@@ -1,3 +1,3 @@
 (library
- (name store)
+ (name vorpal)
  (libraries unix))

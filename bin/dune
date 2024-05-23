@@ -1,4 +1,4 @@
 (executable
  (public_name vorpal)
  (name main)
- (libraries store))
+ (libraries vorpal))
