@@ -7,4 +7,4 @@ let example : artifact =
     source = ".";
   }
 
-let () = build_artifact example
+let () = build_artifact example |> ignore

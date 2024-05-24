@@ -4,7 +4,8 @@ open Store
 type artifact = { ignore : string list; name : string; source : string }
 
 let build_artifact (artifact : artifact) =
-  let artifact_dir = create_dir artifact.name in
-  copy_files artifact.source artifact_dir artifact.ignore
-  |> generate_hashes
-  |> List.iter (fun f -> Printf.printf "%s\n" f)
+  get_file_paths artifact.source artifact.ignore
+  |> generate_hashes |> combine_hashes
+  |> fun hash ->
+  create_dir artifact.name hash |> fun dir ->
+  copy_files artifact.source dir artifact.ignore |> List.iter print_endline

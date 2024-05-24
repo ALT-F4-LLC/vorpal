@@ -12,3 +12,7 @@ let generate_hashes (files : string list) : string list =
       let hash = generate_hash data in
       hash)
     files
+
+let combine_hashes (hashes : string list) : string =
+  let combined = String.concat "" hashes in
+  generate_hash combined
