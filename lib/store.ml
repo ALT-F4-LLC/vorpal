@@ -1,6 +1,7 @@
 let store = "/tmp/vorpal/store"
 
-let rec get_file_paths (path : string) (ignore_files : string list) =
+let rec get_file_paths (path : string) (ignore_files : string list) :
+    string list =
   if Sys.is_directory path then
     Sys.readdir path
     |> Array.fold_left
