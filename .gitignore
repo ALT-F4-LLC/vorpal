@@ -1,3 +1,4 @@
+.direnv
 *.annot
 *.cmo
 *.cma
