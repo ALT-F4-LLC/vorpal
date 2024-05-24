@@ -13,17 +13,19 @@
         ...
       }: let
         inherit (pkgs) ocamlPackages mkShell;
-        inherit (ocamlPackages) buildDunePackage;
+        inherit (ocamlPackages) buildDunePackage mirage-crypto;
       in {
         devShells = {
           default = mkShell {
             inputsFrom = [config.packages.default];
+            nativeBuildInputs = [mirage-crypto];
           };
         };
 
         packages = {
           default = buildDunePackage {
             pname = "vorpal";
+            propogatedBuildInputs = [mirage-crypto];
             src = ./.;
             version = "0.1.0";
           };

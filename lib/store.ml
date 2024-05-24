@@ -1,11 +1,11 @@
 let store = "/tmp/vorpal/store"
 
-let create_dir artifact_name =
+let create_dir (artifact_name : string) : string =
   let dir_path = Filename.concat store artifact_name in
   Unix.mkdir dir_path 0o777;
   dir_path
 
-let copy_file src dst =
+let copy_file (src : string) (dst : string) : unit =
   let ic = open_in src in
   let oc = open_out dst in
   try
@@ -16,7 +16,8 @@ let copy_file src dst =
     close_in ic;
     close_out oc
 
-let rec copy_files src dst ignore_files =
+let rec copy_files (src : string) (dst : string) (ignore_files : string list) :
+    string list =
   if Sys.is_directory src then (
     if not (Sys.file_exists dst) then Unix.mkdir dst 0o777;
     Sys.readdir src
@@ -33,3 +34,10 @@ let rec copy_files src dst ignore_files =
     copy_file src dst;
     [ dst ])
   else []
+
+let read_file (file : string) : string =
+  let ic = open_in file in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  s
