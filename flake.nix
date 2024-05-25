@@ -13,7 +13,7 @@
         ...
       }: let
         inherit (pkgs) just ocamlPackages mkShell;
-        inherit (ocamlPackages) buildDunePackage mirage-crypto;
+        inherit (ocamlPackages) buildDunePackage bos digestif mirage-crypto ppxlib ppx_deriving ocamlformat ocaml-lsp utop;
       in {
         devShells = {
           default = mkShell {
@@ -25,7 +25,7 @@
         packages = {
           default = buildDunePackage {
             pname = "vorpal";
-            propagatedBuildInputs = [mirage-crypto];
+            propagatedBuildInputs =  [bos digestif mirage-crypto ppxlib ppx_deriving ocaml-lsp ocamlformat utop];
             src = ./.;
             version = "0.1.0";
           };

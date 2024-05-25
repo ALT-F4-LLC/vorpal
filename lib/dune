@@ -1,3 +1,5 @@
 (library
  (name vorpal)
- (libraries mirage-crypto unix))
+ (libraries bos common digestif ppx_deriving)
+ (preprocess
+  (pps ppx_deriving.std)))
