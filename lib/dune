@@ -1,3 +1,0 @@
-(library
- (name vorpal)
- (libraries mirage-crypto unix))

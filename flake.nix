@@ -1,5 +1,5 @@
 {
-  description = "vorpal";
+  description = "vorpal-builder";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -12,20 +12,20 @@
         pkgs,
         ...
       }: let
-        inherit (pkgs) just ocamlPackages mkShell;
-        inherit (ocamlPackages) buildDunePackage mirage-crypto;
+        inherit (pkgs) just rustPlatform;
+        inherit (rustPlatform) buildRustPackage;
       in {
         devShells = {
-          default = mkShell {
+          default = pkgs.mkShell {
             inputsFrom = [config.packages.default];
             nativeBuildInputs = [just];
           };
         };
 
         packages = {
-          default = buildDunePackage {
-            pname = "vorpal";
-            propagatedBuildInputs = [mirage-crypto];
+          default = buildRustPackage {
+            cargoSha256 = "sha256-v09mDfaCHwePtRMoWXQ56+wcICLUneY5zco1W6lzzL8=";
+            pname = "vorpal-builder";
             src = ./.;
             version = "0.1.0";
           };
