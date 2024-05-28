@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package vorpal.artifact.v0;
+
+service PackageService {
+    rpc Prepare (PrepareRequest) returns (PrepareResponse);
+    rpc Build (BuildRequest) returns (BuildResponse);
+    rpc Status (StatusRequest) returns (StatusResponse);
+    rpc Retrieve (RetrieveRequest) returns (RetrieveResponse);
+}
+
+message Package {
+    repeated string ignore_paths = 1;
+    string build_phase = 2;
+    string install_phase = 3;
+    string name = 4;
+    string source = 5;
+}
+
+enum Status {
+    CREATED = 0;
+    COMPLETED = 1;
+    FAILED = 2;
+}
+
+message PrepareRequest {
+    bytes source_data = 1;
+    string source_hash = 2;
+    string source_name = 3;
+}
+
+message PrepareResponse {
+    string source_id = 1;
+}
+
+message BuildRequest {
+    repeated string ignore_paths = 1;
+    string build_phase = 2;
+    string install_phase = 3;
+    string source_id = 4;
+}
+
+message BuildResponse {
+    string build_id = 1;
+}
+
+message StatusRequest {
+    string build_id = 1;
+}
+
+message StatusResponse {
+    Status status = 1;
+    repeated string logs = 2;
+}
+
+message RetrieveRequest {
+    string build_id = 1;
+}
+
+message RetrieveResponse {
+    bytes data = 1;
+}

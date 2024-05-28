@@ -1,2 +1,4 @@
 .direnv
 /target
+/vorpal-build
+/vorpal-cli

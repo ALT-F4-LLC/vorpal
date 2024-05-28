@@ -12,20 +12,33 @@
         pkgs,
         ...
       }: let
-        inherit (pkgs) just rustPlatform;
+        inherit (pkgs) grpcurl just protobuf rustPlatform;
         inherit (rustPlatform) buildRustPackage;
       in {
+        apps = {
+          vorpal-build = {
+            program = "${config.packages.vorpal}/bin/vorpal-build";
+            type = "app";
+          };
+
+          vorpal-cli = {
+            program = "${config.packages.vorpal}/bin/vorpal-cli";
+            type = "app";
+          };
+        };
+
         devShells = {
           default = pkgs.mkShell {
+            nativeBuildInputs = [grpcurl just];
             inputsFrom = [config.packages.default];
-            nativeBuildInputs = [just];
           };
         };
 
         packages = {
           default = buildRustPackage {
-            cargoSha256 = "sha256-v09mDfaCHwePtRMoWXQ56+wcICLUneY5zco1W6lzzL8=";
-            pname = "vorpal-builder";
+            cargoSha256 = "sha256-mI3N/TvD8gNjJYOFZ9nWodfy00DsM007ZBGS563m+3M=";
+            nativeBuildInputs = [protobuf];
+            pname = "vorpal";
             src = ./.;
             version = "0.1.0";
           };
