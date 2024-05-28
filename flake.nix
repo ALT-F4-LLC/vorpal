@@ -1,5 +1,5 @@
 {
-  description = "vorpal-builder";
+  description = "vorpal";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
