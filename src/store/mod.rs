@@ -4,7 +4,7 @@ use flate2::Compression;
 use sha256::{digest, try_digest};
 use std::fs;
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tar::Builder;
 use walkdir::WalkDir;
 
@@ -88,13 +88,12 @@ pub fn copy_files(
     Ok(())
 }
 
-pub fn compress_source(
+pub fn compress_files(
     source: PathBuf,
-    source_dir: String,
+    source_tar: PathBuf,
     source_files: Vec<PathBuf>,
-) -> Result<PathBuf, anyhow::Error> {
-    let tar_path = Path::new(&source_dir).with_extension("tar.gz");
-    let tar = File::create(format!("{}/{}", TEMP_DIR, tar_path.display()))?;
+) -> Result<(), anyhow::Error> {
+    let tar = File::create(source_tar)?;
     let tar_encoder = GzEncoder::new(tar, Compression::default());
     let mut tar_builder = Builder::new(tar_encoder);
 
@@ -116,5 +115,9 @@ pub fn compress_source(
 
     tar_builder.finish()?;
 
-    Ok(tar_path)
+    Ok(())
+}
+
+pub fn get_package_dir_name(name: &str, hash: &str) -> String {
+    format!("{}-{}", name, hash)
 }

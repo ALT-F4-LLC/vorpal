@@ -30,6 +30,9 @@ pub async fn run(package: Package) -> Result<(), anyhow::Error> {
 }
 
 async fn prepare(package: Package) -> Result<(), anyhow::Error> {
+    let store_home = dirs::home_dir().expect("Home directory not found");
+    let store_dir = store_home.join(".vorpal/package");
+
     let source = Path::new(&package.source).canonicalize()?;
     let source_ignore_paths = package
         .ignore_paths
@@ -38,21 +41,29 @@ async fn prepare(package: Package) -> Result<(), anyhow::Error> {
         .collect();
     let source_files = store::get_file_paths(&source, source_ignore_paths)?;
     let source_files_hashes = store::get_file_hashes(source_files.clone())?;
+
+    // TODO: enrypt `source_hash` with a signing key
     let source_hash = store::get_source_hash(source_files_hashes.clone())?;
+    let source_dir_name = store::get_package_dir_name(&package.name, &source_hash);
+    let source_dir = store_dir.join(&source_dir_name);
+    let source_tar = Path::new(&source_dir).with_extension("tar.gz");
 
-    let temp_dir = format!("{}-{}", package.name, source_hash);
-    let temp_dir_path = Path::new(&format!("{}/{}", store::TEMP_DIR, temp_dir)).to_path_buf();
+    // Skip if source exists
+    if !source_dir.exists() {
+        println!("Preparing source: {:?}", source_dir);
+        fs::create_dir_all(&source_dir)?;
+        store::copy_files(source.clone(), source_dir.clone(), source_files.clone())?;
+    }
 
-    fs::create_dir_all(&temp_dir_path)?;
-
-    store::copy_files(source.clone(), temp_dir_path.clone(), source_files.clone())?;
-
-    let source_tar = store::compress_source(source.clone(), temp_dir, source_files.clone())?;
+    if !source_tar.exists() {
+        println!("Creating source tar: {:?}", source_tar);
+        store::compress_files(source.clone(), source_tar.clone(), source_files.clone())?;
+    }
 
     let mut client = PackageServiceClient::connect("http://[::1]:15323").await?;
 
     let request = tonic::Request::new(PrepareRequest {
-        source_data: fs::read(format!("{}/{}", store::TEMP_DIR, source_tar.display()))?,
+        source_data: fs::read(source_tar)?,
         source_hash,
         source_name: package.name,
     });
