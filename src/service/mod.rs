@@ -10,6 +10,7 @@ use flate2::read::GzDecoder;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
+use std::os::unix::fs::PermissionsExt;
 use tar::Archive;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
@@ -36,7 +37,13 @@ impl PackageService for Packager {
 
         if !source_tar.exists() {
             match fs::write(&source_tar, message.source_data) {
-                Ok(_) => println!("Source tar: {}", source_tar.display()),
+                Ok(_) => {
+                    println!("Source tar: {}", source_tar.display());
+                    let metadata = fs::metadata(&source_tar)?;
+                    let mut permissions = metadata.permissions();
+                    permissions.set_mode(0o444);
+                    fs::set_permissions(source_tar.clone(), permissions)?;
+                }
                 Err(e) => eprintln!("Failed tar: {}", e),
             }
 
@@ -50,6 +57,8 @@ impl PackageService for Packager {
             println!("Source dir: {}", source_dir.display());
 
             archive.unpack(&source_dir)?;
+
+            fs::set_permissions(&source_dir, fs::Permissions::from_mode(0o555))?;
         }
 
         let source_files = match store::get_file_paths(&source_dir, vec![]) {
@@ -60,6 +69,14 @@ impl PackageService for Packager {
             }
         };
 
+        match store::set_files_permissions(&source_files) {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!("Failed to set files permissions: {}", e);
+                return Err(Status::internal("Failed to set files permissions"));
+            }
+        }
+
         let source_files_hashes = match store::get_file_hashes(source_files) {
             Ok(hashes) => hashes,
             Err(e) => {
@@ -68,6 +85,7 @@ impl PackageService for Packager {
             }
         };
 
+        // TODO: decrypt `source_hash` with a signing key
         let source_hash = match store::get_source_hash(source_files_hashes) {
             Ok(hash) => hash,
             Err(e) => {
@@ -76,9 +94,8 @@ impl PackageService for Packager {
             }
         };
 
-        // TODO: decrypt `source_hash` with a signing key
         if source_hash != message.source_hash {
-            return Err(Status::invalid_argument("Signing hash mismatch"));
+            return Err(Status::invalid_argument("Signing mismatch"));
         }
 
         let source_id = Uuid::now_v7();

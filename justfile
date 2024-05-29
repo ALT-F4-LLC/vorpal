@@ -1,6 +1,9 @@
 _default:
     just --list
 
+_start profile:
+    nix run '.#{{ profile }}'
+
 build profile="default":
     nix build \
         --json \
@@ -10,6 +13,12 @@ build profile="default":
 
 check:
     nix flake check
+
+start:
+    just _start "vorpal-build"
+
+start-build:
+    just _start "vorpal-build"
 
 package profile="default":
     #!/usr/bin/env bash

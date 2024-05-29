@@ -2,6 +2,7 @@ use crate::api::package_service_client::PackageServiceClient;
 use crate::api::{Package, PrepareRequest, Status};
 use crate::store;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -45,7 +46,7 @@ async fn prepare(package: Package) -> Result<(), anyhow::Error> {
     // TODO: enrypt `source_hash` with a signing key
     let source_hash = store::get_source_hash(source_files_hashes.clone())?;
     let source_dir_name = store::get_package_dir_name(&package.name, &source_hash);
-    let source_dir = store_dir.join(&source_dir_name);
+    let source_dir = store_dir.join(&source_dir_name).with_extension("package");
     let source_tar = Path::new(&source_dir).with_extension("tar.gz");
 
     // Skip if source exists
@@ -53,11 +54,17 @@ async fn prepare(package: Package) -> Result<(), anyhow::Error> {
         println!("Preparing source: {:?}", source_dir);
         fs::create_dir_all(&source_dir)?;
         store::copy_files(source.clone(), source_dir.clone(), source_files.clone())?;
+
+        let store_files = store::get_file_paths(&source_dir, vec![])?;
+
+        store::set_files_permissions(&store_files)?;
+        fs::set_permissions(&source_dir, fs::Permissions::from_mode(0o555))?;
     }
 
     if !source_tar.exists() {
         println!("Creating source tar: {:?}", source_tar);
         store::compress_files(source.clone(), source_tar.clone(), source_files.clone())?;
+        fs::set_permissions(&source_tar, fs::Permissions::from_mode(0o444))?;
     }
 
     let mut client = PackageServiceClient::connect("http://[::1]:15323").await?;

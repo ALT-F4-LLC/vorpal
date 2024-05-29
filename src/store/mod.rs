@@ -4,6 +4,7 @@ use flate2::Compression;
 use sha256::{digest, try_digest};
 use std::fs;
 use std::fs::File;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use tar::Builder;
 use walkdir::WalkDir;
@@ -75,12 +76,12 @@ pub fn copy_files(
         let p = path.strip_prefix(&source).unwrap();
 
         if !p.is_file() {
-            let dest = format!("{}/{}", source_path.display(), p.display());
+            let dest = &format!("{}/{}", source_path.display(), p.display());
             fs::create_dir_all(dest)?;
             continue;
         }
 
-        let dest = format!("{}/{}", source_path.display(), p.display());
+        let dest = &format!("{}/{}", source_path.display(), p.display());
 
         fs::copy(p, dest)?;
     }
@@ -120,4 +121,18 @@ pub fn compress_files(
 
 pub fn get_package_dir_name(name: &str, hash: &str) -> String {
     format!("{}-{}", name, hash)
+}
+
+pub fn set_files_permissions(files: &Vec<PathBuf>) -> Result<(), anyhow::Error> {
+    for file in files {
+        let permissions = fs::metadata(&file)?.permissions();
+
+        if permissions.mode() & 0o111 != 0 {
+            fs::set_permissions(file, fs::Permissions::from_mode(0o555))?;
+        } else {
+            fs::set_permissions(file, fs::Permissions::from_mode(0o444))?;
+        }
+    }
+
+    Ok(())
 }
