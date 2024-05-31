@@ -9,7 +9,31 @@ use std::path::PathBuf;
 use tar::Builder;
 use walkdir::WalkDir;
 
-pub const TEMP_DIR: &str = "/tmp";
+pub fn get_home_dir() -> PathBuf {
+    dirs::home_dir()
+        .expect("Home directory not found")
+        .join(".vorpal")
+}
+
+pub fn get_key_dir() -> PathBuf {
+    get_home_dir().join("key")
+}
+
+pub fn get_store_dir() -> PathBuf {
+    get_home_dir().join("store")
+}
+
+pub fn get_database_path() -> PathBuf {
+    get_home_dir().join("vorpal.db")
+}
+
+pub fn get_private_key_path() -> PathBuf {
+    get_key_dir().join("private").with_extension("pem")
+}
+
+pub fn get_public_key_path() -> PathBuf {
+    get_key_dir().join("public").with_extension("pem")
+}
 
 pub fn get_file_paths(source: &PathBuf, ignore_paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = WalkDir::new(&source)

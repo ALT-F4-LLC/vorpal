@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package vorpal.artifact.v0;
+package vorpal.package.v0;
 
 service PackageService {
     rpc Prepare (PrepareRequest) returns (PrepareResponse);
@@ -27,6 +27,7 @@ message PrepareRequest {
     bytes source_data = 1;
     string source_hash = 2;
     string source_name = 3;
+    string source_signature = 4;
 }
 
 message PrepareResponse {

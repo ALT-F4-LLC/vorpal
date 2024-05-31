@@ -12,12 +12,12 @@
         pkgs,
         ...
       }: let
-        inherit (pkgs) grpcurl just protobuf rustPlatform;
+        inherit (pkgs) grpcurl just openssl pkg-config protobuf rustPlatform;
         inherit (rustPlatform) buildRustPackage;
       in {
         packages = {
           default = buildRustPackage {
-            cargoSha256 = "sha256-zA9T/PvYWqH0dYlpGr8g744kmjrhw66kqvSfll/km1A=";
+            cargoSha256 = "sha256-llvbfjVZbrPkWEdIpPJEYLm++HxwN7WypUeZ/RrZtZw=";
             nativeBuildInputs = [protobuf];
             pname = "vorpal";
             src = ./.;
