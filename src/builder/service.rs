@@ -1,8 +1,5 @@
 use crate::api::package_service_server::PackageService;
-use crate::api::{
-    BuildRequest, BuildResponse, PrepareRequest, PrepareResponse, RetrieveRequest,
-    RetrieveResponse, Status as BuildStatus, StatusRequest, StatusResponse,
-};
+use crate::api::{BuildRequest, BuildResponse, PrepareRequest, PrepareResponse};
 use crate::database;
 use crate::notary;
 use crate::store;
@@ -44,14 +41,15 @@ impl PackageService for Packager {
                 return Err(Status::internal("Failed to get public key"));
             }
         };
+
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
-        let dehexed_source_signature = match hex::decode(&message.source_signature) {
+        let source_signature_decode = match hex::decode(&message.source_signature) {
             Ok(data) => data,
             Err(_) => return Err(Status::internal("hex decode of signature failed")),
         };
 
-        let source_signature = match Signature::try_from(dehexed_source_signature.as_slice()) {
+        let source_signature = match Signature::try_from(source_signature_decode.as_slice()) {
             Ok(signature) => signature,
             Err(e) => {
                 eprintln!("Failed to decode signature: {:?}", e);
@@ -59,6 +57,7 @@ impl PackageService for Packager {
             }
         };
 
+        // Used to check if the signature is valid
         match verifying_key.verify(&message.source_data, &source_signature) {
             Ok(_) => (),
             Err(e) => {
@@ -68,7 +67,6 @@ impl PackageService for Packager {
         };
 
         let db_path = store::get_database_path();
-
         let db = match database::connect(db_path) {
             Ok(conn) => conn,
             Err(e) => {
@@ -116,13 +114,21 @@ impl PackageService for Packager {
                 }
             };
 
-            let _source_hash_calc = match store::get_source_hash(source_files_hashes) {
+            let source_hash = match store::get_source_hash(source_files_hashes) {
                 Ok(hash) => hash,
                 Err(e) => {
                     eprintln!("Failed to get source hash: {}", e);
                     return Err(Status::internal("Failed to get source hash"));
                 }
             };
+
+            // Check if source hash matches
+            if source_hash != message.source_hash {
+                eprintln!("Source hash mismatch");
+                return Err(Status::internal("Source hash mismatch"));
+            }
+
+            // TODO: only store file name for file
 
             match database::insert_source(&db, &source_tar_path) {
                 Ok(_) => (),
@@ -135,7 +141,7 @@ impl PackageService for Packager {
             fs::remove_dir_all(&source_dir)?;
         }
 
-        let source_id = match database::find_source(&db, &source_tar_path) {
+        let source_id = match database::find_source_by_uri(&db, &source_tar_path) {
             Ok(source) => source.id,
             Err(e) => {
                 eprintln!("Failed to find source: {:?}", e);
@@ -159,36 +165,53 @@ impl PackageService for Packager {
         &self,
         request: Request<BuildRequest>,
     ) -> Result<Response<BuildResponse>, Status> {
-        println!("[PackageBuild]: {:?}", request);
+        let message = request.into_inner();
 
-        let response = BuildResponse {
-            build_id: "456".to_string(),
+        println!("Build source id: {:?}", message.source_id);
+
+        let db_path = store::get_database_path();
+        let db = match database::connect(db_path) {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("Failed to connect to database: {:?}", e);
+                return Err(Status::internal("Failed to connect to database"));
+            }
         };
 
-        Ok(Response::new(response))
-    }
-
-    async fn status(
-        &self,
-        request: Request<StatusRequest>,
-    ) -> Result<Response<StatusResponse>, Status> {
-        println!("[PackageStatus]: {:?}", request);
-
-        let response = StatusResponse {
-            logs: vec!["log1".to_string(), "log2".to_string()],
-            status: BuildStatus::Created.into(),
+        let source = match database::find_source_by_id(&db, message.source_id.parse().unwrap()) {
+            Ok(source) => source,
+            Err(e) => {
+                eprintln!("Failed to find source: {:?}", e);
+                return Err(Status::internal("Failed to find source"));
+            }
         };
 
-        Ok(Response::new(response))
-    }
+        println!("Build source path: {}", source.uri);
 
-    async fn retrieve(
-        &self,
-        request: Request<RetrieveRequest>,
-    ) -> Result<Response<RetrieveResponse>, Status> {
-        println!("[PackageRetrieve]: {:?}", request);
+        // TODO: create temp build directory
 
-        let response = RetrieveResponse { data: Vec::new() };
+        // TODO: setup temporary build directory
+
+        // TODO: generate build_phase script
+
+        let mut build_phase_script: Vec<String> = Vec::new();
+        build_phase_script.push("#!/bin/bash".to_string());
+        build_phase_script.push(message.build_phase);
+        let build_phase_script = build_phase_script.join("\n");
+
+        println!("Build phase: {:?}", build_phase_script);
+
+        // TODO: generate build_phase sandbox-exec profile
+
+        // TODO: run build_phase script in sandbox
+
+        // TODO: generate install_phase script
+
+        // TODO: generate install_phase sandbox-exec profile
+
+        // TODO: run install_phase script in sandbox
+
+        let response = BuildResponse { data: Vec::new() };
 
         Ok(Response::new(response))
     }

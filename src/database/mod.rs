@@ -31,7 +31,21 @@ pub fn insert_source(conn: &Connection, uri: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub fn find_source(conn: &Connection, uri: &PathBuf) -> Result<Source> {
+pub fn find_source_by_id(conn: &Connection, id: i64) -> Result<Source> {
+    let mut stmt = conn.prepare("SELECT * FROM source WHERE id = ?")?;
+    let mut rows = stmt.query([id])?;
+
+    let row = rows
+        .next()?
+        .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
+
+    Ok(Source {
+        id: row.get(0)?,
+        uri: row.get(1)?,
+    })
+}
+
+pub fn find_source_by_uri(conn: &Connection, uri: &PathBuf) -> Result<Source> {
     let mut stmt = conn.prepare("SELECT * FROM source WHERE uri = ?")?;
     let mut rows = stmt.query([uri.display().to_string()])?;
 
