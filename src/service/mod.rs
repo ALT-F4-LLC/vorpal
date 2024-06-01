@@ -45,7 +45,14 @@ impl PackageService for Packager {
         };
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
-        let source_signature = match Signature::try_from(message.source_signature.as_bytes()) {
+        let dehexed_source_signature = match hex::decode(&message.source_signature) {
+            Ok(data) => {
+                data
+            }
+            Err(_) => {return Err(Status::internal("hex decode of signature failed"))}
+        };
+
+        let source_signature = match Signature::try_from(dehexed_source_signature.as_slice()) {
             Ok(signature) => signature,
             Err(e) => {
                 eprintln!("Failed to decode signature: {:?}", e);
