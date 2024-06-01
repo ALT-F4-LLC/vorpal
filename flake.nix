@@ -12,22 +12,35 @@
         pkgs,
         ...
       }: let
-        inherit (pkgs) just ocamlPackages mkShell;
-        inherit (ocamlPackages) buildDunePackage mirage-crypto;
+        inherit (pkgs) grpcurl just openssl pkg-config protobuf rustPlatform;
+        inherit (rustPlatform) buildRustPackage;
       in {
-        devShells = {
-          default = mkShell {
-            inputsFrom = [config.packages.default];
-            nativeBuildInputs = [just];
+        packages = {
+          default = buildRustPackage {
+            cargoSha256 = "sha256-llvbfjVZbrPkWEdIpPJEYLm++HxwN7WypUeZ/RrZtZw=";
+            nativeBuildInputs = [protobuf];
+            pname = "vorpal";
+            src = ./.;
+            version = "0.1.0";
           };
         };
 
-        packages = {
-          default = buildDunePackage {
-            pname = "vorpal";
-            propagatedBuildInputs = [mirage-crypto];
-            src = ./.;
-            version = "0.1.0";
+        devShells = {
+          default = pkgs.mkShell {
+            nativeBuildInputs = [grpcurl just];
+            inputsFrom = [config.packages.default];
+          };
+        };
+
+        apps = {
+          vorpal-build = {
+            program = "${config.packages.default}/bin/vorpal-build";
+            type = "app";
+          };
+
+          vorpal-cli = {
+            program = "${config.packages.default}/bin/vorpal-cli";
+            type = "app";
           };
         };
       };
