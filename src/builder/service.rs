@@ -14,6 +14,7 @@ use rsa::signature::Verifier;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use tar::Archive;
 use tonic::{Request, Response, Status};
@@ -33,7 +34,7 @@ impl PackageService for Packager {
             .join(&format!("{}-{}", message.source_name, message.source_hash))
             .with_extension("package")
             .to_path_buf();
-        let source_tar = source_dir
+        let source_tar_path = source_dir
             .join(source_dir.with_extension("source.tar.gz"))
             .to_path_buf();
         let public_key = match notary::get_public_key() {
@@ -46,10 +47,8 @@ impl PackageService for Packager {
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
         let dehexed_source_signature = match hex::decode(&message.source_signature) {
-            Ok(data) => {
-                data
-            }
-            Err(_) => {return Err(Status::internal("hex decode of signature failed"))}
+            Ok(data) => data,
+            Err(_) => return Err(Status::internal("hex decode of signature failed")),
         };
 
         let source_signature = match Signature::try_from(dehexed_source_signature.as_slice()) {
@@ -78,30 +77,28 @@ impl PackageService for Packager {
             }
         };
 
-        if !source_tar.exists() {
-            match fs::write(&source_tar, message.source_data) {
+        if !source_tar_path.exists() {
+            let mut source_tar = File::create(&source_tar_path)?;
+            let source_tar_file_name = source_tar_path.file_name().unwrap();
+            match source_tar.write_all(&message.source_data) {
                 Ok(_) => {
-                    println!("Source tar: {}", source_tar.display());
-                    let metadata = fs::metadata(&source_tar)?;
+                    println!("Source file: {}", source_tar_file_name.to_string_lossy());
+                    let metadata = fs::metadata(&source_tar_path)?;
                     let mut permissions = metadata.permissions();
                     permissions.set_mode(0o444);
-                    fs::set_permissions(source_tar.clone(), permissions)?;
+                    fs::set_permissions(source_tar_path.clone(), permissions)?;
                 }
-                Err(e) => eprintln!("Failed tar: {}", e),
+                Err(e) => eprintln!("Failed source file: {}", e),
             }
 
             std::fs::create_dir_all(&source_dir)?;
 
-            let tar_gz = File::open(&source_tar)?;
+            let tar_gz = File::open(&source_tar_path)?;
             let buf_reader = BufReader::new(tar_gz);
             let gz_decoder = GzDecoder::new(buf_reader);
             let mut archive = Archive::new(gz_decoder);
 
-            println!("Source dir: {}", source_dir.display());
-
             archive.unpack(&source_dir)?;
-
-            fs::set_permissions(&source_dir, fs::Permissions::from_mode(0o555))?;
 
             let source_files = match store::get_file_paths(&source_dir, vec![]) {
                 Ok(files) => files,
@@ -110,14 +107,6 @@ impl PackageService for Packager {
                     return Err(Status::internal("Failed to get source files"));
                 }
             };
-
-            match store::set_files_permissions(&source_files) {
-                Ok(_) => (),
-                Err(e) => {
-                    eprintln!("Failed to set files permissions: {}", e);
-                    return Err(Status::internal("Failed to set files permissions"));
-                }
-            }
 
             let source_files_hashes = match store::get_file_hashes(source_files) {
                 Ok(hashes) => hashes,
@@ -135,28 +124,18 @@ impl PackageService for Packager {
                 }
             };
 
-            // let source_hash_enc = match notary::encrypt(&public_key, source_hash_calc.as_bytes()) {
-            //     Ok(hash) => hash,
-            //     Err(e) => {
-            //         eprintln!("Failed to encrypt source hash: {}", e);
-            //         return Err(Status::internal("Failed to encrypt source hash"));
-            //     }
-            // };
-            //
-            // if source_hash != source_hash_enc {
-            //     return Err(Status::invalid_argument("Signing mismatch"));
-            // }
-            //
-            match database::insert_source(&db, &source_tar) {
+            match database::insert_source(&db, &source_tar_path) {
                 Ok(_) => (),
                 Err(e) => {
                     eprintln!("Failed to insert source: {:?}", e);
                     return Err(Status::internal("Failed to insert source"));
                 }
             }
+
+            fs::remove_dir_all(&source_dir)?;
         }
 
-        let source_id = match database::find_source(&db, &source_tar) {
+        let source_id = match database::find_source(&db, &source_tar_path) {
             Ok(source) => source.id,
             Err(e) => {
                 eprintln!("Failed to find source: {:?}", e);

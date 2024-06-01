@@ -1,32 +1,30 @@
+use crate::api::package_service_server::PackageServiceServer;
+use crate::database;
+use crate::notary;
+use crate::store;
 use anyhow::Result;
 use std::fs;
 use tonic::transport::Server;
-use vorpal::api::package_service_server::PackageServiceServer;
-use vorpal::database;
-use vorpal::notary;
-use vorpal::service::Packager;
-use vorpal::store;
+pub mod service;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "[::1]:15323".parse()?;
-    let packager = Packager::default();
-
+pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     let vorpal_dir = store::get_home_dir();
     if !vorpal_dir.exists() {
         std::fs::create_dir_all(&vorpal_dir)?;
     }
 
-    let private_key = store::get_private_key_path();
-    let public_key = store::get_public_key_path();
-    if !private_key.exists() && !public_key.exists() {
-        let key_dir = store::get_key_dir();
-        fs::create_dir_all(&key_dir)?;
-        notary::generate_keys(private_key.clone(), public_key.clone())?;
+    let store_dir = store::get_store_dir();
+    if !store_dir.exists() {
+        std::fs::create_dir_all(&store_dir)?;
     }
 
-    let db_path = store::get_database_path();
-    let db = database::connect(db_path)?;
+    if !store::get_private_key_path().exists() && !store::get_public_key_path().exists() {
+        let key_dir = store::get_key_dir();
+        fs::create_dir_all(&key_dir)?;
+        notary::generate_keys()?;
+    }
+
+    let db = database::connect(store::get_database_path())?;
 
     db.execute(
         "CREATE TABLE IF NOT EXISTS source (
@@ -40,6 +38,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(_) => (),
         Err(e) => eprintln!("Failed to close database: {:?}", e),
     }
+
+    let addr = format!("[::1]:{}", port).parse()?;
+    let packager = service::Packager::default();
 
     println!("Server listening on: {}", addr);
 
