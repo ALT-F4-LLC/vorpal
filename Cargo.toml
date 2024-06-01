@@ -4,20 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "vorpal-build"
-path = "src/bin/build/main.rs"
-
-[[bin]]
-name = "vorpal-cli"
-path = "src/bin/cli/main.rs"
+name = "vorpal"
+path = "src/bin/main.rs"
 
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0"
 flate2 = "1.0"
+hex = "0.4"
 prost = "0.12"
-rand = "0.8.4"
+rand = "0.8"
 rsa = { version = "0.9", features = ["sha2"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 sha256 = "1.5"
@@ -26,7 +23,6 @@ tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
 tonic = "0.11"
 uuid = { version = "1.8", features = ["v7"] }
 walkdir = "2.5"
-hex = "0.4.3"
 
 [build-dependencies]
 tonic-build = "0.11"

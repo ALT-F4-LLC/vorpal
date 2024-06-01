@@ -12,7 +12,7 @@
         pkgs,
         ...
       }: let
-        inherit (pkgs) grpcurl just openssl pkg-config protobuf rustPlatform;
+        inherit (pkgs) grpcurl just protobuf rustPlatform;
         inherit (rustPlatform) buildRustPackage;
       in {
         packages = {
@@ -33,13 +33,8 @@
         };
 
         apps = {
-          vorpal-build = {
-            program = "${config.packages.default}/bin/vorpal-build";
-            type = "app";
-          };
-
-          vorpal-cli = {
-            program = "${config.packages.default}/bin/vorpal-cli";
+          default = {
+            program = "${config.packages.default}/bin/vorpal";
             type = "app";
           };
         };

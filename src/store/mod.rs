@@ -19,6 +19,10 @@ pub fn get_key_dir() -> PathBuf {
     get_home_dir().join("key")
 }
 
+pub fn get_package_dir() -> PathBuf {
+    get_home_dir().join("package")
+}
+
 pub fn get_store_dir() -> PathBuf {
     get_home_dir().join("store")
 }
@@ -85,32 +89,6 @@ pub fn get_source_hash(hashes: Vec<(PathBuf, String)>) -> Result<String> {
     }
 
     Ok(digest(combined))
-}
-
-pub fn copy_files(
-    source: PathBuf,
-    source_path: PathBuf,
-    files: Vec<PathBuf>,
-) -> Result<(), anyhow::Error> {
-    for path in files.clone() {
-        if path == source {
-            continue;
-        }
-
-        let p = path.strip_prefix(&source).unwrap();
-
-        if !p.is_file() {
-            let dest = &format!("{}/{}", source_path.display(), p.display());
-            fs::create_dir_all(dest)?;
-            continue;
-        }
-
-        let dest = &format!("{}/{}", source_path.display(), p.display());
-
-        fs::copy(p, dest)?;
-    }
-
-    Ok(())
 }
 
 pub fn compress_files(
