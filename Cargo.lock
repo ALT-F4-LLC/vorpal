@@ -1571,6 +1571,7 @@ dependencies = [
  "clap",
  "dirs",
  "flate2",
+ "hex",
  "prost",
  "rand",
  "rsa",

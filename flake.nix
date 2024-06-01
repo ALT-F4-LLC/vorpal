@@ -17,7 +17,7 @@
       in {
         packages = {
           default = buildRustPackage {
-            cargoSha256 = "sha256-llvbfjVZbrPkWEdIpPJEYLm++HxwN7WypUeZ/RrZtZw=";
+            cargoSha256 = "sha256-ajINMwlrYWUsmvrFbIENn8P4JRKqo9ggvn6Mpgz1bfk=";
             nativeBuildInputs = [protobuf];
             pname = "vorpal";
             src = ./.;
