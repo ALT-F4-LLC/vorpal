@@ -5,6 +5,8 @@ use crate::store;
 use anyhow::Result;
 use std::fs;
 use tonic::transport::Server;
+mod build;
+mod prepare;
 pub mod service;
 
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {
