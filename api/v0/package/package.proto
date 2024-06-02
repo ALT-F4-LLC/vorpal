@@ -5,8 +5,6 @@ package vorpal.package.v0;
 service PackageService {
     rpc Prepare (PrepareRequest) returns (PrepareResponse);
     rpc Build (BuildRequest) returns (BuildResponse);
-    rpc Status (StatusRequest) returns (StatusResponse);
-    rpc Retrieve (RetrieveRequest) returns (RetrieveResponse);
 }
 
 message Package {
@@ -31,33 +29,16 @@ message PrepareRequest {
 }
 
 message PrepareResponse {
-    string source_id = 1;
+    int32 source_id = 1;
 }
 
 message BuildRequest {
-    repeated string ignore_paths = 1;
-    string build_phase = 2;
-    string install_phase = 3;
-    string source_id = 4;
+    string build_phase = 1;
+    string install_phase = 2;
+    int32 source_id = 3;
 }
 
 message BuildResponse {
-    string build_id = 1;
-}
-
-message StatusRequest {
-    string build_id = 1;
-}
-
-message StatusResponse {
-    Status status = 1;
-    repeated string logs = 2;
-}
-
-message RetrieveRequest {
-    string build_id = 1;
-}
-
-message RetrieveResponse {
-    bytes data = 1;
+    bool is_compressed = 1;
+    bytes package_data = 2;
 }
