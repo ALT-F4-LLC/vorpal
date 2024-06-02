@@ -39,5 +39,6 @@ message BuildRequest {
 }
 
 message BuildResponse {
-    bytes package_data = 1;
+    bool is_compressed = 1;
+    bytes package_data = 2;
 }

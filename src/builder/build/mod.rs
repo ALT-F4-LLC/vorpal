@@ -42,6 +42,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
         let response_data = fs::read(&store_output_tar).await?;
         let response = BuildResponse {
+            is_compressed: true,
             package_data: response_data,
         };
 
@@ -53,6 +54,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
         let response_data = fs::read(&store_output_path).await?;
         let response = BuildResponse {
+            is_compressed: false,
             package_data: response_data,
         };
 
@@ -113,6 +115,12 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     let mut permissions = metadata.permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&automation_script_path, permissions).await?;
+
+    let os_type = std::env::consts::OS;
+    if os_type != "macos" {
+        eprintln!("Unsupported OS: {}", os_type);
+        return Err(Status::internal("Unsupported OS (currently only macOS)"));
+    }
 
     let sandbox_profile_path = source_temp_vorpal_dir.join("sandbox.sb");
 
@@ -191,12 +199,19 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         fs::copy(&sandbox_output_path, &store_output_path).await?;
     }
 
-    println!("Build output: {}", store_output_path.display());
-
     source_temp_dir.close()?;
 
+    let package_data_path = if store_output_tar.exists() {
+        store_output_tar.clone()
+    } else {
+        store_output_path.clone()
+    };
+
+    println!("Build output: {}", package_data_path.display());
+
     let response = BuildResponse {
-        package_data: Vec::new(),
+        is_compressed: store_output_tar.exists(),
+        package_data: fs::read(&package_data_path).await?,
     };
 
     Ok(Response::new(response))
