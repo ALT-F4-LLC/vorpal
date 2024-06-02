@@ -1,45 +1,66 @@
 use anyhow::Result;
+use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use sha256::{digest, try_digest};
 use std::fs;
 use std::fs::File;
+use std::io::BufReader;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tar::Archive;
 use tar::Builder;
 use walkdir::WalkDir;
 
-pub fn get_home_dir() -> PathBuf {
+pub fn get_home_path() -> PathBuf {
     dirs::home_dir()
         .expect("Home directory not found")
         .join(".vorpal")
 }
 
-pub fn get_key_dir() -> PathBuf {
-    get_home_dir().join("key")
+pub fn get_key_path() -> PathBuf {
+    get_home_path().join("key")
 }
 
-pub fn get_package_dir() -> PathBuf {
-    get_home_dir().join("package")
+pub fn get_package_path() -> PathBuf {
+    get_home_path().join("package")
 }
 
-pub fn get_store_dir() -> PathBuf {
-    get_home_dir().join("store")
+pub fn get_store_path() -> PathBuf {
+    get_home_path().join("store")
 }
 
 pub fn get_database_path() -> PathBuf {
-    get_home_dir().join("vorpal.db")
+    get_home_path().join("vorpal.db")
 }
 
 pub fn get_private_key_path() -> PathBuf {
-    get_key_dir().join("private").with_extension("pem")
+    get_key_path().join("private").with_extension("pem")
 }
 
 pub fn get_public_key_path() -> PathBuf {
-    get_key_dir().join("public").with_extension("pem")
+    get_key_path().join("public").with_extension("pem")
 }
 
-pub fn get_file_paths(source: &PathBuf, ignore_paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
+pub fn get_source_tar_path(source_dir: &Path) -> PathBuf {
+    source_dir
+        .join(source_dir.with_extension("source.tar.gz"))
+        .to_path_buf()
+}
+
+pub fn get_package_dir_name(name: &str, hash: &str) -> String {
+    format!("{}-{}", name, hash)
+}
+
+pub fn get_source_dir_path(source_name: &String, source_hash: &String) -> PathBuf {
+    let store_dir = get_store_path();
+    store_dir
+        .join(&get_package_dir_name(source_name, source_hash))
+        .with_extension("package")
+        .to_path_buf()
+}
+
+pub fn get_file_paths(source: &Path, ignore_paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = WalkDir::new(&source)
         .into_iter()
         .filter_map(|entry| {
@@ -60,7 +81,7 @@ pub fn get_file_paths(source: &PathBuf, ignore_paths: Vec<PathBuf>) -> Result<Ve
     Ok(files)
 }
 
-fn get_file_hash(path: PathBuf) -> Result<String, anyhow::Error> {
+pub fn get_file_hash(path: &Path) -> Result<String, anyhow::Error> {
     if !path.is_file() {
         return Err(anyhow::anyhow!("Path is not a file"));
     }
@@ -68,12 +89,12 @@ fn get_file_hash(path: PathBuf) -> Result<String, anyhow::Error> {
     Ok(try_digest(path)?)
 }
 
-pub fn get_file_hashes(files: Vec<PathBuf>) -> Result<Vec<(PathBuf, String)>> {
+pub fn get_file_hashes(files: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
     let hashes: Vec<(PathBuf, String)> = files
         .iter()
         .filter(|file| file.is_file())
         .map(|file| {
-            let hash = get_file_hash(file.clone()).unwrap();
+            let hash = get_file_hash(file).unwrap();
             (file.clone(), hash)
         })
         .collect();
@@ -81,7 +102,7 @@ pub fn get_file_hashes(files: Vec<PathBuf>) -> Result<Vec<(PathBuf, String)>> {
     Ok(hashes)
 }
 
-pub fn get_source_hash(hashes: Vec<(PathBuf, String)>) -> Result<String> {
+pub fn get_source_hash(hashes: &[(PathBuf, String)]) -> Result<String> {
     let mut combined = String::new();
 
     for (_, hash) in hashes {
@@ -92,12 +113,12 @@ pub fn get_source_hash(hashes: Vec<(PathBuf, String)>) -> Result<String> {
 }
 
 pub fn compress_files(
-    source: PathBuf,
-    source_tar: PathBuf,
-    source_files: Vec<PathBuf>,
-) -> Result<(), anyhow::Error> {
+    source: &Path,
+    source_tar: &Path,
+    source_files: &[PathBuf],
+) -> Result<File, anyhow::Error> {
     let tar = File::create(source_tar)?;
-    let tar_encoder = GzEncoder::new(tar, Compression::default());
+    let tar_encoder = GzEncoder::new(tar.try_clone()?, Compression::default());
     let mut tar_builder = Builder::new(tar_encoder);
 
     for path in source_files {
@@ -105,7 +126,7 @@ pub fn compress_files(
             continue;
         }
 
-        let relative_path = path.strip_prefix(&source).unwrap();
+        let relative_path = path.strip_prefix(source)?;
 
         println!("Adding: {}", relative_path.display());
 
@@ -118,17 +139,12 @@ pub fn compress_files(
 
     tar_builder.finish()?;
 
-    Ok(())
+    Ok(tar)
 }
 
-pub fn get_package_dir_name(name: &str, hash: &str) -> String {
-    format!("{}-{}", name, hash)
-}
-
-pub fn set_files_permissions(files: &Vec<PathBuf>) -> Result<(), anyhow::Error> {
+pub fn set_files_permissions(files: &[PathBuf]) -> Result<(), anyhow::Error> {
     for file in files {
         let permissions = fs::metadata(&file)?.permissions();
-
         if permissions.mode() & 0o111 != 0 {
             fs::set_permissions(file, fs::Permissions::from_mode(0o555))?;
         } else {
@@ -136,5 +152,14 @@ pub fn set_files_permissions(files: &Vec<PathBuf>) -> Result<(), anyhow::Error> 
         }
     }
 
+    Ok(())
+}
+
+pub fn unpack_source(target_dir: &Path, source_tar: &Path) -> Result<(), anyhow::Error> {
+    let tar_gz = File::open(&source_tar)?;
+    let buf_reader = BufReader::new(tar_gz);
+    let gz_decoder = GzDecoder::new(buf_reader);
+    let mut archive = Archive::new(gz_decoder);
+    archive.unpack(&target_dir)?;
     Ok(())
 }

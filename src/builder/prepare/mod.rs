@@ -2,39 +2,31 @@ use crate::api::{PrepareRequest, PrepareResponse};
 use crate::database;
 use crate::notary;
 use crate::store;
-use flate2::read::GzDecoder;
 use rsa::pss::{Signature, VerifyingKey};
 use rsa::sha2::Sha256;
 use rsa::signature::Verifier;
-use std::fs;
 use std::fs::File;
-use std::io::BufReader;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use tar::Archive;
+use tokio::fs;
 use tonic::{Request, Response, Status};
 
 pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareResponse>, Status> {
     let message = request.into_inner();
-    let store_dir = store::get_store_dir();
-    let source_dir = store_dir
-        .join(&format!("{}-{}", message.source_name, message.source_hash))
-        .with_extension("package")
-        .to_path_buf();
-    let source_tar_path = source_dir
-        .join(source_dir.with_extension("source.tar.gz"))
-        .to_path_buf();
-    let public_key = match notary::get_public_key() {
+
+    let source_dir_path = store::get_source_dir_path(&message.source_name, &message.source_hash);
+    let source_tar_path = store::get_source_tar_path(&source_dir_path);
+
+    let public_key = match notary::get_public_key().await {
         Ok(key) => key,
         Err(e) => {
             eprintln!("Failed to get public key: {:?}", e);
             return Err(Status::internal("Failed to get public key"));
         }
     };
-
     let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
-    let source_signature_decode = match hex::decode(&message.source_signature) {
+    let source_signature_decode = match hex::decode(message.source_signature) {
         Ok(data) => data,
         Err(_) => return Err(Status::internal("hex decode of signature failed")),
     };
@@ -47,7 +39,6 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
         }
     };
 
-    // Used to check if the signature is valid
     match verifying_key.verify(&message.source_data, &source_signature) {
         Ok(_) => (),
         Err(e) => {
@@ -67,28 +58,29 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
 
     if !source_tar_path.exists() {
         let mut source_tar = File::create(&source_tar_path)?;
-        let source_tar_file_name = source_tar_path.file_name().unwrap();
         match source_tar.write_all(&message.source_data) {
             Ok(_) => {
-                println!("Source file: {}", source_tar_file_name.to_string_lossy());
-                let metadata = fs::metadata(&source_tar_path)?;
+                let metadata = fs::metadata(&source_tar_path).await?;
                 let mut permissions = metadata.permissions();
                 permissions.set_mode(0o444);
-                fs::set_permissions(source_tar_path.clone(), permissions)?;
+                fs::set_permissions(source_tar_path.clone(), permissions).await?;
+                let file_name = source_tar_path.file_name().unwrap();
+                println!("Source file: {}", file_name.to_string_lossy());
             }
             Err(e) => eprintln!("Failed source file: {}", e),
         }
 
-        std::fs::create_dir_all(&source_dir)?;
+        fs::create_dir_all(&source_dir_path).await?;
 
-        let tar_gz = File::open(&source_tar_path)?;
-        let buf_reader = BufReader::new(tar_gz);
-        let gz_decoder = GzDecoder::new(buf_reader);
-        let mut archive = Archive::new(gz_decoder);
+        match store::unpack_source(&source_dir_path, &source_tar_path) {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!("Failed to unpack source: {:?}", e);
+                return Err(Status::internal("Failed to unpack source"));
+            }
+        };
 
-        archive.unpack(&source_dir)?;
-
-        let source_files = match store::get_file_paths(&source_dir, vec![]) {
+        let source_files = match store::get_file_paths(&source_dir_path, &vec![]) {
             Ok(files) => files,
             Err(e) => {
                 eprintln!("Failed to get source files: {}", e);
@@ -96,7 +88,7 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
             }
         };
 
-        let source_files_hashes = match store::get_file_hashes(source_files) {
+        let source_files_hashes = match store::get_file_hashes(&source_files) {
             Ok(hashes) => hashes,
             Err(e) => {
                 eprintln!("Failed to get source files hashes: {}", e);
@@ -104,7 +96,7 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
             }
         };
 
-        let source_hash = match store::get_source_hash(source_files_hashes) {
+        let source_hash = match store::get_source_hash(&source_files_hashes) {
             Ok(hash) => hash,
             Err(e) => {
                 eprintln!("Failed to get source hash: {}", e);
@@ -112,15 +104,12 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
             }
         };
 
-        // Check if source hash matches
         if source_hash != message.source_hash {
             eprintln!("Source hash mismatch");
             return Err(Status::internal("Source hash mismatch"));
         }
 
-        // TODO: only store file name for file
-
-        match database::insert_source(&db, &source_tar_path) {
+        match database::insert_source(&db, &source_hash, &message.source_name) {
             Ok(_) => (),
             Err(e) => {
                 eprintln!("Failed to insert source: {:?}", e);
@@ -128,10 +117,10 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
             }
         }
 
-        fs::remove_dir_all(&source_dir)?;
+        fs::remove_dir_all(source_dir_path).await?;
     }
 
-    let source_id = match database::find_source_by_uri(&db, &source_tar_path) {
+    let source_id = match database::find_source(&db, &message.source_hash, &message.source_name) {
         Ok(source) => source.id,
         Err(e) => {
             eprintln!("Failed to find source: {:?}", e);
@@ -145,7 +134,7 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
     }
 
     let response = PrepareResponse {
-        source_id: source_id.to_string(),
+        source_id: source_id,
     };
 
     Ok(Response::new(response))

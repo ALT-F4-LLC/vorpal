@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 pub struct Source {
-    pub id: i64,
-    pub uri: String,
+    pub id: i32,
+    pub hash: String,
+    pub name: String,
 }
 
 pub struct Build {
@@ -23,15 +24,14 @@ pub fn connect(path: PathBuf) -> Result<Connection> {
     Connection::open(path)
 }
 
-pub fn insert_source(conn: &Connection, uri: &PathBuf) -> Result<()> {
+pub fn insert_source(conn: &Connection, hash: &str, name: &str) -> Result<usize> {
     conn.execute(
-        "INSERT INTO source (uri) VALUES (?)",
-        [uri.display().to_string()],
-    )?;
-    Ok(())
+        "INSERT INTO source (hash, name) VALUES (?1, ?2)",
+        [hash, name],
+    )
 }
 
-pub fn find_source_by_id(conn: &Connection, id: i64) -> Result<Source> {
+pub fn find_source_by_id(conn: &Connection, id: i32) -> Result<Source> {
     let mut stmt = conn.prepare("SELECT * FROM source WHERE id = ?")?;
     let mut rows = stmt.query([id])?;
 
@@ -41,13 +41,14 @@ pub fn find_source_by_id(conn: &Connection, id: i64) -> Result<Source> {
 
     Ok(Source {
         id: row.get(0)?,
-        uri: row.get(1)?,
+        hash: row.get(1)?,
+        name: row.get(2)?,
     })
 }
 
-pub fn find_source_by_uri(conn: &Connection, uri: &PathBuf) -> Result<Source> {
-    let mut stmt = conn.prepare("SELECT * FROM source WHERE uri = ?")?;
-    let mut rows = stmt.query([uri.display().to_string()])?;
+pub fn find_source(conn: &Connection, hash: &str, name: &str) -> Result<Source> {
+    let mut stmt = conn.prepare("SELECT * FROM source WHERE hash = ? AND name = ?")?;
+    let mut rows = stmt.query([hash, name])?;
 
     let row = rows
         .next()?
@@ -55,6 +56,7 @@ pub fn find_source_by_uri(conn: &Connection, uri: &PathBuf) -> Result<Source> {
 
     Ok(Source {
         id: row.get(0)?,
-        uri: row.get(1)?,
+        hash: row.get(1)?,
+        name: row.get(2)?,
     })
 }
