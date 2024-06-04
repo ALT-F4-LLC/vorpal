@@ -1,9 +1,10 @@
 pub mod api {
+    tonic::include_proto!("vorpal.cli.v0");
     tonic::include_proto!("vorpal.package.v0");
 }
-pub mod builder;
 pub mod command;
 pub mod database;
 pub mod notary;
+pub mod service;
 pub mod store;
 extern crate tera;

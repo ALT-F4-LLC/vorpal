@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package vorpal.cli.v0;
+
+service CliService {
+    rpc Package (PackageRequest) returns (PackageResponse);
+}
+
+message PackageRequest {
+    repeated string ignore_paths = 1;
+    string build_phase = 2;
+    string install_phase = 3;
+    string name = 4;
+    string source = 5;
+}
+
+message PackageResponse {
+    string source_id = 1;
+    string source_hash = 2;
+}

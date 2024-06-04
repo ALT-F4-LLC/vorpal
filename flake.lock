@@ -45,10 +45,26 @@
         "url": "https://github.com/NixOS/nixpkgs/archive/eb9ceca17df2ea50a250b6b27f7bf6ab0186f198.tar.gz"
       }
     },
+    "process-compose-flake": {
+      "locked": {
+        "lastModified": 1717422917,
+        "narHash": "sha256-bvmBDOEUb7xo3RG+Hcqeq/NjzFPT30qAudRtEA1zvrI=",
+        "owner": "Platonic-Systems",
+        "repo": "process-compose-flake",
+        "rev": "4569c7c76948efed9d998aff0fb3f81b1caf7e71",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Platonic-Systems",
+        "repo": "process-compose-flake",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "flake-parts": "flake-parts",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "process-compose-flake": "process-compose-flake"
       }
     }
   },

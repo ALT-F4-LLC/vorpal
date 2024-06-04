@@ -56,9 +56,9 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     }
 
     let addr = format!("[::1]:{}", port).parse()?;
-    let packager = service::Packager::default();
+    let packager = service::Package::default();
 
-    println!("Server listening on: {}", addr);
+    println!("Build listening on: {}", addr);
 
     Server::builder()
         .add_service(PackageServiceServer::new(packager))

@@ -1,4 +1,5 @@
-use crate::builder;
+use crate::service::build;
+use crate::service::proxy;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -12,14 +13,33 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    Package {},
+
     #[clap(subcommand)]
-    Builder(Builder),
+    Service(Service),
 }
 
 #[derive(Subcommand)]
-pub enum Builder {
+pub enum Service {
+    #[clap(subcommand)]
+    Build(Build),
+
+    #[clap(subcommand)]
+    Proxy(Proxy),
+}
+
+#[derive(Subcommand)]
+pub enum Build {
     Start {
         #[clap(default_value = "15323", long, short)]
+        port: u16,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum Proxy {
+    Start {
+        #[clap(default_value = "23151", long, short)]
         port: u16,
     },
 }
@@ -28,6 +48,14 @@ pub async fn run() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Command::Builder(Builder::Start { port }) => builder::start(port.clone()).await,
+        Command::Package {} => Ok(()),
+        Command::Service(service) => match service {
+            Service::Build(build) => match build {
+                Build::Start { port } => build::start(port.clone()).await,
+            },
+            Service::Proxy(proxy) => match proxy {
+                Proxy::Start { port } => proxy::start(port.clone()).await,
+            },
+        },
     }
 }
