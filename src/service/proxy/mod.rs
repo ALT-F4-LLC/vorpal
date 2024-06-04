@@ -1,4 +1,4 @@
-use crate::api::cli_service_server::CliServiceServer;
+use crate::api::build_service_server::BuildServiceServer;
 use crate::notary;
 use crate::store;
 use tokio::fs;
@@ -47,7 +47,7 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     println!("Proxy listening on: {}", addr);
 
     Server::builder()
-        .add_service(CliServiceServer::new(proxy))
+        .add_service(BuildServiceServer::new(proxy))
         .serve(addr)
         .await?;
 

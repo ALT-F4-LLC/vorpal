@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package vorpal.cli.v0;
+package vorpal.build.v0;
 
-service CliService {
+service BuildService {
     rpc Package (PackageRequest) returns (PackageResponse);
 }
 

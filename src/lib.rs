@@ -1,5 +1,5 @@
 pub mod api {
-    tonic::include_proto!("vorpal.cli.v0");
+    tonic::include_proto!("vorpal.build.v0");
     tonic::include_proto!("vorpal.package.v0");
 }
 pub mod command;

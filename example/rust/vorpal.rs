@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::env;
-use vorpal::api::cli_service_client::CliServiceClient;
+use vorpal::api::build_service_client::BuildServiceClient;
 use vorpal::api::PackageRequest;
 
 #[tokio::main]
@@ -25,7 +25,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
         source: env::current_dir()?.to_string_lossy().to_string(),
     };
 
-    let mut client = CliServiceClient::connect("http://[::1]:23151").await?;
+    let mut client = BuildServiceClient::connect("http://[::1]:23151").await?;
     let response = client.package(example).await?;
     let response_data = response.into_inner();
     println!("{:?}", response_data);
