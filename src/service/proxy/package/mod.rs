@@ -1,5 +1,5 @@
 use crate::api::package_service_client::PackageServiceClient;
-use crate::api::{BuildRequest, Package, PackageRequest, PackageResponse, PrepareRequest};
+use crate::api::{BuildRequest, PackageRequest, PackageResponse, PrepareRequest};
 use crate::notary;
 use crate::store;
 use rand::rngs::OsRng;
@@ -14,24 +14,6 @@ use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tonic::{Request, Response, Status};
 
-pub struct PackageArgs<'a> {
-    pub build_phase: &'a str,
-    pub ignore_paths: Vec<&'a str>,
-    pub install_phase: &'a str,
-    pub name: &'a str,
-    pub source: &'a str,
-}
-
-pub fn new(args: PackageArgs) -> Package {
-    Package {
-        build_phase: args.build_phase.to_string(),
-        ignore_paths: args.ignore_paths.iter().map(|i| i.to_string()).collect(),
-        install_phase: args.install_phase.to_string(),
-        name: args.name.to_string(),
-        source: args.source.to_string(),
-    }
-}
-
 pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageResponse>, Status> {
     let package_dir = store::get_package_path();
     if !package_dir.exists() {
@@ -40,17 +22,9 @@ pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageRes
 
     let r = request.into_inner();
 
-    let package = new(PackageArgs {
-        build_phase: &r.build_phase,
-        ignore_paths: r.ignore_paths.iter().map(|i| i.as_str()).collect(),
-        install_phase: &r.install_phase,
-        name: &r.name,
-        source: &r.source,
-    });
+    println!("Preparing: {}", r.name);
 
-    println!("Preparing: {}", package.name);
-
-    let (source_id, source_hash) = match prepare(package_dir, &package).await {
+    let (source_id, source_hash) = match prepare(package_dir, &r).await {
         Ok((id, hash)) => (id, hash),
         Err(e) => {
             eprintln!("Failed to prepare: {:?}", e);
@@ -58,9 +32,9 @@ pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageRes
         }
     };
 
-    println!("Building: {}-{}", package.name, source_hash);
+    println!("Building: {}-{}", r.name, source_hash);
 
-    match build(source_id, &source_hash, &package).await {
+    match build(source_id, &source_hash, &r).await {
         Ok(_) => (),
         Err(e) => {
             eprintln!("Failed to build: {:?}", e);
@@ -76,9 +50,12 @@ pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageRes
     Ok(Response::new(response))
 }
 
-async fn prepare(package_dir: PathBuf, package: &Package) -> Result<(i32, String), anyhow::Error> {
-    let source = Path::new(&package.source).canonicalize()?;
-    let source_ignore_paths = package
+async fn prepare(
+    package_dir: PathBuf,
+    request: &PackageRequest,
+) -> Result<(i32, String), anyhow::Error> {
+    let source = Path::new(&request.source).canonicalize()?;
+    let source_ignore_paths = request
         .ignore_paths
         .iter()
         .map(|i| Path::new(i).to_path_buf())
@@ -86,7 +63,7 @@ async fn prepare(package_dir: PathBuf, package: &Package) -> Result<(i32, String
     let source_files = store::get_file_paths(&source, &source_ignore_paths)?;
     let source_files_hashes = store::get_file_hashes(&source_files)?;
     let source_hash = store::get_source_hash(&source_files_hashes)?;
-    let source_dir_name = store::get_package_dir_name(&package.name, &source_hash);
+    let source_dir_name = store::get_package_dir_name(&request.name, &source_hash);
     let source_dir = package_dir.join(&source_dir_name).with_extension("source");
     let source_tar = source_dir.with_extension("source.tar.gz");
     if !source_tar.exists() {
@@ -108,7 +85,7 @@ async fn prepare(package_dir: PathBuf, package: &Package) -> Result<(i32, String
     let request = tonic::Request::new(PrepareRequest {
         source_data,
         source_hash: source_hash.to_string(),
-        source_name: package.name.to_string(),
+        source_name: request.name.to_string(),
         source_signature: source_signature.to_string(),
     });
     let mut client = PackageServiceClient::connect("http://[::1]:15323").await?;
@@ -121,20 +98,22 @@ async fn prepare(package_dir: PathBuf, package: &Package) -> Result<(i32, String
 async fn build(
     package_id: i32,
     package_hash: &str,
-    package: &Package,
+    request: &PackageRequest,
 ) -> Result<(), anyhow::Error> {
-    let request = tonic::Request::new(BuildRequest {
-        build_phase: package.build_phase.to_string(),
-        install_phase: package.install_phase.to_string(),
+    let build_args = tonic::Request::new(BuildRequest {
+        build_deps: Vec::new(),
+        build_phase: request.build_phase.to_string(),
+        install_deps: Vec::new(),
+        install_phase: request.install_phase.to_string(),
         source_id: package_id,
     });
     let mut client = PackageServiceClient::connect("http://[::1]:15323").await?;
-    let response = client.build(request).await?;
+    let response = client.build(build_args).await?;
     let response_data = response.into_inner();
 
     if response_data.is_compressed {
         let store_path = store::get_store_path();
-        let store_path_dir_name = store::get_package_dir_name(&package.name, package_hash);
+        let store_path_dir_name = store::get_package_dir_name(&request.name, package_hash);
         let store_path_dir = store_path.join(&store_path_dir_name);
         let store_path_tar = store_path_dir.with_extension("tar.gz");
 

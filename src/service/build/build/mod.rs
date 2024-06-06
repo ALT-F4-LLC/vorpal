@@ -16,6 +16,10 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     println!("Build source id: {:?}", message.source_id);
 
+    for path in &message.build_deps {
+        println!("Build dependency: {}", path);
+    }
+
     let db_path = store::get_database_path();
     let db = match database::connect(db_path) {
         Ok(conn) => conn,

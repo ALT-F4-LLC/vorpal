@@ -13,8 +13,6 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Package {},
-
     #[clap(subcommand)]
     Service(Service),
 }
@@ -48,7 +46,6 @@ pub async fn run() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Command::Package {} => Ok(()),
         Command::Service(service) => match service {
             Service::Build(build) => match build {
                 Build::Start { port } => build::start(port.clone()).await,

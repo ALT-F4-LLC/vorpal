@@ -7,14 +7,6 @@ service PackageService {
     rpc Build (BuildRequest) returns (BuildResponse);
 }
 
-message Package {
-    repeated string ignore_paths = 1;
-    string build_phase = 2;
-    string install_phase = 3;
-    string name = 4;
-    string source = 5;
-}
-
 enum Status {
     CREATED = 0;
     COMPLETED = 1;
@@ -33,9 +25,11 @@ message PrepareResponse {
 }
 
 message BuildRequest {
-    string build_phase = 1;
-    string install_phase = 2;
-    int32 source_id = 3;
+    repeated string build_deps = 1;
+    repeated string install_deps = 2;
+    string build_phase = 3;
+    string install_phase = 4;
+    int32 source_id = 5;
 }
 
 message BuildResponse {
