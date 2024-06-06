@@ -1,13 +1,11 @@
-use crate::api::package_service_server::PackageServiceServer;
-use crate::database;
+use crate::api::build_service_server::BuildServiceServer;
 use crate::notary;
 use crate::store;
-use anyhow::Result;
 use tokio::fs;
 use tonic::transport::Server;
-mod build;
-mod prepare;
-pub mod service;
+
+mod package;
+mod service;
 
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     let vorpal_dir = store::get_home_path();
@@ -16,6 +14,13 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     }
 
     println!("Vorpal directory: {:?}", vorpal_dir);
+
+    let package_dir = store::get_package_path();
+    if !package_dir.exists() {
+        fs::create_dir_all(&package_dir).await?;
+    }
+
+    println!("Package directory: {:?}", package_dir);
 
     let store_dir = store::get_store_path();
     if !store_dir.exists() {
@@ -36,32 +41,13 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     println!("Private key: {:?}", private_key_path);
     println!("Public key: {:?}", public_key_path);
 
-    let db_path = store::get_database_path();
-    let db = database::connect(db_path.clone())?;
-
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS source (
-                id  INTEGER PRIMARY KEY,
-                hash TEXT NOT NULL,
-                name TEXT NOT NULL
-            )",
-        [],
-    )?;
-
-    println!("Database path: {:?}", db_path.display());
-
-    match db.close() {
-        Ok(_) => (),
-        Err(e) => eprintln!("Failed to close database: {:?}", e),
-    }
-
     let addr = format!("[::1]:{}", port).parse()?;
-    let packager = service::Packager::default();
+    let proxy = service::Proxy::default();
 
-    println!("Server listening on: {}", addr);
+    println!("Proxy listening on: {}", addr);
 
     Server::builder()
-        .add_service(PackageServiceServer::new(packager))
+        .add_service(BuildServiceServer::new(proxy))
         .serve(addr)
         .await?;
 

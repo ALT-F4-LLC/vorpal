@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package vorpal.build.v0;
+
+service BuildService {
+    rpc Package (PackageRequest) returns (PackageResponse);
+}
+
+message PackageResponse {
+    string source_id = 1;
+    string source_hash = 2;
+}
+
+message PackageRequest {
+    repeated PackageResponse build_deps = 1;
+    repeated PackageResponse install_deps = 2;
+    repeated string ignore_paths = 3;
+    string build_phase = 4;
+    string install_phase = 5;
+    string name = 6;
+    string source = 7;
+}
