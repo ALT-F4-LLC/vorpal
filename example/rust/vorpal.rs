@@ -10,22 +10,14 @@ pub async fn main() -> Result<(), anyhow::Error> {
     let foo = client
         .package(PackageRequest {
             build_deps: Vec::new(),
-            build_phase: r#"
-            echo "foo" >> example.txt
-            cat example.txt
-        "#
-            .to_string(),
+            build_phase: "echo \"foo\" >> foo.txt && cat foo.txt".to_string(),
             ignore_paths: vec![
                 ".direnv".to_string(),
                 ".git".to_string(),
                 "target".to_string(),
             ],
             install_deps: Vec::new(),
-            install_phase: r#"
-            mkdir -p $OUTPUT
-            cp example.txt $OUTPUT/example.txt
-        "#
-            .to_string(),
+            install_phase: "cp foo.txt $OUTPUT".to_string(),
             name: "foo".to_string(),
             source: env::current_dir()?.to_string_lossy().to_string(),
         })
@@ -35,22 +27,14 @@ pub async fn main() -> Result<(), anyhow::Error> {
     client
         .package(PackageRequest {
             build_deps: vec![foo],
-            build_phase: r#"
-            echo "bar" >> example.txt
-            cat example.txt
-        "#
-            .to_string(),
+            build_phase: "echo \"bar\" >> bar.txt && cat bar.txt".to_string(),
             ignore_paths: vec![
                 ".direnv".to_string(),
                 ".git".to_string(),
                 "target".to_string(),
             ],
             install_deps: Vec::new(),
-            install_phase: r#"
-            mkdir -p $OUTPUT
-            cp example.txt $OUTPUT/example.txt
-        "#
-            .to_string(),
+            install_phase: "mkdir -p $OUTPUT && cp bar.txt $OUTPUT/bar.txt".to_string(),
             name: "bar".to_string(),
             source: env::current_dir()?.to_string_lossy().to_string(),
         })
