@@ -11,7 +11,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .package(PackageRequest {
             build_deps: Vec::new(),
             build_phase: r#"
-            echo "hello, world!" >> example.txt
+            echo "foo" >> example.txt
             cat example.txt
         "#
             .to_string(),
@@ -32,13 +32,11 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .await?
         .into_inner();
 
-    println!("foo: {:?}", foo.source_id);
-
-    let bar = client
+    client
         .package(PackageRequest {
             build_deps: vec![foo],
             build_phase: r#"
-            echo "hello, world!" >> example.txt
+            echo "bar" >> example.txt
             cat example.txt
         "#
             .to_string(),
@@ -56,10 +54,7 @@ pub async fn main() -> Result<(), anyhow::Error> {
             name: "bar".to_string(),
             source: env::current_dir()?.to_string_lossy().to_string(),
         })
-        .await?
-        .into_inner();
-
-    println!("bar: {:?}", bar.source_id);
+        .await?;
 
     Ok(())
 }
