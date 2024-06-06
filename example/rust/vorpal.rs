@@ -24,9 +24,9 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .await?
         .into_inner();
 
-    client
+    let bar = client
         .package(PackageRequest {
-            build_deps: vec![foo],
+            build_deps: Vec::new(),
             build_phase: "echo \"bar\" >> bar.txt && cat bar.txt".to_string(),
             ignore_paths: vec![
                 ".direnv".to_string(),
@@ -34,8 +34,25 @@ pub async fn main() -> Result<(), anyhow::Error> {
                 "target".to_string(),
             ],
             install_deps: Vec::new(),
-            install_phase: "mkdir -p $OUTPUT && cp bar.txt $OUTPUT/bar.txt".to_string(),
+            install_phase: "cp bar.txt $OUTPUT".to_string(),
             name: "bar".to_string(),
+            source: env::current_dir()?.to_string_lossy().to_string(),
+        })
+        .await?
+        .into_inner();
+
+    client
+        .package(PackageRequest {
+            build_deps: vec![foo],
+            build_phase: "echo \"baz\" >> baz.txt && cat baz.txt".to_string(),
+            ignore_paths: vec![
+                ".direnv".to_string(),
+                ".git".to_string(),
+                "target".to_string(),
+            ],
+            install_deps: vec![bar],
+            install_phase: "mkdir -p $OUTPUT && cp baz.txt $OUTPUT/baz.txt".to_string(),
+            name: "baz".to_string(),
             source: env::current_dir()?.to_string_lossy().to_string(),
         })
         .await?;
