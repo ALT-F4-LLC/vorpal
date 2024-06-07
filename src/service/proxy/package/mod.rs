@@ -95,7 +95,7 @@ async fn prepare(
 
             if source_kind.mime_type() == "application/gzip" {
                 println!("Preparing packed source: {:?}", work_dir);
-                store::unpack_source(&work_dir_path.to_path_buf(), &source_path)?;
+                store::unpack_source(&work_dir_path, &source_path)?;
             }
         }
 

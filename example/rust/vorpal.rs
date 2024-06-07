@@ -7,14 +7,14 @@ use vorpal::api::{PackageRequest, PackageSource, PackageSourceKind};
 pub async fn main() -> Result<(), anyhow::Error> {
     let mut client = BuildServiceClient::connect("http://[::1]:23151").await?;
 
-    // Example: basic source code build
+    // Example: local source directory
     client
         .package(PackageRequest {
             build_deps: Vec::new(),
             build_phase: "echo \"example\" >> example.txt && cat example.txt".to_string(),
             install_phase: "cp example.txt $OUTPUT".to_string(),
             install_deps: Vec::new(),
-            name: "example-source".to_string(),
+            name: "example-local-directory".to_string(),
             source: Some(PackageSource {
                 hash: None,
                 ignore_paths: vec![
@@ -24,6 +24,23 @@ pub async fn main() -> Result<(), anyhow::Error> {
                 ],
                 kind: PackageSourceKind::Local.into(),
                 uri: env::current_dir()?.to_string_lossy().to_string(),
+            }),
+        })
+        .await?;
+
+    // Example: local compressed file
+    client
+        .package(PackageRequest {
+            build_deps: Vec::new(),
+            build_phase: "echo \"example\" >> example.txt && cat example.txt".to_string(),
+            install_phase: "cp example.txt $OUTPUT".to_string(),
+            install_deps: Vec::new(),
+            name: "example-local-compressed".to_string(),
+            source: Some(PackageSource {
+                hash: None,
+                ignore_paths: vec![],
+                kind: PackageSourceKind::Local.into(),
+                uri: "/tmp/bar-20016d34b4290918b2ae482524dbaed38a79e6c973ff287339593186ff73a558.source.tar.gz".to_string(),
             }),
         })
         .await?;
