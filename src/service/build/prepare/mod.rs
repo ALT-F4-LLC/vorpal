@@ -65,7 +65,7 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
                 permissions.set_mode(0o444);
                 fs::set_permissions(source_tar_path.clone(), permissions).await?;
                 let file_name = source_tar_path.file_name().unwrap();
-                println!("Source file: {}", file_name.to_string_lossy());
+                println!("Source tar: {}", file_name.to_string_lossy());
             }
             Err(e) => eprintln!("Failed source file: {}", e),
         }
@@ -88,6 +88,8 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
             }
         };
 
+        println!("Source files: {:?}", source_files);
+
         let source_files_hashes = match store::get_file_hashes(&source_files) {
             Ok(hashes) => hashes,
             Err(e) => {
@@ -104,7 +106,10 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
             }
         };
 
-        if source_hash != message.source_hash {
+        println!("Message source hash: {}", message.source_hash);
+        println!("Source hash: {}", source_hash);
+
+        if message.source_hash != source_hash {
             eprintln!("Source hash mismatch");
             return Err(Status::internal("Source hash mismatch"));
         }

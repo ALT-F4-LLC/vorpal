@@ -1,5 +1,7 @@
 use crate::api::package_service_client::PackageServiceClient;
-use crate::api::{BuildRequest, PackageRequest, PackageResponse, PrepareRequest};
+use crate::api::{
+    BuildRequest, PackageRequest, PackageResponse, PackageSourceKind, PrepareRequest,
+};
 use crate::notary;
 use crate::store;
 use rand::rngs::OsRng;
@@ -9,6 +11,7 @@ use rsa::signature::RandomizedSigner;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use tempfile::tempdir;
 use tokio::fs;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -54,25 +57,110 @@ async fn prepare(
     package_dir: PathBuf,
     request: &PackageRequest,
 ) -> Result<(i32, String), anyhow::Error> {
-    let source = Path::new(&request.source).canonicalize()?;
-    let source_ignore_paths = request
-        .ignore_paths
-        .iter()
-        .map(|i| Path::new(i).to_path_buf())
-        .collect::<Vec<PathBuf>>();
-    let source_files = store::get_file_paths(&source, &source_ignore_paths)?;
-    let source_files_hashes = store::get_file_hashes(&source_files)?;
-    let source_hash = store::get_source_hash(&source_files_hashes)?;
-    let source_dir_name = store::get_package_dir_name(&request.name, &source_hash);
+    let source = match &request.source {
+        Some(s) => s,
+        None => return Err(anyhow::anyhow!("Source is required")),
+    };
+
+    if source.kind == PackageSourceKind::Unknown as i32 {
+        return Err(anyhow::anyhow!("Unknown source kind"));
+    }
+
+    let work_dir = tempdir()?;
+    let work_dir_path = work_dir.path().canonicalize()?;
+
+    println!("Preparing work dir: {:?}", work_dir_path);
+
+    if source.kind == PackageSourceKind::Git as i32 {
+        // TODO: check if source exists already with hash
+        // TODO: if not, download git source
+        // TODO: if so, extract source to work_dir
+    }
+
+    if source.kind == PackageSourceKind::Http as i32 {
+        // TODO: check if source exists already with hash
+        // TODO: if not, download http source
+        // TODO: if so, check mime type for compression
+        // TODO: if compressed, extract source to work_dir
+        // TODO: if not, move source to work_dir
+    }
+
+    if source.kind == PackageSourceKind::Local as i32 {
+        let source_path = Path::new(&source.uri).canonicalize()?;
+
+        println!("Preparing source path: {:?}", source_path);
+
+        if let Ok(Some(source_kind)) = infer::get_from_path(&source_path) {
+            println!("Preparing source kind: {:?}", source_kind);
+
+            if source_kind.mime_type() == "application/gzip" {
+                println!("Preparing packed source: {:?}", work_dir);
+                store::unpack_source(&work_dir_path.to_path_buf(), &source_path)?;
+            }
+        }
+
+        if source_path.is_dir() {
+            let files = store::get_file_paths(&source_path, &source.ignore_paths)?;
+
+            if files.is_empty() {
+                return Err(anyhow::anyhow!("No source files found"));
+            }
+
+            for src in &files {
+                if src.is_dir() {
+                    let dest = work_dir_path.join(src.strip_prefix(&source_path)?);
+                    fs::create_dir_all(dest).await?;
+                    continue;
+                }
+
+                let dest = work_dir_path.join(src.file_name().unwrap());
+                fs::copy(src, &dest).await?;
+                println!(
+                    "Preparing source file: {:?} -> {:?}",
+                    src.display(),
+                    dest.display()
+                );
+            }
+        }
+    }
+
+    // At this point, any source URI should be a local file path
+
+    let work_dir_files = store::get_file_paths(&work_dir_path.to_path_buf(), &vec![])?;
+
+    if work_dir_files.is_empty() {
+        return Err(anyhow::anyhow!("No source files found"));
+    }
+
+    println!("Preparing source files: {:?}", work_dir_files);
+
+    let work_dir_files_hashes = store::get_file_hashes(&work_dir_files)?;
+
+    let work_dir_hash = store::get_source_hash(&work_dir_files_hashes)?;
+
+    if work_dir_hash.is_empty() {
+        return Err(anyhow::anyhow!("Failed to get source hash"));
+    }
+
+    println!("Source hash: {}", work_dir_hash);
+
+    if let Some(request_hash) = &source.hash {
+        if &work_dir_hash != request_hash {
+            println!("Hash mismatch: {} != {}", request_hash, work_dir_hash);
+            return Err(anyhow::anyhow!("Hash mismatch"));
+        }
+    }
+
+    let source_dir_name = store::get_package_dir_name(&request.name, &work_dir_hash);
     let source_dir = package_dir.join(&source_dir_name).with_extension("source");
     let source_tar = source_dir.with_extension("source.tar.gz");
     if !source_tar.exists() {
         println!("Creating source tar: {:?}", source_tar);
-        store::compress_files(&source, &source_tar, &source_files)?;
+        store::compress_files(&work_dir_path.to_path_buf(), &source_tar, &work_dir_files)?;
         fs::set_permissions(&source_tar, Permissions::from_mode(0o444)).await?;
     }
 
-    println!("Source file: {}", source_tar.display());
+    println!("Source tar: {}", source_tar.display());
 
     let private_key = notary::get_private_key().await?;
     let signing_key = SigningKey::<Sha256>::new(private_key);
@@ -80,11 +168,11 @@ async fn prepare(
     let source_data = fs::read(&source_tar).await?;
     let source_signature = signing_key.sign_with_rng(&mut signing_rng, &source_data);
 
-    println!("Source signature: {}", source_signature.to_string());
+    println!("Source tar signature: {}", source_signature.to_string());
 
     let request = tonic::Request::new(PrepareRequest {
         source_data,
-        source_hash: source_hash.to_string(),
+        source_hash: work_dir_hash.to_string(),
         source_name: request.name.to_string(),
         source_signature: source_signature.to_string(),
     });
@@ -92,7 +180,9 @@ async fn prepare(
     let response = client.prepare(request).await?;
     let response_data = response.into_inner();
 
-    Ok((response_data.source_id, source_hash))
+    fs::remove_dir_all(&work_dir).await?;
+
+    Ok((response_data.source_id, work_dir_hash))
 }
 
 async fn build(

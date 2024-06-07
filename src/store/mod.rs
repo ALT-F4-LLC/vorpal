@@ -3,6 +3,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use sha256::{digest, try_digest};
+use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
@@ -10,6 +11,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tar::Archive;
 use tar::Builder;
+use uuid::Uuid;
 use walkdir::WalkDir;
 
 pub fn get_home_path() -> PathBuf {
@@ -48,6 +50,10 @@ pub fn get_source_tar_path(source_dir: &Path) -> PathBuf {
         .to_path_buf()
 }
 
+pub fn get_temp_dir_path() -> PathBuf {
+    env::temp_dir().join(Uuid::now_v7().to_string())
+}
+
 pub fn get_package_dir_name(name: &str, hash: &str) -> String {
     format!("{}-{}", name, hash)
 }
@@ -60,15 +66,20 @@ pub fn get_source_dir_path(source_name: &String, source_hash: &String) -> PathBu
         .to_path_buf()
 }
 
-pub fn get_file_paths(source: &Path, ignore_paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
-    let mut files: Vec<PathBuf> = WalkDir::new(&source)
+pub fn get_file_paths(source: &PathBuf, ignore_paths: &[String]) -> Result<Vec<PathBuf>> {
+    let source_ignore_paths = ignore_paths
+        .iter()
+        .map(|i| Path::new(i).to_path_buf())
+        .collect::<Vec<PathBuf>>();
+
+    let mut files: Vec<PathBuf> = WalkDir::new(source)
         .into_iter()
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            if ignore_paths
+            if source_ignore_paths
                 .iter()
-                .any(|i| path.strip_prefix(&source).unwrap().starts_with(i))
+                .any(|i| path.strip_prefix(source).unwrap().starts_with(i))
             {
                 return None;
             }
@@ -113,13 +124,15 @@ pub fn get_source_hash(hashes: &[(PathBuf, String)]) -> Result<String> {
 }
 
 pub fn compress_files(
-    source: &Path,
-    source_tar: &Path,
+    source: &PathBuf,
+    source_output: &Path,
     source_files: &[PathBuf],
 ) -> Result<File, anyhow::Error> {
-    let tar = File::create(source_tar)?;
+    let tar = File::create(source_output)?;
     let tar_encoder = GzEncoder::new(tar.try_clone()?, Compression::default());
     let mut tar_builder = Builder::new(tar_encoder);
+
+    println!("Compressing: {}", source.display());
 
     for path in source_files {
         if path == source {
@@ -155,7 +168,7 @@ pub fn set_files_permissions(files: &[PathBuf]) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub fn unpack_source(target_dir: &Path, source_tar: &Path) -> Result<(), anyhow::Error> {
+pub fn unpack_source(target_dir: &PathBuf, source_tar: &Path) -> Result<(), anyhow::Error> {
     let tar_gz = File::open(&source_tar)?;
     let buf_reader = BufReader::new(tar_gz);
     let gz_decoder = GzDecoder::new(buf_reader);

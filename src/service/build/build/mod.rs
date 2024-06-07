@@ -2,7 +2,7 @@ use crate::api::{BuildRequest, BuildResponse};
 use crate::database;
 use crate::store;
 use std::os::unix::fs::PermissionsExt;
-use tempfile::tempdir;
+use tempfile::TempDir;
 use tera::Tera;
 use tokio::fs;
 use tokio::process::Command;
@@ -70,8 +70,8 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     println!("Build source tar: {}", source_tar_path.display());
 
-    let source_temp_dir = tempdir()?;
-    let source_temp_dir_path = source_temp_dir.path();
+    let source_temp_dir = TempDir::new()?;
+    let source_temp_dir_path = source_temp_dir.into_path();
 
     match store::unpack_source(&source_temp_dir_path, &source_tar_path) {
         Ok(_) => (),
@@ -148,11 +148,11 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     let sandbox_output_path = source_temp_vorpal_dir.join("output");
 
-    println!("Build output: {}", sandbox_output_path.display());
+    println!("Build output path: {}", sandbox_output_path.display());
 
     let mut sandbox_command = Command::new("/usr/bin/sandbox-exec");
     sandbox_command.args(sandbox_command_args);
-    sandbox_command.current_dir(source_temp_dir_path);
+    sandbox_command.current_dir(&source_temp_dir_path);
     sandbox_command.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
     sandbox_command.env("OUTPUT", sandbox_output_path.to_str().unwrap());
 
@@ -203,7 +203,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         fs::copy(&sandbox_output_path, &store_output_path).await?;
     }
 
-    source_temp_dir.close()?;
+    fs::remove_dir_all(&source_temp_dir_path).await?;
 
     let package_data_path = if store_output_tar.exists() {
         store_output_tar.clone()
