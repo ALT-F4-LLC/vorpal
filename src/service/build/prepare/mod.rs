@@ -39,57 +39,34 @@ pub async fn run(
 
     println!("Processed chunks: {}", source_chunks);
 
-    let public_key = match notary::get_public_key().await {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("Failed to get public key: {:?}", e);
-            return Err(Status::internal("Failed to get public key"));
-        }
-    };
+    let public_key = notary::get_public_key()
+        .await
+        .map_err(|_| Status::internal("Failed to get public key"))?;
+
     let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
     if source_signature.is_empty() {
-        eprintln!("Source signature is empty");
         return Err(Status::internal("Source signature is empty"));
     }
 
-    let signature_decode = match hex::decode(source_signature) {
-        Ok(data) => data,
-        Err(_) => return Err(Status::internal("hex decode of signature failed")),
-    };
+    let signature_decode = hex::decode(source_signature)
+        .map_err(|_| Status::internal("hex decode of signature failed"))?;
 
-    let signature = match Signature::try_from(signature_decode.as_slice()) {
-        Ok(signature) => signature,
-        Err(e) => {
-            eprintln!("Failed to decode signature: {:?}", e);
-            return Err(Status::internal("Failed to decode signature"));
-        }
-    };
+    let signature = Signature::try_from(signature_decode.as_slice())
+        .map_err(|_| Status::internal("Failed to decode signature"))?;
 
-    match verifying_key.verify(&source_data, &signature) {
-        Ok(_) => (),
-        Err(e) => {
-            eprintln!("Failed to verify signature: {:?}", e);
-            return Err(Status::internal("Failed to verify signature"));
-        }
-    };
+    verifying_key
+        .verify(&source_data, &signature)
+        .map_err(|_| Status::internal("Failed to verify signature"))?;
 
-    let db_path = store::get_database_path();
-    let db = match database::connect(db_path) {
-        Ok(conn) => conn,
-        Err(e) => {
-            eprintln!("Failed to connect to database: {:?}", e);
-            return Err(Status::internal("Failed to connect to database"));
-        }
-    };
+    let db = database::connect(store::get_database_path())
+        .map_err(|_| Status::internal("Failed to connect to database"))?;
 
     if source_hash.is_empty() {
-        eprintln!("Source hash is empty");
         return Err(Status::internal("Source hash is empty"));
     }
 
     if source_name.is_empty() {
-        eprintln!("Source name is empty");
         return Err(Status::internal("Source name is empty"));
     }
 
