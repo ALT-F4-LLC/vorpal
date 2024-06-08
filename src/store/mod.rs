@@ -56,7 +56,7 @@ pub fn get_source_tar_path(source_name: &str, source_hash: &str) -> PathBuf {
         .with_extension("source.tar.gz")
 }
 
-pub fn get_source_dir_path(source_name: &String, source_hash: &String) -> PathBuf {
+pub fn get_source_dir_path(source_name: &str, source_hash: &str) -> PathBuf {
     let store_dir = get_store_dir_path();
     store_dir
         .join(get_store_dir_name(source_name, source_hash))
@@ -173,4 +173,38 @@ pub fn unpack_source(target_dir: &PathBuf, source_tar: &Path) -> Result<(), anyh
     let mut archive = Archive::new(gz_decoder);
     archive.unpack(target_dir)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn home_dir_path() {
+        assert_eq!(get_home_dir_path().file_name().unwrap(), ".vorpal");
+    }
+
+    #[test]
+    fn key_dir_path() {
+        assert_eq!(get_key_dir_path().file_name().unwrap(), "key");
+    }
+
+    #[test]
+    fn key_dir_path_home() {
+        let home_dir = get_home_dir_path();
+        let key_dir = get_key_dir_path();
+        assert!(key_dir.starts_with(home_dir));
+    }
+
+    #[test]
+    fn store_dir_path() {
+        assert_eq!(get_store_dir_path().file_name().unwrap(), "store");
+    }
+
+    #[test]
+    fn store_dir_path_home() {
+        let home_dir = get_home_dir_path();
+        let store_dir = get_key_dir_path();
+        assert!(store_dir.starts_with(home_dir));
+    }
 }

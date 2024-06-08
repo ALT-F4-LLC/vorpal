@@ -5,8 +5,10 @@ use crate::store;
 use anyhow::Result;
 use tokio::fs;
 use tonic::transport::Server;
-mod build;
-mod prepare;
+
+mod run_build;
+mod run_prepare;
+mod sandbox_default;
 pub mod service;
 
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {

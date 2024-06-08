@@ -35,7 +35,11 @@
           default = buildRustPackage {
             buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
             cargoSha256 = "sha256-Qvxhf+lY7Khtt0RP2VASh5CDYeii5KaFX8krDn6QpnA=";
-            nativeBuildInputs = [pkg-config protobuf];
+            checkPhase = ''
+              ${pkgs.cargo}/bin/cargo clippy -- -D warnings
+              ${pkgs.cargo}/bin/cargo test
+            '';
+            nativeBuildInputs = [clippy pkg-config protobuf];
             pname = "vorpal";
             src = ./.;
             version = "0.1.0";
@@ -44,7 +48,7 @@
 
         devShells = {
           default = pkgs.mkShell {
-            nativeBuildInputs = [cargo-udeps clippy grpcurl just rustfmt];
+            nativeBuildInputs = [cargo-udeps grpcurl just rustfmt];
             inputsFrom = [config.packages.default];
           };
         };

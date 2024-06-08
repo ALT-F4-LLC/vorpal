@@ -1,5 +1,6 @@
 use crate::api::{BuildRequest, BuildResponse};
 use crate::database;
+use crate::service::build::sandbox_default;
 use crate::store;
 use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
@@ -8,8 +9,6 @@ use tokio::fs;
 use tokio::process::Command;
 use tonic::{Request, Response, Status};
 use walkdir::WalkDir;
-
-mod sandbox_default;
 
 pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildResponse>, Status> {
     let message = request.into_inner();
@@ -99,32 +98,34 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         .collect::<Vec<&str>>()
         .join("\n");
 
-    let mut automation_script: Vec<String> = Vec::new();
+    let automation_script: Vec<String> = vec![
+        "#!/bin/bash".to_string(),
+        "set -e pipefail".to_string(),
+        "echo \"Starting build phase\"".to_string(),
+        build_phase_steps,
+        "echo \"Finished build phase\"".to_string(),
+        "echo \"Starting install phase\"".to_string(),
+        install_phase_steps,
+        "echo \"Finished install phase\"".to_string(),
+    ];
 
-    automation_script.push("#!/bin/bash".to_string());
-    automation_script.push("set -e pipefail".to_string());
-    automation_script.push("echo \"Starting build phase\"".to_string());
-    automation_script.push(build_phase_steps);
-    automation_script.push("echo \"Finished build phase\"".to_string());
-    automation_script.push("echo \"Starting install phase\"".to_string());
-    automation_script.push(install_phase_steps);
-    automation_script.push("echo \"Finished install phase\"".to_string());
+    let automation_script_data = automation_script.join("\n");
 
-    let automation_script = automation_script.join("\n");
+    println!("Build script: {}", automation_script_data);
+
     let automation_script_path = source_temp_vorpal_dir.join("automation.sh");
 
-    fs::write(&automation_script_path, &automation_script).await?;
-
-    println!("Build script: {}", automation_script);
+    fs::write(&automation_script_path, automation_script_data).await?;
 
     let metadata = fs::metadata(&automation_script_path).await?;
     let mut permissions = metadata.permissions();
+
     permissions.set_mode(0o755);
+
     fs::set_permissions(&automation_script_path, permissions).await?;
 
     let os_type = std::env::consts::OS;
     if os_type != "macos" {
-        eprintln!("Unsupported OS: {}", os_type);
         return Err(Status::internal("Unsupported OS (currently only macOS)"));
     }
 
@@ -166,7 +167,6 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     let sandbox_stderr = String::from_utf8_lossy(&sandbox_output.stderr);
     if sandbox_stderr.len() > 0 {
-        eprintln!("Build stderr: {:?}", sandbox_stderr);
         return Err(Status::internal("Build failed"));
     }
 
@@ -190,16 +190,14 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
         let store_output_files = match store::get_file_paths(&store_output_path, &Vec::new()) {
             Ok(files) => files,
-            Err(e) => {
-                eprintln!("Failed to get sandbox output files: {:?}", e);
+            Err(_) => {
                 return Err(Status::internal("Failed to get sandbox output files"));
             }
         };
 
         match store::compress_files(&store_output_path, &store_output_tar, &store_output_files) {
             Ok(_) => (),
-            Err(e) => {
-                eprintln!("Failed to compress sandbox output: {:?}", e);
+            Err(_) => {
                 return Err(Status::internal("Failed to compress sandbox output"));
             }
         };

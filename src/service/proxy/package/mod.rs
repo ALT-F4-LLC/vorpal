@@ -83,7 +83,7 @@ async fn prepare_source(
     Ok((res.source_id, source_hash.to_string()))
 }
 
-async fn prepare(name: &String, source: &PackageSource) -> Result<(i32, String), anyhow::Error> {
+async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), anyhow::Error> {
     let work_dir = tempdir()?;
     let workdir_path = work_dir.path().canonicalize()?;
 
