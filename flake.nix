@@ -3,6 +3,8 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.process-compose-flake.url = "github:Platonic-Systems/process-compose-flake";
+  inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.rust-overlay.url = "github:oxalica/rust-overlay";
 
   outputs = inputs @ {
     flake-parts,
@@ -17,12 +19,18 @@
       perSystem = {
         config,
         pkgs,
+        system,
         ...
       }: let
-        inherit (pkgs) darwin grpcurl just lib openssl pkg-config protobuf rustPlatform;
+        inherit (pkgs) cargo-udeps darwin grpcurl just lib openssl pkg-config protobuf rustPlatform;
         inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (rustPlatform) buildRustPackage;
       in {
+        _module.args.pkgs = import inputs.nixpkgs {
+          inherit system;
+          overlays = [inputs.rust-overlay.overlays.default];
+        };
+
         packages = {
           default = buildRustPackage {
             buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
@@ -36,7 +44,7 @@
 
         devShells = {
           default = pkgs.mkShell {
-            nativeBuildInputs = [grpcurl just];
+            nativeBuildInputs = [cargo-udeps grpcurl just];
             inputsFrom = [config.packages.default];
           };
         };
@@ -44,6 +52,11 @@
         apps = {
           default = {
             program = "${config.packages.default}/bin/vorpal";
+            type = "app";
+          };
+
+          cargo-nightly = {
+            program = "${pkgs.rust-bin.nightly.latest.default}/bin/cargo";
             type = "app";
           };
         };
