@@ -14,55 +14,53 @@ use tar::Builder;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-pub fn get_home_path() -> PathBuf {
+pub fn get_home_dir_path() -> PathBuf {
     dirs::home_dir()
         .expect("Home directory not found")
         .join(".vorpal")
 }
 
-pub fn get_key_path() -> PathBuf {
-    get_home_path().join("key")
+pub fn get_key_dir_path() -> PathBuf {
+    get_home_dir_path().join("key")
 }
 
-pub fn get_package_path() -> PathBuf {
-    get_home_path().join("package")
-}
-
-pub fn get_store_path() -> PathBuf {
-    get_home_path().join("store")
+pub fn get_store_dir_path() -> PathBuf {
+    get_home_dir_path().join("store")
 }
 
 pub fn get_database_path() -> PathBuf {
-    get_home_path().join("vorpal.db")
+    get_home_dir_path().join("vorpal.db")
 }
 
 pub fn get_private_key_path() -> PathBuf {
-    get_key_path().join("private").with_extension("pem")
+    get_key_dir_path().join("private").with_extension("pem")
 }
 
 pub fn get_public_key_path() -> PathBuf {
-    get_key_path().join("public").with_extension("pem")
-}
-
-pub fn get_source_tar_path(source_dir: &Path) -> PathBuf {
-    source_dir
-        .join(source_dir.with_extension("source.tar.gz"))
-        .to_path_buf()
+    get_key_dir_path().join("public").with_extension("pem")
 }
 
 pub fn get_temp_dir_path() -> PathBuf {
     env::temp_dir().join(Uuid::now_v7().to_string())
 }
 
-pub fn get_package_dir_name(name: &str, hash: &str) -> String {
+pub fn get_store_dir_name(name: &str, hash: &str) -> String {
     format!("{}-{}", name, hash)
 }
 
-pub fn get_source_dir_path(source_name: &String, source_hash: &String) -> PathBuf {
-    let store_dir = get_store_path();
+pub fn get_source_tar_path(source_name: &str, source_hash: &str) -> PathBuf {
+    let store_dir = get_store_dir_path();
+    let store_dir_name = get_store_dir_name(source_name, source_hash);
     store_dir
-        .join(&get_package_dir_name(source_name, source_hash))
-        .with_extension("package")
+        .join(store_dir_name)
+        .with_extension("source.tar.gz")
+}
+
+pub fn get_source_dir_path(source_name: &String, source_hash: &String) -> PathBuf {
+    let store_dir = get_store_dir_path();
+    store_dir
+        .join(&get_store_dir_name(source_name, source_hash))
+        .with_extension("source")
         .to_path_buf()
 }
 

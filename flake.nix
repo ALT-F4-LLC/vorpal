@@ -19,13 +19,15 @@
         pkgs,
         ...
       }: let
-        inherit (pkgs) grpcurl just protobuf rustPlatform;
+        inherit (pkgs) darwin grpcurl just lib openssl pkg-config protobuf rustPlatform;
+        inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (rustPlatform) buildRustPackage;
       in {
         packages = {
           default = buildRustPackage {
-            cargoSha256 = "sha256-M1XB4pC15qLECSWkI2YEvsUhyA4B+bL3c6/Ugk20uMk=";
-            nativeBuildInputs = [protobuf];
+            buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
+            cargoSha256 = "sha256-Qvxhf+lY7Khtt0RP2VASh5CDYeii5KaFX8krDn6QpnA=";
+            nativeBuildInputs = [pkg-config protobuf];
             pname = "vorpal";
             src = ./.;
             version = "0.1.0";

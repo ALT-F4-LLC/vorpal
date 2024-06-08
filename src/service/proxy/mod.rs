@@ -8,21 +8,14 @@ mod package;
 mod service;
 
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {
-    let vorpal_dir = store::get_home_path();
+    let vorpal_dir = store::get_home_dir_path();
     if !vorpal_dir.exists() {
         fs::create_dir_all(&vorpal_dir).await?;
     }
 
     println!("Vorpal directory: {:?}", vorpal_dir);
 
-    let package_dir = store::get_package_path();
-    if !package_dir.exists() {
-        fs::create_dir_all(&package_dir).await?;
-    }
-
-    println!("Package directory: {:?}", package_dir);
-
-    let store_dir = store::get_store_path();
+    let store_dir = store::get_store_dir_path();
     if !store_dir.exists() {
         fs::create_dir_all(&store_dir).await?;
     }
@@ -32,7 +25,7 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     let private_key_path = store::get_private_key_path();
     let public_key_path = store::get_public_key_path();
     if !private_key_path.exists() && !public_key_path.exists() {
-        let key_dir = store::get_key_path();
+        let key_dir = store::get_private_key_path();
         fs::create_dir_all(&key_dir).await?;
         println!("Key directory: {:?}", key_dir);
         notary::generate_keys()?;

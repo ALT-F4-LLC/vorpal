@@ -1,13 +1,10 @@
 [package]
+build = "build.rs"
+edition = "2021"
 name = "vorpal-example"
 version = "0.1.0"
-edition = "2021"
 
-[[bin]]
-name = "vorpal"
-path = "vorpal.rs"
-
-[dependencies]
+[build-dependencies]
 anyhow = "1.0"
 tokio = { version = "1.37" }
 vorpal = { path = "../../." }

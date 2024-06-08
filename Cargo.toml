@@ -12,6 +12,8 @@ anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0"
 flate2 = "1.0"
+futures-util = "0.3"
+git2 = "0.18"
 hex = "0.4"
 infer = "0.3"
 prost = "0.12"
@@ -19,11 +21,14 @@ rand = "0.8"
 rsa = { version = "0.9", features = ["sha2"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 sha256 = "1.5"
+reqwest = { version = "0.12", features = ["json"] }
 tar = "0.4"
 tempfile = "3.10"
 tera = { version = "1", default-features = false }
-tokio = { version = "1.37", features = ["macros", "process", "rt-multi-thread"] }
+tokio = { version = "1.37", features = ["full"] }
+tokio-stream = "0.1"
 tonic = "0.11"
+url = "2.5"
 uuid = { version = "1.8", features = ["v7"] }
 walkdir = "2.5"
 

@@ -2,6 +2,7 @@ use crate::api::{PrepareRequest, PrepareResponse};
 use crate::database;
 use crate::notary;
 use crate::store;
+use futures_util::StreamExt;
 use rsa::pss::{Signature, VerifyingKey};
 use rsa::sha2::Sha256;
 use rsa::signature::Verifier;
@@ -9,13 +10,34 @@ use std::fs::File;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use tokio::fs;
-use tonic::{Request, Response, Status};
+use tonic::{Response, Status, Streaming};
 
-pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareResponse>, Status> {
-    let message = request.into_inner();
+pub async fn run(
+    mut stream: Streaming<PrepareRequest>,
+) -> Result<Response<PrepareResponse>, Status> {
+    let mut source_data: Vec<u8> = Vec::new();
 
-    let source_dir_path = store::get_source_dir_path(&message.source_name, &message.source_hash);
-    let source_tar_path = store::get_source_tar_path(&source_dir_path);
+    let mut source_hash = String::new();
+    let mut source_name = String::new();
+    let mut source_signature = String::new();
+    let mut source_chunks = 0;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| Status::internal(format!("Stream error: {}", e)))?;
+
+        println!("Chunk size: {}", chunk.source_data.len());
+
+        if source_chunks == 0 {
+            source_hash = chunk.source_hash;
+            source_name = chunk.source_name;
+            source_signature = chunk.source_signature;
+            source_chunks = source_chunks + 1;
+        }
+
+        source_data.extend_from_slice(&chunk.source_data);
+    }
+
+    println!("Processed chunks: {}", source_chunks);
 
     let public_key = match notary::get_public_key().await {
         Ok(key) => key,
@@ -26,12 +48,17 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
     };
     let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
-    let source_signature_decode = match hex::decode(message.source_signature) {
+    if source_signature.is_empty() {
+        eprintln!("Source signature is empty");
+        return Err(Status::internal("Source signature is empty"));
+    }
+
+    let signature_decode = match hex::decode(source_signature) {
         Ok(data) => data,
         Err(_) => return Err(Status::internal("hex decode of signature failed")),
     };
 
-    let source_signature = match Signature::try_from(source_signature_decode.as_slice()) {
+    let signature = match Signature::try_from(signature_decode.as_slice()) {
         Ok(signature) => signature,
         Err(e) => {
             eprintln!("Failed to decode signature: {:?}", e);
@@ -39,7 +66,7 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
         }
     };
 
-    match verifying_key.verify(&message.source_data, &source_signature) {
+    match verifying_key.verify(&source_data, &signature) {
         Ok(_) => (),
         Err(e) => {
             eprintln!("Failed to verify signature: {:?}", e);
@@ -56,9 +83,22 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
         }
     };
 
+    if source_hash.is_empty() {
+        eprintln!("Source hash is empty");
+        return Err(Status::internal("Source hash is empty"));
+    }
+
+    if source_name.is_empty() {
+        eprintln!("Source name is empty");
+        return Err(Status::internal("Source name is empty"));
+    }
+
+    let source_dir_path = store::get_source_dir_path(&source_name, &source_hash);
+    let source_tar_path = store::get_source_tar_path(&source_name, &source_hash);
+
     if !source_tar_path.exists() {
         let mut source_tar = File::create(&source_tar_path)?;
-        match source_tar.write_all(&message.source_data) {
+        match source_tar.write_all(&source_data) {
             Ok(_) => {
                 let metadata = fs::metadata(&source_tar_path).await?;
                 let mut permissions = metadata.permissions();
@@ -98,7 +138,7 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
             }
         };
 
-        let source_hash = match store::get_source_hash(&source_files_hashes) {
+        let source_hash_computed = match store::get_source_hash(&source_files_hashes) {
             Ok(hash) => hash,
             Err(e) => {
                 eprintln!("Failed to get source hash: {}", e);
@@ -106,15 +146,15 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
             }
         };
 
-        println!("Message source hash: {}", message.source_hash);
-        println!("Source hash: {}", source_hash);
+        println!("Message source hash: {}", source_hash);
+        println!("Computed source hash: {}", source_hash_computed);
 
-        if message.source_hash != source_hash {
+        if source_hash != source_hash_computed {
             eprintln!("Source hash mismatch");
             return Err(Status::internal("Source hash mismatch"));
         }
 
-        match database::insert_source(&db, &source_hash, &message.source_name) {
+        match database::insert_source(&db, &source_hash, &source_name) {
             Ok(_) => (),
             Err(e) => {
                 eprintln!("Failed to insert source: {:?}", e);
@@ -125,7 +165,7 @@ pub async fn run(request: Request<PrepareRequest>) -> Result<Response<PrepareRes
         fs::remove_dir_all(source_dir_path).await?;
     }
 
-    let source_id = match database::find_source(&db, &message.source_hash, &message.source_name) {
+    let source_id = match database::find_source(&db, &source_hash, &source_name) {
         Ok(source) => source.id,
         Err(e) => {
             eprintln!("Failed to find source: {:?}", e);

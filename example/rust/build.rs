@@ -7,26 +7,31 @@ use vorpal::api::{PackageRequest, PackageSource, PackageSourceKind};
 pub async fn main() -> Result<(), anyhow::Error> {
     let mut client = BuildServiceClient::connect("http://[::1]:23151").await?;
 
-    // Example: local source directory
-    client
+    let example_rust = client
         .package(PackageRequest {
             build_deps: Vec::new(),
-            build_phase: "echo \"example\" >> example.txt && cat example.txt".to_string(),
-            install_phase: "cp example.txt $OUTPUT".to_string(),
+            build_phase: r#"
+                cat build.rs
+            "#
+            .to_string(),
+            install_phase: r#"
+                mkdir -p $OUTPUT
+                cp build.rs $OUTPUT/build.rs
+            "#
+            .to_string(),
             install_deps: Vec::new(),
             name: "example-rust".to_string(),
             source: Some(PackageSource {
                 hash: None,
-                ignore_paths: vec![
-                    ".direnv".to_string(),
-                    ".git".to_string(),
-                    "target".to_string(),
-                ],
+                ignore_paths: vec![".git".to_string(), "target".to_string()],
                 kind: PackageSourceKind::Local.into(),
                 uri: env::current_dir()?.to_string_lossy().to_string(),
             }),
         })
-        .await?;
+        .await?
+        .into_inner();
+
+    println!("{:?}", example_rust);
 
     Ok(())
 }
