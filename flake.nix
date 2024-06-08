@@ -22,7 +22,7 @@
         system,
         ...
       }: let
-        inherit (pkgs) cargo-udeps clippy darwin grpcurl just lib openssl pkg-config protobuf rustfmt rustPlatform;
+        inherit (pkgs) clippy darwin grpcurl just lib openssl pkg-config protobuf rustfmt rustPlatform;
         inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (rustPlatform) buildRustPackage;
       in {
@@ -34,7 +34,7 @@
         packages = {
           default = buildRustPackage {
             buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-Qvxhf+lY7Khtt0RP2VASh5CDYeii5KaFX8krDn6QpnA=";
+            cargoSha256 = "sha256-aBfWKqOlRxAOSkRoL+vX4mCbz6jZ7+XVp3uHwS8N4TY=";
             checkPhase = ''
               ${pkgs.cargo}/bin/cargo clippy -- -D warnings
               ${pkgs.rust-bin.nightly.latest.default}/bin/cargo fmt --check --verbose
