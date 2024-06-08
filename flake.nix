@@ -37,9 +37,10 @@
             cargoSha256 = "sha256-Qvxhf+lY7Khtt0RP2VASh5CDYeii5KaFX8krDn6QpnA=";
             checkPhase = ''
               ${pkgs.cargo}/bin/cargo clippy -- -D warnings
-              ${pkgs.cargo}/bin/cargo test
+              ${pkgs.rust-bin.nightly.latest.default}/bin/cargo fmt --check --verbose
+              ${pkgs.cargo}/bin/cargo test --locked --all-features --all-targets
             '';
-            nativeBuildInputs = [clippy pkg-config protobuf];
+            nativeBuildInputs = [clippy pkg-config protobuf rustfmt];
             pname = "vorpal";
             src = ./.;
             version = "0.1.0";
@@ -48,7 +49,7 @@
 
         devShells = {
           default = pkgs.mkShell {
-            nativeBuildInputs = [cargo-udeps grpcurl just rustfmt];
+            nativeBuildInputs = [grpcurl just];
             inputsFrom = [config.packages.default];
           };
         };
@@ -56,11 +57,6 @@
         apps = {
           default = {
             program = "${config.packages.default}/bin/vorpal";
-            type = "app";
-          };
-
-          cargo-nightly = {
-            program = "${pkgs.rust-bin.nightly.latest.default}/bin/cargo";
             type = "app";
           };
         };

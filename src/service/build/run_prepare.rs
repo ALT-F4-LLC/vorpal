@@ -155,9 +155,7 @@ pub async fn run(
         Err(e) => eprintln!("Failed to close database: {:?}", e),
     }
 
-    let response = PrepareResponse {
-        source_id,
-    };
+    let response = PrepareResponse { source_id };
 
     Ok(Response::new(response))
 }
