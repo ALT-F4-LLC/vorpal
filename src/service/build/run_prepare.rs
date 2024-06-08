@@ -11,6 +11,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use tokio::fs;
 use tonic::{Response, Status, Streaming};
+use tracing::{error, info};
 
 pub async fn run(
     mut stream: Streaming<PrepareRequest>,
@@ -25,7 +26,7 @@ pub async fn run(
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| Status::internal(format!("Stream error: {}", e)))?;
 
-        println!("Chunk size: {}", chunk.source_data.len());
+        info!("chunk size: {}", chunk.source_data.len());
 
         if source_chunks == 0 {
             source_hash = chunk.source_hash;
@@ -37,7 +38,7 @@ pub async fn run(
         source_data.extend_from_slice(&chunk.source_data);
     }
 
-    println!("Processed chunks: {}", source_chunks);
+    info!("processed chunks: {}", source_chunks);
 
     let public_key = notary::get_public_key()
         .await
@@ -82,9 +83,9 @@ pub async fn run(
                 permissions.set_mode(0o444);
                 fs::set_permissions(source_tar_path.clone(), permissions).await?;
                 let file_name = source_tar_path.file_name().unwrap();
-                println!("Source tar: {}", file_name.to_string_lossy());
+                info!("source tar created: {}", file_name.to_string_lossy());
             }
-            Err(e) => eprintln!("Failed source file: {}", e),
+            Err(e) => error!("failed source file: {}", e),
         }
 
         fs::create_dir_all(&source_dir_path).await?;
@@ -92,7 +93,7 @@ pub async fn run(
         match store::unpack_source(&source_dir_path, &source_tar_path) {
             Ok(_) => (),
             Err(e) => {
-                eprintln!("Failed to unpack source: {:?}", e);
+                error!("failed to unpack source: {:?}", e);
                 return Err(Status::internal("Failed to unpack source"));
             }
         };
@@ -100,17 +101,17 @@ pub async fn run(
         let source_files = match store::get_file_paths(&source_dir_path, &[]) {
             Ok(files) => files,
             Err(e) => {
-                eprintln!("Failed to get source files: {}", e);
+                error!("failed to get source files: {}", e);
                 return Err(Status::internal("Failed to get source files"));
             }
         };
 
-        println!("Source files: {:?}", source_files);
+        info!("source files: {:?}", source_files);
 
         let source_files_hashes = match store::get_file_hashes(&source_files) {
             Ok(hashes) => hashes,
             Err(e) => {
-                eprintln!("Failed to get source files hashes: {}", e);
+                error!("failed to get source files hashes: {}", e);
                 return Err(Status::internal("Failed to get source files hashes"));
             }
         };
@@ -118,23 +119,23 @@ pub async fn run(
         let source_hash_computed = match store::get_source_hash(&source_files_hashes) {
             Ok(hash) => hash,
             Err(e) => {
-                eprintln!("Failed to get source hash: {}", e);
+                error!("failed to get source hash: {}", e);
                 return Err(Status::internal("Failed to get source hash"));
             }
         };
 
-        println!("Message source hash: {}", source_hash);
-        println!("Computed source hash: {}", source_hash_computed);
+        info!("message source hash: {}", source_hash);
+        info!("computed source hash: {}", source_hash_computed);
 
         if source_hash != source_hash_computed {
-            eprintln!("Source hash mismatch");
+            error!("source hash mismatch");
             return Err(Status::internal("Source hash mismatch"));
         }
 
         match database::insert_source(&db, &source_hash, &source_name) {
             Ok(_) => (),
             Err(e) => {
-                eprintln!("Failed to insert source: {:?}", e);
+                error!("failed to insert source: {:?}", e);
                 return Err(Status::internal("Failed to insert source"));
             }
         }
@@ -145,14 +146,14 @@ pub async fn run(
     let source_id = match database::find_source(&db, &source_hash, &source_name) {
         Ok(source) => source.id,
         Err(e) => {
-            eprintln!("Failed to find source: {:?}", e);
+            error!("failed to find source: {:?}", e);
             return Err(Status::internal("Failed to find source"));
         }
     };
 
     match db.close() {
         Ok(_) => (),
-        Err(e) => eprintln!("Failed to close database: {:?}", e),
+        Err(e) => error!("failed to close database: {:?}", e),
     }
 
     let response = PrepareResponse { source_id };

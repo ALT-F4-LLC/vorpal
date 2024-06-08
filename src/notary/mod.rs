@@ -8,6 +8,7 @@ use rsa::sha2::Sha256;
 use rsa::signature::RandomizedSigner;
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use tokio::fs;
+use tracing::debug;
 
 pub fn generate_keys() -> Result<(), anyhow::Error> {
     let mut rng = rand::thread_rng();
@@ -18,13 +19,13 @@ pub fn generate_keys() -> Result<(), anyhow::Error> {
     let private_key_der = private_key.to_pkcs8_der()?;
     private_key_der.write_pem_file(&private_key_path, "PRIVATE KEY", LineEnding::LF)?;
 
-    println!("Private key generated: {}", private_key_path.display());
+    debug!("private key generated: {:?}", private_key_path);
 
     let public_key_path = store::get_public_key_path();
     let public_key = private_key.to_public_key();
     public_key.write_public_key_pem_file(&public_key_path, LineEnding::LF)?;
 
-    println!("Public key generated: {}", public_key_path.display());
+    debug!("public key generated: {:?}", public_key_path);
 
     Ok(())
 }

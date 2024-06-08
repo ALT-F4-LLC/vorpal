@@ -11,6 +11,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tar::Archive;
 use tar::Builder;
+use tracing::info;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -130,7 +131,7 @@ pub fn compress_files(
     let tar_encoder = GzEncoder::new(tar.try_clone()?, Compression::default());
     let mut tar_builder = Builder::new(tar_encoder);
 
-    println!("Compressing: {}", source.display());
+    info!("Compressing: {}", source.display());
 
     for path in source_files {
         if path == source {
@@ -139,7 +140,7 @@ pub fn compress_files(
 
         let relative_path = path.strip_prefix(source)?;
 
-        println!("Adding: {}", relative_path.display());
+        info!("Adding: {}", relative_path.display());
 
         if path.is_file() {
             tar_builder.append_path_with_name(path.clone(), relative_path)?;
