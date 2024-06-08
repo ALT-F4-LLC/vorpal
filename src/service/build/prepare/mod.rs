@@ -31,7 +31,7 @@ pub async fn run(
             source_hash = chunk.source_hash;
             source_name = chunk.source_name;
             source_signature = chunk.source_signature;
-            source_chunks = source_chunks + 1;
+            source_chunks += 1;
         }
 
         source_data.extend_from_slice(&chunk.source_data);
@@ -97,7 +97,7 @@ pub async fn run(
             }
         };
 
-        let source_files = match store::get_file_paths(&source_dir_path, &vec![]) {
+        let source_files = match store::get_file_paths(&source_dir_path, &[]) {
             Ok(files) => files,
             Err(e) => {
                 eprintln!("Failed to get source files: {}", e);
@@ -156,7 +156,7 @@ pub async fn run(
     }
 
     let response = PrepareResponse {
-        source_id: source_id,
+        source_id,
     };
 
     Ok(Response::new(response))

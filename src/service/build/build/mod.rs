@@ -87,14 +87,14 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     let build_phase_steps = message
         .build_phase
         .trim()
-        .split("\n")
+        .split('\n')
         .map(|line| line.trim())
         .collect::<Vec<&str>>()
         .join("\n");
     let install_phase_steps = message
         .install_phase
         .trim()
-        .split("\n")
+        .split('\n')
         .map(|line| line.trim())
         .collect::<Vec<&str>>()
         .join("\n");

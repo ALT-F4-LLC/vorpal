@@ -29,7 +29,7 @@ pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageRes
 
     println!("Preparing: {}", req.name);
 
-    let (source_id, source_hash) = prepare(&req.name, &req_source).await.map_err(|e| {
+    let (source_id, source_hash) = prepare(&req.name, req_source).await.map_err(|e| {
         eprintln!("Failed to prepare: {:?}", e);
         Status::internal(e.to_string())
     })?;
@@ -58,7 +58,7 @@ async fn prepare_source(
 
     let signature = notary::sign(&data).await?;
 
-    println!("Source tar signature: {}", signature.to_string());
+    println!("Source tar signature: {}", signature);
 
     let mut request_chunks = vec![];
     let request_chunks_size = 2 * 1024 * 1024; // default grpc limit
@@ -80,7 +80,7 @@ async fn prepare_source(
 
     println!("Source ID: {}", res.source_id);
 
-    return Ok((res.source_id, source_hash.to_string()));
+    Ok((res.source_id, source_hash.to_string()))
 }
 
 async fn prepare(name: &String, source: &PackageSource) -> Result<(i32, String), anyhow::Error> {
@@ -140,7 +140,7 @@ async fn prepare(name: &String, source: &PackageSource) -> Result<(i32, String),
                 "application/gzip" => {
                     let temp_file = NamedTempFile::new()?;
                     write(&temp_file, response_bytes).await?;
-                    store::unpack_source(&workdir_path, &temp_file.path())?;
+                    store::unpack_source(&workdir_path, temp_file.path())?;
                     println!("Prepared packed source: {:?}", workdir_path);
                 }
                 _ => {
@@ -239,7 +239,7 @@ async fn prepare(name: &String, source: &PackageSource) -> Result<(i32, String),
 
     println!("Source tar: {}", source_tar_path.display());
 
-    prepare_source(&name, &workdir_hash, &source_tar_path).await
+    prepare_source(name, &workdir_hash, &source_tar_path).await
 }
 
 async fn build(

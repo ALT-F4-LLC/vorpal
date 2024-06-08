@@ -11,12 +11,12 @@ pub async fn main() -> Result<(), anyhow::Error> {
         .package(PackageRequest {
             build_deps: Vec::new(),
             build_phase: r#"
-                cat build.rs
+                cat vorpal.rs
             "#
             .to_string(),
             install_phase: r#"
                 mkdir -p $OUTPUT
-                cp build.rs $OUTPUT/build.rs
+                cp vorpal.rs $OUTPUT/build.rs
             "#
             .to_string(),
             install_deps: Vec::new(),

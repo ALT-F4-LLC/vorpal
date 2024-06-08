@@ -22,7 +22,7 @@
         system,
         ...
       }: let
-        inherit (pkgs) cargo-udeps darwin grpcurl just lib openssl pkg-config protobuf rustPlatform;
+        inherit (pkgs) cargo-udeps clippy darwin grpcurl just lib openssl pkg-config protobuf rustfmt rustPlatform;
         inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (rustPlatform) buildRustPackage;
       in {
@@ -44,7 +44,7 @@
 
         devShells = {
           default = pkgs.mkShell {
-            nativeBuildInputs = [cargo-udeps grpcurl just];
+            nativeBuildInputs = [cargo-udeps clippy grpcurl just rustfmt];
             inputsFrom = [config.packages.default];
           };
         };

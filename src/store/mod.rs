@@ -59,7 +59,7 @@ pub fn get_source_tar_path(source_name: &str, source_hash: &str) -> PathBuf {
 pub fn get_source_dir_path(source_name: &String, source_hash: &String) -> PathBuf {
     let store_dir = get_store_dir_path();
     store_dir
-        .join(&get_store_dir_name(source_name, source_hash))
+        .join(get_store_dir_name(source_name, source_hash))
         .with_extension("source")
         .to_path_buf()
 }
@@ -81,7 +81,7 @@ pub fn get_file_paths(source: &PathBuf, ignore_paths: &[String]) -> Result<Vec<P
             {
                 return None;
             }
-            Some(path.canonicalize().ok()?)
+            path.canonicalize().ok()
         })
         .collect();
 
@@ -115,7 +115,7 @@ pub fn get_source_hash(hashes: &[(PathBuf, String)]) -> Result<String> {
     let mut combined = String::new();
 
     for (_, hash) in hashes {
-        combined.push_str(&hash);
+        combined.push_str(hash);
     }
 
     Ok(digest(combined))
@@ -155,7 +155,7 @@ pub fn compress_files(
 
 pub fn set_files_permissions(files: &[PathBuf]) -> Result<(), anyhow::Error> {
     for file in files {
-        let permissions = fs::metadata(&file)?.permissions();
+        let permissions = fs::metadata(file)?.permissions();
         if permissions.mode() & 0o111 != 0 {
             fs::set_permissions(file, fs::Permissions::from_mode(0o555))?;
         } else {
@@ -167,10 +167,10 @@ pub fn set_files_permissions(files: &[PathBuf]) -> Result<(), anyhow::Error> {
 }
 
 pub fn unpack_source(target_dir: &PathBuf, source_tar: &Path) -> Result<(), anyhow::Error> {
-    let tar_gz = File::open(&source_tar)?;
+    let tar_gz = File::open(source_tar)?;
     let buf_reader = BufReader::new(tar_gz);
     let gz_decoder = GzDecoder::new(buf_reader);
     let mut archive = Archive::new(gz_decoder);
-    archive.unpack(&target_dir)?;
+    archive.unpack(target_dir)?;
     Ok(())
 }
