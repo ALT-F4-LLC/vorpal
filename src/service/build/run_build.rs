@@ -1,15 +1,14 @@
 use crate::api::{BuildRequest, BuildResponse};
 use crate::database;
+use crate::service::build::sandbox_default;
 use crate::store;
 use std::os::unix::fs::PermissionsExt;
-use tempfile::tempdir;
+use tempfile::TempDir;
 use tera::Tera;
 use tokio::fs;
 use tokio::process::Command;
 use tonic::{Request, Response, Status};
 use walkdir::WalkDir;
-
-mod sandbox_default;
 
 pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildResponse>, Status> {
     let message = request.into_inner();
@@ -37,7 +36,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         }
     };
 
-    let store_path = store::get_store_path();
+    let store_path = store::get_store_dir_path();
     let store_output_path = store_path.join(format!("{}-{}", source.name, source.hash));
     let store_output_tar = store_output_path.with_extension("tar.gz");
 
@@ -65,13 +64,12 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         return Ok(Response::new(response));
     }
 
-    let source_dir_path = store::get_source_dir_path(&source.name, &source.hash);
-    let source_tar_path = store::get_source_tar_path(&source_dir_path);
+    let source_tar_path = store::get_source_tar_path(&source.name, &source.hash);
 
     println!("Build source tar: {}", source_tar_path.display());
 
-    let source_temp_dir = tempdir()?;
-    let source_temp_dir_path = source_temp_dir.path();
+    let source_temp_dir = TempDir::new()?;
+    let source_temp_dir_path = source_temp_dir.into_path().canonicalize()?;
 
     match store::unpack_source(&source_temp_dir_path, &source_tar_path) {
         Ok(_) => (),
@@ -88,41 +86,46 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     let build_phase_steps = message
         .build_phase
         .trim()
-        .split("\n")
+        .split('\n')
         .map(|line| line.trim())
         .collect::<Vec<&str>>()
         .join("\n");
     let install_phase_steps = message
         .install_phase
         .trim()
-        .split("\n")
+        .split('\n')
         .map(|line| line.trim())
         .collect::<Vec<&str>>()
         .join("\n");
-    let mut automation_script: Vec<String> = Vec::new();
-    automation_script.push("#!/bin/bash".to_string());
-    automation_script.push("set -e pipefail".to_string());
-    automation_script.push("echo \"Starting build phase\"".to_string());
-    automation_script.push(build_phase_steps);
-    automation_script.push("echo \"Finished build phase\"".to_string());
-    automation_script.push("echo \"Starting install phase\"".to_string());
-    automation_script.push(install_phase_steps);
-    automation_script.push("echo \"Finished install phase\"".to_string());
-    let automation_script = automation_script.join("\n");
+
+    let automation_script: Vec<String> = vec![
+        "#!/bin/bash".to_string(),
+        "set -e pipefail".to_string(),
+        "echo \"Starting build phase\"".to_string(),
+        build_phase_steps,
+        "echo \"Finished build phase\"".to_string(),
+        "echo \"Starting install phase\"".to_string(),
+        install_phase_steps,
+        "echo \"Finished install phase\"".to_string(),
+    ];
+
+    let automation_script_data = automation_script.join("\n");
+
+    println!("Build script: {}", automation_script_data);
+
     let automation_script_path = source_temp_vorpal_dir.join("automation.sh");
 
-    fs::write(&automation_script_path, &automation_script).await?;
-
-    println!("Build script: {}", automation_script);
+    fs::write(&automation_script_path, automation_script_data).await?;
 
     let metadata = fs::metadata(&automation_script_path).await?;
     let mut permissions = metadata.permissions();
+
     permissions.set_mode(0o755);
+
     fs::set_permissions(&automation_script_path, permissions).await?;
 
     let os_type = std::env::consts::OS;
     if os_type != "macos" {
-        eprintln!("Unsupported OS: {}", os_type);
         return Err(Status::internal("Unsupported OS (currently only macOS)"));
     }
 
@@ -148,25 +151,26 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     let sandbox_output_path = source_temp_vorpal_dir.join("output");
 
-    println!("Build output: {}", sandbox_output_path.display());
+    println!("Build output path: {}", sandbox_output_path.display());
 
     let mut sandbox_command = Command::new("/usr/bin/sandbox-exec");
     sandbox_command.args(sandbox_command_args);
-    sandbox_command.current_dir(source_temp_dir_path);
+    sandbox_command.current_dir(&source_temp_dir_path);
     sandbox_command.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
     sandbox_command.env("OUTPUT", sandbox_output_path.to_str().unwrap());
 
     let sandbox_output = sandbox_command.output().await?;
     let sandbox_stdout = String::from_utf8_lossy(&sandbox_output.stdout);
+
+    // TODO: stream output
+    println!("{}", sandbox_stdout.trim());
+
     let sandbox_stderr = String::from_utf8_lossy(&sandbox_output.stderr);
     if sandbox_stderr.len() > 0 {
-        eprintln!("Build stderr: {:?}", sandbox_stderr);
         return Err(Status::internal("Build failed"));
     }
 
-    println!("{}", sandbox_stdout.trim());
-
-    if !sandbox_output_path.is_file() {
+    if sandbox_output_path.is_dir() {
         for entry in WalkDir::new(&sandbox_output_path) {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -186,16 +190,14 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
         let store_output_files = match store::get_file_paths(&store_output_path, &Vec::new()) {
             Ok(files) => files,
-            Err(e) => {
-                eprintln!("Failed to get sandbox output files: {:?}", e);
+            Err(_) => {
                 return Err(Status::internal("Failed to get sandbox output files"));
             }
         };
 
         match store::compress_files(&store_output_path, &store_output_tar, &store_output_files) {
             Ok(_) => (),
-            Err(e) => {
-                eprintln!("Failed to compress sandbox output: {:?}", e);
+            Err(_) => {
                 return Err(Status::internal("Failed to compress sandbox output"));
             }
         };
@@ -203,7 +205,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         fs::copy(&sandbox_output_path, &store_output_path).await?;
     }
 
-    source_temp_dir.close()?;
+    fs::remove_dir_all(&source_temp_dir_path).await?;
 
     let package_data_path = if store_output_tar.exists() {
         store_output_tar.clone()

@@ -3,6 +3,8 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.process-compose-flake.url = "github:Platonic-Systems/process-compose-flake";
+  inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.rust-overlay.url = "github:oxalica/rust-overlay";
 
   outputs = inputs @ {
     flake-parts,
@@ -17,15 +19,28 @@
       perSystem = {
         config,
         pkgs,
+        system,
         ...
       }: let
-        inherit (pkgs) grpcurl just protobuf rustPlatform;
+        inherit (pkgs) clippy darwin grpcurl just lib openssl pkg-config protobuf rustfmt rustPlatform;
+        inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (rustPlatform) buildRustPackage;
       in {
+        _module.args.pkgs = import inputs.nixpkgs {
+          inherit system;
+          overlays = [inputs.rust-overlay.overlays.default];
+        };
+
         packages = {
           default = buildRustPackage {
-            cargoSha256 = "sha256-l8A+eH+UeLd+IccoT4T67wDW0ya5M89tsQKwtQnbwog=";
-            nativeBuildInputs = [protobuf];
+            buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
+            cargoSha256 = "sha256-aBfWKqOlRxAOSkRoL+vX4mCbz6jZ7+XVp3uHwS8N4TY=";
+            checkPhase = ''
+              ${pkgs.cargo}/bin/cargo clippy -- -D warnings
+              ${pkgs.rust-bin.nightly.latest.default}/bin/cargo fmt --check --verbose
+              ${pkgs.cargo}/bin/cargo test --locked --all-features --all-targets
+            '';
+            nativeBuildInputs = [clippy pkg-config protobuf rustfmt];
             pname = "vorpal";
             src = ./.;
             version = "0.1.0";

@@ -3,7 +3,7 @@ syntax = "proto3";
 package vorpal.package.v0;
 
 service PackageService {
-    rpc Prepare (PrepareRequest) returns (PrepareResponse);
+    rpc Prepare (stream PrepareRequest) returns (PrepareResponse);
     rpc Build (BuildRequest) returns (BuildResponse);
 }
 

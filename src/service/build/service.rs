@@ -1,8 +1,8 @@
 use crate::api::package_service_server::PackageService;
 use crate::api::{BuildRequest, BuildResponse, PrepareRequest, PrepareResponse};
-use crate::service::build::{build, prepare};
+use crate::service::build::{run_build, run_prepare};
 use anyhow::Result;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
 
 #[derive(Debug, Default)]
 pub struct Package {}
@@ -11,15 +11,15 @@ pub struct Package {}
 impl PackageService for Package {
     async fn prepare(
         &self,
-        request: Request<PrepareRequest>,
+        request: Request<Streaming<PrepareRequest>>,
     ) -> Result<Response<PrepareResponse>, Status> {
-        prepare::run(request).await
+        run_prepare::run(request.into_inner()).await
     }
 
     async fn build(
         &self,
         request: Request<BuildRequest>,
     ) -> Result<Response<BuildResponse>, Status> {
-        build::run(request).await
+        run_build::run(request).await
     }
 }

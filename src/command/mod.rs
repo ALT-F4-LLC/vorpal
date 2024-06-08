@@ -48,10 +48,10 @@ pub async fn run() -> Result<(), anyhow::Error> {
     match &cli.command {
         Command::Service(service) => match service {
             Service::Build(build) => match build {
-                Build::Start { port } => build::start(port.clone()).await,
+                Build::Start { port } => build::start(*port).await,
             },
             Service::Proxy(proxy) => match proxy {
-                Proxy::Start { port } => proxy::start(port.clone()).await,
+                Proxy::Start { port } => proxy::start(*port).await,
             },
         },
     }
