@@ -76,19 +76,18 @@ pub async fn run(
 
     if !source_tar_path.exists() {
         let mut source_tar = File::create(&source_tar_path).await?;
-        match source_tar.write_all(&source_data).await {
-            Ok(_) => {
-                let metadata = fs::metadata(&source_tar_path).await?;
-                let mut permissions = metadata.permissions();
-                permissions.set_mode(0o444);
-                fs::set_permissions(source_tar_path.clone(), permissions).await?;
-                let file_name = source_tar_path.file_name().unwrap();
-                info!("source tar created: {}", file_name.to_string_lossy());
-            }
-            Err(e) => Err(Status::internal(format!(
+        if let Err(e) = source_tar.write_all(&source_data).await {
+            return Err(Status::internal(format!(
                 "Failed to write source tar: {}",
                 e
-            )))?,
+            )));
+        } else {
+            let metadata = fs::metadata(&source_tar_path).await?;
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(0o444);
+            fs::set_permissions(source_tar_path.clone(), permissions).await?;
+            let file_name = source_tar_path.file_name().unwrap();
+            info!("source tar created: {}", file_name.to_string_lossy());
         }
 
         fs::create_dir_all(&source_dir_path).await?;

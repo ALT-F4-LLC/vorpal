@@ -139,26 +139,22 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         if let Some(source_kind) = infer::get(response_bytes) {
             info!("Preparing source kind: {:?}", source_kind);
 
-            match source_kind.mime_type() {
-                "application/gzip" => {
-                    let temp_file = store::create_temp_file("tar.gz").await?;
-                    write(&temp_file, response_bytes).await?;
-                    store::unpack_tar_gz(&workdir_path, &temp_file).await?;
-                    remove_file(&temp_file).await?;
-                    info!("Prepared gzip source: {:?}", workdir_path);
-                }
-                "application/x-bzip2" => {
-                    let bz_decoder = BzDecoder::new(response_bytes);
-                    let mut archive = Archive::new(bz_decoder);
-                    archive.unpack(&workdir_path).await?;
-                    info!("Prepared bzip2 source: {:?}", workdir_path);
-                }
-                _ => {
-                    let source_file_name = url.path_segments().unwrap().last();
-                    let source_file = source_file_name.unwrap();
-                    write(&source_file, response_bytes).await?;
-                    info!("Prepared source file: {:?}", source_file);
-                }
+            if let "application/gzip" = source_kind.mime_type() {
+                let temp_file = store::create_temp_file("tar.gz").await?;
+                write(&temp_file, response_bytes).await?;
+                store::unpack_tar_gz(&workdir_path, &temp_file).await?;
+                remove_file(&temp_file).await?;
+                info!("Prepared gzip source: {:?}", workdir_path);
+            } else if let "application/x-bzip2" = source_kind.mime_type() {
+                let bz_decoder = BzDecoder::new(response_bytes);
+                let mut archive = Archive::new(bz_decoder);
+                archive.unpack(&workdir_path).await?;
+                info!("Prepared bzip2 source: {:?}", workdir_path);
+            } else {
+                let source_file_name = url.path_segments().unwrap().last();
+                let source_file = source_file_name.unwrap();
+                write(&source_file, response_bytes).await?;
+                info!("Prepared source file: {:?}", source_file);
             }
         }
     }
