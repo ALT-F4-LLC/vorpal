@@ -19,9 +19,9 @@ Below is the existing working diagram that illustrates the platform's design:
 
 The current development uses these great tools:
 
-- `just`: dev commands
-- `nix`: dev builder
-- `nix-direnv`: dev environment
+- `just` dev commands
+- `nix` dev builder
+- `nix-direnv` dev environment
 
 ### Building
 
@@ -83,8 +83,6 @@ Or, if you'd like to start individual services with `just` and `cargo` run:
 ```bash
 $ just start <service-name>
 ```
-
-Please refer to the project documentation for a full list of commands and their usage.
 
 ### Tools
 
