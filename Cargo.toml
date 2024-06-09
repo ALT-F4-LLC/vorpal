@@ -9,6 +9,7 @@ path = "src/bin/main.rs"
 
 [dependencies]
 anyhow = "1.0"
+async-compression = { version = "0.4", features = ["all"] }
 clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0"
 flate2 = "1.0"
@@ -22,11 +23,10 @@ rsa = { version = "0.9", features = ["sha2"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 sha256 = "1.5"
 reqwest = { version = "0.12", features = ["json"] }
-tar = "0.4"
-tempfile = "3.10"
 tera = { version = "1", default-features = false }
 tokio = { version = "1.37", features = ["full"] }
 tokio-stream = "0.1"
+tokio-tar = "0.3"
 tonic = "0.11"
 url = "2.5"
 uuid = { version = "1.8", features = ["v7"] }

@@ -3,7 +3,6 @@ use crate::database;
 use crate::service::build::sandbox_default;
 use crate::store;
 use std::os::unix::fs::PermissionsExt;
-use tempfile::TempDir;
 use tera::Tera;
 use tokio::fs;
 use tokio::process::Command;
@@ -68,16 +67,17 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     println!("Build source tar: {}", source_tar_path.display());
 
-    let source_temp_dir = TempDir::new()?;
-    let source_temp_dir_path = source_temp_dir.into_path().canonicalize()?;
+    let source_temp_dir = store::create_temp_dir()
+        .await
+        .map_err(|_| Status::internal("Failed to create temp dir"))?;
+    let source_temp_dir_path = source_temp_dir.canonicalize()?;
 
-    match store::unpack_source(&source_temp_dir_path, &source_tar_path) {
-        Ok(_) => (),
-        Err(e) => {
-            eprintln!("Failed to unpack source: {:?}", e);
-            return Err(Status::internal("Failed to unpack source"));
-        }
-    };
+    if let Err(err) = store::unpack_tar_gz(&source_temp_dir_path, &source_tar_path).await {
+        return Err(Status::internal(format!(
+            "Failed to unpack source tar: {:?}",
+            err
+        )));
+    }
 
     let source_temp_vorpal_dir = source_temp_dir_path.join(".vorpal");
 
@@ -156,19 +156,18 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     let mut sandbox_command = Command::new("/usr/bin/sandbox-exec");
     sandbox_command.args(sandbox_command_args);
     sandbox_command.current_dir(&source_temp_dir_path);
-    sandbox_command.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    // sandbox_command.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
     sandbox_command.env("OUTPUT", sandbox_output_path.to_str().unwrap());
 
-    let sandbox_output = sandbox_command.output().await?;
-    let sandbox_stdout = String::from_utf8_lossy(&sandbox_output.stdout);
+    sandbox_command.stdout(std::process::Stdio::piped());
+    sandbox_command.stderr(std::process::Stdio::piped());
 
-    // TODO: stream output
-    println!("{}", sandbox_stdout.trim());
+    let sandbox_output = sandbox_command.spawn()?;
 
-    let sandbox_stderr = String::from_utf8_lossy(&sandbox_output.stderr);
-    if sandbox_stderr.len() > 0 {
-        return Err(Status::internal("Build failed"));
-    }
+    sandbox_output
+        .wait_with_output()
+        .await
+        .map_err(|_| Status::internal("Failed to wait for sandbox output"))?;
 
     if sandbox_output_path.is_dir() {
         for entry in WalkDir::new(&sandbox_output_path) {
@@ -195,12 +194,14 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
             }
         };
 
-        match store::compress_files(&store_output_path, &store_output_tar, &store_output_files) {
-            Ok(_) => (),
-            Err(_) => {
-                return Err(Status::internal("Failed to compress sandbox output"));
-            }
-        };
+        if let Err(err) =
+            store::compress_tar_gz(&store_output_path, &store_output_tar, &store_output_files).await
+        {
+            return Err(Status::internal(format!(
+                "Failed to compress sandbox output: {:?}",
+                err
+            )));
+        }
     } else {
         fs::copy(&sandbox_output_path, &store_output_path).await?;
     }

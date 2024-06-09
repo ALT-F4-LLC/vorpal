@@ -4,6 +4,7 @@ use crate::api::{
 };
 use crate::notary;
 use crate::store;
+use async_compression::tokio::bufread::BzDecoder;
 use git2::build::RepoBuilder;
 use git2::{Cred, RemoteCallbacks};
 use reqwest;
@@ -11,11 +12,13 @@ use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
-use tempfile::{tempdir, NamedTempFile};
 use tokio::fs;
-use tokio::fs::{copy, create_dir_all, read, set_permissions, write, File};
+use tokio::fs::{
+    copy, create_dir_all, read, remove_dir_all, remove_file, set_permissions, write, File,
+};
 use tokio::io::AsyncWriteExt;
 use tokio_stream;
+use tokio_tar::Archive;
 use tonic::{Request, Response, Status};
 use url::Url;
 
@@ -61,7 +64,7 @@ async fn prepare_source(
     println!("Source tar signature: {}", signature);
 
     let mut request_chunks = vec![];
-    let request_chunks_size = 2 * 1024 * 1024; // default grpc limit
+    let request_chunks_size = 8192; // default grpc limit
 
     for chunk in data.chunks(request_chunks_size) {
         request_chunks.push(PrepareRequest {
@@ -80,12 +83,14 @@ async fn prepare_source(
 
     println!("Source ID: {}", res.source_id);
 
+    remove_file(&source_tar).await?;
+
     Ok((res.source_id, source_hash.to_string()))
 }
 
 async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), anyhow::Error> {
-    let work_dir = tempdir()?;
-    let workdir_path = work_dir.path().canonicalize()?;
+    let workdir = store::create_temp_dir().await?;
+    let workdir_path = workdir.canonicalize()?;
 
     println!("Preparing working dir: {:?}", workdir_path);
 
@@ -138,10 +143,17 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
 
             match source_kind.mime_type() {
                 "application/gzip" => {
-                    let temp_file = NamedTempFile::new()?;
+                    let temp_file = store::create_temp_file("tar.gz").await?;
                     write(&temp_file, response_bytes).await?;
-                    store::unpack_source(&workdir_path, temp_file.path())?;
-                    println!("Prepared packed source: {:?}", workdir_path);
+                    store::unpack_tar_gz(&workdir_path, &temp_file).await?;
+                    remove_file(&temp_file).await?;
+                    println!("Prepared gzip source: {:?}", workdir_path);
+                }
+                "application/x-bzip2" => {
+                    let bz_decoder = BzDecoder::new(response_bytes);
+                    let mut archive = Archive::new(bz_decoder);
+                    archive.unpack(&workdir_path).await?;
+                    println!("Prepared bzip2 source: {:?}", workdir_path);
                 }
                 _ => {
                     let source_file_name = url.path_segments().unwrap().last();
@@ -162,8 +174,8 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
             println!("Preparing source kind: {:?}", source_kind);
 
             if source_kind.mime_type() == "application/gzip" {
-                println!("Preparing packed source: {:?}", work_dir);
-                store::unpack_source(&workdir_path, &source_path)?;
+                println!("Preparing packed source: {:?}", workdir);
+                store::unpack_tar_gz(&workdir_path, &source_path).await?;
             }
         }
 
@@ -228,16 +240,18 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         }
     }
 
-    let source_tar = NamedTempFile::new()?;
-    let source_tar_path = source_tar.path().canonicalize()?;
+    let source_tar = store::create_temp_file("tar.gz").await?;
+    let source_tar_path = source_tar.canonicalize()?;
 
     println!("Creating source tar: {:?}", source_tar);
 
-    store::compress_files(&workdir_path, &source_tar_path, &workdir_files)?;
+    store::compress_tar_gz(&workdir_path, &source_tar_path, &workdir_files).await?;
 
     set_permissions(&source_tar, Permissions::from_mode(0o444)).await?;
 
     println!("Source tar: {}", source_tar_path.display());
+
+    remove_dir_all(&workdir_path).await?;
 
     prepare_source(name, &workdir_hash, &source_tar_path).await
 }
@@ -274,7 +288,7 @@ async fn build(
 
             fs::create_dir_all(&store_path_dir).await?;
 
-            store::unpack_source(&store_path_dir, &store_path_tar)?;
+            store::unpack_tar_gz(&store_path_dir, &store_path_tar).await?;
 
             println!("Unpacked source: {}", store_path_dir.display());
 
@@ -300,7 +314,7 @@ async fn build(
 
         fs::create_dir_all(&store_path_dir).await?;
 
-        store::unpack_source(&store_path_dir, &store_path_tar)?;
+        store::unpack_tar_gz(&store_path_dir, &store_path_tar).await?;
 
         println!("Unpacked source: {}", store_path_dir.display());
     }

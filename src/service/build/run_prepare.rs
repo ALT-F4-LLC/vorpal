@@ -6,10 +6,10 @@ use futures_util::StreamExt;
 use rsa::pss::{Signature, VerifyingKey};
 use rsa::sha2::Sha256;
 use rsa::signature::Verifier;
-use std::fs::File;
-use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use tokio::fs;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use tonic::{Response, Status, Streaming};
 
 pub async fn run(
@@ -74,8 +74,8 @@ pub async fn run(
     let source_tar_path = store::get_source_tar_path(&source_name, &source_hash);
 
     if !source_tar_path.exists() {
-        let mut source_tar = File::create(&source_tar_path)?;
-        match source_tar.write_all(&source_data) {
+        let mut source_tar = File::create(&source_tar_path).await?;
+        match source_tar.write_all(&source_data).await {
             Ok(_) => {
                 let metadata = fs::metadata(&source_tar_path).await?;
                 let mut permissions = metadata.permissions();
@@ -84,18 +84,20 @@ pub async fn run(
                 let file_name = source_tar_path.file_name().unwrap();
                 println!("Source tar: {}", file_name.to_string_lossy());
             }
-            Err(e) => eprintln!("Failed source file: {}", e),
+            Err(e) => Err(Status::internal(format!(
+                "Failed to write source tar: {}",
+                e
+            )))?,
         }
 
         fs::create_dir_all(&source_dir_path).await?;
 
-        match store::unpack_source(&source_dir_path, &source_tar_path) {
-            Ok(_) => (),
-            Err(e) => {
-                eprintln!("Failed to unpack source: {:?}", e);
-                return Err(Status::internal("Failed to unpack source"));
-            }
-        };
+        if let Err(err) = store::unpack_tar_gz(&source_dir_path, &source_tar_path).await {
+            return Err(Status::internal(format!(
+                "Failed to unpack source tar: {}",
+                err
+            )));
+        }
 
         let source_files = match store::get_file_paths(&source_dir_path, &[]) {
             Ok(files) => files,
