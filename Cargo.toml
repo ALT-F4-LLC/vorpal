@@ -8,32 +8,32 @@ name = "vorpal"
 path = "src/bin/main.rs"
 
 [dependencies]
-anyhow = "1.0"
-async-compression = { version = "0.4", features = ["all"] }
-clap = { version = "4.5", features = ["derive"] }
-dirs = "5.0"
-flate2 = "1.0"
-futures-util = "0.3"
-git2 = "0.18"
-hex = "0.4"
-infer = "0.3"
-process-stream = "0.3"
-prost = "0.12"
-rand = "0.8"
-rsa = { version = "0.9", features = ["sha2"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
-sha256 = "1.5"
-reqwest = { version = "0.12", features = ["json"] }
+anyhow = "1"
+async-compression = { version = "0", features = ["all"] }
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+flate2 = "1"
+futures-util = "0"
+git2 = "0"
+hex = "0"
+infer = "0"
+process-stream = "0"
+prost = "0"
+rand = "0"
+rsa = { version = "0", features = ["sha2"] }
+rusqlite = { version = "0", features = ["bundled"] }
+sha256 = "1"
+reqwest = { version = "0", features = ["json"] }
 tera = { version = "1", default-features = false }
-tokio = { version = "1.37", features = ["full"] }
-tokio-stream = "0.1"
-tokio-tar = "0.3"
-tonic = "0.11"
-url = "2.5"
-uuid = { version = "1.8", features = ["v7"] }
-walkdir = "2.5"
-tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0"
+tokio-tar = "0"
+tonic = "0"
+url = "2"
+uuid = { version = "1", features = ["v7"] }
+walkdir = "2"
+tracing = "0"
+tracing-subscriber = "0"
 
 [build-dependencies]
-tonic-build = "0.11"
+tonic-build = "0"
