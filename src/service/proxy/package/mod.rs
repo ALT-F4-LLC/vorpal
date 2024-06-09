@@ -145,13 +145,13 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
                     write(&temp_file, response_bytes).await?;
                     store::unpack_tar_gz(&workdir_path, &temp_file).await?;
                     remove_file(&temp_file).await?;
-                    println!("Prepared gzip source: {:?}", workdir_path);
+                    info!("Prepared gzip source: {:?}", workdir_path);
                 }
                 "application/x-bzip2" => {
                     let bz_decoder = BzDecoder::new(response_bytes);
                     let mut archive = Archive::new(bz_decoder);
                     archive.unpack(&workdir_path).await?;
-                    println!("Prepared bzip2 source: {:?}", workdir_path);
+                    info!("Prepared bzip2 source: {:?}", workdir_path);
                 }
                 _ => {
                     let source_file_name = url.path_segments().unwrap().last();
