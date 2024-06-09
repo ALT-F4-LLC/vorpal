@@ -56,7 +56,7 @@ pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageRes
 async fn prepare_source<P: AsRef<Path>>(
     source_name: &str,
     source_hash: &str,
-    source_tar: P,
+    source_tar: &P,
 ) -> Result<(i32, String), anyhow::Error> {
     let data = read(source_tar).await?;
 
