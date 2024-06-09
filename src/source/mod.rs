@@ -44,6 +44,30 @@ impl Source for Box<dyn Source> {
 ///
 /// WARNING: this trait should never be implemented manually, because it is already implemented for
 /// all types that satisfies the trait bound `Source + 'static`.
+///
+/// # Examples
+///
+/// Downcast an [`AnySource`] trait object to a concrete type:
+/// ```
+/// use vorpal::source::{AnySource, Source, LocalPackageSource, resolve_source};
+/// use vorpal::api::PackageSourceKind;
+///
+/// fn test() {
+///     let source = resolve_source(&PackageSourceKind::Local).unwrap();
+///     assert!(source.as_any().downcast_ref::<LocalPackageSource>().is_some());
+/// }
+/// ```
+///
+/// Check whether an [`AnySource`] trait object is of a specific type:
+/// ```
+/// use vorpal::source::{AnySource, Source, LocalPackageSource, resolve_source};
+/// use vorpal::api::PackageSourceKind;
+///
+/// fn test() {
+///    let source = resolve_source(&PackageSourceKind::Local).unwrap();
+///    assert!(source.as_any().is::<LocalPackageSource>());
+/// }
+/// ```
 pub trait AnySource {
     /// Returns a reference to the boxed [`Source`] trait object.
     fn as_any(&self) -> &dyn Any;
@@ -77,20 +101,18 @@ impl<T: Source + 'static> AnySource for T {
 ///
 /// # Arguments
 /// - `source` - The [`PackageSourceKind`] to resolve.
-pub fn resolve_source(
-    source: &PackageSourceKind,
-) -> Result<Box<dyn Source + 'static>, anyhow::Error> {
+pub fn resolve_source(source: &PackageSourceKind) -> Result<Box<dyn Source>, anyhow::Error> {
     let resolved: Box<dyn Source> = match source {
-        PackageSourceKind::Local => Box::new(LocalPackageSource {}),
-        PackageSourceKind::Http => Box::new(HttpPackageSource {}),
-        PackageSourceKind::Git => Box::new(GitPackageSource {}),
+        PackageSourceKind::Local => Box::new(LocalPackageSource),
+        PackageSourceKind::Http => Box::new(HttpPackageSource),
+        PackageSourceKind::Git => Box::new(GitPackageSource),
         PackageSourceKind::Unknown => unreachable!(),
     };
 
     Ok(resolved)
 }
 
-pub struct GitPackageSource {}
+pub struct GitPackageSource;
 
 #[async_trait]
 impl Source for GitPackageSource {
@@ -129,7 +151,7 @@ impl Source for GitPackageSource {
     }
 }
 
-pub struct HttpPackageSource {}
+pub struct HttpPackageSource;
 
 #[async_trait]
 impl Source for HttpPackageSource {
@@ -153,30 +175,34 @@ impl Source for HttpPackageSource {
         if let Some(source_kind) = infer::get(response_bytes) {
             info!("Preparing source kind: {:?}", source_kind);
 
-            if let "application/gzip" = source_kind.mime_type() {
-                let temp_file = store::create_temp_file("tar.gz").await?;
-                tokio::fs::write(&temp_file, response_bytes).await?;
-                store::unpack_tar_gz(&ctx.workdir_path, &temp_file).await?;
-                tokio::fs::remove_file(&temp_file).await?;
-                info!("Prepared gzip source: {:?}", ctx.workdir_path);
-            } else if let "application/x-bzip2" = source_kind.mime_type() {
-                let bz_decoder = BzDecoder::new(response_bytes);
-                let mut archive = Archive::new(bz_decoder);
-                archive.unpack(&ctx.workdir_path).await?;
-                info!("Prepared bzip2 source: {:?}", ctx.workdir_path);
-            } else {
-                let source_file_name = url.path_segments().unwrap().last();
-                let source_file = source_file_name.unwrap();
-                tokio::fs::write(&source_file, response_bytes).await?;
-                info!("Prepared source file: {:?}", source_file);
-            }
+            match source_kind.mime_type() {
+                "application/gzip" => {
+                    let temp_file = store::create_temp_file("tar.gz").await?;
+                    tokio::fs::write(&temp_file, response_bytes).await?;
+                    store::unpack_tar_gz(&ctx.workdir_path, &temp_file).await?;
+                    tokio::fs::remove_file(&temp_file).await?;
+                    info!("Prepared gzip source: {:?}", ctx.workdir_path);
+                }
+                "application/x-bzip2" => {
+                    let bz_decoder = BzDecoder::new(response_bytes);
+                    let mut archive = Archive::new(bz_decoder);
+                    archive.unpack(&ctx.workdir_path).await?;
+                    info!("Prepared bzip2 source: {:?}", ctx.workdir_path);
+                }
+                _ => {
+                    let source_file_name = url.path_segments().unwrap().last();
+                    let source_file = source_file_name.unwrap();
+                    tokio::fs::write(&source_file, response_bytes).await?;
+                    info!("Prepared source file: {:?}", source_file);
+                }
+            };
         }
 
         Ok(())
     }
 }
 
-pub struct LocalPackageSource {}
+pub struct LocalPackageSource;
 
 #[async_trait]
 impl Source for LocalPackageSource {
