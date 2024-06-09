@@ -22,7 +22,7 @@
         system,
         ...
       }: let
-        inherit (pkgs) clippy darwin grpcurl just lib openssl pkg-config protobuf rustfmt rustPlatform;
+        inherit (pkgs) alejandra clippy darwin grpcurl just lib openssl pkg-config protobuf rustfmt rustPlatform;
         inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (rustPlatform) buildRustPackage;
       in {
@@ -31,33 +31,30 @@
           overlays = [inputs.rust-overlay.overlays.default];
         };
 
-        packages = {
-          default = buildRustPackage {
-            buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-S3eNqoJ9wgokqj9HpYAWRSArygb4l7sjPYerW9Epvo0=";
-            checkPhase = ''
-              ${pkgs.cargo}/bin/cargo clippy -- -D warnings
-              ${pkgs.rust-bin.nightly.latest.default}/bin/cargo fmt --check --verbose
-              ${pkgs.cargo}/bin/cargo test --locked --all-features --all-targets
-            '';
-            nativeBuildInputs = [clippy pkg-config protobuf rustfmt];
-            pname = "vorpal";
-            src = ./.;
-            version = "0.1.0";
+        apps = {
+          default = {
+            program = "${config.packages.default}/bin/vorpal";
+            type = "app";
           };
         };
 
         devShells = {
           default = pkgs.mkShell {
-            nativeBuildInputs = [grpcurl just];
+            nativeBuildInputs = [clippy grpcurl just rustfmt];
             inputsFrom = [config.packages.default];
           };
         };
 
-        apps = {
-          default = {
-            program = "${config.packages.default}/bin/vorpal";
-            type = "app";
+        formatter = alejandra;
+
+        packages = {
+          default = buildRustPackage {
+            buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
+            cargoSha256 = "sha256-S3eNqoJ9wgokqj9HpYAWRSArygb4l7sjPYerW9Epvo0=";
+            nativeBuildInputs = [pkg-config protobuf];
+            pname = "vorpal";
+            src = ./.;
+            version = "0.1.0";
           };
         };
 
