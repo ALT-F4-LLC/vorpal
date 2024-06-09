@@ -87,7 +87,7 @@ pub async fn run(
             let metadata = fs::metadata(&package_source_tar_path).await?;
             let mut permissions = metadata.permissions();
             permissions.set_mode(0o444);
-            fs::set_permissions(package_source_tar_path.clone(), permissions).await?;
+            fs::set_permissions(&package_source_tar_path, permissions).await?;
             let file_name = package_source_tar_path.file_name().unwrap();
             info!("source tar created: {}", file_name.to_string_lossy());
         }
