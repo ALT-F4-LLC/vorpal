@@ -29,7 +29,7 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     let private_key_path = store::get_private_key_path();
     let public_key_path = store::get_public_key_path();
     if !private_key_path.exists() && !public_key_path.exists() {
-        let key_dir = store::get_private_key_path();
+        let key_dir = store::get_key_dir_path();
         fs::create_dir_all(&key_dir).await?;
         println!("Key directory: {:?}", key_dir);
         notary::generate_keys()?;

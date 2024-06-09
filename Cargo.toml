@@ -17,6 +17,7 @@ futures-util = "0.3"
 git2 = "0.18"
 hex = "0.4"
 infer = "0.3"
+process-stream = "0.3"
 prost = "0.12"
 rand = "0.8"
 rsa = { version = "0.9", features = ["sha2"] }

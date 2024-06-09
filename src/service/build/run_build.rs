@@ -2,10 +2,10 @@ use crate::api::{BuildRequest, BuildResponse};
 use crate::database;
 use crate::service::build::sandbox_default;
 use crate::store;
+use process_stream::{Process, ProcessExt, StreamExt};
 use std::os::unix::fs::PermissionsExt;
 use tera::Tera;
 use tokio::fs;
-use tokio::process::Command;
 use tonic::{Request, Response, Status};
 use walkdir::WalkDir;
 
@@ -153,21 +153,17 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     println!("Build output path: {}", sandbox_output_path.display());
 
-    let mut sandbox_command = Command::new("/usr/bin/sandbox-exec");
+    let mut sandbox_command = Process::new("/usr/bin/sandbox-exec");
     sandbox_command.args(sandbox_command_args);
     sandbox_command.current_dir(&source_temp_dir_path);
     // sandbox_command.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
     sandbox_command.env("OUTPUT", sandbox_output_path.to_str().unwrap());
 
-    sandbox_command.stdout(std::process::Stdio::piped());
-    sandbox_command.stderr(std::process::Stdio::piped());
+    let mut stream = sandbox_command.spawn_and_stream()?;
 
-    let sandbox_output = sandbox_command.spawn()?;
-
-    sandbox_output
-        .wait_with_output()
-        .await
-        .map_err(|_| Status::internal("Failed to wait for sandbox output"))?;
+    while let Some(output) = stream.next().await {
+        println!("{output}")
+    }
 
     if sandbox_output_path.is_dir() {
         for entry in WalkDir::new(&sandbox_output_path) {

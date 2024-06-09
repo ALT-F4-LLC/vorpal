@@ -1,32 +1,24 @@
 _default:
     just --list
 
-_start profile:
-    nix run '.#{{ profile }}'
-
-build profile="default":
-    nix build \
-        --json \
-        --no-link \
-        --print-build-logs \
-        '.#{{ profile }}'
+build:
+    nix build --json --no-link --print-build-logs .
 
 check:
     nix flake check
 
-start:
-    just _start "vorpal-build"
+clean:
+    rm -rf ~/.vorpal
+    mkdir -p ~/.vorpal
 
-start-build:
-    just _start "vorpal-build"
+start: clean
+    nix run ".#start-dev"
 
-package profile="default":
+package:
     #!/usr/bin/env bash
     set -euxo pipefail
-    DERIVATION=$(just _build "{{ profile }}")
-    OUTPUT=$(echo $DERIVATION | jq -r .[0].outputs.out)
-    install --mode 755 $OUTPUT/bin/vorpal-build .
-    install --mode 755 $OUTPUT/bin/vorpal-cli .
+    OUTPUT=$(just build | jq -r .[0].outputs.out)
+    install --mode 755 $OUTPUT/bin/vorpal .
 
 update:
     nix flake update
