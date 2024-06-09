@@ -1,26 +1,17 @@
 use crate::api::package_service_client::PackageServiceClient;
-use crate::api::{
-    BuildRequest, PackageRequest, PackageResponse, PackageSource, PackageSourceKind, PrepareRequest,
-};
+use crate::api::{BuildRequest, PackageRequest, PackageResponse, PackageSource, PrepareRequest};
 use crate::notary;
+use crate::source::{resolve_source, SourceContext};
 use crate::store;
-use async_compression::tokio::bufread::BzDecoder;
-use git2::build::RepoBuilder;
-use git2::{Cred, RemoteCallbacks};
-use reqwest;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tokio::fs;
-use tokio::fs::{
-    copy, create_dir_all, read, remove_dir_all, remove_file, set_permissions, write, File,
-};
+use tokio::fs::{read, remove_dir_all, remove_file, set_permissions, File};
 use tokio::io::AsyncWriteExt;
 use tokio_stream;
-use tokio_tar::Archive;
 use tonic::{Request, Response, Status};
 use tracing::info;
-use url::Url;
 
 pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageResponse>, Status> {
     let req = request.into_inner();
@@ -55,7 +46,7 @@ async fn prepare_source<P: AsRef<Path>>(
     source_hash: &str,
     source_tar: &P,
 ) -> Result<(i32, String), anyhow::Error> {
-    let data = read(source_tar).await?;
+    let data = read(&source_tar).await?;
 
     let signature = notary::sign(&data).await?;
 
@@ -92,124 +83,19 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
 
     info!("Preparing working dir: {:?}", workdir_path);
 
-    if source.kind == PackageSourceKind::Unknown as i32 {
-        return Err(anyhow::anyhow!("unknown source kind"));
-    }
-
-    if source.kind == PackageSourceKind::Git as i32 {
-        let mut builder = RepoBuilder::new();
-
-        if source.uri.starts_with("git://") {
-            let mut callbacks = RemoteCallbacks::new();
-
-            callbacks.credentials(|_url, username_from_url, _allowed_types| {
-                Cred::ssh_key(
-                    username_from_url.unwrap(),
-                    None,
-                    Path::new(&format!(
-                        "{}/.ssh/id_rsa",
-                        dirs::home_dir().unwrap().display()
-                    )),
-                    None,
-                )
-            });
-
-            let mut fetch_options = git2::FetchOptions::new();
-
-            fetch_options.remote_callbacks(callbacks);
-
-            builder.fetch_options(fetch_options);
-        }
-
-        let _ = builder.clone(&source.uri, &workdir_path)?;
-    }
-
-    if source.kind == PackageSourceKind::Http as i32 {
-        info!("Downloading source: {:?}", &source.uri);
-
-        let url = Url::parse(&source.uri)?;
-
-        if url.scheme() != "http" && url.scheme() != "https" {
-            return Err(anyhow::anyhow!("invalid HTTP source URL"));
-        }
-
-        let response = reqwest::get(url.as_str()).await?.bytes().await?;
-        let response_bytes = response.as_ref();
-
-        if let Some(source_kind) = infer::get(response_bytes) {
-            info!("Preparing source kind: {:?}", source_kind);
-
-            if let "application/gzip" = source_kind.mime_type() {
-                let temp_file = store::create_temp_file("tar.gz").await?;
-                write(&temp_file, response_bytes).await?;
-                store::unpack_tar_gz(&workdir_path, &temp_file).await?;
-                remove_file(&temp_file).await?;
-                info!("Prepared gzip source: {:?}", workdir_path);
-            } else if let "application/x-bzip2" = source_kind.mime_type() {
-                let bz_decoder = BzDecoder::new(response_bytes);
-                let mut archive = Archive::new(bz_decoder);
-                archive.unpack(&workdir_path).await?;
-                info!("Prepared bzip2 source: {:?}", workdir_path);
-            } else {
-                let source_file_name = url.path_segments().unwrap().last();
-                let source_file = source_file_name.unwrap();
-                write(&source_file, response_bytes).await?;
-                info!("Prepared source file: {:?}", source_file);
-            }
-        }
-    }
-
-    if source.kind == PackageSourceKind::Local as i32 {
-        let source_path = Path::new(&source.uri).canonicalize()?;
-
-        info!("Preparing source path: {:?}", source_path);
-
-        if let Ok(Some(source_kind)) = infer::get_from_path(&source_path) {
-            info!("Preparing source kind: {:?}", source_kind);
-
-            if source_kind.mime_type() == "application/gzip" {
-                info!("Preparing packed source: {:?}", workdir);
-                store::unpack_tar_gz(&workdir_path, &source_path).await?;
-            }
-        }
-
-        if source_path.is_file() {
-            let dest = workdir_path.join(source_path.file_name().unwrap());
-            copy(&source_path, &dest).await?;
-            info!(
-                "Preparing source file: {:?} -> {:?}",
-                source_path.display(),
-                dest.display()
-            );
-        }
-
-        if source_path.is_dir() {
-            let files = store::get_file_paths(&source_path, &source.ignore_paths)?;
-
-            if files.is_empty() {
-                return Err(anyhow::anyhow!("No source files found"));
-            }
-
-            for src in &files {
-                if src.is_dir() {
-                    let dest = workdir_path.join(src.strip_prefix(&source_path)?);
-                    create_dir_all(dest).await?;
-                    continue;
-                }
-
-                let dest = workdir_path.join(src.file_name().unwrap());
-                copy(src, &dest).await?;
-                info!(
-                    "Preparing source file: {:?} -> {:?}",
-                    src.display(),
-                    dest.display()
-                );
-            }
-        }
+    let source_resolver = resolve_source(&source.kind())?;
+    if let Err(err) = source_resolver
+        .fetch(SourceContext {
+            workdir_path: workdir_path.clone(),
+            source: source.clone(),
+        })
+        .await
+    {
+        eprintln!("Failed to fetch source: {:?}", err);
+        return Err(err);
     }
 
     // At this point, any source URI should be a local file path
-
     let workdir_files = store::get_file_paths(&workdir_path, &source.ignore_paths)?;
 
     if workdir_files.is_empty() {

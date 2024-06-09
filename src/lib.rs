@@ -6,5 +6,6 @@ pub mod command;
 pub mod database;
 pub mod notary;
 pub mod service;
+pub mod source;
 pub mod store;
 extern crate tera;
