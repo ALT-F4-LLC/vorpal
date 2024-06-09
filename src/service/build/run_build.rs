@@ -1,7 +1,9 @@
 use crate::api::{BuildRequest, BuildResponse};
 use crate::database;
 use crate::service::build::sandbox_default;
-use crate::store;
+use crate::store::archives;
+use crate::store::paths;
+use crate::store::temps;
 use process_stream::{Process, ProcessExt, StreamExt};
 use std::os::unix::fs::PermissionsExt;
 use tera::Tera;
@@ -20,14 +22,14 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         info!("building dependency: {}", path);
     }
 
-    let db_path = store::get_database_path();
+    let db_path = paths::get_database_path();
     let db = database::connect(db_path)
         .map_err(|e| Status::internal(format!("Failed to connect to database: {:?}", e)))?;
 
     let source = database::find_source_by_id(&db, message.source_id)
         .map_err(|e| Status::internal(format!("Failed to find source by id: {:?}", e)))?;
 
-    let store_path = store::get_store_dir_path();
+    let store_path = paths::get_store_path();
     let store_output_path = store_path.join(format!("{}-{}", source.name, source.hash));
     let store_output_tar = store_output_path.with_extension("tar.gz");
 
@@ -55,16 +57,16 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         return Ok(Response::new(response));
     }
 
-    let source_tar_path = store::get_source_tar_path(&source.name, &source.hash);
+    let source_tar_path = paths::get_package_source_tar_path(&source.name, &source.hash);
 
     info!("building source: {}", source_tar_path.display());
 
-    let source_temp_dir = store::create_temp_dir()
+    let source_temp_dir = temps::create_dir()
         .await
         .map_err(|_| Status::internal("Failed to create temp dir"))?;
     let source_temp_dir_path = source_temp_dir.canonicalize()?;
 
-    if let Err(err) = store::unpack_tar_gz(&source_temp_dir_path, &source_tar_path).await {
+    if let Err(err) = archives::unpack_tar_gz(&source_temp_dir_path, &source_tar_path).await {
         return Err(Status::internal(format!(
             "Failed to unpack source tar: {:?}",
             err
@@ -170,11 +172,12 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
             }
         }
 
-        let store_output_files = store::get_file_paths(&store_output_path, &Vec::<&str>::new())
+        let store_output_files = paths::get_file_paths(&store_output_path, &Vec::<&str>::new())
             .map_err(|_| Status::internal("Failed to get sandbox output files"))?;
 
         if let Err(err) =
-            store::compress_tar_gz(&store_output_path, &store_output_tar, &store_output_files).await
+            archives::compress_tar_gz(&store_output_path, &store_output_tar, &store_output_files)
+                .await
         {
             return Err(Status::internal(format!(
                 "Failed to compress sandbox output: {:?}",

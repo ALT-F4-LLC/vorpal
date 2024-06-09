@@ -3,7 +3,10 @@ use crate::api::{
     BuildRequest, PackageRequest, PackageResponse, PackageSource, PackageSourceKind, PrepareRequest,
 };
 use crate::notary;
-use crate::store;
+use crate::store::archives;
+use crate::store::hashes;
+use crate::store::paths;
+use crate::store::temps;
 use async_compression::tokio::bufread::BzDecoder;
 use git2::build::RepoBuilder;
 use git2::{Cred, RemoteCallbacks};
@@ -87,7 +90,7 @@ async fn prepare_source<P: AsRef<Path>>(
 }
 
 async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), anyhow::Error> {
-    let workdir = store::create_temp_dir().await?;
+    let workdir = temps::create_dir().await?;
     let workdir_path = workdir.canonicalize()?;
 
     info!("Preparing working dir: {:?}", workdir_path);
@@ -140,9 +143,9 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
             info!("Preparing source kind: {:?}", source_kind);
 
             if let "application/gzip" = source_kind.mime_type() {
-                let temp_file = store::create_temp_file("tar.gz").await?;
+                let temp_file = temps::create_file("tar.gz").await?;
                 write(&temp_file, response_bytes).await?;
-                store::unpack_tar_gz(&workdir_path, &temp_file).await?;
+                archives::unpack_tar_gz(&workdir_path, &temp_file).await?;
                 remove_file(&temp_file).await?;
                 info!("Prepared gzip source: {:?}", workdir_path);
             } else if let "application/x-bzip2" = source_kind.mime_type() {
@@ -169,7 +172,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
 
             if source_kind.mime_type() == "application/gzip" {
                 info!("Preparing packed source: {:?}", workdir);
-                store::unpack_tar_gz(&workdir_path, &source_path).await?;
+                archives::unpack_tar_gz(&workdir_path, &source_path).await?;
             }
         }
 
@@ -184,13 +187,13 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         }
 
         if source_path.is_dir() {
-            let files = store::get_file_paths(&source_path, &source.ignore_paths)?;
+            let file_paths = paths::get_file_paths(&source_path, &source.ignore_paths)?;
 
-            if files.is_empty() {
+            if file_paths.is_empty() {
                 return Err(anyhow::anyhow!("No source files found"));
             }
 
-            for src in &files {
+            for src in &file_paths {
                 if src.is_dir() {
                     let dest = workdir_path.join(src.strip_prefix(&source_path)?);
                     create_dir_all(dest).await?;
@@ -210,7 +213,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
 
     // At this point, any source URI should be a local file path
 
-    let workdir_files = store::get_file_paths(&workdir_path, &source.ignore_paths)?;
+    let workdir_files = paths::get_file_paths(&workdir_path, &source.ignore_paths)?;
 
     if workdir_files.is_empty() {
         return Err(anyhow::anyhow!("No source files found"));
@@ -218,8 +221,8 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
 
     info!("Preparing source files: {:?}", workdir_files);
 
-    let workdir_files_hashes = store::get_file_hashes(&workdir_files)?;
-    let workdir_hash = store::get_source_hash(&workdir_files_hashes)?;
+    let workdir_files_hashes = hashes::get_files(&workdir_files)?;
+    let workdir_hash = hashes::get_source(&workdir_files_hashes)?;
 
     if workdir_hash.is_empty() {
         return Err(anyhow::anyhow!("Failed to get source hash"));
@@ -234,12 +237,12 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         }
     }
 
-    let source_tar = store::create_temp_file("tar.gz").await?;
+    let source_tar = temps::create_file("tar.gz").await?;
     let source_tar_path = source_tar.canonicalize()?;
 
     info!("Creating source tar: {:?}", source_tar);
 
-    store::compress_tar_gz(&workdir_path, &source_tar_path, &workdir_files).await?;
+    archives::compress_tar_gz(&workdir_path, &source_tar_path, &workdir_files).await?;
 
     set_permissions(&source_tar, Permissions::from_mode(0o444)).await?;
 
@@ -267,49 +270,45 @@ async fn build(
     let response_data = response.into_inner();
 
     if response_data.is_compressed {
-        let store_path = store::get_store_dir_path();
-        let store_path_dir_name = store::get_store_dir_name(&request.name, package_hash);
-        let store_path_dir = store_path.join(&store_path_dir_name);
-        let store_path_tar = store_path_dir.with_extension("tar.gz");
+        let package = paths::get_package_path(&request.name, package_hash);
+        let package_tar = package.with_extension("tar.gz");
 
-        if store_path_dir.exists() {
-            info!("Using existing source: {}", store_path_dir.display());
+        if package.exists() {
+            info!("Using existing package: {}", package.display());
             return Ok(());
         }
 
-        if store_path_tar.exists() {
-            info!("Using existing tar: {}", store_path_tar.display());
+        if package_tar.exists() {
+            info!("Using existing package tar: {}", package_tar.display());
 
-            fs::create_dir_all(&store_path_dir).await?;
+            fs::create_dir_all(&package).await?;
+            archives::unpack_tar_gz(&package, &package_tar).await?;
 
-            store::unpack_tar_gz(&store_path_dir, &store_path_tar).await?;
-
-            info!("Unpacked source: {}", store_path_dir.display());
+            info!("Unpacked existing package tar: {}", package.display());
 
             return Ok(());
         }
 
-        let mut store_tar = File::create(&store_path_tar).await?;
+        let mut store_tar = File::create(&package_tar).await?;
         if let Err(e) = store_tar.write(&response_data.package_data).await {
             return Err(anyhow::anyhow!("Failed to write tar: {:?}", e));
         } else {
-            let metadata = fs::metadata(&store_path_tar).await?;
+            let metadata = fs::metadata(&package_tar).await?;
             let mut permissions = metadata.permissions();
 
             permissions.set_mode(0o444);
-            fs::set_permissions(&store_path_tar, permissions).await?;
+            fs::set_permissions(&package_tar, permissions).await?;
 
-            let file_name = store_path_tar.file_name().unwrap();
+            let file_name = package_tar.file_name().unwrap();
             info!("Stored tar: {}", file_name.to_string_lossy());
         }
 
-        info!("Stored tar: {}", store_path_tar.display());
+        info!("Stored package tar: {}", package_tar.display());
 
-        fs::create_dir_all(&store_path_dir).await?;
+        fs::create_dir_all(&package).await?;
+        archives::unpack_tar_gz(&package, &package_tar).await?;
 
-        store::unpack_tar_gz(&store_path_dir, &store_path_tar).await?;
-
-        info!("Unpacked source: {}", store_path_dir.display());
+        info!("Stored package: {}", package.display());
     }
 
     Ok(())

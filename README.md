@@ -68,6 +68,7 @@ This will display a list of available commands and options for running the proje
 You can also run specific commands by appending them to the `vorpal` binary. For example, to start the server, you might use:
 
 ```bash
+$ ./vorpal generate keys # create signing keys
 $ ./vorpal service build start # start builder
 $ ./vorpal service proxy start # start proxy
 ```
