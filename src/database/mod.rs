@@ -1,6 +1,6 @@
 use crate::api::Status;
 use rusqlite::{Connection, Result};
-use std::path::PathBuf;
+use std::path::Path;
 use uuid::Uuid;
 
 pub struct Source {
@@ -20,7 +20,7 @@ pub struct Build {
     pub status: Status,
 }
 
-pub fn connect(path: PathBuf) -> Result<Connection> {
+pub fn connect<P: AsRef<Path>>(path: P) -> Result<Connection> {
     Connection::open(path)
 }
 

@@ -40,7 +40,7 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     info!("Public key: {:?}", public_key_path);
 
     let db_path = store::get_database_path();
-    let db = database::connect(db_path.clone())?;
+    let db = database::connect(&db_path)?;
 
     db.execute(
         "CREATE TABLE IF NOT EXISTS source (
@@ -53,9 +53,8 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
 
     info!("Database path: {:?}", db_path.display());
 
-    match db.close() {
-        Ok(_) => (),
-        Err(e) => eprintln!("Failed to close database: {:?}", e),
+    if let Err(e) = db.close() {
+        eprintln!("Failed to close database: {:?}", e)
     }
 
     let addr = format!("[::1]:{}", port).parse()?;

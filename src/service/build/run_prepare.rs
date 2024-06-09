@@ -76,53 +76,41 @@ pub async fn run(
 
     if !source_tar_path.exists() {
         let mut source_tar = File::create(&source_tar_path)?;
-        match source_tar.write_all(&source_data) {
-            Ok(_) => {
-                let metadata = fs::metadata(&source_tar_path).await?;
-                let mut permissions = metadata.permissions();
-                permissions.set_mode(0o444);
-                fs::set_permissions(source_tar_path.clone(), permissions).await?;
-                let file_name = source_tar_path.file_name().unwrap();
-                info!("source tar created: {}", file_name.to_string_lossy());
-            }
-            Err(e) => error!("failed source file: {}", e),
+        if let Err(e) = source_tar.write_all(&source_data) {
+            error!("Failed source file: {}", e)
+        } else {
+            let metadata = fs::metadata(&source_tar_path).await?;
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(0o444);
+            fs::set_permissions(&source_tar_path, permissions).await?;
+            let file_name = source_tar_path.file_name().unwrap();
+            info!("Source tar: {}", file_name.to_string_lossy());
         }
 
         fs::create_dir_all(&source_dir_path).await?;
 
-        match store::unpack_source(&source_dir_path, &source_tar_path) {
-            Ok(_) => (),
-            Err(e) => {
-                error!("failed to unpack source: {:?}", e);
-                return Err(Status::internal("Failed to unpack source"));
-            }
-        };
+        store::unpack_source(&source_dir_path, &source_tar_path).map_err(|e| {
+            error!("Failed to unpack source: {:?}", e);
+            Status::internal("Failed to unpack source")
+        })?;
 
-        let source_files = match store::get_file_paths(&source_dir_path, &[]) {
-            Ok(files) => files,
-            Err(e) => {
-                error!("failed to get source files: {}", e);
-                return Err(Status::internal("Failed to get source files"));
-            }
-        };
+        let source_files =
+            store::get_file_paths(&source_dir_path, &Vec::<&str>::new()).map_err(|e| {
+                error!("Failed to get source files: {}", e);
+                Status::internal("Failed to get source files")
+            })?;
 
         info!("source files: {:?}", source_files);
 
-        let source_files_hashes = match store::get_file_hashes(&source_files) {
-            Ok(hashes) => hashes,
-            Err(e) => {
-                error!("failed to get source files hashes: {}", e);
-                return Err(Status::internal("Failed to get source files hashes"));
-            }
-        };
+        let source_files_hashes = store::get_file_hashes(&source_files).map_err(|e| {
+            error!("Failed to get source files hashes: {}", e);
+            Status::internal("Failed to get source files hashes")
+        })?;
 
-        let source_hash_computed = match store::get_source_hash(&source_files_hashes) {
-            Ok(hash) => hash,
-            Err(e) => {
-                error!("failed to get source hash: {}", e);
-                return Err(Status::internal("Failed to get source hash"));
-            }
-        };
+        let source_hash_computed = store::get_source_hash(&source_files_hashes).map_err(|e| {
+            error!("Failed to get source hash: {}", e);
+            Status::internal("Failed to get source hash")
+        })?;
 
         info!("message source hash: {}", source_hash);
         info!("computed source hash: {}", source_hash_computed);
@@ -132,28 +120,23 @@ pub async fn run(
             return Err(Status::internal("Source hash mismatch"));
         }
 
-        match database::insert_source(&db, &source_hash, &source_name) {
-            Ok(_) => (),
-            Err(e) => {
-                error!("failed to insert source: {:?}", e);
-                return Err(Status::internal("Failed to insert source"));
-            }
-        }
+        database::insert_source(&db, &source_hash, &source_name).map_err(|e| {
+            error!("Failed to insert source: {:?}", e);
+            Status::internal("Failed to insert source")
+        })?;
 
         fs::remove_dir_all(source_dir_path).await?;
     }
 
-    let source_id = match database::find_source(&db, &source_hash, &source_name) {
-        Ok(source) => source.id,
-        Err(e) => {
-            error!("failed to find source: {:?}", e);
-            return Err(Status::internal("Failed to find source"));
-        }
-    };
+    let source_id = database::find_source(&db, &source_hash, &source_name)
+        .map(|source| source.id)
+        .map_err(|e| {
+            error!("Failed to find source: {:?}", e);
+            Status::internal("Failed to find source")
+        })?;
 
-    match db.close() {
-        Ok(_) => (),
-        Err(e) => error!("failed to close database: {:?}", e),
+    if let Err(e) = db.close() {
+        error!("Failed to close database: {:?}", e)
     }
 
     let response = PrepareResponse { source_id };
