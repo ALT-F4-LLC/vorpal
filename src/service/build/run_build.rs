@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use tera::Tera;
 use tokio::fs;
 use tonic::{Request, Response, Status};
-use tracing::{error, info, span, Level};
+use tracing::{info, span, Level};
 use walkdir::WalkDir;
 
 pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildResponse>, Status> {
@@ -21,15 +21,11 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     }
 
     let db_path = store::get_database_path();
-    let db = database::connect(db_path).map_err(|e| {
-        eprintln!("Failed to connect to database: {:?}", e);
-        Status::internal("Failed to connect to database")
-    })?;
+    let db = database::connect(db_path)
+        .map_err(|e| Status::internal(format!("Failed to connect to database: {:?}", e)))?;
 
-    let source = database::find_source_by_id(&db, message.source_id).map_err(|e| {
-        error!("Failed to find source: {:?}", e);
-        Status::internal("Failed to find source")
-    })?;
+    let source = database::find_source_by_id(&db, message.source_id)
+        .map_err(|e| Status::internal(format!("Failed to find source by id: {:?}", e)))?;
 
     let store_path = store::get_store_dir_path();
     let store_output_path = store_path.join(format!("{}-{}", source.name, source.hash));
@@ -122,8 +118,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     let os_type = std::env::consts::OS;
     if os_type != "macos" {
-        error!("request for unsupported OS: {} received", os_type);
-        return Err(Status::internal("Unsupported OS (currently only macOS)"));
+        return Err(Status::unimplemented("Unsupported OS"));
     }
 
     let sandbox_profile_path = source_temp_vorpal_dir.join("sandbox.sb");
@@ -159,15 +154,13 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     let mut stream = sandbox_command.spawn_and_stream()?;
 
     while let Some(output) = stream.next().await {
-        println!("{output}")
+        info!("{output}")
     }
 
     if sandbox_output_path.is_dir() {
         for entry in WalkDir::new(&sandbox_output_path) {
-            let entry = entry.map_err(|e| {
-                error!("Failed to walk sandbox output: {:?}", e);
-                Status::internal("Failed to walk sandbox output")
-            })?;
+            let entry = entry
+                .map_err(|e| Status::internal(format!("Failed to walk sandbox output: {:?}", e)))?;
             let output_path = entry.path().strip_prefix(&sandbox_output_path).unwrap();
             let output_store_path = store_output_path.join(output_path);
             if entry.path().is_dir() {

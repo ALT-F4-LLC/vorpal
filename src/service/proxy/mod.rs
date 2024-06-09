@@ -38,7 +38,7 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     let addr = format!("[::1]:{}", port).parse()?;
     let proxy = service::Proxy::default();
 
-    println!("Proxy listening on: {}", addr);
+    info!("Proxy listening on: {}", addr);
 
     Server::builder()
         .add_service(BuildServiceServer::new(proxy))

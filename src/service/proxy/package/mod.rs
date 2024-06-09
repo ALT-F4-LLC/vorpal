@@ -20,30 +20,28 @@ use tokio::io::AsyncWriteExt;
 use tokio_stream;
 use tokio_tar::Archive;
 use tonic::{Request, Response, Status};
-use tracing::{error, info};
+use tracing::info;
 use url::Url;
 
 pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageResponse>, Status> {
     let req = request.into_inner();
 
-    let req_source = req.source.as_ref().ok_or_else(|| {
-        error!("Source is required");
-        Status::invalid_argument("Source is required")
-    })?;
+    let req_source = req
+        .source
+        .as_ref()
+        .ok_or_else(|| Status::invalid_argument("source is required"))?;
 
     info!("Preparing: {}", req.name);
 
-    let (source_id, source_hash) = prepare(&req.name, req_source).await.map_err(|e| {
-        error!("Failed to prepare: {:?}", e);
-        Status::internal(e.to_string())
-    })?;
+    let (source_id, source_hash) = prepare(&req.name, req_source)
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
 
     info!("Building: {}-{}", req.name, source_hash);
 
-    build(source_id, &source_hash, &req).await.map_err(|e| {
-        error!("Failed to build: {:?}", e);
-        Status::internal(e.to_string())
-    })?;
+    build(source_id, &source_hash, &req)
+        .await
+        .map_err(|e| Status::internal(format!("Failed to build package: {}", e)))?;
 
     let response = PackageResponse {
         source_id: source_id.to_string(),
@@ -96,8 +94,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
     info!("Preparing working dir: {:?}", workdir_path);
 
     if source.kind == PackageSourceKind::Unknown as i32 {
-        error!("Unknown source kind");
-        return Err(anyhow::anyhow!("Unknown source kind"));
+        return Err(anyhow::anyhow!("unknown source kind"));
     }
 
     if source.kind == PackageSourceKind::Git as i32 {
@@ -134,8 +131,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         let url = Url::parse(&source.uri)?;
 
         if url.scheme() != "http" && url.scheme() != "https" {
-            error!("Invalid HTTP source URL");
-            return Err(anyhow::anyhow!("Invalid HTTP source URL"));
+            return Err(anyhow::anyhow!("invalid HTTP source URL"));
         }
 
         let response = reqwest::get(url.as_str()).await?.bytes().await?;
@@ -300,7 +296,7 @@ async fn build(
 
         let mut store_tar = File::create(&store_path_tar).await?;
         if let Err(e) = store_tar.write(&response_data.package_data).await {
-            eprintln!("Failed source file: {}", e)
+            return Err(anyhow::anyhow!("Failed to write tar: {:?}", e));
         } else {
             let metadata = fs::metadata(&store_path_tar).await?;
             let mut permissions = metadata.permissions();

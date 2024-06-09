@@ -54,7 +54,7 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     info!("Database path: {:?}", db_path.display());
 
     if let Err(e) = db.close() {
-        eprintln!("Failed to close database: {:?}", e)
+        return Err(e.1.into());
     }
 
     let addr = format!("[::1]:{}", port).parse()?;

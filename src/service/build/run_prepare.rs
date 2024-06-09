@@ -11,7 +11,7 @@ use tokio::fs;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tonic::{Response, Status, Streaming};
-use tracing::{error, info};
+use tracing::info;
 
 pub async fn run(
     mut stream: Streaming<PrepareRequest>,
@@ -100,49 +100,39 @@ pub async fn run(
             )));
         }
 
-        let source_files =
-            store::get_file_paths(&source_dir_path, &Vec::<&str>::new()).map_err(|e| {
-                error!("Failed to get source files: {}", e);
-                Status::internal("Failed to get source files")
-            })?;
+        let source_files = store::get_file_paths(&source_dir_path, &Vec::<&str>::new())
+            .map_err(|e| Status::internal(format!("Failed to get source files: {:?}", e)))?;
 
         info!("source files: {:?}", source_files);
 
-        let source_files_hashes = store::get_file_hashes(&source_files).map_err(|e| {
-            error!("Failed to get source files hashes: {}", e);
-            Status::internal("Failed to get source files hashes")
-        })?;
+        let source_files_hashes = store::get_file_hashes(&source_files)
+            .map_err(|e| Status::internal(format!("Failed to get source file hashes: {:?}", e)))?;
 
-        let source_hash_computed = store::get_source_hash(&source_files_hashes).map_err(|e| {
-            error!("Failed to get source hash: {}", e);
-            Status::internal("Failed to get source hash")
-        })?;
+        let source_hash_computed = store::get_source_hash(&source_files_hashes)
+            .map_err(|e| Status::internal(format!("Failed to get source hash: {:?}", e)))?;
 
         info!("message source hash: {}", source_hash);
         info!("computed source hash: {}", source_hash_computed);
 
         if source_hash != source_hash_computed {
-            error!("source hash mismatch");
-            return Err(Status::internal("Source hash mismatch"));
+            return Err(Status::internal("source hash mismatch"));
         }
 
-        database::insert_source(&db, &source_hash, &source_name).map_err(|e| {
-            error!("Failed to insert source: {:?}", e);
-            Status::internal("Failed to insert source")
-        })?;
+        database::insert_source(&db, &source_hash, &source_name)
+            .map_err(|e| Status::internal(format!("Failed to insert source: {:?}", e)))?;
 
         fs::remove_dir_all(source_dir_path).await?;
     }
 
     let source_id = database::find_source(&db, &source_hash, &source_name)
         .map(|source| source.id)
-        .map_err(|e| {
-            error!("Failed to find source: {:?}", e);
-            Status::internal("Failed to find source")
-        })?;
+        .map_err(|e| Status::internal(format!("Failed to find source: {:?}", e.to_string())))?;
 
     if let Err(e) = db.close() {
-        error!("Failed to close database: {:?}", e)
+        return Err(Status::internal(format!(
+            "Failed to close database: {:?}",
+            e.1
+        )));
     }
 
     let response = PrepareResponse { source_id };
