@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::env;
 use vorpal::api::build_service_client::BuildServiceClient;
 use vorpal::api::{PackageRequest, PackageSource, PackageSourceKind};
 
@@ -7,31 +6,29 @@ use vorpal::api::{PackageRequest, PackageSource, PackageSourceKind};
 pub async fn main() -> Result<(), anyhow::Error> {
     let mut client = BuildServiceClient::connect("http://[::1]:23151").await?;
 
-    let example_rust = client
+    client
         .package(PackageRequest {
             build_deps: Vec::new(),
             build_phase: r#"
-                cat vorpal.rs
+                cd coreutils-9.5
+                test -f configure || ./bootstrap
+                ./configure --prefix=$OUTPUT
+                make
             "#
             .to_string(),
-            install_phase: r#"
-                mkdir -p $OUTPUT
-                cp vorpal.rs $OUTPUT/build.rs
-            "#
-            .to_string(),
+            install_phase: "make install".to_string(),
             install_deps: Vec::new(),
-            name: "example-rust".to_string(),
+            name: "coreutils".to_string(),
             source: Some(PackageSource {
-                hash: None,
-                ignore_paths: vec![".git".to_string(), "target".to_string()],
-                kind: PackageSourceKind::Local.into(),
-                uri: env::current_dir()?.to_string_lossy().to_string(),
+                hash: Some(
+                    "af6d643afd6241ec35c7781b7f999b97a66c84bea4710ad2bb15e75a5caf11b4".to_string(),
+                ),
+                ignore_paths: vec![],
+                kind: PackageSourceKind::Http.into(),
+                uri: "https://ftp.gnu.org/gnu/coreutils/coreutils-9.5.tar.gz".to_string(),
             }),
         })
-        .await?
-        .into_inner();
-
-    println!("{:?}", example_rust);
+        .await?;
 
     Ok(())
 }

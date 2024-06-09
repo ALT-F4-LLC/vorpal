@@ -34,7 +34,7 @@
         packages = {
           default = buildRustPackage {
             buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-FliwadZfdF0+O3BRTbaR1nks8SmIDIi6I2dV9iyTZFw=";
+            cargoSha256 = "sha256-VrAN1joJAs7puM76oyHIByNxovhDrp6t2Xw2FiG5tT4=";
             checkPhase = ''
               ${pkgs.cargo}/bin/cargo clippy -- -D warnings
               ${pkgs.rust-bin.nightly.latest.default}/bin/cargo fmt --check --verbose

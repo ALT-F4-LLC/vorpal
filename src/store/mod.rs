@@ -1,17 +1,17 @@
 use anyhow::Result;
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
+use async_compression::tokio::{bufread::GzipDecoder, write::GzipEncoder};
 use sha256::{digest, try_digest};
 use std::env;
 use std::ffi::OsStr;
-use std::fs;
-use std::fs::File;
-use std::io::BufReader;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use tar::Archive;
-use tar::Builder;
+use tokio::fs;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufReader;
+use tokio_tar::Archive;
+use tokio_tar::Builder;
 use tracing::info;
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -42,12 +42,24 @@ pub fn get_public_key_path() -> PathBuf {
     get_key_dir_path().join("public").with_extension("pem")
 }
 
-pub fn get_temp_dir_path() -> PathBuf {
+pub fn get_temp_path() -> PathBuf {
     env::temp_dir().join(Uuid::now_v7().to_string())
 }
 
 pub fn get_store_dir_name(name: &str, hash: &str) -> String {
     format!("{}-{}", name, hash)
+}
+
+pub async fn create_temp_dir() -> Result<PathBuf> {
+    let temp_dir = get_temp_path();
+    fs::create_dir(&temp_dir).await?;
+    Ok(temp_dir)
+}
+
+pub async fn create_temp_file(extension: &str) -> Result<PathBuf> {
+    let temp_file = get_temp_path().with_extension(extension);
+    File::create(&temp_file).await?;
+    Ok(temp_file)
 }
 
 pub fn get_source_tar_path(source_name: &str, source_hash: &str) -> PathBuf {
@@ -136,7 +148,7 @@ where
     Ok(digest(combined))
 }
 
-pub fn compress_files<'a, P1, P2, P3, I>(
+pub async fn compress_tar_gz<'a, P1, P2, P3, I>(
     source: P1,
     source_output: P2,
     source_files: I,
@@ -147,8 +159,8 @@ where
     P3: AsRef<Path> + 'a,
     I: IntoIterator<Item = &'a P3>,
 {
-    let tar = File::create(source_output)?;
-    let tar_encoder = GzEncoder::new(tar.try_clone()?, Compression::default());
+    let tar = File::create(source_output).await?;
+    let tar_encoder = GzipEncoder::new(tar);
     let mut tar_builder = Builder::new(tar_encoder);
 
     let source = source.as_ref();
@@ -166,44 +178,39 @@ where
         info!("Adding: {}", relative_path.display());
 
         if path.is_file() {
-            tar_builder.append_path_with_name(path, relative_path)?;
+            tar_builder
+                .append_path_with_name(path, relative_path)
+                .await?;
         } else if path.is_dir() {
-            tar_builder.append_dir(relative_path, path)?;
+            tar_builder.append_dir_all(relative_path, path).await?;
         }
     }
 
-    tar_builder.finish()?;
+    let mut output = tar_builder.into_inner().await?;
 
-    Ok(tar)
+    output.shutdown().await?;
+
+    Ok(output.into_inner())
 }
 
-pub fn set_files_permissions<'a, P, I>(files: I) -> Result<(), anyhow::Error>
-where
-    P: AsRef<Path> + 'a,
-    I: IntoIterator<Item = &'a P>,
-{
-    for file in files {
-        let permissions = fs::metadata(file)?.permissions();
-        if permissions.mode() & 0o111 != 0 {
-            fs::set_permissions(file, fs::Permissions::from_mode(0o555))?;
-        } else {
-            fs::set_permissions(file, fs::Permissions::from_mode(0o444))?;
-        }
-    }
-
-    Ok(())
-}
-
-pub fn unpack_source<P1, P2>(target_dir: P1, source_tar: P2) -> Result<(), anyhow::Error>
-where
-    P1: AsRef<Path>,
-    P2: AsRef<Path>,
-{
-    let tar_gz = File::open(source_tar)?;
+pub async fn unpack_tar_gz(target_dir: &PathBuf, source_tar: &Path) -> Result<(), anyhow::Error> {
+    let tar_gz = File::open(source_tar).await?;
     let buf_reader = BufReader::new(tar_gz);
-    let gz_decoder = GzDecoder::new(buf_reader);
+    let gz_decoder = GzipDecoder::new(buf_reader);
     let mut archive = Archive::new(gz_decoder);
-    archive.unpack(target_dir)?;
+    Ok(archive.unpack(target_dir).await?)
+}
+
+pub async fn set_files_permissions(files: &[PathBuf]) -> Result<(), anyhow::Error> {
+    for file in files {
+        let permissions = fs::metadata(file).await?;
+        if permissions.mode() & 0o111 != 0 {
+            fs::set_permissions(file, std::fs::Permissions::from_mode(0o555)).await?;
+        } else {
+            fs::set_permissions(file, std::fs::Permissions::from_mode(0o444)).await?;
+        }
+    }
+
     Ok(())
 }
 

@@ -4,42 +4,43 @@ use crate::api::{
 };
 use crate::notary;
 use crate::store;
+use async_compression::tokio::bufread::BzDecoder;
 use git2::build::RepoBuilder;
 use git2::{Cred, RemoteCallbacks};
 use reqwest;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use tempfile::{tempdir, NamedTempFile};
 use tokio::fs;
-use tokio::fs::{copy, create_dir_all, read, set_permissions, write, File};
+use tokio::fs::{
+    copy, create_dir_all, read, remove_dir_all, remove_file, set_permissions, write, File,
+};
 use tokio::io::AsyncWriteExt;
 use tokio_stream;
+use tokio_tar::Archive;
 use tonic::{Request, Response, Status};
-use tracing::{error, info};
+use tracing::info;
 use url::Url;
 
 pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageResponse>, Status> {
     let req = request.into_inner();
 
-    let req_source = req.source.as_ref().ok_or_else(|| {
-        error!("Source is required");
-        Status::invalid_argument("Source is required")
-    })?;
+    let req_source = req
+        .source
+        .as_ref()
+        .ok_or_else(|| Status::invalid_argument("source is required"))?;
 
     info!("Preparing: {}", req.name);
 
-    let (source_id, source_hash) = prepare(&req.name, req_source).await.map_err(|e| {
-        error!("Failed to prepare: {:?}", e);
-        Status::internal(e.to_string())
-    })?;
+    let (source_id, source_hash) = prepare(&req.name, req_source)
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
 
     info!("Building: {}-{}", req.name, source_hash);
 
-    build(source_id, &source_hash, &req).await.map_err(|e| {
-        error!("Failed to build: {:?}", e);
-        Status::internal(e.to_string())
-    })?;
+    build(source_id, &source_hash, &req)
+        .await
+        .map_err(|e| Status::internal(format!("Failed to build package: {}", e)))?;
 
     let response = PackageResponse {
         source_id: source_id.to_string(),
@@ -52,7 +53,7 @@ pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageRes
 async fn prepare_source<P: AsRef<Path>>(
     source_name: &str,
     source_hash: &str,
-    source_tar: P,
+    source_tar: &P,
 ) -> Result<(i32, String), anyhow::Error> {
     let data = read(source_tar).await?;
 
@@ -61,7 +62,7 @@ async fn prepare_source<P: AsRef<Path>>(
     info!("Source tar signature: {}", signature);
 
     let mut request_chunks = vec![];
-    let request_chunks_size = 2 * 1024 * 1024; // default grpc limit
+    let request_chunks_size = 8192; // default grpc limit
 
     for chunk in data.chunks(request_chunks_size) {
         request_chunks.push(PrepareRequest {
@@ -80,18 +81,19 @@ async fn prepare_source<P: AsRef<Path>>(
 
     info!("Source ID: {}", res.source_id);
 
+    remove_file(&source_tar).await?;
+
     Ok((res.source_id, source_hash.to_string()))
 }
 
 async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), anyhow::Error> {
-    let work_dir = tempdir()?;
-    let workdir_path = work_dir.path().canonicalize()?;
+    let workdir = store::create_temp_dir().await?;
+    let workdir_path = workdir.canonicalize()?;
 
     info!("Preparing working dir: {:?}", workdir_path);
 
     if source.kind == PackageSourceKind::Unknown as i32 {
-        error!("Unknown source kind");
-        return Err(anyhow::anyhow!("Unknown source kind"));
+        return Err(anyhow::anyhow!("unknown source kind"));
     }
 
     if source.kind == PackageSourceKind::Git as i32 {
@@ -128,8 +130,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         let url = Url::parse(&source.uri)?;
 
         if url.scheme() != "http" && url.scheme() != "https" {
-            error!("Invalid HTTP source URL");
-            return Err(anyhow::anyhow!("Invalid HTTP source URL"));
+            return Err(anyhow::anyhow!("invalid HTTP source URL"));
         }
 
         let response = reqwest::get(url.as_str()).await?.bytes().await?;
@@ -139,10 +140,16 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
             info!("Preparing source kind: {:?}", source_kind);
 
             if let "application/gzip" = source_kind.mime_type() {
-                let temp_file = NamedTempFile::new()?;
+                let temp_file = store::create_temp_file("tar.gz").await?;
                 write(&temp_file, response_bytes).await?;
-                store::unpack_source(&workdir_path, temp_file.path())?;
-                info!("Prepared packed source: {:?}", workdir_path);
+                store::unpack_tar_gz(&workdir_path, &temp_file).await?;
+                remove_file(&temp_file).await?;
+                info!("Prepared gzip source: {:?}", workdir_path);
+            } else if let "application/x-bzip2" = source_kind.mime_type() {
+                let bz_decoder = BzDecoder::new(response_bytes);
+                let mut archive = Archive::new(bz_decoder);
+                archive.unpack(&workdir_path).await?;
+                info!("Prepared bzip2 source: {:?}", workdir_path);
             } else {
                 let source_file_name = url.path_segments().unwrap().last();
                 let source_file = source_file_name.unwrap();
@@ -161,8 +168,8 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
             info!("Preparing source kind: {:?}", source_kind);
 
             if source_kind.mime_type() == "application/gzip" {
-                info!("Preparing packed source: {:?}", work_dir);
-                store::unpack_source(&workdir_path, &source_path)?;
+                info!("Preparing packed source: {:?}", workdir);
+                store::unpack_tar_gz(&workdir_path, &source_path).await?;
             }
         }
 
@@ -227,16 +234,18 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         }
     }
 
-    let source_tar = NamedTempFile::new()?;
-    let source_tar_path = source_tar.path().canonicalize()?;
+    let source_tar = store::create_temp_file("tar.gz").await?;
+    let source_tar_path = source_tar.canonicalize()?;
 
     info!("Creating source tar: {:?}", source_tar);
 
-    store::compress_files(&workdir_path, &source_tar_path, &workdir_files)?;
+    store::compress_tar_gz(&workdir_path, &source_tar_path, &workdir_files).await?;
 
     set_permissions(&source_tar, Permissions::from_mode(0o444)).await?;
 
     info!("Source tar: {}", source_tar_path.display());
+
+    remove_dir_all(&workdir_path).await?;
 
     prepare_source(name, &workdir_hash, &source_tar_path).await
 }
@@ -273,7 +282,7 @@ async fn build(
 
             fs::create_dir_all(&store_path_dir).await?;
 
-            store::unpack_source(&store_path_dir, &store_path_tar)?;
+            store::unpack_tar_gz(&store_path_dir, &store_path_tar).await?;
 
             info!("Unpacked source: {}", store_path_dir.display());
 
@@ -282,7 +291,7 @@ async fn build(
 
         let mut store_tar = File::create(&store_path_tar).await?;
         if let Err(e) = store_tar.write(&response_data.package_data).await {
-            eprintln!("Failed source file: {}", e)
+            return Err(anyhow::anyhow!("Failed to write tar: {:?}", e));
         } else {
             let metadata = fs::metadata(&store_path_tar).await?;
             let mut permissions = metadata.permissions();
@@ -298,7 +307,7 @@ async fn build(
 
         fs::create_dir_all(&store_path_dir).await?;
 
-        store::unpack_source(&store_path_dir, &store_path_tar)?;
+        store::unpack_tar_gz(&store_path_dir, &store_path_tar).await?;
 
         info!("Unpacked source: {}", store_path_dir.display());
     }
