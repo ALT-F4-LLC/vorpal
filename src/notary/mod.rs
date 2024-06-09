@@ -10,12 +10,13 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use tokio::fs;
 use tracing::debug;
 
+const BITS: usize = 2048;
+
 pub fn generate_keys() -> Result<(), anyhow::Error> {
     let mut rng = rand::thread_rng();
 
-    let bits = 2048;
     let private_key_path = store::get_private_key_path();
-    let private_key = RsaPrivateKey::new(&mut rng, bits)?;
+    let private_key = RsaPrivateKey::new(&mut rng, BITS)?;
     let private_key_der = private_key.to_pkcs8_der()?;
     private_key_der.write_pem_file(&private_key_path, "PRIVATE KEY", LineEnding::LF)?;
 

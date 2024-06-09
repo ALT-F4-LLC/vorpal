@@ -53,10 +53,10 @@ pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageRes
     Ok(Response::new(response))
 }
 
-async fn prepare_source(
+async fn prepare_source<P: AsRef<Path>>(
     source_name: &str,
     source_hash: &str,
-    source_tar: &PathBuf,
+    source_tar: P,
 ) -> Result<(i32, String), anyhow::Error> {
     let data = read(source_tar).await?;
 
@@ -219,7 +219,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
 
     // At this point, any source URI should be a local file path
 
-    let workdir_files = store::get_file_paths(&workdir_path.to_path_buf(), &source.ignore_paths)?;
+    let workdir_files = store::get_file_paths(&workdir_path, &source.ignore_paths)?;
 
     if workdir_files.is_empty() {
         return Err(anyhow::anyhow!("No source files found"));
@@ -299,18 +299,17 @@ async fn build(
         }
 
         let mut store_tar = File::create(&store_path_tar).await?;
-        match store_tar.write(&response_data.package_data).await {
-            Ok(_) => {
-                let metadata = fs::metadata(&store_path_tar).await?;
-                let mut permissions = metadata.permissions();
+        if let Err(e) = store_tar.write(&response_data.package_data).await {
+            eprintln!("Failed source file: {}", e)
+        } else {
+            let metadata = fs::metadata(&store_path_tar).await?;
+            let mut permissions = metadata.permissions();
 
-                permissions.set_mode(0o444);
-                fs::set_permissions(store_path_tar.clone(), permissions).await?;
+            permissions.set_mode(0o444);
+            fs::set_permissions(&store_path_tar, permissions).await?;
 
-                let file_name = store_path_tar.file_name().unwrap();
-                info!("Stored tar: {}", file_name.to_string_lossy());
-            }
-            Err(e) => eprintln!("Failed source file: {}", e),
+            let file_name = store_path_tar.file_name().unwrap();
+            info!("Stored tar: {}", file_name.to_string_lossy());
         }
 
         info!("Stored tar: {}", store_path_tar.display());

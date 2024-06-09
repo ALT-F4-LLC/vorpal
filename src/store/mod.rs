@@ -76,20 +76,25 @@ pub fn get_source_dir_path(source_name: &str, source_hash: &str) -> PathBuf {
         .to_path_buf()
 }
 
-pub fn get_file_paths(source: &PathBuf, ignore_paths: &[String]) -> Result<Vec<PathBuf>> {
+pub fn get_file_paths<'a, P, I, J>(source: P, ignore_paths: I) -> Result<Vec<PathBuf>>
+where
+    P: AsRef<Path>,
+    I: IntoIterator<Item = &'a J>,
+    J: AsRef<OsStr> + 'a,
+{
     let source_ignore_paths = ignore_paths
-        .iter()
+        .into_iter()
         .map(|i| Path::new(i).to_path_buf())
         .collect::<Vec<PathBuf>>();
 
-    let mut files: Vec<PathBuf> = WalkDir::new(source)
+    let mut files: Vec<PathBuf> = WalkDir::new(&source)
         .into_iter()
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
             if source_ignore_paths
                 .iter()
-                .any(|i| path.strip_prefix(source).unwrap().starts_with(i))
+                .any(|i| path.strip_prefix(&source).unwrap().starts_with(i))
             {
                 return None;
             }
@@ -102,28 +107,36 @@ pub fn get_file_paths(source: &PathBuf, ignore_paths: &[String]) -> Result<Vec<P
     Ok(files)
 }
 
-pub fn get_file_hash(path: &Path) -> Result<String, anyhow::Error> {
-    if !path.is_file() {
+pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String, anyhow::Error> {
+    if !path.as_ref().is_file() {
         return Err(anyhow::anyhow!("Path is not a file"));
     }
 
     Ok(try_digest(path)?)
 }
 
-pub fn get_file_hashes(files: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
-    let hashes: Vec<(PathBuf, String)> = files
-        .iter()
-        .filter(|file| file.is_file())
+pub fn get_file_hashes<'a, P, I>(files: I) -> Result<Vec<(&'a Path, String)>>
+where
+    P: AsRef<Path> + Send + Sync + 'a,
+    I: IntoIterator<Item = &'a P>,
+{
+    let hashes = files
+        .into_iter()
+        .filter(|file| file.as_ref().is_file())
         .map(|file| {
             let hash = get_file_hash(file).unwrap();
-            (file.clone(), hash)
+            (file.as_ref(), hash)
         })
         .collect();
 
     Ok(hashes)
 }
 
-pub fn get_source_hash(hashes: &[(PathBuf, String)]) -> Result<String> {
+pub fn get_source_hash<'a, P, I>(hashes: I) -> Result<String>
+where
+    P: AsRef<Path> + 'a,
+    I: IntoIterator<Item = &'a (P, String)>,
+{
     let mut combined = String::new();
 
     for (_, hash) in hashes {
@@ -142,9 +155,12 @@ pub async fn compress_tar_gz(
     let tar_encoder = GzipEncoder::new(tar);
     let mut tar_builder = Builder::new(tar_encoder);
 
+    let source = source.as_ref();
     info!("Compressing: {}", source.display());
 
     for path in source_files {
+        let path = path.as_ref();
+
         if path == source {
             continue;
         }
