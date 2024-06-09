@@ -187,13 +187,13 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         }
 
         if source_path.is_dir() {
-            let files = paths::get_files(&source_path, &source.ignore_paths)?;
+            let file_paths = paths::get_file_paths(&source_path, &source.ignore_paths)?;
 
-            if files.is_empty() {
+            if file_paths.is_empty() {
                 return Err(anyhow::anyhow!("No source files found"));
             }
 
-            for src in &files {
+            for src in &file_paths {
                 if src.is_dir() {
                     let dest = workdir_path.join(src.strip_prefix(&source_path)?);
                     create_dir_all(dest).await?;
@@ -213,7 +213,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
 
     // At this point, any source URI should be a local file path
 
-    let workdir_files = paths::get_files(&workdir_path, &source.ignore_paths)?;
+    let workdir_files = paths::get_file_paths(&workdir_path, &source.ignore_paths)?;
 
     if workdir_files.is_empty() {
         return Err(anyhow::anyhow!("No source files found"));
@@ -270,7 +270,7 @@ async fn build(
     let response_data = response.into_inner();
 
     if response_data.is_compressed {
-        let package = paths::get_package(&request.name, package_hash);
+        let package = paths::get_package_path(&request.name, package_hash);
         let package_tar = package.with_extension("tar.gz");
 
         if package.exists() {

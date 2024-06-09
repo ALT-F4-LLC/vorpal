@@ -27,7 +27,7 @@ pub fn connect<P: AsRef<Path>>(path: P) -> Result<Connection> {
 }
 
 pub fn init() -> Result<(), anyhow::Error> {
-    let db_path = paths::get_database();
+    let db_path = paths::get_database_path();
     let db = connect(&db_path)?;
 
     db.execute(

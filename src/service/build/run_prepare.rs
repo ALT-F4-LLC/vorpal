@@ -70,43 +70,45 @@ pub async fn run(
         return Err(Status::internal("Source name is empty"));
     }
 
-    let source_dir_path = paths::get_package_source(&source_name, &source_hash);
-    let source_tar_path = paths::get_package_source_tar(&source_name, &source_hash);
+    let package_source_path = paths::get_package_source_path(&source_name, &source_hash);
+    let package_source_tar_path = paths::get_package_source_tar_path(&source_name, &source_hash);
 
-    let db = database::connect(paths::get_database())
+    let db = database::connect(paths::get_database_path())
         .map_err(|_| Status::internal("Failed to connect to database"))?;
 
-    if !source_tar_path.exists() {
-        let mut source_tar = File::create(&source_tar_path).await?;
+    if !package_source_tar_path.exists() {
+        let mut source_tar = File::create(&package_source_tar_path).await?;
         if let Err(e) = source_tar.write_all(&source_data).await {
             return Err(Status::internal(format!(
                 "Failed to write source tar: {}",
                 e
             )));
         } else {
-            let metadata = fs::metadata(&source_tar_path).await?;
+            let metadata = fs::metadata(&package_source_tar_path).await?;
             let mut permissions = metadata.permissions();
             permissions.set_mode(0o444);
-            fs::set_permissions(source_tar_path.clone(), permissions).await?;
-            let file_name = source_tar_path.file_name().unwrap();
+            fs::set_permissions(package_source_tar_path.clone(), permissions).await?;
+            let file_name = package_source_tar_path.file_name().unwrap();
             info!("source tar created: {}", file_name.to_string_lossy());
         }
 
-        fs::create_dir_all(&source_dir_path).await?;
+        fs::create_dir_all(&package_source_path).await?;
 
-        if let Err(err) = archives::unpack_tar_gz(&source_dir_path, &source_tar_path).await {
+        if let Err(err) =
+            archives::unpack_tar_gz(&package_source_path, &package_source_tar_path).await
+        {
             return Err(Status::internal(format!(
                 "Failed to unpack source tar: {}",
                 err
             )));
         }
 
-        let source_files = paths::get_files(&source_dir_path, &Vec::<&str>::new())
+        let source_file_paths = paths::get_file_paths(&package_source_path, &Vec::<&str>::new())
             .map_err(|e| Status::internal(format!("Failed to get source files: {:?}", e)))?;
 
-        info!("source files: {:?}", source_files);
+        info!("source files: {:?}", source_file_paths);
 
-        let source_files_hashes = hashes::get_files(&source_files)
+        let source_files_hashes = hashes::get_files(&source_file_paths)
             .map_err(|e| Status::internal(format!("Failed to get source file hashes: {:?}", e)))?;
 
         let source_hash_computed = hashes::get_source(&source_files_hashes)
@@ -122,7 +124,7 @@ pub async fn run(
         database::insert_source(&db, &source_hash, &source_name)
             .map_err(|e| Status::internal(format!("Failed to insert source: {:?}", e)))?;
 
-        fs::remove_dir_all(source_dir_path).await?;
+        fs::remove_dir_all(package_source_path).await?;
     }
 
     let source_id = database::find_source(&db, &source_hash, &source_name)

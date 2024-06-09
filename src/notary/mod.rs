@@ -14,8 +14,8 @@ use tracing::info;
 const BITS: usize = 2048;
 
 pub fn init() -> Result<(), anyhow::Error> {
-    let private_key_path = paths::get_private_key();
-    let public_key_path = paths::get_public_key();
+    let private_key_path = paths::get_private_key_path();
+    let public_key_path = paths::get_public_key_path();
 
     if !private_key_path.exists() && !public_key_path.exists() {
         return Err(anyhow::anyhow!(
@@ -30,8 +30,8 @@ pub fn init() -> Result<(), anyhow::Error> {
 }
 
 pub async fn generate_keys() -> Result<(), anyhow::Error> {
-    let private_key_path = paths::get_private_key();
-    let public_key_path = paths::get_public_key();
+    let private_key_path = paths::get_private_key_path();
+    let public_key_path = paths::get_public_key_path();
 
     if private_key_path.exists() {
         return Err(anyhow::anyhow!("private key already exists"));
@@ -41,9 +41,9 @@ pub async fn generate_keys() -> Result<(), anyhow::Error> {
         return Err(anyhow::anyhow!("public key already exists"));
     }
 
-    create_dir_all(paths::get_key()).await?;
+    create_dir_all(paths::get_key_path()).await?;
 
-    info!("key directory: {:?}", paths::get_key());
+    info!("key directory: {:?}", paths::get_key_path());
 
     let mut rng = rand::thread_rng();
 
@@ -62,13 +62,13 @@ pub async fn generate_keys() -> Result<(), anyhow::Error> {
 }
 
 pub async fn get_private_key() -> Result<RsaPrivateKey, anyhow::Error> {
-    let key_data = fs::read(paths::get_private_key()).await?;
+    let key_data = fs::read(paths::get_private_key_path()).await?;
     let key = std::str::from_utf8(&key_data)?;
     Ok(RsaPrivateKey::from_pkcs8_pem(key)?)
 }
 
 pub async fn get_public_key() -> Result<RsaPublicKey, anyhow::Error> {
-    let key_data = fs::read(paths::get_public_key()).await?;
+    let key_data = fs::read(paths::get_public_key_path()).await?;
     let key = std::str::from_utf8(&key_data)?;
     Ok(RsaPublicKey::from_public_key_pem(key)?)
 }

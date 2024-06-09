@@ -22,14 +22,14 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         info!("building dependency: {}", path);
     }
 
-    let db_path = paths::get_database();
+    let db_path = paths::get_database_path();
     let db = database::connect(db_path)
         .map_err(|e| Status::internal(format!("Failed to connect to database: {:?}", e)))?;
 
     let source = database::find_source_by_id(&db, message.source_id)
         .map_err(|e| Status::internal(format!("Failed to find source by id: {:?}", e)))?;
 
-    let store_path = paths::get_store();
+    let store_path = paths::get_store_path();
     let store_output_path = store_path.join(format!("{}-{}", source.name, source.hash));
     let store_output_tar = store_output_path.with_extension("tar.gz");
 
@@ -57,7 +57,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         return Ok(Response::new(response));
     }
 
-    let source_tar_path = paths::get_package_source_tar(&source.name, &source.hash);
+    let source_tar_path = paths::get_package_source_tar_path(&source.name, &source.hash);
 
     info!("building source: {}", source_tar_path.display());
 
@@ -172,7 +172,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
             }
         }
 
-        let store_output_files = paths::get_files(&store_output_path, &Vec::<&str>::new())
+        let store_output_files = paths::get_file_paths(&store_output_path, &Vec::<&str>::new())
             .map_err(|_| Status::internal("Failed to get sandbox output files"))?;
 
         if let Err(err) =

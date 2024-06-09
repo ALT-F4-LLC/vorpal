@@ -5,13 +5,13 @@ use tokio::fs;
 use tokio::fs::File;
 
 pub async fn create_dir() -> Result<PathBuf> {
-    let temp_dir = paths::get_temp();
-    fs::create_dir(&temp_dir).await?;
-    Ok(temp_dir)
+    let temp_dir_path = paths::get_temp_path();
+    fs::create_dir(&temp_dir_path).await?;
+    Ok(temp_dir_path)
 }
 
 pub async fn create_file(extension: &str) -> Result<PathBuf> {
-    let temp_file = paths::get_temp().with_extension(extension);
-    File::create(&temp_file).await?;
-    Ok(temp_file)
+    let temp_file_path = paths::get_temp_path().with_extension(extension);
+    File::create(&temp_file_path).await?;
+    Ok(temp_file_path)
 }
