@@ -172,7 +172,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
             info!("Preparing source kind: {:?}", source_kind);
 
             if source_kind.mime_type() == "application/gzip" {
-                println!("Preparing packed source: {:?}", workdir);
+                info!("Preparing packed source: {:?}", workdir);
                 store::unpack_tar_gz(&workdir_path, &source_path).await?;
             }
         }
