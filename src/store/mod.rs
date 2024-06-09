@@ -3,7 +3,6 @@ use tokio::fs;
 use tracing::info;
 
 pub mod archives;
-pub mod files;
 pub mod hashes;
 pub mod paths;
 pub mod temps;
