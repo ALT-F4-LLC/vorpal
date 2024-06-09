@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_compression::tokio::{bufread::GzipDecoder, write::GzipEncoder};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
@@ -50,7 +50,11 @@ where
     Ok(output.into_inner())
 }
 
-pub async fn unpack_tar_gz(target_dir: &PathBuf, source_tar: &Path) -> Result<(), anyhow::Error> {
+pub async fn unpack_tar_gz<P1, P2>(target_dir: P1, source_tar: P2) -> Result<(), anyhow::Error>
+where
+    P1: AsRef<Path>,
+    P2: AsRef<Path>,
+{
     let tar_gz = File::open(source_tar).await?;
     let buf_reader = BufReader::new(tar_gz);
     let gz_decoder = GzipDecoder::new(buf_reader);
