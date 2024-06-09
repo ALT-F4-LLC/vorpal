@@ -11,6 +11,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use tokio::fs;
 use tonic::{Response, Status, Streaming};
+use tracing::{error, info};
 
 pub async fn run(
     mut stream: Streaming<PrepareRequest>,
@@ -25,7 +26,7 @@ pub async fn run(
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| Status::internal(format!("Stream error: {}", e)))?;
 
-        println!("Chunk size: {}", chunk.source_data.len());
+        info!("chunk size: {}", chunk.source_data.len());
 
         if source_chunks == 0 {
             source_hash = chunk.source_hash;
@@ -37,7 +38,7 @@ pub async fn run(
         source_data.extend_from_slice(&chunk.source_data);
     }
 
-    println!("Processed chunks: {}", source_chunks);
+    info!("processed chunks: {}", source_chunks);
 
     let public_key = notary::get_public_key()
         .await
@@ -76,51 +77,51 @@ pub async fn run(
     if !source_tar_path.exists() {
         let mut source_tar = File::create(&source_tar_path)?;
         if let Err(e) = source_tar.write_all(&source_data) {
-            eprintln!("Failed source file: {}", e)
+            error!("Failed source file: {}", e)
         } else {
             let metadata = fs::metadata(&source_tar_path).await?;
             let mut permissions = metadata.permissions();
             permissions.set_mode(0o444);
             fs::set_permissions(&source_tar_path, permissions).await?;
             let file_name = source_tar_path.file_name().unwrap();
-            println!("Source tar: {}", file_name.to_string_lossy());
+            info!("Source tar: {}", file_name.to_string_lossy());
         }
 
         fs::create_dir_all(&source_dir_path).await?;
 
         store::unpack_source(&source_dir_path, &source_tar_path).map_err(|e| {
-            eprintln!("Failed to unpack source: {:?}", e);
+            error!("Failed to unpack source: {:?}", e);
             Status::internal("Failed to unpack source")
         })?;
 
         let source_files =
             store::get_file_paths(&source_dir_path, &Vec::<&str>::new()).map_err(|e| {
-                eprintln!("Failed to get source files: {}", e);
+                error!("Failed to get source files: {}", e);
                 Status::internal("Failed to get source files")
             })?;
 
-        println!("Source files: {:?}", source_files);
+        info!("source files: {:?}", source_files);
 
         let source_files_hashes = store::get_file_hashes(&source_files).map_err(|e| {
-            eprintln!("Failed to get source files hashes: {}", e);
+            error!("Failed to get source files hashes: {}", e);
             Status::internal("Failed to get source files hashes")
         })?;
 
         let source_hash_computed = store::get_source_hash(&source_files_hashes).map_err(|e| {
-            eprintln!("Failed to get source hash: {}", e);
+            error!("Failed to get source hash: {}", e);
             Status::internal("Failed to get source hash")
         })?;
 
-        println!("Message source hash: {}", source_hash);
-        println!("Computed source hash: {}", source_hash_computed);
+        info!("message source hash: {}", source_hash);
+        info!("computed source hash: {}", source_hash_computed);
 
         if source_hash != source_hash_computed {
-            eprintln!("Source hash mismatch");
+            error!("source hash mismatch");
             return Err(Status::internal("Source hash mismatch"));
         }
 
         database::insert_source(&db, &source_hash, &source_name).map_err(|e| {
-            eprintln!("Failed to insert source: {:?}", e);
+            error!("Failed to insert source: {:?}", e);
             Status::internal("Failed to insert source")
         })?;
 
@@ -130,12 +131,12 @@ pub async fn run(
     let source_id = database::find_source(&db, &source_hash, &source_name)
         .map(|source| source.id)
         .map_err(|e| {
-            eprintln!("Failed to find source: {:?}", e);
+            error!("Failed to find source: {:?}", e);
             Status::internal("Failed to find source")
         })?;
 
     if let Err(e) = db.close() {
-        eprintln!("Failed to close database: {:?}", e)
+        error!("Failed to close database: {:?}", e)
     }
 
     let response = PrepareResponse { source_id };

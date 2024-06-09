@@ -8,15 +8,17 @@ use tera::Tera;
 use tokio::fs;
 use tokio::process::Command;
 use tonic::{Request, Response, Status};
+use tracing::{error, info, span, Level};
 use walkdir::WalkDir;
 
 pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildResponse>, Status> {
     let message = request.into_inner();
 
-    println!("Build source id: {:?}", message.source_id);
+    let info_span = span!(Level::INFO, "build", source_id = %message.source_id);
+    let _info_span_guard = info_span.enter();
 
     for path in &message.build_deps {
-        println!("Build dependency: {}", path);
+        info!("building dependency: {}", path);
     }
 
     let db_path = store::get_database_path();
@@ -26,7 +28,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     })?;
 
     let source = database::find_source_by_id(&db, message.source_id).map_err(|e| {
-        eprintln!("Failed to find source: {:?}", e);
+        error!("Failed to find source: {:?}", e);
         Status::internal("Failed to find source")
     })?;
 
@@ -35,7 +37,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     let store_output_tar = store_output_path.with_extension("tar.gz");
 
     if store_output_path.exists() && store_output_path.is_dir() && store_output_tar.exists() {
-        println!("Using cached output: {}", store_output_tar.display());
+        info!("using cached output: {}", store_output_tar.display());
 
         let response_data = fs::read(&store_output_tar).await?;
         let response = BuildResponse {
@@ -47,7 +49,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
     }
 
     if store_output_path.exists() && store_output_path.is_file() {
-        println!("Using cached output: {}", store_output_path.display());
+        info!("using cached output: {}", store_output_path.display());
 
         let response_data = fs::read(&store_output_path).await?;
         let response = BuildResponse {
@@ -60,13 +62,13 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     let source_tar_path = store::get_source_tar_path(&source.name, &source.hash);
 
-    println!("Build source tar: {}", source_tar_path.display());
+    info!("building source: {}", source_tar_path.display());
 
     let source_temp_dir = TempDir::new()?;
     let source_temp_dir_path = source_temp_dir.into_path().canonicalize()?;
 
     store::unpack_source(&source_temp_dir_path, &source_tar_path).map_err(|e| {
-        eprintln!("Failed to unpack source: {:?}", e);
+        error!("Failed to unpack source: {:?}", e);
         Status::internal("Failed to unpack source")
     })?;
 
@@ -102,7 +104,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     let automation_script_data = automation_script.join("\n");
 
-    println!("Build script: {}", automation_script_data);
+    info!("build script: {}", automation_script_data);
 
     let automation_script_path = source_temp_vorpal_dir.join("automation.sh");
 
@@ -117,6 +119,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     let os_type = std::env::consts::OS;
     if os_type != "macos" {
+        error!("request for unsupported OS: {} received", os_type);
         return Err(Status::internal("Unsupported OS (currently only macOS)"));
     }
 
@@ -138,11 +141,11 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         automation_script_path.to_str().unwrap(),
     ];
 
-    println!("Build args: {:?}", sandbox_command_args);
+    info!("sandbox command args: {:?}", sandbox_command_args);
 
     let sandbox_output_path = source_temp_vorpal_dir.join("output");
 
-    println!("Build output path: {}", sandbox_output_path.display());
+    info!("sandbox output path: {}", sandbox_output_path.display());
 
     let mut sandbox_command = Command::new("/usr/bin/sandbox-exec");
     sandbox_command.args(sandbox_command_args);
@@ -158,13 +161,14 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
 
     let sandbox_stderr = String::from_utf8_lossy(&sandbox_output.stderr);
     if sandbox_stderr.len() > 0 {
+        error!("sandbox stderr: {}", sandbox_stderr);
         return Err(Status::internal("Build failed"));
     }
 
     if sandbox_output_path.is_dir() {
         for entry in WalkDir::new(&sandbox_output_path) {
             let entry = entry.map_err(|e| {
-                eprintln!("Failed to walk sandbox output: {:?}", e);
+                error!("Failed to walk sandbox output: {:?}", e);
                 Status::internal("Failed to walk sandbox output")
             })?;
             let output_path = entry.path().strip_prefix(&sandbox_output_path).unwrap();
@@ -194,7 +198,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildRespons
         store_output_path
     };
 
-    println!("Build output: {}", package_data_path.display());
+    info!("build completed: {}", package_data_path.display());
 
     let response = BuildResponse {
         is_compressed,
