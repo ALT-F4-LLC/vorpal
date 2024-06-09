@@ -11,7 +11,6 @@ use reqwest;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::path::PathBuf;
 use tokio::fs;
 use tokio::fs::{
     copy, create_dir_all, read, remove_dir_all, remove_file, set_permissions, write, File,

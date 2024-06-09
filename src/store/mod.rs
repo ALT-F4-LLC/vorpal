@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_compression::tokio::{bufread::GzipDecoder, write::GzipEncoder};
 use sha256::{digest, try_digest};
 use std::env;
+use std::ffi::OsStr;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio_tar::Archive;
 use tokio_tar::Builder;
+use tracing::info;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -146,11 +148,17 @@ where
     Ok(digest(combined))
 }
 
-pub async fn compress_tar_gz(
-    source: &PathBuf,
-    source_output: &Path,
-    source_files: &[PathBuf],
-) -> Result<File, anyhow::Error> {
+pub async fn compress_tar_gz<'a, P1, P2, P3, I>(
+    source: P1,
+    source_output: P2,
+    source_files: I,
+) -> Result<File, anyhow::Error>
+where
+    P1: AsRef<Path>,
+    P2: AsRef<Path>,
+    P3: AsRef<Path> + 'a,
+    I: IntoIterator<Item = &'a P3>,
+{
     let tar = File::create(source_output).await?;
     let tar_encoder = GzipEncoder::new(tar);
     let mut tar_builder = Builder::new(tar_encoder);
@@ -171,12 +179,10 @@ pub async fn compress_tar_gz(
 
         if path.is_file() {
             tar_builder
-                .append_path_with_name(path.clone(), relative_path)
+                .append_path_with_name(path, relative_path)
                 .await?;
         } else if path.is_dir() {
-            tar_builder
-                .append_dir_all(relative_path, path.clone())
-                .await?;
+            tar_builder.append_dir_all(relative_path, path).await?;
         }
     }
 
