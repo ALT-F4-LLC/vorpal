@@ -2,11 +2,15 @@ use crate::service::build;
 use crate::service::proxy;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use tracing::Level;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 pub struct Cli {
+    #[clap(long, global = true, default_value_t = Level::INFO)]
+    pub level: tracing::Level,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -44,6 +48,16 @@ pub enum Proxy {
 
 pub async fn run() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
+
+    let mut subscriber = tracing_subscriber::FmtSubscriber::builder().with_max_level(cli.level);
+
+    // when we run the command with `TRACE` or `DEBUG` level, we want to see
+    // the file and line number...
+    if [Level::DEBUG, Level::TRACE].contains(&cli.level) {
+        subscriber = subscriber.with_file(true).with_line_number(true);
+    }
+    let subscriber = subscriber.finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     match &cli.command {
         Command::Service(service) => match service {

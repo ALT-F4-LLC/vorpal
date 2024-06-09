@@ -142,7 +142,7 @@ pub async fn compress_tar_gz(
     let tar_encoder = GzipEncoder::new(tar);
     let mut tar_builder = Builder::new(tar_encoder);
 
-    println!("Compressing: {}", source.display());
+    info!("Compressing: {}", source.display());
 
     for path in source_files {
         if path == source {
@@ -151,7 +151,7 @@ pub async fn compress_tar_gz(
 
         let relative_path = path.strip_prefix(source)?;
 
-        println!("Adding: {}", relative_path.display());
+        info!("Adding: {}", relative_path.display());
 
         if path.is_file() {
             tar_builder

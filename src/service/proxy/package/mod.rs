@@ -20,27 +20,28 @@ use tokio::io::AsyncWriteExt;
 use tokio_stream;
 use tokio_tar::Archive;
 use tonic::{Request, Response, Status};
+use tracing::{error, info};
 use url::Url;
 
 pub async fn run(request: Request<PackageRequest>) -> Result<Response<PackageResponse>, Status> {
     let req = request.into_inner();
 
     let req_source = req.source.as_ref().ok_or_else(|| {
-        eprintln!("Source is required");
+        error!("Source is required");
         Status::invalid_argument("Source is required")
     })?;
 
-    println!("Preparing: {}", req.name);
+    info!("Preparing: {}", req.name);
 
     let (source_id, source_hash) = prepare(&req.name, req_source).await.map_err(|e| {
-        eprintln!("Failed to prepare: {:?}", e);
+        error!("Failed to prepare: {:?}", e);
         Status::internal(e.to_string())
     })?;
 
-    println!("Building: {}-{}", req.name, source_hash);
+    info!("Building: {}-{}", req.name, source_hash);
 
     build(source_id, &source_hash, &req).await.map_err(|e| {
-        eprintln!("Failed to build: {:?}", e);
+        error!("Failed to build: {:?}", e);
         Status::internal(e.to_string())
     })?;
 
@@ -61,7 +62,7 @@ async fn prepare_source(
 
     let signature = notary::sign(&data).await?;
 
-    println!("Source tar signature: {}", signature);
+    info!("Source tar signature: {}", signature);
 
     let mut request_chunks = vec![];
     let request_chunks_size = 8192; // default grpc limit
@@ -75,13 +76,13 @@ async fn prepare_source(
         });
     }
 
-    println!("Request chunks: {}", request_chunks.len());
+    info!("Request chunks: {}", request_chunks.len());
 
     let mut client = PackageServiceClient::connect("http://[::1]:15323").await?;
     let response = client.prepare(tokio_stream::iter(request_chunks)).await?;
     let res = response.into_inner();
 
-    println!("Source ID: {}", res.source_id);
+    info!("Source ID: {}", res.source_id);
 
     remove_file(&source_tar).await?;
 
@@ -92,9 +93,10 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
     let workdir = store::create_temp_dir().await?;
     let workdir_path = workdir.canonicalize()?;
 
-    println!("Preparing working dir: {:?}", workdir_path);
+    info!("Preparing working dir: {:?}", workdir_path);
 
     if source.kind == PackageSourceKind::Unknown as i32 {
+        error!("Unknown source kind");
         return Err(anyhow::anyhow!("Unknown source kind"));
     }
 
@@ -127,11 +129,12 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
     }
 
     if source.kind == PackageSourceKind::Http as i32 {
-        println!("Downloading source: {:?}", &source.uri);
+        info!("Downloading source: {:?}", &source.uri);
 
         let url = Url::parse(&source.uri)?;
 
         if url.scheme() != "http" && url.scheme() != "https" {
+            error!("Invalid HTTP source URL");
             return Err(anyhow::anyhow!("Invalid HTTP source URL"));
         }
 
@@ -139,7 +142,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         let response_bytes = response.as_ref();
 
         if let Some(source_kind) = infer::get(response_bytes) {
-            println!("Preparing source kind: {:?}", source_kind);
+            info!("Preparing source kind: {:?}", source_kind);
 
             match source_kind.mime_type() {
                 "application/gzip" => {
@@ -159,7 +162,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
                     let source_file_name = url.path_segments().unwrap().last();
                     let source_file = source_file_name.unwrap();
                     write(&source_file, response_bytes).await?;
-                    println!("Prepared source file: {:?}", source_file);
+                    info!("Prepared source file: {:?}", source_file);
                 }
             }
         }
@@ -168,10 +171,10 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
     if source.kind == PackageSourceKind::Local as i32 {
         let source_path = Path::new(&source.uri).canonicalize()?;
 
-        println!("Preparing source path: {:?}", source_path);
+        info!("Preparing source path: {:?}", source_path);
 
         if let Ok(Some(source_kind)) = infer::get_from_path(&source_path) {
-            println!("Preparing source kind: {:?}", source_kind);
+            info!("Preparing source kind: {:?}", source_kind);
 
             if source_kind.mime_type() == "application/gzip" {
                 println!("Preparing packed source: {:?}", workdir);
@@ -182,7 +185,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         if source_path.is_file() {
             let dest = workdir_path.join(source_path.file_name().unwrap());
             copy(&source_path, &dest).await?;
-            println!(
+            info!(
                 "Preparing source file: {:?} -> {:?}",
                 source_path.display(),
                 dest.display()
@@ -205,7 +208,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
 
                 let dest = workdir_path.join(src.file_name().unwrap());
                 copy(src, &dest).await?;
-                println!(
+                info!(
                     "Preparing source file: {:?} -> {:?}",
                     src.display(),
                     dest.display()
@@ -222,7 +225,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         return Err(anyhow::anyhow!("No source files found"));
     }
 
-    println!("Preparing source files: {:?}", workdir_files);
+    info!("Preparing source files: {:?}", workdir_files);
 
     let workdir_files_hashes = store::get_file_hashes(&workdir_files)?;
     let workdir_hash = store::get_source_hash(&workdir_files_hashes)?;
@@ -231,7 +234,7 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
         return Err(anyhow::anyhow!("Failed to get source hash"));
     }
 
-    println!("Source hash: {}", workdir_hash);
+    info!("Source hash: {}", workdir_hash);
 
     if let Some(request_hash) = &source.hash {
         if &workdir_hash != request_hash {
@@ -243,13 +246,13 @@ async fn prepare(name: &str, source: &PackageSource) -> Result<(i32, String), an
     let source_tar = store::create_temp_file("tar.gz").await?;
     let source_tar_path = source_tar.canonicalize()?;
 
-    println!("Creating source tar: {:?}", source_tar);
+    info!("Creating source tar: {:?}", source_tar);
 
     store::compress_tar_gz(&workdir_path, &source_tar_path, &workdir_files).await?;
 
     set_permissions(&source_tar, Permissions::from_mode(0o444)).await?;
 
-    println!("Source tar: {}", source_tar_path.display());
+    info!("Source tar: {}", source_tar_path.display());
 
     remove_dir_all(&workdir_path).await?;
 
@@ -279,18 +282,18 @@ async fn build(
         let store_path_tar = store_path_dir.with_extension("tar.gz");
 
         if store_path_dir.exists() {
-            println!("Using existing source: {}", store_path_dir.display());
+            info!("Using existing source: {}", store_path_dir.display());
             return Ok(());
         }
 
         if store_path_tar.exists() {
-            println!("Using existing tar: {}", store_path_tar.display());
+            info!("Using existing tar: {}", store_path_tar.display());
 
             fs::create_dir_all(&store_path_dir).await?;
 
             store::unpack_tar_gz(&store_path_dir, &store_path_tar).await?;
 
-            println!("Unpacked source: {}", store_path_dir.display());
+            info!("Unpacked source: {}", store_path_dir.display());
 
             return Ok(());
         }
@@ -305,18 +308,18 @@ async fn build(
                 fs::set_permissions(store_path_tar.clone(), permissions).await?;
 
                 let file_name = store_path_tar.file_name().unwrap();
-                println!("Stored tar: {}", file_name.to_string_lossy());
+                info!("Stored tar: {}", file_name.to_string_lossy());
             }
             Err(e) => eprintln!("Failed source file: {}", e),
         }
 
-        println!("Stored tar: {}", store_path_tar.display());
+        info!("Stored tar: {}", store_path_tar.display());
 
         fs::create_dir_all(&store_path_dir).await?;
 
         store::unpack_tar_gz(&store_path_dir, &store_path_tar).await?;
 
-        println!("Unpacked source: {}", store_path_dir.display());
+        info!("Unpacked source: {}", store_path_dir.display());
     }
 
     Ok(())
