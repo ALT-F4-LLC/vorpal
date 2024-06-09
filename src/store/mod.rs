@@ -4,6 +4,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use sha256::{digest, try_digest};
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
@@ -64,20 +65,25 @@ pub fn get_source_dir_path(source_name: &str, source_hash: &str) -> PathBuf {
         .to_path_buf()
 }
 
-pub fn get_file_paths(source: &PathBuf, ignore_paths: &[String]) -> Result<Vec<PathBuf>> {
+pub fn get_file_paths<'a, P, I, J>(source: P, ignore_paths: I) -> Result<Vec<PathBuf>>
+where
+    P: AsRef<Path>,
+    I: IntoIterator<Item = &'a J>,
+    J: AsRef<OsStr> + 'a,
+{
     let source_ignore_paths = ignore_paths
-        .iter()
+        .into_iter()
         .map(|i| Path::new(i).to_path_buf())
         .collect::<Vec<PathBuf>>();
 
-    let mut files: Vec<PathBuf> = WalkDir::new(source)
+    let mut files: Vec<PathBuf> = WalkDir::new(&source)
         .into_iter()
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
             if source_ignore_paths
                 .iter()
-                .any(|i| path.strip_prefix(source).unwrap().starts_with(i))
+                .any(|i| path.strip_prefix(&source).unwrap().starts_with(i))
             {
                 return None;
             }
@@ -90,28 +96,36 @@ pub fn get_file_paths(source: &PathBuf, ignore_paths: &[String]) -> Result<Vec<P
     Ok(files)
 }
 
-pub fn get_file_hash(path: &Path) -> Result<String, anyhow::Error> {
-    if !path.is_file() {
+pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String, anyhow::Error> {
+    if !path.as_ref().is_file() {
         return Err(anyhow::anyhow!("Path is not a file"));
     }
 
     Ok(try_digest(path)?)
 }
 
-pub fn get_file_hashes(files: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
-    let hashes: Vec<(PathBuf, String)> = files
-        .iter()
-        .filter(|file| file.is_file())
+pub fn get_file_hashes<'a, P, I>(files: I) -> Result<Vec<(&'a Path, String)>>
+where
+    P: AsRef<Path> + Send + Sync + 'a,
+    I: IntoIterator<Item = &'a P>,
+{
+    let hashes = files
+        .into_iter()
+        .filter(|file| file.as_ref().is_file())
         .map(|file| {
             let hash = get_file_hash(file).unwrap();
-            (file.clone(), hash)
+            (file.as_ref(), hash)
         })
         .collect();
 
     Ok(hashes)
 }
 
-pub fn get_source_hash(hashes: &[(PathBuf, String)]) -> Result<String> {
+pub fn get_source_hash<'a, P, I>(hashes: I) -> Result<String>
+where
+    P: AsRef<Path> + 'a,
+    I: IntoIterator<Item = &'a (P, String)>,
+{
     let mut combined = String::new();
 
     for (_, hash) in hashes {
@@ -121,18 +135,27 @@ pub fn get_source_hash(hashes: &[(PathBuf, String)]) -> Result<String> {
     Ok(digest(combined))
 }
 
-pub fn compress_files(
-    source: &PathBuf,
-    source_output: &Path,
-    source_files: &[PathBuf],
-) -> Result<File, anyhow::Error> {
+pub fn compress_files<'a, P1, P2, P3, I>(
+    source: P1,
+    source_output: P2,
+    source_files: I,
+) -> Result<File, anyhow::Error>
+where
+    P1: AsRef<Path>,
+    P2: AsRef<Path>,
+    P3: AsRef<Path> + 'a,
+    I: IntoIterator<Item = &'a P3>,
+{
     let tar = File::create(source_output)?;
     let tar_encoder = GzEncoder::new(tar.try_clone()?, Compression::default());
     let mut tar_builder = Builder::new(tar_encoder);
 
+    let source = source.as_ref();
     println!("Compressing: {}", source.display());
 
     for path in source_files {
+        let path = path.as_ref();
+
         if path == source {
             continue;
         }
@@ -142,9 +165,9 @@ pub fn compress_files(
         println!("Adding: {}", relative_path.display());
 
         if path.is_file() {
-            tar_builder.append_path_with_name(path.clone(), relative_path)?;
+            tar_builder.append_path_with_name(path, relative_path)?;
         } else if path.is_dir() {
-            tar_builder.append_dir(relative_path, path.clone())?;
+            tar_builder.append_dir(relative_path, path)?;
         }
     }
 
@@ -153,7 +176,11 @@ pub fn compress_files(
     Ok(tar)
 }
 
-pub fn set_files_permissions(files: &[PathBuf]) -> Result<(), anyhow::Error> {
+pub fn set_files_permissions<'a, P, I>(files: I) -> Result<(), anyhow::Error>
+where
+    P: AsRef<Path> + 'a,
+    I: IntoIterator<Item = &'a P>,
+{
     for file in files {
         let permissions = fs::metadata(file)?.permissions();
         if permissions.mode() & 0o111 != 0 {
@@ -166,7 +193,11 @@ pub fn set_files_permissions(files: &[PathBuf]) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub fn unpack_source(target_dir: &PathBuf, source_tar: &Path) -> Result<(), anyhow::Error> {
+pub fn unpack_source<P1, P2>(target_dir: P1, source_tar: P2) -> Result<(), anyhow::Error>
+where
+    P1: AsRef<Path>,
+    P2: AsRef<Path>,
+{
     let tar_gz = File::open(source_tar)?;
     let buf_reader = BufReader::new(tar_gz);
     let gz_decoder = GzDecoder::new(buf_reader);
