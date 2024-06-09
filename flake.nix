@@ -60,8 +60,8 @@
 
         process-compose.start = {
           settings.processes = {
-            build-server.command = "${config.apps.default.program} service build start";
-            proxy-server.command = "${config.apps.default.program} service proxy start";
+            build-server.command = "${config.apps.default.program} services build start";
+            proxy-server.command = "${config.apps.default.program} services proxy start";
           };
         };
       };

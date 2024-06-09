@@ -1,6 +1,8 @@
 use crate::api::Status;
+use crate::store::paths;
 use rusqlite::{Connection, Result};
 use std::path::Path;
+use tracing::info;
 use uuid::Uuid;
 
 pub struct Source {
@@ -22,6 +24,28 @@ pub struct Build {
 
 pub fn connect<P: AsRef<Path>>(path: P) -> Result<Connection> {
     Connection::open(path)
+}
+
+pub fn init() -> Result<(), anyhow::Error> {
+    let db_path = paths::get_database();
+    let db = connect(&db_path)?;
+
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS source (
+                id  INTEGER PRIMARY KEY,
+                hash TEXT NOT NULL,
+                name TEXT NOT NULL
+            )",
+        [],
+    )?;
+
+    info!("database: {:?}", db_path.display());
+
+    if let Err(e) = db.close() {
+        return Err(e.1.into());
+    }
+
+    Ok(())
 }
 
 pub fn insert_source(conn: &Connection, hash: &str, name: &str) -> Result<usize> {

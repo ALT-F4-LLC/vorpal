@@ -18,11 +18,19 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     #[clap(subcommand)]
-    Service(Service),
+    Keys(Keys),
+
+    #[clap(subcommand)]
+    Services(Services),
 }
 
 #[derive(Subcommand)]
-pub enum Service {
+pub enum Keys {
+    Generate {},
+}
+
+#[derive(Subcommand)]
+pub enum Services {
     #[clap(subcommand)]
     Build(Build),
 
@@ -60,11 +68,14 @@ pub async fn run() -> Result<(), anyhow::Error> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     match &cli.command {
-        Command::Service(service) => match service {
-            Service::Build(build) => match build {
+        Command::Keys(keys) => match keys {
+            Keys::Generate {} => crate::notary::generate_keys().await,
+        },
+        Command::Services(service) => match service {
+            Services::Build(build) => match build {
                 Build::Start { port } => build::start(*port).await,
             },
-            Service::Proxy(proxy) => match proxy {
+            Services::Proxy(proxy) => match proxy {
                 Proxy::Start { port } => proxy::start(*port).await,
             },
         },

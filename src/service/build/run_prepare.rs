@@ -1,7 +1,9 @@
 use crate::api::{PrepareRequest, PrepareResponse};
 use crate::database;
 use crate::notary;
-use crate::store;
+use crate::store::archives;
+use crate::store::hashes;
+use crate::store::paths;
 use futures_util::StreamExt;
 use rsa::pss::{Signature, VerifyingKey};
 use rsa::sha2::Sha256;
@@ -60,9 +62,6 @@ pub async fn run(
         .verify(&source_data, &signature)
         .map_err(|_| Status::internal("Failed to verify signature"))?;
 
-    let db = database::connect(store::get_database_path())
-        .map_err(|_| Status::internal("Failed to connect to database"))?;
-
     if source_hash.is_empty() {
         return Err(Status::internal("Source hash is empty"));
     }
@@ -71,8 +70,11 @@ pub async fn run(
         return Err(Status::internal("Source name is empty"));
     }
 
-    let source_dir_path = store::get_source_dir_path(&source_name, &source_hash);
-    let source_tar_path = store::get_source_tar_path(&source_name, &source_hash);
+    let source_dir_path = paths::get_package_source(&source_name, &source_hash);
+    let source_tar_path = paths::get_package_source_tar(&source_name, &source_hash);
+
+    let db = database::connect(paths::get_database())
+        .map_err(|_| Status::internal("Failed to connect to database"))?;
 
     if !source_tar_path.exists() {
         let mut source_tar = File::create(&source_tar_path).await?;
@@ -92,22 +94,22 @@ pub async fn run(
 
         fs::create_dir_all(&source_dir_path).await?;
 
-        if let Err(err) = store::unpack_tar_gz(&source_dir_path, &source_tar_path).await {
+        if let Err(err) = archives::unpack_tar_gz(&source_dir_path, &source_tar_path).await {
             return Err(Status::internal(format!(
                 "Failed to unpack source tar: {}",
                 err
             )));
         }
 
-        let source_files = store::get_file_paths(&source_dir_path, &Vec::<&str>::new())
+        let source_files = paths::get_files(&source_dir_path, &Vec::<&str>::new())
             .map_err(|e| Status::internal(format!("Failed to get source files: {:?}", e)))?;
 
         info!("source files: {:?}", source_files);
 
-        let source_files_hashes = store::get_file_hashes(&source_files)
+        let source_files_hashes = hashes::get_files(&source_files)
             .map_err(|e| Status::internal(format!("Failed to get source file hashes: {:?}", e)))?;
 
-        let source_hash_computed = store::get_source_hash(&source_files_hashes)
+        let source_hash_computed = hashes::get_source(&source_files_hashes)
             .map_err(|e| Status::internal(format!("Failed to get source hash: {:?}", e)))?;
 
         info!("message source hash: {}", source_hash);

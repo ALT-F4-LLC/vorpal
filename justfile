@@ -10,6 +10,7 @@ build:
 
 # check flake (nix)
 check:
+    cargo check
     nix flake check
 
 # clean environment
@@ -24,6 +25,10 @@ format:
     cargo fmt --check --package vorpal --verbose
     nix fmt -- --check .
 
+# generate keys (cargo)
+generate:
+    cargo run --bin vorpal keys generate
+
 # lint code (cargo)
 lint:
     cargo clippy
@@ -37,7 +42,7 @@ package:
 
 # run service (cargo)
 start service:
-    cargo run --bin vorpal service {{ service }} start
+    cargo run --bin vorpal services {{ service }} start
 
 # run all services (nix)
 start-all:
