@@ -40,8 +40,8 @@
 
         devShells = {
           default = pkgs.mkShell {
-            nativeBuildInputs = [clippy grpcurl just rustfmt];
             inputsFrom = [config.packages.default];
+            nativeBuildInputs = [clippy grpcurl just rustfmt];
           };
         };
 
@@ -50,7 +50,7 @@
         packages = {
           default = buildRustPackage {
             buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-S3eNqoJ9wgokqj9HpYAWRSArygb4l7sjPYerW9Epvo0=";
+            cargoSha256 = "sha256-3iH7R+yG9uRQTwFjf+9KPjjlgqk9e6orIhoSHY0LYR0=";
             nativeBuildInputs = [pkg-config protobuf];
             pname = "vorpal";
             src = ./.;
@@ -60,8 +60,8 @@
 
         process-compose.start = {
           settings.processes = {
-            build-server.command = "${config.apps.default.program} services build start";
-            proxy-server.command = "${config.apps.default.program} services proxy start";
+            proxy-server.command = "${config.apps.default.program} services proxy";
+            build-server.command = "${config.apps.default.program} services build";
           };
         };
       };

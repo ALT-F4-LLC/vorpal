@@ -1,12 +1,13 @@
 use anyhow::Result;
-use vorpal::api::build_service_client::BuildServiceClient;
+use tokio_stream::StreamExt;
+use vorpal::api::command_service_client::CommandServiceClient;
 use vorpal::api::{PackageRequest, PackageSource, PackageSourceKind};
 
 #[tokio::main]
 pub async fn main() -> Result<(), anyhow::Error> {
-    let mut client = BuildServiceClient::connect("http://[::1]:23151").await?;
+    let mut client = CommandServiceClient::connect("http://[::1]:15323").await?;
 
-    client
+    let request = client
         .package(PackageRequest {
             build_deps: Vec::new(),
             build_phase: r#"
@@ -29,6 +30,14 @@ pub async fn main() -> Result<(), anyhow::Error> {
             }),
         })
         .await?;
+
+    let mut stream = request.into_inner();
+    while let Some(package_response) = stream.next().await {
+        let response = package_response?;
+        if !response.package_log.is_empty() {
+            println!("{}", response.package_log);
+        }
+    }
 
     Ok(())
 }

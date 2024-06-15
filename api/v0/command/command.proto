@@ -1,9 +1,9 @@
 syntax = "proto3";
 
-package vorpal.build.v0;
+package vorpal.command.v0;
 
-service BuildService {
-    rpc Package (PackageRequest) returns (PackageResponse);
+service CommandService {
+    rpc Package (PackageRequest) returns (stream PackageResponse);
 }
 
 enum PackageSourceKind {
@@ -21,8 +21,7 @@ message PackageSource {
 }
 
 message PackageResponse {
-    string source_id = 1;
-    string source_hash = 2;
+    string package_log = 1;
 }
 
 message PackageRequest {

@@ -8,32 +8,23 @@ use tokio_tar::Archive;
 use tokio_tar::Builder;
 use tracing::info;
 
-pub async fn compress_tar_gz<'a, P1, P2, P3, I>(
-    source: P1,
-    source_output: P2,
-    source_files: I,
-) -> Result<File, anyhow::Error>
-where
-    P1: AsRef<Path>,
-    P2: AsRef<Path>,
-    P3: AsRef<Path> + 'a,
-    I: IntoIterator<Item = &'a P3>,
-{
+pub async fn compress_tar_gz(
+    source: &PathBuf,
+    source_output: &PathBuf,
+    source_files: &[PathBuf],
+) -> Result<File, anyhow::Error> {
     let tar = File::create(source_output).await?;
     let tar_encoder = GzipEncoder::new(tar);
     let mut tar_builder = Builder::new(tar_encoder);
 
-    let source = source.as_ref();
-    info!("Compressing: {}", source.display());
-
     for path in source_files {
-        let path = path.as_ref();
         if path == source {
             continue;
         }
 
         let relative_path = path.strip_prefix(source)?;
-        info!("Adding: {}", relative_path.display());
+
+        info!("packing: {:?}", relative_path);
 
         if path.is_file() {
             tar_builder

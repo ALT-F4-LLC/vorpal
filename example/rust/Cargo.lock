@@ -2595,6 +2595,7 @@ dependencies = [
  "clap",
  "dirs",
  "flate2",
+ "futures",
  "futures-util",
  "git2",
  "hex",
@@ -2625,6 +2626,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "tokio",
+ "tokio-stream",
  "vorpal",
 ]
 
