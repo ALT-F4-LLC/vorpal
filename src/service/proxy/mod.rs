@@ -1,4 +1,4 @@
-use crate::api::build_service_server::BuildServiceServer;
+use crate::api::command_service_server::CommandServiceServer;
 use crate::notary;
 use crate::store;
 use tonic::transport::Server;
@@ -8,16 +8,16 @@ mod package;
 mod service;
 
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {
-    store::init().await?;
-    notary::init()?;
+    store::check_dirs().await?;
+
+    notary::check_keys()?;
 
     let addr = format!("[::1]:{}", port).parse()?;
-    let proxy = service::Proxy::default();
 
     info!("service listening on: {}", addr);
 
     Server::builder()
-        .add_service(BuildServiceServer::new(proxy))
+        .add_service(CommandServiceServer::new(service::Proxy::default()))
         .serve(addr)
         .await?;
 

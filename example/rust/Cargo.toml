@@ -8,6 +8,7 @@ name = "vorpal"
 path = "vorpal.rs"
 
 [dependencies]
-anyhow = "1.0"
-tokio = { version = "1.37" }
+anyhow = "1"
+tokio = { version = "1" }
+tokio-stream = "0"
 vorpal = { path = "../../." }

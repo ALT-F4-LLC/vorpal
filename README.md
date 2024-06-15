@@ -69,8 +69,8 @@ You can also run specific commands by appending them to the `vorpal` binary. For
 
 ```bash
 $ ./vorpal generate keys # create signing keys
-$ ./vorpal service build start # start builder
-$ ./vorpal service proxy start # start proxy
+$ ./vorpal service build # start builder
+$ ./vorpal service proxy # start proxy
 ```
 
 Or, if you'd like to start all services with `nix` run:

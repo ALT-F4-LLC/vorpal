@@ -12,8 +12,8 @@ mod sandbox_default;
 pub mod service;
 
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {
-    store::init().await?;
-    notary::init()?;
+    store::check_dirs().await?;
+    notary::check_keys()?;
     database::init()?;
 
     let addr = format!("[::1]:{}", port).parse()?;

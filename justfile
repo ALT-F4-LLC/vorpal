@@ -16,8 +16,6 @@ check:
 # clean environment
 clean:
     rm -rf $HOME/.vorpal
-    rm -rf example/rust/target
-    rm -rf target
     rm -rf vorpal
 
 # format code (cargo & nix)
@@ -31,7 +29,7 @@ generate:
 
 # lint code (cargo)
 lint:
-    cargo clippy
+    cargo clippy -- -D warnings
 
 # build and install (nix)
 package:
@@ -42,7 +40,7 @@ package:
 
 # run service (cargo)
 start service:
-    cargo run --bin vorpal services {{ service }} start
+    cargo run --bin vorpal services {{ service }}
 
 # run all services (nix)
 start-all:
