@@ -31,7 +31,7 @@ pub async fn validate_hashes(
     workdir_path: &Path,
     source: &PackageSource,
 ) -> Result<(String, Vec<PathBuf>), anyhow::Error> {
-    let workdir_files = paths::get_file_paths(&workdir_path, &source.ignore_paths)?;
+    let workdir_files = paths::get_file_paths(workdir_path, &source.ignore_paths)?;
 
     if workdir_files.is_empty() {
         return Err(anyhow::anyhow!("No source files found"));
@@ -140,7 +140,7 @@ pub async fn prepare(
 
     let mut source_hash = source.hash.clone().unwrap_or("".to_string());
 
-    if source_hash == "" && source.kind == PackageSourceKind::Local as i32 {
+    if source_hash.is_empty() && source.kind == PackageSourceKind::Local as i32 {
         let source_path = Path::new(&source.uri).canonicalize()?;
         let (source_path_hash, _) = validate_hashes(tx, &source_path, source).await?;
 
@@ -154,7 +154,7 @@ pub async fn prepare(
     let workdir = temps::create_dir().await?;
     let workdir_path = workdir.canonicalize()?;
 
-    let source_tar_path = paths::get_package_source_tar_path(&name, &source_hash);
+    let source_tar_path = paths::get_package_source_tar_path(name, &source_hash);
 
     if source_tar_path.exists() {
         tx.send(Ok(PackageResponse {
