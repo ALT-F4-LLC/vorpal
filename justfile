@@ -29,7 +29,7 @@ generate:
 
 # lint code (cargo)
 lint:
-    cargo clippy
+    cargo clippy -- -D warnings
 
 # build and install (nix)
 package:

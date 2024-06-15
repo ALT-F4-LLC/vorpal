@@ -286,7 +286,7 @@ pub async fn run(request: Request<BuildRequest>) -> Result<Response<BuildStream>
 
         for package_chunk in package_data.chunks(response_chunks_size) {
             tx.send(Ok(BuildResponse {
-                is_archive: is_archive,
+                is_archive,
                 package_data: package_chunk.to_vec(),
                 package_log: "".to_string(),
             }))

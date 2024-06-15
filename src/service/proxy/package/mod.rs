@@ -265,7 +265,7 @@ pub async fn prepare(
 
     while let Some(chunk) = stream.message().await? {
         tx.send(Ok(PackageResponse {
-            package_log: format!("{}", chunk.source_log),
+            package_log: chunk.source_log.to_string(),
         }))
         .await?;
 
@@ -275,7 +275,7 @@ pub async fn prepare(
     }
 
     tx.send(Ok(PackageResponse {
-        package_log: format!("source id: {}", source_id),
+        package_log: format!("source id: {}", source_id).to_string(),
     }))
     .await?;
 
@@ -339,7 +339,7 @@ pub async fn build(
         let response = build_response?;
 
         tx.send(Ok(PackageResponse {
-            package_log: format!("{}", response.package_log),
+            package_log: response.package_log,
         }))
         .await?;
 
