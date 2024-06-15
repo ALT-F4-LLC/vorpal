@@ -10,10 +10,10 @@ use tracing::info;
 
 pub async fn compress_tar_gz(
     source: &PathBuf,
-    source_output: &PathBuf,
+    source_tar_path: &PathBuf,
     source_files: &[PathBuf],
 ) -> Result<File, anyhow::Error> {
-    let tar = File::create(source_output).await?;
+    let tar = File::create(source_tar_path).await?;
     let tar_encoder = GzipEncoder::new(tar);
     let mut tar_builder = Builder::new(tar_encoder);
 
