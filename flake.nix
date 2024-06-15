@@ -50,7 +50,7 @@
         packages = {
           default = buildRustPackage {
             buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-3iH7R+yG9uRQTwFjf+9KPjjlgqk9e6orIhoSHY0LYR0=";
+            cargoSha256 = "sha256-xUz6VQlnZlcDYf/I2yBVLaRc36dc2Lz/dWL4flI1480=";
             nativeBuildInputs = [pkg-config protobuf];
             pname = "vorpal";
             src = ./.;
