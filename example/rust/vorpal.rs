@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::env;
 use tokio_stream::StreamExt;
 use vorpal::api::command_service_client::CommandServiceClient;
 use vorpal::api::{PackageRequest, PackageSource, PackageSourceKind};
@@ -7,7 +8,7 @@ use vorpal::api::{PackageRequest, PackageSource, PackageSourceKind};
 pub async fn main() -> Result<(), anyhow::Error> {
     let mut client = CommandServiceClient::connect("http://[::1]:15323").await?;
 
-    let request = client
+    let coreutils = client
         .package(PackageRequest {
             build_deps: Vec::new(),
             build_phase: r#"
@@ -21,7 +22,9 @@ pub async fn main() -> Result<(), anyhow::Error> {
             install_deps: Vec::new(),
             name: "coreutils".to_string(),
             source: Some(PackageSource {
-                hash: Some("af6d643afd6241ec35c7781b7f999b97a66c84bea4710ad2bb15e75a5caf11b4".to_string()),
+                hash: Some(
+                    "af6d643afd6241ec35c7781b7f999b97a66c84bea4710ad2bb15e75a5caf11b4".to_string(),
+                ),
                 ignore_paths: vec![],
                 kind: PackageSourceKind::Http.into(),
                 uri: "https://ftp.gnu.org/gnu/coreutils/coreutils-9.5.tar.gz".to_string(),
@@ -29,7 +32,43 @@ pub async fn main() -> Result<(), anyhow::Error> {
         })
         .await?;
 
-    let mut stream = request.into_inner();
+    let mut stream = coreutils.into_inner();
+    while let Some(package_response) = stream.next().await {
+        let response = package_response?;
+        if !response.package_log.is_empty() {
+            println!("{}", response.package_log);
+        }
+    }
+
+    let example = client
+        .package(PackageRequest {
+            build_deps: Vec::new(),
+            build_phase: r#"
+                mkdir -p $OUTPUT/bin
+                touch $OUTPUT/bin/example.txt
+            "#
+            .to_string(),
+            install_phase: r#"
+                echo "Hello, World!" >> $OUTPUT/bin/example.txt
+                cat $OUTPUT/bin/example.txt
+            "#
+            .to_string(),
+            install_deps: Vec::new(),
+            name: "example".to_string(),
+            source: Some(PackageSource {
+                hash: None,
+                ignore_paths: vec![
+                    ".git".to_string(),
+                    ".gitignore".to_string(),
+                    "target".to_string(),
+                ],
+                kind: PackageSourceKind::Local.into(),
+                uri: env::current_dir()?.to_string_lossy().to_string(),
+            }),
+        })
+        .await?;
+
+    let mut stream = example.into_inner();
     while let Some(package_response) = stream.next().await {
         let response = package_response?;
         if !response.package_log.is_empty() {

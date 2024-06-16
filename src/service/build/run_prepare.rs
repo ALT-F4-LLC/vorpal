@@ -42,6 +42,18 @@ pub async fn run(mut stream: Streaming<PrepareRequest>) -> Result<Response<Prepa
             source_data.extend_from_slice(&chunk.source_data);
         }
 
+        if source_hash.is_empty() {
+            return Err(Status::internal("source hash is empty"));
+        }
+
+        if source_name.is_empty() {
+            return Err(Status::internal("source name is empty"));
+        }
+
+        if source_signature.is_empty() {
+            return Err(Status::internal("source signature is empty"));
+        }
+
         tx.send(Ok(PrepareResponse {
             source_id: 0,
             source_log: format!("source chunks received: {}", source_chunks),
@@ -49,18 +61,11 @@ pub async fn run(mut stream: Streaming<PrepareRequest>) -> Result<Response<Prepa
         .await
         .unwrap();
 
-        let db = database::connect(paths::get_database_path())
-            .map_err(|_| Status::internal("failed to connect to database"))?;
-
         let public_key = notary::get_public_key()
             .await
             .map_err(|_| Status::internal("failed to get public key"))?;
 
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-
-        if source_signature.is_empty() {
-            return Err(Status::internal("source signature is empty"));
-        }
 
         let signature_decode = hex::decode(source_signature)
             .map_err(|_| Status::internal("hex decode of signature failed"))?;
@@ -71,14 +76,6 @@ pub async fn run(mut stream: Streaming<PrepareRequest>) -> Result<Response<Prepa
         verifying_key
             .verify(&source_data, &signature)
             .map_err(|_| Status::internal("failed to verify signature"))?;
-
-        if source_hash.is_empty() {
-            return Err(Status::internal("source hash is empty"));
-        }
-
-        if source_name.is_empty() {
-            return Err(Status::internal("source name is empty"));
-        }
 
         let package_source_path = paths::get_package_source_path(&source_name, &source_hash);
         let package_source_tar_path =
@@ -104,64 +101,70 @@ pub async fn run(mut stream: Streaming<PrepareRequest>) -> Result<Response<Prepa
                 .await
                 .unwrap();
             }
+        }
 
-            fs::create_dir_all(&package_source_path).await?;
+        fs::create_dir_all(&package_source_path).await?;
 
-            if let Err(err) =
-                archives::unpack_tar_gz(&package_source_path, &package_source_tar_path).await
-            {
-                return Err(Status::internal(format!(
-                    "Failed to unpack source tar: {}",
-                    err
-                )));
-            }
+        if let Err(err) =
+            archives::unpack_tar_gz(&package_source_path, &package_source_tar_path).await
+        {
+            return Err(Status::internal(format!(
+                "Failed to unpack source tar: {}",
+                err
+            )));
+        }
 
-            let source_file_paths =
-                paths::get_file_paths(&package_source_path, &Vec::<&str>::new()).map_err(|e| {
-                    Status::internal(format!("Failed to get source files: {:?}", e))
-                })?;
+        let source_file_paths = paths::get_file_paths(&package_source_path, &Vec::<&str>::new())
+            .map_err(|e| Status::internal(format!("Failed to get source files: {:?}", e)))?;
 
-            tx.send(Ok(PrepareResponse {
-                source_id: 0,
-                source_log: format!("source files: {:?}", source_file_paths.len()),
-            }))
-            .await
-            .unwrap();
+        tx.send(Ok(PrepareResponse {
+            source_id: 0,
+            source_log: format!("source files: {:?}", source_file_paths.len()),
+        }))
+        .await
+        .unwrap();
 
-            let source_files_hashes = hashes::get_files(&source_file_paths).map_err(|e| {
-                Status::internal(format!("Failed to get source file hashes: {:?}", e))
-            })?;
+        let source_files_hashes = hashes::get_files(&source_file_paths)
+            .map_err(|e| Status::internal(format!("Failed to get source file hashes: {:?}", e)))?;
 
-            let source_hash_computed = hashes::get_source(&source_files_hashes)
-                .map_err(|e| Status::internal(format!("Failed to get source hash: {:?}", e)))?;
+        let source_hash_computed = hashes::get_source(&source_files_hashes)
+            .map_err(|e| Status::internal(format!("Failed to get source hash: {:?}", e)))?;
 
-            tx.send(Ok(PrepareResponse {
-                source_id: 0,
-                source_log: format!("source hash: {}", source_hash),
-            }))
-            .await
-            .unwrap();
+        tx.send(Ok(PrepareResponse {
+            source_id: 0,
+            source_log: format!("source hash: {}", source_hash),
+        }))
+        .await
+        .unwrap();
 
-            tx.send(Ok(PrepareResponse {
-                source_id: 0,
-                source_log: format!("source hash expected: {}", source_hash_computed),
-            }))
-            .await
-            .unwrap();
+        tx.send(Ok(PrepareResponse {
+            source_id: 0,
+            source_log: format!("source hash expected: {}", source_hash_computed),
+        }))
+        .await
+        .unwrap();
 
-            if source_hash != source_hash_computed {
-                return Err(Status::internal("source hash mismatch"));
-            }
+        if source_hash != source_hash_computed {
+            return Err(Status::internal("source hash mismatch"));
+        }
 
+        let db = database::connect(paths::get_database_path())
+            .map_err(|_| Status::internal("failed to connect to database"))?;
+
+        let mut source_id = database::find_source(&db, &source_hash, &source_name)
+            .map(|source| source.id)
+            .unwrap_or(0);
+
+        if source_id == 0 {
             database::insert_source(&db, &source_hash, &source_name)
                 .map_err(|e| Status::internal(format!("Failed to insert source: {:?}", e)))?;
 
-            fs::remove_dir_all(package_source_path).await?;
+            source_id = database::find_source(&db, &source_hash, &source_name)
+                .map(|source| source.id)
+                .map_err(|e| Status::internal(format!("Failed to find source: {:?}", e)))?;
         }
 
-        let source_id = database::find_source(&db, &source_hash, &source_name)
-            .map(|source| source.id)
-            .map_err(|e| Status::internal(format!("Failed to find source: {:?}", e.to_string())))?;
+        fs::remove_dir_all(package_source_path).await?;
 
         tx.send(Ok(PrepareResponse {
             source_id,

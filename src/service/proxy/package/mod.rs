@@ -13,7 +13,7 @@ use git2::{Cred, RemoteCallbacks};
 use reqwest;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::fs::{
     copy, create_dir_all, read, remove_dir_all, remove_file, set_permissions, write, File,
@@ -26,21 +26,143 @@ use tokio_tar::Archive;
 use tonic::Status;
 use url::Url;
 
+pub async fn validate_hashes(
+    tx: &Sender<Result<PackageResponse, Status>>,
+    workdir_path: &Path,
+    source: &PackageSource,
+) -> Result<(String, Vec<PathBuf>), anyhow::Error> {
+    let workdir_files = paths::get_file_paths(workdir_path, &source.ignore_paths)?;
+
+    if workdir_files.is_empty() {
+        return Err(anyhow::anyhow!("No source files found"));
+    }
+
+    tx.send(Ok(PackageResponse {
+        package_log: format!("preparing source files: {:?} found", workdir_files.len()),
+    }))
+    .await?;
+
+    let workdir_files_hashes = hashes::get_files(&workdir_files)?;
+    let workdir_hash = hashes::get_source(&workdir_files_hashes)?;
+
+    if workdir_hash.is_empty() {
+        return Err(anyhow::anyhow!("Failed to get source hash"));
+    }
+
+    tx.send(Ok(PackageResponse {
+        package_log: format!("preparing source hash: {}", workdir_hash),
+    }))
+    .await?;
+
+    if let Some(request_hash) = &source.hash {
+        if &workdir_hash != request_hash {
+            let message = format!("Hash mismatch: {} != {}", request_hash, workdir_hash);
+            return Err(anyhow::anyhow!("{}", message));
+        }
+    }
+
+    Ok((workdir_hash, workdir_files))
+}
+
+pub async fn send_source(
+    tx: &Sender<Result<PackageResponse, Status>>,
+    name: &str,
+    source_hash: &str,
+    source_tar_path: &Path,
+) -> Result<(i32, String), anyhow::Error> {
+    tx.send(Ok(PackageResponse {
+        package_log: format!("preparing source tar: {}", source_tar_path.display()),
+    }))
+    .await?;
+
+    let data = read(&source_tar_path).await?;
+
+    let signature = notary::sign(&data).await?;
+
+    tx.send(Ok(PackageResponse {
+        package_log: format!("preparing source tar signature: {}", signature),
+    }))
+    .await?;
+
+    let mut request_chunks = vec![];
+    let request_chunks_size = 8192; // default grpc limit
+
+    for chunk in data.chunks(request_chunks_size) {
+        request_chunks.push(PrepareRequest {
+            source_data: chunk.to_vec(),
+            source_hash: source_hash.to_string(),
+            source_name: name.to_string(),
+            source_signature: signature.to_string(),
+        });
+    }
+
+    tx.send(Ok(PackageResponse {
+        package_log: format!("preparing source chunks: {}", request_chunks.len()),
+    }))
+    .await?;
+
+    let mut client = PackageServiceClient::connect("http://[::1]:23151").await?;
+    let response = client.prepare(tokio_stream::iter(request_chunks)).await?;
+    let mut stream = response.into_inner();
+    let mut source_id = 0;
+
+    while let Some(chunk) = stream.message().await? {
+        tx.send(Ok(PackageResponse {
+            package_log: chunk.source_log.to_string(),
+        }))
+        .await?;
+
+        if chunk.source_id != 0 {
+            source_id = chunk.source_id;
+        }
+    }
+
+    if source_id == 0 {
+        return Err(anyhow::anyhow!("Failed to get source id"));
+    }
+
+    tx.send(Ok(PackageResponse {
+        package_log: format!("source id: {}", source_id).to_string(),
+    }))
+    .await?;
+
+    Ok((source_id, source_hash.to_string()))
+}
+
 pub async fn prepare(
     tx: &Sender<Result<PackageResponse, Status>>,
     name: &str,
     source: &PackageSource,
 ) -> Result<(i32, String), anyhow::Error> {
+    if source.kind == PackageSourceKind::Unknown as i32 {
+        return Err(anyhow::anyhow!("unknown source kind"));
+    }
+
+    let mut source_hash = source.hash.clone().unwrap_or("".to_string());
+
+    if source_hash.is_empty() && source.kind == PackageSourceKind::Local as i32 {
+        let source_path = Path::new(&source.uri).canonicalize()?;
+        let (source_path_hash, _) = validate_hashes(tx, &source_path, source).await?;
+
+        source_hash = source_path_hash;
+    }
+
+    if source_hash.is_empty() {
+        return Err(anyhow::anyhow!("source hash is empty"));
+    }
+
     let workdir = temps::create_dir().await?;
     let workdir_path = workdir.canonicalize()?;
 
-    tx.send(Ok(PackageResponse {
-        package_log: format!("preparing working dir: {:?}", workdir_path),
-    }))
-    .await?;
+    let source_tar_path = paths::get_package_source_tar_path(name, &source_hash);
 
-    if source.kind == PackageSourceKind::Unknown as i32 {
-        return Err(anyhow::anyhow!("unknown source kind"));
+    if source_tar_path.exists() {
+        tx.send(Ok(PackageResponse {
+            package_log: format!("using existing source tar: {:?}", source_tar_path.display()),
+        }))
+        .await?;
+
+        return send_source(tx, name, &source_hash, &source_tar_path).await;
     }
 
     if source.kind == PackageSourceKind::Git as i32 {
@@ -188,100 +310,15 @@ pub async fn prepare(
 
     // At this point, any source URI should be a local file path
 
-    let workdir_files = paths::get_file_paths(&workdir_path, &source.ignore_paths)?;
-
-    if workdir_files.is_empty() {
-        return Err(anyhow::anyhow!("No source files found"));
-    }
-
-    tx.send(Ok(PackageResponse {
-        package_log: format!("preparing source files: {:?} found", workdir_files.len()),
-    }))
-    .await?;
-
-    let workdir_files_hashes = hashes::get_files(&workdir_files)?;
-    let workdir_hash = hashes::get_source(&workdir_files_hashes)?;
-
-    if workdir_hash.is_empty() {
-        return Err(anyhow::anyhow!("Failed to get source hash"));
-    }
-
-    tx.send(Ok(PackageResponse {
-        package_log: format!("preparing source hash: {}", workdir_hash),
-    }))
-    .await?;
-
-    if let Some(request_hash) = &source.hash {
-        if &workdir_hash != request_hash {
-            let message = format!("Hash mismatch: {} != {}", request_hash, workdir_hash);
-            return Err(anyhow::anyhow!("{}", message));
-        }
-    }
-
-    let source_tar = temps::create_file("tar.gz").await?;
-    let source_tar_path = source_tar.canonicalize()?;
+    let (workdir_hash, workdir_files) = validate_hashes(tx, &workdir_path, source).await?;
 
     archives::compress_tar_gz(&workdir_path, &source_tar_path, &workdir_files).await?;
 
-    set_permissions(&source_tar, Permissions::from_mode(0o444)).await?;
-
-    tx.send(Ok(PackageResponse {
-        package_log: format!("preparing source tar: {}", source_tar_path.display()),
-    }))
-    .await?;
+    set_permissions(&source_tar_path, Permissions::from_mode(0o444)).await?;
 
     remove_dir_all(&workdir_path).await?;
 
-    let data = read(&source_tar).await?;
-
-    let signature = notary::sign(&data).await?;
-
-    tx.send(Ok(PackageResponse {
-        package_log: format!("preparing source tar signature: {}", signature),
-    }))
-    .await?;
-
-    let mut request_chunks = vec![];
-    let request_chunks_size = 8192; // default grpc limit
-
-    for chunk in data.chunks(request_chunks_size) {
-        request_chunks.push(PrepareRequest {
-            source_data: chunk.to_vec(),
-            source_hash: workdir_hash.to_string(),
-            source_name: name.to_string(),
-            source_signature: signature.to_string(),
-        });
-    }
-
-    tx.send(Ok(PackageResponse {
-        package_log: format!("preparing source chunks: {}", request_chunks.len()),
-    }))
-    .await?;
-
-    let mut client = PackageServiceClient::connect("http://[::1]:23151").await?;
-    let response = client.prepare(tokio_stream::iter(request_chunks)).await?;
-    let mut stream = response.into_inner();
-    let mut source_id = 0;
-
-    while let Some(chunk) = stream.message().await? {
-        tx.send(Ok(PackageResponse {
-            package_log: chunk.source_log.to_string(),
-        }))
-        .await?;
-
-        if chunk.source_id != 0 {
-            source_id = chunk.source_id;
-        }
-    }
-
-    tx.send(Ok(PackageResponse {
-        package_log: format!("source id: {}", source_id).to_string(),
-    }))
-    .await?;
-
-    remove_file(&source_tar).await?;
-
-    Ok((source_id, workdir_hash.to_string()))
+    send_source(tx, name, &workdir_hash, &source_tar_path).await
 }
 
 pub async fn build(
@@ -360,7 +397,7 @@ pub async fn build(
             let metadata = fs::metadata(&package_tar).await?;
             let mut permissions = metadata.permissions();
 
-            permissions.set_mode(0o444);
+            permissions.set_mode(0o440);
 
             fs::set_permissions(&package_tar, permissions).await?;
         }
@@ -388,7 +425,7 @@ pub async fn build(
     } else {
         let metadata = fs::metadata(&package_tar).await?;
         let mut permissions = metadata.permissions();
-        permissions.set_mode(0o444);
+        permissions.set_mode(0o440);
         fs::set_permissions(&package, permissions).await?;
     }
 
