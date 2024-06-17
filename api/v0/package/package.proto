@@ -3,38 +3,22 @@ syntax = "proto3";
 package vorpal.package.v0;
 
 service PackageService {
-    rpc Prepare (stream PrepareRequest) returns (stream PrepareResponse);
-    rpc Build (BuildRequest) returns (stream BuildResponse);
+    rpc Make (stream PackageMakeRequest) returns (stream PackageMakeResponse);
 }
 
-enum Status {
-    CREATED = 0;
-    COMPLETED = 1;
-    FAILED = 2;
+message PackageMakeSource {
+    bytes data = 1;
+    string hash = 2;
+    string name = 3;
+    string signature = 4;
 }
 
-message PrepareRequest {
-    bytes source_data = 1;
-    string source_hash = 2;
-    string source_name = 3;
-    string source_signature = 4;
+message PackageMakeRequest {
+    PackageMakeSource source = 1;
+    string build_script = 2;
 }
 
-message PrepareResponse {
-    string source_log = 1;
-    int32 source_id = 2;
-}
-
-message BuildRequest {
-    repeated string build_deps = 1;
-    repeated string install_deps = 2;
-    string build_phase = 3;
-    string install_phase = 4;
-    int32 source_id = 5;
-}
-
-message BuildResponse {
-    bool is_archive = 1;
-    bytes package_data = 2;
-    string package_log = 3;
+message PackageMakeResponse {
+    bytes data = 1;
+    string log = 2;
 }

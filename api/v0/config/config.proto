@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package vorpal.config.v0;
+
+service ConfigService {
+    rpc Package (ConfigPackageRequest) returns (stream ConfigPackageResponse);
+}
+
+enum ConfigPackageSourceKind {
+    UNKNOWN = 0;
+    LOCAL = 1;
+    HTTP = 2;
+    GIT = 3;
+}
+
+message ConfigPackageSource {
+    ConfigPackageSourceKind kind = 1;
+    optional string hash = 2;
+    repeated string ignore_paths = 3;
+    string name = 4;
+    string uri = 5;
+}
+
+message ConfigPackageRequest {
+    ConfigPackageSource source = 1;
+    string build_script = 2;
+}
+
+message ConfigPackageResponse {
+    string log = 1;
+}

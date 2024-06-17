@@ -61,8 +61,8 @@ async fn main() -> Result<(), anyhow::Error> {
             Keys::Generate {} => notary::generate_keys().await,
         },
         Command::Services(service) => match service {
-            Services::Build { port } => build::start(*port).await,
             Services::Proxy { port } => proxy::start(*port).await,
+            Services::Build { port } => build::start(*port).await,
         },
     }
 }

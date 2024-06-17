@@ -1,10 +1,9 @@
-use crate::api::command_service_server::CommandServiceServer;
+use crate::api::config_service_server::ConfigServiceServer;
 use crate::notary;
 use crate::store;
 use tonic::transport::Server;
 use tracing::info;
 
-mod package;
 mod service;
 
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {
@@ -17,7 +16,7 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     info!("service listening on: {}", addr);
 
     Server::builder()
-        .add_service(CommandServiceServer::new(service::Proxy::default()))
+        .add_service(ConfigServiceServer::new(service::Proxy::default()))
         .serve(addr)
         .await?;
 

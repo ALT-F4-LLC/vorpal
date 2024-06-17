@@ -22,7 +22,6 @@ process-stream = "0"
 prost = "0"
 rand = "0"
 rsa = { version = "0", features = ["sha2"] }
-rusqlite = { version = "0", features = ["bundled"] }
 sha256 = "1"
 reqwest = { version = "0", features = ["json"] }
 tera = { version = "1", default-features = false }
