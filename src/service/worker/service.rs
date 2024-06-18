@@ -1,7 +1,11 @@
 use crate::api::package_service_server::PackageService;
-use crate::api::{PackageMakeRequest, PackageMakeResponse};
+use crate::api::store_service_server::StoreService;
+use crate::api::{
+    PackageBuildRequest, PackageBuildResponse, PackagePrepareRequest, PackagePrepareResponse,
+    StoreFetchResponse, StorePath, StorePathKind, StorePathResponse,
+};
 use crate::notary;
-use crate::service::build::sandbox_default;
+use crate::service::worker::sandbox_default;
 use crate::store::archives;
 use crate::store::hashes;
 use crate::store::paths;
@@ -15,29 +19,141 @@ use std::convert::TryFrom;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use tera::Tera;
-use tokio::fs::{copy, create_dir, create_dir_all, metadata, read, set_permissions, write, File};
+use tokio::fs::{
+    copy, create_dir, create_dir_all, metadata, read, remove_dir_all, set_permissions, write, File,
+};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
+use tracing::info;
 use walkdir::WalkDir;
 
 #[derive(Debug, Default)]
 pub struct Package {}
 
-#[tonic::async_trait]
-impl PackageService for Package {
-    type MakeStream = ReceiverStream<Result<PackageMakeResponse, Status>>;
+#[derive(Debug, Default)]
+pub struct Store {}
 
-    async fn make(
+#[tonic::async_trait]
+impl StoreService for Store {
+    type FetchStream = ReceiverStream<Result<StoreFetchResponse, Status>>;
+
+    async fn fetch(
         &self,
-        request: Request<Streaming<PackageMakeRequest>>,
-    ) -> Result<Response<Self::MakeStream>, Status> {
+        request: Request<StorePath>,
+    ) -> Result<Response<Self::FetchStream>, Status> {
         let (tx, rx) = mpsc::channel(4);
 
         tokio::spawn(async move {
-            let mut build_script = String::new();
+            let req = request.into_inner();
+
+            let package_chunks_size = 8192;
+
+            if req.kind == StorePathKind::Unknown as i32 {
+                return Err(Status::invalid_argument("invalid store path kind"));
+            }
+
+            if req.kind == StorePathKind::Package as i32 {
+                let package_tar_path = paths::get_package_tar_path(&req.name, &req.hash);
+
+                if !package_tar_path.exists() {
+                    return Err(Status::not_found("package archive not found"));
+                }
+
+                info!("serving package: {}", package_tar_path.display());
+
+                let data = read(&package_tar_path)
+                    .await
+                    .map_err(|_| Status::internal("failed to read cached package"))?;
+
+                for package_chunk in data.chunks(package_chunks_size) {
+                    tx.send(Ok(StoreFetchResponse {
+                        data: package_chunk.to_vec(),
+                    }))
+                    .await
+                    .unwrap();
+                }
+
+                return Ok(());
+            }
+
+            let package_source_tar_path = paths::get_package_source_tar_path(&req.name, &req.hash);
+
+            if !package_source_tar_path.exists() {
+                return Err(Status::not_found("package source tar not found"));
+            }
+
+            info!(
+                "serving package source: {}",
+                package_source_tar_path.display()
+            );
+
+            let data = read(&package_source_tar_path)
+                .await
+                .map_err(|_| Status::internal("failed to read cached package"))?;
+
+            for package_chunk in data.chunks(package_chunks_size) {
+                tx.send(Ok(StoreFetchResponse {
+                    data: package_chunk.to_vec(),
+                }))
+                .await
+                .unwrap();
+            }
+
+            Ok(())
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn path(
+        &self,
+        request: Request<StorePath>,
+    ) -> Result<Response<StorePathResponse>, Status> {
+        let req = request.into_inner();
+
+        if req.kind == StorePathKind::Unknown as i32 {
+            return Err(Status::invalid_argument("invalid store path kind"));
+        }
+
+        if req.kind == StorePathKind::Package as i32 {
+            let package_path = paths::get_package_path(&req.name, &req.hash);
+
+            if !package_path.exists() {
+                return Err(Status::not_found("package archive not found"));
+            }
+
+            return Ok(Response::new(StorePathResponse {
+                uri: package_path.to_string_lossy().to_string(),
+            }));
+        }
+
+        let package_source_tar_path = paths::get_package_source_tar_path(&req.name, &req.hash);
+
+        if !package_source_tar_path.exists() {
+            return Err(Status::not_found("package source tar not found"));
+        }
+
+        Ok(Response::new(StorePathResponse {
+            uri: package_source_tar_path.to_string_lossy().to_string(),
+        }))
+    }
+}
+
+#[tonic::async_trait]
+impl PackageService for Package {
+    type BuildStream = ReceiverStream<Result<PackageBuildResponse, Status>>;
+    type PrepareStream = ReceiverStream<Result<PackagePrepareResponse, Status>>;
+
+    async fn prepare(
+        &self,
+        request: Request<Streaming<PackagePrepareRequest>>,
+    ) -> Result<Response<Self::PrepareStream>, Status> {
+        let (tx, rx) = mpsc::channel(4);
+
+        tokio::spawn(async move {
             let mut source_data: Vec<u8> = Vec::new();
             let mut source_hash = String::new();
             let mut source_name = String::new();
@@ -49,15 +165,11 @@ impl PackageService for Package {
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk.map_err(|e| Status::internal(format!("stream error: {}", e)))?;
 
-                build_script = chunk.build_script;
-
-                if let Some(source) = chunk.source {
-                    source_chunks += 1;
-                    source_data.extend_from_slice(&source.data);
-                    source_hash = source.hash;
-                    source_name = source.name;
-                    source_signature = source.signature;
-                }
+                source_chunks += 1;
+                source_data.extend_from_slice(&chunk.source_data);
+                source_hash = chunk.source_hash;
+                source_name = chunk.source_name;
+                source_signature = chunk.source_signature;
             }
 
             if source_hash.is_empty() {
@@ -72,9 +184,8 @@ impl PackageService for Package {
                 return Err(Status::internal("source signature is empty"));
             }
 
-            tx.send(Ok(PackageMakeResponse {
-                data: Vec::new(),
-                log: format!("source chunks received: {}", source_chunks),
+            tx.send(Ok(PackagePrepareResponse {
+                log_output: format!("package source chunks received: {}", source_chunks),
             }))
             .await
             .unwrap();
@@ -99,9 +210,8 @@ impl PackageService for Package {
                 paths::get_package_source_tar_path(&source_name, &source_hash);
 
             if !package_source_tar_path.exists() {
-                tx.send(Ok(PackageMakeResponse {
-                    data: Vec::new(),
-                    log: format!(
+                tx.send(Ok(PackagePrepareResponse {
+                    log_output: format!(
                         "source tar not found: {}",
                         package_source_tar_path.display()
                     ),
@@ -121,9 +231,8 @@ impl PackageService for Package {
                     permissions.set_mode(0o444);
                     set_permissions(package_source_tar_path.clone(), permissions).await?;
                     let file_name = package_source_tar_path.file_name().unwrap();
-                    tx.send(Ok(PackageMakeResponse {
-                        data: Vec::new(),
-                        log: format!("source tar created: {}", file_name.to_string_lossy()),
+                    tx.send(Ok(PackagePrepareResponse {
+                        log_output: format!("source tar created: {}", file_name.to_string_lossy()),
                     }))
                     .await
                     .unwrap();
@@ -148,9 +257,8 @@ impl PackageService for Package {
             let temp_file_paths = paths::get_file_paths(&temp_source_path, &Vec::<&str>::new())
                 .map_err(|e| Status::internal(format!("failed to get source files: {:?}", e)))?;
 
-            tx.send(Ok(PackageMakeResponse {
-                data: Vec::new(),
-                log: format!("source files: {:?}", temp_file_paths.len()),
+            tx.send(Ok(PackagePrepareResponse {
+                log_output: format!("source files: {:?}", temp_file_paths.len()),
             }))
             .await
             .unwrap();
@@ -162,16 +270,14 @@ impl PackageService for Package {
             let temp_hash_computed = hashes::get_source(&temp_files_hashes)
                 .map_err(|e| Status::internal(format!("failed to get source hash: {:?}", e)))?;
 
-            tx.send(Ok(PackageMakeResponse {
-                data: Vec::new(),
-                log: format!("source hash: {}", source_hash),
+            tx.send(Ok(PackagePrepareResponse {
+                log_output: format!("source hash: {}", source_hash),
             }))
             .await
             .unwrap();
 
-            tx.send(Ok(PackageMakeResponse {
-                data: Vec::new(),
-                log: format!("source hash expected: {}", temp_hash_computed),
+            tx.send(Ok(PackagePrepareResponse {
+                log_output: format!("source hash expected: {}", temp_hash_computed),
             }))
             .await
             .unwrap();
@@ -180,51 +286,48 @@ impl PackageService for Package {
                 return Err(Status::internal("source hash mismatch"));
             }
 
-            // remove_dir_all(temp_source_path).await?;
+            remove_dir_all(temp_source_path).await?;
 
-            // at this point we are done preparing source files
+            Ok(())
+        });
 
-            let package_tar_path = paths::get_package_tar_path(&source_name, &source_hash);
-            let package_chunks_size = 8192; // default grpc limit
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
 
-            if package_tar_path.exists() {
-                tx.send(Ok(PackageMakeResponse {
-                    data: vec![],
-                    log: format!("using cached package: {}", package_tar_path.display()),
-                }))
-                .await
-                .unwrap();
+    async fn build(
+        &self,
+        request: Request<PackageBuildRequest>,
+    ) -> Result<Response<Self::BuildStream>, Status> {
+        let (tx, rx) = mpsc::channel(4);
 
-                let data = read(&package_tar_path)
-                    .await
-                    .map_err(|_| Status::internal("failed to read cached package"))?;
+        tokio::spawn(async move {
+            let req = request.into_inner();
 
-                for package_chunk in data.chunks(package_chunks_size) {
-                    tx.send(Ok(PackageMakeResponse {
-                        data: package_chunk.to_vec(),
-                        log: "".to_string(),
-                    }))
-                    .await
-                    .unwrap();
-                }
+            let package_source_tar_path =
+                paths::get_package_source_tar_path(&req.source_name, &req.source_hash);
 
-                return Ok(());
+            if !package_source_tar_path.exists() {
+                return Err(Status::internal(
+                    "package source tar not found - must be prepared first",
+                ));
             }
 
-            tx.send(Ok(PackageMakeResponse {
-                data: vec![],
-                log: format!("building source: {}", package_source_tar_path.display()),
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!(
+                    "package source building: {}",
+                    package_source_tar_path.display()
+                ),
             }))
             .await
             .unwrap();
 
-            let temp_build_dir = temps::create_dir()
+            let package_build_path = temps::create_dir()
                 .await
                 .map_err(|_| Status::internal("failed to create temp dir"))?;
-            let temp_build_path = temp_build_dir.canonicalize()?;
+            let package_build_path = package_build_path.canonicalize()?;
 
             if let Err(err) =
-                archives::unpack_tar_gz(&temp_build_path, &package_source_tar_path).await
+                archives::unpack_tar_gz(&package_build_path, &package_source_tar_path).await
             {
                 return Err(Status::internal(format!(
                     "failed to unpack source tar: {:?}",
@@ -232,13 +335,14 @@ impl PackageService for Package {
                 )));
             }
 
-            let build_vorpal_dir = temp_build_path.join(".vorpal");
+            let build_vorpal_dir = package_build_path.join(".vorpal");
 
             create_dir(&build_vorpal_dir)
                 .await
                 .map_err(|_| Status::internal("failed to create vorpal temp dir"))?;
 
-            let build_phase_steps = build_script
+            let build_phase_steps = req
+                .build_script
                 .trim()
                 .split('\n')
                 .map(|line| line.trim())
@@ -255,9 +359,8 @@ impl PackageService for Package {
 
             let automation_script_data = automation_script.join("\n");
 
-            tx.send(Ok(PackageMakeResponse {
-                data: vec![],
-                log: format!("build script: {}", automation_script_data),
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!("package build script: {}", automation_script_data),
             }))
             .await
             .unwrap();
@@ -287,7 +390,7 @@ impl PackageService for Package {
                 .unwrap();
 
             let mut context = tera::Context::new();
-            context.insert("tmpdir", temp_build_path.to_str().unwrap());
+            context.insert("tmpdir", package_build_path.to_str().unwrap());
             let sandbox_profile = tera.render("sandbox_default", &context).unwrap();
 
             write(&sandbox_profile_path, sandbox_profile)
@@ -308,9 +411,8 @@ impl PackageService for Package {
                 sandbox_build_script_path.to_str().unwrap(),
             ];
 
-            tx.send(Ok(PackageMakeResponse {
-                data: vec![],
-                log: format!("sandbox command args: {:?}", sandbox_command_args),
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!("package sandbox args: {:?}", sandbox_command_args),
             }))
             .await
             .unwrap();
@@ -321,25 +423,23 @@ impl PackageService for Package {
                 .await
                 .map_err(|_| Status::internal("failed to create sandbox output dir"))?;
 
-            tx.send(Ok(PackageMakeResponse {
-                data: vec![],
-                log: format!("sandbox output path: {}", sandbox_output_path.display()),
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!("package sandbox log: {}", sandbox_output_path.display()),
             }))
             .await
             .unwrap();
 
             let mut sandbox_command = Process::new("/usr/bin/sandbox-exec");
             sandbox_command.args(sandbox_command_args);
-            sandbox_command.current_dir(&temp_build_path);
+            sandbox_command.current_dir(&package_build_path);
             // sandbox_command.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
             sandbox_command.env("OUTPUT", sandbox_output_path.to_str().unwrap());
 
             let mut stream = sandbox_command.spawn_and_stream()?;
 
             while let Some(output) = stream.next().await {
-                tx.send(Ok(PackageMakeResponse {
-                    data: vec![],
-                    log: format!("sandbox response: {}", output),
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!("package sandbox response: {}", output),
                 }))
                 .await
                 .unwrap();
@@ -353,7 +453,7 @@ impl PackageService for Package {
                 return Err(Status::internal("sandbox output is empty"));
             }
 
-            let package_path = paths::get_package_path(&source_name, &source_hash);
+            let package_path = paths::get_package_path(&req.source_name, &req.source_hash);
 
             for entry in WalkDir::new(&sandbox_output_path) {
                 let entry = entry.map_err(|e| {
@@ -374,7 +474,9 @@ impl PackageService for Package {
                 }
             }
 
-            // fs::remove_dir_all(&temp_build_path).await?;
+            remove_dir_all(&package_build_path).await?;
+
+            let package_tar_path = paths::get_package_tar_path(&req.source_name, &req.source_hash);
 
             let package_files = paths::get_file_paths(&package_path, &Vec::<&str>::new())
                 .map_err(|_| Status::internal("failed to get sandbox output files"))?;
@@ -388,23 +490,11 @@ impl PackageService for Package {
                 )));
             }
 
-            tx.send(Ok(PackageMakeResponse {
-                data: vec![],
-                log: format!("build completed: {}", package_tar_path.display()),
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!("package tar created: {}", package_tar_path.display()),
             }))
             .await
             .unwrap();
-
-            let data = read(&package_tar_path).await?;
-
-            for package_chunk in data.chunks(package_chunks_size) {
-                tx.send(Ok(PackageMakeResponse {
-                    data: package_chunk.to_vec(),
-                    log: "".to_string(),
-                }))
-                .await
-                .unwrap();
-            }
 
             Ok(())
         });

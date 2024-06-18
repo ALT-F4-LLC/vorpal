@@ -3,22 +3,28 @@ syntax = "proto3";
 package vorpal.package.v0;
 
 service PackageService {
-    rpc Make (stream PackageMakeRequest) returns (stream PackageMakeResponse);
+    rpc Prepare (stream PackagePrepareRequest) returns (stream PackagePrepareResponse);
+    rpc Build (PackageBuildRequest) returns (stream PackageBuildResponse);
 }
 
-message PackageMakeSource {
-    bytes data = 1;
-    string hash = 2;
-    string name = 3;
-    string signature = 4;
+message PackagePrepareRequest {
+    bytes source_data = 1;
+    string source_hash = 2;
+    string source_name = 3;
+    string source_signature = 4;
 }
 
-message PackageMakeRequest {
-    PackageMakeSource source = 1;
+message PackagePrepareResponse {
+    string log_output = 2;
+}
+
+message PackageBuildRequest {
+    repeated string build_packages = 1;
     string build_script = 2;
+    string source_hash = 3;
+    string source_name = 4;
 }
 
-message PackageMakeResponse {
-    bytes data = 1;
-    string log = 2;
+message PackageBuildResponse {
+    string log_output = 2;
 }

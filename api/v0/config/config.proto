@@ -4,6 +4,7 @@ package vorpal.config.v0;
 
 service ConfigService {
     rpc Package (ConfigPackageRequest) returns (stream ConfigPackageResponse);
+    // rpc Secret (ConfigSecretRequest) returns (stream ConfigSecretResponse);
 }
 
 enum ConfigPackageSourceKind {
@@ -13,19 +14,24 @@ enum ConfigPackageSourceKind {
     GIT = 3;
 }
 
+message ConfigPackageBuild {
+    repeated string packages = 1;
+    string script = 2;
+}
+
 message ConfigPackageSource {
     ConfigPackageSourceKind kind = 1;
     optional string hash = 2;
     repeated string ignore_paths = 3;
-    string name = 4;
-    string uri = 5;
+    string uri = 4;
 }
 
 message ConfigPackageRequest {
-    ConfigPackageSource source = 1;
-    string build_script = 2;
+    ConfigPackageBuild build = 1;
+    ConfigPackageSource source = 2;
+    string name = 3;
 }
 
 message ConfigPackageResponse {
-    string log = 1;
+    string log_output = 1;
 }

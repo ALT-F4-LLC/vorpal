@@ -1,2 +1,2 @@
-pub mod build;
-pub mod proxy;
+pub mod agent;
+pub mod worker;
