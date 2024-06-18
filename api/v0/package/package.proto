@@ -24,10 +24,11 @@ message PrepareBuildPackage {
 }
 
 message PackageBuildRequest {
-    repeated PrepareBuildPackage build_packages = 1;
-    string build_script = 2;
-    string source_hash = 3;
-    string source_name = 4;
+    map<string, string> build_environment = 1;
+    repeated PrepareBuildPackage build_packages = 2;
+    string build_script = 3;
+    string source_hash = 4;
+    string source_name = 5;
 }
 
 message PackageBuildResponse {

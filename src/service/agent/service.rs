@@ -237,8 +237,18 @@ impl ConfigService for Agent {
                         .await
                         .map_err(|e| Status::internal(e.to_string()))?;
 
+                    let mut build_packages = vec![];
+
+                    for output in build.packages.clone().into_iter() {
+                        build_packages.push(PrepareBuildPackage {
+                            hash: output.hash.to_string(),
+                            name: output.name.to_string(),
+                        });
+                    }
+
                     let worker_package_request = PackageBuildRequest {
-                        build_packages: vec![],
+                        build_environment: build.environment.clone(),
+                        build_packages,
                         build_script: build.script.to_string(),
                         source_name: config.name.clone(),
                         source_hash: source_hash.clone(),
@@ -459,6 +469,7 @@ async fn stream_build(
     }
 
     let worker_package_request = PackageBuildRequest {
+        build_environment: build.environment.clone(),
         build_packages,
         build_script: build.script.to_string(),
         source_name: name.to_string(),

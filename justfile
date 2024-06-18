@@ -18,6 +18,10 @@ clean:
     rm -rf $HOME/.vorpal
     rm -rf vorpal
 
+# clean store cache
+clean-cache:
+    rm -rf $HOME/.vorpal/store
+
 # format code (cargo & nix)
 format:
     cargo fmt --check --package vorpal --verbose

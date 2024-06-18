@@ -20,8 +20,9 @@ message ConfigPackageOutput {
 }
 
 message ConfigPackageBuild {
-    repeated ConfigPackageOutput packages = 1;
-    string script = 2;
+    map<string, string> environment = 1;
+    repeated ConfigPackageOutput packages = 2;
+    string script = 3;
 }
 
 message ConfigPackageSource {

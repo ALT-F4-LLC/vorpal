@@ -425,12 +425,21 @@ impl PackageService for Package {
                 .map_err(|_| Status::internal("failed to create sandbox output dir"))?;
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("package sandbox log: {}", sandbox_output_path.display()),
+                log_output: format!(
+                    "package sandbox output path: {}",
+                    sandbox_output_path.display()
+                ),
             }))
             .await
             .unwrap();
 
-            let mut sandbox_paths = vec![];
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!("sandbox build packages: {:?}", req.build_packages),
+            }))
+            .await
+            .unwrap();
+
+            let mut sandbox_store_paths = vec![];
 
             for path in req.build_packages {
                 let build_package = paths::get_package_path(&path.name, &path.hash);
@@ -441,14 +450,30 @@ impl PackageService for Package {
 
                 let package_bin_path = build_package.join("bin").canonicalize()?;
 
-                sandbox_paths.push(package_bin_path.display().to_string());
+                sandbox_store_paths.push(package_bin_path.display().to_string());
             }
+
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!("sandbox store paths: {:?}", sandbox_store_paths),
+            }))
+            .await
+            .unwrap();
 
             let mut sandbox_command = Process::new("/usr/bin/sandbox-exec");
             sandbox_command.args(sandbox_command_args);
             sandbox_command.current_dir(&package_build_path);
-            sandbox_command.env("PATH", sandbox_paths.join(":"));
+            sandbox_command.env("PATH", sandbox_store_paths.join(":"));
             sandbox_command.env("OUTPUT", sandbox_output_path.to_str().unwrap());
+
+            for (key, value) in req.build_environment.clone() {
+                sandbox_command.env(key, value);
+            }
+
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!("package sandbox environment: {:?}", req.build_environment),
+            }))
+            .await
+            .unwrap();
 
             let mut stream = sandbox_command.spawn_and_stream()?;
 
