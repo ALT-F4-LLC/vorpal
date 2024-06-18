@@ -14,8 +14,13 @@ enum ConfigPackageSourceKind {
     GIT = 3;
 }
 
+message ConfigPackageOutput {
+    string name = 1;
+    string hash = 2;
+}
+
 message ConfigPackageBuild {
-    repeated string packages = 1;
+    repeated ConfigPackageOutput packages = 1;
     string script = 2;
 }
 
@@ -33,5 +38,6 @@ message ConfigPackageRequest {
 }
 
 message ConfigPackageResponse {
-    string log_output = 1;
+    optional ConfigPackageOutput package_output = 1;
+    string log_output = 2;
 }

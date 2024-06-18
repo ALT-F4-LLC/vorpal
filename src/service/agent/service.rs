@@ -2,8 +2,9 @@ use crate::api::config_service_server::ConfigService;
 use crate::api::package_service_client::PackageServiceClient;
 use crate::api::store_service_client::StoreServiceClient;
 use crate::api::{
-    ConfigPackageBuild, ConfigPackageRequest, ConfigPackageResponse, ConfigPackageSource,
-    ConfigPackageSourceKind, PackageBuildRequest, PackagePrepareRequest, StorePath, StorePathKind,
+    ConfigPackageBuild, ConfigPackageOutput, ConfigPackageRequest, ConfigPackageResponse,
+    ConfigPackageSource, ConfigPackageSourceKind, PackageBuildRequest, PackagePrepareRequest,
+    PrepareBuildPackage, StorePath, StorePathKind,
 };
 use crate::notary;
 use crate::store::archives;
@@ -25,7 +26,7 @@ use tokio_stream;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
 use tonic::{Request, Response, Status};
-use tracing::error;
+use tracing::warn;
 use url::Url;
 
 #[derive(Debug, Default)]
@@ -46,6 +47,7 @@ impl ConfigService for Agent {
 
             tx.send(Ok(ConfigPackageResponse {
                 log_output: format!("package name: {}", config.name),
+                package_output: None,
             }))
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -76,6 +78,7 @@ impl ConfigService for Agent {
                     .map_err(|e| Status::internal(e.to_string()))?;
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package source hash: {}", hash),
+                    package_output: None,
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -93,6 +96,10 @@ impl ConfigService for Agent {
             if package_path.exists() {
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package already unpacked: {}", package_path.display()),
+                    package_output: Some(ConfigPackageOutput {
+                        hash: source_hash.clone(),
+                        name: config.name.clone(),
+                    }),
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -106,6 +113,7 @@ impl ConfigService for Agent {
             if package_tar_path.exists() {
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package tar (cached): {}", package_tar_path.display()),
+                    package_output: None,
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -121,6 +129,10 @@ impl ConfigService for Agent {
                         "package tar (cached) unpacked: {}",
                         package_path.display()
                     ),
+                    package_output: Some(ConfigPackageOutput {
+                        hash: source_hash.clone(),
+                        name: config.name.clone(),
+                    }),
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -145,6 +157,7 @@ impl ConfigService for Agent {
 
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package tar cache available: {}", store_path.uri),
+                    package_output: None,
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -174,6 +187,7 @@ impl ConfigService for Agent {
 
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package tar downloaded: {}", package_tar_path.display()),
+                    package_output: None,
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -188,6 +202,10 @@ impl ConfigService for Agent {
 
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package tar unpacked: {}", package_path.display()),
+                    package_output: Some(ConfigPackageOutput {
+                        hash: source_hash.clone(),
+                        name: config.name.clone(),
+                    }),
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -204,12 +222,13 @@ impl ConfigService for Agent {
             };
 
             match worker_store.path(worker_package_source_path.clone()).await {
-                Err(e) => error!("worker store path error: {}", e),
+                Err(e) => warn!("worker store path error: {}", e),
                 Ok(response) => {
                     let path_response = response.into_inner();
 
                     tx.send(Ok(ConfigPackageResponse {
                         log_output: format!("package source cache prepared: {}", path_response.uri),
+                        package_output: None,
                     }))
                     .await
                     .map_err(|e| Status::internal(e.to_string()))?;
@@ -232,6 +251,7 @@ impl ConfigService for Agent {
                         if !chunk.log_output.is_empty() {
                             tx.send(Ok(ConfigPackageResponse {
                                 log_output: chunk.log_output.to_string(),
+                                package_output: None,
                             }))
                             .await
                             .map_err(|e| Status::internal(e.to_string()))?;
@@ -259,6 +279,7 @@ impl ConfigService for Agent {
                                 "package tar (downloaded): {}",
                                 package_tar_path.display()
                             ),
+                            package_output: None,
                         }))
                         .await
                         .map_err(|e| Status::internal(e.to_string()))?;
@@ -274,6 +295,10 @@ impl ConfigService for Agent {
 
                     tx.send(Ok(ConfigPackageResponse {
                         log_output: format!("package tar unpacked: {}", package_path.display()),
+                        package_output: Some(ConfigPackageOutput {
+                            hash: source_hash.clone(),
+                            name: config.name.clone(),
+                        }),
                     }))
                     .await
                     .map_err(|e| Status::internal(e.to_string()))?;
@@ -291,6 +316,7 @@ impl ConfigService for Agent {
                         "package source tar exists: {}",
                         package_source_tar_path.display()
                     ),
+                    package_output: None,
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -341,6 +367,7 @@ async fn validate_source(
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!("package source files: {:?} found", workdir_files.len()),
+        package_output: None,
     }))
     .await?;
 
@@ -353,6 +380,7 @@ async fn validate_source(
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!("package source hash computed: {}", workdir_hash),
+        package_output: None,
     }))
     .await?;
 
@@ -375,6 +403,7 @@ async fn stream_build(
 ) -> Result<(), anyhow::Error> {
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!("package source tar: {}", source_tar_path.display()),
+        package_output: None,
     }))
     .await?;
 
@@ -384,6 +413,7 @@ async fn stream_build(
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!("package source tar signature: {}", signature),
+        package_output: None,
     }))
     .await?;
 
@@ -401,6 +431,7 @@ async fn stream_build(
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!("package source chunks send: {}", request_chunks.len()),
+        package_output: None,
     }))
     .await?;
 
@@ -412,13 +443,23 @@ async fn stream_build(
         if !chunk.log_output.is_empty() {
             tx.send(Ok(ConfigPackageResponse {
                 log_output: chunk.log_output.to_string(),
+                package_output: None,
             }))
             .await?;
         }
     }
 
+    let mut build_packages = vec![];
+
+    for output in build.packages.clone().into_iter() {
+        build_packages.push(PrepareBuildPackage {
+            hash: output.hash.to_string(),
+            name: output.name.to_string(),
+        });
+    }
+
     let worker_package_request = PackageBuildRequest {
-        build_packages: vec![],
+        build_packages,
         build_script: build.script.to_string(),
         source_name: name.to_string(),
         source_hash: source_hash.to_string(),
@@ -435,6 +476,7 @@ async fn stream_build(
         if !chunk.log_output.is_empty() {
             tx.send(Ok(ConfigPackageResponse {
                 log_output: chunk.log_output.to_string(),
+                package_output: None,
             }))
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -470,6 +512,7 @@ async fn stream_build(
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!("package tar (downloaded): {}", package_tar_path.display()),
+        package_output: None,
     }))
     .await?;
 
@@ -480,7 +523,11 @@ async fn stream_build(
     archives::unpack_tar_gz(&package_path, &package_tar_path).await?;
 
     tx.send(Ok(ConfigPackageResponse {
-        log_output: format!("package dir: {}", package_path.display()),
+        log_output: format!("package tar unpacked: {}", package_path.display()),
+        package_output: Some(ConfigPackageOutput {
+            hash: source_hash.to_string(),
+            name: name.to_string(),
+        }),
     }))
     .await?;
 
@@ -526,6 +573,7 @@ async fn package(
     if source.kind == ConfigPackageSourceKind::Http as i32 {
         tx.send(Ok(ConfigPackageResponse {
             log_output: format!("preparing download source: {:?}", &source.uri),
+            package_output: None,
         }))
         .await?;
 
@@ -541,6 +589,7 @@ async fn package(
         if let Some(kind) = infer::get(response_bytes) {
             tx.send(Ok(ConfigPackageResponse {
                 log_output: format!("preparing download source kind: {:?}", kind),
+                package_output: None,
             }))
             .await?;
 
@@ -551,6 +600,7 @@ async fn package(
                 remove_file(&temp_file).await?;
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("preparing download gzip source: {:?}", workdir_path),
+                    package_output: None,
                 }))
                 .await?;
             } else if let "application/x-bzip2" = kind.mime_type() {
@@ -559,6 +609,7 @@ async fn package(
                 archive.unpack(&workdir_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("preparing bzip2 source: {:?}", workdir_path),
+                    package_output: None,
                 }))
                 .await?;
             } else {
@@ -567,6 +618,7 @@ async fn package(
                 write(&file, response_bytes).await?;
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("preparing source file: {:?}", file),
+                    package_output: None,
                 }))
                 .await?;
             }
@@ -578,18 +630,21 @@ async fn package(
 
         tx.send(Ok(ConfigPackageResponse {
             log_output: format!("preparing source path: {:?}", source_path),
+            package_output: None,
         }))
         .await?;
 
         if let Ok(Some(source_kind)) = infer::get_from_path(&source_path) {
             tx.send(Ok(ConfigPackageResponse {
                 log_output: format!("preparing source kind: {:?}", source_kind),
+                package_output: None,
             }))
             .await?;
 
             if source_kind.mime_type() == "application/gzip" {
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("preparing packed source: {:?}", workdir),
+                    package_output: None,
                 }))
                 .await?;
 
@@ -606,6 +661,7 @@ async fn package(
                     source_path.display(),
                     dest.display()
                 ),
+                package_output: None,
             }))
             .await?;
         }
@@ -634,6 +690,7 @@ async fn package(
                         source_path.display(),
                         dest.display()
                     ),
+                    package_output: None,
                 }))
                 .await?;
             }

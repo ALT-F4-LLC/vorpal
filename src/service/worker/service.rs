@@ -352,6 +352,7 @@ impl PackageService for Package {
             let automation_script = [
                 "#!/bin/bash",
                 "set -e pipefail",
+                "echo \"PATH: $PATH\"",
                 "echo \"Starting build script\"",
                 &build_phase_steps,
                 "echo \"Finished build script\"",
@@ -429,17 +430,31 @@ impl PackageService for Package {
             .await
             .unwrap();
 
+            let mut sandbox_paths = vec![];
+
+            for path in req.build_packages {
+                let build_package = paths::get_package_path(&path.name, &path.hash);
+
+                if !build_package.exists() {
+                    return Err(Status::internal("build package not found"));
+                }
+
+                let package_bin_path = build_package.join("bin").canonicalize()?;
+
+                sandbox_paths.push(package_bin_path.display().to_string());
+            }
+
             let mut sandbox_command = Process::new("/usr/bin/sandbox-exec");
             sandbox_command.args(sandbox_command_args);
             sandbox_command.current_dir(&package_build_path);
-            // sandbox_command.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+            sandbox_command.env("PATH", sandbox_paths.join(":"));
             sandbox_command.env("OUTPUT", sandbox_output_path.to_str().unwrap());
 
             let mut stream = sandbox_command.spawn_and_stream()?;
 
             while let Some(output) = stream.next().await {
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("package sandbox response: {}", output),
+                    log_output: format!("package sandbox log: {}", output),
                 }))
                 .await
                 .unwrap();

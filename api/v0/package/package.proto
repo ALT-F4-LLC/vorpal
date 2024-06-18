@@ -18,8 +18,13 @@ message PackagePrepareResponse {
     string log_output = 2;
 }
 
+message PrepareBuildPackage {
+    string hash = 1;
+    string name = 2;
+}
+
 message PackageBuildRequest {
-    repeated string build_packages = 1;
+    repeated PrepareBuildPackage build_packages = 1;
     string build_script = 2;
     string source_hash = 3;
     string source_name = 4;
