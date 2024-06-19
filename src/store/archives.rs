@@ -4,9 +4,8 @@ use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
-use tokio_tar::Archive;
+use tokio_tar::ArchiveBuilder;
 use tokio_tar::Builder;
-use tracing::info;
 
 pub async fn compress_tar_gz(
     source: &PathBuf,
@@ -23,8 +22,6 @@ pub async fn compress_tar_gz(
         }
 
         let relative_path = path.strip_prefix(source)?;
-
-        info!("packing: {:?}", relative_path);
 
         if path.is_file() {
             tar_builder
@@ -45,7 +42,10 @@ pub async fn unpack_tar_gz(target_dir: &PathBuf, source_tar: &Path) -> Result<()
     let tar_gz = File::open(source_tar).await?;
     let buf_reader = BufReader::new(tar_gz);
     let gz_decoder = GzipDecoder::new(buf_reader);
-    let mut archive = Archive::new(gz_decoder);
+    let archive_builder = ArchiveBuilder::new(gz_decoder)
+        .set_preserve_permissions(true)
+        .set_ignore_zeros(true);
+    let mut archive = archive_builder.build();
 
     Ok(archive.unpack(target_dir).await?)
 }

@@ -20,9 +20,10 @@ message ConfigPackageOutput {
 }
 
 message ConfigPackageBuild {
-    map<string, string> environment = 1;
-    repeated ConfigPackageOutput packages = 2;
-    string script = 3;
+    bool sandbox = 1;
+    map<string, string> environment = 2;
+    repeated ConfigPackageOutput packages = 3;
+    string script = 4;
 }
 
 message ConfigPackageSource {

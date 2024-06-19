@@ -8,5 +8,5 @@ pub const SANDBOX_DEFAULT: &str = r#"
 (allow process-fork)
 
 ; Global denies
-(deny network*)
+; (deny network*)
 "#;

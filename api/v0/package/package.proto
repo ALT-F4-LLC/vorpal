@@ -15,7 +15,7 @@ message PackagePrepareRequest {
 }
 
 message PackagePrepareResponse {
-    string log_output = 2;
+    string log_output = 1;
 }
 
 message PrepareBuildPackage {
@@ -24,13 +24,14 @@ message PrepareBuildPackage {
 }
 
 message PackageBuildRequest {
-    map<string, string> build_environment = 1;
-    repeated PrepareBuildPackage build_packages = 2;
-    string build_script = 3;
-    string source_hash = 4;
-    string source_name = 5;
+    bool build_sandbox = 1;
+    map<string, string> build_environment = 2;
+    repeated PrepareBuildPackage build_packages = 3;
+    string build_script = 4;
+    string source_hash = 5;
+    string source_name = 6;
 }
 
 message PackageBuildResponse {
-    string log_output = 2;
+    string log_output = 1;
 }

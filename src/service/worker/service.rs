@@ -15,6 +15,7 @@ use process_stream::{Process, ProcessExt};
 use rsa::pss::{Signature, VerifyingKey};
 use rsa::sha2::Sha256;
 use rsa::signature::Verifier;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -283,7 +284,7 @@ impl PackageService for Package {
             .unwrap();
 
             if source_hash != temp_hash_computed {
-                return Err(Status::internal("source hash mismatch"));
+                return Err(Status::internal("package source hash mismatch"));
             }
 
             remove_dir_all(temp_source_path).await?;
@@ -433,13 +434,14 @@ impl PackageService for Package {
             .await
             .unwrap();
 
+            let mut sandbox_environment = HashMap::new();
+            let mut sandbox_store_paths = vec![];
+
             tx.send(Ok(PackageBuildResponse {
                 log_output: format!("sandbox build packages: {:?}", req.build_packages),
             }))
             .await
             .unwrap();
-
-            let mut sandbox_store_paths = vec![];
 
             for path in req.build_packages {
                 let build_package = paths::get_package_path(&path.name, &path.hash);
@@ -448,9 +450,17 @@ impl PackageService for Package {
                     return Err(Status::internal("build package not found"));
                 }
 
-                let package_bin_path = build_package.join("bin").canonicalize()?;
+                let package_bin_path = build_package.join("bin");
 
-                sandbox_store_paths.push(package_bin_path.display().to_string());
+                if package_bin_path.exists() {
+                    sandbox_store_paths
+                        .push(package_bin_path.canonicalize()?.display().to_string());
+                }
+
+                sandbox_environment.insert(
+                    format!("{}", path.name.replace("-", "_")),
+                    build_package.canonicalize()?.display().to_string(),
+                );
             }
 
             tx.send(Ok(PackageBuildResponse {
@@ -459,21 +469,40 @@ impl PackageService for Package {
             .await
             .unwrap();
 
-            let mut sandbox_command = Process::new("/usr/bin/sandbox-exec");
-            sandbox_command.args(sandbox_command_args);
-            sandbox_command.current_dir(&package_build_path);
-            sandbox_command.env("PATH", sandbox_store_paths.join(":"));
-            sandbox_command.env("OUTPUT", sandbox_output_path.to_str().unwrap());
-
-            for (key, value) in req.build_environment.clone() {
-                sandbox_command.env(key, value);
+            if !req.build_sandbox {
+                sandbox_environment.insert(
+                    "PATH".to_string(),
+                    format!("{}:$PATH", sandbox_store_paths.join(":").to_string()),
+                );
+            } else {
+                sandbox_environment.insert(
+                    "PATH".to_string(),
+                    format!("{}", sandbox_store_paths.join(":").to_string()),
+                );
             }
 
+            for (key, value) in req.build_environment.clone() {
+                sandbox_environment.insert(key, value);
+            }
+
+            sandbox_environment.insert(
+                "output".to_string(),
+                sandbox_output_path.canonicalize()?.display().to_string(),
+            );
+
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("package sandbox environment: {:?}", req.build_environment),
+                log_output: format!("package sandbox environment: {:?}", sandbox_environment),
             }))
             .await
             .unwrap();
+
+            let mut sandbox_command = Process::new("/usr/bin/sandbox-exec");
+            sandbox_command.args(sandbox_command_args);
+            sandbox_command.current_dir(&package_build_path);
+
+            for (key, value) in sandbox_environment {
+                sandbox_command.env(key, value);
+            }
 
             let mut stream = sandbox_command.spawn_and_stream()?;
 
@@ -483,6 +512,15 @@ impl PackageService for Package {
                 }))
                 .await
                 .unwrap();
+            }
+
+            if let Err(err) = sandbox_command.status().await {
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!("sandbox command failed: {:?}", err),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+                return Err(Status::internal("sandbox command failed"));
             }
 
             let sandbox_output_files =

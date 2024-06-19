@@ -12,13 +12,13 @@ use crate::store::hashes;
 use crate::store::paths;
 use crate::store::temps;
 use anyhow::Result;
-use async_compression::tokio::bufread::BzDecoder;
+use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use git2::build::RepoBuilder;
 use git2::{Cred, RemoteCallbacks};
 use reqwest;
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use tokio::fs::{copy, create_dir_all, read, remove_dir_all, remove_file, write, File};
+use tokio::fs::{copy, create_dir_all, read, remove_dir_all, write, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
@@ -78,7 +78,10 @@ impl ConfigService for Agent {
                     .map_err(|e| Status::internal(e.to_string()))?;
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package source hash: {}", hash),
-                    package_output: None,
+                    package_output: Some(ConfigPackageOutput {
+                        hash: hash.clone(),
+                        name: config.name.clone(),
+                    }),
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -103,6 +106,7 @@ impl ConfigService for Agent {
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
+
                 return Ok(());
             }
 
@@ -113,7 +117,10 @@ impl ConfigService for Agent {
             if package_tar_path.exists() {
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package tar (cached): {}", package_tar_path.display()),
-                    package_output: None,
+                    package_output: Some(ConfigPackageOutput {
+                        hash: source_hash.clone(),
+                        name: config.name.clone(),
+                    }),
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -157,7 +164,10 @@ impl ConfigService for Agent {
 
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package tar cache available: {}", store_path.uri),
-                    package_output: None,
+                    package_output: Some(ConfigPackageOutput {
+                        hash: source_hash.clone(),
+                        name: config.name.clone(),
+                    }),
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -187,7 +197,10 @@ impl ConfigService for Agent {
 
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("package tar downloaded: {}", package_tar_path.display()),
-                    package_output: None,
+                    package_output: Some(ConfigPackageOutput {
+                        hash: source_hash.clone(),
+                        name: config.name.clone(),
+                    }),
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -228,7 +241,10 @@ impl ConfigService for Agent {
 
                     tx.send(Ok(ConfigPackageResponse {
                         log_output: format!("package source cache prepared: {}", path_response.uri),
-                        package_output: None,
+                        package_output: Some(ConfigPackageOutput {
+                            hash: source_hash.clone(),
+                            name: config.name.clone(),
+                        }),
                     }))
                     .await
                     .map_err(|e| Status::internal(e.to_string()))?;
@@ -248,6 +264,7 @@ impl ConfigService for Agent {
 
                     let worker_package_request = PackageBuildRequest {
                         build_environment: build.environment.clone(),
+                        build_sandbox: build.sandbox.clone(),
                         build_packages,
                         build_script: build.script.to_string(),
                         source_name: config.name.clone(),
@@ -261,7 +278,10 @@ impl ConfigService for Agent {
                         if !chunk.log_output.is_empty() {
                             tx.send(Ok(ConfigPackageResponse {
                                 log_output: chunk.log_output.to_string(),
-                                package_output: None,
+                                package_output: Some(ConfigPackageOutput {
+                                    hash: source_hash.clone(),
+                                    name: config.name.clone(),
+                                }),
                             }))
                             .await
                             .map_err(|e| Status::internal(e.to_string()))?;
@@ -289,7 +309,10 @@ impl ConfigService for Agent {
                                 "package tar (downloaded): {}",
                                 package_tar_path.display()
                             ),
-                            package_output: None,
+                            package_output: Some(ConfigPackageOutput {
+                                hash: source_hash.clone(),
+                                name: config.name.clone(),
+                            }),
                         }))
                         .await
                         .map_err(|e| Status::internal(e.to_string()))?;
@@ -326,7 +349,10 @@ impl ConfigService for Agent {
                         "package source tar exists: {}",
                         package_source_tar_path.display()
                     ),
-                    package_output: None,
+                    package_output: Some(ConfigPackageOutput {
+                        hash: source_hash.clone(),
+                        name: config.name.clone(),
+                    }),
                 }))
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
@@ -340,6 +366,7 @@ impl ConfigService for Agent {
                 )
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
+
                 return Ok(());
             }
 
@@ -396,7 +423,14 @@ async fn validate_source(
 
     if let Some(request_hash) = &source.hash {
         if &workdir_hash != request_hash {
-            let message = format!("Hash mismatch: {} != {}", request_hash, workdir_hash);
+            let message = &format!("hash mismatch: {} != {}", request_hash, workdir_hash);
+
+            tx.send(Ok(ConfigPackageResponse {
+                log_output: message.to_string(),
+                package_output: None,
+            }))
+            .await?;
+
             return Err(anyhow::anyhow!("{}", message));
         }
     }
@@ -470,6 +504,7 @@ async fn stream_build(
 
     let worker_package_request = PackageBuildRequest {
         build_environment: build.environment.clone(),
+        build_sandbox: build.sandbox.clone(),
         build_packages,
         build_script: build.script.to_string(),
         source_name: name.to_string(),
@@ -556,6 +591,8 @@ async fn package(
     if source.kind == ConfigPackageSourceKind::Git as i32 {
         let mut builder = RepoBuilder::new();
 
+        let mut fetch_options = git2::FetchOptions::new();
+
         if source.uri.starts_with("git://") {
             let mut callbacks = RemoteCallbacks::new();
 
@@ -571,12 +608,12 @@ async fn package(
                 )
             });
 
-            let mut fetch_options = git2::FetchOptions::new();
-
             fetch_options.remote_callbacks(callbacks);
-
-            builder.fetch_options(fetch_options);
         }
+
+        fetch_options.depth(1);
+
+        builder.fetch_options(fetch_options);
 
         let _ = builder.clone(&source.uri, &workdir_path)?;
     }
@@ -605,10 +642,9 @@ async fn package(
             .await?;
 
             if let "application/gzip" = kind.mime_type() {
-                let temp_file = temps::create_file("tar.gz").await?;
-                write(&temp_file, response_bytes).await?;
-                archives::unpack_tar_gz(&workdir_path, &temp_file).await?;
-                remove_file(&temp_file).await?;
+                let gz_decoder = GzipDecoder::new(response_bytes);
+                let mut archive = Archive::new(gz_decoder);
+                archive.unpack(&workdir_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("preparing download gzip source: {:?}", workdir_path),
                     package_output: None,
@@ -620,6 +656,15 @@ async fn package(
                 archive.unpack(&workdir_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("preparing bzip2 source: {:?}", workdir_path),
+                    package_output: None,
+                }))
+                .await?;
+            } else if let "application/x-xz" = kind.mime_type() {
+                let xz_decoder = XzDecoder::new(response_bytes);
+                let mut archive = Archive::new(xz_decoder);
+                archive.unpack(&workdir_path).await?;
+                tx.send(Ok(ConfigPackageResponse {
+                    log_output: format!("preparing xz source: {:?}", workdir_path),
                     package_output: None,
                 }))
                 .await?;
