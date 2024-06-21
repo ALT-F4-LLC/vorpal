@@ -31,7 +31,7 @@ pub async fn run(
     let config = request.into_inner();
 
     tx.send(Ok(ConfigPackageResponse {
-        log_output: format!("[agent] package config name: {}", config.name),
+        log_output: format!("[agent] package config name: {}", config.name).into_bytes(),
         package_output: None,
     }))
     .await?;
@@ -42,7 +42,7 @@ pub async fn run(
     };
 
     tx.send(Ok(ConfigPackageResponse {
-        log_output: format!("[agent] package build config: {:?}", config_build),
+        log_output: format!("[agent] package build config: {:?}", config_build).into_bytes(),
         package_output: None,
     }))
     .await?;
@@ -64,7 +64,8 @@ pub async fn run(
                 let (source_hash, _) = validate_source(tx, &source_path, &config_source).await?;
 
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!("[agent] package source hash computed: {}", source_hash),
+                    log_output: format!("[agent] package source hash computed: {}", source_hash)
+                        .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
@@ -84,7 +85,7 @@ pub async fn run(
 
     if package_path.exists() {
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] package cache: {}", package_path.display()),
+            log_output: format!("[agent] package cache: {}", package_path.display()).into_bytes(),
             package_output: Some(ConfigPackageOutput {
                 hash: config_source_hash,
                 name: config.name,
@@ -101,7 +102,8 @@ pub async fn run(
 
     if !package_path.exists() && package_tar_path.exists() {
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] package tar cache: {}", package_tar_path.display()),
+            log_output: format!("[agent] package tar cache: {}", package_tar_path.display())
+                .into_bytes(),
             package_output: None,
         }))
         .await?;
@@ -114,7 +116,8 @@ pub async fn run(
             log_output: format!(
                 "[agent] package tar cache unpacked: {}",
                 package_path.display()
-            ),
+            )
+            .into_bytes(),
             package_output: Some(ConfigPackageOutput {
                 hash: config_source_hash,
                 name: config.name,
@@ -139,7 +142,8 @@ pub async fn run(
         let store_path = res.into_inner();
 
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] package tar cache (worker): {}", store_path.uri),
+            log_output: format!("[agent] package tar cache (worker): {}", store_path.uri)
+                .into_bytes(),
             package_output: None,
         }))
         .await?;
@@ -167,7 +171,8 @@ pub async fn run(
                 log_output: format!(
                     "[agent] package tar cache (worker): {}",
                     package_tar_path.display()
-                ),
+                )
+                .into_bytes(),
                 package_output: None,
             }))
             .await?;
@@ -180,7 +185,8 @@ pub async fn run(
                 log_output: format!(
                     "[agent] package tar cache unpacked (worker): {}",
                     package_path.display()
-                ),
+                )
+                .into_bytes(),
                 package_output: Some(ConfigPackageOutput {
                     hash: config_source_hash,
                     name: config.name,
@@ -204,7 +210,8 @@ pub async fn run(
         let store_path = res.into_inner();
 
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] package source cache (worker): {}", store_path.uri),
+            log_output: format!("[agent] package source cache (worker): {}", store_path.uri)
+                .into_bytes(),
             package_output: None,
         }))
         .await?;
@@ -230,7 +237,8 @@ pub async fn run(
             log_output: format!(
                 "[agent] package source tar cache: {}",
                 package_source_tar_path.display()
-            ),
+            )
+            .into_bytes(),
             package_output: None,
         }))
         .await?;
@@ -263,7 +271,8 @@ pub async fn run(
         log_output: format!(
             "[agent] package source tar: {}",
             package_source_tar_path.display()
-        ),
+        )
+        .into_bytes(),
         package_output: None,
     }))
     .await?;
@@ -274,7 +283,8 @@ pub async fn run(
         let store_path = res.into_inner();
 
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] package source cache (worker): {}", store_path.uri),
+            log_output: format!("[agent] package source cache (worker): {}", store_path.uri)
+                .into_bytes(),
             package_output: None,
         }))
         .await?;
@@ -319,7 +329,7 @@ async fn validate_source(
     }
 
     tx.send(Ok(ConfigPackageResponse {
-        log_output: format!("[agent] package source files: {}", workdir_files.len()),
+        log_output: format!("[agent] package source files: {}", workdir_files.len()).into_bytes(),
         package_output: None,
     }))
     .await?;
@@ -332,7 +342,7 @@ async fn validate_source(
     }
 
     tx.send(Ok(ConfigPackageResponse {
-        log_output: format!("[agent] package source hash computed: {}", workdir_hash),
+        log_output: format!("[agent] package source hash computed: {}", workdir_hash).into_bytes(),
         package_output: None,
     }))
     .await?;
@@ -345,7 +355,7 @@ async fn validate_source(
             );
 
             tx.send(Ok(ConfigPackageResponse {
-                log_output: message.to_string(),
+                log_output: message.clone().into_bytes(),
                 package_output: None,
             }))
             .await?;
@@ -393,7 +403,7 @@ async fn stream_build(
         while let Some(chunk) = build_stream.message().await? {
             if !chunk.log_output.is_empty() {
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!("[worker] {}", chunk.log_output),
+                    log_output: chunk.log_output,
                     package_output: None,
                 }))
                 .await?;
@@ -422,7 +432,8 @@ async fn stream_build(
                 log_output: format!(
                     "[agent] package tar fetched (worker): {}",
                     package_tar_path.display()
-                ),
+                )
+                .into_bytes(),
                 package_output: None,
             }))
             .await?;
@@ -432,7 +443,8 @@ async fn stream_build(
             archives::unpack_tar_gz(&package_path, &package_tar_path).await?;
 
             tx.send(Ok(ConfigPackageResponse {
-                log_output: format!("[agent] package tar unpacked: {}", package_path.display()),
+                log_output: format!("[agent] package tar unpacked: {}", package_path.display())
+                    .into_bytes(),
                 package_output: Some(ConfigPackageOutput {
                     hash: source_hash.to_string(),
                     name: name.to_string(),
@@ -445,7 +457,7 @@ async fn stream_build(
     }
 
     tx.send(Ok(ConfigPackageResponse {
-        log_output: format!("[agent] package output: {}", package_path.display()),
+        log_output: format!("[agent] package output: {}", package_path.display()).into_bytes(),
         package_output: Some(ConfigPackageOutput {
             hash: source_hash.to_string(),
             name: name.to_string(),
@@ -467,7 +479,7 @@ async fn stream_prepare(
     let signature = notary::sign(&data).await?;
 
     tx.send(Ok(ConfigPackageResponse {
-        log_output: format!("[agent] package source tar signature: {}", signature),
+        log_output: format!("[agent] package source tar signature: {}", signature).into_bytes(),
         package_output: None,
     }))
     .await?;
@@ -488,7 +500,8 @@ async fn stream_prepare(
         log_output: format!(
             "[agent] package source chunks send: {}",
             request_chunks.len()
-        ),
+        )
+        .into_bytes(),
         package_output: None,
     }))
     .await?;
@@ -500,7 +513,7 @@ async fn stream_prepare(
     while let Some(chunk) = stream.message().await? {
         if !chunk.log_output.is_empty() {
             tx.send(Ok(ConfigPackageResponse {
-                log_output: format!("[worker-prepare] {}", chunk.log_output),
+                log_output: chunk.log_output,
                 package_output: None,
             }))
             .await?;
@@ -524,14 +537,15 @@ async fn source_prepare(
         log_output: format!(
             "[agent] preparing package source: {:?}",
             &package_source_path
-        ),
+        )
+        .into_bytes(),
         package_output: None,
     }))
     .await?;
 
     if source.kind == ConfigPackageSourceKind::Git as i32 {
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] preparing git source: {:?}", &source.uri),
+            log_output: format!("[agent] preparing git source: {:?}", &source.uri).into_bytes(),
             package_output: None,
         }))
         .await?;
@@ -588,7 +602,7 @@ async fn source_prepare(
         .map_err(|e| anyhow::anyhow!("Failed to clone git source: {}", e))?;
 
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] preparing git source commit: {:?}", &result),
+            log_output: format!("[agent] preparing git source commit: {:?}", &result).into_bytes(),
             package_output: None,
         }))
         .await?;
@@ -596,7 +610,8 @@ async fn source_prepare(
 
     if source.kind == ConfigPackageSourceKind::Http as i32 {
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] preparing download source: {:?}", &source.uri),
+            log_output: format!("[agent] preparing download source: {:?}", &source.uri)
+                .into_bytes(),
             package_output: None,
         }))
         .await?;
@@ -612,7 +627,8 @@ async fn source_prepare(
 
         if let Some(kind) = infer::get(response_bytes) {
             tx.send(Ok(ConfigPackageResponse {
-                log_output: format!("[agent] preparing download source kind: {:?}", kind),
+                log_output: format!("[agent] preparing download source kind: {:?}", kind)
+                    .into_bytes(),
                 package_output: None,
             }))
             .await?;
@@ -625,7 +641,8 @@ async fn source_prepare(
                     log_output: format!(
                         "[agent] preparing download gzip source: {:?}",
                         package_source_path
-                    ),
+                    )
+                    .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
@@ -637,7 +654,8 @@ async fn source_prepare(
                     log_output: format!(
                         "[agent] preparing bzip2 source: {:?}",
                         package_source_path
-                    ),
+                    )
+                    .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
@@ -646,7 +664,8 @@ async fn source_prepare(
                 let mut archive = Archive::new(xz_decoder);
                 archive.unpack(&package_source_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!("[agent] preparing xz source: {:?}", package_source_path),
+                    log_output: format!("[agent] preparing xz source: {:?}", package_source_path)
+                        .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
@@ -656,7 +675,8 @@ async fn source_prepare(
                 archives::unpack_zip(&temp_zip_path, &package_source_path).await?;
                 remove_file(&temp_zip_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!("[agent] preparing zip source: {:?}", package_source_path),
+                    log_output: format!("[agent] preparing zip source: {:?}", package_source_path)
+                        .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
@@ -665,7 +685,7 @@ async fn source_prepare(
                 let file = file_name.unwrap();
                 write(&file, response_bytes).await?;
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!("[agent] preparing source file: {:?}", file),
+                    log_output: format!("[agent] preparing source file: {:?}", file).into_bytes(),
                     package_output: None,
                 }))
                 .await?;
@@ -677,14 +697,15 @@ async fn source_prepare(
         let source_path = Path::new(&source.uri).canonicalize()?;
 
         tx.send(Ok(ConfigPackageResponse {
-            log_output: format!("[agent] preparing source path: {:?}", source_path),
+            log_output: format!("[agent] preparing source path: {:?}", source_path).into_bytes(),
             package_output: None,
         }))
         .await?;
 
         if let Ok(Some(source_kind)) = infer::get_from_path(&source_path) {
             tx.send(Ok(ConfigPackageResponse {
-                log_output: format!("[agent] preparing source kind: {:?}", source_kind),
+                log_output: format!("[agent] preparing source kind: {:?}", source_kind)
+                    .into_bytes(),
                 package_output: None,
             }))
             .await?;
@@ -694,7 +715,8 @@ async fn source_prepare(
                     log_output: format!(
                         "[agent] preparing packed source: {:?}",
                         package_source_path
-                    ),
+                    )
+                    .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
@@ -711,7 +733,8 @@ async fn source_prepare(
                     "[agent] preparing source file: {:?} -> {:?}",
                     source_path.display(),
                     dest.display()
-                ),
+                )
+                .into_bytes(),
                 package_output: None,
             }))
             .await?;
@@ -740,7 +763,8 @@ async fn source_prepare(
                         "[agent] preparing source file: {:?} -> {:?}",
                         source_path.display(),
                         dest.display()
-                    ),
+                    )
+                    .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
@@ -750,19 +774,17 @@ async fn source_prepare(
 
     // At this point, any source URI should be a local file path
 
-    let (package_source_hash, package_source_files) =
-        validate_source(tx, &package_source_path, source).await?;
+    let (package_source_hash, _) = validate_source(tx, &package_source_path, source).await?;
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!(
             "[agent] package source packing: {}",
             source_tar_path.display()
-        ),
+        )
+        .into_bytes(),
         package_output: None,
     }))
     .await?;
-
-    archives::compress_tar_gz(&package_source_path, &package_source_files, source_tar_path).await?;
 
     Ok(package_source_hash)
 }

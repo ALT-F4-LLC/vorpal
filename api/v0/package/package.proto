@@ -15,7 +15,7 @@ message PackagePrepareRequest {
 }
 
 message PackagePrepareResponse {
-    string log_output = 1;
+    bytes log_output = 1;
 }
 
 message PrepareBuildPackage {
@@ -33,5 +33,5 @@ message PackageBuildRequest {
 }
 
 message PackageBuildResponse {
-    string log_output = 1;
+    bytes log_output = 1;
 }

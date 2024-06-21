@@ -213,7 +213,8 @@ impl PackageService for Package {
             }
 
             tx.send(Ok(PackagePrepareResponse {
-                log_output: format!("package source chunks received: {}", source_chunks),
+                log_output: format!("package source chunks received: {}", source_chunks)
+                    .into_bytes(),
             }))
             .await
             .unwrap();
@@ -225,7 +226,8 @@ impl PackageService for Package {
                     log_output: format!(
                         "package source already prepared: {}",
                         package_source_path.display()
-                    ),
+                    )
+                    .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -240,7 +242,8 @@ impl PackageService for Package {
                     log_output: format!(
                         "package source tar already prepared: {}",
                         package_source_tar_path.display()
-                    ),
+                    )
+                    .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -271,7 +274,8 @@ impl PackageService for Package {
                 log_output: format!(
                     "source tar not found: {}",
                     package_source_tar_path.display()
-                ),
+                )
+                .into_bytes(),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"))?;
@@ -289,7 +293,8 @@ impl PackageService for Package {
                 set_permissions(package_source_tar_path.clone(), permissions).await?;
                 let file_name = package_source_tar_path.file_name().unwrap();
                 tx.send(Ok(PackagePrepareResponse {
-                    log_output: format!("source tar created: {}", file_name.to_string_lossy()),
+                    log_output: format!("source tar created: {}", file_name.to_string_lossy())
+                        .into_bytes(),
                 }))
                 .await
                 .unwrap();
@@ -302,7 +307,8 @@ impl PackageService for Package {
             create_dir_all(&temp_source_path).await?;
 
             tx.send(Ok(PackagePrepareResponse {
-                log_output: format!("package source unpacking: {}", temp_source_path.display()),
+                log_output: format!("package source unpacking: {}", temp_source_path.display())
+                    .into_bytes(),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"))?;
@@ -320,7 +326,7 @@ impl PackageService for Package {
                 .map_err(|e| Status::internal(format!("failed to get source files: {:?}", e)))?;
 
             tx.send(Ok(PackagePrepareResponse {
-                log_output: format!("source files: {:?}", temp_file_paths.len()),
+                log_output: format!("source files: {:?}", temp_file_paths.len()).into_bytes(),
             }))
             .await
             .unwrap();
@@ -333,13 +339,13 @@ impl PackageService for Package {
                 .map_err(|e| Status::internal(format!("failed to get source hash: {:?}", e)))?;
 
             tx.send(Ok(PackagePrepareResponse {
-                log_output: format!("source hash: {}", source_hash),
+                log_output: format!("source hash: {}", source_hash).into_bytes(),
             }))
             .await
             .unwrap();
 
             tx.send(Ok(PackagePrepareResponse {
-                log_output: format!("source hash expected: {}", temp_hash_computed),
+                log_output: format!("source hash expected: {}", temp_hash_computed).into_bytes(),
             }))
             .await
             .unwrap();
@@ -369,7 +375,8 @@ impl PackageService for Package {
 
             if package_path.exists() {
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("package already built: {}", package_path.display()),
+                    log_output: format!("package already built: {}", package_path.display())
+                        .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -383,7 +390,8 @@ impl PackageService for Package {
                     log_output: format!(
                         "package tar found (unpacking): {}",
                         package_tar_path.display()
-                    ),
+                    )
+                    .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -411,7 +419,8 @@ impl PackageService for Package {
 
             if package_source_path.exists() {
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("package source found: {}", package_source_path.display()),
+                    log_output: format!("package source found: {}", package_source_path.display())
+                        .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -423,7 +432,8 @@ impl PackageService for Package {
                     })?;
 
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("package source copied: {}", build_path.display()),
+                    log_output: format!("package source copied: {}", build_path.display())
+                        .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -437,7 +447,8 @@ impl PackageService for Package {
                     log_output: format!(
                         "package source tar found: {}",
                         package_source_tar_path.display()
-                    ),
+                    )
+                    .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -450,7 +461,8 @@ impl PackageService for Package {
                     log_output: format!(
                         "package source unpacking: {}",
                         package_source_path.display()
-                    ),
+                    )
+                    .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -468,7 +480,8 @@ impl PackageService for Package {
                     log_output: format!(
                         "package source copying: {}",
                         package_source_path.display()
-                    ),
+                    )
+                    .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -480,7 +493,8 @@ impl PackageService for Package {
                     })?;
 
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("package source copied: {}", build_path.display()),
+                    log_output: format!("package source copied: {}", build_path.display())
+                        .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -498,7 +512,7 @@ impl PackageService for Package {
             // at this point we should be ready to build with source files
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("package building: {}", build_path.display()),
+                log_output: format!("package building: {}", build_path.display()).into_bytes(),
             }))
             .await
             .unwrap();
@@ -529,7 +543,7 @@ impl PackageService for Package {
             let build_script_data = build_script.join("\n");
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("package build script: {}", build_script_data),
+                log_output: format!("package build script: {}", build_script_data).into_bytes(),
             }))
             .await
             .unwrap();
@@ -573,7 +587,7 @@ impl PackageService for Package {
             ];
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("build args: {:?}", build_command_args),
+                log_output: format!("build args: {:?}", build_command_args).into_bytes(),
             }))
             .await
             .unwrap();
@@ -585,7 +599,7 @@ impl PackageService for Package {
             }
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("build packages: {:?}", req.build_packages),
+                log_output: format!("build packages: {:?}", req.build_packages).into_bytes(),
             }))
             .await
             .unwrap();
@@ -622,7 +636,7 @@ impl PackageService for Package {
             }
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("build store paths: {:?}", build_store_paths),
+                log_output: format!("build store paths: {:?}", build_store_paths).into_bytes(),
             }))
             .await
             .unwrap();
@@ -641,13 +655,14 @@ impl PackageService for Package {
             );
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("build output path: {}", build_output_path.display()),
+                log_output: format!("build output path: {}", build_output_path.display())
+                    .into_bytes(),
             }))
             .await
             .unwrap();
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("build environment: {:?}", build_environment),
+                log_output: format!("build environment: {:?}", build_environment).into_bytes(),
             }))
             .await
             .unwrap();
@@ -664,7 +679,7 @@ impl PackageService for Package {
 
             while let Some(output) = stream.next().await {
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("build: {}", output),
+                    log_output: output.as_bytes().to_vec(),
                 }))
                 .await
                 .unwrap();
@@ -674,7 +689,7 @@ impl PackageService for Package {
 
             if let Err(err) = sandbox_command.status().await {
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("build failed: {:?}", err),
+                    log_output: format!("build failed: {:?}", err).into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -689,7 +704,8 @@ impl PackageService for Package {
                     log_output: format!(
                         "no build output files found: {}",
                         build_output_path.display()
-                    ),
+                    )
+                    .into_bytes(),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
@@ -718,7 +734,8 @@ impl PackageService for Package {
             }
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("package tar created: {}", package_tar_path.display()),
+                log_output: format!("package tar created: {}", package_tar_path.display())
+                    .into_bytes(),
             }))
             .await
             .unwrap();
