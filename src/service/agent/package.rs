@@ -264,8 +264,14 @@ pub async fn run(
         return Ok(());
     }
 
-    let source_hash =
-        source_prepare(tx, &config.name, &config_source, &package_source_tar_path).await?;
+    let source_hash = source_prepare(
+        tx,
+        &config.name,
+        &config_source,
+        &config_source_hash,
+        &package_source_tar_path,
+    )
+    .await?;
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!(
@@ -527,18 +533,14 @@ async fn source_prepare(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
     name: &str,
     source: &ConfigPackageSource,
+    source_hash: &str,
     source_tar_path: &PathBuf,
 ) -> Result<String, anyhow::Error> {
-    let package_source_path = paths::get_package_source_path(name, source.hash());
-
-    create_dir_all(&package_source_path).await?;
+    let temp_source_path = temps::create_dir().await?.canonicalize()?;
 
     tx.send(Ok(ConfigPackageResponse {
-        log_output: format!(
-            "[agent] preparing package source: {:?}",
-            &package_source_path
-        )
-        .into_bytes(),
+        log_output: format!("[agent] preparing package source: {:?}", &temp_source_path)
+            .into_bytes(),
         package_output: None,
     }))
     .await?;
@@ -551,7 +553,7 @@ async fn source_prepare(
         .await?;
 
         let source_uri = source.uri.clone();
-        let package_clone_path = package_source_path.clone();
+        let package_clone_path = temp_source_path.clone();
 
         let result = task::spawn_blocking(move || {
             let mut builder = RepoBuilder::new();
@@ -636,11 +638,11 @@ async fn source_prepare(
             if let "application/gzip" = kind.mime_type() {
                 let gz_decoder = GzipDecoder::new(response_bytes);
                 let mut archive = Archive::new(gz_decoder);
-                archive.unpack(&package_source_path).await?;
+                archive.unpack(&temp_source_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!(
                         "[agent] preparing download gzip source: {:?}",
-                        package_source_path
+                        temp_source_path
                     )
                     .into_bytes(),
                     package_output: None,
@@ -649,22 +651,19 @@ async fn source_prepare(
             } else if let "application/x-bzip2" = kind.mime_type() {
                 let bz_decoder = BzDecoder::new(response_bytes);
                 let mut archive = Archive::new(bz_decoder);
-                archive.unpack(&package_source_path).await?;
+                archive.unpack(&temp_source_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!(
-                        "[agent] preparing bzip2 source: {:?}",
-                        package_source_path
-                    )
-                    .into_bytes(),
+                    log_output: format!("[agent] preparing bzip2 source: {:?}", temp_source_path)
+                        .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
             } else if let "application/x-xz" = kind.mime_type() {
                 let xz_decoder = XzDecoder::new(response_bytes);
                 let mut archive = Archive::new(xz_decoder);
-                archive.unpack(&package_source_path).await?;
+                archive.unpack(&temp_source_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!("[agent] preparing xz source: {:?}", package_source_path)
+                    log_output: format!("[agent] preparing xz source: {:?}", temp_source_path)
                         .into_bytes(),
                     package_output: None,
                 }))
@@ -672,10 +671,10 @@ async fn source_prepare(
             } else if let "application/zip" = kind.mime_type() {
                 let temp_zip_path = temps::create_file("zip").await?;
                 write(&temp_zip_path, response_bytes).await?;
-                archives::unpack_zip(&temp_zip_path, &package_source_path).await?;
+                archives::unpack_zip(&temp_zip_path, &temp_source_path).await?;
                 remove_file(&temp_zip_path).await?;
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!("[agent] preparing zip source: {:?}", package_source_path)
+                    log_output: format!("[agent] preparing zip source: {:?}", temp_source_path)
                         .into_bytes(),
                     package_output: None,
                 }))
@@ -692,6 +691,8 @@ async fn source_prepare(
             }
         }
     }
+
+    let source_path = paths::get_package_source_path(&name, &source_hash);
 
     if source.kind == ConfigPackageSourceKind::Local as i32 {
         let source_path = Path::new(&source.uri).canonicalize()?;
@@ -712,21 +713,18 @@ async fn source_prepare(
 
             if source_kind.mime_type() == "application/gzip" {
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!(
-                        "[agent] preparing packed source: {:?}",
-                        package_source_path
-                    )
-                    .into_bytes(),
+                    log_output: format!("[agent] preparing packed source: {:?}", temp_source_path)
+                        .into_bytes(),
                     package_output: None,
                 }))
                 .await?;
 
-                archives::unpack_tar_gz(&package_source_path, &source_path).await?;
+                archives::unpack_tar_gz(&temp_source_path, &source_path).await?;
             }
         }
 
         if source_path.is_file() {
-            let dest = package_source_path.join(source_path.file_name().unwrap());
+            let dest = temp_source_path.join(source_path.file_name().unwrap());
             copy(&source_path, &dest).await?;
             tx.send(Ok(ConfigPackageResponse {
                 log_output: format!(
@@ -749,12 +747,12 @@ async fn source_prepare(
 
             for src in &file_paths {
                 if src.is_dir() {
-                    let dest = package_source_path.join(src.strip_prefix(&source_path)?);
+                    let dest = temp_source_path.join(src.strip_prefix(&source_path)?);
                     create_dir_all(dest).await?;
                     continue;
                 }
 
-                let dest = package_source_path.join(src.strip_prefix(&source_path)?);
+                let dest = temp_source_path.join(src.strip_prefix(&source_path)?);
 
                 copy(src, &dest).await?;
 
@@ -774,11 +772,23 @@ async fn source_prepare(
 
     // At this point, any source URI should be a local file path
 
-    let (package_source_hash, _) = validate_source(tx, &package_source_path, source).await?;
+    let (source_hash, _) = validate_source(tx, &temp_source_path, source).await?;
+
+    create_dir_all(&source_path).await?;
+
+    paths::copy_files(&temp_source_path, &source_path).await?;
+
+    tx.send(Ok(ConfigPackageResponse {
+        log_output: format!("[agent] package source: {}", source_path.display()).into_bytes(),
+        package_output: None,
+    }))
+    .await?;
+
+    let source_path_files = paths::get_file_paths(&source_path, &Vec::<&str>::new())?;
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!(
-            "[agent] package source packing: {}",
+            "[agent] package source tar packing: {}",
             source_tar_path.display()
         )
         .into_bytes(),
@@ -786,5 +796,17 @@ async fn source_prepare(
     }))
     .await?;
 
-    Ok(package_source_hash)
+    archives::compress_tar_gz(&source_path, &source_path_files, &source_tar_path).await?;
+
+    tx.send(Ok(ConfigPackageResponse {
+        log_output: format!(
+            "[agent] package source tar packed: {}",
+            source_tar_path.display()
+        )
+        .into_bytes(),
+        package_output: None,
+    }))
+    .await?;
+
+    Ok(source_hash)
 }

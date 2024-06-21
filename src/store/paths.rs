@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::env;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use tokio::fs::{copy, create_dir_all};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -81,6 +82,32 @@ where
     files.sort();
 
     Ok(files)
+}
+
+pub async fn copy_files(
+    source_path: &PathBuf,
+    destination_path: &Path,
+) -> Result<(), anyhow::Error> {
+    let file_paths = get_file_paths(source_path, &Vec::<&str>::new())
+        .map_err(|e| anyhow::anyhow!("failed to get source files: {:?}", e))?;
+
+    if file_paths.is_empty() {
+        return Err(anyhow::anyhow!("no source files found"));
+    }
+
+    for src in &file_paths {
+        if src.is_dir() {
+            let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
+            create_dir_all(dest).await?;
+            continue;
+        }
+
+        let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
+
+        copy(src, dest).await?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

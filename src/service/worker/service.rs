@@ -6,10 +6,7 @@ use crate::api::{
 };
 use crate::notary;
 use crate::service::worker::sandbox_default;
-use crate::store::archives;
-use crate::store::hashes;
-use crate::store::paths;
-use crate::store::temps;
+use crate::store::{archives, hashes, paths, temps};
 use anyhow::Result;
 use process_stream::{Process, ProcessExt};
 use rsa::pss::{Signature, VerifyingKey};
@@ -20,11 +17,8 @@ use std::convert::TryFrom;
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
 use tera::Tera;
-use tokio::fs::{
-    copy, create_dir_all, metadata, read, remove_dir_all, set_permissions, write, File,
-};
+use tokio::fs::{create_dir_all, metadata, read, remove_dir_all, set_permissions, write, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -37,32 +31,6 @@ pub struct Package {}
 
 #[derive(Debug, Default)]
 pub struct Store {}
-
-pub async fn copy_files(
-    source_path: &PathBuf,
-    destination_path: &Path,
-) -> Result<(), anyhow::Error> {
-    let file_paths = paths::get_file_paths(source_path, &Vec::<&str>::new())
-        .map_err(|e| anyhow::anyhow!("failed to get source files: {:?}", e))?;
-
-    if file_paths.is_empty() {
-        return Err(anyhow::anyhow!("no source files found"));
-    }
-
-    for src in &file_paths {
-        if src.is_dir() {
-            let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
-            create_dir_all(dest).await?;
-            continue;
-        }
-
-        let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
-
-        copy(src, dest).await?;
-    }
-
-    Ok(())
-}
 
 #[tonic::async_trait]
 impl StoreService for Store {
@@ -425,7 +393,7 @@ impl PackageService for Package {
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
 
-                copy_files(&package_source_path, &build_path)
+                paths::copy_files(&package_source_path, &build_path)
                     .await
                     .map_err(|e| {
                         Status::internal(format!("failed to copy source files: {:?}", e))
@@ -486,7 +454,7 @@ impl PackageService for Package {
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
 
-                copy_files(&package_source_path, &build_path)
+                paths::copy_files(&package_source_path, &build_path)
                     .await
                     .map_err(|e| {
                         Status::internal(format!("failed to copy source files: {:?}", e))
@@ -716,7 +684,7 @@ impl PackageService for Package {
                 .await
                 .map_err(|_| Status::internal("failed to create package dir"))?;
 
-            copy_files(&build_output_path, &package_path)
+            paths::copy_files(&build_output_path, &package_path)
                 .await
                 .map_err(|e| Status::internal(format!("failed to copy source files: {:?}", e)))?;
 
