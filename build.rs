@@ -1,6 +1,10 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure().compile(
-        &["command/command.proto", "package/package.proto"],
+        &[
+            "config/config.proto",
+            "package/package.proto",
+            "store/store.proto",
+        ],
         &["api/v0"],
     )?;
     Ok(())

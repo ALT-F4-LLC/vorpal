@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing::Level;
 use vorpal::notary;
-use vorpal::service::{build, proxy};
+use vorpal::service::{agent, worker};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -31,12 +31,12 @@ pub enum Keys {
 
 #[derive(Subcommand)]
 enum Services {
-    Proxy {
+    Agent {
         #[clap(default_value = "15323", long, short)]
         port: u16,
     },
 
-    Build {
+    Worker {
         #[clap(default_value = "23151", long, short)]
         port: u16,
     },
@@ -61,8 +61,8 @@ async fn main() -> Result<(), anyhow::Error> {
             Keys::Generate {} => notary::generate_keys().await,
         },
         Command::Services(service) => match service {
-            Services::Build { port } => build::start(*port).await,
-            Services::Proxy { port } => proxy::start(*port).await,
+            Services::Agent { port } => agent::start(*port).await,
+            Services::Worker { port } => worker::start(*port).await,
         },
     }
 }

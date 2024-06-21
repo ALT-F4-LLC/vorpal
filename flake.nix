@@ -50,7 +50,7 @@
         packages = {
           default = buildRustPackage {
             buildInputs = [openssl] ++ lib.optionals pkgs.stdenv.isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-xUz6VQlnZlcDYf/I2yBVLaRc36dc2Lz/dWL4flI1480=";
+            cargoSha256 = "sha256-cXNAFYmmsc9S/IjfkQEW0P1Dirx36TYT5qZgWYgyoUY=";
             nativeBuildInputs = [pkg-config protobuf];
             pname = "vorpal";
             src = ./.;
@@ -60,8 +60,8 @@
 
         process-compose.start = {
           settings.processes = {
-            proxy-server.command = "${config.apps.default.program} services proxy";
-            build-server.command = "${config.apps.default.program} services build";
+            agent-server.command = "${config.apps.default.program} services agent";
+            worker-server.command = "${config.apps.default.program} services worker";
           };
         };
       };
