@@ -692,7 +692,7 @@ async fn source_prepare(
         }
     }
 
-    let source_path = paths::get_package_source_path(&name, &source_hash);
+    let source_path = paths::get_package_source_path(name, source_hash);
 
     if source.kind == ConfigPackageSourceKind::Local as i32 {
         let source_path = Path::new(&source.uri).canonicalize()?;
@@ -796,7 +796,7 @@ async fn source_prepare(
     }))
     .await?;
 
-    archives::compress_tar_gz(&source_path, &source_path_files, &source_tar_path).await?;
+    archives::compress_tar_gz(&source_path, &source_path_files, source_tar_path).await?;
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!(
