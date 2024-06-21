@@ -17,11 +17,12 @@ use rsa::sha2::Sha256;
 use rsa::signature::Verifier;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use tera::Tera;
 use tokio::fs::{
-    copy, create_dir, create_dir_all, metadata, read, remove_dir_all, set_permissions, write, File,
+    copy, create_dir_all, metadata, read, remove_dir_all, set_permissions, write, File,
 };
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
@@ -29,13 +30,38 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::info;
-use walkdir::WalkDir;
 
 #[derive(Debug, Default)]
 pub struct Package {}
 
 #[derive(Debug, Default)]
 pub struct Store {}
+
+pub async fn copy_files(
+    source_path: &std::path::PathBuf,
+    destination_path: &std::path::PathBuf,
+) -> Result<(), anyhow::Error> {
+    let file_paths = paths::get_file_paths(&source_path, &Vec::<&str>::new())
+        .map_err(|e| anyhow::anyhow!("failed to get source files: {:?}", e))?;
+
+    if file_paths.is_empty() {
+        return Err(anyhow::anyhow!("no source files found"));
+    }
+
+    for src in &file_paths {
+        if src.is_dir() {
+            let dest = destination_path.join(src.strip_prefix(&source_path).unwrap());
+            create_dir_all(dest).await?;
+            continue;
+        }
+
+        let dest = destination_path.join(src.strip_prefix(&source_path).unwrap());
+
+        copy(src, &dest).await?;
+    }
+
+    Ok(())
+}
 
 #[tonic::async_trait]
 impl StoreService for Store {
@@ -191,6 +217,39 @@ impl PackageService for Package {
             .await
             .unwrap();
 
+            let package_source_path = paths::get_package_path(&source_name, &source_hash);
+
+            if package_source_path.exists() {
+                tx.send(Ok(PackagePrepareResponse {
+                    log_output: format!(
+                        "package source already prepared: {}",
+                        package_source_path.display()
+                    ),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+                return Err(Status::already_exists("package source already prepared"));
+            }
+
+            let package_source_tar_path =
+                paths::get_package_source_tar_path(&source_name, &source_hash);
+
+            if package_source_tar_path.exists() {
+                tx.send(Ok(PackagePrepareResponse {
+                    log_output: format!(
+                        "package source tar already prepared: {}",
+                        package_source_tar_path.display()
+                    ),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+                return Err(Status::already_exists(
+                    "package source tar already prepared",
+                ));
+            }
+
+            // at this point we should be ready to prepare the source
+
             let public_key = notary::get_public_key()
                 .await
                 .map_err(|_| Status::internal("failed to get public key"))?;
@@ -207,37 +266,32 @@ impl PackageService for Package {
                 .verify(&source_data, &signature)
                 .map_err(|_| Status::internal("failed to verify signature"))?;
 
-            let package_source_tar_path =
-                paths::get_package_source_tar_path(&source_name, &source_hash);
+            tx.send(Ok(PackagePrepareResponse {
+                log_output: format!(
+                    "source tar not found: {}",
+                    package_source_tar_path.display()
+                ),
+            }))
+            .await
+            .map_err(|_| Status::internal("failed to send response"))?;
 
-            if !package_source_tar_path.exists() {
+            let mut source_tar = File::create(&package_source_tar_path).await?;
+            if let Err(e) = source_tar.write_all(&source_data).await {
+                return Err(Status::internal(format!(
+                    "failed to write source tar: {}",
+                    e
+                )));
+            } else {
+                let metadata = metadata(&package_source_tar_path).await?;
+                let mut permissions = metadata.permissions();
+                permissions.set_mode(0o444);
+                set_permissions(package_source_tar_path.clone(), permissions).await?;
+                let file_name = package_source_tar_path.file_name().unwrap();
                 tx.send(Ok(PackagePrepareResponse {
-                    log_output: format!(
-                        "source tar not found: {}",
-                        package_source_tar_path.display()
-                    ),
+                    log_output: format!("source tar created: {}", file_name.to_string_lossy()),
                 }))
                 .await
-                .map_err(|_| Status::internal("failed to send response"))?;
-
-                let mut source_tar = File::create(&package_source_tar_path).await?;
-                if let Err(e) = source_tar.write_all(&source_data).await {
-                    return Err(Status::internal(format!(
-                        "failed to write source tar: {}",
-                        e
-                    )));
-                } else {
-                    let metadata = metadata(&package_source_tar_path).await?;
-                    let mut permissions = metadata.permissions();
-                    permissions.set_mode(0o444);
-                    set_permissions(package_source_tar_path.clone(), permissions).await?;
-                    let file_name = package_source_tar_path.file_name().unwrap();
-                    tx.send(Ok(PackagePrepareResponse {
-                        log_output: format!("source tar created: {}", file_name.to_string_lossy()),
-                    }))
-                    .await
-                    .unwrap();
-                }
+                .unwrap();
             }
 
             let temp_source_path = temps::create_dir()
@@ -245,6 +299,12 @@ impl PackageService for Package {
                 .map_err(|_| Status::internal("failed to create temp dir"))?;
 
             create_dir_all(&temp_source_path).await?;
+
+            tx.send(Ok(PackagePrepareResponse {
+                log_output: format!("package source unpacking: {}", temp_source_path.display()),
+            }))
+            .await
+            .map_err(|_| Status::internal("failed to send response"))?;
 
             if let Err(err) =
                 archives::unpack_tar_gz(&temp_source_path, &package_source_tar_path).await
@@ -304,45 +364,151 @@ impl PackageService for Package {
         tokio::spawn(async move {
             let req = request.into_inner();
 
+            let package_path = paths::get_package_path(&req.source_name, &req.source_hash);
+
+            if package_path.exists() {
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!("package already built: {}", package_path.display()),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+                return Err(Status::already_exists("package already built"));
+            }
+
+            let package_tar_path = paths::get_package_tar_path(&req.source_name, &req.source_hash);
+
+            if !package_path.exists() && package_tar_path.exists() {
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!(
+                        "package tar found (unpacking): {}",
+                        package_tar_path.display()
+                    ),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+
+                create_dir_all(&package_path)
+                    .await
+                    .map_err(|_| Status::internal("failed to create package dir"))?;
+
+                if let Err(err) = archives::unpack_tar_gz(&package_path, &package_tar_path).await {
+                    return Err(Status::internal(format!(
+                        "failed to unpack source tar: {:?}",
+                        err
+                    )));
+                }
+
+                return Err(Status::internal("package already built"));
+            }
+
+            let build_path = temps::create_dir()
+                .await
+                .map_err(|_| Status::internal("failed to create temp dir"))?;
+
+            let package_source_path =
+                paths::get_package_source_path(&req.source_name, &req.source_hash);
+
+            if package_source_path.exists() {
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!("package source found: {}", package_source_path.display()),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+
+                copy_files(&package_source_path, &build_path)
+                    .await
+                    .map_err(|e| {
+                        Status::internal(format!("failed to copy source files: {:?}", e))
+                    })?;
+
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!("package source copied: {}", build_path.display()),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+            }
+
             let package_source_tar_path =
                 paths::get_package_source_tar_path(&req.source_name, &req.source_hash);
 
-            if !package_source_tar_path.exists() {
-                return Err(Status::internal(
-                    "package source tar not found - must be prepared first",
-                ));
+            if !package_source_path.exists() && package_source_tar_path.exists() {
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!(
+                        "package source tar found: {}",
+                        package_source_tar_path.display()
+                    ),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+
+                create_dir_all(&package_source_path)
+                    .await
+                    .map_err(|_| Status::internal("failed to create package source dir"))?;
+
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!(
+                        "package source unpacking: {}",
+                        package_source_path.display()
+                    ),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+
+                if let Err(err) =
+                    archives::unpack_tar_gz(&package_source_path, &package_source_tar_path).await
+                {
+                    return Err(Status::internal(format!(
+                        "failed to unpack source tar: {:?}",
+                        err
+                    )));
+                }
+
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!(
+                        "package source copying: {}",
+                        package_source_path.display()
+                    ),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+
+                copy_files(&package_source_path, &build_path)
+                    .await
+                    .map_err(|e| {
+                        Status::internal(format!("failed to copy source files: {:?}", e))
+                    })?;
+
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!("package source copied: {}", build_path.display()),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
             }
 
+            let build_source_file_paths = paths::get_file_paths(&build_path, &Vec::<&str>::new())
+                .map_err(|e| {
+                Status::internal(format!("failed to get source files: {:?}", e))
+            })?;
+
+            if build_source_file_paths.is_empty() {
+                return Err(Status::internal("no source files found"));
+            }
+
+            // at this point we should be ready to build with source files
+
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!(
-                    "package source building: {}",
-                    package_source_tar_path.display()
-                ),
+                log_output: format!("package building: {}", build_path.display()),
             }))
             .await
             .unwrap();
 
-            let package_build_path = temps::create_dir()
+            let build_vorpal_path = build_path.join(".vorpal");
+
+            create_dir_all(&build_vorpal_path)
                 .await
-                .map_err(|_| Status::internal("failed to create temp dir"))?;
-            let package_build_path = package_build_path.canonicalize()?;
+                .map_err(|_| Status::internal("failed to create build vorpal dir"))?;
 
-            if let Err(err) =
-                archives::unpack_tar_gz(&package_build_path, &package_source_tar_path).await
-            {
-                return Err(Status::internal(format!(
-                    "failed to unpack source tar: {:?}",
-                    err
-                )));
-            }
-
-            let build_vorpal_dir = package_build_path.join(".vorpal");
-
-            create_dir(&build_vorpal_dir)
-                .await
-                .map_err(|_| Status::internal("failed to create vorpal temp dir"))?;
-
-            let build_phase_steps = req
+            let package_build_script = req
                 .build_script
                 .trim()
                 .split('\n')
@@ -350,157 +516,146 @@ impl PackageService for Package {
                 .collect::<Vec<&str>>()
                 .join("\n");
 
-            let automation_script = [
+            let build_script = [
                 "#!/bin/bash",
                 "set -e pipefail",
                 "echo \"PATH: $PATH\"",
                 "echo \"Starting build script\"",
-                &build_phase_steps,
+                &package_build_script,
                 "echo \"Finished build script\"",
             ];
 
-            let automation_script_data = automation_script.join("\n");
+            let build_script_data = build_script.join("\n");
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("package build script: {}", automation_script_data),
+                log_output: format!("package build script: {}", build_script_data),
             }))
             .await
             .unwrap();
 
-            let sandbox_build_script_path = build_vorpal_dir.join("automation.sh");
+            let build_script_path = build_vorpal_path.join("build.sh");
 
-            write(&sandbox_build_script_path, automation_script_data)
+            write(&build_script_path, build_script_data)
                 .await
-                .map_err(|_| Status::internal("failed to write automation script"))?;
+                .map_err(|_| Status::internal("failed to write build script"))?;
 
-            set_permissions(
-                &sandbox_build_script_path,
-                fs::Permissions::from_mode(0o755),
-            )
-            .await
-            .map_err(|_| Status::internal("failed to set automation script permissions"))?;
+            set_permissions(&build_script_path, fs::Permissions::from_mode(0o755))
+                .await
+                .map_err(|_| Status::internal("failed to set build script permissions"))?;
 
-            let os_type = std::env::consts::OS;
-            if os_type != "macos" {
-                return Err(Status::unimplemented("unsupported OS"));
-            }
-
-            let sandbox_profile_path = build_vorpal_dir.join("sandbox.sb");
+            let build_profile_path = build_vorpal_path.join("sandbox.sb");
 
             let mut tera = Tera::default();
             tera.add_raw_template("sandbox_default", sandbox_default::SANDBOX_DEFAULT)
                 .unwrap();
 
             let mut context = tera::Context::new();
-            context.insert("tmpdir", package_build_path.to_str().unwrap());
-            let sandbox_profile = tera.render("sandbox_default", &context).unwrap();
+            context.insert("tmpdir", build_path.to_str().unwrap());
+            let default_profile = tera.render("sandbox_default", &context).unwrap();
 
-            write(&sandbox_profile_path, sandbox_profile)
+            write(&build_profile_path, default_profile)
                 .await
                 .map_err(|_| Status::internal("failed to write sandbox profile"))?;
 
-            if !sandbox_profile_path.exists() {
-                return Err(Status::internal("sandbox profile not found"));
+            if !build_profile_path.exists() {
+                return Err(Status::internal("build profile not found"));
             }
 
-            if !sandbox_build_script_path.exists() {
-                return Err(Status::internal("automation script not found"));
+            if !build_script_path.exists() {
+                return Err(Status::internal("build script not found"));
             }
 
-            let sandbox_command_args = [
+            let build_command_args = [
                 "-f",
-                sandbox_profile_path.to_str().unwrap(),
-                sandbox_build_script_path.to_str().unwrap(),
+                build_profile_path.to_str().unwrap(),
+                build_script_path.to_str().unwrap(),
             ];
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("package sandbox args: {:?}", sandbox_command_args),
+                log_output: format!("build args: {:?}", build_command_args),
             }))
             .await
             .unwrap();
 
-            let sandbox_output_path = build_vorpal_dir.join("output");
+            let mut build_environment = HashMap::new();
 
-            create_dir_all(&sandbox_output_path)
-                .await
-                .map_err(|_| Status::internal("failed to create sandbox output dir"))?;
+            for (key, value) in req.build_environment.clone() {
+                build_environment.insert(key, value);
+            }
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!(
-                    "package sandbox output path: {}",
-                    sandbox_output_path.display()
-                ),
+                log_output: format!("build packages: {:?}", req.build_packages),
             }))
             .await
             .unwrap();
 
-            let mut sandbox_environment = HashMap::new();
-            let mut sandbox_store_paths = vec![];
-
-            tx.send(Ok(PackageBuildResponse {
-                log_output: format!("sandbox build packages: {:?}", req.build_packages),
-            }))
-            .await
-            .unwrap();
+            let mut build_store_paths = vec![];
 
             for path in req.build_packages {
                 let build_package = paths::get_package_path(&path.name, &path.hash);
-
                 if !build_package.exists() {
                     return Err(Status::internal("build package not found"));
                 }
 
                 let package_bin_path = build_package.join("bin");
-
                 if package_bin_path.exists() {
-                    sandbox_store_paths
-                        .push(package_bin_path.canonicalize()?.display().to_string());
+                    build_store_paths.push(package_bin_path.canonicalize()?.display().to_string());
                 }
 
-                sandbox_environment.insert(
+                build_environment.insert(
                     format!("{}", path.name.replace("-", "_")),
                     build_package.canonicalize()?.display().to_string(),
                 );
             }
 
+            let os_type = env::consts::OS;
+
+            if os_type != "macos" {
+                return Err(Status::unimplemented("unsupported os (macos only)"));
+            }
+
+            if os_type == "macos" {
+                build_store_paths.push("/usr/bin".to_string());
+                build_store_paths.push("/bin".to_string());
+                build_store_paths.push("/Library/Developer/CommandLineTools/usr/bin".to_string());
+            }
+
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("sandbox store paths: {:?}", sandbox_store_paths),
+                log_output: format!("build store paths: {:?}", build_store_paths),
             }))
             .await
             .unwrap();
 
-            if !req.build_sandbox {
-                sandbox_environment.insert(
-                    "PATH".to_string(),
-                    format!("{}:$PATH", sandbox_store_paths.join(":").to_string()),
-                );
-            } else {
-                sandbox_environment.insert(
-                    "PATH".to_string(),
-                    format!("{}", sandbox_store_paths.join(":").to_string()),
-                );
-            }
+            build_environment.insert("PATH".to_string(), build_store_paths.join(":"));
 
-            for (key, value) in req.build_environment.clone() {
-                sandbox_environment.insert(key, value);
-            }
+            let build_output_dir = temps::create_dir()
+                .await
+                .map_err(|_| Status::internal("failed to create temp dir"))?;
 
-            sandbox_environment.insert(
+            let build_output_path = build_output_dir.canonicalize()?;
+
+            build_environment.insert(
                 "output".to_string(),
-                sandbox_output_path.canonicalize()?.display().to_string(),
+                build_output_path.display().to_string(),
             );
 
             tx.send(Ok(PackageBuildResponse {
-                log_output: format!("package sandbox environment: {:?}", sandbox_environment),
+                log_output: format!("build output path: {}", build_output_path.display()),
+            }))
+            .await
+            .unwrap();
+
+            tx.send(Ok(PackageBuildResponse {
+                log_output: format!("build environment: {:?}", build_environment),
             }))
             .await
             .unwrap();
 
             let mut sandbox_command = Process::new("/usr/bin/sandbox-exec");
-            sandbox_command.args(sandbox_command_args);
-            sandbox_command.current_dir(&package_build_path);
+            sandbox_command.args(build_command_args);
+            sandbox_command.current_dir(&build_path);
 
-            for (key, value) in sandbox_environment {
+            for (key, value) in build_environment {
                 sandbox_command.env(key, value);
             }
 
@@ -508,59 +663,52 @@ impl PackageService for Package {
 
             while let Some(output) = stream.next().await {
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("package sandbox log: {}", output),
+                    log_output: format!("build: {}", output),
                 }))
                 .await
                 .unwrap();
             }
 
+            // TODO: properly handle error when sandbox command fails
+
             if let Err(err) = sandbox_command.status().await {
                 tx.send(Ok(PackageBuildResponse {
-                    log_output: format!("sandbox command failed: {:?}", err),
+                    log_output: format!("build failed: {:?}", err),
                 }))
                 .await
                 .map_err(|_| Status::internal("failed to send response"))?;
                 return Err(Status::internal("sandbox command failed"));
             }
 
-            let sandbox_output_files =
-                paths::get_file_paths(&sandbox_output_path, &Vec::<&str>::new())
-                    .map_err(|_| Status::internal("failed to get sandbox output files"))?;
-
-            if sandbox_output_files.is_empty() {
-                return Err(Status::internal("sandbox output is empty"));
-            }
-
-            let package_path = paths::get_package_path(&req.source_name, &req.source_hash);
-
-            for entry in WalkDir::new(&sandbox_output_path) {
-                let entry = entry.map_err(|e| {
-                    Status::internal(format!("failed to walk sandbox output: {:?}", e))
-                })?;
-
-                let output_path = entry.path().strip_prefix(&sandbox_output_path).unwrap();
-                let output_store_path = package_path.join(output_path);
-
-                if entry.path().is_dir() {
-                    create_dir_all(&output_store_path)
-                        .await
-                        .map_err(|_| Status::internal("failed to create sandbox output dir"))?;
-                } else {
-                    copy(&entry.path(), &output_store_path)
-                        .await
-                        .map_err(|_| Status::internal("failed to copy sandbox output file"))?;
-                }
-            }
-
-            remove_dir_all(&package_build_path).await?;
-
-            let package_tar_path = paths::get_package_tar_path(&req.source_name, &req.source_hash);
-
-            let package_files = paths::get_file_paths(&package_path, &Vec::<&str>::new())
+            let build_output_files = paths::get_file_paths(&build_output_path, &Vec::<&str>::new())
                 .map_err(|_| Status::internal("failed to get sandbox output files"))?;
 
-            if let Err(err) =
-                archives::compress_tar_gz(&package_path, &package_tar_path, &package_files).await
+            if build_output_files.is_empty() {
+                tx.send(Ok(PackageBuildResponse {
+                    log_output: format!(
+                        "no build output files found: {}",
+                        build_output_path.display()
+                    ),
+                }))
+                .await
+                .map_err(|_| Status::internal("failed to send response"))?;
+                return Err(Status::internal("no build output files found"));
+            }
+
+            create_dir_all(&package_path)
+                .await
+                .map_err(|_| Status::internal("failed to create package dir"))?;
+
+            copy_files(&build_output_path, &package_path)
+                .await
+                .map_err(|e| Status::internal(format!("failed to copy source files: {:?}", e)))?;
+
+            if let Err(err) = archives::compress_tar_gz(
+                &build_output_path,
+                &build_output_files,
+                &package_tar_path,
+            )
+            .await
             {
                 return Err(Status::internal(format!(
                     "failed to compress sandbox output: {:?}",
@@ -573,6 +721,8 @@ impl PackageService for Package {
             }))
             .await
             .unwrap();
+
+            remove_dir_all(&build_path).await?;
 
             Ok(())
         });

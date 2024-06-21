@@ -4,6 +4,7 @@ use crate::store;
 use tonic::transport::Server;
 use tracing::info;
 
+mod package;
 mod service;
 
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {
