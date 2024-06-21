@@ -20,6 +20,7 @@ use std::convert::TryFrom;
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use tera::Tera;
 use tokio::fs::{
     copy, create_dir_all, metadata, read, remove_dir_all, set_permissions, write, File,
@@ -38,10 +39,10 @@ pub struct Package {}
 pub struct Store {}
 
 pub async fn copy_files(
-    source_path: &std::path::PathBuf,
-    destination_path: &std::path::PathBuf,
+    source_path: &PathBuf,
+    destination_path: &Path,
 ) -> Result<(), anyhow::Error> {
-    let file_paths = paths::get_file_paths(&source_path, &Vec::<&str>::new())
+    let file_paths = paths::get_file_paths(source_path, &Vec::<&str>::new())
         .map_err(|e| anyhow::anyhow!("failed to get source files: {:?}", e))?;
 
     if file_paths.is_empty() {
@@ -50,14 +51,14 @@ pub async fn copy_files(
 
     for src in &file_paths {
         if src.is_dir() {
-            let dest = destination_path.join(src.strip_prefix(&source_path).unwrap());
+            let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
             create_dir_all(dest).await?;
             continue;
         }
 
-        let dest = destination_path.join(src.strip_prefix(&source_path).unwrap());
+        let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
 
-        copy(src, &dest).await?;
+        copy(src, dest).await?;
     }
 
     Ok(())
@@ -603,7 +604,7 @@ impl PackageService for Package {
                 }
 
                 build_environment.insert(
-                    format!("{}", path.name.replace("-", "_")),
+                    path.name.replace('-', "_").to_string(),
                     build_package.canonicalize()?.display().to_string(),
                 );
             }

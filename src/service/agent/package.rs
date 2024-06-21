@@ -61,7 +61,7 @@ pub async fn run(
         ConfigPackageSourceKind::Local => {
             if config_source_hash.is_empty() {
                 let source_path = Path::new(&config_source.uri).canonicalize()?;
-                let (source_hash, _) = validate_source(&tx, &source_path, &config_source).await?;
+                let (source_hash, _) = validate_source(tx, &source_path, &config_source).await?;
 
                 tx.send(Ok(ConfigPackageResponse {
                     log_output: format!("[agent] package source hash computed: {}", source_hash),
@@ -210,11 +210,9 @@ pub async fn run(
         .await?;
 
         stream_build(
-            &tx,
+            tx,
             &config_build,
             &config.name,
-            &package_path,
-            &package_tar_path,
             &config_source_hash,
             &store_package_path,
             &mut store_service,
@@ -238,7 +236,7 @@ pub async fn run(
         .await?;
 
         stream_prepare(
-            &tx,
+            tx,
             &config.name,
             &config_source_hash,
             &package_source_tar_path,
@@ -246,11 +244,9 @@ pub async fn run(
         .await?;
 
         stream_build(
-            &tx,
+            tx,
             &config_build,
             &config.name,
-            &package_path,
-            &package_tar_path,
             &config_source_hash,
             &store_package_path,
             &mut store_service,
@@ -261,7 +257,7 @@ pub async fn run(
     }
 
     let source_hash =
-        source_prepare(&tx, &config.name, &config_source, &package_source_tar_path).await?;
+        source_prepare(tx, &config.name, &config_source, &package_source_tar_path).await?;
 
     tx.send(Ok(ConfigPackageResponse {
         log_output: format!(
@@ -284,11 +280,9 @@ pub async fn run(
         .await?;
 
         stream_build(
-            &tx,
+            tx,
             &config_build,
             &config.name,
-            &package_path,
-            &package_tar_path,
             &config_source_hash,
             &store_package_path,
             &mut store_service,
@@ -298,14 +292,12 @@ pub async fn run(
         return Ok(());
     }
 
-    stream_prepare(&tx, &config.name, &source_hash, &package_source_tar_path).await?;
+    stream_prepare(tx, &config.name, &source_hash, &package_source_tar_path).await?;
 
     stream_build(
-        &tx,
+        tx,
         &config_build,
         &config.name,
-        &package_path,
-        &package_tar_path,
         &source_hash,
         &store_package_path,
         &mut store_service,
@@ -369,8 +361,6 @@ async fn stream_build(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
     build: &ConfigPackageBuild,
     name: &str,
-    package_path: &PathBuf,
-    package_tar_path: &PathBuf,
     source_hash: &str,
     store_package_path: &StorePath,
     store_service: &mut StoreServiceClient<tonic::transport::channel::Channel>,
@@ -393,6 +383,8 @@ async fn stream_build(
         source_hash: source_hash.to_string(),
     };
 
+    let package_path = paths::get_package_path(name, source_hash);
+
     let mut package_service = PackageServiceClient::connect("http://[::1]:23151").await?;
 
     if let Ok(res) = package_service.build(build_config).await {
@@ -401,12 +393,14 @@ async fn stream_build(
         while let Some(chunk) = build_stream.message().await? {
             if !chunk.log_output.is_empty() {
                 tx.send(Ok(ConfigPackageResponse {
-                    log_output: format!("[worker] {}", chunk.log_output.to_string()),
+                    log_output: format!("[worker] {}", chunk.log_output),
                     package_output: None,
                 }))
                 .await?;
             }
         }
+
+        let package_tar_path = paths::get_package_tar_path(name, source_hash);
 
         if !package_tar_path.exists() {
             let fetch_response = store_service.fetch(store_package_path.clone()).await?;
@@ -433,9 +427,9 @@ async fn stream_build(
             }))
             .await?;
 
-            fs::create_dir_all(package_path).await?;
+            fs::create_dir_all(package_path.clone()).await?;
 
-            archives::unpack_tar_gz(package_path, package_tar_path).await?;
+            archives::unpack_tar_gz(&package_path, &package_tar_path).await?;
 
             tx.send(Ok(ConfigPackageResponse {
                 log_output: format!("[agent] package tar unpacked: {}", package_path.display()),
@@ -459,7 +453,7 @@ async fn stream_build(
     }))
     .await?;
 
-    return Ok(());
+    Ok(())
 }
 
 async fn stream_prepare(
@@ -506,7 +500,7 @@ async fn stream_prepare(
     while let Some(chunk) = stream.message().await? {
         if !chunk.log_output.is_empty() {
             tx.send(Ok(ConfigPackageResponse {
-                log_output: format!("[worker-prepare] {}", chunk.log_output.to_string()),
+                log_output: format!("[worker-prepare] {}", chunk.log_output),
                 package_output: None,
             }))
             .await?;
@@ -768,12 +762,7 @@ async fn source_prepare(
     }))
     .await?;
 
-    archives::compress_tar_gz(
-        &package_source_path,
-        &package_source_files,
-        &source_tar_path,
-    )
-    .await?;
+    archives::compress_tar_gz(&package_source_path, &package_source_files, source_tar_path).await?;
 
     Ok(package_source_hash)
 }
