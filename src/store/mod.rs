@@ -7,7 +7,7 @@ pub mod hashes;
 pub mod paths;
 pub mod temps;
 
-pub async fn check_dirs() -> Result<(), anyhow::Error> {
+pub async fn check() -> Result<(), anyhow::Error> {
     let root_dir_path = paths::get_root_path();
     if !root_dir_path.exists() {
         fs::create_dir_all(&root_dir_path).await?;

@@ -23,13 +23,20 @@ message PrepareBuildPackage {
     string name = 2;
 }
 
+enum PackageBuildSystem {
+    UNKNOWN_SYSTEM = 0;
+    AARCH64_LINUX = 1;
+    AARCH64_MACOS = 2;
+}
+
 message PackageBuildRequest {
-    bool build_sandbox = 1;
-    map<string, string> build_environment = 2;
-    repeated PrepareBuildPackage build_packages = 3;
-    string build_script = 4;
-    string source_hash = 5;
-    string source_name = 6;
+    PackageBuildSystem build_system = 1;
+    bool build_sandbox = 2;
+    map<string, string> build_environment = 3;
+    repeated PrepareBuildPackage build_packages = 4;
+    string build_script = 5;
+    string source_hash = 6;
+    string source_name = 7;
 }
 
 message PackageBuildResponse {

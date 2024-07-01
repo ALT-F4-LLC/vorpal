@@ -42,13 +42,28 @@ package:
     OUTPUT=$(nix build --json --no-link --print-build-logs . | jq -r .[0].outputs.out)
     install --mode 755 $OUTPUT/bin/vorpal .
 
-# run service (cargo)
-start service:
-    cargo run --bin vorpal services {{ service }}
+stack-setup:
+    orb -m "vorpal" sudo $PWD/script/setup_agent.sh
 
-# run all services (nix)
-start-all:
-    nix run . ".#start"
+stack-create:
+    orbctl create nixos "vorpal"
+
+stack-delete:
+    orbctl delete --force "vorpal"
+
+stack-start:
+    orbctl start "vorpal"
+
+stack-stop:
+    orbctl stop "vorpal"
+
+# run agent (cargo)
+start-agent workers:
+    cargo run --bin vorpal services agent --workers "{{ workers }}"
+
+# run worker (cargo)
+start-worker:
+    cargo run --bin vorpal services worker
 
 # test (cargo)
 test:

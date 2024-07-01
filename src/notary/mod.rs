@@ -13,7 +13,7 @@ use tracing::info;
 
 const BITS: usize = 2048;
 
-pub fn check_keys() -> Result<(), anyhow::Error> {
+pub fn check() -> Result<(), anyhow::Error> {
     let private_key_path = paths::get_private_key_path();
     let public_key_path = paths::get_public_key_path();
 

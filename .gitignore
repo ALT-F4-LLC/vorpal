@@ -1,3 +1,4 @@
-.direnv
+/.direnv
+/result
 /target
 /vorpal

@@ -2,7 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing::Level;
 use vorpal::notary;
-use vorpal::service::{agent, worker};
+use vorpal::service::agent;
+use vorpal::service::worker;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -34,6 +35,9 @@ enum Services {
     Agent {
         #[clap(default_value = "15323", long, short)]
         port: u16,
+
+        #[clap(long, short, use_value_delimiter = true)]
+        workers: Vec<String>,
     },
 
     Worker {
@@ -61,7 +65,7 @@ async fn main() -> Result<(), anyhow::Error> {
             Keys::Generate {} => notary::generate_keys().await,
         },
         Command::Services(service) => match service {
-            Services::Agent { port } => agent::start(*port).await,
+            Services::Agent { port, workers } => agent::start(port, workers).await,
             Services::Worker { port } => worker::start(*port).await,
         },
     }

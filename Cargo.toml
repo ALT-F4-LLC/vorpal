@@ -20,20 +20,20 @@ infer = "0"
 process-stream = "0"
 prost = "0"
 rand = "0"
+reqwest = { version = "0", features = ["json"] }
 rsa = { version = "0", features = ["sha2"] }
 sha256 = "1"
-reqwest = { version = "0", features = ["json"] }
 tera = { version = "1", default-features = false }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0"
 tokio-tar = "0"
 tokio-util = { version = "0", features = ["compat"] }
 tonic = "0"
+tracing = "0"
+tracing-subscriber = "0"
 url = "2"
 uuid = { version = "1", features = ["v7"] }
 walkdir = "2"
-tracing = "0"
-tracing-subscriber = "0"
 
 [build-dependencies]
 tonic-build = "0"
