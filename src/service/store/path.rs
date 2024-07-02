@@ -1,5 +1,5 @@
 use crate::api::{StorePath, StorePathKind, StorePathResponse};
-use crate::store::paths::{get_package_path, get_package_source_tar_path};
+use crate::store::paths::{get_package_path, get_package_source_archive_path};
 use anyhow::Result;
 use tonic::Request;
 
@@ -22,13 +22,13 @@ pub async fn get(request: Request<StorePath>) -> Result<StorePathResponse, anyho
         });
     }
 
-    let package_source_tar_path = get_package_source_tar_path(&req.name, &req.hash);
+    let source_archive_path = get_package_source_archive_path(&req.name, &req.hash);
 
-    if !package_source_tar_path.exists() {
+    if !source_archive_path.exists() {
         anyhow::bail!("package source tar not found");
     }
 
     Ok(StorePathResponse {
-        uri: package_source_tar_path.to_string_lossy().to_string(),
+        uri: source_archive_path.to_string_lossy().to_string(),
     })
 }

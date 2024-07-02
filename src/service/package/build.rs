@@ -1,9 +1,11 @@
 use crate::api::{PackageBuildRequest, PackageBuildResponse, PackageBuildSystem};
 use crate::service::get_build_system;
 use crate::service::package::sandbox_default;
-use crate::store::archives::{compress_gzip, unpack_gzip};
-use crate::store::paths::get_file_paths;
-use crate::store::{archives, paths, temps};
+use crate::store::archives::{compress_zstd, unpack_zstd};
+use crate::store::paths::{
+    get_file_paths, get_package_archive_path, get_package_path, get_package_source_archive_path,
+};
+use crate::store::temps::{create_dir, create_file};
 use process_stream::{Process, ProcessExt};
 use std::collections::HashMap;
 use std::env;
@@ -69,7 +71,7 @@ pub async fn run(
         send_error(tx, message.into()).await?
     }
 
-    let package_path = paths::get_package_path(&request.source_name, &request.source_hash);
+    let package_path = get_package_path(&request.source_name, &request.source_hash);
 
     // If package exists, return
 
@@ -79,43 +81,46 @@ pub async fn run(
         send_error(tx, message.into()).await?
     }
 
-    let package_tar_path = paths::get_package_tar_path(&request.source_name, &request.source_hash);
+    let package_archive_path = get_package_archive_path(&request.source_name, &request.source_hash);
 
     // If package tar exists, unpack it to package path
 
-    if package_tar_path.exists() {
-        let message = format!("package tar found: {}", package_tar_path.display());
+    if package_archive_path.exists() {
+        let message = format!("package archive found: {}", package_archive_path.display());
 
         send(tx, message.into()).await?;
 
         create_dir_all(&package_path).await?;
 
-        if let Err(err) = archives::unpack_gzip(&package_path, &package_tar_path).await {
+        if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
             send_error(tx, format!("failed to unpack package tar: {:?}", err)).await?
         }
     }
 
-    let package_source_tar_path =
-        paths::get_package_source_tar_path(&request.source_name, &request.source_hash);
+    let package_source_archive_path =
+        get_package_source_archive_path(&request.source_name, &request.source_hash);
 
-    if !package_source_tar_path.exists() {
+    if !package_source_archive_path.exists() {
         let message = format!(
             "package source tar not found: {}",
-            package_source_tar_path.display()
+            package_source_archive_path.display()
         );
 
         send_error(tx, message.into()).await?
     }
 
-    let message = format!("package source tar: {}", package_source_tar_path.display());
+    let message = format!(
+        "package source tar: {}",
+        package_source_archive_path.display()
+    );
 
     send(tx, message.into()).await?;
 
-    let package_build_path = temps::create_dir().await?;
+    let package_build_path = create_dir().await?;
     let package_build_path = package_build_path.canonicalize()?;
 
-    if let Err(err) = unpack_gzip(&package_build_path, &package_source_tar_path).await {
-        let message = format!("failed to unpack package source tar: {:?}", err);
+    if let Err(err) = unpack_zstd(&package_build_path, &package_source_archive_path).await {
+        let message = format!("failed to unpack package source archive: {:?}", err);
 
         send_error(tx, message.into()).await?
     }
@@ -165,7 +170,7 @@ pub async fn run(
 
     send(tx, message.into()).await?;
 
-    let package_build_script_path = temps::create_file("sh").await?;
+    let package_build_script_path = create_file("sh").await?;
     let package_build_script_path = package_build_script_path.canonicalize()?;
 
     write(&package_build_script_path, package_build_script_shell_data).await?;
@@ -189,7 +194,7 @@ pub async fn run(
     let mut build_bin_paths = vec![];
 
     for path in request.build_packages {
-        let package_path = paths::get_package_path(&path.name, &path.hash);
+        let package_path = get_package_path(&path.name, &path.hash);
 
         if !package_path.exists() {
             let message = format!("build package not found: {}", package_path.display());
@@ -235,7 +240,7 @@ pub async fn run(
 
     build_environment.insert("PATH".to_string(), build_bin_paths.join(":"));
 
-    let package_build_output_path = temps::create_dir().await?;
+    let package_build_output_path = create_dir().await?;
     let package_build_output_path = package_build_output_path.canonicalize()?;
 
     build_environment.insert(
@@ -370,7 +375,7 @@ pub async fn run(
     if OS == "macos" {
         // Create sandbox profile
 
-        let build_profile_path = temps::create_file("sb").await?;
+        let build_profile_path = create_file("sb").await?;
         let build_profile_path = build_profile_path.canonicalize()?;
 
         let mut tera = Tera::default();
@@ -445,7 +450,7 @@ pub async fn run(
     remove_dir_all(&package_build_path).await?;
 
     let package_build_output_files =
-        paths::get_file_paths(&package_build_output_path, &Vec::<&str>::new())?;
+        get_file_paths(&package_build_output_path, &Vec::<&str>::new())?;
 
     if package_build_output_files.is_empty() {
         send_error(tx, "no build output files found".to_string()).await?
@@ -550,10 +555,10 @@ pub async fn run(
 
     // Create package tar from build output files
 
-    if let Err(err) = compress_gzip(
+    if let Err(err) = compress_zstd(
         &package_build_output_path,
         &package_build_output_files,
-        &package_tar_path,
+        &package_archive_path,
     )
     .await
     {
@@ -562,7 +567,7 @@ pub async fn run(
 
     remove_dir_all(&package_build_output_path).await?;
 
-    let message = format!("package tar created: {}", package_tar_path.display());
+    let message = format!("package tar created: {}", package_archive_path.display());
 
     send(tx, message.into()).await?;
 
@@ -570,8 +575,8 @@ pub async fn run(
 
     create_dir_all(&package_path).await?;
 
-    if let Err(err) = unpack_gzip(&package_path, &package_tar_path).await {
-        send_error(tx, format!("failed to unpack package tar: {:?}", err)).await?
+    if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
+        send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
     }
 
     Ok(())

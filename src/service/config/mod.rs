@@ -42,7 +42,14 @@ impl ConfigService for Config {
 
         let workers = self.workers.clone();
 
-        tokio::spawn(async move { stream::package(&tx, request, workers).await });
+        tokio::spawn(async move {
+            match stream::package(&tx, request, workers).await {
+                Ok(_) => (),
+                Err(e) => {
+                    tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
+                }
+            }
+        });
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }

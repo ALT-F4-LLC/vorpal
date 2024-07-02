@@ -8,8 +8,10 @@ use crate::api::{
 use crate::notary;
 use crate::service::config::source;
 use crate::service::config::{ConfigPackageRequest, ConfigWorker};
-use crate::store::archives::unpack_gzip;
-use crate::store::paths::{get_package_path, get_package_source_tar_path, get_package_tar_path};
+use crate::store::archives::unpack_zstd;
+use crate::store::paths::{
+    get_package_archive_path, get_package_path, get_package_source_archive_path,
+};
 use anyhow::Result;
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, File};
@@ -133,11 +135,11 @@ pub async fn build(
             }
         }
 
-        let package_tar_path = get_package_tar_path(name, source_hash);
+        let package_archive_path = get_package_archive_path(name, source_hash);
 
         // check if package tar exists in agent (local) cache
 
-        if !package_tar_path.exists() {
+        if !package_archive_path.exists() {
             let fetch_response = store_service.fetch(store_package_path.clone()).await?;
             let mut fetch_stream = fetch_response.into_inner();
             let mut fetch_stream_data = Vec::new();
@@ -148,17 +150,17 @@ pub async fn build(
                 }
             }
 
-            let mut package_tar = File::create(&package_tar_path).await?;
+            let mut package_tar = File::create(&package_archive_path).await?;
 
             package_tar.write_all(&fetch_stream_data).await?;
 
-            let message = format!("package tar fetched: {}", package_tar_path.display());
+            let message = format!("package tar fetched: {}", package_archive_path.display());
 
             send(tx, message.into(), None).await?;
 
             create_dir_all(package_path.clone()).await?;
 
-            unpack_gzip(&package_path, &package_tar_path).await?;
+            unpack_zstd(&package_path, &package_archive_path).await?;
         }
     }
 
@@ -224,7 +226,7 @@ pub async fn package(
         send(
             tx,
             format!(
-                "package cache: {}",
+                "package exists: {}",
                 package_path.file_name().unwrap().to_str().unwrap()
             )
             .into(),
@@ -240,23 +242,23 @@ pub async fn package(
 
     // check package tar exists in agent (local) cache
 
-    let package_tar_path = get_package_tar_path(&config.name, &source_hash);
+    let package_archive_path = get_package_archive_path(&config.name, &source_hash);
 
-    if !package_path.exists() && package_tar_path.exists() {
+    if !package_path.exists() && package_archive_path.exists() {
         send(
             tx,
-            format!("package tar cache: {}", package_tar_path.display()).into_bytes(),
+            format!("package archive exists: {}", package_archive_path.display()).into_bytes(),
             None,
         )
         .await?;
 
         create_dir_all(&package_path).await?;
 
-        unpack_gzip(&package_path, &package_tar_path).await?;
+        unpack_zstd(&package_path, &package_archive_path).await?;
 
         send(
             tx,
-            format!("package tar cache unpacked: {}", package_path.display()).into_bytes(),
+            format!("package archive unpacked: {}", package_path.display()).into_bytes(),
             Some(ConfigPackageOutput {
                 hash: source_hash.clone(),
                 name: config.name.clone(),
@@ -308,7 +310,7 @@ pub async fn package(
         if let Ok(res) = store_service.path(store_package_path.clone()).await {
             let store_path = res.into_inner();
 
-            let message = format!("package tar cache remote: {}", store_path.uri);
+            let message = format!("package archive cache remote: {}", store_path.uri);
 
             send(tx, message.into(), None).await?;
 
@@ -328,24 +330,24 @@ pub async fn package(
 
                 let stream_data_size = stream_data.len();
 
-                let message = format!("package tar cache remote size: {}", stream_data_size);
+                let message = format!("package archive cache remote size: {}", stream_data_size);
 
                 send(tx, message.into(), None).await?;
 
-                let mut package_tar = File::create(&package_tar_path).await?;
+                let mut package_archive = File::create(&package_archive_path).await?;
 
-                package_tar.write_all(&stream_data).await?;
+                package_archive.write_all(&stream_data).await?;
 
                 let message = format!(
                     "package tar cache remote fetched: {}",
-                    package_tar_path.display()
+                    package_archive_path.display()
                 );
 
                 send(tx, message.into(), None).await?;
 
                 create_dir_all(&package_path).await?;
 
-                match unpack_gzip(&package_path, &package_tar_path).await {
+                match unpack_zstd(&package_path, &package_archive_path).await {
                     Ok(_) => {}
                     Err(_) => send_error(tx, "failed to unpack tar".to_string()).await?,
                 }
@@ -399,12 +401,13 @@ pub async fn package(
 
         // check if package source tar exists in agent (local) cache
 
-        let package_source_tar_path = get_package_source_tar_path(&config.name, &source_hash);
+        let package_source_archive_path =
+            get_package_source_archive_path(&config.name, &source_hash);
 
-        if package_source_tar_path.exists() {
+        if package_source_archive_path.exists() {
             let message = format!(
                 "package source tar cache: {}",
-                package_source_tar_path.display()
+                package_source_archive_path.display()
             );
 
             send(tx, message.into(), None).await?;
@@ -413,7 +416,7 @@ pub async fn package(
                 tx,
                 &config.name,
                 &source_hash,
-                &package_source_tar_path,
+                &package_source_archive_path,
                 &worker.uri,
             )
             .await?;
@@ -432,7 +435,7 @@ pub async fn package(
             break;
         }
 
-        let source_hash = source::prepare(tx, &source, &package_source_tar_path).await?;
+        let source_hash = source::prepare(tx, &source, &package_source_archive_path).await?;
 
         // check if package source exists in worker cache (same as agent)
 
@@ -464,7 +467,7 @@ pub async fn package(
             tx,
             &config.name,
             &source_hash,
-            &package_source_tar_path,
+            &package_source_archive_path,
             &worker.uri,
         )
         .await?;

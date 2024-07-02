@@ -1,5 +1,9 @@
 use anyhow::Result;
-use async_compression::tokio::{bufread::GzipDecoder, write::GzipEncoder};
+use async_compression::tokio::{
+    bufread::{GzipDecoder, ZstdDecoder},
+    write::GzipEncoder,
+    write::ZstdEncoder,
+};
 use async_zip::tokio::read::seek::ZipFileReader;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
@@ -7,9 +11,47 @@ use tokio::{
     fs::{create_dir_all, File, OpenOptions},
     io::BufReader,
 };
-use tokio_tar::ArchiveBuilder;
-use tokio_tar::Builder;
+use tokio_tar::{Archive, ArchiveBuilder, Builder};
 use tokio_util::compat::TokioAsyncWriteCompatExt;
+
+pub async fn compress_zstd(
+    source_path: &PathBuf,
+    source_files: &[PathBuf],
+    output_path: &PathBuf,
+) -> Result<File, anyhow::Error> {
+    let file = File::create(output_path).await?;
+    let encoder = ZstdEncoder::new(file);
+    let mut builder = Builder::new(encoder);
+
+    for path in source_files {
+        if path == source_path {
+            continue;
+        }
+
+        let relative_path = path.strip_prefix(source_path)?;
+
+        if path.is_file() {
+            builder.append_path_with_name(path, relative_path).await?;
+        } else if path.is_dir() {
+            builder.append_dir_all(relative_path, path).await?;
+        }
+    }
+
+    let mut output = builder.into_inner().await?;
+
+    output.shutdown().await?;
+
+    Ok(output.into_inner())
+}
+
+pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(), anyhow::Error> {
+    let zstd = File::open(source_zstd).await?;
+    let buf_reader = BufReader::new(zstd);
+    let zstd_decoder = ZstdDecoder::new(buf_reader);
+    let mut archive = Archive::new(zstd_decoder);
+
+    Ok(archive.unpack(target_dir).await?)
+}
 
 pub async fn compress_gzip(
     source_path: &PathBuf,

@@ -34,7 +34,14 @@ impl PackageService for Package {
     ) -> Result<Response<Self::PrepareStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
-        tokio::spawn(async move { prepare::run(&tx, request).await });
+        tokio::spawn(async move {
+            match prepare::run(&tx, request).await {
+                Ok(_) => (),
+                Err(e) => {
+                    tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
+                }
+            }
+        });
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
@@ -45,7 +52,14 @@ impl PackageService for Package {
     ) -> Result<Response<Self::BuildStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
-        tokio::spawn(async move { build::run(&tx, request).await });
+        tokio::spawn(async move {
+            match build::run(&tx, request).await {
+                Ok(_) => (),
+                Err(e) => {
+                    tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
+                }
+            }
+        });
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }

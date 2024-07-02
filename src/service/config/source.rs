@@ -2,7 +2,7 @@ use crate::api::{
     ConfigPackageOutput, ConfigPackageResponse, ConfigPackageSource, ConfigPackageSourceKind,
 };
 use crate::store::{
-    archives::{compress_gzip, unpack_gzip, unpack_zip},
+    archives::{compress_zstd, unpack_gzip, unpack_zip},
     hashes,
     paths::get_file_paths,
     temps,
@@ -66,8 +66,8 @@ pub async fn validate(
     )
     .await?;
 
-    let workdir_files_hashes = hashes::get_files(&workdir_files)?;
-    let workdir_hash = hashes::get_source(&workdir_files_hashes)?;
+    let workdir_files_hashes = hashes::get_file_hashes(&workdir_files)?;
+    let workdir_hash = hashes::get_source_hash(&workdir_files_hashes)?;
 
     if workdir_hash.is_empty() {
         send_error(tx, "no source hash found".to_string()).await?
@@ -93,7 +93,7 @@ pub async fn validate(
 pub async fn prepare(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
     source: &ConfigPackageSource,
-    package_source_tar_path: &PathBuf,
+    source_tar_path: &PathBuf,
 ) -> Result<String, anyhow::Error> {
     let source_sandbox_path = temps::create_dir().await?;
     let source_sandbox_path = source_sandbox_path.canonicalize()?;
@@ -318,14 +318,14 @@ pub async fn prepare(
 
     send(tx, message.into(), None).await?;
 
-    compress_gzip(
+    compress_zstd(
         &source_sandbox_path,
         &source_sandbox_file_paths,
-        package_source_tar_path,
+        source_tar_path,
     )
     .await?;
 
-    let message = format!("package source tar: {:?}", package_source_tar_path);
+    let message = format!("package source archive: {:?}", source_tar_path);
 
     send(tx, message.into(), None).await?;
 

@@ -1,5 +1,5 @@
 use crate::api::{StoreFetchResponse, StorePath, StorePathKind};
-use crate::store::paths::{get_package_source_tar_path, get_package_tar_path};
+use crate::store::paths::{get_package_archive_path, get_package_source_archive_path};
 use anyhow::Result;
 use tokio::fs::read;
 use tokio::sync::mpsc::Sender;
@@ -19,21 +19,24 @@ pub async fn stream(
     }
 
     if req.kind == StorePathKind::Package as i32 {
-        let package_tar_path = get_package_tar_path(&req.name, &req.hash);
+        let package_archive_path = get_package_archive_path(&req.name, &req.hash);
 
-        if !package_tar_path.exists() {
+        if !package_archive_path.exists() {
             anyhow::bail!("package archive not found");
         }
 
-        info!("serving package: {}", package_tar_path.display());
+        info!(
+            "serving package archive: {}",
+            package_archive_path.display()
+        );
 
-        let data = read(&package_tar_path)
+        let data = read(&package_archive_path)
             .await
             .map_err(|_| Status::internal("failed to read cached package"))?;
 
         let data_size = data.len();
 
-        info!("serving package size: {}", data_size);
+        info!("serving package archive size: {}", data_size);
 
         for package_chunk in data.chunks(package_chunks_size) {
             tx.send(Ok(StoreFetchResponse {
@@ -45,7 +48,7 @@ pub async fn stream(
         return Ok(());
     }
 
-    let package_source_tar_path = get_package_source_tar_path(&req.name, &req.hash);
+    let package_source_tar_path = get_package_source_archive_path(&req.name, &req.hash);
 
     if !package_source_tar_path.exists() {
         anyhow::bail!("package source tar not found");

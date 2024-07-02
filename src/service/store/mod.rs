@@ -21,7 +21,14 @@ impl StoreService for Store {
     ) -> Result<Response<Self::FetchStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
-        tokio::spawn(async move { fetch::stream(&tx, request).await });
+        tokio::spawn(async move {
+            match fetch::stream(&tx, request).await {
+                Ok(_) => (),
+                Err(e) => {
+                    tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
+                }
+            }
+        });
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
