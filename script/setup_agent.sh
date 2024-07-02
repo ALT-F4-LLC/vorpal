@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-NIX_CONFIG_BINARIES="environment\.systemPackages = \[pkgs\.automake pkgs\.autoconf pkgs\.bubblewrap pkgs\.gcc pkgs\.git\ pkgs\.gnumake pkgs\.help2man pkgs\.vim];"
+NIX_CONFIG_BINARIES="environment\.systemPackages = \[pkgs\.automake pkgs\.autoconf pkgs\.bubblewrap pkgs\.gcc pkgs\.git\ pkgs\.gnumake pkgs\.help2man pkgs\.patchelf pkgs\.perl pkgs\.vim];"
 NIX_CONFIG_FEATURES="nix\.settings\.experimental-features = \[\"nix-command\" \"flakes\"\];"
 NIX_CONFIG_PATH="/etc/nixos/configuration.nix"
 

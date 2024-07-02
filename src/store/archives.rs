@@ -11,7 +11,7 @@ use tokio_tar::ArchiveBuilder;
 use tokio_tar::Builder;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
-pub async fn compress_tar_gz(
+pub async fn compress_gzip(
     source_path: &PathBuf,
     source_files: &[PathBuf],
     output_tar_path: &PathBuf,
@@ -43,7 +43,7 @@ pub async fn compress_tar_gz(
     Ok(output.into_inner())
 }
 
-pub async fn unpack_tar_gz(target_dir: &PathBuf, source_tar: &Path) -> Result<(), anyhow::Error> {
+pub async fn unpack_gzip(target_dir: &PathBuf, source_tar: &Path) -> Result<(), anyhow::Error> {
     let tar_gz = File::open(source_tar).await?;
     let buf_reader = BufReader::new(tar_gz);
     let gz_decoder = GzipDecoder::new(buf_reader);

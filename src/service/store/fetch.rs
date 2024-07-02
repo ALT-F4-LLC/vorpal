@@ -31,12 +31,15 @@ pub async fn stream(
             .await
             .map_err(|_| Status::internal("failed to read cached package"))?;
 
+        let data_size = data.len();
+
+        info!("serving package size: {}", data_size);
+
         for package_chunk in data.chunks(package_chunks_size) {
             tx.send(Ok(StoreFetchResponse {
                 data: package_chunk.to_vec(),
             }))
-            .await
-            .unwrap();
+            .await?;
         }
 
         return Ok(());

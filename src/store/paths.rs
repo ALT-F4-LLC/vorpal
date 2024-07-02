@@ -45,10 +45,6 @@ pub fn get_package_tar_path(name: &str, hash: &str) -> PathBuf {
     get_package_path(name, hash).with_extension("tar.gz")
 }
 
-pub fn get_package_source_path(source_name: &str, source_hash: &str) -> PathBuf {
-    get_package_path(source_name, source_hash).with_extension("source")
-}
-
 pub fn get_package_source_tar_path(source_name: &str, source_hash: &str) -> PathBuf {
     get_package_path(source_name, source_hash).with_extension("source.tar.gz")
 }

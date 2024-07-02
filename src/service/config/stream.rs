@@ -8,18 +8,17 @@ use crate::api::{
 use crate::notary;
 use crate::service::config::source;
 use crate::service::config::{ConfigPackageRequest, ConfigWorker};
-use crate::store::{archives, paths};
+use crate::store::archives::unpack_gzip;
+use crate::store::paths::{get_package_path, get_package_source_tar_path, get_package_tar_path};
 use anyhow::Result;
 use std::path::Path;
-use tokio::fs;
-use tokio::fs::read;
-use tokio::fs::File;
+use tokio::fs::{create_dir_all, read, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 use tonic::{Request, Status};
 use tracing::debug;
 
-pub async fn send_error(
+async fn send_error(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
     message: String,
 ) -> Result<(), anyhow::Error> {
@@ -27,15 +26,15 @@ pub async fn send_error(
 
     tx.send(Err(Status::internal(message.clone()))).await?;
 
-    anyhow::bail!(message)
+    anyhow::bail!(message);
 }
 
-pub async fn send(
+async fn send(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
     log_output: Vec<u8>,
     package_output: Option<ConfigPackageOutput>,
 ) -> Result<(), anyhow::Error> {
-    debug!("send: {}", String::from_utf8_lossy(&log_output));
+    debug!("send: {:?}", String::from_utf8(log_output.clone()).unwrap());
 
     tx.send(Ok(ConfigPackageResponse {
         log_output,
@@ -53,38 +52,35 @@ pub async fn prepare(
     source_tar_path: &Path,
     worker: &String,
 ) -> Result<(), anyhow::Error> {
-    let data = read(&source_tar_path).await?;
+    let source_data = read(&source_tar_path).await?;
 
-    let signature = notary::sign(&data).await?;
+    let source_signature = notary::sign(&source_data).await?;
 
-    send(
-        tx,
-        format!("source tar signature: {}", signature).into_bytes(),
-        None,
-    )
-    .await?;
+    let message = format!("package source tar: {}", source_tar_path.display());
+
+    send(tx, message.into(), None).await?;
 
     let mut request_chunks = vec![];
+
     let request_chunks_size = 8192; // default grpc limit
 
-    for chunk in data.chunks(request_chunks_size) {
+    for chunk in source_data.chunks(request_chunks_size) {
         request_chunks.push(PackagePrepareRequest {
             source_data: chunk.to_vec(),
             source_name: name.to_string(),
             source_hash: source_hash.to_string(),
-            source_signature: signature.to_string(),
+            source_signature: source_signature.to_string(),
         });
     }
 
-    send(
-        tx,
-        format!("source chunks: {}", request_chunks.len()).into_bytes(),
-        None,
-    )
-    .await?;
+    let message = format!("package source chunks: {}", request_chunks.len());
+
+    send(tx, message.into(), None).await?;
 
     let mut client = PackageServiceClient::connect(worker.to_string()).await?;
+
     let response = client.prepare(tokio_stream::iter(request_chunks)).await?;
+
     let mut stream = response.into_inner();
 
     while let Some(res) = stream.message().await? {
@@ -124,7 +120,7 @@ pub async fn build(
         source_hash: source_hash.to_string(),
     };
 
-    let package_path = paths::get_package_path(name, source_hash);
+    let package_path = get_package_path(name, source_hash);
 
     let mut package_service = PackageServiceClient::connect(worker.to_string()).await?;
 
@@ -133,15 +129,13 @@ pub async fn build(
 
         while let Some(chunk) = build_stream.message().await? {
             if !chunk.log_output.is_empty() {
-                tx.send(Ok(ConfigPackageResponse {
-                    log_output: chunk.log_output,
-                    package_output: None,
-                }))
-                .await?;
+                send(tx, chunk.log_output, None).await?;
             }
         }
 
-        let package_tar_path = paths::get_package_tar_path(name, source_hash);
+        let package_tar_path = get_package_tar_path(name, source_hash);
+
+        // check if package tar exists in agent (local) cache
 
         if !package_tar_path.exists() {
             let fetch_response = store_service.fetch(store_package_path.clone()).await?;
@@ -156,41 +150,30 @@ pub async fn build(
 
             let mut package_tar = File::create(&package_tar_path).await?;
 
-            if let Err(e) = package_tar.write(&fetch_stream_data).await {
-                send_error(tx, e.to_string()).await?
-            }
+            package_tar.write_all(&fetch_stream_data).await?;
 
-            send(
-                tx,
-                format!("tar fetched: {}", package_tar_path.display()).into_bytes(),
-                None,
-            )
-            .await?;
+            let message = format!("package tar fetched: {}", package_tar_path.display());
 
-            fs::create_dir_all(package_path.clone()).await?;
+            send(tx, message.into(), None).await?;
 
-            archives::unpack_tar_gz(&package_path, &package_tar_path).await?;
+            create_dir_all(package_path.clone()).await?;
 
-            tx.send(Ok(ConfigPackageResponse {
-                log_output: format!("tar unpacked: {}", package_path.display()).into_bytes(),
-                package_output: Some(ConfigPackageOutput {
-                    hash: source_hash.to_string(),
-                    name: name.to_string(),
-                }),
-            }))
-            .await?;
+            unpack_gzip(&package_path, &package_tar_path).await?;
         }
-
-        // TODO: check if build failed
     }
 
-    tx.send(Ok(ConfigPackageResponse {
-        log_output: format!("output: {}", package_path.display()).into_bytes(),
-        package_output: Some(ConfigPackageOutput {
+    send(
+        tx,
+        format!(
+            "package output: {}",
+            package_path.file_name().unwrap().to_str().unwrap()
+        )
+        .into_bytes(),
+        Some(ConfigPackageOutput {
             hash: source_hash.to_string(),
             name: name.to_string(),
         }),
-    }))
+    )
     .await?;
 
     Ok(())
@@ -203,45 +186,50 @@ pub async fn package(
 ) -> Result<(), anyhow::Error> {
     let config = request.into_inner();
 
-    send(tx, config.name.clone().into_bytes(), None).await?;
+    send(tx, format!("package name: {}", config.name).into(), None).await?;
 
-    let config_source = match config.source {
-        None => anyhow::bail!("source config is required"),
+    let source = match config.source {
+        None => return send_error(tx, "source config is required".to_string()).await,
         Some(source) => source,
     };
 
-    let mut config_source_hash = config_source.hash.clone().unwrap_or_default();
+    let mut source_hash = source.hash.clone().unwrap_or_default();
 
-    match config_source.kind() {
+    match source.kind() {
         ConfigPackageSourceKind::UnknownSource => {
-            send_error(tx, "source kind is unknown".to_string()).await?
+            send_error(tx, "package source kind is unknown".to_string()).await?
         }
         ConfigPackageSourceKind::Git => {}
         ConfigPackageSourceKind::Http => {}
         ConfigPackageSourceKind::Local => {
-            if config_source_hash.is_empty() {
-                let path = Path::new(&config_source.uri).canonicalize()?;
-                let (hash, _) = source::validate(tx, &path, &config_source).await?;
-                send(tx, format!("source hash: {}", hash).into_bytes(), None).await?;
-                config_source_hash = hash;
+            if source_hash.is_empty() {
+                let path = Path::new(&source.uri).canonicalize()?;
+                let (hash, _) = source::validate(tx, &path, &source).await?;
+                let message = format!("package source local hash: {}", hash);
+                send(tx, message.into(), None).await?;
+                source_hash = hash;
             }
         }
     };
 
-    if config_source_hash.is_empty() {
-        send_error(tx, "source hash is required".to_string()).await?
+    if source_hash.is_empty() {
+        send_error(tx, "package source hash is required".to_string()).await?
     }
 
     // check package_path exists in agent (local) cache
 
-    let package_path = paths::get_package_path(&config.name, &config_source_hash);
+    let package_path = get_package_path(&config.name, &source_hash);
 
     if package_path.exists() {
         send(
             tx,
-            format!("cache: {}", package_path.display()).into_bytes(),
+            format!(
+                "package cache: {}",
+                package_path.file_name().unwrap().to_str().unwrap()
+            )
+            .into(),
             Some(ConfigPackageOutput {
-                hash: config_source_hash.clone(),
+                hash: source_hash.clone(),
                 name: config.name.clone(),
             }),
         )
@@ -252,25 +240,25 @@ pub async fn package(
 
     // check package tar exists in agent (local) cache
 
-    let package_tar_path = paths::get_package_tar_path(&config.name, &config_source_hash);
+    let package_tar_path = get_package_tar_path(&config.name, &source_hash);
 
     if !package_path.exists() && package_tar_path.exists() {
         send(
             tx,
-            format!("tar cache: {}", package_tar_path.display()).into_bytes(),
+            format!("package tar cache: {}", package_tar_path.display()).into_bytes(),
             None,
         )
         .await?;
 
-        fs::create_dir_all(&package_path).await?;
+        create_dir_all(&package_path).await?;
 
-        archives::unpack_tar_gz(&package_path, &package_tar_path).await?;
+        unpack_gzip(&package_path, &package_tar_path).await?;
 
         send(
             tx,
-            format!("tar cache unpacked: {}", package_path.display()).into_bytes(),
+            format!("package tar cache unpacked: {}", package_path.display()).into_bytes(),
             Some(ConfigPackageOutput {
-                hash: config_source_hash.clone(),
+                hash: source_hash.clone(),
                 name: config.name.clone(),
             }),
         )
@@ -279,10 +267,8 @@ pub async fn package(
         return Ok(());
     }
 
-    // check if package exists in worker (remote) cache
-
     let config_build = match config.build {
-        None => return send_error(tx, "build config is required".to_string()).await,
+        None => return send_error(tx, "package build config is required".to_string()).await,
         Some(build) => build,
     };
 
@@ -293,46 +279,38 @@ pub async fn package(
         send_error(tx, "build system is unknown".to_string()).await?
     }
 
-    send(
-        tx,
-        format!("build system: {:?}", config_build.system()).into_bytes(),
-        None,
-    )
-    .await?;
+    let message = format!("package build system: {:?}", config_build.system());
+
+    send(tx, message.into(), None).await?;
 
     for worker in workers {
         if worker.system != config_build_system {
-            send(
-                tx,
-                format!(
-                    "build system mismatch: {:?} != {:?}",
-                    worker.system, config_build_system
-                )
-                .into_bytes(),
-                None,
-            )
-            .await?;
+            let message = format!(
+                "package build system mismatch: {:?} != {:?}",
+                config_build_system, worker.system
+            );
+
+            send(tx, message.into_bytes(), None).await?;
 
             continue;
         }
+
+        // check if package tar exists in worker caches
 
         let mut store_service = StoreServiceClient::connect(worker.uri.clone()).await?;
 
         let store_package_path = StorePath {
             kind: StorePathKind::Package as i32,
             name: config.name.clone(),
-            hash: config_source_hash.clone(),
+            hash: source_hash.clone(),
         };
 
         if let Ok(res) = store_service.path(store_package_path.clone()).await {
             let store_path = res.into_inner();
 
-            send(
-                tx,
-                format!("remote cache: {}", store_path.uri).into_bytes(),
-                None,
-            )
-            .await?;
+            let message = format!("package tar cache remote: {}", store_path.uri);
+
+            send(tx, message.into(), None).await?;
 
             if let Ok(res) = store_service.fetch(store_package_path.clone()).await {
                 let mut stream = res.into_inner();
@@ -348,31 +326,39 @@ pub async fn package(
                     send_error(tx, "no data fetched".to_string()).await?
                 }
 
+                let stream_data_size = stream_data.len();
+
+                let message = format!("package tar cache remote size: {}", stream_data_size);
+
+                send(tx, message.into(), None).await?;
+
                 let mut package_tar = File::create(&package_tar_path).await?;
 
-                if let Err(e) = package_tar.write(&stream_data).await {
-                    send_error(tx, e.to_string()).await?
-                }
+                package_tar.write_all(&stream_data).await?;
 
-                send(
-                    tx,
-                    format!("tar fetched: {}", package_tar_path.display()).into_bytes(),
-                    None,
-                )
-                .await?;
+                let message = format!(
+                    "package tar cache remote fetched: {}",
+                    package_tar_path.display()
+                );
 
-                fs::create_dir_all(&package_path).await?;
+                send(tx, message.into(), None).await?;
 
-                match archives::unpack_tar_gz(&package_path, &package_tar_path).await {
+                create_dir_all(&package_path).await?;
+
+                match unpack_gzip(&package_path, &package_tar_path).await {
                     Ok(_) => {}
                     Err(_) => send_error(tx, "failed to unpack tar".to_string()).await?,
                 }
 
                 send(
                     tx,
-                    format!("tar unpacked: {}", package_path.display()).into_bytes(),
+                    format!(
+                        "package tar cache remote unpacked: {}",
+                        package_path.display()
+                    )
+                    .into_bytes(),
                     Some(ConfigPackageOutput {
-                        hash: config_source_hash.clone(),
+                        hash: source_hash.clone(),
                         name: config.name.clone(),
                     }),
                 )
@@ -387,24 +373,21 @@ pub async fn package(
         let store_package_source_path = StorePath {
             kind: StorePathKind::Source as i32,
             name: config.name.clone(),
-            hash: config_source_hash.clone(),
+            hash: source_hash.clone(),
         };
 
         if let Ok(res) = store_service.path(store_package_source_path.clone()).await {
             let store_path = res.into_inner();
 
-            send(
-                tx,
-                format!("source cache: {}", store_path.uri).into_bytes(),
-                None,
-            )
-            .await?;
+            let message = format!("package source tar cache remote: {}", store_path.uri);
+
+            send(tx, message.into(), None).await?;
 
             build(
                 tx,
                 &config_build,
                 &config.name,
-                &config_source_hash,
+                &source_hash,
                 &store_package_path,
                 &mut store_service,
                 &worker.uri,
@@ -414,21 +397,22 @@ pub async fn package(
             break;
         }
 
-        let package_source_tar_path =
-            paths::get_package_source_tar_path(&config.name, &config_source_hash);
+        // check if package source tar exists in agent (local) cache
+
+        let package_source_tar_path = get_package_source_tar_path(&config.name, &source_hash);
 
         if package_source_tar_path.exists() {
-            send(
-                tx,
-                format!("source tar cache: {}", package_source_tar_path.display()).into_bytes(),
-                None,
-            )
-            .await?;
+            let message = format!(
+                "package source tar cache: {}",
+                package_source_tar_path.display()
+            );
+
+            send(tx, message.into(), None).await?;
 
             prepare(
                 tx,
                 &config.name,
-                &config_source_hash,
+                &source_hash,
                 &package_source_tar_path,
                 &worker.uri,
             )
@@ -438,7 +422,7 @@ pub async fn package(
                 tx,
                 &config_build,
                 &config.name,
-                &config_source_hash,
+                &source_hash,
                 &store_package_path,
                 &mut store_service,
                 &worker.uri,
@@ -448,21 +432,7 @@ pub async fn package(
             break;
         }
 
-        let source_hash = source::prepare(
-            tx,
-            &config.name,
-            &config_source,
-            &config_source_hash,
-            &package_source_tar_path,
-        )
-        .await?;
-
-        send(
-            tx,
-            format!("source tar: {}", package_source_tar_path.display()).into_bytes(),
-            None,
-        )
-        .await?;
+        let source_hash = source::prepare(tx, &source, &package_source_tar_path).await?;
 
         // check if package source exists in worker cache (same as agent)
 
@@ -471,7 +441,7 @@ pub async fn package(
 
             send(
                 tx,
-                format!("source cache: {}", store_path.uri).into_bytes(),
+                format!("package source tar cache remote: {}", store_path.uri).into_bytes(),
                 None,
             )
             .await?;
@@ -480,7 +450,7 @@ pub async fn package(
                 tx,
                 &config_build,
                 &config.name,
-                &config_source_hash,
+                &source_hash,
                 &store_package_path,
                 &mut store_service,
                 &worker.uri,
