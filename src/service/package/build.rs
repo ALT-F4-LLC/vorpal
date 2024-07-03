@@ -23,9 +23,9 @@ use tracing::{debug, warn};
 
 async fn send(
     tx: &Sender<Result<PackageBuildResponse, Status>>,
-    log_output: Vec<u8>,
+    log_output: String,
 ) -> Result<(), anyhow::Error> {
-    debug!("send: {:?}", String::from_utf8(log_output.clone()).unwrap());
+    debug!("{}", log_output);
 
     tx.send(Ok(PackageBuildResponse { log_output })).await?;
 
@@ -36,7 +36,7 @@ async fn send_error(
     tx: &Sender<Result<PackageBuildResponse, Status>>,
     message: String,
 ) -> Result<(), anyhow::Error> {
-    debug!("send_error: {}", message);
+    debug!("{}", message);
 
     tx.send(Err(Status::internal(message.clone()))).await?;
 
@@ -356,7 +356,7 @@ pub async fn run(
         let mut stream = sandbox_command.spawn_and_stream()?;
 
         while let Some(output) = stream.next().await {
-            send(tx, output.as_bytes().to_vec()).await?;
+            send(tx, output.to_string()).await?;
 
             if let Some(success) = output.is_success() {
                 if !success {
@@ -427,7 +427,7 @@ pub async fn run(
         let mut stream = sandbox_command.spawn_and_stream()?;
 
         while let Some(output) = stream.next().await {
-            send(tx, output.as_bytes().to_vec()).await?;
+            send(tx, output.to_string()).await?;
 
             if let Some(success) = output.is_success() {
                 if !success {
@@ -567,7 +567,10 @@ pub async fn run(
 
     remove_dir_all(&package_build_output_path).await?;
 
-    let message = format!("package tar created: {}", package_archive_path.display());
+    let message = format!(
+        "package archive created: {}",
+        package_archive_path.file_name().unwrap().to_str().unwrap()
+    );
 
     send(tx, message.into()).await?;
 

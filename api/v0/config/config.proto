@@ -48,5 +48,5 @@ message ConfigPackageRequest {
 
 message ConfigPackageResponse {
     optional ConfigPackageOutput package_output = 1;
-    bytes log_output = 2;
+    string log_output = 2;
 }

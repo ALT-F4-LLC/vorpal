@@ -59,11 +59,11 @@ stack-stop:
 
 # run agent (cargo)
 start-agent workers:
-    cargo run --bin vorpal services agent --workers "{{ workers }}"
+    cargo run --bin vorpal -- --level debug services agent --workers "{{ workers }}"
 
 # run worker (cargo)
 start-worker:
-    cargo run --bin vorpal services worker
+    cargo run --bin vorpal -- --level debug services worker
 
 # test (cargo)
 test:

@@ -1,18 +1,13 @@
 use crate::api::{PackagePrepareRequest, PackagePrepareResponse};
 use crate::notary::get_public_key;
-use crate::store::archives::compress_zstd;
-use crate::store::hashes::{get_file_hashes, get_source_hash};
-use crate::store::paths::{get_file_paths, get_package_source_archive_path};
-use crate::store::temps::create_dir;
-use async_compression::tokio::bufread::ZstdDecoder;
+use crate::store::paths::get_package_source_archive_path;
 use rsa::pss::{Signature, VerifyingKey};
 use rsa::sha2::Sha256;
 use rsa::signature::Verifier;
 use std::convert::TryFrom;
-use tokio::fs::remove_dir_all;
+use tokio::fs::write;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
-use tokio_tar::Archive;
 use tonic::{Request, Status, Streaming};
 use tracing::debug;
 
@@ -29,9 +24,9 @@ async fn send_error(
 
 async fn send(
     tx: &Sender<Result<PackagePrepareResponse, Status>>,
-    log_output: Vec<u8>,
+    log_output: String,
 ) -> Result<(), anyhow::Error> {
-    debug!("send: {:?}", String::from_utf8(log_output.clone()).unwrap());
+    debug!("{}", log_output);
 
     tx.send(Ok(PackagePrepareResponse { log_output })).await?;
 
@@ -74,7 +69,7 @@ pub async fn run(
 
     send(
         tx,
-        format!("package source chunks received: {}", source_chunks).into_bytes(),
+        format!("package source chunks received: {}", source_chunks),
     )
     .await?;
 
@@ -106,70 +101,11 @@ pub async fn run(
 
     verifying_key.verify(&source_data, &signature)?;
 
-    let source_sandbox_path = create_dir().await?;
+    write(&source_archive_path, &source_data).await?;
 
     send(
         tx,
-        format!("package source sandbox: {}", source_sandbox_path.display()).into_bytes(),
-    )
-    .await?;
-
-    let decoder = ZstdDecoder::new(source_data.as_slice());
-
-    let mut archive = Archive::new(decoder);
-
-    archive.unpack(&source_sandbox_path).await?;
-
-    let sandbox_file_paths = get_file_paths(&source_sandbox_path, &Vec::<&str>::new())?;
-
-    send(
-        tx,
-        format!("source sandbox files: {:?}", sandbox_file_paths.len()).into_bytes(),
-    )
-    .await?;
-
-    let sandbox_file_paths_hashes = get_file_hashes(&sandbox_file_paths)?;
-
-    let sandbox_source_hash = get_source_hash(&sandbox_file_paths_hashes)?;
-
-    send(
-        tx,
-        format!("source hash computed: {}", sandbox_source_hash).into_bytes(),
-    )
-    .await?;
-
-    send(
-        tx,
-        format!("source hash provided: {}", source_hash).into_bytes(),
-    )
-    .await?;
-
-    if source_hash != sandbox_source_hash {
-        remove_dir_all(source_sandbox_path.clone()).await?;
-
-        send_error(
-            tx,
-            format!(
-                "source hash mismatch: {} != {}",
-                source_hash, sandbox_source_hash
-            )
-            .to_string(),
-        )
-        .await?
-    }
-
-    compress_zstd(
-        &source_sandbox_path,
-        &sandbox_file_paths,
-        &source_archive_path,
-    )
-    .await?;
-
-    remove_dir_all(source_sandbox_path).await?;
-
-    send(
-        tx,
-        format!("package source tar: {}", source_archive_path.display()).into_bytes(),
+        format!("package source tar: {}", source_archive_path.display()),
     )
     .await?;
 

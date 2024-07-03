@@ -25,7 +25,7 @@ async fn send_error(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
     message: String,
 ) -> Result<(), anyhow::Error> {
-    debug!("send_error: {}", message);
+    debug!("{}", message);
 
     tx.send(Err(Status::internal(message.clone()))).await?;
 
@@ -34,10 +34,10 @@ async fn send_error(
 
 async fn send(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
-    log_output: Vec<u8>,
+    log_output: String,
     package_output: Option<ConfigPackageOutput>,
 ) -> Result<(), anyhow::Error> {
-    debug!("send: {:?}", String::from_utf8(log_output.clone()).unwrap());
+    debug!("{}", log_output);
 
     tx.send(Ok(ConfigPackageResponse {
         log_output,
@@ -61,7 +61,7 @@ pub async fn validate(
 
     send(
         tx,
-        format!("package source files: {}", workdir_files.len()).into_bytes(),
+        format!("package source files: {}", workdir_files.len()),
         None,
     )
     .await?;
@@ -75,7 +75,7 @@ pub async fn validate(
 
     send(
         tx,
-        format!("package source hash: {}", workdir_hash).into_bytes(),
+        format!("package source hash: {}", workdir_hash),
         None,
     )
     .await?;
@@ -325,7 +325,10 @@ pub async fn prepare(
     )
     .await?;
 
-    let message = format!("package source archive: {:?}", source_tar_path);
+    let message = format!(
+        "package source archive: {:?}",
+        source_tar_path.file_name().unwrap()
+    );
 
     send(tx, message.into(), None).await?;
 

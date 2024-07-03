@@ -33,10 +33,10 @@ async fn send_error(
 
 async fn send(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
-    log_output: Vec<u8>,
+    log_output: String,
     package_output: Option<ConfigPackageOutput>,
 ) -> Result<(), anyhow::Error> {
-    debug!("send: {:?}", String::from_utf8(log_output.clone()).unwrap());
+    debug!("send: {:?}", log_output);
 
     tx.send(Ok(ConfigPackageResponse {
         log_output,
@@ -154,7 +154,10 @@ pub async fn build(
 
             package_tar.write_all(&fetch_stream_data).await?;
 
-            let message = format!("package tar fetched: {}", package_archive_path.display());
+            let message = format!(
+                "package archive fetched: {}",
+                package_archive_path.file_name().unwrap().to_str().unwrap()
+            );
 
             send(tx, message.into(), None).await?;
 
@@ -169,8 +172,7 @@ pub async fn build(
         format!(
             "package output: {}",
             package_path.file_name().unwrap().to_str().unwrap()
-        )
-        .into_bytes(),
+        ),
         Some(ConfigPackageOutput {
             hash: source_hash.to_string(),
             name: name.to_string(),
@@ -187,8 +189,6 @@ pub async fn package(
     workers: Vec<ConfigWorker>,
 ) -> Result<(), anyhow::Error> {
     let config = request.into_inner();
-
-    send(tx, format!("package name: {}", config.name).into(), None).await?;
 
     let source = match config.source {
         None => return send_error(tx, "source config is required".to_string()).await,
@@ -226,7 +226,7 @@ pub async fn package(
         send(
             tx,
             format!(
-                "package exists: {}",
+                "package: {}",
                 package_path.file_name().unwrap().to_str().unwrap()
             )
             .into(),
@@ -247,7 +247,7 @@ pub async fn package(
     if !package_path.exists() && package_archive_path.exists() {
         send(
             tx,
-            format!("package archive exists: {}", package_archive_path.display()).into_bytes(),
+            format!("package archive exists: {}", package_archive_path.display()),
             None,
         )
         .await?;
@@ -258,7 +258,7 @@ pub async fn package(
 
         send(
             tx,
-            format!("package archive unpacked: {}", package_path.display()).into_bytes(),
+            format!("package archive unpacked: {}", package_path.display()),
             Some(ConfigPackageOutput {
                 hash: source_hash.clone(),
                 name: config.name.clone(),
@@ -292,7 +292,7 @@ pub async fn package(
                 config_build_system, worker.system
             );
 
-            send(tx, message.into_bytes(), None).await?;
+            send(tx, message, None).await?;
 
             continue;
         }
@@ -357,8 +357,7 @@ pub async fn package(
                     format!(
                         "package tar cache remote unpacked: {}",
                         package_path.display()
-                    )
-                    .into_bytes(),
+                    ),
                     Some(ConfigPackageOutput {
                         hash: source_hash.clone(),
                         name: config.name.clone(),
@@ -381,7 +380,18 @@ pub async fn package(
         if let Ok(res) = store_service.path(store_package_source_path.clone()).await {
             let store_path = res.into_inner();
 
-            let message = format!("package source tar cache remote: {}", store_path.uri);
+            let store_path_segments: Vec<&str> = store_path
+                .uri
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect();
+
+            let store_path_file_name = store_path_segments.last().unwrap_or(&"");
+
+            let message = format!(
+                "package source archive cache remote: {}",
+                store_path_file_name
+            );
 
             send(tx, message.into(), None).await?;
 
@@ -444,7 +454,7 @@ pub async fn package(
 
             send(
                 tx,
-                format!("package source tar cache remote: {}", store_path.uri).into_bytes(),
+                format!("package source tar cache remote: {}", store_path.uri),
                 None,
             )
             .await?;
