@@ -71,4 +71,5 @@ test:
 
 # update flake (nix)
 update:
+    cargo update
     nix flake update
