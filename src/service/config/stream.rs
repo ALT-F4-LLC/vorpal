@@ -43,7 +43,7 @@ pub async fn prepare(
 
     let message = format!("source chunks: {}", source_chunks.len());
 
-    send(tx, message.into(), None).await?;
+    send(tx, message, None).await?;
 
     let mut client = PackageServiceClient::connect(worker.to_string()).await?;
 
@@ -141,7 +141,7 @@ pub async fn build(
                 package_store_path.file_name().unwrap().to_str().unwrap()
             );
 
-            send(tx, message.into(), None).await?;
+            send(tx, message, None).await?;
 
             create_dir_all(package_path.clone()).await?;
 
@@ -190,7 +190,7 @@ pub async fn package(
                 let path = Path::new(&config_source.uri).canonicalize()?;
                 let (hash, _) = source::validate(tx, &path, &config_source).await?;
                 let message = format!("source local hash: {}", hash);
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
                 config_source_hash = hash;
             }
         }
@@ -210,8 +210,7 @@ pub async fn package(
             format!(
                 "package: {}",
                 package_path.file_name().unwrap().to_str().unwrap()
-            )
-            .into(),
+            ),
             Some(ConfigPackageOutput {
                 hash: config_source_hash.clone(),
                 name: config.name.clone(),
@@ -396,7 +395,7 @@ pub async fn package(
         if source_archive_path.exists() {
             let message = format!("source archive: {}", source_archive_path.display());
 
-            send(tx, message.into(), None).await?;
+            send(tx, message, None).await?;
 
             prepare(
                 tx,

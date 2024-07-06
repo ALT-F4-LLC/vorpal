@@ -69,7 +69,7 @@ pub async fn run(
             worker_build_system.as_str_name()
         );
 
-        send_error(tx, message.into()).await?
+        send_error(tx, message).await?
     }
 
     let package_path = get_package_path(&request.source_name, &request.source_hash);
@@ -79,7 +79,7 @@ pub async fn run(
     if package_path.exists() {
         let message = format!("package: {}", package_path.display());
 
-        send(tx, message.into()).await?;
+        send(tx, message).await?;
 
         return Ok(());
     }
@@ -91,7 +91,7 @@ pub async fn run(
     if package_archive_path.exists() {
         let message = format!("package archive found: {}", package_archive_path.display());
 
-        send(tx, message.into()).await?;
+        send(tx, message).await?;
 
         create_dir_all(&package_path).await?;
 
@@ -118,7 +118,7 @@ pub async fn run(
         if !build_package_path.exists() {
             let message = format!("package not found: {}", build_package_path.display());
 
-            send_error(tx, message.into()).await?
+            send_error(tx, message).await?
         }
 
         let build_package_bin_path = build_package_path.join("bin");
@@ -139,7 +139,7 @@ pub async fn run(
 
     let message = format!("build environment: {:?}", env_var);
 
-    send(tx, message.into()).await?;
+    send(tx, message).await?;
 
     // Create build script
 
@@ -238,7 +238,7 @@ pub async fn run(
         if !path.exists() {
             let message = format!("store path not found: {}", path.display());
 
-            send_error(tx, message.into()).await?
+            send_error(tx, message).await?
         }
 
         mounts.push(Mount {
@@ -321,7 +321,7 @@ pub async fn run(
 
     let message = format!("build output files: {}", sandbox_package_files.len());
 
-    send(tx, message.into()).await?;
+    send(tx, message).await?;
 
     // Create package tar from build output files
 
@@ -342,7 +342,7 @@ pub async fn run(
         package_archive_path.file_name().unwrap().to_str().unwrap()
     );
 
-    send(tx, message.into()).await?;
+    send(tx, message).await?;
 
     // Unpack package tar to package path
 
@@ -357,7 +357,7 @@ pub async fn run(
         package_path.file_name().unwrap().to_str().unwrap()
     );
 
-    send(tx, message.into()).await?;
+    send(tx, message).await?;
 
     Ok(())
 }

@@ -7,7 +7,7 @@ use std::env::consts::{ARCH, OS};
 use tonic::transport::Server;
 use tracing::{error, info, warn};
 
-pub async fn start(port: &u16, workers: &Vec<String>) -> Result<(), anyhow::Error> {
+pub async fn start(port: &u16, workers: &[String]) -> Result<(), anyhow::Error> {
     store::check().await?;
 
     notary::check()?;

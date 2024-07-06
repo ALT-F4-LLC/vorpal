@@ -24,7 +24,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(workers: &Vec<ConfigWorker>) -> Self {
+    pub fn new(workers: &[ConfigWorker]) -> Self {
         Self {
             workers: workers.to_vec(),
         }
@@ -45,7 +45,7 @@ impl ConfigService for Config {
 
         tokio::spawn(async move {
             match stream::package(&tx, request, workers).await {
-                Err(e) => return send_error(&tx, e.to_string()).await,
+                Err(e) => send_error(&tx, e.to_string()).await,
                 Ok(_) => Ok(()),
             }
         });

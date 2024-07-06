@@ -88,7 +88,7 @@ pub async fn prepare(
     if source.kind == ConfigPackageSourceKind::Git as i32 {
         let message = format!("source git: {:?}", &source.uri);
 
-        send(tx, message.into(), None).await?;
+        send(tx, message, None).await?;
 
         let source_uri = source.uri.clone();
         let package_clone_path = source_sandbox_path.clone();
@@ -142,13 +142,13 @@ pub async fn prepare(
 
         let message = format!("source commit: {:?}", &result);
 
-        send(tx, message.into(), None).await?;
+        send(tx, message, None).await?;
     }
 
     if source.kind == ConfigPackageSourceKind::Http as i32 {
         let message = format!("source uri: {:?}", &source.uri);
 
-        send(tx, message.into(), None).await?;
+        send(tx, message, None).await?;
 
         let url = Url::parse(&source.uri)?;
 
@@ -166,7 +166,7 @@ pub async fn prepare(
         if let Some(kind) = infer::get(response_bytes) {
             let message = format!("source kind: {:?}", kind.mime_type());
 
-            send(tx, message.into(), None).await?;
+            send(tx, message, None).await?;
 
             if let "application/gzip" = kind.mime_type() {
                 let gz_decoder = GzipDecoder::new(response_bytes);
@@ -176,7 +176,7 @@ pub async fn prepare(
 
                 let message = format!("source gzip unpacked: {:?}", file_name);
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
             } else if let "application/x-bzip2" = kind.mime_type() {
                 let bz_decoder = BzDecoder::new(response_bytes);
                 let mut archive = Archive::new(bz_decoder);
@@ -185,7 +185,7 @@ pub async fn prepare(
 
                 let message = format!("source bzip2 unpacked: {:?}", file_name);
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
             } else if let "application/x-xz" = kind.mime_type() {
                 let xz_decoder = XzDecoder::new(response_bytes);
                 let mut archive = Archive::new(xz_decoder);
@@ -194,7 +194,7 @@ pub async fn prepare(
 
                 let message = format!("source xz unpacked: {:?}", file_name);
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
             } else if let "application/zip" = kind.mime_type() {
                 let temp_path = temps::create_file("zip").await?;
 
@@ -204,7 +204,7 @@ pub async fn prepare(
 
                 let message = format!("source zip unpacked: {:?}", file_name);
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
             } else {
                 let file_name = url.path_segments().unwrap().last();
                 let sandbox_file_path = source_sandbox_path.join(file_name.unwrap());
@@ -213,7 +213,7 @@ pub async fn prepare(
 
                 let message = format!("source file: {:?}", file_name);
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
             }
         }
     }
@@ -222,17 +222,17 @@ pub async fn prepare(
         let source_path = Path::new(&source.uri).canonicalize()?;
         let message = format!("source local: {:?}", source_path);
 
-        send(tx, message.into(), None).await?;
+        send(tx, message, None).await?;
 
         if let Ok(Some(source_kind)) = infer::get_from_path(&source_path) {
             let message = format!("source kind: {:?}", source_kind.mime_type());
 
-            send(tx, message.into(), None).await?;
+            send(tx, message, None).await?;
 
             if source_kind.mime_type() == "application/gzip" {
                 let message = format!("source gzip unpacking: {:?}", source_path);
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
 
                 unpack_gzip(&source_sandbox_path, &source_path).await?;
             }
@@ -249,7 +249,7 @@ pub async fn prepare(
                 dest.display()
             );
 
-            send(tx, message.into(), None).await?;
+            send(tx, message, None).await?;
         }
 
         if source_path.is_dir() {
@@ -275,7 +275,7 @@ pub async fn prepare(
 
                 let message = format!("source file: {:?} -> {:?}", path.display(), dest.display());
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
             }
         }
     }
@@ -301,7 +301,7 @@ pub async fn prepare(
 
     let message = format!("source store: {:?}", source_store_path.file_name().unwrap());
 
-    send(tx, message.into(), None).await?;
+    send(tx, message, None).await?;
 
     Ok(source_sandbox_hash)
 }
