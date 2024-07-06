@@ -83,10 +83,6 @@ pub async fn run(
 
     verifying_key.verify(&source_data, &signature)?;
 
-    let message = format!("source signature verified: {}", source_signature);
-
-    send(tx, message).await?;
-
     let source_archive_path = get_source_archive_path(&source_name, &source_hash);
 
     if !source_archive_path.exists() {

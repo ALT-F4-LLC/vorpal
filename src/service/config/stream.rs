@@ -30,10 +30,6 @@ pub async fn prepare(
 
     let source_signature = notary::sign(&source_data).await?;
 
-    let message = format!("source signature: {}", source_signature.to_string());
-
-    send(tx, message.into(), None).await?;
-
     let mut source_chunks = vec![];
 
     for chunk in source_data.chunks(DEFAULT_CHUNKS_SIZE) {
