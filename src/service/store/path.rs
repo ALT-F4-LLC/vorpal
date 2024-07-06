@@ -1,5 +1,5 @@
 use crate::api::{StorePath, StorePathKind, StorePathResponse};
-use crate::store::paths::{get_package_store_path, get_source_store_path};
+use crate::store::paths::{get_package_archive_path, get_source_archive_path};
 use anyhow::Result;
 use tonic::Request;
 
@@ -8,18 +8,18 @@ pub async fn get(request: Request<StorePath>) -> Result<StorePathResponse, anyho
 
     match req.kind() {
         StorePathKind::Package => {
-            let package_store_path = get_package_store_path(&req.name, &req.hash);
-            if !package_store_path.exists() {
+            let package_path = get_package_archive_path(&req.name, &req.hash);
+            if !package_path.exists() {
                 anyhow::bail!("package not found");
             }
 
             Ok(StorePathResponse {
-                uri: package_store_path.to_string_lossy().to_string(),
+                uri: package_path.to_string_lossy().to_string(),
             })
         }
 
         StorePathKind::Source => {
-            let source_path = get_source_store_path(&req.name, &req.hash);
+            let source_path = get_source_archive_path(&req.name, &req.hash);
             if !source_path.exists() {
                 anyhow::bail!("source not found");
             }

@@ -6,18 +6,11 @@ build:
     #!/usr/bin/env bash
     set -euxo pipefail
     cargo build --package vorpal
-    install --mode 755 target/debug/vorpal .
 
 build-sandbox tag="ubuntu-24.04":
     #!/usr/bin/env bash
     set -euxo pipefail
-    buildah build --tag "sandbox:{{ tag }}" .
-    buildah push "sandbox:{{ tag }}" "oci:/var/lib/vorpal/image/sandbox:{{ tag }}"
-    buildah rmi "sandbox:{{ tag }}"
-    umoci unpack \
-        --image "/var/lib/vorpal/image/sandbox:{{ tag }}" \
-        --rootless \
-        "/var/lib/vorpal/bundle/sandbox_{{ tag }}"
+    docker buildx build --tag "altf4llc/vorpal-sandbox:{{ tag }}" --target "sandbox" .
 
 # check flake (nix)
 check:
@@ -73,12 +66,12 @@ stack-stop:
     orbctl stop "vorpal"
 
 # run agent (cargo)
-start-agent workers:
-    cargo run --bin vorpal services agent --workers "{{ workers }}"
+start-agent workers: build
+    sudo ./target/debug/vorpal services agent --workers "{{ workers }}"
 
 # run worker (cargo)
-start-worker:
-    cargo run --bin vorpal services worker
+start-worker: build
+    sudo ./target/debug/vorpal services worker
 
 # test (cargo)
 test:

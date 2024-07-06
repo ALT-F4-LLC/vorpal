@@ -10,62 +10,40 @@ pub fn get_package_name(name: &str, hash: &str) -> String {
     format!("{}-{}", name, hash)
 }
 
-pub fn get_root_dir_path() -> PathBuf {
+pub fn get_root_path() -> PathBuf {
     Path::new("/var/lib/vorpal").to_path_buf()
 }
 
-pub fn get_container_dir_path() -> PathBuf {
-    get_root_dir_path().join("container")
+pub fn get_key_path() -> PathBuf {
+    get_root_path().join("key")
 }
 
-pub fn get_key_dir_path() -> PathBuf {
-    get_root_dir_path().join("key")
+pub fn get_store_path() -> PathBuf {
+    get_root_path().join("store")
 }
 
 pub fn get_private_key_path() -> PathBuf {
-    get_key_dir_path().join("private").with_extension("pem")
+    get_key_path().join("private").with_extension("pem")
 }
 
 pub fn get_public_key_path() -> PathBuf {
-    get_key_dir_path().join("public").with_extension("pem")
-}
-
-pub fn get_image_dir_path() -> PathBuf {
-    get_root_dir_path().join("image")
-}
-
-pub fn get_image_path(name: &str, hash: &str) -> PathBuf {
-    get_image_dir_path().join(get_package_name(name, hash))
-}
-
-pub fn get_package_dir_path() -> PathBuf {
-    get_root_dir_path().join("package")
+    get_key_path().join("public").with_extension("pem")
 }
 
 pub fn get_package_path(name: &str, hash: &str) -> PathBuf {
-    get_package_dir_path().join(get_package_name(name, hash))
+    get_store_path().join(get_package_name(name, hash))
 }
 
-pub fn get_store_dir_path() -> PathBuf {
-    get_root_dir_path().join("store")
+pub fn get_package_archive_path(name: &str, hash: &str) -> PathBuf {
+    get_package_path(name, hash).with_extension("tar.zst")
 }
 
-pub fn get_image_store_path(name: &str, hash: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_package_name(name, hash))
-        .with_extension("image.tar.zst")
+pub fn get_source_path(name: &str, hash: &str) -> PathBuf {
+    get_package_path(name, hash).with_extension("source")
 }
 
-pub fn get_package_store_path(name: &str, hash: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_package_name(name, hash))
-        .with_extension("package.tar.zst")
-}
-
-pub fn get_source_store_path(name: &str, hash: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_package_name(name, hash))
-        .with_extension("source.tar.zst")
+pub fn get_source_archive_path(name: &str, hash: &str) -> PathBuf {
+    get_package_path(name, hash).with_extension("source.tar.zst")
 }
 
 pub fn get_temp_path() -> PathBuf {

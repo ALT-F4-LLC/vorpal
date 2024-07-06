@@ -7,45 +7,17 @@ use crate::api::{
 };
 use crate::notary;
 use crate::service::config::source;
-use crate::service::config::{ConfigPackageRequest, ConfigWorker};
+use crate::service::config::{send, send_error, ConfigPackageRequest, ConfigWorker};
 use crate::store::archives::unpack_zstd;
-use crate::store::paths::{get_package_path, get_package_store_path, get_source_store_path};
+use crate::store::paths::{get_package_archive_path, get_package_path, get_source_archive_path};
 use anyhow::Result;
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 use tonic::{Request, Status};
-use tracing::debug;
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
-
-async fn send_error(
-    tx: &Sender<Result<ConfigPackageResponse, Status>>,
-    message: String,
-) -> Result<(), anyhow::Error> {
-    debug!("send_error: {}", message);
-
-    tx.send(Err(Status::internal(message.clone()))).await?;
-
-    anyhow::bail!(message);
-}
-
-async fn send(
-    tx: &Sender<Result<ConfigPackageResponse, Status>>,
-    log_output: String,
-    package_output: Option<ConfigPackageOutput>,
-) -> Result<(), anyhow::Error> {
-    debug!("send: {:?}", log_output);
-
-    tx.send(Ok(ConfigPackageResponse {
-        log_output,
-        package_output,
-    }))
-    .await?;
-
-    Ok(())
-}
 
 pub async fn prepare(
     tx: &Sender<Result<ConfigPackageResponse, Status>>,
@@ -141,7 +113,7 @@ pub async fn build(
         }
 
         let package_path = get_package_path(name, source_hash);
-        let package_store_path = get_package_store_path(name, source_hash);
+        let package_store_path = get_package_archive_path(name, source_hash);
 
         // check if package tar exists in agent (local) cache
 
@@ -256,7 +228,7 @@ pub async fn package(
 
     // check package tar exists in agent (local) cache
 
-    let package_store_path = get_package_store_path(&config.name, &config_source_hash);
+    let package_store_path = get_package_archive_path(&config.name, &config_source_hash);
 
     if package_store_path.exists() {
         send(
@@ -423,10 +395,10 @@ pub async fn package(
 
         // check if source store exists in local cache
 
-        let source_store_path = get_source_store_path(&config.name, &config_source_hash);
+        let source_archive_path = get_source_archive_path(&config.name, &config_source_hash);
 
-        if source_store_path.exists() {
-            let message = format!("source store: {}", source_store_path.display());
+        if source_archive_path.exists() {
+            let message = format!("source archive: {}", source_archive_path.display());
 
             send(tx, message.into(), None).await?;
 
@@ -434,7 +406,7 @@ pub async fn package(
                 tx,
                 &config.name,
                 &config_source_hash,
-                &source_store_path,
+                &source_archive_path,
                 &worker.uri,
             )
             .await?;
@@ -451,33 +423,13 @@ pub async fn package(
             break;
         }
 
-        let source_hash = source::prepare(tx, &config_source, &source_store_path).await?;
-
-        // check if package source exists in worker cache (same as agent)
-
-        let mut store_service = StoreServiceClient::connect(worker.uri.to_string()).await?;
-
-        let store_source = StorePath {
-            kind: StorePathKind::Source as i32,
-            name: config.name.clone(),
-            hash: source_hash.clone(),
-        };
-
-        if let Ok(res) = store_service.path(store_source).await {
-            let message = format!("source store in remote: {}", res.into_inner().uri);
-
-            send(tx, message.into(), None).await?;
-
-            build(tx, &config_build, &config.name, &source_hash, &worker.uri).await?;
-
-            break;
-        }
+        let source_hash = source::prepare(tx, &config_source, &source_archive_path).await?;
 
         prepare(
             tx,
             &config.name,
             &source_hash,
-            &source_store_path,
+            &source_archive_path,
             &worker.uri,
         )
         .await?;

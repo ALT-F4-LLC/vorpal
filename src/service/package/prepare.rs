@@ -1,11 +1,14 @@
 use crate::api::{PackagePrepareRequest, PackagePrepareResponse};
 use crate::notary::get_public_key;
-use crate::store::paths::get_source_store_path;
+use crate::store::{
+    archives::unpack_zstd,
+    paths::{get_source_archive_path, get_source_path},
+};
 use rsa::pss::{Signature, VerifyingKey};
 use rsa::sha2::Sha256;
 use rsa::signature::Verifier;
 use std::convert::TryFrom;
-use tokio::fs::write;
+use tokio::fs::{create_dir_all, write};
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 use tonic::{Request, Status, Streaming};
@@ -71,7 +74,7 @@ pub async fn run(
 
     let public_key = get_public_key().await?;
     let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-    let signature_decode = match hex::decode(source_signature) {
+    let signature_decode = match hex::decode(source_signature.clone()) {
         Ok(signature) => signature,
         Err(e) => return send_error(tx, format!("failed to decode signature: {:?}", e)).await,
     };
@@ -80,15 +83,39 @@ pub async fn run(
 
     verifying_key.verify(&source_data, &signature)?;
 
-    let source_path = get_source_store_path(&source_name, &source_hash);
+    let message = format!("source signature verified: {}", source_signature);
 
-    if source_path.exists() {
-        return send_error(tx, "source store exists".to_string()).await;
+    send(tx, message).await?;
+
+    let source_archive_path = get_source_archive_path(&source_name, &source_hash);
+
+    if !source_archive_path.exists() {
+        write(&source_archive_path, &source_data).await?;
+
+        let message = format!("source archive: {}", source_archive_path.to_string_lossy());
+
+        send(tx, message).await?;
     }
 
-    write(&source_path, &source_data).await?;
+    let source_path = get_source_path(&source_name, &source_hash);
 
-    // TODO: Generate a source containerfile
+    if !source_path.exists() {
+        let message = format!(
+            "source archive unpacking: {} => {}",
+            source_archive_path.to_string_lossy(),
+            source_path.to_string_lossy()
+        );
+
+        send(tx, message).await?;
+
+        create_dir_all(&source_path).await?;
+
+        unpack_zstd(&source_path, &source_archive_path).await?;
+
+        let message = format!("source: {}", source_path.to_string_lossy());
+
+        send(tx, message).await?;
+    }
 
     Ok(())
 }

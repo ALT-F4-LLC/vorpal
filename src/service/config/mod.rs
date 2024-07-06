@@ -1,11 +1,13 @@
 use crate::api::config_service_server::ConfigService;
 use crate::api::ConfigPackageBuildSystem;
-use crate::api::{ConfigPackageRequest, ConfigPackageResponse};
+use crate::api::{ConfigPackageOutput, ConfigPackageRequest, ConfigPackageResponse};
 use anyhow::Result;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 use tokio_stream;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
+use tracing::debug;
 
 mod source;
 mod stream;
@@ -43,13 +45,37 @@ impl ConfigService for Config {
 
         tokio::spawn(async move {
             match stream::package(&tx, request, workers).await {
-                Ok(_) => (),
-                Err(e) => {
-                    tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
-                }
+                Err(e) => return send_error(&tx, e.to_string()).await,
+                Ok(_) => Ok(()),
             }
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
+}
+async fn send_error(
+    tx: &Sender<Result<ConfigPackageResponse, Status>>,
+    message: String,
+) -> Result<(), anyhow::Error> {
+    debug!("send_error: {}", message);
+
+    tx.send(Err(Status::internal(message.clone()))).await?;
+
+    anyhow::bail!(message);
+}
+
+async fn send(
+    tx: &Sender<Result<ConfigPackageResponse, Status>>,
+    log_output: String,
+    package_output: Option<ConfigPackageOutput>,
+) -> Result<(), anyhow::Error> {
+    debug!("send: {:?}", log_output);
+
+    tx.send(Ok(ConfigPackageResponse {
+        log_output,
+        package_output,
+    }))
+    .await?;
+
+    Ok(())
 }

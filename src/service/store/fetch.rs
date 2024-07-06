@@ -1,5 +1,5 @@
 use crate::api::{StoreFetchResponse, StorePath, StorePathKind};
-use crate::store::paths::{get_package_store_path, get_source_store_path};
+use crate::store::paths::{get_package_archive_path, get_source_archive_path};
 use anyhow::Result;
 use tokio::fs::read;
 use tokio::sync::mpsc::Sender;
@@ -15,8 +15,8 @@ pub async fn stream(
     let package_chunks_size = 8192;
 
     let store_path = match req.kind() {
-        StorePathKind::Package => get_package_store_path(&req.name, &req.hash),
-        StorePathKind::Source => get_source_store_path(&req.name, &req.hash),
+        StorePathKind::Package => get_package_archive_path(&req.name, &req.hash),
+        StorePathKind::Source => get_source_archive_path(&req.name, &req.hash),
         _ => anyhow::bail!("unsupported store path kind"),
     };
 

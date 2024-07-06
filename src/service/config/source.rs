@@ -59,8 +59,6 @@ pub async fn validate(
         send_error(tx, "no source files found".to_string()).await?
     }
 
-    send(tx, format!("source files: {}", workdir_files.len()), None).await?;
-
     let workdir_files_hashes = hashes::get_file_hashes(&workdir_files)?;
     let workdir_hash = hashes::get_source_hash(&workdir_files_hashes)?;
 
