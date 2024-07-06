@@ -6,47 +6,70 @@ use tokio::fs::{copy, create_dir_all};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-pub fn get_root_path() -> PathBuf {
-    dirs::home_dir()
-        .expect("Home directory not found")
-        .join(".vorpal")
+pub fn get_package_name(name: &str, hash: &str) -> String {
+    format!("{}-{}", name, hash)
 }
 
-pub fn get_key_path() -> PathBuf {
-    get_root_path().join("key")
+pub fn get_root_dir_path() -> PathBuf {
+    Path::new("/var/lib/vorpal").to_path_buf()
 }
 
-pub fn get_store_path() -> PathBuf {
-    get_root_path().join("store")
+pub fn get_container_dir_path() -> PathBuf {
+    get_root_dir_path().join("container")
 }
 
-pub fn get_database_path() -> PathBuf {
-    get_root_path().join("vorpal.db")
+pub fn get_key_dir_path() -> PathBuf {
+    get_root_dir_path().join("key")
 }
 
 pub fn get_private_key_path() -> PathBuf {
-    get_key_path().join("private").with_extension("pem")
+    get_key_dir_path().join("private").with_extension("pem")
 }
 
 pub fn get_public_key_path() -> PathBuf {
-    get_key_path().join("public").with_extension("pem")
+    get_key_dir_path().join("public").with_extension("pem")
+}
+
+pub fn get_image_dir_path() -> PathBuf {
+    get_root_dir_path().join("image")
+}
+
+pub fn get_image_path(name: &str, hash: &str) -> PathBuf {
+    get_image_dir_path().join(get_package_name(name, hash))
+}
+
+pub fn get_package_dir_path() -> PathBuf {
+    get_root_dir_path().join("package")
+}
+
+pub fn get_package_path(name: &str, hash: &str) -> PathBuf {
+    get_package_dir_path().join(get_package_name(name, hash))
+}
+
+pub fn get_store_dir_path() -> PathBuf {
+    get_root_dir_path().join("store")
+}
+
+pub fn get_image_store_path(name: &str, hash: &str) -> PathBuf {
+    get_store_dir_path()
+        .join(get_package_name(name, hash))
+        .with_extension("image.tar.zst")
+}
+
+pub fn get_package_store_path(name: &str, hash: &str) -> PathBuf {
+    get_store_dir_path()
+        .join(get_package_name(name, hash))
+        .with_extension("package.tar.zst")
+}
+
+pub fn get_source_store_path(name: &str, hash: &str) -> PathBuf {
+    get_store_dir_path()
+        .join(get_package_name(name, hash))
+        .with_extension("source.tar.zst")
 }
 
 pub fn get_temp_path() -> PathBuf {
     env::temp_dir().join(Uuid::now_v7().to_string())
-}
-
-pub fn get_package_path(name: &str, hash: &str) -> PathBuf {
-    let store_dir_name = format!("{}-{}", name, hash);
-    get_store_path().join(store_dir_name)
-}
-
-pub fn get_package_archive_path(name: &str, hash: &str) -> PathBuf {
-    get_package_path(name, hash).with_extension("tar.zst")
-}
-
-pub fn get_package_source_archive_path(source_name: &str, source_hash: &str) -> PathBuf {
-    get_package_path(source_name, source_hash).with_extension("source.tar.zst")
 }
 
 pub fn get_file_paths<'a, P, I, J>(source: P, ignore_paths: I) -> Result<Vec<PathBuf>>
@@ -104,34 +127,4 @@ pub async fn copy_files(
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn root_dir() {
-        assert_eq!(get_root_path().file_name().unwrap(), ".vorpal");
-    }
-
-    #[test]
-    fn key_dir() {
-        assert_eq!(get_key_path().file_name().unwrap(), "key");
-    }
-
-    #[test]
-    fn key_root() {
-        assert!(get_key_path().starts_with(get_root_path()));
-    }
-
-    #[test]
-    fn store_dir() {
-        assert_eq!(get_store_path().file_name().unwrap(), "store");
-    }
-
-    #[test]
-    fn store_dir_root() {
-        assert!(get_store_path().starts_with(get_root_path()));
-    }
 }

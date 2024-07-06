@@ -27,13 +27,15 @@ enum PackageBuildSystem {
     UNKNOWN_SYSTEM = 0;
     AARCH64_LINUX = 1;
     AARCH64_MACOS = 2;
+    X86_64_LINUX = 3;
+    X86_64_MACOS = 4;
 }
 
 message PackageBuildRequest {
     PackageBuildSystem build_system = 1;
-    bool build_sandbox = 2;
-    map<string, string> build_environment = 3;
-    repeated PrepareBuildPackage build_packages = 4;
+    map<string, string> build_environment = 2;
+    repeated PrepareBuildPackage build_packages = 3;
+    string build_image = 4;
     string build_script = 5;
     string source_hash = 6;
     string source_name = 7;

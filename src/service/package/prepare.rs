@@ -1,6 +1,6 @@
 use crate::api::{PackagePrepareRequest, PackagePrepareResponse};
 use crate::notary::get_public_key;
-use crate::store::paths::get_package_source_archive_path;
+use crate::store::paths::get_source_store_path;
 use rsa::pss::{Signature, VerifyingKey};
 use rsa::sha2::Sha256;
 use rsa::signature::Verifier;
@@ -42,12 +42,10 @@ pub async fn run(
     let mut source_name = String::new();
     let mut source_signature = String::new();
     let mut source_chunks = 0;
-
     let mut stream = request.into_inner();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-
         source_chunks += 1;
         source_data.extend_from_slice(&chunk.source_data);
         source_hash = chunk.source_hash;
@@ -56,42 +54,23 @@ pub async fn run(
     }
 
     if source_hash.is_empty() {
-        send_error(tx, "package source hash is empty".to_string()).await?
+        send_error(tx, "source hash is empty".to_string()).await?
     }
 
     if source_name.is_empty() {
-        send_error(tx, "package source name is empty".to_string()).await?
+        send_error(tx, "source name is empty".to_string()).await?
     }
 
     if source_signature.is_empty() {
-        send_error(tx, "package source signature is empty".to_string()).await?
+        send_error(tx, "source signature is empty".to_string()).await?
     }
 
-    send(
-        tx,
-        format!("package source chunks received: {}", source_chunks),
-    )
-    .await?;
-
-    let source_archive_path = get_package_source_archive_path(&source_name, &source_hash);
-
-    if source_archive_path.exists() {
-        send_error(
-            tx,
-            format!(
-                "package source tar already exists: {}",
-                source_archive_path.display()
-            ),
-        )
-        .await?
-    }
+    send(tx, format!("source chunks received: {}", source_chunks)).await?;
 
     // at this point we should be ready to prepare the source
 
     let public_key = get_public_key().await?;
-
     let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-
     let signature_decode = match hex::decode(source_signature) {
         Ok(signature) => signature,
         Err(e) => return send_error(tx, format!("failed to decode signature: {:?}", e)).await,
@@ -101,13 +80,15 @@ pub async fn run(
 
     verifying_key.verify(&source_data, &signature)?;
 
-    write(&source_archive_path, &source_data).await?;
+    let source_path = get_source_store_path(&source_name, &source_hash);
 
-    send(
-        tx,
-        format!("package source tar: {}", source_archive_path.display()),
-    )
-    .await?;
+    if source_path.exists() {
+        return send_error(tx, "source store exists".to_string()).await;
+    }
+
+    write(&source_path, &source_data).await?;
+
+    // TODO: Generate a source containerfile
 
     Ok(())
 }

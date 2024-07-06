@@ -15,13 +15,13 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
 
     notary::check()?;
 
-    let addr = format!("[::]:{}", port).parse()?;
-
-    info!("service address: {}", addr);
-
     let system = get_build_system(format!("{}-{}", ARCH, OS).as_str());
 
     info!("service system: {:?}", system);
+
+    let addr = format!("[::]:{}", port).parse()?;
+
+    info!("service address: {}", addr);
 
     Server::builder()
         .add_service(PackageServiceServer::new(Package::new(system)))

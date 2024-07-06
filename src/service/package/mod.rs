@@ -10,7 +10,6 @@ use tonic::{Request, Response, Status, Streaming};
 
 mod build;
 mod prepare;
-mod sandbox_default;
 
 #[derive(Debug, Default)]
 pub struct Package {

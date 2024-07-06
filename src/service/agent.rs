@@ -12,10 +12,6 @@ pub async fn start(port: &u16, workers: &Vec<String>) -> Result<(), anyhow::Erro
 
     notary::check()?;
 
-    let address = format!("[::]:{}", port).parse()?;
-
-    info!("service address: {}", address);
-
     let system = get_build_system(format!("{}-{}", ARCH, OS).as_str());
 
     info!("service system: {:?}", system);
@@ -41,6 +37,10 @@ pub async fn start(port: &u16, workers: &Vec<String>) -> Result<(), anyhow::Erro
     }
 
     info!("service workers: {:?}", workers);
+
+    let address = format!("[::]:{}", port).parse()?;
+
+    info!("service address: {}", address);
 
     Server::builder()
         .add_service(ConfigServiceServer::new(Config::new(&workers)))

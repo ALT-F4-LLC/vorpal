@@ -1,5 +1,5 @@
 use crate::api::{StoreFetchResponse, StorePath, StorePathKind};
-use crate::store::paths::{get_package_archive_path, get_package_source_archive_path};
+use crate::store::paths::{get_package_store_path, get_source_store_path};
 use anyhow::Result;
 use tokio::fs::read;
 use tokio::sync::mpsc::Sender;
@@ -14,61 +14,31 @@ pub async fn stream(
 
     let package_chunks_size = 8192;
 
-    if req.kind == StorePathKind::Unknown as i32 {
-        anyhow::bail!("invalid store path kind");
+    let store_path = match req.kind() {
+        StorePathKind::Package => get_package_store_path(&req.name, &req.hash),
+        StorePathKind::Source => get_source_store_path(&req.name, &req.hash),
+        _ => anyhow::bail!("unsupported store path kind"),
+    };
+
+    if !store_path.exists() {
+        anyhow::bail!("store path not found");
     }
 
-    if req.kind == StorePathKind::Package as i32 {
-        let package_archive_path = get_package_archive_path(&req.name, &req.hash);
+    info!("serving store path: {}", store_path.display());
 
-        if !package_archive_path.exists() {
-            anyhow::bail!("package archive not found");
-        }
-
-        info!(
-            "serving package archive: {}",
-            package_archive_path.display()
-        );
-
-        let data = read(&package_archive_path)
-            .await
-            .map_err(|_| Status::internal("failed to read cached package"))?;
-
-        let data_size = data.len();
-
-        info!("serving package archive size: {}", data_size);
-
-        for package_chunk in data.chunks(package_chunks_size) {
-            tx.send(Ok(StoreFetchResponse {
-                data: package_chunk.to_vec(),
-            }))
-            .await?;
-        }
-
-        return Ok(());
-    }
-
-    let package_source_tar_path = get_package_source_archive_path(&req.name, &req.hash);
-
-    if !package_source_tar_path.exists() {
-        anyhow::bail!("package source tar not found");
-    }
-
-    info!(
-        "serving package source: {}",
-        package_source_tar_path.display()
-    );
-
-    let data = read(&package_source_tar_path)
+    let data = read(&store_path)
         .await
-        .map_err(|_| Status::internal("failed to read cached package"))?;
+        .map_err(|_| Status::internal("failed to read store path"))?;
+
+    let data_size = data.len();
+
+    info!("serving store size: {}", data_size);
 
     for package_chunk in data.chunks(package_chunks_size) {
         tx.send(Ok(StoreFetchResponse {
             data: package_chunk.to_vec(),
         }))
-        .await
-        .unwrap();
+        .await?;
     }
 
     Ok(())

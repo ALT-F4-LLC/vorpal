@@ -41,9 +41,9 @@ pub async fn generate_keys() -> Result<(), anyhow::Error> {
         return Err(anyhow::anyhow!("public key already exists"));
     }
 
-    create_dir_all(paths::get_key_path()).await?;
+    create_dir_all(paths::get_key_dir_path()).await?;
 
-    info!("key directory: {:?}", paths::get_key_path());
+    info!("key directory: {:?}", paths::get_key_dir_path());
 
     let mut rng = rand::thread_rng();
 

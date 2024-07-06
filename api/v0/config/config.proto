@@ -23,14 +23,16 @@ enum ConfigPackageBuildSystem {
     UNKNOWN_SYSTEM = 0;
     AARCH64_LINUX = 1;
     AARCH64_MACOS = 2;
+    X86_64_LINUX = 3;
+    X86_64_MACOS = 4;
 }
 
 message ConfigPackageBuild {
-    bool sandbox = 1;
+    ConfigPackageBuildSystem system = 1;
     map<string, string> environment = 2;
-    repeated ConfigPackageOutput packages = 3;
-    string script = 4;
-    ConfigPackageBuildSystem system = 5;
+    optional string image = 3;
+    repeated ConfigPackageOutput packages = 4;
+    string script = 5;
 }
 
 message ConfigPackageSource {

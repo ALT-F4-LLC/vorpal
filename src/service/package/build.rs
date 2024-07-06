@@ -1,25 +1,25 @@
 use crate::api::{PackageBuildRequest, PackageBuildResponse, PackageBuildSystem};
 use crate::service::get_build_system;
-use crate::service::package::sandbox_default;
 use crate::store::archives::{compress_zstd, unpack_zstd};
 use crate::store::paths::{
-    get_file_paths, get_package_archive_path, get_package_path, get_package_source_archive_path,
+    get_container_dir_path, get_file_paths, get_image_dir_path, get_package_path,
+    get_package_store_path, get_source_store_path,
 };
 use crate::store::temps::{create_dir, create_file};
+use oci_spec::runtime;
+use oci_spec::runtime::{Mount, Root, Spec};
 use process_stream::{Process, ProcessExt};
 use std::collections::HashMap;
-use std::env;
 use std::env::consts::{ARCH, OS};
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use tera::Tera;
-use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, set_permissions, write};
-use tokio::process::Command;
+use std::path::PathBuf;
+use tokio::fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write};
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 use tonic::{Request, Status};
-use tracing::{debug, warn};
+use tracing::debug;
+use uuid::Uuid;
 
 async fn send(
     tx: &Sender<Result<PackageBuildResponse, Status>>,
@@ -43,29 +43,230 @@ async fn send_error(
     anyhow::bail!(message);
 }
 
+pub async fn set_bundle_config(
+    tx: &Sender<Result<PackageBuildResponse, Status>>,
+    container_id: &str,
+    env_var: &HashMap<String, String>,
+    package_path: &PathBuf,
+    sandbox_build_script_path: &PathBuf,
+    sandbox_bundle_path: &PathBuf,
+    sandbox_package_path: &PathBuf,
+    sandbox_source_path: &PathBuf,
+    store_paths: &Vec<String>,
+) -> Result<(), anyhow::Error> {
+    let spec_path = sandbox_bundle_path.join("config.json");
+
+    let mut spec = Spec::load(spec_path.clone())?;
+
+    // Set hostname
+
+    spec.set_hostname(Some(container_id.to_string()));
+
+    // Set mounts
+
+    let spec_mounts = spec.mounts().as_ref().unwrap_or(&vec![]).clone();
+
+    let mut mounts: Vec<Mount> = Vec::new();
+
+    mounts.extend(spec_mounts.clone());
+
+    // Add build script mount to sandbox
+
+    mounts.push(
+        Mount::default()
+            .set_source(Some(sandbox_build_script_path.to_path_buf()))
+            .set_destination(PathBuf::from("/sandbox/build.sh"))
+            .set_typ(Some("bind".to_string()))
+            .set_options(Some(vec![
+                "nodev".to_string(),
+                "nosuid".to_string(),
+                "rbind".to_string(),
+                "ro".to_string(),
+            ]))
+            .clone(),
+    );
+
+    // Add source mount to sandbox
+
+    mounts.push(
+        Mount::default()
+            .set_source(Some(sandbox_source_path.clone()))
+            .set_destination(PathBuf::from("/sandbox/source"))
+            .set_typ(Some("bind".to_string()))
+            .set_options(Some(vec![
+                "nodev".to_string(),
+                "nosuid".to_string(),
+                "rbind".to_string(),
+                "rw".to_string(),
+            ]))
+            .clone(),
+    );
+
+    // Add package mount to sandbox
+
+    mounts.push(
+        Mount::default()
+            .set_source(Some(sandbox_package_path.to_path_buf()))
+            .set_destination(package_path.to_path_buf())
+            .set_typ(Some("bind".to_string()))
+            .set_options(Some(vec![
+                "nodev".to_string(),
+                "nosuid".to_string(),
+                "rbind".to_string(),
+                "rw".to_string(),
+            ]))
+            .clone(),
+    );
+
+    // Add store mounts to sandbox
+
+    for store_path in store_paths {
+        let path = PathBuf::from(store_path);
+
+        if !path.exists() {
+            let message = format!("store path not found: {}", path.display());
+
+            send_error(tx, message.into()).await?
+        }
+
+        mounts.push(
+            Mount::default()
+                .set_source(Some(path.clone()))
+                .set_destination(path)
+                .set_typ(Some("bind".to_string()))
+                .set_options(Some(vec![
+                    "nodev".to_string(),
+                    "nosuid".to_string(),
+                    "rbind".to_string(),
+                    "ro".to_string(),
+                ]))
+                .clone(),
+        );
+    }
+
+    // Add tmpfs mount to sandbox
+
+    mounts.push(
+        Mount::default()
+            .set_destination("/tmp".to_string().into())
+            .set_typ(Some("tmpfs".to_string()))
+            .set_options(Some(vec![
+                "nodev".to_string(),
+                "nosuid".to_string(),
+                "rw".to_string(),
+            ]))
+            .clone(),
+    );
+
+    // Set process
+
+    let process_args = vec!["bash".to_string(), "/sandbox/build.sh".to_string()];
+
+    let mut process_env = Vec::new();
+
+    let spec_env = spec
+        .process()
+        .as_ref()
+        .unwrap()
+        .env()
+        .as_ref()
+        .unwrap()
+        .clone();
+
+    // Update PATH
+
+    let mut bin_paths = vec![];
+
+    for build_package_path in store_paths {
+        let package_path = PathBuf::from(build_package_path);
+
+        if !package_path.exists() {
+            let message = format!("package not found: {}", package_path.display());
+
+            send_error(tx, message.into()).await?
+        }
+
+        let package_bin_path = package_path.join("bin");
+
+        if package_bin_path.exists() {
+            bin_paths.push(package_bin_path.display().to_string());
+        }
+    }
+
+    for env in spec_env {
+        if env.starts_with("PATH=") {
+            let path_value = env.split('=').collect::<Vec<&str>>()[1];
+
+            if bin_paths.is_empty() {
+                process_env.push(env.clone());
+
+                continue;
+            }
+
+            process_env.push(format!("PATH={}:{}", bin_paths.join(":"), path_value));
+
+            continue;
+        }
+
+        process_env.push(env.clone());
+    }
+
+    // Update environment variables
+
+    for (key, value) in env_var {
+        process_env.push(format!("{}={}", key, value));
+    }
+
+    // Set process
+
+    let mut process = runtime::Process::default();
+
+    process.set_args(Some(process_args));
+    process.set_cwd(PathBuf::from("/sandbox/source"));
+    process.set_env(Some(process_env));
+
+    // Set root directory
+
+    let mut root = Root::default();
+    let root_path = sandbox_bundle_path.join("rootfs");
+    let root = root
+        .set_path(root_path.to_path_buf())
+        .set_readonly(Some(true));
+
+    // Save spec
+
+    spec.set_mounts(Some(mounts.clone()));
+    spec.set_process(Some(process.clone()));
+    spec.set_root(Some(root.clone()));
+
+    let _ = spec.save(spec_path);
+
+    Ok(())
+}
+
 pub async fn run(
     tx: &Sender<Result<PackageBuildResponse, Status>>,
     request: Request<PackageBuildRequest>,
 ) -> Result<(), anyhow::Error> {
-    let request = request.into_inner();
-
-    if OS != "linux" && OS != "macos" {
+    if OS != "linux" {
         send_error(tx, format!("unsupported operating system: {}", OS)).await?
     }
 
-    let package_system = request.build_system();
+    let request = request.into_inner();
 
-    if package_system == PackageBuildSystem::UnknownSystem {
+    let package_build_system = request.build_system();
+
+    if package_build_system == PackageBuildSystem::UnknownSystem {
         send_error(tx, "unsupported build system".to_string()).await?
     }
 
-    let worker_system = get_build_system(format!("{}-{}", ARCH, OS).as_str());
+    let worker_build_system = get_build_system(format!("{}-{}", ARCH, OS).as_str());
 
-    if package_system != worker_system {
+    if package_build_system != worker_build_system {
         let message = format!(
             "build system mismatch: {} != {}",
-            package_system.as_str_name(),
-            worker_system.as_str_name()
+            package_build_system.as_str_name(),
+            worker_build_system.as_str_name()
         );
 
         send_error(tx, message.into()).await?
@@ -81,73 +282,64 @@ pub async fn run(
         send_error(tx, message.into()).await?
     }
 
-    let package_archive_path = get_package_archive_path(&request.source_name, &request.source_hash);
+    let package_store_path = get_package_store_path(&request.source_name, &request.source_hash);
 
     // If package tar exists, unpack it to package path
 
-    if package_archive_path.exists() {
-        let message = format!("package archive found: {}", package_archive_path.display());
+    if package_store_path.exists() {
+        let message = format!("package store found: {}", package_store_path.display());
 
         send(tx, message.into()).await?;
 
         create_dir_all(&package_path).await?;
 
-        if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
+        if let Err(err) = unpack_zstd(&package_path, &package_store_path).await {
             send_error(tx, format!("failed to unpack package tar: {:?}", err)).await?
         }
     }
 
-    let package_source_archive_path =
-        get_package_source_archive_path(&request.source_name, &request.source_hash);
+    // Create build environment
 
-    if !package_source_archive_path.exists() {
-        let message = format!(
-            "package source tar not found: {}",
-            package_source_archive_path.display()
+    let mut bin_paths = vec![];
+    let mut env_var = HashMap::new();
+    let mut store_paths = vec![];
+
+    for (key, value) in request.build_environment.clone() {
+        env_var.insert(key, value);
+    }
+
+    for build_package in request.build_packages {
+        let build_package_path = get_package_path(&build_package.name, &build_package.hash);
+
+        if !build_package_path.exists() {
+            let message = format!("package not found: {}", build_package_path.display());
+
+            send_error(tx, message.into()).await?
+        }
+
+        let build_package_bin_path = build_package_path.join("bin");
+
+        if build_package_bin_path.exists() {
+            bin_paths.push(build_package_bin_path.display().to_string());
+        }
+
+        env_var.insert(
+            build_package.name.to_lowercase().replace('-', "_"),
+            build_package_path.display().to_string(),
         );
 
-        send_error(tx, message.into()).await?
+        store_paths.push(build_package_path.display().to_string());
     }
 
-    let message = format!(
-        "package source tar: {}",
-        package_source_archive_path.display()
-    );
+    env_var.insert("output".to_string(), package_path.display().to_string());
 
-    send(tx, message.into()).await?;
-
-    let package_build_path = create_dir().await?;
-    let package_build_path = package_build_path.canonicalize()?;
-
-    if let Err(err) = unpack_zstd(&package_build_path, &package_source_archive_path).await {
-        let message = format!("failed to unpack package source archive: {:?}", err);
-
-        send_error(tx, message.into()).await?
-    }
-
-    let message = format!("package source unpacked: {}", package_build_path.display());
-
-    send(tx, message.into()).await?;
-
-    let source_file_paths = get_file_paths(&package_build_path, &Vec::<&str>::new())?;
-
-    if source_file_paths.is_empty() {
-        send_error(tx, "no source files found".to_string()).await?
-    }
-
-    let message = format!("package source files: {}", source_file_paths.len());
-
-    send(tx, message.into()).await?;
-
-    // At this point, we have source files in the build path
-
-    let message = format!("package building: {}", package_build_path.display());
+    let message = format!("build environment: {:?}", env_var);
 
     send(tx, message.into()).await?;
 
     // Create build script
 
-    let package_build_script = request
+    let build_script = request
         .build_script
         .trim()
         .split('\n')
@@ -155,421 +347,173 @@ pub async fn run(
         .collect::<Vec<&str>>()
         .join("\n");
 
-    let package_build_script_shell = [
+    let build_script_commands = [
         "#!/bin/sh",
         "set -ex",
         "echo \"PATH: $PATH\"",
         "echo \"Starting build script\"",
-        &package_build_script,
+        &build_script,
         "echo \"Finished build script\"",
     ];
 
-    let package_build_script_shell_data = package_build_script_shell.join("\n");
+    let build_script = build_script_commands.join("\n");
 
-    let message = format!("package build script: {}", package_build_script_shell_data);
+    let message = format!("build script: {}", build_script);
 
     send(tx, message.into()).await?;
 
-    let package_build_script_path = create_file("sh").await?;
-    let package_build_script_path = package_build_script_path.canonicalize()?;
+    let sandbox_build_script_path = create_file("sh").await?;
 
-    write(&package_build_script_path, package_build_script_shell_data).await?;
+    write(&sandbox_build_script_path, build_script).await?;
 
-    set_permissions(&package_build_script_path, Permissions::from_mode(0o755)).await?;
+    set_permissions(&sandbox_build_script_path, Permissions::from_mode(0o755)).await?;
 
-    if !package_build_script_path.exists() {
+    if !sandbox_build_script_path.exists() {
+        remove_file(&sandbox_build_script_path).await?;
         send_error(tx, "build script not found".to_string()).await?
     }
 
-    // Create build environment
+    // Create source directory
 
-    let mut build_environment = HashMap::new();
+    let source_path = get_source_store_path(&request.source_name, &request.source_hash);
 
-    for (key, value) in request.build_environment.clone() {
-        build_environment.insert(key, value);
+    if !source_path.exists() {
+        remove_file(&sandbox_build_script_path).await?;
+        send_error(tx, "source store not found".to_string()).await?
     }
 
-    let mut build_store_paths = vec![];
+    let sandbox_source_path = create_dir().await?;
 
-    let mut build_bin_paths = vec![];
+    unpack_zstd(&sandbox_source_path, &source_path).await?;
 
-    for path in request.build_packages {
-        let package_path = get_package_path(&path.name, &path.hash);
+    // TODO: handle custom build images
 
-        if !package_path.exists() {
-            let message = format!("build package not found: {}", package_path.display());
+    // Create container bundle
 
-            send_error(tx, message.into()).await?
-        }
+    let mut bundle_command =
+        Process::new("/nix/store/f7xznd3x3q6f2vxnw2j91838wmvps9ha-umoci-0.4.7/bin/umoci");
 
-        build_environment.insert(
-            path.name.replace('-', "_").to_string(),
-            package_path.canonicalize()?.display().to_string(),
-        );
+    // TODO: see if this works with remote images
 
-        build_store_paths.push(package_path.canonicalize()?.display().to_string());
+    let bundle_image_path = get_image_dir_path().join("sandbox");
 
-        let package_bin_path = package_path.join("bin");
-
-        if package_bin_path.exists() {
-            build_bin_paths.push(package_bin_path.canonicalize()?.display().to_string());
-        }
+    if !bundle_image_path.exists() {
+        remove_file(&sandbox_build_script_path).await?;
+        remove_dir_all(&sandbox_source_path).await?;
+        send_error(tx, "bundle image path not found".to_string()).await?
     }
 
-    if OS == "linux" {
-        let current_path = env::var("PATH").unwrap_or_default();
-        let current_path_paths = current_path.split(':').collect::<Vec<&str>>();
-        for path in current_path_paths {
-            let path = Path::new(path);
-            if path.exists() {
-                let p = path.canonicalize()?;
-                build_bin_paths.push(p.display().to_string());
+    let bundle_image_tag = "ubuntu-24.04";
+
+    let bundle_image = format!("{}:{}", bundle_image_path.display(), bundle_image_tag);
+
+    let sandbox_bundle_path = create_dir().await?;
+
+    let bundle_args = vec![
+        "unpack",
+        "--image",
+        bundle_image.as_str(),
+        "--rootless",
+        sandbox_bundle_path.to_str().unwrap(),
+    ];
+
+    bundle_command.args(bundle_args);
+
+    let mut stream = bundle_command.spawn_and_stream()?;
+
+    while let Some(output) = stream.next().await {
+        send(tx, output.to_string()).await?;
+
+        if let Some(success) = output.is_success() {
+            if !success {
+                remove_file(&sandbox_build_script_path).await?;
+                remove_dir_all(&sandbox_source_path).await?;
+                remove_dir_all(&sandbox_bundle_path).await?;
+                send_error(tx, "bundle command failed".to_string()).await?
             }
         }
     }
 
-    if OS == "macos" {
-        build_bin_paths.push("/usr/bin".to_string());
-        build_bin_paths.push("/bin".to_string());
-        build_bin_paths.push("/Library/Developer/CommandLineTools/usr/bin".to_string());
-    }
+    // Create container spec
 
-    let message = format!("build store paths: {:?}", build_bin_paths);
+    let container_id = Uuid::now_v7().to_string();
+    let sandbox_package_path = create_dir().await?;
 
-    send(tx, message.into()).await?;
+    set_bundle_config(
+        tx,
+        &container_id,
+        &env_var,
+        &package_path,
+        &sandbox_build_script_path,
+        &sandbox_bundle_path,
+        &sandbox_package_path,
+        &sandbox_source_path,
+        &store_paths,
+    )
+    .await?;
 
-    build_environment.insert("PATH".to_string(), build_bin_paths.join(":"));
+    let mut runc = Process::new("/nix/store/488pild8br6aaaqv1069qgcw4l62ib3g-runc-1.1.13/bin/runc");
 
-    let package_build_output_path = create_dir().await?;
-    let package_build_output_path = package_build_output_path.canonicalize()?;
+    let container_root_path = get_container_dir_path();
 
-    build_environment.insert(
-        "output".to_string(),
-        package_build_output_path.display().to_string(),
-    );
+    let runc_args = vec![
+        "--root",
+        container_root_path.to_str().unwrap(),
+        "run",
+        "--bundle",
+        sandbox_bundle_path.to_str().unwrap(),
+        container_id.as_str(),
+    ];
 
-    let message = format!("build environment: {:?}", build_environment);
+    runc.args(runc_args.clone());
 
-    send(tx, message.into()).await?;
+    let mut stream = runc.spawn_and_stream()?;
 
-    let message = format!("build output path: {}", package_build_output_path.display());
+    while let Some(output) = stream.next().await {
+        send(tx, output.to_string()).await?;
 
-    send(tx, message.into()).await?;
-
-    // At this point, we have build script and environment
-
-    if OS == "linux" {
-        let mut sandbox_command = Process::new("/run/current-system/sw/bin/bwrap");
-
-        // Set sandbox args
-
-        let mut sandbox_args = vec![
-            // bind (read/write) build path
-            "--bind",
-            package_build_path.to_str().unwrap(),
-            package_build_path.to_str().unwrap(),
-            // bind (read/write) output path
-            "--bind",
-            package_build_output_path.to_str().unwrap(),
-            package_build_output_path.to_str().unwrap(),
-            // change working directory
-            "--chdir",
-            package_build_path.to_str().unwrap(),
-            // dev
-            "--dev",
-            "/dev",
-            // bind (read-only) build.sh to build.sh
-            "--ro-bind",
-            package_build_script_path.to_str().unwrap(),
-            package_build_script_path.to_str().unwrap(),
-            // bind (read-only) /bin to /bin
-            "--ro-bind",
-            "/bin",
-            "/bin",
-            // bind (read-only) /etc to /etc
-            "--ro-bind",
-            "/etc",
-            "/etc",
-            // bind (read-only) /home to /home
-            "--ro-bind",
-            "/home",
-            "/home",
-            // bind (read-only) /lib to /lib
-            "--ro-bind",
-            "/lib",
-            "/lib",
-            // bind (read-only) /nix to /nix
-            "--ro-bind",
-            "/nix",
-            "/nix",
-            // bind (read-only) /opt to /opt
-            "--ro-bind",
-            "/opt",
-            "/opt",
-            // bind (read-only) /run to /run
-            "--ro-bind",
-            "/run",
-            "/run",
-            // bind (read-only) /usr/bin to /usr/bin
-            "--ro-bind",
-            "/usr/bin",
-            "/usr/bin",
-            // kill sandbox if parent dies
-            "--die-with-parent",
-            // set proc path
-            "--proc",
-            "/proc",
-            // unshare all namespaces
-            "--unshare-all",
-        ];
-
-        // Allow store paths to be read-only
-
-        for store_path in &build_store_paths {
-            sandbox_args.push("--ro-bind");
-            sandbox_args.push(&store_path);
-            sandbox_args.push(&store_path);
-        }
-
-        // Set build environment
-
-        for (key, value) in &build_environment {
-            sandbox_args.push("--setenv");
-            sandbox_args.push(key);
-            sandbox_args.push(value);
-        }
-
-        sandbox_args.push(package_build_script_path.to_str().unwrap());
-
-        sandbox_command.args(sandbox_args.clone());
-
-        send(tx, format!("sandbox args: {:?}", sandbox_args).into()).await?;
-
-        // Set sandbox current dir
-
-        sandbox_command.current_dir(&package_build_path);
-
-        let message = format!("sandbox current dir: {}", package_build_path.display());
-
-        send(tx, message.into()).await?;
-
-        let mut stream = sandbox_command.spawn_and_stream()?;
-
-        while let Some(output) = stream.next().await {
-            send(tx, output.to_string()).await?;
-
-            if let Some(success) = output.is_success() {
-                if !success {
-                    remove_dir_all(&package_build_path).await?;
-
-                    remove_dir_all(&package_build_output_path).await?;
-
-                    remove_file(&package_build_script_path).await?;
-
-                    send_error(tx, "sandbox command failed".to_string()).await?
-                }
+        if let Some(success) = output.is_success() {
+            if !success {
+                remove_file(&sandbox_build_script_path).await?;
+                remove_dir_all(&sandbox_source_path).await?;
+                remove_dir_all(&sandbox_bundle_path).await?;
+                remove_dir_all(&sandbox_package_path).await?;
+                send_error(tx, "runc command failed".to_string()).await?
             }
         }
     }
 
-    if OS == "macos" {
-        // Create sandbox profile
+    remove_file(&sandbox_build_script_path).await?;
+    remove_dir_all(&sandbox_source_path).await?;
+    remove_dir_all(&sandbox_bundle_path).await?;
 
-        let build_profile_path = create_file("sb").await?;
-        let build_profile_path = build_profile_path.canonicalize()?;
+    let build_path_files = get_file_paths(&sandbox_package_path, &Vec::<&str>::new())?;
 
-        let mut tera = Tera::default();
-
-        tera.add_raw_template("sandbox_default", sandbox_default::SANDBOX_DEFAULT)?;
-
-        let mut context = tera::Context::new();
-
-        context.insert("tmpdir", package_build_path.to_str().unwrap());
-
-        let default_profile = tera.render("sandbox_default", &context)?;
-
-        write(&build_profile_path, default_profile).await?;
-
-        if !build_profile_path.exists() {
-            send_error(tx, "sandbox profile not found".to_string()).await?
-        }
-
-        let mut sandbox_command = Process::new("/usr/bin/sandbox-exec");
-
-        // Set sandbox args
-
-        let build_command_args = [
-            "-f",
-            build_profile_path.to_str().unwrap(),
-            package_build_script_path.to_str().unwrap(),
-        ];
-
-        sandbox_command.args(build_command_args);
-
-        let message = format!("sandbox build args: {:?}", build_command_args);
-
-        send(tx, message.into()).await?;
-
-        // Set sandbox environment
-
-        for (key, value) in build_environment {
-            sandbox_command.env(key, value);
-        }
-
-        // Set sandbox current dir
-
-        sandbox_command.current_dir(&package_build_path);
-
-        let message = format!("sandbox current dir: {}", package_build_path.display());
-
-        send(tx, message.into()).await?;
-
-        let mut stream = sandbox_command.spawn_and_stream()?;
-
-        while let Some(output) = stream.next().await {
-            send(tx, output.to_string()).await?;
-
-            if let Some(success) = output.is_success() {
-                if !success {
-                    remove_dir_all(&package_build_path).await?;
-
-                    remove_dir_all(&package_build_output_path).await?;
-
-                    remove_file(&package_build_script_path).await?;
-
-                    send_error(tx, "sandbox command failed".to_string()).await?
-                }
-            }
-        }
-
-        remove_file(&build_profile_path).await?;
-    }
-
-    remove_file(&package_build_script_path).await?;
-
-    remove_dir_all(&package_build_path).await?;
-
-    let package_build_output_files =
-        get_file_paths(&package_build_output_path, &Vec::<&str>::new())?;
-
-    if package_build_output_files.is_empty() {
+    if build_path_files.is_empty() {
         send_error(tx, "no build output files found".to_string()).await?
     }
 
-    let message = format!("build output files: {}", package_build_output_files.len());
+    let message = format!("build output files: {}", build_path_files.len());
 
     send(tx, message.into()).await?;
-
-    // TODO: handle patchelf for all files that require it
-
-    for path in &package_build_output_files {
-        if !path.is_file() {
-            debug!("skipping non-file: {:?}", path.display());
-            continue;
-        }
-
-        let output = Command::new("patchelf")
-            .arg("--print-rpath")
-            .arg(path)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            warn!("failed to print patchelf rpath: {:?}", output.status);
-            continue;
-        }
-
-        let rpath = String::from_utf8(output.stdout)?;
-
-        if rpath.is_empty() {
-            continue;
-        }
-
-        let rpath_paths = rpath.trim().split(':').collect::<Vec<&str>>();
-
-        let mut rpath_paths_new = vec![];
-
-        for rpath_path in rpath_paths {
-            if rpath_path.starts_with(package_build_output_path.to_str().unwrap()) {
-                rpath_paths_new.push(rpath_path.replace(
-                    package_build_output_path.to_str().unwrap(),
-                    package_path.to_str().unwrap(),
-                ));
-            } else {
-                rpath_paths_new.push(rpath_path.to_string());
-            }
-        }
-
-        if rpath_paths_new.is_empty() {
-            continue;
-        }
-
-        let rpath_new = rpath_paths_new.join(":");
-
-        let output = Command::new("patchelf")
-            .arg("--set-rpath")
-            .arg(&rpath_new)
-            .arg(path)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            continue;
-        }
-    }
-
-    // Update all files with package_build_output paths
-
-    for path in &package_build_output_files {
-        if !path.is_file() {
-            debug!("skipping non-file: {:?}", path.display());
-            continue;
-        }
-
-        let data = read(path).await?;
-
-        let prev = match String::from_utf8(data) {
-            Ok(data) => data,
-            Err(_) => {
-                let message = format!(
-                    "failed to convert file data to string: {:?}",
-                    path.display()
-                );
-                debug!("{}", message);
-                continue;
-            }
-        };
-
-        let next = prev.replace(
-            package_build_output_path.to_str().unwrap(),
-            package_path.to_str().unwrap(),
-        );
-
-        if prev == next {
-            debug!("skipping unchanged file: {:?}", path.display());
-            continue;
-        }
-
-        write(path, next).await?;
-    }
 
     // Create package tar from build output files
 
     if let Err(err) = compress_zstd(
-        &package_build_output_path,
-        &package_build_output_files,
-        &package_archive_path,
+        &sandbox_package_path,
+        &build_path_files,
+        &package_store_path,
     )
     .await
     {
         send_error(tx, format!("failed to compress package tar: {:?}", err)).await?
     }
 
-    remove_dir_all(&package_build_output_path).await?;
+    remove_dir_all(&sandbox_package_path).await?;
 
     let message = format!(
-        "package archive created: {}",
-        package_archive_path.file_name().unwrap().to_str().unwrap()
+        "package store created: {}",
+        package_store_path.file_name().unwrap().to_str().unwrap()
     );
 
     send(tx, message.into()).await?;
@@ -578,9 +522,16 @@ pub async fn run(
 
     create_dir_all(&package_path).await?;
 
-    if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
+    if let Err(err) = unpack_zstd(&package_path, &package_store_path).await {
         send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
     }
+
+    let message = format!(
+        "package created: {}",
+        package_path.file_name().unwrap().to_str().unwrap()
+    );
+
+    send(tx, message.into()).await?;
 
     Ok(())
 }

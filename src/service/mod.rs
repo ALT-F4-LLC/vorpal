@@ -15,6 +15,8 @@ impl BuildSystem for ConfigPackageBuildSystem {
         match system {
             "aarch64-linux" => ConfigPackageBuildSystem::Aarch64Linux,
             "aarch64-macos" => ConfigPackageBuildSystem::Aarch64Macos,
+            "x86_64-linux" => ConfigPackageBuildSystem::X8664Linux,
+            "x86_64-macos" => ConfigPackageBuildSystem::X8664Macos,
             _ => ConfigPackageBuildSystem::default(),
         }
     }
@@ -25,6 +27,8 @@ impl BuildSystem for PackageBuildSystem {
         match system {
             "aarch64-linux" => PackageBuildSystem::Aarch64Linux,
             "aarch64-macos" => PackageBuildSystem::Aarch64Macos,
+            "x86_64-linux" => PackageBuildSystem::X8664Linux,
+            "x86_64-macos" => PackageBuildSystem::X8664Macos,
             _ => PackageBuildSystem::default(),
         }
     }

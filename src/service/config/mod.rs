@@ -7,7 +7,6 @@ use tokio_stream;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-mod package;
 mod source;
 mod stream;
 
