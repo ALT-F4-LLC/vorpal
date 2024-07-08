@@ -10,7 +10,7 @@ use tracing::{error, info, warn};
 pub async fn start(port: &u16, workers: &[String]) -> Result<(), anyhow::Error> {
     store::check().await?;
 
-    notary::check()?;
+    notary::check_agent()?;
 
     let system = get_build_system(format!("{}-{}", ARCH, OS).as_str());
 

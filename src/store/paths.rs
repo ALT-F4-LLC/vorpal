@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::env;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all};
@@ -16,6 +15,10 @@ pub fn get_root_path() -> PathBuf {
 
 pub fn get_key_path() -> PathBuf {
     get_root_path().join("key")
+}
+
+pub fn get_sandbox_path() -> PathBuf {
+    get_root_path().join("sandbox")
 }
 
 pub fn get_store_path() -> PathBuf {
@@ -47,7 +50,7 @@ pub fn get_source_archive_path(name: &str, hash: &str) -> PathBuf {
 }
 
 pub fn get_temp_path() -> PathBuf {
-    env::temp_dir().join(Uuid::now_v7().to_string())
+    get_sandbox_path().join(Uuid::now_v7().to_string())
 }
 
 pub fn get_file_paths<'a, P, I, J>(source: P, ignore_paths: I) -> Result<Vec<PathBuf>>

@@ -13,13 +13,24 @@ use tracing::info;
 
 const BITS: usize = 2048;
 
-pub fn check() -> Result<(), anyhow::Error> {
+pub fn check_agent() -> Result<(), anyhow::Error> {
     let private_key_path = paths::get_private_key_path();
+
+    if !private_key_path.exists() {
+        return Err(anyhow::anyhow!(
+            "private key not found - run 'vorpal keys generate'"
+        ));
+    }
+
+    Ok(())
+}
+
+pub fn check_worker() -> Result<(), anyhow::Error> {
     let public_key_path = paths::get_public_key_path();
 
-    if !private_key_path.exists() && !public_key_path.exists() {
+    if !public_key_path.exists() {
         return Err(anyhow::anyhow!(
-            "keys not found - run 'vorpal keys generate'"
+            "public key not found - run 'vorpal keys generate' or copy from agent"
         ));
     }
 
@@ -31,11 +42,13 @@ pub async fn generate_keys() -> Result<(), anyhow::Error> {
     let public_key_path = paths::get_public_key_path();
 
     if private_key_path.exists() {
-        return Err(anyhow::anyhow!("private key already exists"));
+        info!("skipping - private key already exists");
+        return Ok(());
     }
 
     if public_key_path.exists() {
-        return Err(anyhow::anyhow!("public key already exists"));
+        info!("skipping - public key already exists");
+        return Ok(());
     }
 
     let key_path = paths::get_key_path();

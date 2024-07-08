@@ -1,0 +1,15 @@
+name: vorpal
+
+services:
+  worker:
+    build:
+      context: .
+    command:
+      - services
+      - worker
+    image: altf4llc/vorpal:dev
+    ports:
+      - 23151:23151
+    volumes:
+      - /var/lib/vorpal:/var/lib/vorpal
+      - /var/run/docker.sock:/var/run/docker.sock

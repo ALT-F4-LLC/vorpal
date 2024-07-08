@@ -13,7 +13,7 @@ use tracing::info;
 pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     store::check().await?;
 
-    notary::check()?;
+    notary::check_worker()?;
 
     let system = get_build_system(format!("{}-{}", ARCH, OS).as_str());
 

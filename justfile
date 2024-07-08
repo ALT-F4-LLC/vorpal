@@ -1,16 +1,33 @@
 _default:
     just --list
 
-# build cli (nix)
+# build (cargo)
 build:
     #!/usr/bin/env bash
     set -euxo pipefail
     cargo build --package vorpal
 
-build-sandbox tag="ubuntu-24.04":
+# build image (docker)
+build-image tag="dev":
     #!/usr/bin/env bash
     set -euxo pipefail
-    docker buildx build --tag "altf4llc/vorpal-sandbox:{{ tag }}" --target "sandbox" .
+    docker buildx build \
+        --tag "altf4llc/vorpal-build:{{ tag }}" \
+        --target "build" \
+        .
+    docker buildx build \
+        --cache-from "altf4llc/vorpal-build:{{ tag }}" \
+        --tag "altf4llc/vorpal:{{ tag }}" \
+        .
+
+# build sandbox image (docker)
+build-image-sandbox tag="dev":
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    docker buildx build \
+        --tag "altf4llc/vorpal-sandbox:{{ tag }}" \
+        --target "sandbox" \
+        .
 
 # check flake (nix)
 check:
@@ -18,64 +35,52 @@ check:
     nix flake check
 
 # clean environment
-clean: clean-cache
+clean: down
     rm -rf target
-    rm -rf vorpal
+    rm -rf /var/lib/vorpal/key
+    rm -rf /var/lib/vorpal/sandbox
+    rm -rf /var/lib/vorpal/store
 
-# clean store cache
-clean-cache:
-    rm -rf /var/lib/vorpal/bundle/*
-    rm -rf /var/lib/vorpal/image/*
-    rm -rf /var/lib/vorpal/package/*
-    rm -rf /var/lib/vorpal/source/*
-    rm -rf /var/lib/vorpal/store/*
+down:
+    docker-compose down --remove-orphans --rmi=local --volumes
 
 # format code (cargo & nix)
 format:
     cargo fmt --check --package vorpal --verbose
     nix fmt -- --check .
 
-# generate keys (cargo)
-generate:
-    cargo run --bin vorpal keys generate
+generate: build build-image
+    docker container run \
+        --name "vorpal_worker_generate" \
+        --volume "/var/lib/vorpal:/var/lib/vorpal" \
+        altf4llc/vorpal:dev keys generate
+    docker container cp \
+        "vorpal_worker_generate:/var/lib/vorpal/key" \
+        "/var/lib/vorpal"
+    docker container rm "vorpal_worker_generate"
 
 # lint code (cargo)
 lint:
     cargo clippy -- -D warnings
 
+logs:
+    docker compose logs --follow
+
 # build and install (nix)
-package:
+package profile="default":
     #!/usr/bin/env bash
     set -euxo pipefail
-    OUTPUT=$(nix build --json --no-link --print-build-logs . | jq -r .[0].outputs.out)
-    install --mode 755 $OUTPUT/bin/vorpal .
+    nix build --json --no-link --print-build-logs ".#{{ profile }}" | jq -r .[0].outputs.out
 
-stack-setup:
-    orb -m "vorpal" sudo $PWD/script/setup_agent.sh
-
-stack-create:
-    orbctl create nixos "vorpal"
-
-stack-delete:
-    orbctl delete --force "vorpal"
-
-stack-start:
-    orbctl start "vorpal"
-
-stack-stop:
-    orbctl stop "vorpal"
-
-# run agent (cargo)
 start-agent workers: build
-    sudo ./target/debug/vorpal services agent --workers "{{ workers }}"
-
-# run worker (cargo)
-start-worker: build
-    sudo ./target/debug/vorpal services worker
+    ./target/debug/vorpal services agent --workers "{{ workers }}"
 
 # test (cargo)
 test:
     cargo test
+
+up: build-image-sandbox
+    docker compose up --detach
 
 # update flake (nix)
 update:

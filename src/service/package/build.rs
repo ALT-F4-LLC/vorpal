@@ -255,10 +255,8 @@ pub async fn run(
         ..Default::default()
     };
 
-    let container_image_name = "altf4llc/vorpal-sandbox";
-    let container_image_sha256 =
-        "sha256:c4bc0100f66e476ca595200e9b9c5c38933d4babbbbc37c9d62b9a1b77a7b022";
-    let container_image = format!("{}@{}", container_image_name, container_image_sha256);
+    let container_image_name = "docker.io/altf4llc/vorpal-sandbox";
+    let container_image = format!("{}:{}", container_image_name, "dev");
 
     let container_config = Config::<String> {
         entrypoint: Some(vec!["/bin/bash".to_string()]),
