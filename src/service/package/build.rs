@@ -112,7 +112,7 @@ pub async fn run(
         env_var.insert(key, value);
     }
 
-    for build_package in request.build_packages {
+    for build_package in request.build_packages.iter() {
         let build_package_path = get_package_path(&build_package.name, &build_package.hash);
 
         if !build_package_path.exists() {
@@ -136,6 +136,25 @@ pub async fn run(
     }
 
     env_var.insert("output".to_string(), package_path.display().to_string());
+
+    // expand any environment variables that have package references
+
+    for (key, value) in env_var.clone().into_iter() {
+        for package in request.build_packages.iter() {
+            let package_name = package.name.to_lowercase();
+
+            if value.starts_with(&format!("${}", package_name)) {
+                let package_path = get_package_path(&package.name, &package.hash);
+
+                let value = value.replace(
+                    &format!("${}", package_name),
+                    &package_path.display().to_string(),
+                );
+
+                env_var.insert(key.clone(), value);
+            }
+        }
+    }
 
     let message = format!("build environment: {:?}", env_var);
 
@@ -204,7 +223,8 @@ pub async fn run(
         .collect::<Vec<String>>();
 
     if !bin_paths.is_empty() {
-        let path = format!("PATH={}:$PATH", bin_paths.join(":"));
+        let path_default = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+        let path = format!("PATH={}:{}", bin_paths.join(":"), path_default);
         container_env.push(path);
     }
 

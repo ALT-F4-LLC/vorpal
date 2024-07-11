@@ -1,12 +1,26 @@
-FROM docker.io/library/ubuntu:24.04@sha256:c920ba4cfca05503764b785c16b76d43c83a6df8d1ab107e7e6610000d94315c as sandbox
+FROM docker.io/library/debian:12.6-slim@sha256:f528891ab1aa484bf7233dbcc84f3c806c3e427571d75510a9d74bb5ec535b33 as sandbox
 
 RUN apt-get update && apt-get install -y \
-    automake \
-    build-essential \
-    file \
-    help2man \
-    rsync \
-    texinfo \
+    ca-certificates \
+    gcc \
+    libssl-dev \
+    pkg-config \
+    # autoconf \
+    # automake \
+    # byacc \
+    # binutils \
+    # coreutils \
+    # dpkg-dev \
+    # file \
+    # g++ \
+    # help2man \
+    # libc6-dev \
+    # libtool \
+    # m4 \
+    # make \
+    # perl \
+    # rsync \
+    # texinfo \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -39,7 +53,7 @@ RUN cargo build -j $(nproc) --offline --profile release
 RUN cargo test -j $(nproc) --offline --profile release -- --test-threads=$(nproc)
 
 
-FROM docker.io/library/debian:12.6
+FROM docker.io/library/debian:12.6-slim@sha256:f528891ab1aa484bf7233dbcc84f3c806c3e427571d75510a9d74bb5ec535b33
 
 RUN apt-get update && apt-get install -y \
     curl \

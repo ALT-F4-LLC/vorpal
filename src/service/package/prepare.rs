@@ -78,7 +78,6 @@ pub async fn run(
         Ok(signature) => signature,
         Err(e) => return send_error(tx, format!("failed to decode signature: {:?}", e)).await,
     };
-
     let signature = Signature::try_from(signature_decode.as_slice())?;
 
     verifying_key.verify(&source_data, &signature)?;
@@ -97,7 +96,7 @@ pub async fn run(
 
     if !source_path.exists() {
         let message = format!(
-            "source archive unpacking: {} => {}",
+            "source unpacking: {} => {}",
             source_archive_path.to_string_lossy(),
             source_path.to_string_lossy()
         );

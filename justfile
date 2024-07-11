@@ -42,22 +42,15 @@ clean: down
     rm -rf /var/lib/vorpal/store
 
 down:
-    docker-compose down --remove-orphans --rmi=local --volumes
+    docker compose down --remove-orphans --rmi=local --volumes
 
 # format code (cargo & nix)
 format:
     cargo fmt --check --package vorpal --verbose
     nix fmt -- --check .
 
-generate: build build-image
-    docker container run \
-        --name "vorpal_worker_generate" \
-        --volume "/var/lib/vorpal:/var/lib/vorpal" \
-        altf4llc/vorpal:dev keys generate
-    docker container cp \
-        "vorpal_worker_generate:/var/lib/vorpal/key" \
-        "/var/lib/vorpal"
-    docker container rm "vorpal_worker_generate"
+generate: build
+    cargo run keys generate
 
 # lint code (cargo)
 lint:
@@ -73,14 +66,14 @@ package profile="default":
     nix build --json --no-link --print-build-logs ".#{{ profile }}" | jq -r .[0].outputs.out
 
 start-agent workers: build
-    ./target/debug/vorpal services agent --workers "{{ workers }}"
+    cargo run services agent --workers "{{ workers }}"
 
 # test (cargo)
 test:
     cargo test
 
 up: build-image-sandbox
-    docker compose up --detach
+    docker compose up --build --detach
 
 # update flake (nix)
 update:

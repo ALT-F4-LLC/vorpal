@@ -109,7 +109,7 @@ pub async fn build(
         }
 
         let package_path = get_package_path(name, source_hash);
-        let package_store_path = get_package_archive_path(name, source_hash);
+        let package_archive_path = get_package_archive_path(name, source_hash);
 
         // check if package tar exists in agent (local) cache
 
@@ -121,7 +121,7 @@ pub async fn build(
             hash: source_hash.to_string(),
         };
 
-        if !package_store_path.exists() {
+        if !package_archive_path.exists() {
             let fetch_response = store_service.fetch(store_package.clone()).await?;
             let mut fetch_stream = fetch_response.into_inner();
             let mut fetch_stream_data = Vec::new();
@@ -132,20 +132,20 @@ pub async fn build(
                 }
             }
 
-            let mut package_tar = File::create(&package_store_path).await?;
+            let mut package_tar = File::create(&package_archive_path).await?;
 
             package_tar.write_all(&fetch_stream_data).await?;
 
             let message = format!(
                 "package fetched: {}",
-                package_store_path.file_name().unwrap().to_str().unwrap()
+                package_archive_path.file_name().unwrap().to_str().unwrap()
             );
 
             send(tx, message, None).await?;
 
             create_dir_all(package_path.clone()).await?;
 
-            unpack_zstd(&package_path, &package_store_path).await?;
+            unpack_zstd(&package_path, &package_archive_path).await?;
         }
 
         send(
@@ -276,117 +276,118 @@ pub async fn package(
             continue;
         }
 
-        // check if package store exists on worker
+        // check if package archive exists on worker
 
-        // let mut worker_store = StoreServiceClient::connect(worker.uri.clone()).await?;
+        let mut worker_store = StoreServiceClient::connect(worker.uri.clone()).await?;
 
-        // let worker_store_package = StorePath {
-        //     kind: StorePathKind::Package as i32,
-        //     name: config.name.clone(),
-        //     hash: config_source_hash.clone(),
-        // };
+        let worker_store_package = StorePath {
+            kind: StorePathKind::Package as i32,
+            name: config.name.clone(),
+            hash: config_source_hash.clone(),
+        };
 
-        // if let Ok(res) = store_service.path(store_package_path.clone()).await {
-        //     let store_path = res.into_inner();
-        //
-        //     let message = format!("package archive cache remote: {}", store_path.uri);
-        //
-        //     send(tx, message.into(), None).await?;
-        //
-        //     if let Ok(res) = store_service.fetch(store_package_path.clone()).await {
-        //         let mut stream = res.into_inner();
-        //         let mut stream_data = Vec::new();
-        //
-        //         while let Some(chunk) = stream.message().await? {
-        //             if !chunk.data.is_empty() {
-        //                 stream_data.extend_from_slice(&chunk.data);
-        //             }
-        //         }
-        //
-        //         if stream_data.is_empty() {
-        //             send_error(tx, "no data fetched".to_string()).await?
-        //         }
-        //
-        //         let stream_data_size = stream_data.len();
-        //
-        //         let message = format!("package archive cache remote size: {}", stream_data_size);
-        //
-        //         send(tx, message.into(), None).await?;
-        //
-        //         let mut package_archive = File::create(&package_archive_path).await?;
-        //
-        //         package_archive.write_all(&stream_data).await?;
-        //
-        //         let message = format!(
-        //             "package tar cache remote fetched: {}",
-        //             package_archive_path.display()
-        //         );
-        //
-        //         send(tx, message.into(), None).await?;
-        //
-        //         create_dir_all(&package_output_path).await?;
-        //
-        //         match unpack_zstd(&package_output_path, &package_archive_path).await {
-        //             Ok(_) => {}
-        //             Err(_) => send_error(tx, "failed to unpack tar".to_string()).await?,
-        //         }
-        //
-        //         send(
-        //             tx,
-        //             format!(
-        //                 "package tar cache remote unpacked: {}",
-        //                 package_output_path.display()
-        //             ),
-        //             Some(ConfigPackageOutput {
-        //                 hash: source_hash.clone(),
-        //                 name: config.name.clone(),
-        //             }),
-        //         )
-        //         .await?;
-        //
-        //         break;
-        //     }
-        // }
+        if let Ok(res) = worker_store.path(worker_store_package.clone()).await {
+            let store_path = res.into_inner();
+
+            let message = format!("package archive cache remote: {}", store_path.uri);
+
+            send(tx, message.into(), None).await?;
+
+            if let Ok(res) = worker_store.fetch(worker_store_package.clone()).await {
+                let mut stream = res.into_inner();
+                let mut stream_data = Vec::new();
+
+                while let Some(chunk) = stream.message().await? {
+                    if !chunk.data.is_empty() {
+                        stream_data.extend_from_slice(&chunk.data);
+                    }
+                }
+
+                if stream_data.is_empty() {
+                    send_error(tx, "no data fetched".to_string()).await?
+                }
+
+                let stream_data_size = stream_data.len();
+
+                let message = format!("package archive cache remote size: {}", stream_data_size);
+
+                send(tx, message.into(), None).await?;
+
+                let package_archive_path =
+                    get_package_archive_path(&config.name, &config_source_hash);
+
+                let mut package_archive = File::create(&package_archive_path).await?;
+
+                package_archive.write_all(&stream_data).await?;
+
+                let message = format!(
+                    "package tar cache remote fetched: {}",
+                    package_archive_path.display()
+                );
+
+                send(tx, message.into(), None).await?;
+
+                create_dir_all(&package_path).await?;
+
+                match unpack_zstd(&package_path, &package_archive_path).await {
+                    Ok(_) => {}
+                    Err(_) => send_error(tx, "failed to unpack tar".to_string()).await?,
+                }
+
+                send(
+                    tx,
+                    format!(
+                        "package tar cache remote unpacked: {}",
+                        package_path.display()
+                    ),
+                    Some(ConfigPackageOutput {
+                        hash: config_source_hash.clone(),
+                        name: config.name.clone(),
+                    }),
+                )
+                .await?;
+
+                break;
+            }
+        }
 
         // check if package source exists in worker cache
 
-        // let store_package_source_path = StorePath {
-        //     kind: StorePathKind::Source as i32,
-        //     name: config.name.clone(),
-        //     hash: source_hash.clone(),
-        // };
+        let worker_package_source = StorePath {
+            kind: StorePathKind::Source as i32,
+            name: config.name.clone(),
+            hash: config_source_hash.clone(),
+        };
 
-        // if let Ok(res) = store_service.path(store_package_source_path.clone()).await {
-        //     let store_path = res.into_inner();
-        //
-        //     let store_path_segments: Vec<&str> = store_path
-        //         .uri
-        //         .split('/')
-        //         .filter(|segment| !segment.is_empty())
-        //         .collect();
-        //
-        //     let store_path_file_name = store_path_segments.last().unwrap_or(&"");
-        //
-        //     let message = format!(
-        //         "package source archive cache remote: {}",
-        //         store_path_file_name
-        //     );
-        //
-        //     send(tx, message.into(), None).await?;
-        //
-        //     build(
-        //         tx,
-        //         &build_config,
-        //         &config.name,
-        //         &source_hash,
-        //         &store_package_path,
-        //         &mut store_service,
-        //         &worker.uri,
-        //     )
-        //     .await?;
-        //
-        //     break;
-        // }
+        if let Ok(res) = worker_store.path(worker_package_source.clone()).await {
+            let store_path = res.into_inner();
+
+            let store_path_segments: Vec<&str> = store_path
+                .uri
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect();
+
+            let store_path_file_name = store_path_segments.last().unwrap_or(&"");
+
+            let message = format!(
+                "package source archive cache remote: {}",
+                store_path_file_name
+            );
+
+            send(tx, message.into(), None).await?;
+
+            build(
+                tx,
+                &config_build,
+                &config.name,
+                &config_source_hash,
+                &worker.uri,
+            )
+            .await?;
+
+            break;
+        }
 
         // check if source store exists in local cache
 

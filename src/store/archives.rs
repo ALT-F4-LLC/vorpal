@@ -89,9 +89,7 @@ pub async fn unpack_gzip(target_dir: &PathBuf, source_tar: &Path) -> Result<(), 
     let tar_gz = File::open(source_tar).await?;
     let buf_reader = BufReader::new(tar_gz);
     let gz_decoder = GzipDecoder::new(buf_reader);
-    let archive_builder = ArchiveBuilder::new(gz_decoder)
-        .set_preserve_permissions(true)
-        .set_ignore_zeros(true);
+    let archive_builder = ArchiveBuilder::new(gz_decoder);
     let mut archive = archive_builder.build();
 
     Ok(archive.unpack(target_dir).await?)

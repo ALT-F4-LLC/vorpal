@@ -15,9 +15,8 @@
         system,
         ...
       }: let
-        inherit (pkgs) alejandra clippy darwin dockerTools grpcurl just jq lib mkShell openssl pkg-config protobuf rustfmt rustPlatform stdenv;
+        inherit (pkgs) alejandra clippy darwin grpcurl just jq lib mkShell nomad openssl pkg-config protobuf rustfmt rustPlatform stdenv;
         inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
-        inherit (dockerTools) buildImage;
         inherit (lib) optionals;
         inherit (rustPlatform) buildRustPackage;
         inherit (stdenv) isDarwin;
@@ -26,6 +25,7 @@
       in {
         _module.args.pkgs = import inputs.nixpkgs {
           inherit system;
+          config.allowUnfree = true;
           overlays = [inputs.rust-overlay.overlays.default];
         };
 
@@ -39,7 +39,7 @@
         devShells = {
           default = mkShell {
             inputsFrom = [config.packages.default];
-            nativeBuildInputs = [clippy grpcurl jq just rustfmt];
+            nativeBuildInputs = [clippy grpcurl jq just nomad rustfmt];
           };
         };
 
@@ -49,7 +49,7 @@
           default = buildRustPackage {
             inherit pname version;
             buildInputs = [openssl] ++ optionals isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-xOE7UgrUTxWzdTuD+vatVTCOrT58V+FWB/Lv3M1CWME=";
+            cargoSha256 = "sha256-YgdgyLJTNn6GSDlgeI9vHvceCUlfkmnEZmsj/4SL0hY=";
             nativeBuildInputs = [pkg-config protobuf];
             src = ./.;
           };
