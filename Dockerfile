@@ -1,31 +1,31 @@
-FROM docker.io/library/debian:12.6-slim@sha256:f528891ab1aa484bf7233dbcc84f3c806c3e427571d75510a9d74bb5ec535b33 as sandbox
+FROM docker.io/library/debian:12.6-slim@sha256:f528891ab1aa484bf7233dbcc84f3c806c3e427571d75510a9d74bb5ec535b33 AS sandbox
 
 RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    gcc \
-    libssl-dev \
-    pkg-config \
     # autoconf \
-    # automake \
-    # byacc \
     # binutils \
+    # byacc \
     # coreutils \
     # dpkg-dev \
     # file \
     # g++ \
-    # help2man \
     # libc6-dev \
     # libtool \
     # m4 \
-    # make \
     # perl \
-    # rsync \
-    # texinfo \
+    automake \
+    ca-certificates \
+    gcc \
+    help2man \
+    libssl-dev \
+    make \
+    pkg-config \
+    rsync \
+    texinfo \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 
-FROM docker.io/library/rust:1.79.0@sha256:4c45f61ebe054560190f232b7d883f174ff287e1a0972c8f6d7ab88da0188870 as build
+FROM docker.io/library/rust:1.79.0@sha256:4c45f61ebe054560190f232b7d883f174ff287e1a0972c8f6d7ab88da0188870 AS build
 
 RUN apt-get update \
     && apt-get install -y \
