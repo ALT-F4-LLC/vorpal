@@ -7,13 +7,15 @@ RUN apt-get update && apt-get install -y \
     # coreutils \
     # dpkg-dev \
     # file \
-    # g++ \
     # libc6-dev \
     # libtool \
     # m4 \
     # perl \
     automake \
+    bison \
     ca-certificates \
+    g++ \
+    gawk \
     gcc \
     help2man \
     libssl-dev \
