@@ -2,7 +2,8 @@ use crate::api::{PackageBuildRequest, PackageBuildResponse, PackageBuildSystem};
 use crate::service::get_build_system;
 use crate::store::archives::{compress_zstd, unpack_zstd};
 use crate::store::paths::{
-    copy_files, get_file_paths, get_package_archive_path, get_package_path, get_source_path,
+    copy_files, get_file_paths, get_package_archive_path, get_package_path,
+    get_source_archive_path, get_source_path,
 };
 use crate::store::temps::{create_dir, create_file};
 use bollard::{
@@ -102,6 +103,28 @@ pub async fn run(
         return Ok(());
     }
 
+    // If package tar exists, unpack it to package path
+
+    let package_source_path = get_source_path(&request.source_name, &request.source_hash);
+
+    let package_source_archive_path =
+        get_source_archive_path(&request.source_name, &request.source_hash);
+
+    if !package_source_path.exists() && package_source_archive_path.exists() {
+        let message = format!(
+            "package source archive found: {}",
+            package_source_archive_path.display()
+        );
+
+        send(tx, message).await?;
+
+        create_dir_all(&package_source_path).await?;
+
+        if let Err(err) = unpack_zstd(&package_source_path, &package_source_archive_path).await {
+            send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
+        }
+    }
+
     // Create build environment
 
     let mut bin_paths = vec![];
@@ -194,16 +217,14 @@ pub async fn run(
 
     // Create source directory
 
-    let source_path = get_source_path(&request.source_name, &request.source_hash);
-
-    if !source_path.exists() {
+    if !package_source_path.exists() {
         remove_file(&sandbox_build_script_path).await?;
         send_error(tx, "source not found".to_string()).await?
     }
 
     let sandbox_source_path = create_dir().await?;
 
-    copy_files(&source_path, &sandbox_source_path).await?;
+    copy_files(&package_source_path, &sandbox_source_path).await?;
 
     let sandbox_package_path = create_dir().await?;
 

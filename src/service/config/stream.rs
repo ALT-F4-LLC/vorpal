@@ -189,8 +189,6 @@ pub async fn package(
             if config_source_hash.is_empty() {
                 let path = Path::new(&config_source.uri).canonicalize()?;
                 let (hash, _) = source::validate(tx, &path, &config_source).await?;
-                let message = format!("source local hash: {}", hash);
-                send(tx, message, None).await?;
                 config_source_hash = hash;
             }
         }
@@ -420,6 +418,38 @@ pub async fn package(
         }
 
         let source_hash = source::prepare(tx, &config_source, &source_archive_path).await?;
+
+        // TODO: check if the source archive exists on the worker already
+
+        if let Ok(res) = worker_store.path(worker_package_source.clone()).await {
+            let store_path = res.into_inner();
+
+            let store_path_segments: Vec<&str> = store_path
+                .uri
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect();
+
+            let store_path_file_name = store_path_segments.last().unwrap_or(&"");
+
+            let message = format!(
+                "package source archive cache remote: {}",
+                store_path_file_name
+            );
+
+            send(tx, message.into(), None).await?;
+
+            build(
+                tx,
+                &config_build,
+                &config.name,
+                &config_source_hash,
+                &worker.uri,
+            )
+            .await?;
+
+            break;
+        }
 
         prepare(
             tx,

@@ -66,8 +66,6 @@ pub async fn validate(
         send_error(tx, "no source hash found".to_string()).await?
     }
 
-    send(tx, format!("source hash: {}", workdir_hash), None).await?;
-
     if let Some(request_hash) = &source.hash {
         if &workdir_hash != request_hash {
             let message = &format!("source hash mismatch: {} != {}", request_hash, workdir_hash);
