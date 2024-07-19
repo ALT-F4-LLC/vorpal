@@ -75,7 +75,7 @@ where
             {
                 return None;
             }
-            path.canonicalize().ok()
+            return Some(path.to_path_buf());
         })
         .collect();
 
