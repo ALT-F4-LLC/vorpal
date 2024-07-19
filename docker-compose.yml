@@ -4,9 +4,7 @@ services:
   worker:
     build:
       context: .
-    command:
-      - services
-      - worker
+    command: ["services", "worker"]
     image: altf4llc/vorpal:dev
     ports:
       - 23151:23151
