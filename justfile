@@ -68,6 +68,9 @@ package profile="default":
 start-agent workers: build
     cargo run services agent --workers "{{ workers }}"
 
+start-worker: build
+    cargo run services worker
+
 # test (cargo)
 test:
     cargo test
