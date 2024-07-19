@@ -15,7 +15,7 @@
         system,
         ...
       }: let
-        inherit (pkgs) alejandra clippy darwin grpcurl just jq lib mkShell nomad openssl pkg-config protobuf rustfmt rustPlatform stdenv;
+        inherit (pkgs) alejandra clippy darwin grpcurl just jq lib mkShell openssl pkg-config protobuf rustfmt rustPlatform stdenv;
         inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (lib) optionals;
         inherit (rustPlatform) buildRustPackage;
@@ -39,7 +39,7 @@
         devShells = {
           default = mkShell {
             inputsFrom = [config.packages.default];
-            nativeBuildInputs = [clippy grpcurl jq just nomad rustfmt];
+            nativeBuildInputs = [clippy grpcurl jq just rustfmt];
           };
         };
 
