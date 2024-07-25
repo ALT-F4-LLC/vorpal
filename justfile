@@ -3,8 +3,6 @@ _default:
 
 # build (cargo)
 build:
-    #!/usr/bin/env bash
-    set -euxo pipefail
     cargo build --package vorpal
 
 # build image (docker)
@@ -60,15 +58,13 @@ logs:
 
 # build and install (nix)
 package profile="default":
-    #!/usr/bin/env bash
-    set -euxo pipefail
-    nix build --json --no-link --print-build-logs ".#{{ profile }}" | jq -r .[0].outputs.out
+    nix build --json --no-link --print-build-logs ".#{{ profile }}"
 
 start-agent workers: build
-    cargo run services agent --workers "{{ workers }}"
+    sudo ./target/debug/vorpal services agent --workers "{{ workers }}"
 
 start-worker: build
-    cargo run services worker
+    sudo ./target/debug/vorpal services worker
 
 # test (cargo)
 test:
@@ -79,5 +75,4 @@ up: build-image-sandbox
 
 # update flake (nix)
 update:
-    cargo update
     nix flake update
