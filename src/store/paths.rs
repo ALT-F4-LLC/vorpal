@@ -75,7 +75,7 @@ where
             {
                 return None;
             }
-            return Some(path.to_path_buf());
+            Some(path.to_path_buf())
         })
         .collect();
 

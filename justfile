@@ -31,7 +31,6 @@ build-image-sandbox tag="dev":
 
 # check flake (nix)
 check:
-    cargo check
     nix flake check
 
 # clean environment

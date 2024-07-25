@@ -289,7 +289,7 @@ pub async fn package(
 
             let message = format!("package archive cache remote: {}", store_path.uri);
 
-            send(tx, message.into(), None).await?;
+            send(tx, message, None).await?;
 
             if let Ok(res) = worker_store.fetch(worker_store_package.clone()).await {
                 let mut stream = res.into_inner();
@@ -309,7 +309,7 @@ pub async fn package(
 
                 let message = format!("package archive cache remote size: {}", stream_data_size);
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
 
                 let package_archive_path =
                     get_package_archive_path(&config.name, &config_source_hash);
@@ -323,7 +323,7 @@ pub async fn package(
                     package_archive_path.display()
                 );
 
-                send(tx, message.into(), None).await?;
+                send(tx, message, None).await?;
 
                 create_dir_all(&package_path).await?;
 
@@ -373,7 +373,7 @@ pub async fn package(
                 store_path_file_name
             );
 
-            send(tx, message.into(), None).await?;
+            send(tx, message, None).await?;
 
             build(
                 tx,
@@ -437,7 +437,7 @@ pub async fn package(
                 store_path_file_name
             );
 
-            send(tx, message.into(), None).await?;
+            send(tx, message, None).await?;
 
             build(
                 tx,
