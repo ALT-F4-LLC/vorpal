@@ -2,27 +2,28 @@ FROM docker.io/library/debian:12.6-slim@sha256:f528891ab1aa484bf7233dbcc84f3c806
 
 RUN apt-get update && apt-get install -y \
     # autoconf \
+    # automake \
     # binutils \
+    # bison \
     # byacc \
     # coreutils \
     # dpkg-dev \
     # file \
+    # g++ \
+    # gawk \
+    # help2man \
     # libc6-dev \
+    # libssl-dev \
     # libtool \
     # m4 \
+    # make \
     # perl \
-    automake \
-    bison \
+    # rsync \
+    # texinfo \
     ca-certificates \
-    g++ \
-    gawk \
     gcc \
-    help2man \
     libssl-dev \
-    make \
     pkg-config \
-    rsync \
-    texinfo \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -50,8 +51,8 @@ COPY api api
 COPY src src
 COPY build.rs build.rs
 
+RUN cargo check -j $(nproc) --offline --profile release
 RUN cargo build -j $(nproc) --offline --profile release
-
 RUN cargo test -j $(nproc) --offline --profile release -- --test-threads=$(nproc)
 
 
