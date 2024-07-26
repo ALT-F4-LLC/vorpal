@@ -1,4 +1,4 @@
-FROM docker.io/library/rust:1.79.0@sha256:4c45f61ebe054560190f232b7d883f174ff287e1a0972c8f6d7ab88da0188870 AS build
+FROM docker.io/library/rust:1.79.0@sha256:9b2689d6f99ff381f178fa4361db745c8c355faecde73aa5b18b0efa84f03e62 AS build
 
 RUN apt-get update \
     && apt-get install -y \
