@@ -1,33 +1,3 @@
-FROM docker.io/library/debian:12.6-slim@sha256:f528891ab1aa484bf7233dbcc84f3c806c3e427571d75510a9d74bb5ec535b33 AS sandbox
-
-RUN apt-get update && apt-get install -y \
-    # autoconf \
-    # automake \
-    # binutils \
-    # bison \
-    # byacc \
-    # coreutils \
-    # dpkg-dev \
-    # file \
-    # g++ \
-    # gawk \
-    # help2man \
-    # libc6-dev \
-    # libssl-dev \
-    # libtool \
-    # m4 \
-    # make \
-    # perl \
-    # rsync \
-    # texinfo \
-    ca-certificates \
-    gcc \
-    libssl-dev \
-    pkg-config \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-
 FROM docker.io/library/rust:1.79.0@sha256:4c45f61ebe054560190f232b7d883f174ff287e1a0972c8f6d7ab88da0188870 AS build
 
 RUN apt-get update \
@@ -66,4 +36,4 @@ RUN apt-get update && apt-get install -y \
 
 COPY --from=build /usr/src/app/target/release/vorpal /usr/local/bin/vorpal
 
-ENTRYPOINT ["/usr/local/bin/vorpal"]
+ENTRYPOINT ["vorpal"]

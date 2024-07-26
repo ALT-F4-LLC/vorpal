@@ -1,3 +1,5 @@
+docker_build_cache := `echo "$PWD/.buildx"`
+
 _default:
     just --list
 
@@ -7,24 +9,19 @@ build:
 
 # build image (docker)
 build-image tag="dev":
-    #!/usr/bin/env bash
-    set -euxo pipefail
     docker buildx build \
-        --tag "altf4llc/vorpal-build:{{ tag }}" \
-        --target "build" \
-        .
-    docker buildx build \
-        --cache-from "altf4llc/vorpal-build:{{ tag }}" \
-        --tag "altf4llc/vorpal:{{ tag }}" \
+        --cache-from "type=local,src={{ docker_build_cache }}" \
+        --cache-to "type=local,dest={{ docker_build_cache }},mode=max" \
+        --tag "docker.io/altf4llc/vorpal:{{ tag }}" \
         .
 
-# build sandbox image (docker)
+# build image sandbox (docker)
 build-image-sandbox tag="dev":
-    #!/usr/bin/env bash
-    set -euxo pipefail
     docker buildx build \
+        --cache-from "type=local,src={{ docker_build_cache }}" \
+        --cache-to "type=local,dest={{ docker_build_cache }},mode=max" \
+        --file "Dockerfile.sandbox" \
         --tag "altf4llc/vorpal-sandbox:{{ tag }}" \
-        --target "sandbox" \
         .
 
 # check flake (nix)
@@ -34,9 +31,6 @@ check:
 # clean environment
 clean: down
     rm -rf target
-    rm -rf /var/lib/vorpal/key
-    rm -rf /var/lib/vorpal/sandbox
-    rm -rf /var/lib/vorpal/store
 
 down:
     docker compose down --remove-orphans --rmi=local --volumes
@@ -59,6 +53,9 @@ logs:
 # build and install (nix)
 package profile="default":
     nix build --json --no-link --print-build-logs ".#{{ profile }}"
+
+package-buildx-cache:
+    tar --create --gzip --file buildx.tar.gz --verbose .buildx
 
 start-agent workers: build
     sudo ./target/debug/vorpal services agent --workers "{{ workers }}"
