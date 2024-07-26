@@ -12,7 +12,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build-image:
+  build:
     runs-on: ubuntu-latest
     permissions:
       attestations: write
@@ -59,7 +59,7 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
 
-  build-image-sandbox:
+  build-sandbox:
     runs-on: ubuntu-latest
     permissions:
       attestations: write
