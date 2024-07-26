@@ -12,7 +12,7 @@ build-image tag="dev":
     docker buildx build \
         --cache-from "type=local,src={{ docker_build_cache }}" \
         --cache-to "type=local,dest={{ docker_build_cache }},mode=max" \
-        --tag "docker.io/altf4llc/vorpal:{{ tag }}" \
+        --tag "vorpal:{{ tag }}" \
         .
 
 # build image sandbox (docker)
@@ -21,7 +21,7 @@ build-image-sandbox tag="dev":
         --cache-from "type=local,src={{ docker_build_cache }}" \
         --cache-to "type=local,dest={{ docker_build_cache }},mode=max" \
         --file "Dockerfile.sandbox" \
-        --tag "altf4llc/vorpal-sandbox:{{ tag }}" \
+        --tag "vorpal-sandbox:{{ tag }}" \
         .
 
 # check flake (nix)
@@ -67,8 +67,38 @@ start-worker: build
 test:
     cargo test
 
-up: build-image-sandbox
-    docker compose up --build --detach
+start-docker image="vorpal:dev" system="x86_64-linux": build-image build-image-sandbox
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    docker network create "vorpal"
+    docker container run \
+        --detach \
+        --interactive \
+        --name "vorpal-worker" \
+        --network "vorpal" \
+        --rm \
+        --tty \
+        --volume "/var/lib/vorpal:/var/lib/vorpal" \
+        --volume "/var/run/docker.sock:/var/run/docker.sock" \
+        {{ image }} \
+        services worker
+    docker container run \
+        --detach \
+        --interactive \
+        --name "vorpal-agent" \
+        --network "vorpal" \
+        --publish "127.0.0.1:15323:15323" \
+        --tty \
+        --volume "${PWD}:${PWD}" \
+        --volume "/var/lib/vorpal:/var/lib/vorpal" \
+        --volume "/var/run/docker.sock:/var/run/docker.sock" \
+        {{ image }} \
+        services agent --workers "{{ system }}=http://vorpal-worker:23151"
+
+stop-docker:
+    docker container rm --force "vorpal-agent"
+    docker container rm --force "vorpal-worker"
+    docker network rm --force "vorpal"
 
 # update flake (nix)
 update:
