@@ -29,11 +29,8 @@ check:
     nix flake check
 
 # clean environment
-clean: down
-    rm -rf target
-
-down:
-    docker compose down --remove-orphans --rmi=local --volumes
+clean: stop-docker
+    rm -rf ./.buildx ./target
 
 # format code (cargo & nix)
 format:
@@ -47,8 +44,8 @@ generate: build
 lint:
     cargo clippy -- -D warnings
 
-logs:
-    docker compose logs --follow
+logs service:
+    docker container logs --follow --tail 100 "vorpal-{{ service }}"
 
 # build and install (nix)
 package profile="default":
@@ -88,6 +85,7 @@ start-docker image="vorpal:dev" system="x86_64-linux": build-image build-image-s
         --name "vorpal-agent" \
         --network "vorpal" \
         --publish "127.0.0.1:15323:15323" \
+        --rm \
         --tty \
         --volume "${PWD}:${PWD}" \
         --volume "/var/lib/vorpal:/var/lib/vorpal" \
