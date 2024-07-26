@@ -51,8 +51,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
 
-      - uses: actions/attest-build-provenance@v1
+      - if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v1
         with:
-          push-to-registry: ${{ github.event_name != 'pull_request' }}
+          push-to-registry: true
           subject-digest: ${{ steps.push.outputs.digest }}
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
