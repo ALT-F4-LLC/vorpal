@@ -34,8 +34,8 @@ enum PackageBuildSystem {
 message PackageBuildRequest {
     PackageBuildSystem build_system = 1;
     map<string, string> build_environment = 2;
-    repeated PrepareBuildPackage build_packages = 3;
-    string build_image = 4;
+    optional string build_image = 3;
+    repeated PrepareBuildPackage build_packages = 4;
     string build_script = 5;
     string source_hash = 6;
     string source_name = 7;

@@ -76,20 +76,9 @@ pub async fn build(
         });
     }
 
-    let build_image_default_name = "vorpal/alpine";
-    let build_image_default_tag = "3.20.1";
-    let build_image_default_sha256 =
-        "b89d9c93e9ed3597455c90a0b88a8bbb5cb7188438f70953fede212a0c4394e0";
-    let build_image_default = format!(
-        "{}:{}@sha256:{}",
-        build_image_default_name, build_image_default_tag, build_image_default_sha256
-    );
-
-    let build_image = build.image.clone().unwrap_or(build_image_default);
-
     let build_config = PackageBuildRequest {
         build_environment: build.environment.clone(),
-        build_image,
+        build_image: build.image.clone(),
         build_packages,
         build_script: build.script.to_string(),
         build_system: build.system,

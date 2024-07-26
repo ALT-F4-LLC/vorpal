@@ -296,8 +296,10 @@ pub async fn run(
         ..Default::default()
     };
 
-    let container_image_name = "docker.io/altf4llc/vorpal-sandbox";
-    let container_image = format!("{}:{}", container_image_name, "dev");
+    let container_image = match request.build_image {
+        None => "ghcr.io/alt-f4-llc/vorpal-sandbox:edge".to_string(),
+        Some(image) => image,
+    };
 
     let container_config = Config::<String> {
         entrypoint: Some(vec!["/bin/bash".to_string()]),
