@@ -6,4 +6,3 @@ pub mod api {
 pub mod notary;
 pub mod service;
 pub mod store;
-extern crate tera;

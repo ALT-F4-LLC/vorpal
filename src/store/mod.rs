@@ -7,20 +7,27 @@ pub mod hashes;
 pub mod paths;
 pub mod temps;
 
-pub async fn check_dirs() -> Result<(), anyhow::Error> {
-    let root_dir_path = paths::get_root_path();
-    if !root_dir_path.exists() {
-        fs::create_dir_all(&root_dir_path).await?;
+pub async fn check() -> Result<(), anyhow::Error> {
+    let key_path = paths::get_key_path();
+    if !key_path.exists() {
+        fs::create_dir_all(&key_path).await?;
     }
 
-    info!("root directory: {}", root_dir_path.display());
+    info!("keys path: {:?}", key_path);
 
-    let store_dir_path = paths::get_store_path();
-    if !store_dir_path.exists() {
-        fs::create_dir_all(&store_dir_path).await?;
+    let sandbox_path = paths::get_sandbox_path();
+    if !sandbox_path.exists() {
+        fs::create_dir_all(&sandbox_path).await?;
     }
 
-    info!("store directory: {:?}", store_dir_path);
+    info!("sandbox path: {:?}", sandbox_path);
+
+    let store_dir = paths::get_store_path();
+    if !store_dir.exists() {
+        fs::create_dir_all(&store_dir).await?;
+    }
+
+    info!("store path: {:?}", store_dir);
 
     Ok(())
 }

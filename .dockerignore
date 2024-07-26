@@ -1,0 +1,12 @@
+.buildx
+.direnv
+.envrc
+.github
+Dockerfile
+LICENSE
+README.md
+flake.lock
+flake.nix
+justfile
+target
+vorpal.webp

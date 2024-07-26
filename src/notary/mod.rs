@@ -13,18 +13,26 @@ use tracing::info;
 
 const BITS: usize = 2048;
 
-pub fn check_keys() -> Result<(), anyhow::Error> {
+pub fn check_agent() -> Result<(), anyhow::Error> {
     let private_key_path = paths::get_private_key_path();
-    let public_key_path = paths::get_public_key_path();
 
-    if !private_key_path.exists() && !public_key_path.exists() {
+    if !private_key_path.exists() {
         return Err(anyhow::anyhow!(
-            "keys not found - run 'vorpal keys generate'"
+            "private key not found - run 'vorpal keys generate'"
         ));
     }
 
-    info!("private key: {:?}", private_key_path);
-    info!("public key: {:?}", public_key_path);
+    Ok(())
+}
+
+pub fn check_worker() -> Result<(), anyhow::Error> {
+    let public_key_path = paths::get_public_key_path();
+
+    if !public_key_path.exists() {
+        return Err(anyhow::anyhow!(
+            "public key not found - run 'vorpal keys generate' or copy from agent"
+        ));
+    }
 
     Ok(())
 }
@@ -34,16 +42,20 @@ pub async fn generate_keys() -> Result<(), anyhow::Error> {
     let public_key_path = paths::get_public_key_path();
 
     if private_key_path.exists() {
-        return Err(anyhow::anyhow!("private key already exists"));
+        info!("skipping - private key already exists");
+        return Ok(());
     }
 
     if public_key_path.exists() {
-        return Err(anyhow::anyhow!("public key already exists"));
+        info!("skipping - public key already exists");
+        return Ok(());
     }
 
-    create_dir_all(paths::get_key_path()).await?;
+    let key_path = paths::get_key_path();
 
-    info!("key directory: {:?}", paths::get_key_path());
+    create_dir_all(key_path.clone()).await?;
+
+    info!("key directory: {:?}", key_path);
 
     let mut rng = rand::thread_rng();
 

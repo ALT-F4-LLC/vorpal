@@ -1,4 +1,4 @@
-name: flake
+name: nix
 
 on:
   pull_request:

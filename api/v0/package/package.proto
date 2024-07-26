@@ -15,7 +15,7 @@ message PackagePrepareRequest {
 }
 
 message PackagePrepareResponse {
-    bytes log_output = 1;
+    string log_output = 1;
 }
 
 message PrepareBuildPackage {
@@ -23,15 +23,24 @@ message PrepareBuildPackage {
     string name = 2;
 }
 
+enum PackageBuildSystem {
+    UNKNOWN_SYSTEM = 0;
+    AARCH64_LINUX = 1;
+    AARCH64_MACOS = 2;
+    X86_64_LINUX = 3;
+    X86_64_MACOS = 4;
+}
+
 message PackageBuildRequest {
-    bool build_sandbox = 1;
+    PackageBuildSystem build_system = 1;
     map<string, string> build_environment = 2;
     repeated PrepareBuildPackage build_packages = 3;
-    string build_script = 4;
-    string source_hash = 5;
-    string source_name = 6;
+    string build_image = 4;
+    string build_script = 5;
+    string source_hash = 6;
+    string source_name = 7;
 }
 
 message PackageBuildResponse {
-    bytes log_output = 1;
+    string log_output = 1;
 }
