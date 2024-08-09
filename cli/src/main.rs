@@ -4,11 +4,12 @@ use nickel_lang_core::eval::cache::lazy::CBNCache;
 use nickel_lang_core::program::Program;
 use nickel_lang_core::serialize;
 use nickel_lang_core::serialize::ExportFormat::Json;
-use std::collections::{HashMap, HashSet};
 use std::env::consts::{ARCH, OS};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
-use vorpal_schema::{api::package::PackageSystem, get_package_target, Config, Package};
+use vorpal_schema::{api::package::PackageSystem, get_package_target, Config};
+
+mod config;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -41,56 +42,6 @@ enum Command {
 #[derive(Subcommand)]
 pub enum Keys {
     Generate {},
-}
-
-fn topological_sort(
-    package_graph: &HashMap<String, HashSet<String>>,
-    build_order: &mut Vec<String>,
-    visited: &mut HashSet<String>,
-    stack: &mut HashSet<String>,
-    package: &str,
-) -> Result<(), String> {
-    if stack.contains(package) {
-        return Err(format!("Circular dependency detected: {}", package));
-    }
-
-    if visited.contains(package) {
-        return Ok(());
-    }
-
-    stack.insert(package.to_string());
-
-    if let Some(deps) = package_graph.get(package) {
-        for dep in deps {
-            topological_sort(package_graph, build_order, visited, stack, dep)?;
-        }
-    }
-
-    stack.remove(package);
-
-    visited.insert(package.to_string());
-
-    build_order.push(package.to_string());
-
-    Ok(())
-}
-
-fn add_to_map(package_map: &mut HashMap<String, Package>, package: &Package) {
-    package_map.insert(package.name.clone(), package.clone());
-
-    for dep in &package.packages {
-        add_to_map(package_map, dep);
-    }
-}
-
-fn add_to_graph(package_graph: &mut HashMap<String, HashSet<String>>, package: &Package) {
-    let dependencies: HashSet<String> = package.packages.iter().map(|p| p.name.clone()).collect();
-
-    package_graph.insert(package.name.clone(), dependencies);
-
-    for dep in &package.packages {
-        add_to_graph(package_graph, dep);
-    }
 }
 
 #[tokio::main]
@@ -146,34 +97,11 @@ async fn main() -> Result<(), anyhow::Error> {
             };
 
             let config: Config = serde_json::from_str(&data)?;
+            let config_structures = config::build_structures(&config);
+            let config_build_order = config::get_build_order(&config_structures.graph)?;
 
-            let mut package_graph: HashMap<String, HashSet<String>> = HashMap::new();
-            let mut package_map = HashMap::new();
-
-            for (_, package) in &config.packages {
-                add_to_graph(&mut package_graph, package);
-                add_to_map(&mut package_map, package);
-            }
-
-            let mut build_order = Vec::new();
-            let mut stack = HashSet::new();
-            let mut visited = HashSet::new();
-
-            for package in package_graph.keys() {
-                if !visited.contains(package) {
-                    topological_sort(
-                        &package_graph,
-                        &mut build_order,
-                        &mut visited,
-                        &mut stack,
-                        package,
-                    )
-                    .expect("Failed to sort packages");
-                }
-            }
-
-            for package_name in build_order {
-                match package_map.get(&package_name) {
+            for package_name in config_build_order {
+                match config_structures.map.get(&package_name) {
                     None => eprintln!("Package not found: {}", package_name),
                     Some(package) => {
                         println!("Building package: {}", package.name)
