@@ -1,0 +1,20 @@
+[package]
+name = "vorpal-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "vorpal-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+nickel-lang-core = "0"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0"
+tracing-subscriber = "0"
+vorpal-notary = { path = "../notary" }
+vorpal-schema = { path = "../schema" }
+vorpal-store = { path = "../store" }

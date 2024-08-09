@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package vorpal.package.v0;
+
+service PackageService {
+    rpc Build (stream BuildRequest) returns (stream BuildResponse);
+}
+
+enum PackageSystem {
+    UNKNOWN = 0;
+    aarch64_linux = 1;
+    aarch64_macos = 2;
+    x86_64_linux = 3;
+    x86_64_macos = 4;
+}
+
+message Package {
+    string hash = 1;
+    string name = 2;
+}
+
+message BuildRequest {
+    PackageSystem package_target = 1;
+    bool package_sandbox = 2;
+    map<string, string> package_environment = 3;
+    map<string, string> package_input = 4;
+    optional bytes package_source_data = 5;
+    optional string package_image = 6;;
+    optional string package_source_data_signature = 7;
+    optional string package_source_hash = 8;
+    repeated Package package_packages = 9;
+    repeated PackageSystem package_systems = 10;
+    string package_name = 11;
+    string package_script = 12;
+}
+
+message BuildResponse {
+    map<string, string> input_hash = 1;
+    string package_log = 2;
+}

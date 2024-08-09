@@ -1,6 +1,5 @@
-/.buildx
-/.direnv
-/result
-/target
-/volume
-/vorpal
+.direnv
+.vorpal
+result
+target
+vorpal

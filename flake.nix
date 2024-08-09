@@ -1,6 +1,7 @@
 {
   description = "vorpal";
 
+  inputs.json-schema-to-nickel.url = "github:nickel-lang/json-schema-to-nickel";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
@@ -11,11 +12,12 @@
 
       perSystem = {
         config,
+        inputs',
         pkgs,
         system,
         ...
       }: let
-        inherit (pkgs) alejandra clippy darwin grpcurl just jq lib mkShell openssl pkg-config protobuf rustfmt rustPlatform stdenv;
+        inherit (pkgs) alejandra clippy darwin grpcurl just jq lib mkShell nickel openssl pkg-config protobuf rustfmt rustPlatform stdenv;
         inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (lib) optionals;
         inherit (rustPlatform) buildRustPackage;
@@ -38,8 +40,17 @@
 
         devShells = {
           default = mkShell {
+            NICKEL_IMPORT_PATH = "config";
             inputsFrom = [config.packages.default];
-            nativeBuildInputs = [clippy grpcurl jq just rustfmt];
+            packages = [
+              clippy
+              grpcurl
+              inputs'.json-schema-to-nickel.packages.default
+              jq
+              just
+              nickel
+              rustfmt
+            ];
           };
         };
 

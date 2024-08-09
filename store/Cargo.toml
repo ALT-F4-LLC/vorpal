@@ -1,0 +1,17 @@
+[package]
+name = "vorpal-store"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+async-compression = { version = "0", features = ["all"] }
+async_zip = { version = "0", features = ["deflate", "tokio"] }
+futures-lite = { version = "2", default-features = false, features = ["std"] }
+sha256 = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-tar = "0"
+tokio-util = { version = "0", features = ["compat"] }
+tracing = "0"
+uuid = { version = "1", features = ["v7"] }
+walkdir = "2"
