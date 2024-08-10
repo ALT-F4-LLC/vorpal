@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all};
+use tracing::info;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -106,6 +107,31 @@ pub async fn copy_files(
 
         copy(src, dest).await?;
     }
+
+    Ok(())
+}
+
+pub async fn setup_paths() -> Result<(), anyhow::Error> {
+    let key_path = get_key_path();
+    if !key_path.exists() {
+        create_dir_all(&key_path).await?;
+    }
+
+    info!("keys path: {:?}", key_path);
+
+    let sandbox_path = get_sandbox_path();
+    if !sandbox_path.exists() {
+        create_dir_all(&sandbox_path).await?;
+    }
+
+    info!("sandbox path: {:?}", sandbox_path);
+
+    let store_path = get_store_path();
+    if !store_path.exists() {
+        create_dir_all(&store_path).await?;
+    }
+
+    info!("store path: {:?}", store_path);
 
     Ok(())
 }

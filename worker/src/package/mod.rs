@@ -23,25 +23,6 @@ impl PackageServer {
 #[tonic::async_trait]
 impl PackageService for PackageServer {
     type BuildStream = ReceiverStream<Result<BuildResponse, Status>>;
-    // type PrepareStream = ReceiverStream<Result<PrepareResponse, Status>>;
-
-    // async fn prepare(
-    //     &self,
-    //     request: Request<Streaming<PrepareRequest>>,
-    // ) -> Result<Response<Self::PrepareStream>, Status> {
-    //     let (tx, rx) = mpsc::channel(100);
-    //
-    //     tokio::spawn(async move {
-    //         match prepare::run(&tx, request).await {
-    //             Ok(_) => (),
-    //             Err(e) => {
-    //                 tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
-    //             }
-    //         }
-    //     });
-    //
-    //     Ok(Response::new(ReceiverStream::new(rx)))
-    // }
 
     async fn build(
         &self,

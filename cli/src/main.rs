@@ -2,12 +2,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::env::consts::{ARCH, OS};
 use std::path::Path;
-use tokio::fs;
 use tracing::Level;
 use tracing::{error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{api::package::PackageSystem, get_package_target};
-use vorpal_store::paths::{get_key_path, get_private_key_path, get_sandbox_path, get_store_path};
+use vorpal_store::paths::{get_private_key_path, setup_paths};
 
 mod config;
 mod nickel;
@@ -93,26 +92,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
             // Create directories
 
-            let key_path = get_key_path();
-            if !key_path.exists() {
-                fs::create_dir_all(&key_path).await?;
-            }
-
-            info!("keys path: {:?}", key_path);
-
-            let sandbox_path = get_sandbox_path();
-            if !sandbox_path.exists() {
-                fs::create_dir_all(&sandbox_path).await?;
-            }
-
-            info!("sandbox path: {:?}", sandbox_path);
-
-            let store_dir = get_store_path();
-            if !store_dir.exists() {
-                fs::create_dir_all(&store_dir).await?;
-            }
-
-            info!("store path: {:?}", store_dir);
+            setup_paths().await?;
 
             let private_key_path = get_private_key_path();
 

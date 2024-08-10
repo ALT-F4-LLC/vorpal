@@ -16,6 +16,17 @@ pub struct StoreServer {}
 impl StoreService for StoreServer {
     type PullStream = ReceiverStream<Result<StorePullResponse, Status>>;
 
+    async fn exists(
+        &self,
+        request: Request<StoreRequest>,
+    ) -> Result<Response<StoreExistsResponse>, Status> {
+        let store_path = path::get(request)
+            .await
+            .map_err(|_| Status::not_found("failed to get store path"))?;
+
+        Ok(Response::new(store_path))
+    }
+
     async fn pull(
         &self,
         request: Request<StoreRequest>,
@@ -32,16 +43,5 @@ impl StoreService for StoreServer {
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
-    }
-
-    async fn exists(
-        &self,
-        request: Request<StoreRequest>,
-    ) -> Result<Response<StoreExistsResponse>, Status> {
-        let store_path = path::get(request)
-            .await
-            .map_err(|_| Status::not_found("failed to get store path"))?;
-
-        Ok(Response::new(store_path))
     }
 }

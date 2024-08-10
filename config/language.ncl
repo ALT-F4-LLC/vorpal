@@ -2,7 +2,6 @@ let { Package, .. } = import "schema.ncl" in
 {
   PackageRust = fun config =>
     let releaseBaseUrl = "https://static.rust-lang.org/dist/2024-05-02" in
-
     let releaseSystem = fun label value =>
       value
       |> match {
@@ -10,9 +9,7 @@ let { Package, .. } = import "schema.ncl" in
         _ => std.fail_with "Unsupported target"
       }
     in
-
     let releaseVersion = "1.78.0" in
-
     let releaseSystem = "%{config.target | releaseSystem}" in
 
     let cargo =

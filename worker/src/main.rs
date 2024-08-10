@@ -30,7 +30,9 @@ async fn main() -> Result<(), anyhow::Error> {
     if [Level::DEBUG, Level::TRACE].contains(&cli.level) {
         subscriber = subscriber.with_file(true).with_line_number(true);
     }
+
     let subscriber = subscriber.finish();
+
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     match cli {

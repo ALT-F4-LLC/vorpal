@@ -67,41 +67,47 @@ pub async fn run(
     }
 
     let mut package_environment = HashMap::new();
+    let mut package_hash = String::new();
     let mut package_image = String::new();
+    // let mut package_input = HashMap::new();
     let mut package_name = String::new();
     let mut package_packages = vec![];
+    // let mut package_sandbox = false;
     let mut package_script = String::new();
     let mut package_source_data: Vec<u8> = Vec::new();
     let mut package_source_data_chunks = 0;
-    let mut package_source_data_hash = String::new();
     let mut package_source_data_signature = String::new();
+    let mut package_source_path: Option<PathBuf> = None;
+    // let mut package_systems = vec![];
     let mut package_target = PackageSystem::Unknown;
     let mut stream = request.into_inner();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        package_source_data_chunks += 1;
+
+        // TODO: only accept the first chunk if source doesn't exist
 
         if let Some(data) = chunk.package_source_data {
+            package_source_data_chunks += 1;
             package_source_data.extend_from_slice(&data);
-        }
-
-        if let Some(hash) = chunk.package_source_hash {
-            package_source_data_hash = hash;
-        }
-
-        if let Some(image) = chunk.package_image {
-            package_image = image;
         }
 
         if let Some(signature) = chunk.package_source_data_signature {
             package_source_data_signature = signature;
         }
 
+        if let Some(image) = chunk.package_image {
+            package_image = image;
+        }
+
         package_environment = chunk.package_environment;
+        package_hash = chunk.package_hash;
+        // package_input = chunk.package_input;
         package_name = chunk.package_name;
         package_packages = chunk.package_packages;
+        // package_sandbox = chunk.package_sandbox;
         package_script = chunk.package_script;
+        // package_systems = chunk.package_systems;
         package_target = PackageSystem::try_from(chunk.package_target)?;
     }
 
@@ -109,86 +115,25 @@ pub async fn run(
         send_error(tx, "source name is empty".to_string()).await?
     }
 
-    // at this point we should be ready to prepare the source
-
-    let source_archive_path = get_source_archive_path(&package_name, &package_source_data_hash);
-
-    if !package_source_data.is_empty() {
-        send(
-            tx,
-            format!("source chunks received: {}", package_source_data_chunks),
-        )
-        .await?;
-
-        if package_source_data_hash.is_empty() {
-            send_error(tx, "source hash is empty".to_string()).await?
-        }
-
-        if package_source_data_signature.is_empty() {
-            send_error(tx, "source signature is empty".to_string()).await?
-        }
-
-        let public_key_path = get_public_key_path();
-        let public_key = get_public_key(public_key_path).await?;
-        let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-        let signature_decode = match hex::decode(package_source_data_signature.clone()) {
-            Ok(signature) => signature,
-            Err(e) => return send_error(tx, format!("failed to decode signature: {:?}", e)).await,
-        };
-        let signature = Signature::try_from(signature_decode.as_slice())?;
-
-        verifying_key.verify(&package_source_data, &signature)?;
-
-        if !source_archive_path.exists() {
-            write(&source_archive_path, &package_source_data).await?;
-
-            let message = format!("source archive: {}", source_archive_path.to_string_lossy());
-
-            send(tx, message).await?;
-        }
-    }
-
-    let source_path = get_source_path(&package_name, &package_source_data_hash);
-
-    if !source_path.exists() {
-        let message = format!(
-            "source unpacking: {} => {}",
-            source_archive_path.to_string_lossy(),
-            source_path.to_string_lossy()
-        );
-
-        send(tx, message).await?;
-
-        create_dir_all(&source_path).await?;
-
-        unpack_zstd(&source_path, &source_archive_path).await?;
-
-        let message = format!("source: {}", source_path.to_string_lossy());
-
-        send(tx, message).await?;
-    }
-
-    // TODO: handle new input fields
-
     if package_target == PackageSystem::Unknown {
         send_error(tx, "unsupported build target".to_string()).await?
     }
 
-    let worker_build_system = get_package_target(format!("{}-{}", ARCH, OS).as_str());
+    let worker_system = get_package_target(format!("{}-{}", ARCH, OS).as_str());
 
-    if package_target != worker_build_system {
+    if package_target != worker_system {
         let message = format!(
             "build target mismatch: {} != {}",
             package_target.as_str_name(),
-            worker_build_system.as_str_name()
+            worker_system.as_str_name()
         );
 
         send_error(tx, message).await?
     }
 
-    let package_path = get_package_path(&package_name, &package_source_data_hash);
-
     // If package exists, return
+
+    let package_path = get_package_path(&package_name, &package_hash);
 
     if package_path.exists() {
         let message = format!("package: {}", package_path.display());
@@ -198,9 +143,9 @@ pub async fn run(
         return Ok(());
     }
 
-    let package_archive_path = get_package_archive_path(&package_name, &package_source_data_hash);
+    // If package archive exists, unpack it to package path
 
-    // If package tar exists, unpack it to package path
+    let package_archive_path = get_package_archive_path(&package_name, &package_hash);
 
     if package_archive_path.exists() {
         let message = format!("package archive found: {}", package_archive_path.display());
@@ -216,27 +161,72 @@ pub async fn run(
         return Ok(());
     }
 
-    // If package tar exists, unpack it to package path
+    // at this point we should be ready to prepare the source
 
-    let package_source_path = get_source_path(&package_name, &package_source_data_hash);
+    if !package_source_data.is_empty() {
+        send(
+            tx,
+            format!("source chunks received: {}", package_source_data_chunks),
+        )
+        .await?;
 
-    let package_source_archive_path =
-        get_source_archive_path(&package_name, &package_source_data_hash);
-
-    if !package_source_path.exists() && package_source_archive_path.exists() {
-        let message = format!(
-            "package source archive found: {}",
-            package_source_archive_path.display()
-        );
-
-        send(tx, message).await?;
-
-        create_dir_all(&package_source_path).await?;
-
-        if let Err(err) = unpack_zstd(&package_source_path, &package_source_archive_path).await {
-            send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
+        if package_source_data_signature.is_empty() {
+            send_error(tx, "source signature is empty".to_string()).await?
         }
+
+        if package_hash.is_empty() {
+            send_error(tx, "source hash is empty".to_string()).await?
+        }
+
+        let public_key_path = get_public_key_path();
+
+        let public_key = get_public_key(public_key_path).await?;
+
+        let verifying_key = VerifyingKey::<Sha256>::new(public_key);
+
+        let signature_decode = match hex::decode(package_source_data_signature.clone()) {
+            Ok(signature) => signature,
+            Err(e) => return send_error(tx, format!("failed to decode signature: {:?}", e)).await,
+        };
+
+        let signature = Signature::try_from(signature_decode.as_slice())?;
+
+        verifying_key.verify(&package_source_data, &signature)?;
+
+        let source_archive_path = get_source_archive_path(&package_name, &package_hash);
+
+        if !source_archive_path.exists() {
+            write(&source_archive_path, &package_source_data).await?;
+
+            let message = format!("source archive: {}", source_archive_path.to_string_lossy());
+
+            send(tx, message).await?;
+        }
+
+        let source_path = get_source_path(&package_name, &package_hash);
+
+        if !source_path.exists() {
+            let message = format!(
+                "source unpacking: {} => {}",
+                source_archive_path.to_string_lossy(),
+                source_path.to_string_lossy()
+            );
+
+            send(tx, message).await?;
+
+            create_dir_all(&source_path).await?;
+
+            unpack_zstd(&source_path, &source_archive_path).await?;
+
+            let message = format!("package source: {}", source_path.to_string_lossy());
+
+            send(tx, message).await?;
+        }
+
+        package_source_path = Some(source_path);
     }
+
+    // TODO: handle new input fields
 
     // Create build environment
 
@@ -328,19 +318,27 @@ pub async fn run(
 
     if !sandbox_build_script_path.exists() {
         remove_file(&sandbox_build_script_path).await?;
+
         send_error(tx, "build script not found".to_string()).await?
     }
 
     // Create source directory
 
-    if !package_source_path.exists() {
-        remove_file(&sandbox_build_script_path).await?;
-        send_error(tx, "source not found".to_string()).await?
+    let mut sandbox_source_path: Option<PathBuf> = None;
+
+    if let Some(source_path) = package_source_path {
+        if !source_path.exists() {
+            remove_file(&sandbox_build_script_path).await?;
+
+            send_error(tx, "source not found".to_string()).await?
+        }
+
+        let sandbox_path = create_dir().await?;
+
+        copy_files(&source_path, &sandbox_path).await?;
+
+        sandbox_source_path = Some(sandbox_path);
     }
-
-    let sandbox_source_path = create_dir().await?;
-
-    copy_files(&package_source_path, &sandbox_source_path).await?;
 
     let sandbox_package_path = create_dir().await?;
 
@@ -375,19 +373,22 @@ pub async fn run(
         },
         Mount {
             read_only: Some(false),
-            source: Some(sandbox_source_path.to_str().unwrap().to_string()),
-            target: Some("/sandbox/source".to_string()),
-            typ: Some(MountTypeEnum::BIND),
-            ..Default::default()
-        },
-        Mount {
-            read_only: Some(false),
             source: Some(sandbox_package_path.to_str().unwrap().to_string()),
             target: Some(package_path.to_str().unwrap().to_string()),
             typ: Some(MountTypeEnum::BIND),
             ..Default::default()
         },
     ];
+
+    if let Some(source_path) = sandbox_source_path.clone() {
+        mounts.push(Mount {
+            read_only: Some(false),
+            source: Some(source_path.to_str().unwrap().to_string()),
+            target: Some("/sandbox/source".to_string()),
+            typ: Some(MountTypeEnum::BIND),
+            ..Default::default()
+        });
+    }
 
     for store_path in store_paths {
         let path = PathBuf::from(store_path);
@@ -449,13 +450,15 @@ pub async fn run(
 
     while let Some(output) = stream.next().await {
         match output {
-            Ok(output) => {
-                send(tx, output.to_string().trim().to_string()).await?;
-            }
+            Ok(output) => send(tx, output.to_string().trim().to_string()).await?,
             Err(err) => {
                 remove_file(&sandbox_build_script_path).await?;
-                remove_dir_all(&sandbox_source_path).await?;
                 remove_dir_all(&sandbox_package_path).await?;
+
+                if let Some(source_path) = sandbox_source_path.clone() {
+                    remove_dir_all(&source_path).await?;
+                }
+
                 send_error(tx, format!("docker logs error: {:?}", err)).await?
             }
         }
@@ -469,7 +472,10 @@ pub async fn run(
         .await?;
 
     remove_file(&sandbox_build_script_path).await?;
-    remove_dir_all(&sandbox_source_path).await?;
+
+    if let Some(sandbox_source_path) = sandbox_source_path.clone() {
+        remove_dir_all(&sandbox_source_path).await?;
+    }
 
     let sandbox_package_files = get_file_paths(&sandbox_package_path, &Vec::<&str>::new())?;
 
