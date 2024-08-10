@@ -1,6 +1,7 @@
+use crate::paths::get_file_paths;
 use anyhow::Result;
 use sha256::{digest, try_digest};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String, anyhow::Error> {
     if !path.as_ref().is_file() {
@@ -10,33 +11,42 @@ pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String, anyhow::E
     Ok(try_digest(path)?)
 }
 
-pub fn get_file_hashes<'a, P, I>(files: I) -> Result<Vec<(&'a Path, String)>>
-where
-    P: AsRef<Path> + Send + Sync + 'a,
-    I: IntoIterator<Item = &'a P>,
-{
+pub fn get_file_hashes(files: &Vec<PathBuf>) -> Result<Vec<String>> {
     let hashes = files
         .into_iter()
-        .filter(|file| file.as_ref().is_file())
-        .map(|file| {
-            let hash = get_file_hash(file).unwrap();
-            (file.as_ref(), hash)
-        })
+        .filter(|file| file.is_file())
+        .map(|file| get_file_hash(file).unwrap())
         .collect();
 
     Ok(hashes)
 }
 
-pub fn get_source_hash<'a, P, I>(hashes: I) -> Result<String>
-where
-    P: AsRef<Path> + 'a,
-    I: IntoIterator<Item = &'a (P, String)>,
-{
+pub fn get_hashes_digest(hashes: Vec<String>) -> Result<String> {
     let mut combined = String::new();
 
-    for (_, hash) in hashes {
-        combined.push_str(hash);
+    for hash in hashes {
+        combined.push_str(&hash);
     }
 
     Ok(digest(combined))
+}
+
+pub async fn hash_files(
+    path: &Path,
+    ignores: &Vec<String>,
+) -> Result<(String, Vec<PathBuf>), anyhow::Error> {
+    let workdir_files = get_file_paths(path, ignores)?;
+
+    if workdir_files.is_empty() {
+        anyhow::bail!("no source files found")
+    }
+
+    let workdir_files_hashes = get_file_hashes(&workdir_files)?;
+    let workdir_hash = get_hashes_digest(workdir_files_hashes)?;
+
+    if workdir_hash.is_empty() {
+        anyhow::bail!("no source hash found")
+    }
+
+    Ok((workdir_hash, workdir_files))
 }

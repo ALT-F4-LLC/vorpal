@@ -8,10 +8,10 @@ service PackageService {
 
 enum PackageSystem {
     UNKNOWN = 0;
-    aarch64_linux = 1;
-    aarch64_macos = 2;
-    x86_64_linux = 3;
-    x86_64_macos = 4;
+    AARCH64_LINUX = 1;
+    AARCH64_MACOS = 2;
+    X86_64_LINUX = 3;
+    X86_64_MACOS = 4;
 }
 
 message Package {
@@ -27,9 +27,9 @@ message BuildRequest {
     optional bytes package_source_data = 5;
     optional string package_image = 6;;
     optional string package_source_data_signature = 7;
-    optional string package_source_hash = 8;
-    repeated Package package_packages = 9;
-    repeated PackageSystem package_systems = 10;
+    repeated Package package_packages = 8;
+    repeated PackageSystem package_systems = 9;
+    string package_hash = 10;
     string package_name = 11;
     string package_script = 12;
 }

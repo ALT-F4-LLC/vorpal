@@ -9,12 +9,21 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+async-compression = { version = "0", features = ["all"] }
 clap = { version = "4", features = ["derive"] }
+git2 = "0"
+infer = "0"
 nickel-lang-core = "0"
+reqwest = { version = "0", features = ["json"] }
 serde_json = "1"
+sha256 = "1"
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0"
+tokio-tar = "0"
+tonic = "0"
 tracing = "0"
 tracing-subscriber = "0"
+url = "2"
 vorpal-notary = { path = "../notary" }
 vorpal-schema = { path = "../schema" }
 vorpal-store = { path = "../store" }

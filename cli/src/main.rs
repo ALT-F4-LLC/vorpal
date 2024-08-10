@@ -1,15 +1,17 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use nickel_lang_core::eval::cache::lazy::CBNCache;
-use nickel_lang_core::program::Program;
-use nickel_lang_core::serialize;
-use nickel_lang_core::serialize::ExportFormat::Json;
 use std::env::consts::{ARCH, OS};
+use std::path::Path;
+use tokio::fs;
 use tracing::Level;
+use tracing::{error, info, warn};
 use tracing_subscriber::FmtSubscriber;
-use vorpal_schema::{api::package::PackageSystem, get_package_target, Config};
+use vorpal_schema::{api::package::PackageSystem, get_package_target};
+use vorpal_store::paths::{get_key_path, get_private_key_path, get_sandbox_path, get_store_path};
 
 mod config;
+mod nickel;
+mod worker;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -22,7 +24,7 @@ pub struct Cli {
     command: Command,
 }
 
-fn get_default_workers() -> String {
+pub fn get_default_workers() -> String {
     let target: PackageSystem = get_package_target(format!("{}-{}", ARCH, OS).as_str());
     let target_dashes = target.as_str_name().to_lowercase().replace("_", "-");
     format!("{}=http://localhost:23151", target_dashes)
@@ -31,8 +33,11 @@ fn get_default_workers() -> String {
 #[derive(Subcommand)]
 enum Command {
     Build {
+        #[clap(short, long, default_value = "vorpal.ncl")]
+        file: String,
+
         #[clap(short, long, default_value = get_default_workers())]
-        workers: String,
+        workers: Vec<String>,
     },
 
     #[clap(subcommand)]
@@ -61,52 +66,85 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     match &cli.command {
-        Command::Build { workers } => {
-            println!("Building with workers: {}", workers);
+        Command::Build { file, workers } => {
+            // Parse workers
 
-            let config_path = std::path::Path::new("vorpal.ncl");
+            let workers: Vec<worker::Worker> = workers
+                .iter()
+                .map(|worker| {
+                    let parts: Vec<&str> = worker.split('=').collect();
+                    worker::Worker {
+                        system: get_package_target(parts[0]),
+                        uri: parts[1].to_string(),
+                    }
+                })
+                .collect();
 
-            let mut program = Program::<CBNCache>::new_from_file(config_path, std::io::stderr())?;
-
-            if let Ok(nickel_path) = std::env::var("NICKEL_IMPORT_PATH") {
-                program.add_import_paths(nickel_path.split(':'));
+            if workers.is_empty() {
+                error!("no workers specified");
+                return Ok(());
             }
 
-            let eval = match program.eval_full_for_export() {
-                Ok(eval) => eval,
-                Err(err) => {
-                    eprintln!("{:?}", err);
-                    std::process::exit(1);
-                }
-            };
+            let default_target = get_package_target(format!("{}-{}", ARCH, OS).as_str());
 
-            match serialize::validate(Json, &eval) {
-                Ok(_) => {}
-                Err(err) => {
-                    eprintln!("{:?}", err);
-                    std::process::exit(1);
-                }
+            if !workers.iter().any(|w| w.system == default_target) {
+                warn!("no workers for current system");
             }
 
-            let data = match serialize::to_string(Json, &eval) {
-                Ok(data) => data,
-                Err(err) => {
-                    eprintln!("{:?}", err);
-                    std::process::exit(1);
-                }
-            };
+            // Create directories
 
-            let config: Config = serde_json::from_str(&data)?;
+            let key_path = get_key_path();
+            if !key_path.exists() {
+                fs::create_dir_all(&key_path).await?;
+            }
+
+            info!("keys path: {:?}", key_path);
+
+            let sandbox_path = get_sandbox_path();
+            if !sandbox_path.exists() {
+                fs::create_dir_all(&sandbox_path).await?;
+            }
+
+            info!("sandbox path: {:?}", sandbox_path);
+
+            let store_dir = get_store_path();
+            if !store_dir.exists() {
+                fs::create_dir_all(&store_dir).await?;
+            }
+
+            info!("store path: {:?}", store_dir);
+
+            let private_key_path = get_private_key_path();
+
+            if !private_key_path.exists() {
+                return Err(anyhow::anyhow!(
+                    "private key not found - run 'vorpal keys generate' or copy from worker"
+                ));
+            }
+
+            // Load configuration
+
+            let config_path = Path::new(file).to_path_buf();
+
+            let (config, config_hash) = nickel::load_config(config_path)?;
+
+            info!("Config hash: {:?}", config_hash);
+
+            // Generate build order
+
             let config_structures = config::build_structures(&config);
+
             let config_build_order = config::get_build_order(&config_structures.graph)?;
+
+            // Build packages
+
+            // TODO: run builds in parallel
 
             for package_name in config_build_order {
                 match config_structures.map.get(&package_name) {
-                    None => eprintln!("Package not found: {}", package_name),
+                    None => error!("Package not found: {}", package_name),
                     Some(package) => {
-                        println!("Building package: {}", package.name)
-
-                        // TODO: build package
+                        worker::build(package, &config_hash, default_target, &workers).await?;
                     }
                 }
             }

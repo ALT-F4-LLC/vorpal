@@ -40,7 +40,7 @@ impl StoreService for StoreServer {
     ) -> Result<Response<StoreExistsResponse>, Status> {
         let store_path = path::get(request)
             .await
-            .map_err(|_| Status::internal("failed to get store path"))?;
+            .map_err(|_| Status::not_found("failed to get store path"))?;
 
         Ok(Response::new(store_path))
     }
