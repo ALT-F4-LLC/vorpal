@@ -8,6 +8,7 @@ anyhow = "1"
 async-compression = { version = "0", features = ["all"] }
 async_zip = { version = "0", features = ["deflate", "tokio"] }
 futures-lite = { version = "2", default-features = false, features = ["std"] }
+sanitize-filename = "0"
 sha256 = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-tar = "0"

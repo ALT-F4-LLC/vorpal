@@ -6,7 +6,7 @@ use tonic::transport::Server;
 use tracing::info;
 use vorpal_schema::{
     api::{
-        package::package_service_server::PackageServiceServer,
+        package::{package_service_server::PackageServiceServer, PackageSystem},
         store::store_service_server::StoreServiceServer,
     },
     get_package_target,
@@ -23,7 +23,12 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
             "public key not found - run 'vorpal keys generate' or copy from agent"
         ));
     }
-    let default_target = get_package_target(format!("{}-{}", ARCH, OS).as_str());
+
+    let mut default_target = get_package_target(format!("{}-{}", ARCH, OS).as_str());
+
+    if default_target == PackageSystem::Aarch64Macos {
+        default_target = PackageSystem::Aarch64Linux; // docker uses linux on macos
+    }
 
     info!("worker default target: {:?}", default_target);
 

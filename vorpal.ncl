@@ -5,10 +5,10 @@ let { PackageRust, .. } = import "language.ncl" in
     default =
       PackageRust
         {
-          name = "example",
+          name = "vorpal",
           source = ".",
-          systems = ["X8664Linux"],
-          target = "X8664Linux",
+          systems = ["Aarch64Linux", "X8664Linux"],
+          target = "Aarch64Linux",
         }
   }
 } | Config

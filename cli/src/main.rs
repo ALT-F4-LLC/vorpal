@@ -1,11 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::env::consts::{ARCH, OS};
+use std::collections::HashMap;
 use std::path::Path;
-use tracing::Level;
-use tracing::{error, info, warn};
-use tracing_subscriber::FmtSubscriber;
-use vorpal_schema::{api::package::PackageSystem, get_package_target};
+use vorpal_schema::{api::package::PackageOutput, get_package_target};
 use vorpal_store::paths::{get_private_key_path, setup_paths};
 
 mod config;
@@ -16,17 +13,8 @@ mod worker;
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 pub struct Cli {
-    #[clap(long, global = true, default_value_t = Level::INFO)]
-    level: tracing::Level,
-
     #[command(subcommand)]
     command: Command,
-}
-
-pub fn get_default_workers() -> String {
-    let target: PackageSystem = get_package_target(format!("{}-{}", ARCH, OS).as_str());
-    let target_dashes = target.as_str_name().to_lowercase().replace("_", "-");
-    format!("{}=http://localhost:23151", target_dashes)
 }
 
 #[derive(Subcommand)]
@@ -35,7 +23,7 @@ enum Command {
         #[clap(short, long, default_value = "vorpal.ncl")]
         file: String,
 
-        #[clap(short, long, default_value = get_default_workers())]
+        #[clap(short, long)]
         workers: Vec<String>,
     },
 
@@ -51,18 +39,6 @@ pub enum Keys {
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
-
-    let mut subscriber = FmtSubscriber::builder().with_max_level(cli.level);
-
-    // when we run the command with `TRACE` or `DEBUG` level, we want to see
-    // the file and line number...
-    if [Level::DEBUG, Level::TRACE].contains(&cli.level) {
-        subscriber = subscriber.with_file(true).with_line_number(true);
-    }
-
-    let subscriber = subscriber.finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     match &cli.command {
         Command::Build { file, workers } => {
@@ -80,15 +56,15 @@ async fn main() -> Result<(), anyhow::Error> {
                 .collect();
 
             if workers.is_empty() {
-                error!("no workers specified");
+                eprintln!("no workers specified");
                 return Ok(());
             }
 
-            let default_target = get_package_target(format!("{}-{}", ARCH, OS).as_str());
+            // let default_target = get_package_target(format!("{}-{}", ARCH, OS).as_str());
 
-            if !workers.iter().any(|w| w.system == default_target) {
-                warn!("no workers for current system");
-            }
+            // if !workers.iter().any(|w| w.system == default_target) {
+            //     warn!("no workers for current system");
+            // }
 
             // Create directories
 
@@ -108,8 +84,6 @@ async fn main() -> Result<(), anyhow::Error> {
 
             let (config, config_hash) = nickel::load_config(config_path)?;
 
-            info!("Config hash: {:?}", config_hash);
-
             // Generate build order
 
             let config_structures = config::build_structures(&config);
@@ -119,12 +93,25 @@ async fn main() -> Result<(), anyhow::Error> {
             // Build packages
 
             // TODO: run builds in parallel
+            let mut package_finished = HashMap::<String, PackageOutput>::new();
 
             for package_name in config_build_order {
                 match config_structures.map.get(&package_name) {
-                    None => error!("Package not found: {}", package_name),
+                    None => eprintln!("Package not found: {}", package_name),
                     Some(package) => {
-                        worker::build(package, &config_hash, default_target, &workers).await?;
+                        let mut packages = vec![];
+
+                        for p in &package.packages {
+                            match package_finished.get(&p.name) {
+                                None => eprintln!("Package not found: {}", p.name),
+                                Some(package) => packages.push(package.clone()),
+                            }
+                        }
+
+                        let output =
+                            worker::build(&config_hash, package, packages, &workers).await?;
+
+                        package_finished.insert(package_name, output);
                     }
                 }
             }
@@ -134,10 +121,15 @@ async fn main() -> Result<(), anyhow::Error> {
 
         Command::Keys(keys) => match keys {
             Keys::Generate {} => {
-                let key_path = vorpal_store::paths::get_key_path();
+                let key_dir_path = vorpal_store::paths::get_key_dir_path();
+
                 let private_key_path = vorpal_store::paths::get_private_key_path();
+
                 let public_key_path = vorpal_store::paths::get_public_key_path();
-                vorpal_notary::generate_keys(key_path, private_key_path, public_key_path).await?;
+
+                vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)
+                    .await?;
+
                 Ok(())
             }
         },

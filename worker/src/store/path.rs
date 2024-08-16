@@ -8,7 +8,7 @@ pub async fn get(request: Request<StoreRequest>) -> Result<StoreExistsResponse, 
 
     match req.kind() {
         StoreKind::Package => {
-            let package_path = get_package_archive_path(&req.name, &req.hash);
+            let package_path = get_package_archive_path(&req.hash, &req.name);
             if !package_path.exists() {
                 anyhow::bail!("package not found");
             }
@@ -17,7 +17,7 @@ pub async fn get(request: Request<StoreRequest>) -> Result<StoreExistsResponse, 
         }
 
         StoreKind::Source => {
-            let source_path = get_source_archive_path(&req.name, &req.hash);
+            let source_path = get_source_archive_path(&req.hash, &req.name);
             if !source_path.exists() {
                 anyhow::bail!("source not found");
             }

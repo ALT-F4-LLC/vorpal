@@ -8,19 +8,9 @@ name = "vorpal-worker"
 path = "src/main.rs"
 
 [dependencies]
-# async_zip = { version = "0", features = ["deflate", "tokio"] }
-# clap = { version = "4", features = ["derive"] }
-# futures-lite = { version = "2", default-features = false, features = ["std"] }
-# nickel-lang-core = "0"
-# petgraph = "0"
-# rand = "0"
-# serde_json = "1"
-# sha256 = "1"
-# tokio-util = { version = "0", features = ["compat"] }
-# tracing-subscriber = "0"
-# walkdir = "2"
 anyhow = "1"
 async-compression = { version = "0", features = ["all"] }
+async-tempfile = "0"
 bollard = { version = "0", features = ["buildkit"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "5"
@@ -30,6 +20,7 @@ infer = "0"
 prost = "0"
 reqwest = { version = "0", features = ["json"] }
 rsa = { version = "0", features = ["sha2"] }
+sha256 = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0"
 tokio-tar = "0"

@@ -1,3 +1,4 @@
+use crate::temps::create_temp_file;
 use anyhow::Result;
 use async_compression::tokio::{
     bufread::{GzipDecoder, ZstdDecoder},
@@ -8,10 +9,11 @@ use async_zip::tokio::read::seek::ZipFileReader;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use tokio::{
-    fs::{copy, create_dir_all, File, OpenOptions},
+    fs::{copy, create_dir_all, remove_file, File, OpenOptions},
     io::BufReader,
 };
 use tokio_tar::{Archive, ArchiveBuilder, Builder};
+use tokio_util::compat::TokioAsyncReadCompatExt;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
 pub async fn compress_zstd(
@@ -19,9 +21,8 @@ pub async fn compress_zstd(
     source_files: &[PathBuf],
     output_path: &PathBuf,
 ) -> Result<File, anyhow::Error> {
-    let source_archive_path = source_path.join("source").with_extension("tar.zst");
-
-    let file = File::create(source_archive_path.clone()).await?;
+    let temp_file = create_temp_file("tar.zst").await?;
+    let file = File::create(temp_file.clone()).await?;
     let encoder = ZstdEncoder::new(file);
     let mut builder = Builder::new(encoder);
 
@@ -45,7 +46,9 @@ pub async fn compress_zstd(
 
     file.flush().await?;
 
-    copy(&source_archive_path, output_path).await?;
+    copy(&temp_file, output_path).await?;
+
+    remove_file(temp_file).await?;
 
     Ok(file)
 }
@@ -101,20 +104,24 @@ pub async fn unpack_gzip(target_dir: &PathBuf, source_tar: &Path) -> Result<(), 
     Ok(archive.unpack(target_dir).await?)
 }
 
+/// Returns a relative path without reserved names, redundant separators, ".", or "..".
+fn sanitize_file_path(path: &str) -> PathBuf {
+    // Replaces backwards slashes
+    path.replace('\\', "/")
+        // Sanitizes each component
+        .split('/')
+        .map(sanitize_filename::sanitize)
+        .collect()
+}
 pub async fn unpack_zip(source_path: &PathBuf, out_dir: &Path) -> Result<(), anyhow::Error> {
-    let archive_file = File::open(source_path)
-        .await
-        .expect("Failed to open zip file");
-
-    let mut archive = BufReader::new(archive_file);
-
-    let mut reader = ZipFileReader::with_tokio(&mut archive)
+    let archive_file = File::open(source_path).await?;
+    let archive = BufReader::new(archive_file).compat();
+    let mut reader = ZipFileReader::new(archive)
         .await
         .expect("Failed to read zip file");
-
     for index in 0..reader.file().entries().len() {
         let entry = reader.file().entries().get(index).unwrap();
-        let path = out_dir.join(entry.filename().as_str().unwrap());
+        let path = out_dir.join(sanitize_file_path(entry.filename().as_str().unwrap()));
         // If the filename of the entry ends with '/', it is treated as a directory.
         // This is implemented by previous versions of this crate and the Python Standard Library.
         // https://docs.rs/async_zip/0.0.8/src/async_zip/read/mod.rs.html#63-65
@@ -127,29 +134,29 @@ pub async fn unpack_zip(source_path: &PathBuf, out_dir: &Path) -> Result<(), any
             .expect("Failed to read ZipEntry");
 
         if entry_is_dir {
+            // The directory may have been created if iteration is out of order.
             if !path.exists() {
                 create_dir_all(&path)
                     .await
                     .expect("Failed to create extracted directory");
             }
         } else {
+            // Creates parent directories. They may not exist if iteration is out of order
+            // or the archive does not contain directory entries.
             let parent = path
                 .parent()
                 .expect("A file entry should have parent directories");
-
             if !parent.is_dir() {
                 create_dir_all(parent)
                     .await
                     .expect("Failed to create parent directories");
             }
-
             let writer = OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&path)
                 .await
                 .expect("Failed to create extracted file");
-
             futures_lite::io::copy(&mut entry_reader, &mut writer.compat_write())
                 .await
                 .expect("Failed to copy to extracted file");

@@ -1,4 +1,3 @@
-use crate::paths::get_file_paths;
 use anyhow::Result;
 use sha256::{digest, try_digest};
 use std::path::{Path, PathBuf};
@@ -31,22 +30,14 @@ pub fn get_hashes_digest(hashes: Vec<String>) -> Result<String> {
     Ok(digest(combined))
 }
 
-pub async fn hash_files(
-    path: &Path,
-    ignores: &Vec<String>,
-) -> Result<(String, Vec<PathBuf>), anyhow::Error> {
-    let workdir_files = get_file_paths(path, ignores)?;
-
-    if workdir_files.is_empty() {
+pub async fn hash_files(paths: Vec<PathBuf>) -> Result<(String, Vec<PathBuf>), anyhow::Error> {
+    if paths.is_empty() {
         anyhow::bail!("no source files found")
     }
 
-    let workdir_files_hashes = get_file_hashes(&workdir_files)?;
-    let workdir_hash = get_hashes_digest(workdir_files_hashes)?;
+    let paths_hashes = get_file_hashes(&paths)?;
 
-    if workdir_hash.is_empty() {
-        anyhow::bail!("no source hash found")
-    }
+    let paths_hashes_joined = get_hashes_digest(paths_hashes)?;
 
-    Ok((workdir_hash, workdir_files))
+    Ok((paths_hashes_joined, paths))
 }

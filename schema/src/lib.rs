@@ -15,13 +15,14 @@ pub mod api {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Package {
     pub environment: HashMap<String, String>,
-    pub input: HashMap<String, String>,
     pub name: String,
     pub packages: Vec<Package>,
     pub script: String,
     pub source: Option<String>,
+    pub source_hash: Option<String>,
     pub source_ignores: Vec<String>,
     pub systems: Vec<PackageSystem>,
+    pub target: PackageSystem,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

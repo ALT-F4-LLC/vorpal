@@ -22,14 +22,13 @@ use vorpal_schema::{
     api::package::{BuildRequest, BuildResponse, PackageSystem},
     get_package_target,
 };
-use vorpal_store::archives::{compress_zstd, unpack_zstd};
-use vorpal_store::paths::{
-    copy_files, get_file_paths, get_package_archive_path, get_package_path,
-    get_source_archive_path, get_source_path,
-};
 use vorpal_store::{
-    paths::get_public_key_path,
-    temps::{create_dir, create_file},
+    archives::{compress_zstd, unpack_zstd},
+    paths::{
+        copy_files, get_file_paths, get_package_archive_path, get_package_path,
+        get_public_key_path, get_source_archive_path, get_source_path,
+    },
+    temps::{create_temp_dir, create_temp_file},
 };
 
 async fn send(
@@ -38,11 +37,7 @@ async fn send(
 ) -> Result<(), anyhow::Error> {
     debug!("{}", package_log);
 
-    tx.send(Ok(BuildResponse {
-        input_hash: HashMap::new(),
-        package_log,
-    }))
-    .await?;
+    tx.send(Ok(BuildResponse { package_log })).await?;
 
     Ok(())
 }
@@ -62,14 +57,9 @@ pub async fn run(
     tx: &Sender<Result<BuildResponse, Status>>,
     request: Request<Streaming<BuildRequest>>,
 ) -> Result<(), anyhow::Error> {
-    if OS != "linux" {
-        send_error(tx, format!("unsupported operating system: {}", OS)).await?
-    }
-
     let mut package_environment = HashMap::new();
-    let mut package_hash = String::new();
+    let mut package_source_hash = String::new();
     let mut package_image = String::new();
-    // let mut package_input = HashMap::new();
     let mut package_name = String::new();
     let mut package_packages = vec![];
     // let mut package_sandbox = false;
@@ -77,15 +67,12 @@ pub async fn run(
     let mut package_source_data: Vec<u8> = Vec::new();
     let mut package_source_data_chunks = 0;
     let mut package_source_data_signature = String::new();
-    let mut package_source_path: Option<PathBuf> = None;
     // let mut package_systems = vec![];
     let mut package_target = PackageSystem::Unknown;
     let mut stream = request.into_inner();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-
-        // TODO: only accept the first chunk if source doesn't exist
 
         if let Some(data) = chunk.package_source_data {
             package_source_data_chunks += 1;
@@ -96,13 +83,15 @@ pub async fn run(
             package_source_data_signature = signature;
         }
 
+        if let Some(hash) = chunk.package_source_hash {
+            package_source_hash = hash;
+        }
+
         if let Some(image) = chunk.package_image {
             package_image = image;
         }
 
         package_environment = chunk.package_environment;
-        package_hash = chunk.package_hash;
-        // package_input = chunk.package_input;
         package_name = chunk.package_name;
         package_packages = chunk.package_packages;
         // package_sandbox = chunk.package_sandbox;
@@ -119,7 +108,11 @@ pub async fn run(
         send_error(tx, "unsupported build target".to_string()).await?
     }
 
-    let worker_system = get_package_target(format!("{}-{}", ARCH, OS).as_str());
+    let mut worker_system = get_package_target(format!("{}-{}", ARCH, OS).as_str());
+
+    if worker_system == PackageSystem::Aarch64Macos {
+        worker_system = PackageSystem::Aarch64Linux; // docker uses linux on macos
+    }
 
     if package_target != worker_system {
         let message = format!(
@@ -133,7 +126,7 @@ pub async fn run(
 
     // If package exists, return
 
-    let package_path = get_package_path(&package_name, &package_hash);
+    let package_path = get_package_path(&package_source_hash, &package_name);
 
     if package_path.exists() {
         let message = format!("package: {}", package_path.display());
@@ -145,7 +138,7 @@ pub async fn run(
 
     // If package archive exists, unpack it to package path
 
-    let package_archive_path = get_package_archive_path(&package_name, &package_hash);
+    let package_archive_path = get_package_archive_path(&package_source_hash, &package_name);
 
     if package_archive_path.exists() {
         let message = format!("package archive found: {}", package_archive_path.display());
@@ -163,7 +156,9 @@ pub async fn run(
 
     // at this point we should be ready to prepare the source
 
-    if !package_source_data.is_empty() {
+    let source_path = get_source_path(&package_source_hash, &package_name);
+
+    if !source_path.exists() && !package_source_data.is_empty() {
         send(
             tx,
             format!("source chunks received: {}", package_source_data_chunks),
@@ -174,7 +169,7 @@ pub async fn run(
             send_error(tx, "source signature is empty".to_string()).await?
         }
 
-        if package_hash.is_empty() {
+        if package_source_hash.is_empty() {
             send_error(tx, "source hash is empty".to_string()).await?
         }
 
@@ -193,7 +188,7 @@ pub async fn run(
 
         verifying_key.verify(&package_source_data, &signature)?;
 
-        let source_archive_path = get_source_archive_path(&package_name, &package_hash);
+        let source_archive_path = get_source_archive_path(&package_source_hash, &package_name);
 
         if !source_archive_path.exists() {
             write(&source_archive_path, &package_source_data).await?;
@@ -202,8 +197,6 @@ pub async fn run(
 
             send(tx, message).await?;
         }
-
-        let source_path = get_source_path(&package_name, &package_hash);
 
         if !source_path.exists() {
             let message = format!(
@@ -222,11 +215,9 @@ pub async fn run(
 
             send(tx, message).await?;
         }
-
-        package_source_path = Some(source_path);
     }
 
-    // TODO: handle new input fields
+    // Handle remote source paths
 
     // Create build environment
 
@@ -239,10 +230,12 @@ pub async fn run(
     }
 
     for build_package in package_packages.iter() {
-        let build_package_path = get_package_path(&build_package.name, &build_package.hash);
+        let build_package_path = get_package_path(&build_package.hash, &build_package.name);
 
         if !build_package_path.exists() {
-            let message = format!("package not found: {}", build_package_path.display());
+            let message = format!("Package not found: {}", build_package_path.display());
+
+            println!("Package not found: {}", build_package_path.display());
 
             send_error(tx, message).await?
         }
@@ -270,7 +263,7 @@ pub async fn run(
             let package_name = package.name.to_lowercase();
 
             if value.starts_with(&format!("${}", package_name)) {
-                let package_path = get_package_path(&package.name, &package.hash);
+                let package_path = get_package_path(&package_name, &package.hash);
 
                 let value = value.replace(
                     &format!("${}", package_name),
@@ -292,55 +285,43 @@ pub async fn run(
         send_error(tx, "build script is empty".to_string()).await?
     }
 
-    let build_script = package_script
+    let sandbox_script = package_script
         .trim()
         .split('\n')
         .map(|line| line.trim())
         .collect::<Vec<&str>>()
         .join("\n");
-
-    let build_script_commands = [
+    let sandbox_script_commands = [
         "#!/bin/sh",
-        "set -ex",
+        "set -euxo pipefail",
         "echo \"PATH: $PATH\"",
         "echo \"Starting build script\"",
-        &build_script,
+        &sandbox_script,
         "echo \"Finished build script\"",
     ];
+    let sandbox_script_data = sandbox_script_commands.join("\n");
+    let sandbox_script_file_path = create_temp_file("sh").await?;
 
-    let build_script = build_script_commands.join("\n");
+    write(&sandbox_script_file_path, sandbox_script_data).await?;
 
-    let sandbox_build_script_path = create_file("sh").await?;
-
-    write(&sandbox_build_script_path, build_script).await?;
-
-    set_permissions(&sandbox_build_script_path, Permissions::from_mode(0o755)).await?;
-
-    if !sandbox_build_script_path.exists() {
-        remove_file(&sandbox_build_script_path).await?;
-
-        send_error(tx, "build script not found".to_string()).await?
-    }
+    set_permissions(&sandbox_script_file_path, Permissions::from_mode(0o755)).await?;
 
     // Create source directory
 
-    let mut sandbox_source_path: Option<PathBuf> = None;
+    let sandbox_source_dir_path = create_temp_dir().await?;
 
-    if let Some(source_path) = package_source_path {
-        if !source_path.exists() {
-            remove_file(&sandbox_build_script_path).await?;
+    if source_path.exists() {
+        let source_store_path_files = get_file_paths(&source_path, &Vec::<&str>::new())?;
 
-            send_error(tx, "source not found".to_string()).await?
-        }
-
-        let sandbox_path = create_dir().await?;
-
-        copy_files(&source_path, &sandbox_path).await?;
-
-        sandbox_source_path = Some(sandbox_path);
+        copy_files(
+            &source_path,
+            source_store_path_files,
+            &sandbox_source_dir_path,
+        )
+        .await?;
     }
 
-    let sandbox_package_path = create_dir().await?;
+    let sandbox_package_dir_path = create_temp_dir().await?;
 
     #[cfg(unix)]
     let docker = Docker::connect_with_socket_defaults()?;
@@ -366,34 +347,35 @@ pub async fn run(
     let mut mounts = vec![
         Mount {
             read_only: Some(true),
-            source: Some(sandbox_build_script_path.to_str().unwrap().to_string()),
+            source: Some(sandbox_script_file_path.to_str().unwrap().to_string()),
             target: Some("/sandbox/build.sh".to_string()),
             typ: Some(MountTypeEnum::BIND),
             ..Default::default()
         },
         Mount {
             read_only: Some(false),
-            source: Some(sandbox_package_path.to_str().unwrap().to_string()),
+            source: Some(sandbox_source_dir_path.to_str().unwrap().to_string()),
+            target: Some("/sandbox/source".to_string()),
+            typ: Some(MountTypeEnum::BIND),
+            ..Default::default()
+        },
+        Mount {
+            read_only: Some(false),
+            source: Some(sandbox_package_dir_path.to_str().unwrap().to_string()),
             target: Some(package_path.to_str().unwrap().to_string()),
             typ: Some(MountTypeEnum::BIND),
             ..Default::default()
         },
     ];
 
-    if let Some(source_path) = sandbox_source_path.clone() {
-        mounts.push(Mount {
-            read_only: Some(false),
-            source: Some(source_path.to_str().unwrap().to_string()),
-            target: Some("/sandbox/source".to_string()),
-            typ: Some(MountTypeEnum::BIND),
-            ..Default::default()
-        });
-    }
-
     for store_path in store_paths {
         let path = PathBuf::from(store_path);
 
         if !path.exists() {
+            remove_dir_all(&sandbox_package_dir_path).await?;
+            remove_dir_all(&sandbox_source_dir_path).await?;
+            remove_file(&sandbox_script_file_path).await?;
+
             let message = format!("store path not found: {}", path.display());
 
             send_error(tx, message).await?
@@ -452,13 +434,9 @@ pub async fn run(
         match output {
             Ok(output) => send(tx, output.to_string().trim().to_string()).await?,
             Err(err) => {
-                remove_file(&sandbox_build_script_path).await?;
-                remove_dir_all(&sandbox_package_path).await?;
-
-                if let Some(source_path) = sandbox_source_path.clone() {
-                    remove_dir_all(&source_path).await?;
-                }
-
+                remove_dir_all(&sandbox_package_dir_path).await?;
+                remove_dir_all(&sandbox_source_dir_path).await?;
+                remove_file(&sandbox_script_file_path).await?;
                 send_error(tx, format!("docker logs error: {:?}", err)).await?
             }
         }
@@ -471,15 +449,12 @@ pub async fn run(
         )
         .await?;
 
-    remove_file(&sandbox_build_script_path).await?;
-
-    if let Some(sandbox_source_path) = sandbox_source_path.clone() {
-        remove_dir_all(&sandbox_source_path).await?;
-    }
-
-    let sandbox_package_files = get_file_paths(&sandbox_package_path, &Vec::<&str>::new())?;
+    let sandbox_package_files = get_file_paths(&sandbox_package_dir_path, &Vec::<&str>::new())?;
 
     if sandbox_package_files.is_empty() || sandbox_package_files.len() == 1 {
+        remove_dir_all(&sandbox_package_dir_path).await?;
+        remove_dir_all(&sandbox_source_dir_path).await?;
+        remove_file(&sandbox_script_file_path).await?;
         send_error(tx, "no build output files found".to_string()).await?
     }
 
@@ -490,19 +465,20 @@ pub async fn run(
     // Create package tar from build output files
 
     if let Err(err) = compress_zstd(
-        &sandbox_package_path,
+        &sandbox_package_dir_path,
         &sandbox_package_files,
         &package_archive_path,
     )
     .await
     {
+        remove_dir_all(&sandbox_package_dir_path).await?;
+        remove_dir_all(&sandbox_source_dir_path).await?;
+        remove_file(&sandbox_script_file_path).await?;
         send_error(tx, format!("failed to compress package tar: {:?}", err)).await?
     }
 
-    remove_dir_all(&sandbox_package_path).await?;
-
     let message = format!(
-        "package store created: {}",
+        "package archive created: {}",
         package_archive_path.file_name().unwrap().to_str().unwrap()
     );
 
@@ -513,6 +489,9 @@ pub async fn run(
     create_dir_all(&package_path).await?;
 
     if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
+        remove_dir_all(&sandbox_package_dir_path).await?;
+        remove_dir_all(&sandbox_source_dir_path).await?;
+        remove_file(&sandbox_script_file_path).await?;
         send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
     }
 
@@ -522,6 +501,10 @@ pub async fn run(
     );
 
     send(tx, message).await?;
+
+    remove_dir_all(&sandbox_package_dir_path).await?;
+    remove_dir_all(&sandbox_source_dir_path).await?;
+    remove_file(&sandbox_script_file_path).await?;
 
     Ok(())
 }

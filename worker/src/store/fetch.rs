@@ -15,8 +15,8 @@ pub async fn stream(
     let package_chunks_size = 8192;
 
     let store_path = match req.kind() {
-        StoreKind::Package => get_package_archive_path(&req.name, &req.hash),
-        StoreKind::Source => get_source_archive_path(&req.name, &req.hash),
+        StoreKind::Package => get_package_archive_path(&req.hash, &req.name),
+        StoreKind::Source => get_source_archive_path(&req.hash, &req.name),
         _ => anyhow::bail!("unsupported store path kind"),
     };
 
