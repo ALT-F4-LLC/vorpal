@@ -1,46 +1,79 @@
-docker_build_cache := `echo "$PWD/.buildx"`
-
 _default:
     just --list
 
-build:
-    cargo check -j $(nproc)
-    cargo build -j $(nproc)
+# build cli (only)
+build-cli:
+    cargo build -j $(nproc) --package "vorpal-cli"
 
-build-docker tag="dev":
+# build sandbox (only)
+build-sandbox tag="edge":
     docker buildx build \
-        --cache-from "type=local,src={{ docker_build_cache }}" \
-        --cache-to "type=local,dest={{ docker_build_cache }},mode=max" \
-        --file "Dockerfile.sandbox" \
-        --progress "plain" \
-        --tag "vorpal-sandbox:{{ tag }}" \
+        --file "Dockerfile" \
+        --tag "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
         .
 
-check:
+# build everything
+build: build-cli build-sandbox
+
+# check cargo
+check-cargo:
+    cargo check -j $(nproc)
+
+# check nix
+check-nix:
     nix flake check
 
-clean:
-    rm -rf ./.buildx ./target
+# check everything
+check: check-cargo check-nix
 
-format:
-    cargo fmt --check --package vorpal --verbose
+# clean everything
+clean:
+    rm -rf ./target
+
+# format cargo
+format-cargo:
+    cargo fmt --check --verbose
+
+# format nix
+format-nix:
     nix fmt -- --check .
 
-generate:
-    cargo run --package "vorpal-cli" keys generate
+# format everything
+format: format-cargo format-nix
 
+# lint
 lint:
     cargo clippy -- -D warnings
 
+# package (nix)
 package profile="default":
     nix build --json --no-link --print-build-logs ".#{{ profile }}"
 
+# start worker (only)
 start-worker:
     cargo run --package "vorpal-worker"
 
-test:
+# start everything
+start: start-worker
+
+# test cargo
+test-cargo:
     cargo test -j $(nproc)
 
-update:
+# test nickel
+test-nickel:
+    nickel export "vorpal.ncl"
+
+# test everything
+test: test-cargo test-nickel
+
+# update cargo
+update-cargo:
     cargo update
+
+# update nix
+update-nix:
     nix flake update
+
+# update everything
+update: update-cargo update-nix
