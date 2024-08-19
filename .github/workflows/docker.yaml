@@ -12,7 +12,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build-sandbox:
+  sandbox:
     runs-on: ubuntu-latest
     permissions:
       attestations: write

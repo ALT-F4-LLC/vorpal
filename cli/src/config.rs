@@ -11,9 +11,9 @@ pub fn build_structures(config: &Config) -> PackageStructures {
     let mut package_graph: HashMap<String, HashSet<String>> = HashMap::new();
     let mut package_map = HashMap::new();
 
-    for (_, package) in &config.packages {
-        add_to_graph(&mut package_graph, package);
-        add_to_map(&mut package_map, package);
+    for package_name in config.packages.keys() {
+        add_to_graph(&mut package_graph, &config.packages[package_name]);
+        add_to_map(&mut package_map, &config.packages[package_name]);
     }
 
     PackageStructures {
@@ -79,7 +79,7 @@ pub fn get_build_order(graph: &HashMap<String, HashSet<String>>) -> Result<Vec<S
 
     for package in graph.keys() {
         if !visited.contains(package) {
-            topological_sort(&graph, &mut build_order, &mut visited, &mut stack, package)?;
+            topological_sort(graph, &mut build_order, &mut visited, &mut stack, package)?;
         }
     }
 

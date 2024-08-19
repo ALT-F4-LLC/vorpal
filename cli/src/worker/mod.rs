@@ -40,14 +40,14 @@ enum PackageSourceKind {
 }
 
 pub async fn build(
-    config_hash: &String,
+    config_hash: &str,
     package: &Package,
     packages: Vec<PackageOutput>,
-    workers: &Vec<Worker>,
+    workers: &[Worker],
 ) -> anyhow::Result<PackageOutput> {
     println!("=> name: {}", package.name);
 
-    if packages.len() > 0 {
+    if !packages.is_empty() {
         let packages_names = packages
             .clone()
             .into_iter()
@@ -57,7 +57,7 @@ pub async fn build(
         println!("=> packages: {}", packages_names.join(", "));
     }
 
-    let mut package_source_hash = config_hash.clone();
+    let mut package_source_hash = config_hash.to_owned();
     let mut package_source_type = PackageSourceKind::Unknown;
 
     if let Some(source) = &package.source {
@@ -68,7 +68,7 @@ pub async fn build(
             _ => anyhow::bail!("Package `source` path not supported."),
         };
 
-        if package_source_type != PackageSourceKind::Local && package.source_hash == None {
+        if package_source_type != PackageSourceKind::Local && package.source_hash.is_none() {
             anyhow::bail!("Package `source_hash` not found for remote `source` path");
         }
 
@@ -139,7 +139,7 @@ pub async fn build(
 
     let mut worker_store = StoreServiceClient::connect(worker.uri.clone()).await?;
 
-    if let Ok(_) = worker_store.exists(worker_package.clone()).await {
+    if (worker_store.exists(worker_package.clone()).await).is_ok() {
         println!("=> cache: {:?}", worker_package);
 
         let worker_store_package = StoreRequest {
@@ -211,7 +211,7 @@ pub async fn build(
                             }
 
                             PackageSourceKind::Http => {
-                                let url = Url::parse(&source)?;
+                                let url = Url::parse(source)?;
 
                                 if url.scheme() != "http" && url.scheme() != "https" {
                                     anyhow::bail!(
@@ -343,11 +343,7 @@ pub async fn build(
                             package_source_data: Some(chunk.to_vec()),
                             package_source_data_signature: Some(source_signature.to_string()),
                             package_source_hash: Some(package_source_hash.clone()),
-                            package_systems: package
-                                .systems
-                                .iter()
-                                .map(|s| s.clone() as i32)
-                                .collect(),
+                            package_systems: package.systems.iter().map(|s| *s as i32).collect(),
                             package_target: package.target as i32,
                         });
                     }
@@ -369,7 +365,7 @@ pub async fn build(
             package_source_data: None,
             package_source_data_signature: None,
             package_source_hash: Some(package_source_hash.clone()),
-            package_systems: package.systems.iter().map(|s| s.clone() as i32).collect(),
+            package_systems: package.systems.iter().map(|s| *s as i32).collect(),
             package_target: package.target as i32,
         });
     }

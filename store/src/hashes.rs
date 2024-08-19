@@ -10,9 +10,9 @@ pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String, anyhow::E
     Ok(try_digest(path)?)
 }
 
-pub fn get_file_hashes(files: &Vec<PathBuf>) -> Result<Vec<String>> {
+pub fn get_file_hashes(files: &[PathBuf]) -> Result<Vec<String>> {
     let hashes = files
-        .into_iter()
+        .iter()
         .filter(|file| file.is_file())
         .map(|file| get_file_hash(file).unwrap())
         .collect();

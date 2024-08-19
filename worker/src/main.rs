@@ -25,9 +25,11 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let mut subscriber = FmtSubscriber::builder().with_max_level(cli.level);
 
+    let Cli { port, level } = cli;
+
     // when we run the command with `TRACE` or `DEBUG` level, we want to see
     // the file and line number...
-    if [Level::DEBUG, Level::TRACE].contains(&cli.level) {
+    if [Level::DEBUG, Level::TRACE].contains(&level) {
         subscriber = subscriber.with_file(true).with_line_number(true);
     }
 
@@ -35,9 +37,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
-    match cli {
-        Cli { port, .. } => start(port).await?,
-    }
+    start(port).await?;
 
     Ok(())
 }
