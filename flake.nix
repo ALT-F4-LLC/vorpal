@@ -1,7 +1,6 @@
 {
   description = "vorpal";
 
-  inputs.json-schema-to-nickel.url = "github:nickel-lang/json-schema-to-nickel";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
@@ -45,7 +44,6 @@
             packages = [
               clippy
               grpcurl
-              inputs'.json-schema-to-nickel.packages.default
               jq
               just
               nickel
@@ -60,7 +58,7 @@
           default = buildRustPackage {
             inherit pname version;
             buildInputs = [openssl] ++ optionals isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-aOET7RYbm5puxtJieYYYaaayDfxa7AHiM1CZqbCOLJU=";
+            cargoHash = "sha256-8GWF4owMLLg6Jzx49Q0B3a7N+9qXhENdAu4VoU3EPww=";
             nativeBuildInputs = [pkg-config protobuf];
             src = ./.;
           };

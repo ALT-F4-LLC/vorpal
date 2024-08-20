@@ -1,10 +1,47 @@
 # vorpal
 
-Maintain your entire supply chain with one magical tool.
+Build and deliver software reliably with one magical tool.
 
 ## Overview
 
-Vorpal is a unified build, development, and deployment system that manages all phases of the software lifecycle and supply chain. Vorpal can compile your code in a reproducible manner and then deliver the resulting "artifacts" for development and deployment environments.
+Vorpal's goal is to package and distribute software reliably to local (development) and remote (cloud, self-hosted, etc) environments.
+
+Vorpal uses a `vorpal.ncl` file written in [Nickel](https://nickel-lang.org/) that allows you to describe every aspect of your software dependencies in a reproducible way.
+
+```
+# Vorpal's built-in schemas
+let { Config, Package, .. } = import "schema.ncl" in
+
+# User defined variable
+let baseUrl = "https://static.rust-lang.org/dist/2024-05-02" in
+
+# Pattern matching for values
+let sourceSystem = fun label value =>
+  value
+  |> match {
+    "Aarch64Linux" => "aarch64-unknown-linux-gnu",
+    "X8664Linux" => "x86_64-unknown-linux-gnu",
+    _ => std.fail_with "Unsupported target"
+  }
+in
+let system = "%{GetTarget | sourceSystem}" in
+
+let version = "1.78.0" in
+
+{
+  packages = {
+    default = {
+      name = "cargo",
+      script = m%"
+        cp -pr cargo-%{rustVersion}-%{rustSystem}/cargo/* $output/.
+      "%,
+      source = "%{rustBaseUrl}/cargo-%{rustVersion}-%{rustSystem}.tar.gz",
+      source_hash = "d782e34151df01519de86f0acace8a755cae6fad93cb0303ddd61c2642444c1c",
+      systems = ["x86_64-darwin", "x86_64-linux"],
+    }
+  } | Package
+} | Config
+```
 
 ## Design
 

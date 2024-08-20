@@ -1,14 +1,15 @@
 let { Config, .. } = import "schema.ncl" in
-let { PackageRust, .. } = import "language.ncl" in
-{
-  packages = {
-    default =
-      PackageRust
-        {
-          name = "vorpal",
-          source = ".",
-          systems = ["Aarch64Linux", "X8664Linux"],
-          target = "Aarch64Linux",
-        }
-  }
-} | Config
+let { RustPackage, .. } = import "language.ncl" in
+fun system =>
+  {
+    packages = {
+      default =
+        RustPackage
+          {
+            name = "vorpal",
+            source = ".",
+            systems = ["aarch64-linux", "x86_64-linux"],
+            target = system
+          }
+    }
+  } | Config

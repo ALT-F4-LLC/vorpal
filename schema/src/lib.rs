@@ -21,8 +21,8 @@ pub struct Package {
     pub source: Option<String>,
     pub source_hash: Option<String>,
     pub source_ignores: Vec<String>,
-    pub systems: Vec<PackageSystem>,
-    pub target: PackageSystem,
+    pub systems: Vec<String>,
+    pub target: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,7 +36,9 @@ pub trait PackageTarget {
 
 impl PackageTarget for PackageSystem {
     fn from_str(system: &str) -> Self {
-        match system {
+        let target = system.to_lowercase().replace("_", "-");
+
+        match target.as_str() {
             "aarch64-linux" => Aarch64Linux,
             "aarch64-macos" => Aarch64Macos,
             "x86_64-linux" => X8664Linux,

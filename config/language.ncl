@@ -1,11 +1,11 @@
 let { Package, .. } = import "schema.ncl" in
 {
-  PackageRust = fun config =>
+  RustPackage = fun config =>
     let protocSystem = fun label value =>
       value
       |> match {
-        "Aarch64Linux" => "linux-aarch_64",
-        "X8664Linux" => "linux-x86_64",
+        "aarch64-linux" => "linux-aarch_64",
+        "x86_64-linux" => "linux-x86_64",
         _ => std.fail_with "Unsupported target"
       }
     in
@@ -15,8 +15,8 @@ let { Package, .. } = import "schema.ncl" in
     let rustSystem = fun label value =>
       value
       |> match {
-        "Aarch64Linux" => "aarch64-unknown-linux-gnu",
-        "X8664Linux" => "x86_64-unknown-linux-gnu",
+        "aarch64-linux" => "aarch64-unknown-linux-gnu",
+        "x86_64-linux" => "x86_64-unknown-linux-gnu",
         _ => std.fail_with "Unsupported target"
       }
     in

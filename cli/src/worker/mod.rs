@@ -5,11 +5,16 @@ use tokio::io::AsyncWriteExt;
 use tokio_tar::Archive;
 use url::Url;
 use uuid::Uuid;
-use vorpal_schema::api::package::package_service_client::PackageServiceClient;
-use vorpal_schema::api::package::{BuildRequest, PackageOutput, PackageSystem};
-use vorpal_schema::api::store::store_service_client::StoreServiceClient;
-use vorpal_schema::api::store::{StoreKind, StoreRequest};
-use vorpal_schema::Package;
+use vorpal_schema::{
+    api::{
+        package::{
+            package_service_client::PackageServiceClient, BuildRequest, PackageOutput,
+            PackageSystem,
+        },
+        store::{store_service_client::StoreServiceClient, StoreKind, StoreRequest},
+    },
+    get_package_target, Package,
+};
 use vorpal_store::{
     archives::{compress_zstd, unpack_zip, unpack_zstd},
     hashes::hash_files,
@@ -43,6 +48,7 @@ pub async fn build(
     config_hash: &str,
     package: &Package,
     packages: Vec<PackageOutput>,
+    target: PackageSystem,
     workers: &[Worker],
 ) -> anyhow::Result<PackageOutput> {
     println!("=> name: {}", package.name);
@@ -127,7 +133,7 @@ pub async fn build(
 
     let worker = workers.first().unwrap();
 
-    if worker.system != package.target {
+    if worker.system != target {
         anyhow::bail!("Worker system mismatch: {:?}", worker.system);
     }
 
@@ -186,6 +192,15 @@ pub async fn build(
     }
 
     let mut request_stream: Vec<BuildRequest> = vec![];
+
+    let package_systems = package
+        .systems
+        .iter()
+        .map(|s| {
+            let target: PackageSystem = get_package_target(s);
+            target as i32
+        })
+        .collect::<Vec<i32>>();
 
     if let Some(source) = &package.source {
         let source_archive_path = get_source_archive_path(&package_source_hash, &package.name);
@@ -343,8 +358,8 @@ pub async fn build(
                             package_source_data: Some(chunk.to_vec()),
                             package_source_data_signature: Some(source_signature.to_string()),
                             package_source_hash: Some(package_source_hash.clone()),
-                            package_systems: package.systems.iter().map(|s| *s as i32).collect(),
-                            package_target: package.target as i32,
+                            package_systems: package_systems.clone(),
+                            package_target: target as i32,
                         });
                     }
                 }
@@ -365,8 +380,8 @@ pub async fn build(
             package_source_data: None,
             package_source_data_signature: None,
             package_source_hash: Some(package_source_hash.clone()),
-            package_systems: package.systems.iter().map(|s| *s as i32).collect(),
-            package_target: package.target as i32,
+            package_systems,
+            package_target: target as i32,
         });
     }
 
