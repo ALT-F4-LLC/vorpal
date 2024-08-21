@@ -7,7 +7,6 @@ use vorpal_schema::api::package::{
 };
 
 mod build;
-mod prepare;
 
 #[derive(Debug, Default)]
 pub struct PackageServer {

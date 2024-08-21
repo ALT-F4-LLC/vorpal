@@ -64,7 +64,7 @@ async fn main() -> Result<(), anyhow::Error> {
             system,
             workers,
         } => {
-            let mut package_system: PackageSystem = get_package_system(&system);
+            let mut package_system: PackageSystem = get_package_system(system);
 
             if package_system == PackageSystem::Unknown {
                 eprintln!("unknown target: {}", package_system.as_str_name());
@@ -165,7 +165,7 @@ async fn main() -> Result<(), anyhow::Error> {
         },
 
         Command::Validate { file, system } => {
-            let mut package_system: PackageSystem = get_package_system(&system);
+            let mut package_system: PackageSystem = get_package_system(system);
 
             if package_system == PackageSystem::Unknown {
                 eprintln!("unknown target: {}", package_system.as_str_name());

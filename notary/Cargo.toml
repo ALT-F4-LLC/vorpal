@@ -5,31 +5,7 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1"
-# async-compression = { version = "0", features = ["all"] }
-# async_zip = { version = "0", features = ["deflate", "tokio"] }
-# bollard = { version = "0", features = ["buildkit"] }
-# clap = { version = "4", features = ["derive"] }
-# dirs = "5"
-# futures-lite = { version = "2", default-features = false, features = ["std"] }
-# git2 = "0"
-# hex = "0"
-# infer = "0"
-# nickel-lang-core = "0"
-# petgraph = "0"
-# prost = "0"
 rand = "0"
-# reqwest = { version = "0", features = ["json"] }
 rsa = { version = "0", features = ["sha2"] }
-# schemars = "0"
-# serde_json = "1"
-# sha256 = "1"
 tokio = { version = "1", features = ["full"] }
-# tokio-stream = "0"
-# tokio-tar = "0"
-# tokio-util = { version = "0", features = ["compat"] }
-# tonic = "0"
 tracing = "0"
-# tracing-subscriber = "0"
-# url = "2"
-# uuid = { version = "1", features = ["v7"] }
-# walkdir = "2"

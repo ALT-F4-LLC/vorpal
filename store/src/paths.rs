@@ -95,7 +95,7 @@ pub fn get_file_paths(
         .map(|i| Path::new(&i).to_path_buf())
         .collect::<Vec<PathBuf>>();
 
-    let mut files: Vec<PathBuf> = WalkDir::new(&source_path)
+    let mut files: Vec<PathBuf> = WalkDir::new(source_path)
         .into_iter()
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -103,7 +103,7 @@ pub fn get_file_paths(
 
             if excludes_paths
                 .iter()
-                .any(|i| path.strip_prefix(&source_path).unwrap().starts_with(i))
+                .any(|i| path.strip_prefix(source_path).unwrap().starts_with(i))
             {
                 return None;
             }
@@ -118,14 +118,11 @@ pub fn get_file_paths(
         .collect::<Vec<PathBuf>>();
 
     if !includes_paths.is_empty() {
-        files = files
-            .into_iter()
-            .filter(|i| {
-                includes_paths
-                    .iter()
-                    .any(|j| i.strip_prefix(&source_path).unwrap().starts_with(j))
-            })
-            .collect();
+        files.retain(|i| {
+            includes_paths
+                .iter()
+                .any(|j| i.strip_prefix(source_path).unwrap().starts_with(j))
+        });
     }
 
     files.sort();

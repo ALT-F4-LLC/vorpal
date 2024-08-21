@@ -25,9 +25,6 @@ use vorpal_store::{
     temps::create_temp_dir,
 };
 
-mod source;
-mod stream;
-
 #[derive(Clone, Debug)]
 pub struct Worker {
     pub system: PackageSystem,
