@@ -20,7 +20,7 @@ use uuid::Uuid;
 use vorpal_notary::get_public_key;
 use vorpal_schema::{
     api::package::{BuildRequest, BuildResponse, PackageSystem},
-    get_package_target,
+    get_package_system,
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
@@ -108,7 +108,7 @@ pub async fn run(
         send_error(tx, "unsupported build target".to_string()).await?
     }
 
-    let mut worker_system = get_package_target(format!("{}-{}", ARCH, OS).as_str());
+    let mut worker_system = get_package_system(format!("{}-{}", ARCH, OS).as_str());
 
     if worker_system == PackageSystem::Aarch64Macos {
         worker_system = PackageSystem::Aarch64Linux; // docker uses linux on macos
@@ -311,7 +311,8 @@ pub async fn run(
     let sandbox_source_dir_path = create_temp_dir().await?;
 
     if source_path.exists() {
-        let source_store_path_files = get_file_paths(&source_path, &Vec::<&str>::new())?;
+        let source_store_path_files =
+            get_file_paths(&source_path, Vec::<String>::new(), Vec::<String>::new())?;
 
         copy_files(
             &source_path,
@@ -449,7 +450,11 @@ pub async fn run(
         )
         .await?;
 
-    let sandbox_package_files = get_file_paths(&sandbox_package_dir_path, &Vec::<&str>::new())?;
+    let sandbox_package_files = get_file_paths(
+        &sandbox_package_dir_path,
+        Vec::<String>::new(),
+        Vec::<String>::new(),
+    )?;
 
     if sandbox_package_files.is_empty() || sandbox_package_files.len() == 1 {
         remove_dir_all(&sandbox_package_dir_path).await?;

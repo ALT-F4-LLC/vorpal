@@ -19,8 +19,9 @@ pub struct Package {
     pub packages: Vec<Package>,
     pub script: String,
     pub source: Option<String>,
+    pub source_excludes: Vec<String>,
     pub source_hash: Option<String>,
-    pub source_ignores: Vec<String>,
+    pub source_includes: Vec<String>,
     pub systems: Vec<String>,
     pub target: String,
 }
@@ -48,6 +49,6 @@ impl PackageTarget for PackageSystem {
     }
 }
 
-pub fn get_package_target<T: PackageTarget>(system: &str) -> T {
+pub fn get_package_system<T: PackageTarget>(system: &str) -> T {
     T::from_str(system)
 }

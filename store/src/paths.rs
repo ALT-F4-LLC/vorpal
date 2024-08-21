@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all};
 use tracing::info;
@@ -86,33 +85,54 @@ pub fn get_temp_dir_path() -> PathBuf {
     get_sandbox_dir_path().join(Uuid::now_v7().to_string())
 }
 
-pub fn get_file_paths<'a, P, I, J>(source: P, ignore_paths: I) -> Result<Vec<PathBuf>>
-where
-    P: AsRef<Path>,
-    I: IntoIterator<Item = &'a J>,
-    J: AsRef<OsStr> + 'a,
-{
-    let source_ignore_paths = ignore_paths
+pub fn get_file_paths(
+    source_path: &PathBuf,
+    excludes: Vec<String>,
+    includes: Vec<String>,
+) -> Result<Vec<PathBuf>> {
+    let excludes_paths = excludes
         .into_iter()
-        .map(|i| Path::new(i).to_path_buf())
+        .map(|i| Path::new(&i).to_path_buf())
         .collect::<Vec<PathBuf>>();
 
-    let mut files: Vec<PathBuf> = WalkDir::new(&source)
+    let mut files: Vec<PathBuf> = WalkDir::new(&source_path)
         .into_iter()
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            if source_ignore_paths
+
+            if excludes_paths
                 .iter()
-                .any(|i| path.strip_prefix(&source).unwrap().starts_with(i))
+                .any(|i| path.strip_prefix(&source_path).unwrap().starts_with(i))
             {
                 return None;
             }
+
             Some(path.to_path_buf())
         })
         .collect();
 
+    let includes_paths = includes
+        .into_iter()
+        .map(|i| Path::new(&i).to_path_buf())
+        .collect::<Vec<PathBuf>>();
+
+    if !includes_paths.is_empty() {
+        files = files
+            .into_iter()
+            .filter(|i| {
+                includes_paths
+                    .iter()
+                    .any(|j| i.strip_prefix(&source_path).unwrap().starts_with(j))
+            })
+            .collect();
+    }
+
     files.sort();
+
+    if files.is_empty() {
+        return Err(anyhow::anyhow!("no files found"));
+    }
 
     Ok(files)
 }

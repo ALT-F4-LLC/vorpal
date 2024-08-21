@@ -79,32 +79,55 @@ let { Package, .. } = import "schema.ncl" in
       } | Package
     in
 
-    let sourceIgnores = [".buildx", ".direnv", ".git", ".gitignore", "target", "vendor"] in
+    let sourceExcludes = [
+      ".buildx",
+      ".direnv",
+      ".git",
+      ".gitignore",
+      "target",
+      "vendor"
+    ]
+    in
 
-    let vendor =
+    let sourceIncludes = [
+      "Cargo.lock",
+      "Cargo.toml",
+      "cli/Cargo.toml",
+      "notary/Cargo.toml",
+      "schema/Cargo.toml",
+      "store/Cargo.toml",
+      "worker/Cargo.toml"
+    ]
+    in
+
+    let cache =
       {
-        name = "%{config.name}-vendor",
+        name = "%{config.name}-cache",
         packages = [cargo, rustc],
         script = m%"
-          mkdir -p cli/src \
-            && mkdir -p notary/src \
-            && mkdir -p schema/src \
-            && mkdir -p store/src \
-            && mkdir -p worker/src \
-            && mkdir -p $output/vendor \
+          dirs=("cli/src" "notary/src" "schema/src" "store/src" "worker/src")
 
-          touch cli/src/main.rs \
-            && touch notary/src/lib.rs \
-            && touch schema/src/lib.rs \
-            && touch store/src/lib.rs \
-            && touch worker/src/main.rs
+          for dir in "${dirs[@]}"; do
+              mkdir -p "$dir"
+          done
+
+          for dir in "${dirs[@]}"; do
+              if [[ "$dir" == "cli/src" || "$dir" == "worker/src" ]]; then
+                  touch "$dir/main.rs"
+              else
+                  touch "$dir/lib.rs"
+              fi
+          done
+
+          mkdir -p $output/vendor
 
           export CARGO_VENDOR=$(cargo vendor --versioned-dirs $output/vendor)
 
           echo "$CARGO_VENDOR" > $output/config.toml
         "%,
-        source_ignores = std.array.concat sourceIgnores ["cli/src", "config", "notary/src", "schema/api", "schema/src", "schema/build.rs", "store/src", "worker/src", ".dockerignore", ".envrc", ".github", "Dockerfile", "Dockerfile.sandbox", "LICENSE", "README.md", "flake.lock", "flake.nix", "justfile", "vorpal.webp"],
         source = config.source,
+        source_hash = config.cargo_hash,
+        source_includes = sourceIncludes,
         systems = config.systems,
         target = config.target,
       } | Package
@@ -112,17 +135,23 @@ let { Package, .. } = import "schema.ncl" in
 
     {
       name = config.name,
-      packages = [cargo, rustc, protoc, vendor],
+      packages = [cargo, rustc, protoc, cache],
       script = m%"
           mkdir -p .cargo
-          ln -s $%{std.string.replace "-" "_" config.name}_vendor/config.toml .cargo/config.toml
-          cargo check -j $(nproc) --offline --profile release
-          cargo build -j $(nproc) --offline --profile release
-          cargo test -j $(nproc) --offline --profile release -- --test-threads=$(nproc)
+
+          cp \
+            $%{std.string.replace "-" "_" config.name}_cache/config.toml \
+            .cargo/config.toml
+
+          cargo build -j $(nproc) --offline --release
+
+          cargo test -j $(nproc) --offline --release -- --test-threads=$(nproc)
+
           mkdir -p $output/bin
+
           cp -pr target/release/%{config.name} $output/bin/%{config.name}
         "%,
-      source_ignores = sourceIgnores,
+      source_excludes = sourceExcludes,
       source = config.source,
       systems = config.systems,
       target = config.target,

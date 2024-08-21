@@ -13,7 +13,7 @@ use vorpal_schema::{
         },
         store::{store_service_client::StoreServiceClient, StoreKind, StoreRequest},
     },
-    get_package_target, Package,
+    get_package_system, Package,
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zip, unpack_zstd},
@@ -85,13 +85,21 @@ pub async fn build(
                 anyhow::bail!("Package `source` path not found: {:?}", path);
             }
 
-            let source_files = get_file_paths(path, &package.source_ignores)?;
+            let source_files = get_file_paths(
+                &path,
+                package.source_excludes.clone(),
+                package.source_includes.clone(),
+            )?;
 
             let (hash, _) = hash_files(source_files).await?;
 
             if let Some(source_hash) = package.source_hash.clone() {
                 if source_hash != hash {
-                    anyhow::bail!("Package `source_hash` mismatch: {:?}", source_hash);
+                    anyhow::bail!(
+                        "Package `source_hash` mismatch: {} != {}",
+                        source_hash,
+                        hash
+                    );
                 }
             }
 
@@ -197,7 +205,7 @@ pub async fn build(
         .systems
         .iter()
         .map(|s| {
-            let target: PackageSystem = get_package_target(s);
+            let target: PackageSystem = get_package_system(s);
             target as i32
         })
         .collect::<Vec<i32>>();
@@ -273,8 +281,11 @@ pub async fn build(
                                         write(&file_path, response_bytes).await?;
                                     }
 
-                                    let source_files =
-                                        get_file_paths(&temp_dir_path, &package.source_ignores)?;
+                                    let source_files = get_file_paths(
+                                        &temp_dir_path,
+                                        package.source_excludes.clone(),
+                                        package.source_includes.clone(),
+                                    )?;
 
                                     let (temp_hash, temp_files) = hash_files(source_files).await?;
 
@@ -311,8 +322,11 @@ pub async fn build(
                                     );
                                 }
 
-                                let source_files =
-                                    get_file_paths(source_path.clone(), &package.source_ignores)?;
+                                let source_files = get_file_paths(
+                                    &source_path.clone(),
+                                    package.source_excludes.clone(),
+                                    package.source_includes.clone(),
+                                )?;
 
                                 for file_path in &source_files {
                                     if file_path.display().to_string().ends_with(".tar.zst") {

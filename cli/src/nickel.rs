@@ -11,9 +11,9 @@ use vorpal_schema::{api::package::PackageSystem, Config};
 
 pub fn load_config(
     config: &String,
-    target: PackageSystem,
+    system: PackageSystem,
 ) -> Result<(Config, String), anyhow::Error> {
-    let config_target = match target {
+    let config_system = match system {
         PackageSystem::Aarch64Linux => "aarch64-linux",
         PackageSystem::Aarch64Macos => "aaarch64-macos",
         PackageSystem::Unknown => anyhow::bail!("unknown target"),
@@ -23,7 +23,7 @@ pub fn load_config(
 
     let config_str = format!(
         "let config = import \"{}\" in config \"{}\"",
-        config, config_target,
+        config, config_system,
     );
 
     let src = Cursor::new(config_str);

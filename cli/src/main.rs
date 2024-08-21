@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
 use vorpal_schema::{
     api::package::{PackageOutput, PackageSystem},
-    get_package_target,
+    get_package_system,
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
 
@@ -20,7 +20,7 @@ pub struct Cli {
     command: Command,
 }
 
-fn get_default_target() -> String {
+fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
 }
 
@@ -30,8 +30,8 @@ enum Command {
         #[arg(short, long, default_value = "vorpal.ncl")]
         file: String,
 
-        #[arg(short, long, default_value_t = get_default_target())]
-        target: String,
+        #[arg(short, long, default_value_t = get_default_system())]
+        system: String,
 
         #[arg(short, long)]
         workers: Vec<String>,
@@ -44,8 +44,8 @@ enum Command {
         #[arg(short, long, default_value = "vorpal.ncl")]
         file: String,
 
-        #[arg(short, long, default_value_t = get_default_target())]
-        target: String,
+        #[arg(short, long, default_value_t = get_default_system())]
+        system: String,
     },
 }
 
@@ -61,30 +61,26 @@ async fn main() -> Result<(), anyhow::Error> {
     match &cli.command {
         Command::Build {
             file,
-            target,
+            system,
             workers,
         } => {
-            // Parse target
+            let mut package_system: PackageSystem = get_package_system(&system);
 
-            let mut target: PackageSystem = get_package_target(&target);
-
-            if target == PackageSystem::Unknown {
-                eprintln!("unknown target: {}", target.as_str_name());
+            if package_system == PackageSystem::Unknown {
+                eprintln!("unknown target: {}", package_system.as_str_name());
                 return Ok(());
             }
 
-            if target == PackageSystem::Aarch64Macos {
-                target = PackageSystem::Aarch64Linux;
+            if package_system == PackageSystem::Aarch64Macos {
+                package_system = PackageSystem::Aarch64Linux;
             }
-
-            // Parse workers
 
             let workers: Vec<worker::Worker> = workers
                 .iter()
                 .map(|worker| {
                     let parts: Vec<&str> = worker.split('=').collect();
                     worker::Worker {
-                        system: get_package_target(parts[0]),
+                        system: get_package_system(parts[0]),
                         uri: parts[1].to_string(),
                     }
                 })
@@ -94,8 +90,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 eprintln!("no workers specified");
                 return Ok(());
             }
-
-            // Create directories
 
             setup_paths().await?;
 
@@ -107,29 +101,22 @@ async fn main() -> Result<(), anyhow::Error> {
                 ));
             }
 
-            // Load configuration
+            let (config, config_hash) = nickel::load_config(file, package_system)?;
 
-            let (config, config_hash) = nickel::load_config(file, target)?;
-
-            // Get target
-
-            if !workers.iter().any(|w| w.system == target) {
+            if !workers.iter().any(|w| w.system == package_system) {
                 println!(
                     "no worker specified for target '{}', using default '{}'",
-                    target.as_str_name(),
+                    package_system.as_str_name(),
                     workers[0].uri
                 );
             }
-
-            // Generate build order
 
             let config_structures = config::build_structures(&config);
 
             let config_build_order = config::get_build_order(&config_structures.graph)?;
 
-            // Build packages
-
             // TODO: run builds in parallel
+
             let mut package_finished = HashMap::<String, PackageOutput>::new();
 
             for package_name in config_build_order {
@@ -145,9 +132,14 @@ async fn main() -> Result<(), anyhow::Error> {
                             }
                         }
 
-                        let output =
-                            worker::build(&config_hash, package, packages_built, target, &workers)
-                                .await?;
+                        let output = worker::build(
+                            &config_hash,
+                            package,
+                            packages_built,
+                            package_system,
+                            &workers,
+                        )
+                        .await?;
 
                         package_finished.insert(package_name, output);
                     }
@@ -172,19 +164,19 @@ async fn main() -> Result<(), anyhow::Error> {
             }
         },
 
-        Command::Validate { file, target } => {
-            let mut target: PackageSystem = get_package_target(&target);
+        Command::Validate { file, system } => {
+            let mut package_system: PackageSystem = get_package_system(&system);
 
-            if target == PackageSystem::Unknown {
-                eprintln!("unknown target: {}", target.as_str_name());
+            if package_system == PackageSystem::Unknown {
+                eprintln!("unknown target: {}", package_system.as_str_name());
                 return Ok(());
             }
 
-            if target == PackageSystem::Aarch64Macos {
-                target = PackageSystem::Aarch64Linux;
+            if package_system == PackageSystem::Aarch64Macos {
+                package_system = PackageSystem::Aarch64Linux;
             }
 
-            let (config, _) = nickel::load_config(file, target)?;
+            let (config, _) = nickel::load_config(file, package_system)?;
 
             println!("{}", serde_json::to_string_pretty(&config)?);
 

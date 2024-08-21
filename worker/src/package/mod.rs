@@ -11,12 +11,12 @@ mod prepare;
 
 #[derive(Debug, Default)]
 pub struct PackageServer {
-    pub target: PackageSystem,
+    pub system: PackageSystem,
 }
 
 impl PackageServer {
-    pub fn new(target: PackageSystem) -> Self {
-        Self { target }
+    pub fn new(system: PackageSystem) -> Self {
+        Self { system }
     }
 }
 

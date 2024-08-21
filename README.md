@@ -9,37 +9,22 @@ Vorpal's goal is to package and distribute software reliably to local (developme
 Vorpal uses a `vorpal.ncl` file written in [Nickel](https://nickel-lang.org/) that allows you to describe every aspect of your software dependencies in a reproducible way.
 
 ```
-# Vorpal's built-in schemas
-let { Config, Package, .. } = import "schema.ncl" in
+# Built-in validation contracts
+let { Config, .. } = import "schema.ncl" in
 
-# User defined variable
-let baseUrl = "https://static.rust-lang.org/dist/2024-05-02" in
+# Built-in language functions
+let { RustPackage, .. } = import "language.ncl" in
 
-# Pattern matching for values
-let sourceSystem = fun label value =>
-  value
-  |> match {
-    "Aarch64Linux" => "aarch64-unknown-linux-gnu",
-    "X8664Linux" => "x86_64-unknown-linux-gnu",
-    _ => std.fail_with "Unsupported target"
-  }
-in
-let system = "%{GetTarget | sourceSystem}" in
-
-let version = "1.78.0" in
-
-{
+# Project configuration (with `--system "<system>"` value)
+fun system => {
   packages = {
-    default = {
-      name = "cargo",
-      script = m%"
-        cp -pr cargo-%{rustVersion}-%{rustSystem}/cargo/* $output/.
-      "%,
-      source = "%{rustBaseUrl}/cargo-%{rustVersion}-%{rustSystem}.tar.gz",
-      source_hash = "d782e34151df01519de86f0acace8a755cae6fad93cb0303ddd61c2642444c1c",
-      systems = ["x86_64-darwin", "x86_64-linux"],
+    default = RustPackage {
+      name = "vorpal",
+      source = ".",
+      systems = ["aarch64-linux", "x86_64-linux"],
+      target = system
     }
-  } | Package
+  }
 } | Config
 ```
 
