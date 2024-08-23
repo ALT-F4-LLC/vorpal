@@ -34,7 +34,7 @@ Below is the existing working diagram that illustrates the platform's design:
 > [!CAUTION]
 > This design is subject to change at ANY moment and is a work in progress.
 
-![vorpal](./vorpal.webp)
+![vorpal](./vorpal.png)
 
 ## Development
 
