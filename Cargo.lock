@@ -3306,6 +3306,7 @@ dependencies = [
  "bollard",
  "clap",
  "dirs",
+ "futures-util",
  "git2",
  "hex",
  "infer",

@@ -10,6 +10,7 @@ async-tempfile = "0"
 bollard = { version = "0", features = ["buildkit"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "5"
+futures-util = "0"
 git2 = "0"
 hex = "0"
 infer = "0"

@@ -5,7 +5,7 @@ let { sandbox } = import "vorpal.lock.ncl" in
     environment | { _ : String } | default = {},
     name | String,
     packages | Array Package | default = [],
-    sandbox_image | String | default = "%{sandbox.image.name}:%{sandbox.image.tag}@sha256:%{sandbox.image.digest}",
+    sandbox_image | String | default = sandbox.image,
     script | String,
     source | String | optional,
     source_excludes | Array String | default = [],

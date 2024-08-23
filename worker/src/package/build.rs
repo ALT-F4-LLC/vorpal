@@ -1,13 +1,18 @@
 use bollard::{
+    auth::DockerCredentials,
     container::{Config, CreateContainerOptions, LogsOptions, StartContainerOptions},
+    image::ListImagesOptions,
     models::{HostConfig, Mount, MountTypeEnum},
     Docker,
 };
+use futures_util::stream::StreamExt;
+use futures_util::TryStreamExt;
 use rsa::{
     pss::{Signature, VerifyingKey},
     sha2::Sha256,
     signature::Verifier,
 };
+use std::iter::Iterator;
 use std::{
     collections::HashMap,
     env::consts::{ARCH, OS},
@@ -19,7 +24,6 @@ use tokio::{
     fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
     sync::mpsc::Sender,
 };
-use tokio_stream::StreamExt;
 use tonic::{Request, Status, Streaming};
 use tracing::debug;
 use uuid::Uuid;
@@ -402,21 +406,64 @@ pub async fn run(
     }
 
     let container_host_config = HostConfig {
+        auto_remove: Some(true),
         mounts: Some(mounts),
         ..Default::default()
     };
 
     let container_config = Config::<String> {
-        entrypoint: Some(vec!["/bin/bash".to_string()]),
         cmd: Some(vec!["/sandbox/build.sh".to_string()]),
+        entrypoint: Some(vec!["/bin/bash".to_string()]),
         env: Some(container_env),
         host_config: Some(container_host_config),
         hostname: Some(container_name),
-        image: Some(package_sandbox_image),
+        image: Some(package_sandbox_image.clone()),
         network_disabled: Some(false),
+        tty: Some(true),
         working_dir: Some("/sandbox/source".to_string()),
         ..Default::default()
     };
+
+    let mut filters = HashMap::new();
+
+    let image_name = package_sandbox_image.split('@').next().unwrap();
+
+    let image_digest = package_sandbox_image.split('@').last().unwrap();
+
+    filters.insert("reference".to_string(), vec![image_name.to_string()]);
+
+    let options = ListImagesOptions::<String> {
+        all: true,
+        filters,
+        ..Default::default()
+    };
+
+    let images_results = docker.list_images(Some(options)).await?;
+
+    let mut image_tag = String::new();
+
+    for image in images_results {
+        if image.id == image_digest {
+            image_tag = image.id;
+            break;
+        }
+    }
+
+    if image_tag.is_empty() {
+        let options = Some(bollard::image::CreateImageOptions {
+            from_image: package_sandbox_image.clone(),
+            ..Default::default()
+        });
+
+        let credentials = DockerCredentials {
+            ..Default::default()
+        };
+
+        docker
+            .create_image(options, None, Some(credentials))
+            .try_collect::<Vec<_>>()
+            .await?;
+    }
 
     let container = docker
         .create_container(container_options, container_config)
@@ -446,13 +493,6 @@ pub async fn run(
             }
         }
     }
-
-    docker
-        .remove_container(
-            &container.id,
-            None::<bollard::container::RemoveContainerOptions>,
-        )
-        .await?;
 
     let sandbox_package_files = get_file_paths(
         &sandbox_package_dir_path,

@@ -7,7 +7,7 @@ fun system =>
       default =
         RustPackage
           {
-            cargo_hash = "4baecaffa7273beac912e3f4995df69fb1470f0119c2d1a42ed0f7671b8253ee",
+            cargo_hash = "9c138a7d798a766b33388422c3b12f395f172ba93d4c4b37fcd330433ee5b55a",
             name = "vorpal",
             source = ".",
             systems = ["aarch64-linux", "x86_64-linux"],
