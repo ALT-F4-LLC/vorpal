@@ -41,7 +41,7 @@ pub async fn build(
     package: &Package,
     packages: Vec<PackageOutput>,
     target: PackageSystem,
-    worker: &String,
+    worker: &str,
 ) -> anyhow::Result<PackageOutput> {
     println!("=> name: {}", style(package.name.clone()).magenta());
 
@@ -137,7 +137,7 @@ pub async fn build(
         hash: package_source_hash.clone(),
     };
 
-    let mut worker_store = StoreServiceClient::connect(worker.clone()).await?;
+    let mut worker_store = StoreServiceClient::connect(worker.to_owned()).await?;
 
     if (worker_store.exists(worker_package.clone()).await).is_ok() {
         println!("=> cache: {:?}", worker_package);
@@ -385,7 +385,7 @@ pub async fn build(
         });
     }
 
-    let mut service = PackageServiceClient::connect(worker.clone()).await?;
+    let mut service = PackageServiceClient::connect(worker.to_owned()).await?;
 
     let response = service.build(tokio_stream::iter(request_stream)).await?;
 

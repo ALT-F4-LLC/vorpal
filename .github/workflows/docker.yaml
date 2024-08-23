@@ -7,12 +7,11 @@ on:
       - main
 
 env:
-  IMAGE_NAME: ${{ github.repository }}
-  IMAGE_SANDBOX_NAME: ${{ github.repository }}-sandbox
+  IMAGE_NAME: ${{ github.repository }}-sandbox
   REGISTRY: ghcr.io
 
 jobs:
-  sandbox:
+  package:
     runs-on: ubuntu-latest
     permissions:
       attestations: write
@@ -36,9 +35,9 @@ jobs:
         with:
           annotations: |
             org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_SANDBOX_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           labels: |
-            org.opencontainers.image.title=vorpal-sandbox
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
             org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
             org.opencontainers.image.vendor=ALT-F4-LLC
           tags: |
@@ -62,4 +61,4 @@ jobs:
         with:
           push-to-registry: true
           subject-digest: ${{ steps.push.outputs.digest }}
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_SANDBOX_NAME }}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}

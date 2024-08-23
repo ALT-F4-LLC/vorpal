@@ -1,7 +1,7 @@
 {
   sandbox = {
     image = {
-      digest = "0bdd43bb51a6b05b7009fdbe26493931aad6a41c2b9f4f08267621828375e982",
+      digest = "8ef5ca1e9057e7508f28f0fc4db1b8555ba7a9cdbc5acccb1c86542e934d2027",
       name = "ghcr.io/alt-f4-llc/vorpal-sandbox",
       tag = "edge",
     }
