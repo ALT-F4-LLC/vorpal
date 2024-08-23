@@ -1,4 +1,5 @@
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
+use console::style;
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write, File};
 use tokio::io::AsyncWriteExt;
@@ -42,7 +43,7 @@ pub async fn build(
     target: PackageSystem,
     worker: &String,
 ) -> anyhow::Result<PackageOutput> {
-    println!("=> name: {}", package.name);
+    println!("=> name: {}", style(package.name.clone()).magenta());
 
     if !packages.is_empty() {
         let packages_names = packages
@@ -51,7 +52,7 @@ pub async fn build(
             .map(|p| p.name)
             .collect::<Vec<String>>();
 
-        println!("=> packages: {}", packages_names.join(", "));
+        println!("=> packages: {}", style(packages_names.join(", ")).cyan());
     }
 
     let mut package_source_hash = config_hash.to_owned();
@@ -102,12 +103,12 @@ pub async fn build(
         }
     }
 
-    println!("=> hash: {}", package_source_hash);
+    println!("=> hash: {}", style(package_source_hash.clone()).blue());
 
     let package_path = get_package_path(&package_source_hash, &package.name);
 
     if package_path.exists() {
-        println!("=> path: {}", package_path.display());
+        println!("=> output: {}", style(package_path.display()).green());
 
         return Ok(PackageOutput {
             hash: package_source_hash,
@@ -349,10 +350,10 @@ pub async fn build(
                     for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
                         request_stream.push(BuildRequest {
                             package_environment: package.environment.clone(),
-                            package_image: None,
                             package_name: package.name.clone(),
                             package_packages: packages.clone(),
                             package_sandbox: false,
+                            package_sandbox_image: package.sandbox_image.clone(),
                             package_script: package.script.clone(),
                             package_source_data: Some(chunk.to_vec()),
                             package_source_data_signature: Some(source_signature.to_string()),
@@ -371,7 +372,7 @@ pub async fn build(
     if request_stream.is_empty() {
         request_stream.push(BuildRequest {
             package_environment: package.environment.clone(),
-            package_image: None,
+            package_sandbox_image: package.sandbox_image.clone(),
             package_name: package.name.clone(),
             package_packages: packages.clone(),
             package_sandbox: false,

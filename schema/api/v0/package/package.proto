@@ -24,12 +24,12 @@ message BuildRequest {
     bool package_sandbox = 2;
     map<string, string> package_environment = 3;
     optional bytes package_source_data = 4;
-    optional string package_image = 5;
-    optional string package_source_data_signature = 6;
-    optional string package_source_hash = 7;
-    repeated PackageOutput package_packages = 8;
-    repeated PackageSystem package_systems = 9;
-    string package_name = 10;
+    optional string package_source_data_signature = 5;
+    optional string package_source_hash = 6;
+    repeated PackageOutput package_packages = 7;
+    repeated PackageSystem package_systems = 8;
+    string package_name = 9;
+    string package_sandbox_image = 10;
     string package_script = 11;
 }
 

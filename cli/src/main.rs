@@ -68,21 +68,11 @@ pub enum CommandWorker {
 
         #[clap(default_value = "23151", long, short)]
         port: u16,
-
-        #[clap(default_value_t = get_default_sandbox_image(), long, short)]
-        sandbox_image: String,
     },
 }
 
 fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
-}
-
-fn get_default_sandbox_image() -> String {
-    let digest = "7137e2e655b655d65640a30b007d2fcbfbfbfd264966defa1f9533c416398319";
-    let name = "ghcr.io/alt-f4-llc/vorpal-sandbox";
-    let tag = "edge";
-    format!("{}:{}@sha256:{}", name, tag, digest)
 }
 
 #[tokio::main]
@@ -184,11 +174,7 @@ async fn main() -> Result<(), anyhow::Error> {
         }
 
         Command::Worker(worker) => match worker {
-            CommandWorker::Start {
-                level,
-                port,
-                sandbox_image,
-            } => {
+            CommandWorker::Start { level, port } => {
                 let mut subscriber = FmtSubscriber::builder().with_max_level(*level);
 
                 if [Level::DEBUG, Level::TRACE].contains(level) {
@@ -200,7 +186,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber");
 
-                service::start(*port, sandbox_image).await?;
+                service::start(*port).await?;
 
                 Ok(())
             }

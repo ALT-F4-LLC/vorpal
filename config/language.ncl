@@ -112,7 +112,7 @@ let { Package, .. } = import "schema.ncl" in
           done
 
           for dir in "${dirs[@]}"; do
-              if [[ "$dir" == "cli/src" || "$dir" == "worker/src" ]]; then
+              if [[ "$dir" == "cli/src" ]]; then
                   touch "$dir/main.rs"
               else
                   touch "$dir/lib.rs"
@@ -139,8 +139,7 @@ let { Package, .. } = import "schema.ncl" in
       script = m%"
           mkdir -p .cargo
 
-          cp \
-            $%{std.string.replace "-" "_" config.name}_cache/config.toml \
+          cp $%{std.string.replace "-" "_" config.name}_cache/config.toml \
             .cargo/config.toml
 
           cargo build -j $(nproc) --offline --release

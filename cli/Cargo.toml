@@ -12,6 +12,7 @@ anyhow = "1"
 async-compression = { version = "0", features = ["all"] }
 async-tempfile = "0"
 clap = { version = "4", features = ["derive"] }
+console = "0"
 git2 = "0"
 infer = "0"
 nickel-lang-core = { version = "0", default-features = false }

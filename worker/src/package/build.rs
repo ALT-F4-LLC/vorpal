@@ -3,16 +3,22 @@ use bollard::{
     models::{HostConfig, Mount, MountTypeEnum},
     Docker,
 };
-use rsa::pss::{Signature, VerifyingKey};
-use rsa::sha2::Sha256;
-use rsa::signature::Verifier;
-use std::collections::HashMap;
-use std::env::consts::{ARCH, OS};
-use std::fs::Permissions;
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-use tokio::fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write};
-use tokio::sync::mpsc::Sender;
+use rsa::{
+    pss::{Signature, VerifyingKey},
+    sha2::Sha256,
+    signature::Verifier,
+};
+use std::{
+    collections::HashMap,
+    env::consts::{ARCH, OS},
+    fs::Permissions,
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
+};
+use tokio::{
+    fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
+    sync::mpsc::Sender,
+};
 use tokio_stream::StreamExt;
 use tonic::{Request, Status, Streaming};
 use tracing::debug;
@@ -63,7 +69,7 @@ pub async fn run(
     // let mut package_sandbox = false;
     // let mut package_systems = vec![];
     let mut package_environment = HashMap::new();
-    let mut package_image = String::new();
+    let mut package_sandbox_image = String::new();
     let mut package_name = String::new();
     let mut package_packages = vec![];
     let mut package_script = String::new();
@@ -90,21 +96,22 @@ pub async fn run(
             package_source_hash = hash;
         }
 
-        if let Some(image) = chunk.package_image {
-            package_image = image;
-        }
-
         // package_sandbox = chunk.package_sandbox;
         // package_systems = chunk.package_systems;
         package_environment = chunk.package_environment;
         package_name = chunk.package_name;
         package_packages = chunk.package_packages;
+        package_sandbox_image = chunk.package_sandbox_image;
         package_script = chunk.package_script;
         package_target = PackageSystem::try_from(chunk.package_target)?;
     }
 
     if package_name.is_empty() {
         send_error(tx, "source name is empty".to_string()).await?
+    }
+
+    if package_sandbox_image.is_empty() {
+        send_error(tx, "sandbox image is empty".to_string()).await?
     }
 
     if package_target == Unknown {
@@ -399,19 +406,13 @@ pub async fn run(
         ..Default::default()
     };
 
-    let package_image_default = "ghcr.io/alt-f4-llc/vorpal-sandbox:edge".to_string();
-
-    if package_image.is_empty() {
-        package_image = package_image_default;
-    }
-
     let container_config = Config::<String> {
         entrypoint: Some(vec!["/bin/bash".to_string()]),
         cmd: Some(vec!["/sandbox/build.sh".to_string()]),
         env: Some(container_env),
         host_config: Some(container_host_config),
         hostname: Some(container_name),
-        image: Some(package_image),
+        image: Some(package_sandbox_image),
         network_disabled: Some(false),
         working_dir: Some("/sandbox/source".to_string()),
         ..Default::default()

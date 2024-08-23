@@ -10,16 +10,12 @@ mod build;
 
 #[derive(Debug, Default)]
 pub struct PackageServer {
-    pub sandbox_image: String,
     pub system: PackageSystem,
 }
 
 impl PackageServer {
-    pub fn new(sandbox_image: String, system: PackageSystem) -> Self {
-        Self {
-            sandbox_image,
-            system,
-        }
+    pub fn new(system: PackageSystem) -> Self {
+        Self { system }
     }
 }
 

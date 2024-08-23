@@ -13,7 +13,7 @@ use vorpal_schema::{
 };
 use vorpal_store::paths::{get_public_key_path, setup_paths};
 
-pub async fn start(port: u16, sandbox_image: &String) -> Result<(), anyhow::Error> {
+pub async fn start(port: u16) -> Result<(), anyhow::Error> {
     setup_paths().await?;
 
     let public_key_path = get_public_key_path();
@@ -37,10 +37,7 @@ pub async fn start(port: u16, sandbox_image: &String) -> Result<(), anyhow::Erro
     info!("worker address: {}", addr);
 
     Server::builder()
-        .add_service(PackageServiceServer::new(PackageServer::new(
-            sandbox_image.to_string(),
-            system,
-        )))
+        .add_service(PackageServiceServer::new(PackageServer::new(system)))
         .add_service(StoreServiceServer::new(StoreServer::default()))
         .serve(addr)
         .await?;
