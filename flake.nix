@@ -58,7 +58,7 @@
           default = buildRustPackage {
             inherit pname version;
             buildInputs = [openssl] ++ optionals isDarwin [CoreServices SystemConfiguration Security];
-            cargoHash = "sha256-I5LpVz+T1qSWL0fSyzpaopNfqx/M6wmsYVUY4EKQ6G0=";
+            cargoHash = "sha256-0tvfd1uD/SbuNCu0b3mE8y4wszNvKRx3tUVm/dZvCIY=";
             nativeBuildInputs = [pkg-config protobuf];
             src = ./.;
           };
