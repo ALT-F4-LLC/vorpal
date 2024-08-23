@@ -10,12 +10,16 @@ mod build;
 
 #[derive(Debug, Default)]
 pub struct PackageServer {
+    pub sandbox_image: String,
     pub system: PackageSystem,
 }
 
 impl PackageServer {
-    pub fn new(system: PackageSystem) -> Self {
-        Self { system }
+    pub fn new(sandbox_image: String, system: PackageSystem) -> Self {
+        Self {
+            sandbox_image,
+            system,
+        }
     }
 }
 
@@ -30,7 +34,7 @@ impl PackageService for PackageServer {
         let (tx, rx) = mpsc::channel(100);
 
         tokio::spawn(async move {
-            match build::run(&tx, request).await {
+            match build::run(request, &tx).await {
                 Ok(_) => (),
                 Err(e) => {
                     tx.send(Err(Status::internal(e.to_string()))).await.unwrap();

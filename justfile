@@ -1,19 +1,16 @@
 _default:
     just --list
 
-# build cli (only)
-build-cli:
+# build everything
+build: build-sandbox
     cargo build -j $(nproc) --package "vorpal-cli"
 
 # build sandbox (only)
 build-sandbox tag="edge":
     docker buildx build \
-        --file "Dockerfile" \
+        --file "Dockerfile.sandbox" \
         --tag "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
         .
-
-# build everything
-build: build-cli build-sandbox
 
 # check cargo
 check-cargo:
@@ -49,12 +46,9 @@ lint:
 package profile="default":
     nix build --json --no-link --print-build-logs ".#{{ profile }}"
 
-# start worker (only)
-start-worker:
-    cargo run --package "vorpal-worker"
-
-# start everything
-start: start-worker
+# start (worker)
+start:
+    cargo run --package "vorpal-cli" -- worker start
 
 # test cargo
 test-cargo:

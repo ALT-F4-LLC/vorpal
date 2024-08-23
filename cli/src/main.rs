@@ -1,12 +1,19 @@
+use crate::worker::build;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
+use tracing::Level;
+use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
-    api::package::{PackageOutput, PackageSystem},
+    api::package::{
+        PackageOutput, PackageSystem,
+        PackageSystem::{Aarch64Linux, Aarch64Macos, Unknown},
+    },
     get_package_system,
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
+use vorpal_worker::service;
 
 mod config;
 mod nickel;
@@ -20,38 +27,62 @@ pub struct Cli {
     command: Command,
 }
 
+#[derive(Subcommand)]
+enum Command {
+    Build {
+        #[arg(default_value = "vorpal.ncl", long, short)]
+        file: String,
+
+        #[arg(default_value_t = get_default_system(), long, short)]
+        system: String,
+
+        #[clap(default_value = "http://localhost:23151", long, short)]
+        worker: String,
+    },
+
+    #[clap(subcommand)]
+    Keys(CommandKeys),
+
+    Validate {
+        #[arg(default_value = "vorpal.ncl", long, short)]
+        file: String,
+
+        #[arg(default_value_t = get_default_system(), long, short)]
+        system: String,
+    },
+
+    #[clap(subcommand)]
+    Worker(CommandWorker),
+}
+
+#[derive(Subcommand)]
+pub enum CommandKeys {
+    Generate {},
+}
+
+#[derive(Subcommand)]
+pub enum CommandWorker {
+    Start {
+        #[clap(default_value_t = Level::INFO, global = true, long)]
+        level: Level,
+
+        #[clap(default_value = "23151", long, short)]
+        port: u16,
+
+        #[clap(default_value_t = get_default_sandbox_image(), long, short)]
+        sandbox_image: String,
+    },
+}
+
 fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
 }
 
-#[derive(Subcommand)]
-enum Command {
-    Build {
-        #[arg(short, long, default_value = "vorpal.ncl")]
-        file: String,
-
-        #[arg(short, long, default_value_t = get_default_system())]
-        system: String,
-
-        #[arg(short, long)]
-        workers: Vec<String>,
-    },
-
-    #[clap(subcommand)]
-    Keys(Keys),
-
-    Validate {
-        #[arg(short, long, default_value = "vorpal.ncl")]
-        file: String,
-
-        #[arg(short, long, default_value_t = get_default_system())]
-        system: String,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum Keys {
-    Generate {},
+fn get_default_sandbox_image() -> String {
+    let digest = "7137e2e655b655d65640a30b007d2fcbfbfbfd264966defa1f9533c416398319";
+    let name = "ghcr.io/alt-f4-llc/vorpal-sandbox";
+    let tag = "edge";
+    format!("{}:{}@sha256:{}", name, tag, digest)
 }
 
 #[tokio::main]
@@ -62,33 +93,20 @@ async fn main() -> Result<(), anyhow::Error> {
         Command::Build {
             file,
             system,
-            workers,
+            worker,
         } => {
-            let mut package_system: PackageSystem = get_package_system(system);
+            let mut system: PackageSystem = get_package_system(system);
 
-            if package_system == PackageSystem::Unknown {
-                eprintln!("unknown target: {}", package_system.as_str_name());
-                return Ok(());
+            if system == Unknown {
+                anyhow::bail!("unknown target: {}", system.as_str_name());
             }
 
-            if package_system == PackageSystem::Aarch64Macos {
-                package_system = PackageSystem::Aarch64Linux;
+            if system == Aarch64Macos {
+                system = Aarch64Linux;
             }
 
-            let workers: Vec<worker::Worker> = workers
-                .iter()
-                .map(|worker| {
-                    let parts: Vec<&str> = worker.split('=').collect();
-                    worker::Worker {
-                        system: get_package_system(parts[0]),
-                        uri: parts[1].to_string(),
-                    }
-                })
-                .collect();
-
-            if workers.is_empty() {
-                eprintln!("no workers specified");
-                return Ok(());
+            if worker.is_empty() {
+                anyhow::bail!("no worker specified");
             }
 
             setup_paths().await?;
@@ -96,50 +114,33 @@ async fn main() -> Result<(), anyhow::Error> {
             let private_key_path = get_private_key_path();
 
             if !private_key_path.exists() {
-                return Err(anyhow::anyhow!(
+                anyhow::bail!(
                     "private key not found - run 'vorpal keys generate' or copy from worker"
-                ));
-            }
-
-            let (config, config_hash) = nickel::load_config(file, package_system)?;
-
-            if !workers.iter().any(|w| w.system == package_system) {
-                println!(
-                    "no worker specified for target '{}', using default '{}'",
-                    package_system.as_str_name(),
-                    workers[0].uri
                 );
             }
+
+            let (config, config_hash) = nickel::load_config(file, system)?;
 
             let config_structures = config::build_structures(&config);
 
             let config_build_order = config::get_build_order(&config_structures.graph)?;
 
-            // TODO: run builds in parallel
-
             let mut package_finished = HashMap::<String, PackageOutput>::new();
 
             for package_name in config_build_order {
                 match config_structures.map.get(&package_name) {
-                    None => eprintln!("Package not found: {}", package_name),
+                    None => anyhow::bail!("Package not found: {}", package_name),
                     Some(package) => {
-                        let mut packages_built = vec![];
+                        let mut packages = vec![];
 
                         for p in &package.packages {
                             match package_finished.get(&p.name) {
                                 None => eprintln!("Package not found: {}", p.name),
-                                Some(package) => packages_built.push(package.clone()),
+                                Some(package) => packages.push(package.clone()),
                             }
                         }
 
-                        let output = worker::build(
-                            &config_hash,
-                            package,
-                            packages_built,
-                            package_system,
-                            &workers,
-                        )
-                        .await?;
+                        let output = build(&config_hash, package, packages, system, worker).await?;
 
                         package_finished.insert(package_name, output);
                     }
@@ -150,7 +151,7 @@ async fn main() -> Result<(), anyhow::Error> {
         }
 
         Command::Keys(keys) => match keys {
-            Keys::Generate {} => {
+            CommandKeys::Generate {} => {
                 let key_dir_path = vorpal_store::paths::get_key_dir_path();
 
                 let private_key_path = vorpal_store::paths::get_private_key_path();
@@ -167,13 +168,12 @@ async fn main() -> Result<(), anyhow::Error> {
         Command::Validate { file, system } => {
             let mut package_system: PackageSystem = get_package_system(system);
 
-            if package_system == PackageSystem::Unknown {
-                eprintln!("unknown target: {}", package_system.as_str_name());
-                return Ok(());
+            if package_system == Unknown {
+                anyhow::bail!("unknown target: {}", system);
             }
 
-            if package_system == PackageSystem::Aarch64Macos {
-                package_system = PackageSystem::Aarch64Linux;
+            if package_system == Aarch64Macos {
+                package_system = Aarch64Linux;
             }
 
             let (config, _) = nickel::load_config(file, package_system)?;
@@ -182,5 +182,28 @@ async fn main() -> Result<(), anyhow::Error> {
 
             Ok(())
         }
+
+        Command::Worker(worker) => match worker {
+            CommandWorker::Start {
+                level,
+                port,
+                sandbox_image,
+            } => {
+                let mut subscriber = FmtSubscriber::builder().with_max_level(*level);
+
+                if [Level::DEBUG, Level::TRACE].contains(level) {
+                    subscriber = subscriber.with_file(true).with_line_number(true);
+                }
+
+                let subscriber = subscriber.finish();
+
+                tracing::subscriber::set_global_default(subscriber)
+                    .expect("setting default subscriber");
+
+                service::start(*port, sandbox_image).await?;
+
+                Ok(())
+            }
+        },
     }
 }

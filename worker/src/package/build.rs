@@ -19,7 +19,10 @@ use tracing::debug;
 use uuid::Uuid;
 use vorpal_notary::get_public_key;
 use vorpal_schema::{
-    api::package::{BuildRequest, BuildResponse, PackageSystem},
+    api::package::{
+        BuildRequest, BuildResponse, PackageSystem,
+        PackageSystem::{Aarch64Linux, Aarch64Macos, Unknown},
+    },
     get_package_system,
 };
 use vorpal_store::{
@@ -54,21 +57,21 @@ async fn send_error(
 }
 
 pub async fn run(
-    tx: &Sender<Result<BuildResponse, Status>>,
     request: Request<Streaming<BuildRequest>>,
+    tx: &Sender<Result<BuildResponse, Status>>,
 ) -> Result<(), anyhow::Error> {
+    // let mut package_sandbox = false;
+    // let mut package_systems = vec![];
     let mut package_environment = HashMap::new();
-    let mut package_source_hash = String::new();
     let mut package_image = String::new();
     let mut package_name = String::new();
     let mut package_packages = vec![];
-    // let mut package_sandbox = false;
     let mut package_script = String::new();
     let mut package_source_data: Vec<u8> = Vec::new();
     let mut package_source_data_chunks = 0;
     let mut package_source_data_signature = String::new();
-    // let mut package_systems = vec![];
-    let mut package_target = PackageSystem::Unknown;
+    let mut package_source_hash = String::new();
+    let mut package_target = Unknown;
     let mut stream = request.into_inner();
 
     while let Some(chunk) = stream.next().await {
@@ -91,12 +94,12 @@ pub async fn run(
             package_image = image;
         }
 
+        // package_sandbox = chunk.package_sandbox;
+        // package_systems = chunk.package_systems;
         package_environment = chunk.package_environment;
         package_name = chunk.package_name;
         package_packages = chunk.package_packages;
-        // package_sandbox = chunk.package_sandbox;
         package_script = chunk.package_script;
-        // package_systems = chunk.package_systems;
         package_target = PackageSystem::try_from(chunk.package_target)?;
     }
 
@@ -104,14 +107,14 @@ pub async fn run(
         send_error(tx, "source name is empty".to_string()).await?
     }
 
-    if package_target == PackageSystem::Unknown {
+    if package_target == Unknown {
         send_error(tx, "unsupported build target".to_string()).await?
     }
 
     let mut worker_system = get_package_system(format!("{}-{}", ARCH, OS).as_str());
 
-    if worker_system == PackageSystem::Aarch64Macos {
-        worker_system = PackageSystem::Aarch64Linux; // docker uses linux on macos
+    if worker_system == Aarch64Macos {
+        worker_system = Aarch64Linux; // docker uses linux on macos
     }
 
     if package_target != worker_system {

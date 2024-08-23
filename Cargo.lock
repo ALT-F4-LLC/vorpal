@@ -3227,11 +3227,14 @@ dependencies = [
  "tokio-stream",
  "tokio-tar",
  "tonic",
+ "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "vorpal-notary",
  "vorpal-schema",
  "vorpal-store",
+ "vorpal-worker",
 ]
 
 [[package]]

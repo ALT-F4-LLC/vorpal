@@ -25,12 +25,6 @@ use vorpal_store::{
     temps::create_temp_dir,
 };
 
-#[derive(Clone, Debug)]
-pub struct Worker {
-    pub system: PackageSystem,
-    pub uri: String,
-}
-
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
                                          //
 #[derive(Debug, PartialEq, Eq)]
@@ -46,7 +40,7 @@ pub async fn build(
     package: &Package,
     packages: Vec<PackageOutput>,
     target: PackageSystem,
-    workers: &[Worker],
+    worker: &String,
 ) -> anyhow::Result<PackageOutput> {
     println!("=> name: {}", package.name);
 
@@ -136,19 +130,13 @@ pub async fn build(
         });
     }
 
-    let worker = workers.first().unwrap();
-
-    if worker.system != target {
-        anyhow::bail!("Worker system mismatch: {:?}", worker.system);
-    }
-
     let worker_package = StoreRequest {
         kind: StoreKind::Package as i32,
         name: package.name.clone(),
         hash: package_source_hash.clone(),
     };
 
-    let mut worker_store = StoreServiceClient::connect(worker.uri.clone()).await?;
+    let mut worker_store = StoreServiceClient::connect(worker.clone()).await?;
 
     if (worker_store.exists(worker_package.clone()).await).is_ok() {
         println!("=> cache: {:?}", worker_package);
@@ -396,7 +384,7 @@ pub async fn build(
         });
     }
 
-    let mut service = PackageServiceClient::connect(worker.uri.clone()).await?;
+    let mut service = PackageServiceClient::connect(worker.clone()).await?;
 
     let response = service.build(tokio_stream::iter(request_stream)).await?;
 

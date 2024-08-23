@@ -22,8 +22,11 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0"
 tokio-tar = "0"
 tonic = "0"
+tracing = "0"
+tracing-subscriber = "0"
 url = "2"
 uuid = { version = "1", features = ["v7"] }
 vorpal-notary = { path = "../notary" }
 vorpal-schema = { path = "../schema" }
 vorpal-store = { path = "../store" }
+vorpal-worker = { path = "../worker" }
