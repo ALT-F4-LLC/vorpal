@@ -55,8 +55,8 @@ test-cargo:
     cargo test -j $(nproc)
 
 # test nickel
-test-nickel:
-    nickel export "vorpal.ncl"
+test-nickel system="x86_64-linux":
+    nickel export <<< 'let config = import "vorpal.ncl" in config "{{ system }}"'
 
 # test everything
 test: test-cargo test-nickel
