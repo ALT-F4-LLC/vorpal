@@ -11,11 +11,12 @@
 
       perSystem = {
         config,
+        inputs',
         pkgs,
         system,
         ...
       }: let
-        inherit (pkgs) alejandra clippy darwin grpcurl just jq lib mkShell openssl pkg-config protobuf rustfmt rustPlatform stdenv;
+        inherit (pkgs) alejandra clippy darwin grpcurl just jq lib mkShell nickel openssl pkg-config protobuf rustfmt rustPlatform stdenv;
         inherit (darwin.apple_sdk.frameworks) CoreServices SystemConfiguration Security;
         inherit (lib) optionals;
         inherit (rustPlatform) buildRustPackage;
@@ -38,8 +39,16 @@
 
         devShells = {
           default = mkShell {
+            NICKEL_IMPORT_PATH = ".:./.vorpal/packages";
             inputsFrom = [config.packages.default];
-            nativeBuildInputs = [clippy grpcurl jq just rustfmt];
+            packages = [
+              clippy
+              grpcurl
+              jq
+              just
+              nickel
+              rustfmt
+            ];
           };
         };
 
@@ -49,7 +58,7 @@
           default = buildRustPackage {
             inherit pname version;
             buildInputs = [openssl] ++ optionals isDarwin [CoreServices SystemConfiguration Security];
-            cargoSha256 = "sha256-aOET7RYbm5puxtJieYYYaaayDfxa7AHiM1CZqbCOLJU=";
+            cargoHash = "sha256-QpfL3JQ+Amzr5TXjmceefY4NZtW0p/C6g9twpWYlN3s=";
             nativeBuildInputs = [pkg-config protobuf];
             src = ./.;
           };

@@ -1,0 +1,11 @@
+[package]
+edition = "2021"
+name = "vorpal-notary"
+version = "0.1.0"
+
+[dependencies]
+anyhow = "1"
+rand = "0"
+rsa = { version = "0", features = ["sha2"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0"

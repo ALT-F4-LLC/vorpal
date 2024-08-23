@@ -7,12 +7,11 @@ on:
       - main
 
 env:
-  IMAGE_NAME: ${{ github.repository }}
-  IMAGE_SANDBOX_NAME: ${{ github.repository }}-sandbox
+  IMAGE_NAME: ${{ github.repository }}-sandbox
   REGISTRY: ghcr.io
 
 jobs:
-  build:
+  package:
     runs-on: ubuntu-latest
     permissions:
       attestations: write
@@ -34,58 +33,15 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
+          annotations: |
+            org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
+            org.opencontainers.image.vendor=ALT-F4-LLC
           tags: |
             type=edge,branch=main
-            type=ref,event=pr
-            type=ref,event=tag
-
-      - uses: actions/checkout@v4
-
-      - id: push
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          context: .
-          labels: ${{ steps.meta.outputs.labels }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-
-      - if: github.event_name != 'pull_request'
-        uses: actions/attest-build-provenance@v1
-        with:
-          push-to-registry: true
-          subject-digest: ${{ steps.push.outputs.digest }}
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
-
-  build-sandbox:
-    runs-on: ubuntu-latest
-    permissions:
-      attestations: write
-      contents: read
-      id-token: write
-      packages: write
-    steps:
-      - uses: docker/setup-qemu-action@v3
-
-      - uses: docker/setup-buildx-action@v3
-
-      - if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          password: ${{ secrets.GITHUB_TOKEN }}
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_SANDBOX_NAME }}
-          tags: |
-            type=edge,branch=main
-            type=ref,event=pr
-            type=ref,event=tag
 
       - uses: actions/checkout@v4
 
@@ -97,6 +53,7 @@ jobs:
           context: .
           file: Dockerfile.sandbox
           labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
 
@@ -105,4 +62,4 @@ jobs:
         with:
           push-to-registry: true
           subject-digest: ${{ steps.push.outputs.digest }}
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_SANDBOX_NAME }}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}

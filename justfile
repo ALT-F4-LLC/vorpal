@@ -1,103 +1,73 @@
-docker_build_cache := `echo "$PWD/.buildx"`
-
 _default:
     just --list
 
-# build (cargo)
-build:
-    cargo build --package vorpal
+# build everything
+build: build-sandbox
+    cargo build -j $(nproc) --package "vorpal-cli"
 
-# build image (docker)
-build-image tag="dev":
+# build sandbox (only)
+build-sandbox tag="edge":
     docker buildx build \
-        --cache-from "type=local,src={{ docker_build_cache }}" \
-        --cache-to "type=local,dest={{ docker_build_cache }},mode=max" \
-        --tag "vorpal:{{ tag }}" \
-        .
-
-# build image sandbox (docker)
-build-image-sandbox tag="dev":
-    docker buildx build \
-        --cache-from "type=local,src={{ docker_build_cache }}" \
-        --cache-to "type=local,dest={{ docker_build_cache }},mode=max" \
         --file "Dockerfile.sandbox" \
-        --tag "vorpal-sandbox:{{ tag }}" \
+        --tag "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
         .
 
-# check flake (nix)
-check:
+# check cargo
+check-cargo:
+    cargo check -j $(nproc)
+
+# check nix
+check-nix:
     nix flake check
 
-# clean environment
-clean: stop-docker
-    rm -rf ./.buildx ./target
+# check everything
+check: check-cargo check-nix
 
-# format code (cargo & nix)
-format:
-    cargo fmt --check --package vorpal --verbose
+# clean everything
+clean:
+    rm -rf ./target
+
+# format cargo
+format-cargo:
+    cargo fmt --check --verbose
+
+# format nix
+format-nix:
     nix fmt -- --check .
 
-generate: build
-    cargo run keys generate
+# format everything
+format: format-cargo format-nix
 
-# lint code (cargo)
+# lint
 lint:
     cargo clippy -- -D warnings
 
-logs service:
-    docker container logs --follow --tail 100 "vorpal-{{ service }}"
-
-# build and install (nix)
+# package (nix)
 package profile="default":
     nix build --json --no-link --print-build-logs ".#{{ profile }}"
 
-package-buildx-cache:
-    tar --create --gzip --file buildx.tar.gz --verbose .buildx
+# start (worker)
+start:
+    cargo run --package "vorpal-cli" -- worker start
 
-start-agent workers: build
-    sudo ./target/debug/vorpal services agent --workers "{{ workers }}"
+# test cargo
+test-cargo:
+    cargo test -j $(nproc)
 
-start-worker: build
-    sudo ./target/debug/vorpal services worker
+# test nickel
+test-nickel:
+    nickel export "vorpal.ncl"
 
-# test (cargo)
-test:
-    cargo test
+# test everything
+test: test-cargo test-nickel
 
-start-docker image="vorpal:dev" system="x86_64-linux": build-image build-image-sandbox
-    #!/usr/bin/env bash
-    set -euxo pipefail
-    docker network create "vorpal"
-    docker container run \
-        --detach \
-        --interactive \
-        --name "vorpal-worker" \
-        --network "vorpal" \
-        --rm \
-        --tty \
-        --volume "/var/lib/vorpal:/var/lib/vorpal" \
-        --volume "/var/run/docker.sock:/var/run/docker.sock" \
-        {{ image }} \
-        services worker
-    docker container run \
-        --detach \
-        --interactive \
-        --name "vorpal-agent" \
-        --network "vorpal" \
-        --publish "127.0.0.1:15323:15323" \
-        --rm \
-        --tty \
-        --volume "${PWD}:${PWD}" \
-        --volume "/var/lib/vorpal:/var/lib/vorpal" \
-        --volume "/var/run/docker.sock:/var/run/docker.sock" \
-        {{ image }} \
-        services agent --workers "{{ system }}=http://vorpal-worker:23151"
+# update cargo
+update-cargo:
+    cargo update
 
-stop-docker:
-    docker container rm --force "vorpal-agent"
-    docker container rm --force "vorpal-worker"
-    docker network rm --force "vorpal"
-
-# update flake (nix)
-update:
+# update nix
+update-nix:
     nix flake update
+
+# update everything
+update: update-cargo update-nix
