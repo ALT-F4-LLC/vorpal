@@ -1,6 +1,5 @@
 .buildx
 .direnv
-.vorpal
 result
 target
 vorpal

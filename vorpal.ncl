@@ -1,5 +1,5 @@
-let { Config, .. } = import "schema.ncl" in
-let { RustPackage, .. } = import "language.ncl" in
+let { Config, .. } = import "@vorpal/schema.ncl" in
+let { RustPackage, .. } = import "@vorpal/language.ncl" in
 
 fun system =>
   {

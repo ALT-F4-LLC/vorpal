@@ -39,7 +39,7 @@
 
         devShells = {
           default = mkShell {
-            NICKEL_IMPORT_PATH = ".:config";
+            NICKEL_IMPORT_PATH = ".:./.vorpal/packages";
             inputsFrom = [config.packages.default];
             packages = [
               clippy

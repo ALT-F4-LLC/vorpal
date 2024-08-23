@@ -1,4 +1,4 @@
-let { Package, .. } = import "schema.ncl" in
+let { Package, .. } = import "@vorpal/schema.ncl" in
 {
   RustPackage = fun config =>
     let protocSystem = fun label value =>
