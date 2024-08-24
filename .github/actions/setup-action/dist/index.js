@@ -28815,6 +28815,7 @@ exports.run = run;
 const core = __importStar(__nccwpck_require__(2186));
 const toolcache = __importStar(__nccwpck_require__(7784));
 const os = __importStar(__nccwpck_require__(2037));
+const fs = __importStar(__nccwpck_require__(7147));
 const DEFAULT_VERSION = '0.1.0-rc.0';
 const SUPPORTED_SYSTEMS = ['x64-linux'];
 /**
@@ -28837,8 +28838,11 @@ async function run() {
                 break;
         }
         const archivePath = await toolcache.downloadTool(`${baseUrl}/${version}/vorpal-${system}.tar.gz`);
-        const binaryPath = await toolcache.extractTar(archivePath, '/tmp/vorpal');
-        core.addPath(binaryPath);
+        const vorpalBinPath = '/tmp/vorpal/bin';
+        fs.mkdirSync(vorpalBinPath, { recursive: true });
+        const binaryPath = await toolcache.extractTar(archivePath, vorpalBinPath);
+        core.info(`Extracted binary to ${binaryPath}`);
+        core.addPath(vorpalBinPath);
     }
     catch (error) {
         // Fail the workflow run if an error occurs

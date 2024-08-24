@@ -1,6 +1,7 @@
 import * as core from '@actions/core'
 import * as toolcache from '@actions/tool-cache'
 import * as os from 'os'
+import * as fs from 'fs'
 
 const DEFAULT_VERSION = '0.1.0-rc.0'
 
@@ -34,9 +35,15 @@ export async function run(): Promise<void> {
       `${baseUrl}/${version}/vorpal-${system}.tar.gz`
     )
 
-    const binaryPath = await toolcache.extractTar(archivePath, '/tmp/vorpal')
+    const vorpalBinPath = '/tmp/vorpal/bin'
 
-    core.addPath(binaryPath)
+    fs.mkdirSync(vorpalBinPath, { recursive: true })
+
+    const binaryPath = await toolcache.extractTar(archivePath, vorpalBinPath)
+
+    core.info(`Extracted binary to ${binaryPath}`)
+
+    core.addPath(vorpalBinPath)
   } catch (error) {
     // Fail the workflow run if an error occurs
     if (error instanceof Error) core.setFailed(error.message)
