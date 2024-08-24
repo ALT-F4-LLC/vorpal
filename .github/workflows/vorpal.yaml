@@ -16,4 +16,10 @@ jobs:
         with:
           version: 0.1.0-rc.0
 
+      - run: ls -alh /tmp/vorpal
+
+      - run: ls -alh /tmp/vorpal/bin
+
+      - run: file /tmp/vorpal/bin/vorpal
+
       - run: vorpal --help
