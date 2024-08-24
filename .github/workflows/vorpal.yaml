@@ -10,6 +10,8 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: ./.github/actions/setup-action
         with:
           version: 0.1.0-rc.0
