@@ -10,7 +10,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: .github/actions/setup-action
+      - uses: ./.github/actions/setup-action
         with:
           version: 0.1.0-rc.0
 
