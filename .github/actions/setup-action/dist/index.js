@@ -28816,7 +28816,7 @@ const core = __importStar(__nccwpck_require__(2186));
 const toolcache = __importStar(__nccwpck_require__(7784));
 const os = __importStar(__nccwpck_require__(2037));
 const DEFAULT_VERSION = '0.1.0-rc.0';
-const SUPPORTED_SYSTEMS = ['x86_64-linux'];
+const SUPPORTED_SYSTEMS = ['x64-linux'];
 /**
  * The main function for the action.
  * @returns {Promise<void>} Resolves when the action is complete.
@@ -28827,9 +28827,14 @@ async function run() {
         if (version === '')
             version = DEFAULT_VERSION;
         const baseUrl = 'https://github.com/ALT-F4-LLC/vorpal/releases/download';
-        const system = `${os.arch()}-${os.platform()}`;
+        let system = `${os.arch()}-${os.platform()}`;
         if (!SUPPORTED_SYSTEMS.includes(system)) {
             throw new Error(`Unsupported system: ${system}`);
+        }
+        switch (system) {
+            case 'x64-linux':
+                system = 'x86_64-linux';
+                break;
         }
         const archivePath = await toolcache.downloadTool(`${baseUrl}/${version}/vorpal-${system}.tar.gz`);
         const binaryPath = await toolcache.extractTar(archivePath, '/tmp/vorpal');

@@ -4,7 +4,7 @@ import * as os from 'os'
 
 const DEFAULT_VERSION = '0.1.0-rc.0'
 
-const SUPPORTED_SYSTEMS = ['x86_64-linux']
+const SUPPORTED_SYSTEMS = ['x64-linux']
 
 /**
  * The main function for the action.
@@ -18,10 +18,16 @@ export async function run(): Promise<void> {
 
     const baseUrl = 'https://github.com/ALT-F4-LLC/vorpal/releases/download'
 
-    const system = `${os.arch()}-${os.platform()}`
+    let system = `${os.arch()}-${os.platform()}`
 
     if (!SUPPORTED_SYSTEMS.includes(system)) {
       throw new Error(`Unsupported system: ${system}`)
+    }
+
+    switch (system) {
+      case 'x64-linux':
+        system = 'x86_64-linux'
+        break
     }
 
     const archivePath = await toolcache.downloadTool(

@@ -2,22 +2,14 @@ name: 'setup-action'
 author: 'ALT-F4-LLC'
 description: 'Setup Vorpal in a pipeline.'
 
-# Add your action's branding here. This will appear on the GitHub Marketplace.
 branding:
   color: 'red'
   icon: 'heart'
 
-# Define your inputs here.
 inputs:
-  milliseconds:
-    default: '1000'
-    description: 'Your input description here'
-    required: true
-
-# Define your outputs here.
-outputs:
-  time:
-    description: 'Your output description here'
+  version:
+    default: 0.1.0-rc.0
+    description: Vorpal binary version to install.
 
 runs:
   main: dist/index.js
