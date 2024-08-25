@@ -7,10 +7,9 @@ else
     TTY_OPTS=""
 fi
 
-docker container run \
+docker container run ${TTY_OPTS} \
     --interactive \
     --rm \
-    "${TTY_OPTS}" \
     --user "$(id -u):$(id -g)" \
     --volume "${HOME}/.cargo:/home/devuser/.cargo" \
     --volume "${PWD}:${PWD}" \
