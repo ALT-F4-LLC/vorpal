@@ -12,17 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: just format
-        shell: $GITHUB_WORKSPACE/dev.sh
+      - run: ./dev.sh just format
 
-      - run: just lint
-        shell: $GITHUB_WORKSPACE/dev.sh
+      - run: ./dev.sh just lint
 
-      - run: just check
-        shell: $GITHUB_WORKSPACE/dev.sh
+      - run: ./dev.sh just check
 
-      - run: just test
-        shell: $GITHUB_WORKSPACE/dev.sh
+      - run: ./dev.sh just test
 
-      - run: just build
-        shell: $GITHUB_WORKSPACE/dev.sh
+      - run: ./dev.sh just build
