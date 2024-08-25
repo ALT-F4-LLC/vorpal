@@ -8,5 +8,5 @@ docker container run \
     --volume "${HOME}/.cargo:/home/devuser/.cargo" \
     --volume "${PWD}:${PWD}" \
     --workdir "${PWD}" \
-    ghcr.io/alt-f4-llc/vorpal-dev:edge \
+    ghcr.io/alt-f4-llc/vorpal:edge-dev \
     rust-analyzer "${@}"
