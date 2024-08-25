@@ -1,0 +1,13 @@
+#!/bin/bash
+set -eo pipefail
+
+docker container run \
+    --interactive \
+    --rm \
+    --tty \
+    --user "$(id -u):$(id -g)" \
+    --volume "${HOME}/.cargo:/home/devuser/.cargo" \
+    --volume "${PWD}:${PWD}" \
+    --workdir "${PWD}" \
+    ghcr.io/alt-f4-llc/vorpal-dev:edge \
+    cargo "$@"

@@ -1,0 +1,12 @@
+#!/bin/bash
+set -eo pipefail
+
+docker container run \
+    --interactive \
+    --rm \
+    --user "$(id -u):$(id -g)" \
+    --volume "${HOME}/.cargo:/home/devuser/.cargo" \
+    --volume "${PWD}:${PWD}" \
+    --workdir "${PWD}" \
+    ghcr.io/alt-f4-llc/vorpal-dev:edge \
+    rust-analyzer "${@}"

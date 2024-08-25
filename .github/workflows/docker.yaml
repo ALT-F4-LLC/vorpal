@@ -11,7 +11,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  package:
+  vorpal-sandbox:
     runs-on: ubuntu-latest
     permissions:
       attestations: write

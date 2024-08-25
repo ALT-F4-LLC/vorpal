@@ -1,0 +1,23 @@
+name: dev
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: ./shell.sh just format
+
+      - run: ./shell.sh just lint
+
+      - run: ./shell.sh just check
+
+      - run: ./shell.sh just test
+
+      - run: ./shell.sh just build
