@@ -12,12 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: ./shell.sh just format
+      - run: just format
+        shell: ./dev.sh
 
-      - run: ./shell.sh just lint
+      - run: just lint
+        shell: ./dev.sh
 
-      - run: ./shell.sh just check
+      - run: just check
+        shell: ./dev.sh
 
-      - run: ./shell.sh just test
+      - run: just test
+        shell: ./dev.sh
 
-      - run: ./shell.sh just build
+      - run: just build
+        shell: ./dev.sh
