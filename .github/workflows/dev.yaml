@@ -13,16 +13,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - run: just format
-        shell: ${{ github.workspace }}/dev.sh
+        shell: $GITHUB_WORKSPACE/dev.sh
 
       - run: just lint
-        shell: ${{ github.workspace }}/dev.sh
+        shell: $GITHUB_WORKSPACE/dev.sh
 
       - run: just check
-        shell: ${{ github.workspace }}/dev.sh
+        shell: $GITHUB_WORKSPACE/dev.sh
 
       - run: just test
-        shell: ${{ github.workspace }}/dev.sh
+        shell: $GITHUB_WORKSPACE/dev.sh
 
       - run: just build
-        shell: ${{ github.workspace }}/dev.sh
+        shell: $GITHUB_WORKSPACE/dev.sh
