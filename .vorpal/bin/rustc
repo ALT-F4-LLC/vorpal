@@ -1,10 +1,16 @@
 #!/bin/bash
 set -eo pipefail
 
+if [ -t 1 ]; then
+    TTY_OPTS="--tty"
+else
+    TTY_OPTS=""
+fi
+
 docker container run \
     --interactive \
     --rm \
-    --tty \
+    "${TTY_OPTS}" \
     --user "$(id -u):$(id -g)" \
     --volume "${HOME}/.cargo:/home/devuser/.cargo" \
     --volume "${PWD}:${PWD}" \
