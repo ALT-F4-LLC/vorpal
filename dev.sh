@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PATH=$PWD/.vorpal/bin:$PATH
-
 docker buildx build \
     --build-arg "GROUP_ID=$(id -g)" \
     --build-arg "USER_ID=$(id -u)" \
@@ -10,8 +8,8 @@ docker buildx build \
     --target "dev" \
     .
 
-if [[ "$PATH" != *"$PWD/.vorpal/bin"* ]]; then
-    exec "$SHELL"
-else
+if [ $# -ne 0 ]; then
+    export NICKEL_IMPORT_PATH="${PWD}/.vorpal/packages:${PWD}"
+    export PATH="${PWD}/.vorpal/bin:$PATH"
     exec "$@"
 fi

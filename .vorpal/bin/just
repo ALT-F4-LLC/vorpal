@@ -1,18 +1,1 @@
-#!/bin/bash
-set -eo pipefail
-
-if [ -t 1 ]; then
-    TTY_OPTS="--tty"
-else
-    TTY_OPTS=""
-fi
-
-docker container run ${TTY_OPTS} \
-    --interactive \
-    --rm \
-    --volume "${HOME}/.cargo:/home/devuser/.cargo" \
-    --volume "${PWD}:${PWD}" \
-    --volume "/var/run/docker.sock:/var/run/docker.sock" \
-    --workdir "${PWD}" \
-    ghcr.io/alt-f4-llc/vorpal:edge-dev \
-    just "$@"
+wrapper.sh

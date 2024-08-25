@@ -1,18 +1,1 @@
-#!/bin/bash
-set -eo pipefail
-
-if [ -t 1 ]; then
-    TTY_OPTS="--tty"
-else
-    TTY_OPTS=""
-fi
-
-docker container run ${TTY_OPTS} \
-    --interactive \
-    --rm \
-    --user "$(id -u):$(id -g)" \
-    --volume "${HOME}/.cargo:/home/devuser/.cargo" \
-    --volume "${PWD}:${PWD}" \
-    --workdir "${PWD}" \
-    ghcr.io/alt-f4-llc/vorpal:edge-dev \
-    rustc "$@"
+wrapper.sh

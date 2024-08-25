@@ -7,10 +7,106 @@ on:
       - main
 
 env:
-  IMAGE_NAME: ${{ github.repository }}-sandbox
   REGISTRY: ghcr.io
+  VORPAL_IMAGE: ${{ github.repository }}
+  VORPAL_SANDBOX_IMAGE: ${{ github.repository }}-sandbox
 
 jobs:
+  vorpal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          annotations: |
+            org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
+          images: ${{ env.REGISTRY }}/${{ env.VORPAL_IMAGE }}
+          labels: |
+            org.opencontainers.image.title=${{ env.VORPAL_IMAGE }}
+            org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
+            org.opencontainers.image.vendor=ALT-F4-LLC
+          tags: |
+            edge
+
+      - uses: actions/checkout@v4
+
+      - id: push
+        uses: docker/build-push-action@v6
+        with:
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v1
+        with:
+          push-to-registry: true
+          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-name: ${{ env.REGISTRY }}/${{ env.VORPAL_IMAGE }}
+
+  vorpal-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          annotations: |
+            org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
+          images: ${{ env.REGISTRY }}/${{ env.VORPAL_IMAGE }}
+          labels: |
+            org.opencontainers.image.title=${{ env.VORPAL_IMAGE }}
+            org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
+            org.opencontainers.image.vendor=ALT-F4-LLC
+          tags: |
+            edge-dev
+
+      - uses: actions/checkout@v4
+
+      - id: push
+        uses: docker/build-push-action@v6
+        with:
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          target: dev
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - run: ./dev.sh just format
+
+      - run: ./dev.sh just lint
+
+      - run: ./dev.sh just check
+
+      - run: ./dev.sh just test
+
+      - run: ./dev.sh just build
+
   vorpal-sandbox:
     runs-on: ubuntu-latest
     permissions:
@@ -35,13 +131,13 @@ jobs:
         with:
           annotations: |
             org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.VORPAL_SANDBOX_IMAGE }}
           labels: |
-            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.title=${{ env.VORPAL_SANDBOX_IMAGE }}
             org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
             org.opencontainers.image.vendor=ALT-F4-LLC
           tags: |
-            type=edge,branch=main
+            edge
 
       - uses: actions/checkout@v4
 
@@ -50,7 +146,6 @@ jobs:
         with:
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          context: .
           file: Dockerfile.sandbox
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
@@ -62,4 +157,4 @@ jobs:
         with:
           push-to-registry: true
           subject-digest: ${{ steps.push.outputs.digest }}
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-name: ${{ env.REGISTRY }}/${{ env.VORPAL_SANDBOX_IMAGE }}

@@ -6,12 +6,7 @@ ARG USER_ID
 ENV PATH=/usr/local/just/bin:$PATH
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes \
-    curl \
-    libssl-dev \
-    pkg-config \
-    protobuf-compiler \
-    && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/just/bin \
+    && apt-get install --no-install-recommends --yes curl \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
@@ -21,13 +16,17 @@ RUN apt-get update \
     docker-buildx-plugin \
     docker-ce-cli \
     docker-compose-plugin \
+    libssl-dev \
+    pkg-config \
+    protobuf-compiler \
+    && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/just/bin \
+    && rustup component add clippy rust-analyzer rust-src rustfmt \
+    && cargo install nickel-lang-cli \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 RUN if ! getent group $GROUP_ID; then groupadd --gid $GROUP_ID devgroup; fi && \
     useradd --uid $USER_ID --gid $GROUP_ID --create-home devuser
-
-RUN rustup component add clippy rust-analyzer rust-src rustfmt
 
 
 FROM dev AS build
