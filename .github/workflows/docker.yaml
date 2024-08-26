@@ -50,8 +50,8 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             *.tar.gz
-          name: ${{ github.ref == 'refs/heads/main' && 'edge' || github.ref_name }}
-          prerelease: ${{ github.ref == 'refs/head/main }}
+          name: github.ref == 'refs/heads/main' && 'edge' || github.ref_name
+          prerelease: github.ref == 'refs/head/main
 
   sandbox:
     runs-on: ubuntu-latest
