@@ -2,8 +2,8 @@ _default:
     just --list
 
 # build everything
-build:
-    cargo build -j $(nproc) --package "vorpal-cli"
+build args="":
+    cargo build -j $(nproc) --package "vorpal-cli" {{ args }}
 
 # build (docker)
 build-docker tag="edge":
@@ -17,8 +17,8 @@ build-docker tag="edge":
         .
 
 # check (cargo)
-check:
-    cargo check -j $(nproc)
+check args="":
+    cargo check -j $(nproc) {{ args }}
 
 # clean everything
 clean:
@@ -37,8 +37,8 @@ start:
     cargo run --package "vorpal-cli" -- worker start
 
 # test cargo
-test-cargo:
-    cargo test -j $(nproc)
+test-cargo args="":
+    cargo test -j $(nproc) {{ args }}
 
 # test nickel
 test-nickel system="x86_64-linux":
@@ -50,7 +50,7 @@ test-nickel system="x86_64-linux":
     nickel export $tmpfile
 
 # test everything
-test: test-cargo test-nickel
+test args: (test-cargo args) test-nickel
 
 # update (cargo)
 update:
