@@ -9,7 +9,6 @@ build:
 build-docker tag="edge":
     docker buildx build \
         --file "Dockerfile" \
-        --platform "linux/amd64,linux/arm64" \
         --tag "ghcr.io/alt-f4-llc/vorpal:{{ tag }}" \
         .
     docker buildx build \

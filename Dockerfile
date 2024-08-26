@@ -1,10 +1,5 @@
 FROM docker.io/library/rust:1.80.0-slim@sha256:fcbb950e8fa0de7f8ada015ea78e97ad09fcc4120bf23485664e418e0ec5087b AS dev
 
-ARG GROUP_ID
-ARG USER_ID
-
-ENV PATH=/usr/local/just/bin:/usr/local/bin:$PATH
-
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "aarch64" ]; then \
     ARCH="arm64"; \
@@ -26,14 +21,12 @@ RUN ARCH=$(uname -m) && \
     protobuf-compiler \
     && curl -fsSL https://github.com/tweag/nickel/releases/download/1.7.0/nickel-$ARCH-linux -o /usr/local/bin/nickel \
     && chmod +x /usr/local/bin/nickel \
-    && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/just/bin \
+    && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin \
     && rustup component add clippy rust-analyzer rust-src rustfmt \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN if ! getent group $GROUP_ID; then groupadd --gid $GROUP_ID devgroup; fi && \
-    useradd --uid $USER_ID --gid $GROUP_ID --create-home devuser
-
+RUN echo $PATH
 
 FROM dev AS build
 

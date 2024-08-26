@@ -109,7 +109,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 );
             }
 
-            let (config, config_hash) = nickel::load_config(file, system)?;
+            let (config, config_hash) = nickel::load_config(file, system).await?;
 
             let config_structures = config::build_structures(&config);
 
@@ -156,6 +156,8 @@ async fn main() -> Result<(), anyhow::Error> {
         },
 
         Command::Validate { file, system } => {
+            println!("=> Validating: {}", file);
+
             let mut package_system: PackageSystem = get_package_system(system);
 
             if package_system == Unknown {
@@ -166,7 +168,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 package_system = Aarch64Linux;
             }
 
-            let (config, _) = nickel::load_config(file, package_system)?;
+            let (config, _) = nickel::load_config(file, package_system).await?;
 
             println!("{}", serde_json::to_string_pretty(&config)?);
 
