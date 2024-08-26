@@ -37,6 +37,22 @@ jobs:
 
       - run: ./dev.sh just test --release
 
+      - run: |
+          ARCH=$(uname -m)
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+
+      - run: |
+          tar -czvf vorpal-$ARCH-linux.tar.gz -C ./target/release vorpal
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            *.tar.gz
+          name: ${{ github.ref == 'refs/heads/main' && 'edge' || github.ref_name }}
+          prerelease: ${{ github.ref == 'refs/head/main }}
+
   sandbox:
     runs-on: ubuntu-latest
     permissions:
