@@ -63,7 +63,7 @@ jobs:
         with:
           pattern: vorpal-*
 
-      - run: ls -alh *.tar.gz
+      - run: ls -alh
 
       - run: git fetch --tags
 
