@@ -160,8 +160,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           build-args: |
-            GROUP_ID=$GROUP_ID
-            USER_ID=$USER_ID
+            GROUP_ID
+            USER_ID
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: ${{ steps.meta.outputs.labels }}
