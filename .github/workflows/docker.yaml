@@ -43,6 +43,7 @@ jobs:
 
       - run: |
           tar -czvf vorpal-$ARCH-linux.tar.gz -C ./target/release vorpal
+          ls -alh *.tar.gz
 
       - if: github.ref == 'refs/heads/main'
         run: |
