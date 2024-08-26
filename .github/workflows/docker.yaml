@@ -64,9 +64,9 @@ jobs:
 
       - run: ./dev.sh just check
 
-      - run: ./dev.sh just test
-
       - run: ./dev.sh just build
+
+      - run: ./dev.sh just test
 
   vorpal-sandbox:
     runs-on: ubuntu-latest
