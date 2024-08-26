@@ -8,8 +8,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  VORPAL_IMAGE: ${{ github.repository }}
-  VORPAL_SANDBOX_IMAGE: ${{ github.repository }}-sandbox
+  VORPAL_IMAGE: alt-f4-llc/vorpal
+  VORPAL_SANDBOX_IMAGE: alt-f4-llc/vorpal-sandbox
 
 jobs:
   release:
