@@ -12,8 +12,11 @@ env:
   VORPAL_SANDBOX_IMAGE: alt-f4-llc/vorpal-sandbox
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  package:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-latest-arm64]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: docker/setup-buildx-action@v3
 
@@ -43,16 +46,30 @@ jobs:
 
       - run: |
           tar -czvf vorpal-$ARCH-linux.tar.gz -C ./target/release vorpal
-          ls -alh *.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vorpal-$ARCH-linux
+          path: vorpal-$ARCH-linux.tar.gz
+
+  release:
+    needs:
+      - package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - run: ls -alh *.tar.gz
+
+      - run: git fetch --tags
 
       - if: github.ref == 'refs/heads/main'
         run: |
-          git fetch --tags
           hub release delete edge
           git push --delete origin edge
 
-      - uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main'
+      - if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
           files: |
@@ -71,12 +88,7 @@ jobs:
     steps:
       - uses: docker/setup-buildx-action@v3
 
-      - if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          password: ${{ secrets.GITHUB_TOKEN }}
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
+      - uses: actions/checkout@v4
 
       - id: meta
         uses: docker/metadata-action@v5
@@ -91,7 +103,12 @@ jobs:
           tags: |
             edge
 
-      - uses: actions/checkout@v4
+      - if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
 
       - id: push
         uses: docker/build-push-action@v6
@@ -100,10 +117,10 @@ jobs:
           cache-to: type=gha,mode=max
           file: Dockerfile.sandbox
           labels: ${{ steps.meta.outputs.labels }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
 
-      - if: github.event_name != 'pull_request'
+      - if: github.ref == 'refs/heads/main'
         uses: actions/attest-build-provenance@v1
         with:
           push-to-registry: true
