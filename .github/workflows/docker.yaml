@@ -44,14 +44,21 @@ jobs:
       - run: |
           tar -czvf vorpal-$ARCH-linux.tar.gz -C ./target/release vorpal
 
+      - if: github.ref == 'refs/heads/main'
+        run: |
+          git fetch --tags
+          hub release delete edge
+          git push --delete origin edge
+
       - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         with:
           fail_on_unmatched_files: true
           files: |
             *.tar.gz
-          name: github.ref == 'refs/heads/main' && 'edge' || github.ref_name
-          prerelease: github.ref == 'refs/head/main
+          generate_release_notes: true
+          name: edge
+          prerelease: true
 
   sandbox:
     runs-on: ubuntu-latest
