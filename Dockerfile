@@ -21,7 +21,6 @@ RUN apt-get update \
     protobuf-compiler \
     && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/just/bin \
     && rustup component add clippy rust-analyzer rust-src rustfmt \
-    && cargo install nickel-lang-cli \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
