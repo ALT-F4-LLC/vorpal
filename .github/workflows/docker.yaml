@@ -62,8 +62,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: vorpal-*
+          path: dist
 
-      - run: ls -alh
+      - run: ls -alh dist
 
       - run: git fetch --tags
 
