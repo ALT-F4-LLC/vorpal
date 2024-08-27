@@ -42,15 +42,17 @@ jobs:
 
       - run: |
           ARCH=$(uname -m)
+          OS=$(uname -s)
           echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "OS=$OS" >> $GITHUB_ENV
 
       - run: |
-          tar -czvf vorpal-$ARCH-linux.tar.gz -C ./target/release vorpal
+          tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./target/release vorpal
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vorpal-${{ env.ARCH }}-linux
-          path: vorpal-${{ env.ARCH }}-linux.tar.gz
+          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
+          path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
 
   release:
     needs:
@@ -62,9 +64,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: vorpal-*
-          path: dist
 
-      - run: ls -alh dist
+      - run: |
+          ls -alh vorpal-aarch64-linux
+          ls -alh vorpal-x86_64-linux
 
       - run: git fetch --tags
 
@@ -78,7 +81,8 @@ jobs:
         with:
           fail_on_unmatched_files: true
           files: |
-            *.tar.gz
+            vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz
+            vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
           generate_release_notes: true
           name: edge
           prerelease: true
