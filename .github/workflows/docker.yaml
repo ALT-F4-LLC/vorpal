@@ -49,8 +49,12 @@ jobs:
       - id: push
         uses: docker/build-push-action@v6
         with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
+          cache-to: |
+            type=gha,mode=max
+            type=registry,mode=max,ref=${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
           file: Dockerfile.dev
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
@@ -101,8 +105,12 @@ jobs:
       - id: push
         uses: docker/build-push-action@v6
         with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.VORPAL_SANDBOX_IMAGE }}:edge
+          cache-to: |
+            type=gha,mode=max
+            type=registry,mode=max,ref=${{ env.REGISTRY }}/${{ env.VORPAL_SANDBOX_IMAGE }}:edge
           file: Dockerfile.sandbox
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
@@ -131,7 +139,9 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          cache-from: type=gha
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
           file: Dockerfile.dev
           load: true
           tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
@@ -166,7 +176,9 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          cache-from: type=gha
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
           file: Dockerfile.dev
           load: true
           tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
