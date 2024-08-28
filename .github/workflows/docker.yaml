@@ -233,22 +233,19 @@ jobs:
           files: |
             vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz
             vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
-          generate_release_notes: true
           name: edge
           prerelease: true
           tag_name: refs/tags/edge
 
       - run: |
-          tar -xzf vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz
-          tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
-          ls -alh
+          mkdir -p dist/aarch64-linux
+          mkdir -p dist/x86_64-linux
+          tar -xzf vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
+          tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
 
       - if: github.ref == 'refs/heads/main'
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: vorpal-aarch64-linux/vorpal
-
-      - if: github.ref == 'refs/heads/main'
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-path: vorpal-x86_64-linux/vorpal
+          subject-path: |
+            dist/aarch64-linux/vorpal
+            dist/x86_64-linux/vorpal
