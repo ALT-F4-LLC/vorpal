@@ -147,6 +147,8 @@ jobs:
 
       - run: ./dev.sh just format
 
+      - run: ./dev.sh just check --release
+
       - run: ./dev.sh just lint
 
   package:
@@ -179,8 +181,6 @@ jobs:
         with:
           key: target-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('**/Cargo.*') }}
           path: target
-
-      - run: ./dev.sh just check --release
 
       - run: ./dev.sh just build --release
 
