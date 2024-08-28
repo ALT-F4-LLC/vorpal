@@ -8,17 +8,9 @@ build args="":
 # build (docker)
 build-docker tag="edge":
     docker buildx build \
-        --cache-from "type=registry,ref=localhost:5000/vorpal:{{ tag }}-cache" \
-        --cache-to "type=registry,ref=localhost:5000/vorpal:{{ tag }}-cache" \
-        --push \
-        --tag "localhost:5000/vorpal:{{ tag }}" \
-        .
-    docker buildx build \
-        --cache-from "type=registry,ref=localhost:5000/vorpal-sandbox:{{ tag }}-cache" \
-        --cache-to "type=registry,ref=localhost:5000/vorpal-sandbox:{{ tag }}-cache" \
+        --cache-from "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
         --file "Dockerfile.sandbox" \
-        --push \
-        --tag "localhost:5000/vorpal-sandbox:{{ tag }}" \
+        --tag "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
         .
 
 # check (cargo)
