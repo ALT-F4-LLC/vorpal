@@ -218,7 +218,7 @@ jobs:
       - if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release delete --cleanup-tag --yes edge
+        run: gh release delete --cleanup-tag --yes edge || true
 
       - if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
