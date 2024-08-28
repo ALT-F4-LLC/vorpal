@@ -61,6 +61,8 @@ jobs:
           key: buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile.dev') }}
           path: .vorpal/buildx
 
+      - run: ./dev.sh
+
       - run: ./dev.sh just format
 
       - run: ./dev.sh just lint
@@ -85,6 +87,8 @@ jobs:
         with:
           key: buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile.dev') }}
           path: .vorpal/buildx
+
+      - run: ./dev.sh
 
       - run: ./dev.sh just check --release
 
