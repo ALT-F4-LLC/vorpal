@@ -28843,7 +28843,7 @@ async function run() {
         }
         const downloadUrl = `https://github.com/ALT-F4-LLC/vorpal/releases/download/${DEFAULT_VERSION}/vorpal-${system}.tar.gz`;
         const packagePath = await toolcache.downloadTool(downloadUrl);
-        const binPath = await toolcache.extractTar(packagePath, '/usr/local/vorpal/bin');
+        const binPath = await toolcache.extractTar(packagePath, '/tmp/vorpal/bin');
         core.addPath(binPath);
     }
     catch (error) {
