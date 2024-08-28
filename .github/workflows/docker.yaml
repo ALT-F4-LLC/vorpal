@@ -29,9 +29,8 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           key: registry-${{ env.ARCH }}-${{ env.OS }}
-          path: .vorpal/registry
 
-      - run: ls -alh ./vorpal/registry
+      - run: ls -alh
 
       - uses: actions/checkout@v4
 
