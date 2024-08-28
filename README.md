@@ -45,13 +45,10 @@ The following tool(s) are used to make changes to source code:
 - [`direnv`](https://github.com/direnv/direnv)
 - [`docker`](https://www.docker.com/products/docker-desktop)
 
+> [!IMPORTANT]
+> Docker provides [`rootless`](https://docs.docker.com/engine/security/rootless/) containers option which solves permissions problems and is recommended to setup before running commands.
+
 ### Steps
-
-- To enter the development environment:
-
-```bash
-direnv allow
-```
 
 - To run a command inside the development environment:
 
@@ -59,16 +56,19 @@ direnv allow
 ./dev.sh <command>
 ```
 
-- To run a just recipe in the development environment:
+- To enter the development environment:
 
-> [!CAUTION]
-> Requires `direnv` setup otherwise include `./dev.sh` before your `just` command.
+```bash
+direnv allow
+```
+
+- To run a `recipe` command inside the development environment:
 
 ```bash
 just <command> # or ./dev.sh just <command>
 ```
 
-- To list all available `just` recipes:
+- To list available `recipe` commands inside the development environment:
 
 ```bash
 just --list # or ./dev.sh just --list
