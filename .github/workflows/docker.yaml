@@ -20,22 +20,23 @@ jobs:
     steps:
       - uses: docker/setup-buildx-action@v3
 
-      - uses: actions/checkout@v4
-
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
+      - uses: actions/checkout@v4
+
       - uses: actions/cache/restore@v4
         with:
-          key: vorpal-buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile') }}
+          key: buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile.dev') }}
           path: .vorpal/buildx
+
 
       - run: ./dev.sh
 
       - uses: actions/cache/save@v4
         with:
-          key: vorpal-buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile') }}
+          key: buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile.dev') }}
           path: .vorpal/buildx
 
       - if: always()
@@ -49,15 +50,15 @@ jobs:
     steps:
       - uses: docker/setup-buildx-action@v3
 
-      - uses: actions/checkout@v4
-
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
+      - uses: actions/checkout@v4
+
       - uses: actions/cache/restore@v4
         with:
-          key: vorpal-buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile') }}
+          key: buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile.dev') }}
           path: .vorpal/buildx
 
       - run: ./dev.sh just format
@@ -74,15 +75,15 @@ jobs:
     steps:
       - uses: docker/setup-buildx-action@v3
 
-      - uses: actions/checkout@v4
-
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
+      - uses: actions/checkout@v4
+
       - uses: actions/cache/restore@v4
         with:
-          key: vorpal-buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile') }}
+          key: buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile.dev') }}
           path: .vorpal/buildx
 
       - run: ./dev.sh just check --release
@@ -139,6 +140,10 @@ jobs:
       id-token: write
       packages: write
     steps:
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
       - uses: actions/checkout@v4
 
       - id: meta

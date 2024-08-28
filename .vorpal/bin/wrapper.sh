@@ -18,6 +18,6 @@ docker container run ${TTY_OPTS} \
     --volume "/var/lib/vorpal:/var/lib/vorpal" \
     --volume "/var/run/docker.sock:/var/run/docker.sock" \
     --workdir "${PWD}" \
-    ghcr.io/alt-f4-llc/vorpal:edge-dev \
+    ghcr.io/alt-f4-llc/vorpal-dev:edge \
     "${SCRIPT_NAME}" \
     "$@"
