@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+apt-get update
+
+apt-get install --no-install-recommends --yes \
+    ca-certificates \
+    curl \
+    dirmngr \
+    gcc \
+    gnupg \
+    libatomic1 \
+    libc6-dev \
+    libssl-dev \
+    pkg-config \
+    protobuf-compiler \
+    wget \
+    xz-utils

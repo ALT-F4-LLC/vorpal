@@ -1,13 +1,13 @@
 #!/bin/bash
 set -eo pipefail
 
-SCRIPT_NAME=$(basename "$0")
-
 if [ -t 1 ]; then
     TTY_OPTS="--tty"
 else
     TTY_OPTS=""
 fi
+
+SCRIPT_NAME=$(basename "$0")
 
 docker container run ${TTY_OPTS} \
     --env "NICKEL_IMPORT_PATH=${PWD}/.vorpal/packages:${PWD}" \

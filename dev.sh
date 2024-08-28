@@ -4,6 +4,7 @@ set -euo pipefail
 docker buildx build \
     --cache-from "type=registry,ref=ghcr.io/alt-f4-llc/vorpal-dev:edge" \
     --file "Dockerfile.dev" \
+    --progress "plain" \
     --tag "ghcr.io/alt-f4-llc/vorpal-dev:edge" \
     .
 

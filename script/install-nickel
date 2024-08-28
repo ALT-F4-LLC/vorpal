@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+NICKEL_ARCH=$(uname -m)
+
+if [ "$NICKEL_ARCH" = "aarch64" ]; then
+    NICKEL_ARCH="arm64"
+fi
+
+echo "Nickel architecture set to $NICKEL_ARCH"
+
+curl -fsSL "https://github.com/tweag/nickel/releases/download/1.7.0/nickel-${NICKEL_ARCH}-linux" -o /usr/local/bin/nickel
+
+chmod +x /usr/local/bin/nickel

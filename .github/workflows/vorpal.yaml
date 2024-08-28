@@ -1,0 +1,15 @@
+name: vorpal
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup-action
+
+      - run: vorpal --help

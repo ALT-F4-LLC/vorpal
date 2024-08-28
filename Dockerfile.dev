@@ -1,27 +1,15 @@
-FROM docker.io/library/rust:1.80.0-slim@sha256:fcbb950e8fa0de7f8ada015ea78e97ad09fcc4120bf23485664e418e0ec5087b
+FROM docker.io/library/debian:12.6-slim@sha256:5f7d5664eae4a192c2d2d6cb67fc3f3c7891a8722cd2903cc35aa649a12b0c8d
 
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "aarch64" ]; then \
-    ARCH="arm64"; \
-    fi && \
-    echo "Architecture set to $ARCH" && \
-    apt-get update \
-    && apt-get install --no-install-recommends --yes curl \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
-    && chmod a+r /etc/apt/keyrings/docker.asc \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
-    && apt-get update \
-    && apt-get install --no-install-recommends --yes \
-    docker-buildx-plugin \
-    docker-ce-cli \
-    docker-compose-plugin \
-    libssl-dev \
-    pkg-config \
-    protobuf-compiler \
-    && curl -fsSL https://github.com/tweag/nickel/releases/download/1.7.0/nickel-$ARCH-linux -o /usr/local/bin/nickel \
-    && chmod +x /usr/local/bin/nickel \
-    && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin \
-    && rustup component add clippy rust-analyzer rust-src rustfmt \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:$PATH
+
+COPY script /usr/local/bin
+
+RUN install-base \
+    && install-docker \
+    && install-just \
+    && install-nickel \
+    && install-nodejs \
+    && install-rust \
+    && install-clean
