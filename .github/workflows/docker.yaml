@@ -142,6 +142,7 @@ jobs:
         with:
           cache-from: type=gha
           file: Dockerfile.dev
+          load: true
           tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
 
       - run: ./dev.sh just format
@@ -176,6 +177,7 @@ jobs:
         with:
           cache-from: type=gha
           file: Dockerfile.dev
+          load: true
           tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
 
       - run: ./dev.sh just check --release
