@@ -53,16 +53,25 @@ The following tool(s) are used to make changes to source code:
 direnv allow
 ```
 
-- To run a command in the development environment:
+- To run a command inside the development environment:
 
 ```bash
-./dev.sh just <command>
+./dev.sh <command>
 ```
 
-- To list all available commands:
+- To run a just recipe in the development environment:
+
+> [!CAUTION]
+> Requires `direnv` setup otherwise include `./dev.sh` before your `just` command.
 
 ```bash
-just --list
+just <command> # or ./dev.sh just <command>
+```
+
+- To list all available `just` recipes:
+
+```bash
+just --list # or ./dev.sh just --list
 
 Available recipes:
     build args=""                     # build everything
