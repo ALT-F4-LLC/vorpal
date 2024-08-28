@@ -56,7 +56,7 @@ direnv allow
 - To run a command in the development environment:
 
 ```bash
-./dev.sh <command>
+./dev.sh just <command>
 ```
 
 - To list all available commands:
