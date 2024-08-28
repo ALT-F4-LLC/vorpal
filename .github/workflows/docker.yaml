@@ -12,47 +12,112 @@ env:
   VORPAL_SANDBOX_IMAGE: alt-f4-llc/vorpal-sandbox
 
 jobs:
-  package:
+  dev:
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-latest-arm64]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - run: |
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: registry-${{ env.ARCH }}-${{ env.OS }}
+          path: .vorpal/registry
 
       - uses: actions/checkout@v4
 
-      - uses: docker/build-push-action@v6
+      - run: ./dev.sh || true
+
+      - run: ./dev.sh start
+
+      - if: always()
+        run: ./dev.sh stop
+
+      - if: always()
+        uses: actions/cache/save@v4
         with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          load: true
-          target: dev
-          tags: ${{ env.REGISTRY }}/${{ env.VORPAL_IMAGE }}:edge-dev
+          key: registry-${{ env.ARCH }}-${{ env.OS }}
+          path: .vorpal/registry
 
-      - run: ./dev.sh just format
+      - if: always()
+        run: ./dev.sh clean 
 
-      - run: ./dev.sh just lint
-
-      - run: ./dev.sh just check --release
-
-      - run: ./dev.sh just build --release
-
-      - run: ./dev.sh just test --release
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
 
       - run: |
-          ARCH=$(uname -m)
-          OS=$(uname -s)
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
-          echo "OS=$OS" >> $GITHUB_ENV
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: registry-${{ env.ARCH }}-${{ env.OS }}
+          path: .vorpal/registry
+
+      - uses: actions/checkout@v4
+
+      - run: ./dev.sh start just format
+
+      - run: ./dev.sh start just lint
+
+      - if: always()
+        run: |
+          ./dev.sh stop
+          ./dev.sh clean
+
+  package:
+    needs:
+      - test
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-latest-arm64]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
 
       - run: |
-          tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./target/release vorpal
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: registry-${{ env.ARCH }}-${{ env.OS }}
+          path: .vorpal/registry
+
+      - uses: actions/checkout@v4
+
+      - run: ls -alh ./vorpal/registry
+
+      - run: ./dev.sh start just check --release
+
+      - run: ./dev.sh start just build --release
+
+      - run: ./dev.sh start just test --release
+
+      - run: tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./target/release vorpal
 
       - uses: actions/upload-artifact@v4
         with:
           name: vorpal-${{ env.ARCH }}-${{ env.OS }}
           path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
+
+      - if: always()
+        run: |
+          ./dev.sh stop
+          ./dev.sh clean
 
   release:
     needs:

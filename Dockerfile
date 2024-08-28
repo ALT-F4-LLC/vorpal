@@ -1,3 +1,5 @@
+# STAGE: Development
+
 FROM docker.io/library/rust:1.80.0-slim@sha256:fcbb950e8fa0de7f8ada015ea78e97ad09fcc4120bf23485664e418e0ec5087b AS dev
 
 RUN ARCH=$(uname -m) && \
@@ -26,7 +28,7 @@ RUN ARCH=$(uname -m) && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN echo $PATH
+# STAGE: Build
 
 FROM dev AS build
 
@@ -56,6 +58,7 @@ COPY worker worker
 
 RUN cargo build -j $(nproc) --offline --profile release
 
+# STAGE: Release
 
 FROM docker.io/library/debian:12.6-slim@sha256:5f7d5664eae4a192c2d2d6cb67fc3f3c7891a8722cd2903cc35aa649a12b0c8d
 
