@@ -201,6 +201,10 @@ jobs:
   release:
     needs:
       - package
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -209,16 +213,10 @@ jobs:
         with:
           pattern: vorpal-*
 
-      - run: |
-          ls -alh vorpal-aarch64-linux
-          ls -alh vorpal-x86_64-linux
-
       - run: git fetch --tags
 
       - if: github.ref == 'refs/heads/main'
-        run: |
-          hub release delete edge
-          git push --delete origin edge
+        run: gh release delete --cleanup-tag --yes edge
 
       - if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
@@ -230,3 +228,18 @@ jobs:
           generate_release_notes: true
           name: edge
           prerelease: true
+
+      - run: |
+          tar -xzf vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz
+          tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
+          ls -alh
+
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: vorpal-aarch64-linux/vorpal
+
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: vorpal-x86_64-linux/vorpal
