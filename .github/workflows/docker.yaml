@@ -145,6 +145,10 @@ jobs:
           key: target-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('**/Cargo.*') }}
           path: target
 
+      - run: ls -alh
+
+      - run: ls -alh/target
+
       - run: ./dev.sh just format
 
       - run: ./dev.sh just lint
@@ -179,6 +183,10 @@ jobs:
         with:
           key: target-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('**/Cargo.*') }}
           path: target
+
+      - run: ls -alh
+
+      - run: ls -alh/target
 
       - run: ./dev.sh just check --release
 
