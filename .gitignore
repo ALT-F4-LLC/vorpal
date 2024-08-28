@@ -1,7 +1,2 @@
-.buildx
-.direnv
-.vorpal/registry
-.vorpal/registry-id
-result
+.vorpal/buildx
 target
-vorpal
