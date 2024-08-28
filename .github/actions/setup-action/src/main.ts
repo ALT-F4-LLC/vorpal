@@ -10,25 +10,28 @@ const SUPPORTED_SYSTEMS = ['x86_64-linux']
  * @returns {Promise<void>} Resolves when the action is complete.
  */
 export async function run(): Promise<void> {
-    try {
-        const platform = os.platform();
-        const arch = os.arch() === 'x64' ? 'x86_64' : os.arch();
-        const system = `${arch}-${platform}`;
+  try {
+    const platform = os.platform()
+    const arch = os.arch() === 'x64' ? 'x86_64' : os.arch()
+    const system = `${arch}-${platform}`
 
-        core.info(`Current system: ${system}`)
-        core.info(`Supported systems: ${SUPPORTED_SYSTEMS.join(', ')}`)
-        core.info(`Version: ${DEFAULT_VERSION}`)
+    core.info(`Current system: ${system}`)
+    core.info(`Supported systems: ${SUPPORTED_SYSTEMS.join(', ')}`)
+    core.info(`Version: ${DEFAULT_VERSION}`)
 
-        if (!SUPPORTED_SYSTEMS.includes(system)) {
-            throw new Error(`System ${system} is not supported.`);
-        }
-
-        const downloadUrl = `https://github.com/ALT-F4-LLC/vorpal/releases/download/${DEFAULT_VERSION}/vorpal-${system}.tar.gz`;
-        const packagePath = await toolcache.downloadTool(downloadUrl);
-        const binPath = await toolcache.extractTar(packagePath, '/usr/local/vorpal/bin');
-
-        core.addPath(binPath);
-    } catch (error) {
-        if (error instanceof Error) core.setFailed(error.message)
+    if (!SUPPORTED_SYSTEMS.includes(system)) {
+      throw new Error(`System ${system} is not supported.`)
     }
+
+    const downloadUrl = `https://github.com/ALT-F4-LLC/vorpal/releases/download/${DEFAULT_VERSION}/vorpal-${system}.tar.gz`
+    const packagePath = await toolcache.downloadTool(downloadUrl)
+    const binPath = await toolcache.extractTar(
+      packagePath,
+      '/usr/local/vorpal/bin'
+    )
+
+    core.addPath(binPath)
+  } catch (error) {
+    if (error instanceof Error) core.setFailed(error.message)
+  }
 }
