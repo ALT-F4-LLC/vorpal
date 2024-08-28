@@ -27,11 +27,6 @@ jobs:
           key: vorpal-buildx
           path: .vorpal/buildx
 
-      - run: |
-          ls -alh
-          ls -alh .vorpal
-          ls -alh .vorpal/buildx
-
       - uses: actions/checkout@v4
 
       - run: ./dev.sh
