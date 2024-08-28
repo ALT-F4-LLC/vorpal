@@ -31,14 +31,16 @@ jobs:
           key: registry-${{ env.ARCH }}-${{ env.OS }}
           path: .vorpal/registry
 
+      - run: ls -alh ./vorpal/registry
+
       - uses: actions/checkout@v4
 
-      - run: _ ./dev.sh || true
+      - run: sudo ./dev.sh || true
 
-      - run: _ ./dev.sh start
+      - run: sudo ./dev.sh start
 
       - if: always()
-        run: _ ./dev.sh stop
+        run: sudo ./dev.sh stop
 
       - if: always()
         uses: actions/cache/save@v4
@@ -47,7 +49,7 @@ jobs:
           path: .vorpal/registry
 
       - if: always()
-        run: _ ./dev.sh clean 
+        run: sudo ./dev.sh clean 
 
   test:
     needs:
@@ -67,16 +69,18 @@ jobs:
           key: registry-${{ env.ARCH }}-${{ env.OS }}
           path: .vorpal/registry
 
+      - run: ls -alh ./vorpal/registry
+
       - uses: actions/checkout@v4
 
-      - run: _ ./dev.sh start just format
+      - run: sudo ./dev.sh start just format
 
-      - run: _ ./dev.sh start just lint
+      - run: sudo ./dev.sh start just lint
 
       - if: always()
         run: |
-          _ ./dev.sh stop
-          _ ./dev.sh clean
+          sudo ./dev.sh stop
+          sudo ./dev.sh clean
 
   package:
     needs:
@@ -103,11 +107,11 @@ jobs:
 
       - run: ls -alh ./vorpal/registry
 
-      - run: _ ./dev.sh start just check --release
+      - run: sudo ./dev.sh start just check --release
 
-      - run: _ ./dev.sh start just build --release
+      - run: sudo ./dev.sh start just build --release
 
-      - run: _ ./dev.sh start just test --release
+      - run: sudo ./dev.sh start just test --release
 
       - run: tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./target/release vorpal
 
@@ -118,8 +122,8 @@ jobs:
 
       - if: always()
         run: |
-          _ ./dev.sh stop
-          _ ./dev.sh clean
+          sudo ./dev.sh stop
+          sudo ./dev.sh clean
 
   release:
     needs:
