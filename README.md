@@ -42,8 +42,8 @@ Below is the existing working diagram that illustrates the platform's design:
 
 The following tool(s) are used to make changes to source code:
 
-- [`direnv`](https://github.com/direnv/direnv)
 - [`docker`](https://www.docker.com/products/docker-desktop)
+- [`direnv (optional)`](https://github.com/direnv/direnv)
 
 > [!IMPORTANT]
 > Docker provides [`rootless`](https://docs.docker.com/engine/security/rootless/) containers option which solves permissions problems and is recommended to setup before running commands.
