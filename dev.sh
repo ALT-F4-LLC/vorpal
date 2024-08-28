@@ -4,6 +4,7 @@ set -euo pipefail
 docker buildx build \
     --cache-from "type=local,src=${PWD}/.vorpal/buildx" \
     --cache-to "type=local,dest=${PWD}/.vorpal/buildx" \
+    --load \
     --tag "ghcr.io/alt-f4-llc/vorpal:edge-dev" \
     --target "dev" \
     .

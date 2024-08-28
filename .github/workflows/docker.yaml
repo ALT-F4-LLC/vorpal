@@ -18,42 +18,43 @@ jobs:
         os: [ubuntu-latest, ubuntu-latest-arm64]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: network=host
+      - uses: actions/checkout@v4
+
+      - run: |
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/cache/restore@v4
         with:
-          key: vorpal-buildx
+          key: vorpal-buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile') }}
           path: .vorpal/buildx
-
-      - uses: actions/checkout@v4
 
       - run: ./dev.sh
 
       - uses: actions/cache/save@v4
         with:
-          key: vorpal-buildx
+          key: vorpal-buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile') }}
           path: .vorpal/buildx
 
       - if: always()
-        run: sudo rm -rf .vorpal/buildx 
+        run: |
+          sudo rm -rf .vorpal/buildx 
 
   test:
     needs:
       - dev
     runs-on: ubuntu-latest
     steps:
-      - uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: network=host
+      - uses: actions/checkout@v4
+
+      - run: |
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/cache/restore@v4
         with:
-          key: vorpal-buildx
+          key: vorpal-buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile') }}
           path: .vorpal/buildx
-
-      - uses: actions/checkout@v4
 
       - run: ./dev.sh just format
 
@@ -67,26 +68,22 @@ jobs:
         os: [ubuntu-latest, ubuntu-latest-arm64]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: network=host
+      - uses: actions/checkout@v4
+
+      - run: |
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/cache/restore@v4
         with:
-          key: vorpal-buildx
+          key: vorpal-buildx-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('Dockerfile') }}
           path: .vorpal/buildx
-
-      - uses: actions/checkout@v4
 
       - run: ./dev.sh just check --release
 
       - run: ./dev.sh just build --release
 
       - run: ./dev.sh just test --release
-
-      - run: |
-          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - run: tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./target/release vorpal
 
@@ -136,8 +133,6 @@ jobs:
       id-token: write
       packages: write
     steps:
-      - uses: docker/setup-buildx-action@v3
-
       - uses: actions/checkout@v4
 
       - id: meta
