@@ -118,7 +118,8 @@ jobs:
 
   code-quality:
     env:
-      BUILDX_CACHE_FROM: type=gha
+      DOCKER_BUILD_RECORD_UPLOAD: false
+      DOCKER_BUILD_SUMMARY: false
     needs:
       - dev
       - sandbox
@@ -137,13 +138,20 @@ jobs:
           key: target-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('**/Cargo.*') }}
           path: target
 
+      - uses: docker/build-push-action@v6
+        with:
+          cache-from: type=gha
+          file: Dockerfile.dev
+          tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
+
       - run: ./dev.sh just format
 
       - run: ./dev.sh just lint
 
   package:
     env:
-      BUILDX_CACHE_FROM: type=gha
+      DOCKER_BUILD_RECORD_UPLOAD: false
+      DOCKER_BUILD_SUMMARY: false
     needs:
       - code-quality
     strategy:
@@ -163,6 +171,12 @@ jobs:
         with:
           key: target-${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('**/Cargo.*') }}
           path: target
+
+      - uses: docker/build-push-action@v6
+        with:
+          cache-from: type=gha
+          file: Dockerfile.dev
+          tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
 
       - run: ./dev.sh just check --release
 
