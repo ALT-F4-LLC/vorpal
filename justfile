@@ -38,7 +38,7 @@ test-cargo args="":
     cargo test -j $(nproc) {{ args }}
 
 # test nickel
-test-nickel system="x86_64-linux":
+test-nickel system="aarch64-linux":
     #!/usr/bin/env bash
     set -euo pipefail
     tmpfile="vorpal.test.ncl"
@@ -47,7 +47,7 @@ test-nickel system="x86_64-linux":
     nickel export $tmpfile
 
 # test everything
-test args: (test-cargo args) test-nickel
+test args="" system="aarch64-linux": (test-cargo args) (test-nickel system)
 
 # update (cargo)
 update:
