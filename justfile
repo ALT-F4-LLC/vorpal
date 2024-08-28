@@ -2,72 +2,53 @@ _default:
     just --list
 
 # build everything
-build: build-sandbox
-    cargo build -j $(nproc) --package "vorpal-cli"
+build args="":
+    cargo build -j $(nproc) --package "vorpal-cli" {{ args }}
 
-# build sandbox (only)
-build-sandbox tag="edge":
+# build (docker)
+build-docker tag="edge":
     docker buildx build \
+        --cache-from "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
         --file "Dockerfile.sandbox" \
         --tag "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
         .
 
-# check cargo
-check-cargo:
-    cargo check -j $(nproc)
-
-# check nix
-check-nix:
-    nix flake check
-
-# check everything
-check: check-cargo check-nix
+# check (cargo)
+check args="":
+    cargo check -j $(nproc) {{ args }}
 
 # clean everything
 clean:
-    rm -rf ./target
+    cargo clean
 
 # format cargo
-format-cargo:
+format:
     cargo fmt --check --verbose
-
-# format nix
-format-nix:
-    nix fmt -- --check .
-
-# format everything
-format: format-cargo format-nix
 
 # lint
 lint:
     cargo clippy -- -D warnings
-
-# package (nix)
-package profile="default":
-    nix build --json --no-link --print-build-logs ".#{{ profile }}"
 
 # start (worker)
 start:
     cargo run --package "vorpal-cli" -- worker start
 
 # test cargo
-test-cargo:
-    cargo test -j $(nproc)
+test-cargo args="":
+    cargo test -j $(nproc) {{ args }}
 
 # test nickel
-test-nickel:
-    nickel export "vorpal.ncl"
+test-nickel system="x86_64-linux":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmpfile="vorpal.test.ncl"
+    trap 'rm -f "$tmpfile"' EXIT
+    echo 'let config = import "vorpal.ncl" in config "{{ system }}"' > $tmpfile
+    nickel export $tmpfile
 
 # test everything
-test: test-cargo test-nickel
+test args: (test-cargo args) test-nickel
 
-# update cargo
-update-cargo:
+# update (cargo)
+update:
     cargo update
-
-# update nix
-update-nix:
-    nix flake update
-
-# update everything
-update: update-cargo update-nix

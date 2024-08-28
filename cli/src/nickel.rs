@@ -1,15 +1,11 @@
 use anyhow::Result;
-use nickel_lang_core::{
-    error::report::ErrorFormat,
-    eval::cache::lazy::CBNCache,
-    program::Program,
-    serialize::{to_string, validate, ExportFormat::Json},
-};
 use sha256::digest;
-use std::io::Cursor;
+use tokio::fs::write;
+use tokio::process::Command;
 use vorpal_schema::{api::package::PackageSystem, Config};
+use vorpal_store::temps::create_temp_file;
 
-pub fn load_config(
+pub async fn load_config(
     config: &String,
     system: PackageSystem,
 ) -> Result<(Config, String), anyhow::Error> {
@@ -26,37 +22,22 @@ pub fn load_config(
         config, config_system,
     );
 
-    let src = Cursor::new(config_str);
+    let temp_file = create_temp_file("ncl").await?;
 
-    let mut program = Program::<CBNCache>::new_from_source(src, "vorpal", std::io::stdout())?;
+    write(&temp_file, config_str).await?;
 
-    if let Ok(nickel_path) = std::env::var("NICKEL_IMPORT_PATH") {
-        program.add_import_paths(nickel_path.split(':'));
-    }
+    let data = Command::new("nickel")
+        .arg("export")
+        .arg("--import-path")
+        .arg(".")
+        .arg("--import-path")
+        .arg(".vorpal/packages")
+        .arg(temp_file.display().to_string())
+        .output()
+        .await?
+        .stdout;
 
-    let eval = match program.eval_full_for_export() {
-        Ok(eval) => eval,
-        Err(err) => {
-            program.report(err, ErrorFormat::Json);
-            std::process::exit(1);
-        }
-    };
-
-    match validate(Json, &eval) {
-        Ok(_) => {}
-        Err(err) => {
-            eprintln!("{:?}", err);
-            std::process::exit(1);
-        }
-    }
-
-    let data = match to_string(Json, &eval) {
-        Ok(data) => data,
-        Err(err) => {
-            eprintln!("{:?}", err);
-            std::process::exit(1);
-        }
-    };
+    let data = String::from_utf8(data)?;
 
     Ok((serde_json::from_str(&data)?, digest(data)))
 }
