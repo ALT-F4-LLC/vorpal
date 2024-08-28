@@ -18,27 +18,31 @@ if [ ! -f .vorpal/registry-id ]; then
 fi
 
 if [ "$1" == "start" ]; then
-    REGISTRY_CONTAINER_NAME="vorpal-registry-$(cat .vorpal/registry-id)"
+    CONTAINER_NAME="vorpal-registry-$(cat .vorpal/registry-id)"
 
-    if [ ! "$(docker ps -q -f name="$REGISTRY_CONTAINER_NAME")" ]; then
-        docker container run \
+    if [ ! "$(docker ps -q -f name="$CONTAINER_NAME")" ]; then
+        REGISTRY_HOST="127.0.0.1:5000"
+        REGISTRY_ID=$(docker container run \
             --detach \
-            --name "$REGISTRY_CONTAINER_NAME" \
-            --publish "127.0.0.1:5000:5000" \
+            --name "$CONTAINER_NAME" \
+            --publish "$REGISTRY_HOST:5000" \
+            --quiet \
             --rm \
             --volume "$(pwd)/.vorpal/registry:/var/lib/registry" \
-            registry:2
-        echo "Started registry container $REGISTRY_CONTAINER_NAME"
+            registry:2)
+        echo "Registry: $CONTAINER_NAME:$REGISTRY_ID [$REGISTRY_HOST:5000]"
     fi
 
-    docker buildx build \
+    IMAGE_DIGEST=$(docker buildx build \
         --cache-from "type=registry,ref=localhost:5000/vorpal:edge-dev-cache" \
         --cache-to "type=registry,ref=localhost:5000/vorpal:edge-dev-cache" \
         --push \
         --quiet \
         --tag "localhost:5000/vorpal:edge-dev" \
         --target "dev" \
-        .
+        .)
+
+    echo "Digest: $IMAGE_DIGEST"
 
     docker image tag \
         "localhost:5000/vorpal:edge-dev" \

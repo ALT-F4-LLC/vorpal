@@ -35,6 +35,8 @@ jobs:
 
       - run: ls -alh .vorpal
 
+      - run: ls -alh .vorpal/registry
+
       - uses: actions/checkout@v4
 
       - run: sudo ./dev.sh || true
