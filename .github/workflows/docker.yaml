@@ -130,7 +130,7 @@ jobs:
           cache-to: type=gha,mode=max
           file: Dockerfile.dev
           load: true
-          tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}
+          tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -165,7 +165,7 @@ jobs:
           cache-to: type=gha,mode=max
           file: Dockerfile.dev
           load: true
-          tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}
+          tags: ${{ env.REGISTRY }}/${{ env.VORPAL_DEV_IMAGE }}:edge
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
