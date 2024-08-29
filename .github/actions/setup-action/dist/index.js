@@ -28834,7 +28834,7 @@ const SUPPORTED_SYSTEMS = ['x86_64-linux'];
  */
 function ensureDirectoryExists(dirPath) {
     if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true });
+        exec.exec(`sudo`, ['mkdir', '-p', '/var/lib/vorpal'], {});
         core.info(`Vorpal dir created: ${dirPath}`);
     }
     else {
