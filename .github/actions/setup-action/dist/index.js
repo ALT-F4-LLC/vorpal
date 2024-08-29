@@ -28823,10 +28823,24 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(2186));
 const exec = __importStar(__nccwpck_require__(1514));
+const fs = __importStar(__nccwpck_require__(7147));
 const os = __importStar(__nccwpck_require__(2037));
 const toolcache = __importStar(__nccwpck_require__(7784));
 const DEFAULT_VERSION = 'edge';
 const SUPPORTED_SYSTEMS = ['x86_64-linux'];
+/**
+ * Ensure the directory exists, create it if it doesn't.
+ * @param dirPath The path of the directory to check/create.
+ */
+function ensureDirectoryExists(dirPath) {
+    if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+        core.info(`Vorpal dir created: ${dirPath}`);
+    }
+    else {
+        core.info(`Vorpal dir exists: ${dirPath}`);
+    }
+}
 /**
  * The main function for the action.
  * @returns {Promise<void>} Resolves when the action is complete.
@@ -28842,9 +28856,11 @@ async function run() {
         if (!SUPPORTED_SYSTEMS.includes(system)) {
             throw new Error(`System ${system} is not supported.`);
         }
+        const vorpalDir = '/var/lib/vorpal';
+        ensureDirectoryExists(vorpalDir);
         const downloadUrl = `https://github.com/ALT-F4-LLC/vorpal/releases/download/${DEFAULT_VERSION}/vorpal-${system}.tar.gz`;
         const packagePath = await toolcache.downloadTool(downloadUrl);
-        const binPath = await toolcache.extractTar(packagePath, '/tmp/vorpal/bin');
+        const binPath = await toolcache.extractTar(packagePath, `${vorpalDir}/bin`);
         core.addPath(binPath);
         let generateOutput = '';
         let generateError = '';

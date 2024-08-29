@@ -1,10 +1,24 @@
 import * as core from '@actions/core'
 import * as exec from '@actions/exec'
+import * as fs from 'fs'
 import * as os from 'os'
 import * as toolcache from '@actions/tool-cache'
 
 const DEFAULT_VERSION = 'edge'
 const SUPPORTED_SYSTEMS = ['x86_64-linux']
+
+/**
+ * Ensure the directory exists, create it if it doesn't.
+ * @param dirPath The path of the directory to check/create.
+ */
+function ensureDirectoryExists(dirPath: string): void {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true })
+    core.info(`Vorpal dir created: ${dirPath}`)
+  } else {
+    core.info(`Vorpal dir exists: ${dirPath}`)
+  }
+}
 
 /**
  * The main function for the action.
@@ -24,9 +38,12 @@ export async function run(): Promise<void> {
       throw new Error(`System ${system} is not supported.`)
     }
 
+    const vorpalDir = '/var/lib/vorpal'
+    ensureDirectoryExists(vorpalDir)
+
     const downloadUrl = `https://github.com/ALT-F4-LLC/vorpal/releases/download/${DEFAULT_VERSION}/vorpal-${system}.tar.gz`
     const packagePath = await toolcache.downloadTool(downloadUrl)
-    const binPath = await toolcache.extractTar(packagePath, '/tmp/vorpal/bin')
+    const binPath = await toolcache.extractTar(packagePath, `${vorpalDir}/bin`)
 
     core.addPath(binPath)
 
