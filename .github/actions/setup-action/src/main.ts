@@ -1,6 +1,7 @@
 import * as core from '@actions/core'
-import * as toolcache from '@actions/tool-cache'
+import * as exec from '@actions/exec'
 import * as os from 'os'
+import * as toolcache from '@actions/tool-cache'
 
 const DEFAULT_VERSION = 'edge'
 const SUPPORTED_SYSTEMS = ['x86_64-linux']
@@ -28,6 +29,25 @@ export async function run(): Promise<void> {
     const binPath = await toolcache.extractTar(packagePath, '/tmp/vorpal/bin')
 
     core.addPath(binPath)
+
+    let generateOutput = ''
+    let generateError = ''
+
+    const generateOptions: exec.ExecOptions = {
+      listeners: {
+        stdout: (data: Buffer) => (generateOutput += data.toString()),
+        stderr: (data: Buffer) => (generateError += data.toString())
+      }
+    }
+
+    exec.exec(`${binPath}/vorpal`, ['keys', 'generate'], generateOptions)
+
+    if (generateError !== '') {
+      core.setFailed(`Generate failed: ${generateError}`)
+      return
+    }
+
+    core.info(`Generate output: ${generateOutput}`)
   } catch (error) {
     if (error instanceof Error) core.setFailed(error.message)
   }

@@ -28822,8 +28822,9 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(2186));
-const toolcache = __importStar(__nccwpck_require__(7784));
+const exec = __importStar(__nccwpck_require__(1514));
 const os = __importStar(__nccwpck_require__(2037));
+const toolcache = __importStar(__nccwpck_require__(7784));
 const DEFAULT_VERSION = 'edge';
 const SUPPORTED_SYSTEMS = ['x86_64-linux'];
 /**
@@ -28845,6 +28846,20 @@ async function run() {
         const packagePath = await toolcache.downloadTool(downloadUrl);
         const binPath = await toolcache.extractTar(packagePath, '/tmp/vorpal/bin');
         core.addPath(binPath);
+        let generateOutput = '';
+        let generateError = '';
+        const generateOptions = {
+            listeners: {
+                stdout: (data) => (generateOutput += data.toString()),
+                stderr: (data) => (generateError += data.toString())
+            }
+        };
+        exec.exec(`${binPath}/vorpal`, ['keys', 'generate'], generateOptions);
+        if (generateError !== '') {
+            core.setFailed(`Generate failed: ${generateError}`);
+            return;
+        }
+        core.info(`Generate output: ${generateOutput}`);
     }
     catch (error) {
         if (error instanceof Error)

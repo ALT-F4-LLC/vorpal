@@ -1,15 +1,19 @@
 #!/bin/bash
 set -eo pipefail
 
+SCRIPT_NAME=$(basename "$0")
+TTY_OPTS=""
+VOLUME_OPTS=""
+
 if [ -t 1 ]; then
     TTY_OPTS="--tty"
-else
-    TTY_OPTS=""
 fi
 
-SCRIPT_NAME=$(basename "$0")
+if [ -d /nix/store ]; then
+    VOLUME_OPTS="--volume /nix/store:/nix/store"
+fi
 
-docker container run ${TTY_OPTS} \
+docker container run ${TTY_OPTS} ${VOLUME_OPTS} \
     --env "NICKEL_IMPORT_PATH=${PWD}/.vorpal/packages:${PWD}" \
     --interactive \
     --rm \

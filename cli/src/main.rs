@@ -143,10 +143,18 @@ async fn main() -> Result<(), anyhow::Error> {
         Command::Keys(keys) => match keys {
             CommandKeys::Generate {} => {
                 let key_dir_path = vorpal_store::paths::get_key_dir_path();
-
                 let private_key_path = vorpal_store::paths::get_private_key_path();
-
                 let public_key_path = vorpal_store::paths::get_public_key_path();
+
+                if private_key_path.exists() {
+                    println!("=> Private key exists: {}", private_key_path.display());
+                    return Ok(())
+                }
+
+                if public_key_path.exists() {
+                    println!("=> Public key exists: {}", public_key_path.display());
+                    return Ok(())
+                }
 
                 vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)
                     .await?;

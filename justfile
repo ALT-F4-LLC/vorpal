@@ -29,6 +29,9 @@ format:
 lint:
     cargo clippy -- -D warnings
 
+run +flags="":
+    cargo run --package "vorpal-cli" {{ if flags != "" { "--" } else { "" } }} {{ flags }}
+
 # start (worker)
 start:
     cargo run --package "vorpal-cli" -- worker start
