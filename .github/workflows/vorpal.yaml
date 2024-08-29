@@ -15,3 +15,5 @@ jobs:
       - uses: ./.github/actions/setup-action
 
       - run: vorpal --help
+
+      - run: ls -alh /var/lib/vorpal
