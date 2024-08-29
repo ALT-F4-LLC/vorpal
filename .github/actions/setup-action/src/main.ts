@@ -12,9 +12,11 @@ const SUPPORTED_SYSTEMS = ['x86_64-linux']
  * @param dirPath The path of the directory to check/create.
  */
 function ensureDirectoryExists(dirPath: string): void {
+  const uid = os.userInfo().uid
+  const gid = os.userInfo().gid
   if (!fs.existsSync(dirPath)) {
     exec.exec(`sudo`, ['mkdir', '-p', '/var/lib/vorpal/bin'], {})
-    exec.exec(`sudo`, ['chown', '-R', '$(whoami)', '/var/lib/vorpal'], {})
+    exec.exec(`sudo`, ['chown', '-R', `${uid}:${gid}`, '/var/lib/vorpal'], {})
     core.info(`Vorpal dir created: ${dirPath}`)
   } else {
     core.info(`Vorpal dir exists: ${dirPath}`)
