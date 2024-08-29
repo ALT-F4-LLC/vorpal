@@ -5,13 +5,16 @@ _default:
 build args="":
     cargo build -j $(nproc) --package "vorpal-cli" {{ args }}
 
-# build (docker)
-build-docker tag="edge":
+# build sandbox (docker)
+build-docker-sandbox:
     docker buildx build \
-        --cache-from "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
         --file "Dockerfile.sandbox" \
-        --tag "ghcr.io/alt-f4-llc/vorpal-sandbox:{{ tag }}" \
+        --tag "ghcr.io/alt-f4-llc/vorpal-sandbox:edge" \
         .
+
+# build (docker)
+build-docker: build-docker-sandbox
+    docker buildx build --tag "ghcr.io/alt-f4-llc/vorpal:edge" .
 
 # check (cargo)
 check args="":
@@ -32,9 +35,33 @@ lint:
 run +flags="":
     cargo run --package "vorpal-cli" {{ if flags != "" { "--" } else { "" } }} {{ flags }}
 
-# start (worker)
+run-docker +command: build-docker
+    docker container run \
+        --interactive \
+        --network "host" \
+        --rm \
+        --tty \
+        --volume "${PWD}:${PWD}" \
+        --volume "/var/lib/vorpal:/var/lib/vorpal" \
+        --workdir "${PWD}" \
+        ghcr.io/alt-f4-llc/vorpal:edge \
+        {{ command }}
+
+# start (cargo)
 start:
     cargo run --package "vorpal-cli" -- worker start
+
+# start (docker)
+start-docker: build-docker
+    docker container run \
+        --detach \
+        --publish "127.0.0.1:23151:23151" \
+        --rm \
+        --tty \
+        --volume "/var/lib/vorpal:/var/lib/vorpal" \
+        --volume "/var/run/docker.sock:/var/run/docker.sock" \
+        ghcr.io/alt-f4-llc/vorpal:edge \
+        worker start
 
 # test cargo
 test-cargo args="":
