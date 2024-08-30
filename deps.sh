@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euxo pipefail
 
 ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -7,9 +7,13 @@ WORKDIR=$(pwd)
 
 export NICKEL_IMPORT_PATH="$WORKDIR/.vorpal/packages:$WORKDIR"
 export OPENSSL_DIR="$WORKDIR/deps/openssl"
-export PATH="$WORKDIR/deps/proto/bin:$WORKDIR/deps/just:$HOME/.cargo/bin:$PATH"
+export PATH="$WORKDIR/deps/protoc/bin:$WORKDIR/deps/just:$HOME/.cargo/bin:$PATH"
 
-just() {
+cd "${WORKDIR}"
+
+mkdir -p ./deps
+
+if [[ ! -d "$PWD/deps/just" ]]; then
     JUST_SYSTEM=""
     JUST_VERSION="1.35.0"
 
@@ -35,18 +39,22 @@ just() {
 
     mkdir -p deps/just
 
-    wget "${JUST_URL}" -O deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
+    curl -L "${JUST_URL}" -o deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
 
     tar -xvf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz -C deps/just
 
-    # TODO: support hash checking for downloads
-}
+    rm -rf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
 
-openssl() {
+    # TODO: support hash checking for downloads
+fi
+
+cd "${WORKDIR}"
+
+if [[ ! -d "$PWD/deps/openssl" ]]; then
     OPENSSL_VERSION="3.3.1"
     OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
 
-    wget "${OPENSSL_URL}" -O deps/openssl-${OPENSSL_VERSION}.tar.gz
+    curl -L "${OPENSSL_URL}" -o deps/openssl-${OPENSSL_VERSION}.tar.gz
 
     tar -xvf deps/openssl-${OPENSSL_VERSION}.tar.gz -C deps
 
@@ -54,14 +62,20 @@ openssl() {
 
     ./Configure --prefix="${WORKDIR}/deps/openssl"
 
-    make
+    make -j$(sysctl -n hw.ncpu)
 
     make install
 
-    # TODO: support hash checking for downloads
-}
+    rm -rf "${WORKDIR}/deps/openssl-${OPENSSL_VERSION}"
 
-protoc() {
+    rm -rf "${WORKDIR}/deps/openssl-${OPENSSL_VERSION}.tar.gz"
+
+    # TODO: support hash checking for downloads
+fi
+
+cd "${WORKDIR}"
+
+if [[ ! -d "$PWD/deps/protoc" ]]; then
     PROTOC_SYSTEM=""
     PROTOC_VERSION="28.0"
 
@@ -90,27 +104,15 @@ protoc() {
 
     PROTOC_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"
 
-    wget "${PROTOC_URL}" -O deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip
+    mkdir -p deps/protoc
 
-    mkdir -p deps/proto
+    curl -L "${PROTOC_URL}" -o deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip
 
-    unzip deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip -d deps/proto
+    unzip deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip -d deps/protoc
+
+    rm -rf deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip
 
     # TODO: support hash checking for downloads
-}
-
-mkdir -p ./deps
-
-if [[ ! -d "./deps/just" ]]; then
-    just
-fi
-
-if [[ ! -d "./deps/openssl" ]]; then
-    openssl
-fi
-
-if [[ ! -d "./deps/proto" ]]; then
-    protoc
 fi
 
 if ! command -v cargo &> /dev/null || [[ ! -x "$(command -v cargo)" ]]; then
