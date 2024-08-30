@@ -10,7 +10,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build-docker:
+  build:
     strategy:
       matrix:
         runner:
@@ -66,6 +66,7 @@ jobs:
           cache-to: type=gha,mode=max
           file: ${{ env.DOCKERFILE }}
           labels: ${{ steps.meta.outputs.labels }}
+          load: true
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
 
@@ -75,3 +76,21 @@ jobs:
           push-to-registry: true
           subject-digest: ${{ steps.push.outputs.digest }}
           subject-name: ${{ env.REGISTRY }}/alt-f4-llc/${{ matrix.target }}
+
+      - run: |
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - if: matrix.target == 'vorpal'
+        run: |
+          CONTAINER_ID="$(docker container create ${{ env.REGISTRY }}/alt-f4-llc/${{ matrix.target }}:edge)"
+          mkdir -p dist
+          docker container cp $CONTAINER_ID:/usr/local/bin/vorpal ./dist/vorpal
+          docker rm --force $CONTAINER_ID
+
+      - run: tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./dist vorpal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
+          path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
