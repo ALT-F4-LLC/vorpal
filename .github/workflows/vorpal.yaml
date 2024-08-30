@@ -13,19 +13,39 @@ jobs:
   dev:
     runs-on: ubuntu-latest
     steps:
+      - run: |
+          apt-get update
+          apt-get install --yes \
+            openssl \
+            protobuf-compiler
+
+      - uses: extractions/setup-just@v2
+
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
 
+      - run: |
+          NICKEL_ARCH=$(uname -m)
+          if [ "$NICKEL_ARCH" = "aarch64" ]; then
+            NICKEL_ARCH="arm64";
+          fi
+          curl -fsSL \
+            "https://github.com/tweag/nickel/releases/download/1.7.0/nickel-${NICKEL_ARCH}-linux" \
+            -o /usr/local/bin/nickel
+          chmod +x /usr/local/bin/nickel
+
+      - run: just --version
+      - run: openssl --version
+      - run: protoc --version
+      - run: nickel --version
+
       - uses: actions/checkout@v4
 
-      - run: ./dev.sh
+      - run: just format
+      - run: just lint
 
-      - run: ./dev.sh just format
-
-      - run: ./dev.sh just lint
-
-  build:
+  package:
     needs:
       - dev
     strategy:
@@ -35,18 +55,37 @@ jobs:
           - latest-arm64
     runs-on: ubuntu-${{ matrix.runner }}
     steps:
+      - run: |
+          apt-get update
+          apt-get install --yes \
+            openssl \
+            protobuf-compiler
+
+      - uses: extractions/setup-just@v2
+
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
 
+      - run: |
+          NICKEL_ARCH=$(uname -m)
+          if [ "$NICKEL_ARCH" = "aarch64" ]; then
+            NICKEL_ARCH="arm64";
+          fi
+          curl -fsSL \
+            "https://github.com/tweag/nickel/releases/download/1.7.0/nickel-${NICKEL_ARCH}-linux" \
+            -o /usr/local/bin/nickel
+          chmod +x /usr/local/bin/nickel
+
+      - run: just --version
+      - run: openssl --version
+      - run: protoc --version
+      - run: nickel --version
+
       - uses: actions/checkout@v4
 
-      - run: ./dev.sh
-
       - run: just check --release
-
       - run: just build --release
-
       - run: just test --release
 
       - run: |
@@ -70,7 +109,7 @@ jobs:
 
   test:
     needs:
-      - build
+      - package
     runs-on: ubuntu-latest
     steps:
       - run: |

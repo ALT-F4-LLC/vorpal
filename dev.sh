@@ -88,8 +88,6 @@ protoc() {
 
     wget "${PROTOC_URL}" -O deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip
 
-    rm -rf deps/proto
-
     mkdir -p deps/proto
 
     unzip deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip -d deps/proto
