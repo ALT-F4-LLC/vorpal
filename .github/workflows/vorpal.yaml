@@ -10,17 +10,37 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  deps: # cache dependencies
+    strategy:
+      matrix:
+        runner:
+          - latest
+          - latest-arm64
+    runs-on: ubuntu-${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: |
+          ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "OS=$OS" >> $GITHUB_ENV
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('deps.sh') }}
+          path: deps
+
+      - run: ./deps.sh
+
+      - uses: actions/cache/save@v4
+        with:
+          key: ${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('deps.sh') }}
+          path: deps
+
   dev:
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            openssl \
-            protobuf-compiler
-
-      - uses: extractions/setup-just@v2
-
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
@@ -35,12 +55,21 @@ jobs:
             -o /usr/local/bin/nickel
           chmod +x /usr/local/bin/nickel
 
-      - run: just --version
-      - run: protoc --version
       - run: nickel --version
 
       - uses: actions/checkout@v4
 
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('deps.sh') }}
+          path: deps
+
+      - run: |
+          PATH="${PWD}/deps/just:${PWD}/deps/proto/bin:$PATH"
+          echo "PATH=$PATH" >> $GITHUB_ENV
+
+      - run: protoc --version
+      - run: just --version
       - run: just format
       - run: just lint
 

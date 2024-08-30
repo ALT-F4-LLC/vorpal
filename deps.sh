@@ -38,6 +38,8 @@ just() {
     wget "${JUST_URL}" -O deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
 
     tar -xvf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz -C deps/just
+
+    # TODO: support hash checking for downloads
 }
 
 openssl() {
@@ -55,6 +57,8 @@ openssl() {
     make
 
     make install
+
+    # TODO: support hash checking for downloads
 }
 
 protoc() {
@@ -91,6 +95,8 @@ protoc() {
     mkdir -p deps/proto
 
     unzip deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip -d deps/proto
+
+    # TODO: support hash checking for downloads
 }
 
 mkdir -p ./deps
@@ -117,6 +123,6 @@ if ! command -v rustc &> /dev/null || [[ ! -x "$(command -v rustc)" ]]; then
     exit 1
 fi
 
-cargo install nickel-lang-cli
+# cargo install nickel-lang-cli
 
 "$@"
