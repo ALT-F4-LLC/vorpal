@@ -14,9 +14,11 @@ jobs:
     strategy:
       matrix:
         runner:
-          - latest
-          - latest-arm64
-    runs-on: ubuntu-${{ matrix.runner }}
+          - macos-13
+          - macos-14
+          - ubuntu-latest
+          - ubuntu-latest-arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +48,7 @@ jobs:
           key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: deps
 
-  dev:
+  quality:
     needs:
       - deps
     runs-on: ubuntu-latest
@@ -74,13 +76,15 @@ jobs:
 
   package:
     needs:
-      - dev
+      - quality
     strategy:
       matrix:
         runner:
-          - latest
-          - latest-arm64
-    runs-on: ubuntu-${{ matrix.runner }}
+          - macos-13
+          - macos-14
+          - ubuntu-latest
+          - ubuntu-latest-arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -98,6 +102,8 @@ jobs:
           echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
           echo "$PWD/deps/openssl/bin" >> $GITHUB_PATH
           echo "$PWD/deps/protoc/bin" >> $GITHUB_PATH
+          echo "NICKEL_IMPORT_PATH=$PWD/.vorpal/packages:$PWD" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=$PWD/deps/openssl" >> $GITHUB_ENV
 
       - run: just check --release
 
