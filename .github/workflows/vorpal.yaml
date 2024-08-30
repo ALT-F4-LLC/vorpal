@@ -36,7 +36,6 @@ jobs:
           chmod +x /usr/local/bin/nickel
 
       - run: just --version
-      - run: openssl --version
       - run: protoc --version
       - run: nickel --version
 
@@ -78,7 +77,6 @@ jobs:
           chmod +x /usr/local/bin/nickel
 
       - run: just --version
-      - run: openssl --version
       - run: protoc --version
       - run: nickel --version
 
