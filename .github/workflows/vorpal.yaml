@@ -14,12 +14,12 @@ jobs:
     strategy:
       matrix:
         runner:
-          - ubuntu-latest
-          - ubuntu-latest-arm64
+          - latest
+          - latest-arm64
         target:
           - vorpal
           - vorpal-sandbox
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-${{ matrix.runner }}
     permissions:
       attestations: write
       contents: read
