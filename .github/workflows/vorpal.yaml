@@ -11,14 +11,8 @@ env:
 
 jobs:
   dev:
-    env:
-      NICKEL_IMPORT_PATH: ${{ github.workspace }}/.vorpal/packages:${{ github.workspace }}
-      OPENSSL_DIR: ${{ github.workspace }}/deps/openssl-3.3.1-dist
-      PATH: ${{ github.workspace }}/deps/proto-28.0-osx-aarch_64/bin:$PATH
     runs-on: ubuntu-latest
     steps:
-      - uses: extractions/setup-just@v2
-
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
@@ -27,15 +21,11 @@ jobs:
 
       - run: ./dev.sh
 
-      - run: just format
+      - run: ./dev.sh just format
 
-      - run: just lint
+      - run: ./dev.sh just lint
 
   build:
-    env:
-      NICKEL_IMPORT_PATH: ${{ github.workspace }}/.vorpal/packages:${{ github.workspace }}
-      OPENSSL_DIR: ${{ github.workspace }}/deps/openssl-3.3.1-dist
-      PATH: ${{ github.workspace }}/deps/proto-28.0-osx-aarch_64/bin:$PATH
     needs:
       - dev
     strategy:
@@ -45,8 +35,6 @@ jobs:
           - latest-arm64
     runs-on: ubuntu-${{ matrix.runner }}
     steps:
-      - uses: extractions/setup-just@v2
-
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
