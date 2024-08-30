@@ -1,6 +1,8 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all};
+use tokio::fs::{write, File};
+use tokio::io::AsyncReadExt;
 use tracing::info;
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -183,6 +185,35 @@ pub async fn setup_paths() -> Result<(), anyhow::Error> {
     }
 
     info!("store path: {:?}", store_path);
+
+    Ok(())
+}
+
+pub async fn replace_path_in_files(from_path: &Path, to_path: &Path) -> Result<()> {
+    let from = from_path.display().to_string();
+    let to = to_path.display().to_string();
+
+    for entry in WalkDir::new(from_path) {
+        let entry = entry?;
+
+        if entry.file_type().is_file() {
+            let path = entry.path();
+            let mut file = File::open(path).await?;
+            let mut content = Vec::new();
+
+            file.read_to_end(&mut content).await?;
+
+            if let Ok(prev) = String::from_utf8(content) {
+                let next = prev.replace(&from, &to);
+
+                if next != prev {
+                    write(path, next).await?;
+                }
+            } else {
+                continue;
+            }
+        }
+    }
 
     Ok(())
 }

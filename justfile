@@ -3,7 +3,7 @@ _default:
 
 # build everything
 build args="":
-    cargo build -j $(nproc) --package "vorpal-cli" {{ args }}
+    cargo build --package "vorpal-cli" {{ args }}
 
 # build sandbox (docker)
 build-docker-sandbox:
@@ -20,7 +20,7 @@ build-docker: build-docker-sandbox
 
 # check (cargo)
 check args="":
-    cargo check -j $(nproc) {{ args }}
+    cargo check {{ args }}
 
 # clean everything
 clean:
@@ -68,7 +68,7 @@ start-docker: build-docker
 
 # test cargo
 test-cargo args="":
-    cargo test -j $(nproc) {{ args }}
+    cargo test {{ args }}
 
 # test nickel
 test-nickel system="aarch64-linux":

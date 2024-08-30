@@ -10,84 +10,64 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  test:
+    env:
+      NICKEL_IMPORT_PATH: ${{ github.workspace }}/.vorpal/packages:${{ github.workspace }}
+      OPENSSL_DIR: ${{ github.workspace }}/deps/openssl-3.3.1-dist
+      PATH: ${{ github.workspace }}/deps/proto-28.0-osx-aarch_64/bin:$PATH
+    runs-on: ubuntu-latest
+    steps:
+      - uses: extractions/setup-just@v2
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+
+      - uses: actions/checkout@v4
+
+      - run: ./dev.sh
+
+      - run: just format
+
+      - run: just lint
+
   build:
+    env:
+      NICKEL_IMPORT_PATH: ${{ github.workspace }}/.vorpal/packages:${{ github.workspace }}
+      OPENSSL_DIR: ${{ github.workspace }}/deps/openssl-3.3.1-dist
+      PATH: ${{ github.workspace }}/deps/proto-28.0-osx-aarch_64/bin:$PATH
+    needs:
+      - test
     strategy:
       matrix:
         runner:
           - latest
           - latest-arm64
-        target:
-          - vorpal
-          - vorpal-sandbox
     runs-on: ubuntu-${{ matrix.runner }}
-    permissions:
-      attestations: write
-      contents: read
-      id-token: write
-      packages: write
     steps:
-      - uses: docker/setup-qemu-action@v3
+      - uses: extractions/setup-just@v2
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
 
       - uses: actions/checkout@v4
 
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          annotations: |
-            org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
-          images: ${{ env.REGISTRY }}/alt-f4-llc/${{ matrix.target }}
-          labels: |
-            org.opencontainers.image.title=${{ matrix.target }}
-            org.opencontainers.image.description=Build and deliver software reliably with one magical tool.
-            org.opencontainers.image.vendor=ALT-F4-LLC
-          tags: |
-            edge
+      - run: ./dev.sh
 
-      - if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          password: ${{ secrets.GITHUB_TOKEN }}
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
+      - run: just check --release
+
+      - run: just build --release
+
+      - run: just build --release
 
       - run: |
-          if [ "${{ matrix.target }}" == "vorpal-sandbox" ]; then
-            echo "DOCKERFILE=Dockerfile.sandbox" >> $GITHUB_ENV
-          else
-            echo "DOCKERFILE=Dockerfile" >> $GITHUB_ENV
-          fi
-
-      - id: push
-        uses: docker/build-push-action@v6
-        with:
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          file: ${{ env.DOCKERFILE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          load: true
-          push: ${{ github.ref == 'refs/heads/main' }}
-          tags: ${{ steps.meta.outputs.tags }}
-
-      - if: github.ref == 'refs/heads/main'
-        uses: actions/attest-build-provenance@v1
-        with:
-          push-to-registry: true
-          subject-digest: ${{ steps.push.outputs.digest }}
-          subject-name: ${{ env.REGISTRY }}/alt-f4-llc/${{ matrix.target }}
-
-      - if: matrix.target == 'vorpal'
-        run: |
           ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
-          ID="$(docker container create ${{ env.REGISTRY }}/alt-f4-llc/${{ matrix.target }}:edge)"
           OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
           mkdir -p dist
 
-          docker container cp $ID:/usr/local/bin/vorpal ./dist/vorpal
-
-          docker rm --force $ID
+          cp ./target/release/vorpal ./dist/vorpal
 
           tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./dist vorpal
 

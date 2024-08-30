@@ -22,13 +22,9 @@ pub async fn load_config(
         config, config_system,
     );
 
-    println!("config_str: {}", config_str);
-
     let temp_file = create_temp_file("ncl").await?;
 
     write(&temp_file, config_str).await?;
-
-    println!("temp_file: {}", temp_file.display());
 
     let data = Command::new("nickel")
         .arg("export")
@@ -42,8 +38,6 @@ pub async fn load_config(
         .stdout;
 
     let data = String::from_utf8(data)?;
-
-    println!("data: {}", data);
 
     Ok((serde_json::from_str(&data)?, digest(data)))
 }

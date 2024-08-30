@@ -111,12 +111,25 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
     in
 
     let sourceExcludes = [
-      ".buildx",
-      ".direnv",
+      ".dockerignore",
+      ".envrc",
       ".git",
+      ".github",
       ".gitignore",
+      ".vorpal",
+      "Dockerfile",
+      "Dockerfile.sandbox",
+      "LICENSE",
+      "README.md",
+      "deps",
+      "dev.sh",
+      "justfile",
+      "nickel",
+      "script",
       "target",
-      "vendor"
+      "vorpal.lock.ncl",
+      "vorpal.ncl",
+      "vorpal.png",
     ]
     in
 
@@ -173,9 +186,9 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
           cp $%{std.string.replace "-" "_" config.name}_cache/config.toml \
             .cargo/config.toml
 
-          cargo build -j $(nproc) --offline --release
+          cargo build --offline --release
 
-          cargo test -j $(nproc) --offline --release -- --test-threads=$(nproc)
+          cargo test --offline --release
 
           mkdir -p $output/bin
 
