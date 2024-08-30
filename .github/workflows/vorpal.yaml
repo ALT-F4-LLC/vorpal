@@ -101,8 +101,6 @@ jobs:
           path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
 
   test:
-    env:
-      PATH: ${{ github.workspace }}/.vorpal/bin:$PATH
     needs:
       - build
     runs-on: ubuntu-latest
@@ -117,4 +115,6 @@ jobs:
           mkdir -p .vorpal/bin
           tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C .vorpal/bin
 
-      - run: vorpal validate
+      - env:
+          PATH: $PWD/.vorpal/bin:$PATH
+        run: vorpal validate
