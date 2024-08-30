@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          apt-get update
-          apt-get install --yes \
+          sudo apt-get update
+          sudo apt-get install --yes \
             openssl \
             protobuf-compiler
 
@@ -56,8 +56,8 @@ jobs:
     runs-on: ubuntu-${{ matrix.runner }}
     steps:
       - run: |
-          apt-get update
-          apt-get install --yes \
+          sudo apt-get update
+          sudo apt-get install --yes \
             openssl \
             protobuf-compiler
 
