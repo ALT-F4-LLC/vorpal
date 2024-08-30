@@ -38,7 +38,7 @@ pub trait PackageTarget {
 
 impl PackageTarget for PackageSystem {
     fn from_str(system: &str) -> Self {
-        match target {
+        match system {
             "aarch64-linux" => Aarch64Linux,
             "aarch64-macos" => Aarch64Macos,
             "x86_64-linux" => X8664Linux,
