@@ -99,3 +99,20 @@ jobs:
         with:
           name: vorpal-${{ env.ARCH }}-${{ env.OS }}
           path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
+
+  test:
+    env:
+      PATH: ${{ github.workspace }}/.vorpal/bin:$PATH
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vorpal-x86_64-linux
+
+      - run: |
+          mkdir -p .vorpal/bin
+          tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C .vorpal/bin
+
+      - run: vorpal build --help
