@@ -11,10 +11,10 @@ pub async fn load_config(
 ) -> Result<(Config, String), anyhow::Error> {
     let config_system = match system {
         PackageSystem::Aarch64Linux => "aarch64-linux",
-        PackageSystem::Aarch64Macos => "aaarch64-macos",
-        PackageSystem::Unknown => anyhow::bail!("unknown target"),
+        PackageSystem::Aarch64Macos => "aarch64-macos",
         PackageSystem::X8664Linux => "x86_64-linux",
         PackageSystem::X8664Macos => "x86_64-macos",
+        PackageSystem::Unknown => anyhow::bail!("unknown target"),
     };
 
     let config_str = format!(
@@ -22,9 +22,13 @@ pub async fn load_config(
         config, config_system,
     );
 
+    println!("config_str: {}", config_str);
+
     let temp_file = create_temp_file("ncl").await?;
 
     write(&temp_file, config_str).await?;
+
+    println!("temp_file: {}", temp_file.display());
 
     let data = Command::new("nickel")
         .arg("export")
@@ -38,6 +42,8 @@ pub async fn load_config(
         .stdout;
 
     let data = String::from_utf8(data)?;
+
+    println!("data: {}", data);
 
     Ok((serde_json::from_str(&data)?, digest(data)))
 }

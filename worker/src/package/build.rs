@@ -13,13 +13,7 @@ use rsa::{
     signature::Verifier,
 };
 use std::iter::Iterator;
-use std::{
-    collections::HashMap,
-    env::consts::{ARCH, OS},
-    fs::Permissions,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
-};
+use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::PathBuf};
 use tokio::{
     fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
     sync::mpsc::Sender,
@@ -28,12 +22,8 @@ use tonic::{Request, Status, Streaming};
 use tracing::debug;
 use uuid::Uuid;
 use vorpal_notary::get_public_key;
-use vorpal_schema::{
-    api::package::{
-        BuildRequest, BuildResponse, PackageSystem,
-        PackageSystem::{Aarch64Linux, Aarch64Macos, Unknown},
-    },
-    get_package_system,
+use vorpal_schema::api::package::{
+    BuildRequest, BuildResponse, PackageSystem, PackageSystem::Unknown,
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
@@ -120,22 +110,6 @@ pub async fn run(
 
     if package_target == Unknown {
         send_error(tx, "unsupported build target".to_string()).await?
-    }
-
-    let mut worker_system = get_package_system(format!("{}-{}", ARCH, OS).as_str());
-
-    if worker_system == Aarch64Macos {
-        worker_system = Aarch64Linux; // docker uses linux on macos
-    }
-
-    if package_target != worker_system {
-        let message = format!(
-            "build target mismatch: {} != {}",
-            package_target.as_str_name(),
-            worker_system.as_str_name()
-        );
-
-        send_error(tx, message).await?
     }
 
     // If package exists, return

@@ -39,6 +39,7 @@ run +flags="":
 
 run-docker +command: build-docker
     docker container run \
+        --env "NICKEL_IMPORT_PATH=${PWD}/.vorpal/packages:${PWD}" \
         --interactive \
         --network "host" \
         --rm \

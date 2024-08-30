@@ -6,10 +6,7 @@ use std::env::consts::{ARCH, OS};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
-    api::package::{
-        PackageOutput, PackageSystem,
-        PackageSystem::{Aarch64Linux, Aarch64Macos, Unknown},
-    },
+    api::package::{PackageOutput, PackageSystem, PackageSystem::Unknown},
     get_package_system,
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
@@ -85,14 +82,10 @@ async fn main() -> Result<(), anyhow::Error> {
             system,
             worker,
         } => {
-            let mut system: PackageSystem = get_package_system(system);
+            let system: PackageSystem = get_package_system(system);
 
             if system == Unknown {
                 anyhow::bail!("unknown target: {}", system.as_str_name());
-            }
-
-            if system == Aarch64Macos {
-                system = Aarch64Linux;
             }
 
             if worker.is_empty() {
@@ -148,12 +141,12 @@ async fn main() -> Result<(), anyhow::Error> {
 
                 if private_key_path.exists() {
                     println!("=> Private key exists: {}", private_key_path.display());
-                    return Ok(())
+                    return Ok(());
                 }
 
                 if public_key_path.exists() {
                     println!("=> Public key exists: {}", public_key_path.display());
-                    return Ok(())
+                    return Ok(());
                 }
 
                 vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)
@@ -166,14 +159,10 @@ async fn main() -> Result<(), anyhow::Error> {
         Command::Validate { file, system } => {
             println!("=> Validating: {}", file);
 
-            let mut package_system: PackageSystem = get_package_system(system);
+            let package_system: PackageSystem = get_package_system(system);
 
             if package_system == Unknown {
                 anyhow::bail!("unknown target: {}", system);
-            }
-
-            if package_system == Aarch64Macos {
-                package_system = Aarch64Linux;
             }
 
             let (config, _) = nickel::load_config(file, package_system).await?;
