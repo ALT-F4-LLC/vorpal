@@ -35,7 +35,7 @@ just() {
 
     mkdir -p deps/just
 
-    curl --proto '=https' --tlsv1.2 -sSf -L "${JUST_URL}" -o deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
+    wget "${JUST_URL}" -O deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
 
     tar -xvf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz -C deps/just
 }
@@ -44,7 +44,7 @@ openssl() {
     OPENSSL_VERSION="3.3.1"
     OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
 
-    curl --proto '=https' --tlsv1.2 -sSf -L "${OPENSSL_URL}" -o deps/openssl-${OPENSSL_VERSION}.tar.gz
+    wget "${OPENSSL_URL}" -O deps/openssl-${OPENSSL_VERSION}.tar.gz
 
     tar -xvf deps/openssl-${OPENSSL_VERSION}.tar.gz -C deps
 
@@ -86,7 +86,7 @@ protoc() {
 
     PROTOC_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"
 
-    curl --proto '=https' --tlsv1.2 -sSf -L "${PROTOC_URL}" -o deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip
+    wget "${PROTOC_URL}" -O deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip
 
     rm -rf deps/proto
 
