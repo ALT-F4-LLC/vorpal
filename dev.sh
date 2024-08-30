@@ -16,7 +16,7 @@ just() {
     if [[ "${OS}" == "darwin" ]]; then
         JUST_SYSTEM="apple-darwin"
     elif [[ "${OS}" == "linux" ]]; then
-        JUST_SYSTEM="unknown-linux-gnu"
+        JUST_SYSTEM="unknown-linux-musl"
     else
         echo "Unsupported OS: ${OS}"
         exit 1
