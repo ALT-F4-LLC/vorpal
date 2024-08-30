@@ -20,6 +20,8 @@ jobs:
           - ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/cache/restore@v4
         with:
           key: cargo-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
@@ -29,8 +31,6 @@ jobs:
         with:
           key: rustup-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: /home/runner/.rustup
-
-      - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
@@ -77,6 +77,8 @@ jobs:
       - deps
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/cache/restore@v4
         with:
           key: cargo-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
@@ -86,8 +88,6 @@ jobs:
         with:
           key: rustup-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: /home/runner/.rustup
-
-      - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
@@ -116,6 +116,8 @@ jobs:
           - ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/cache/restore@v4
         with:
           key: cargo-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
@@ -125,8 +127,6 @@ jobs:
         with:
           key: rustup-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: /home/runner/.rustup
-
-      - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
