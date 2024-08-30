@@ -77,20 +77,25 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           subject-name: ${{ env.REGISTRY }}/alt-f4-llc/${{ matrix.target }}
 
-      - run: |
-          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
       - if: matrix.target == 'vorpal'
         run: |
-          CONTAINER_ID="$(docker container create ${{ env.REGISTRY }}/alt-f4-llc/${{ matrix.target }}:edge)"
+          ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
+          ID="$(docker container create ${{ env.REGISTRY }}/alt-f4-llc/${{ matrix.target }}:edge)"
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
           mkdir -p dist
-          docker container cp $CONTAINER_ID:/usr/local/bin/vorpal ./dist/vorpal
-          docker rm --force $CONTAINER_ID
 
-      - run: tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./dist vorpal
+          docker container cp $ID:/usr/local/bin/vorpal ./dist/vorpal
 
-      - uses: actions/upload-artifact@v4
+          docker rm --force $ID
+
+          tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./dist vorpal
+
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "OS=$OS" >> $GITHUB_ENV
+
+      - if: matrix.target == 'vorpal'
+        uses: actions/upload-artifact@v4
         with:
           name: vorpal-${{ env.ARCH }}-${{ env.OS }}
           path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
