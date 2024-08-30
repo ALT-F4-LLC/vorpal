@@ -38,9 +38,7 @@ pub trait PackageTarget {
 
 impl PackageTarget for PackageSystem {
     fn from_str(system: &str) -> Self {
-        let target = system.to_lowercase().replace("_", "-");
-
-        match target.as_str() {
+        match target {
             "aarch64-linux" => Aarch64Linux,
             "aarch64-macos" => Aarch64Macos,
             "x86_64-linux" => X8664Linux,
