@@ -10,7 +10,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  test:
+  dev:
     env:
       NICKEL_IMPORT_PATH: ${{ github.workspace }}/.vorpal/packages:${{ github.workspace }}
       OPENSSL_DIR: ${{ github.workspace }}/deps/openssl-3.3.1-dist
@@ -37,7 +37,7 @@ jobs:
       OPENSSL_DIR: ${{ github.workspace }}/deps/openssl-3.3.1-dist
       PATH: ${{ github.workspace }}/deps/proto-28.0-osx-aarch_64/bin:$PATH
     needs:
-      - test
+      - dev
     strategy:
       matrix:
         runner:
@@ -59,7 +59,7 @@ jobs:
 
       - run: just build --release
 
-      - run: just build --release
+      - run: just test --release
 
       - run: |
           ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
