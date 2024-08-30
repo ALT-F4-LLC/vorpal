@@ -127,3 +127,56 @@ jobs:
         run: |
           kill $WORKER_PID
           cat worker_output.log
+
+  release:
+    needs:
+      - test
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vorpal-*
+
+      - run: git fetch --tags
+
+      - if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view edge > /dev/null 2>&1; then
+            gh release delete --cleanup-tag --yes edge
+          fi
+          git tag edge
+          git push --tags
+
+      - if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          body: Latest artifacts from `main` branch when merged.
+          fail_on_unmatched_files: true
+          files: |
+            vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz
+            vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
+          name: edge
+          prerelease: true
+          tag_name: refs/tags/edge
+
+      - run: |
+          mkdir -p dist/aarch64-linux
+          mkdir -p dist/x86_64-linux
+          tar -xzf vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
+          tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
+
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            dist/aarch64-linux/vorpal
+            dist/x86_64-linux/vorpal
