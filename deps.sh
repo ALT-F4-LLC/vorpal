@@ -24,7 +24,7 @@ just() {
 
     if [[ "${ARCH}" == "x86_64" ]]; then
         JUST_SYSTEM="x86_64-${JUST_SYSTEM}"
-    elif [[ "${ARCH}" == "arm64" ]]; then
+    elif [[ "${ARCH}" == "arm64" || "${ARCH}" == "aarch64" ]]; then
         JUST_SYSTEM="aarch64-${JUST_SYSTEM}"
     else
         echo "Unsupported ARCH: ${ARCH}"
@@ -76,7 +76,7 @@ protoc() {
 
     if [[ "${ARCH}" == "x86_64" ]]; then
         PROTOC_SYSTEM="${PROTOC_SYSTEM}-x86_64"
-    elif [[ "${ARCH}" == "arm64" ]]; then
+    elif [[ "${ARCH}" == "arm64" || "${ARCH}" == "aarch64" ]]; then
         PROTOC_SYSTEM="${PROTOC_SYSTEM}-aarch_64"
     else
         echo "Unsupported ARCH: ${ARCH}"

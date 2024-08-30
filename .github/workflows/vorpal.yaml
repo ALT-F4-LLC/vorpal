@@ -10,7 +10,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  deps: # cache dependencies
+  deps:
     strategy:
       matrix:
         runner:
@@ -39,6 +39,8 @@ jobs:
           path: deps
 
   dev:
+    needs:
+      - deps
     runs-on: ubuntu-latest
     steps:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
