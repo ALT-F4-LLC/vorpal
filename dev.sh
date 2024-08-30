@@ -48,10 +48,13 @@ openssl() {
 
     tar -xvf deps/openssl-${OPENSSL_VERSION}.tar.gz -C deps
 
-    cd deps/openssl-${OPENSSL_VERSION} \
-        && ./Config --prefix="${WORKDIR}/deps/openssl" \
-        && make \
-        && make install
+    cd deps/openssl-${OPENSSL_VERSION}
+
+    ./Configure --prefix="${WORKDIR}/deps/openssl"
+
+    make
+
+    make install
 }
 
 protoc() {
