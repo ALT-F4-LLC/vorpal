@@ -111,10 +111,19 @@ jobs:
         with:
           pattern: vorpal-x86_64-linux
 
-      - run: |
-          mkdir -p .vorpal/bin
-          tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C .vorpal/bin
+      - run: tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
 
-      - env:
-          PATH: $PWD/.vorpal/bin:$PATH
-        run: vorpal validate
+      - run: ./vorpal validate
+
+      - run: |
+          ./vorpal worker start > worker_output.log 2>&1 &
+          WORKER_PID=$(echo $!)
+          echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
+          echo "Worker pid: $WORKER_PID"
+
+      - run: ./vorpal build
+
+      - if: always()
+        run: |
+          kill $WORKER_PID
+          cat worker_output.log
