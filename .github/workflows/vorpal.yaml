@@ -22,6 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - run: which cargo
+
       - uses: actions/cache/restore@v4
         with:
           key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
