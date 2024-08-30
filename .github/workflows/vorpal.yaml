@@ -20,14 +20,17 @@ jobs:
           - ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-
-      - run: which cargo
+      - uses: actions/cache/restore@v4
+        with:
+          key: cargo-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: /home/runner/.cargo
 
       - uses: actions/cache/restore@v4
         with:
-          key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
-          path: ${{ env.HOME }}
+          key: rustup-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: /home/runner/.rustup
+
+      - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
@@ -56,17 +59,18 @@ jobs:
 
       - uses: actions/cache/save@v4
         with:
-          key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
-          path: |
-            ${{ env.HOME }}/.cargo
-            ${{ env.HOME }}/.rustup
+          key: cargo-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: /home/runner/.cargo
+
+      - uses: actions/cache/save@v4
+        with:
+          key: rustup-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: /home/runner/.rustup
 
       - uses: actions/cache/save@v4
         with:
           key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
-          path: |
-            ${{ github.workspace }}/deps
-            ${{ env.HOME }}/.rustup
+          path: deps
 
   quality:
     needs:
@@ -75,8 +79,13 @@ jobs:
     steps:
       - uses: actions/cache/restore@v4
         with:
-          key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
-          path: ${{ env.HOME }}
+          key: cargo-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: /home/runner/.cargo
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: rustup-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: /home/runner/.rustup
 
       - uses: actions/checkout@v4
 
@@ -109,8 +118,13 @@ jobs:
     steps:
       - uses: actions/cache/restore@v4
         with:
-          key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
-          path: ${{ env.HOME }}
+          key: cargo-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: /home/runner/.cargo
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: rustup-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: /home/runner/.rustup
 
       - uses: actions/checkout@v4
 
