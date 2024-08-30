@@ -13,10 +13,13 @@ jobs:
   build-docker:
     strategy:
       matrix:
+        runner:
+          - ubuntu-latest
+          - ubuntu-latest-arm64
         target:
           - vorpal
           - vorpal-sandbox
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       attestations: write
       contents: read
@@ -63,7 +66,6 @@ jobs:
           cache-to: type=gha,mode=max
           file: ${{ env.DOCKERFILE }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
 

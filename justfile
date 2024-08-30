@@ -14,7 +14,9 @@ build-docker-sandbox:
 
 # build (docker)
 build-docker: build-docker-sandbox
-    docker buildx build --tag "ghcr.io/alt-f4-llc/vorpal:edge" .
+    docker buildx build \
+        --tag "ghcr.io/alt-f4-llc/vorpal:edge" \
+        .
 
 # check (cargo)
 check args="":
