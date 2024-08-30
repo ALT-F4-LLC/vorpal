@@ -9,6 +9,31 @@ export NICKEL_IMPORT_PATH="$WORKDIR/.vorpal/packages:$WORKDIR"
 export OPENSSL_DIR="$WORKDIR/deps/openssl"
 export PATH="$WORKDIR/deps/just/bin:$WORKDIR/deps/nickel/bin:$WORKDIR/deps/openssl/bin:$WORKDIR/deps/protoc/bin:$HOME/.cargo/bin:$PATH"
 
+RUST_VERSION="1.80.1"
+
+if [[ "${OS}" == "darwin" ]]; then
+    RUST_SYSTEM="apple-darwin"
+elif [[ "${OS}" == "linux" ]]; then
+    RUST_SYSTEM="unknown-linux-gnu"
+else
+    echo "Unsupported OS: ${OS}"
+    exit 1
+fi
+
+if [[ "${ARCH}" == "x86_64" ]]; then
+    RUST_SYSTEM="x86_64-${RUST_SYSTEM}"
+elif [[ "${ARCH}" == "arm64" || "${ARCH}" == "aarch64" ]]; then
+    RUST_SYSTEM="aarch64-${RUST_SYSTEM}"
+else
+    echo "Unsupported ARCH: ${ARCH}"
+    exit 1
+fi
+
+if [[ ! -d "$HOME/.rustup/toolchains/${RUST_VERSION}-${RUST_SYSTEM}" ]]; then
+    rustup toolchain install --profile "minimal" "${RUST_VERSION}"
+    rustup default "${RUST_VERSION}"
+fi
+
 cd "${WORKDIR}"
 
 mkdir -p ./deps

@@ -20,11 +20,12 @@ jobs:
           - ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
-
       - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: ${{ env.HOME }}
 
       - uses: actions/cache/restore@v4
         with:
@@ -32,6 +33,10 @@ jobs:
           path: deps
 
       - run: ./deps.sh
+
+      - run: cargo --version
+
+      - run: rustc --version
 
       - run: |
           echo "$PWD/deps/just/bin" >> $GITHUB_PATH
@@ -49,17 +54,27 @@ jobs:
 
       - uses: actions/cache/save@v4
         with:
+          key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: |
+            ${{ env.HOME }}/.cargo
+            ${{ env.HOME }}/.rustup
+
+      - uses: actions/cache/save@v4
+        with:
           key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
-          path: deps
+          path: |
+            ${{ github.workspace }}/deps
+            ${{ env.HOME }}/.rustup
 
   quality:
     needs:
       - deps
     runs-on: ubuntu-latest
     steps:
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/cache/restore@v4
         with:
-          components: rustfmt
+          key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: ${{ env.HOME }}
 
       - uses: actions/checkout@v4
 
@@ -90,9 +105,10 @@ jobs:
           - ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/cache/restore@v4
         with:
-          components: rustfmt
+          key: toolchain-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: ${{ env.HOME }}
 
       - uses: actions/checkout@v4
 
