@@ -7,13 +7,13 @@ WORKDIR=$(pwd)
 
 export NICKEL_IMPORT_PATH="$WORKDIR/.vorpal/packages:$WORKDIR"
 export OPENSSL_DIR="$WORKDIR/deps/openssl"
-export PATH="$WORKDIR/deps/protoc/bin:$WORKDIR/deps/just:$HOME/.cargo/bin:$PATH"
+export PATH="$WORKDIR/deps/just/bin:$WORKDIR/deps/nickel/bin:$WORKDIR/deps/openssl/bin:$WORKDIR/deps/protoc/bin:$HOME/.cargo/bin:$PATH"
 
 cd "${WORKDIR}"
 
 mkdir -p ./deps
 
-if [[ ! -d "$PWD/deps/just" ]]; then
+if [[ ! -d "$PWD/deps/just/bin" ]]; then
     JUST_SYSTEM=""
     JUST_VERSION="1.35.0"
 
@@ -37,11 +37,11 @@ if [[ ! -d "$PWD/deps/just" ]]; then
 
     JUST_URL="https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz"
 
-    mkdir -p deps/just
+    mkdir -p deps/just/bin
 
     curl -L "${JUST_URL}" -o deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
 
-    tar -xvf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz -C deps/just
+    tar -xvf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz -C deps/just/bin
 
     rm -rf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
 
@@ -50,7 +50,33 @@ fi
 
 cd "${WORKDIR}"
 
-if [[ ! -d "$PWD/deps/openssl" ]]; then
+if [[ ! -d "$PWD/deps/nickel/bin" ]]; then
+    NICKEL_ARCH=$ARCH
+
+    if [ "$ARCH" = "aarch64" ]; then
+        NICKEL_ARCH="arm64";
+    fi
+
+    mkdir -p deps/nickel/bin
+
+    if [ "$OS" == "darwin" ]; then
+        cargo install nickel-lang-cli
+
+        ln -s "$HOME/.cargo/bin/nickel" deps/nickel/bin/nickel
+    fi
+
+    if [ "$OS" == "linux" ]; then
+        curl -fsSL \
+            "https://github.com/tweag/nickel/releases/download/1.7.0/nickel-${NICKEL_ARCH}-linux" \
+            -o deps/nickel/bin/nickel
+
+        chmod +x deps/nickel/bin/nickel
+    fi
+fi
+
+cd "${WORKDIR}"
+
+if [[ ! -d "$PWD/deps/openssl/bin" ]]; then
     OPENSSL_VERSION="3.3.1"
     OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
 
@@ -75,7 +101,7 @@ fi
 
 cd "${WORKDIR}"
 
-if [[ ! -d "$PWD/deps/protoc" ]]; then
+if [[ ! -d "$PWD/deps/protoc/bin" ]]; then
     PROTOC_SYSTEM=""
     PROTOC_VERSION="28.0"
 
@@ -124,7 +150,3 @@ if ! command -v rustc &> /dev/null || [[ ! -x "$(command -v rustc)" ]]; then
     echo "rustc is not installed or not executable"
     exit 1
 fi
-
-# cargo install nickel-lang-cli
-
-"$@"

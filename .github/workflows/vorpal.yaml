@@ -20,22 +20,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: |
-          ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
-          echo "OS=$OS" >> $GITHUB_ENV
-
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('deps.sh') }}
+          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: deps
 
       - run: ./deps.sh
 
+      - run: |
+          echo "$PWD/deps/just/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/openssl/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/protoc/bin" >> $GITHUB_PATH
+
+      - run: which just
+
+      - run: which nickel
+
+      - run: which openssl
+
+      - run: which protoc
+
       - uses: actions/cache/save@v4
         with:
-          key: ${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('deps.sh') }}
+          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: deps
 
   dev:
@@ -47,32 +55,21 @@ jobs:
         with:
           components: rustfmt
 
-      - run: |
-          NICKEL_ARCH=$(uname -m)
-          if [ "$NICKEL_ARCH" = "aarch64" ]; then
-            NICKEL_ARCH="arm64";
-          fi
-          curl -fsSL \
-            "https://github.com/tweag/nickel/releases/download/1.7.0/nickel-${NICKEL_ARCH}-linux" \
-            -o /usr/local/bin/nickel
-          chmod +x /usr/local/bin/nickel
-
-      - run: nickel --version
-
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ env.ARCH }}-${{ env.OS }}-${{ hashFiles('deps.sh') }}
+          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: deps
 
       - run: |
-          PATH="${PWD}/deps/just:${PWD}/deps/proto/bin:$PATH"
-          echo "PATH=$PATH" >> $GITHUB_ENV
+          echo "$PWD/deps/just/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/openssl/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/protoc/bin" >> $GITHUB_PATH
 
-      - run: protoc --version
-      - run: just --version
       - run: just format
+
       - run: just lint
 
   package:
@@ -85,36 +82,27 @@ jobs:
           - latest-arm64
     runs-on: ubuntu-${{ matrix.runner }}
     steps:
-      - run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            openssl \
-            protobuf-compiler
-
-      - uses: extractions/setup-just@v2
-
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
 
-      - run: |
-          NICKEL_ARCH=$(uname -m)
-          if [ "$NICKEL_ARCH" = "aarch64" ]; then
-            NICKEL_ARCH="arm64";
-          fi
-          curl -fsSL \
-            "https://github.com/tweag/nickel/releases/download/1.7.0/nickel-${NICKEL_ARCH}-linux" \
-            -o /usr/local/bin/nickel
-          chmod +x /usr/local/bin/nickel
-
-      - run: just --version
-      - run: protoc --version
-      - run: nickel --version
-
       - uses: actions/checkout@v4
 
+      - uses: actions/cache/restore@v4
+        with:
+          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: deps
+
+      - run: |
+          echo "$PWD/deps/just/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/openssl/bin" >> $GITHUB_PATH
+          echo "$PWD/deps/protoc/bin" >> $GITHUB_PATH
+
       - run: just check --release
+
       - run: just build --release
+
       - run: just test --release
 
       - run: |
@@ -125,7 +113,7 @@ jobs:
 
           cp ./target/release/vorpal ./dist/vorpal
 
-          tar -czvf vorpal-$ARCH-$OS.tar.gz -C ./dist vorpal
+          tar -czvf "vorpal-$ARCH-$OS.tar.gz" -C ./dist vorpal
 
           echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "OS=$OS" >> $GITHUB_ENV
@@ -141,18 +129,15 @@ jobs:
       - package
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          NICKEL_ARCH=$(uname -m)
-          if [ "$NICKEL_ARCH" = "aarch64" ]; then
-            NICKEL_ARCH="arm64";
-          fi
-          curl -fsSL \
-            "https://github.com/tweag/nickel/releases/download/1.7.0/nickel-${NICKEL_ARCH}-linux" \
-            -o /usr/local/bin/nickel
-          chmod +x /usr/local/bin/nickel
-          nickel --version
-
       - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: deps
+
+      - run: |
+          echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
 
       - uses: actions/download-artifact@v4
         with:
