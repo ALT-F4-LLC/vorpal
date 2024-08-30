@@ -105,6 +105,17 @@ jobs:
       - build
     runs-on: ubuntu-latest
     steps:
+      - run: |
+          NICKEL_ARCH=$(uname -m)
+          if [ "$NICKEL_ARCH" = "aarch64" ]; then
+            NICKEL_ARCH="arm64";
+          fi
+          curl -fsSL \
+            "https://github.com/tweag/nickel/releases/download/1.7.0/nickel-${NICKEL_ARCH}-linux" \
+            -o /usr/local/bin/nickel
+          chmod +x /usr/local/bin/nickel
+          nickel --version
+
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
