@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-rustup show
+WORKDIR=$(pwd)
+ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+export NICKEL_IMPORT_PATH="$WORKDIR/.vorpal/packages:$WORKDIR"
+export OPENSSL_DIR="$WORKDIR/deps/openssl"
+export PATH="$WORKDIR/deps/just/bin:$WORKDIR/deps/nickel/bin:$WORKDIR/deps/openssl/bin:$WORKDIR/deps/protoc/bin:$HOME/.cargo/bin:$PATH"
+
+rustup show active-toolchain
 
 if ! command -v cargo &> /dev/null || [[ ! -x "$(command -v cargo)" ]]; then
     echo "cargo is not installed or not executable"
@@ -12,14 +20,6 @@ if ! command -v rustc &> /dev/null || [[ ! -x "$(command -v rustc)" ]]; then
     echo "rustc is not installed or not executable"
     exit 1
 fi
-
-ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-WORKDIR=$(pwd)
-
-export NICKEL_IMPORT_PATH="$WORKDIR/.vorpal/packages:$WORKDIR"
-export OPENSSL_DIR="$WORKDIR/deps/openssl"
-export PATH="$WORKDIR/deps/just/bin:$WORKDIR/deps/nickel/bin:$WORKDIR/deps/openssl/bin:$WORKDIR/deps/protoc/bin:$HOME/.cargo/bin:$PATH"
 
 cd "${WORKDIR}"
 
@@ -152,3 +152,5 @@ if [[ ! -d "$PWD/deps/protoc/bin" ]]; then
 
     # TODO: support hash checking for downloads
 fi
+
+"$@"

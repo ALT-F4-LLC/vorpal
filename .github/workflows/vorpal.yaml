@@ -28,17 +28,10 @@ jobs:
           path: deps
 
       - run: ./dev.sh
-
-      - run: |
-          echo "$PWD/deps/just/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/openssl/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/protoc/bin" >> $GITHUB_PATH
-
-      - run: which just
-      - run: which nickel
-      - run: which openssl
-      - run: which protoc
+      - run: ./dev.sh which just
+      - run: ./dev.sh which nickel
+      - run: ./dev.sh which openssl
+      - run: ./dev.sh which protoc
 
       - uses: actions/cache/save@v4
         with:
@@ -62,13 +55,9 @@ jobs:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./dev.sh
+      - run: ./dev.sh just format
 
-      - run: echo "$PWD/deps/just/bin" >> $GITHUB_PATH
-
-      - run: just format
-
-      - run: just lint
+      - run: ./dev.sh just lint
 
   package:
     needs:
@@ -93,21 +82,11 @@ jobs:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./dev.sh
+      - run: ./dev.sh just check --release
 
-      - run: |
-          echo "$PWD/deps/just/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/openssl/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/protoc/bin" >> $GITHUB_PATH
-          echo "NICKEL_IMPORT_PATH=$PWD/.vorpal/packages:$PWD" >> $GITHUB_ENV
-          echo "OPENSSL_DIR=$PWD/deps/openssl" >> $GITHUB_ENV
+      - run: ./dev.sh just build --release
 
-      - run: just check --release
-
-      - run: just build --release
-
-      - run: just test --release
+      - run: ./dev.sh just test --release
 
       - run: |
           ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
