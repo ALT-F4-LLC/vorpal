@@ -48,6 +48,8 @@ pub async fn load_config(
 
     write(&sandbox_file, config_str).await?;
 
+    println!("=> Sandbox: {}", sandbox_file.display());
+
     let current_path = std::env::current_dir()?;
 
     let packages_path = current_path.join(".vorpal/packages");
@@ -62,7 +64,7 @@ pub async fn load_config(
         .arg(packages_path.display().to_string())
         .arg(sandbox_file.display().to_string());
 
-    println!("=> Running: {:?}", command);
+    println!("=> Command: {:?}", command);
 
     let data = command.output().await?.stdout;
 
