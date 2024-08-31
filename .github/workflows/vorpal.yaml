@@ -140,8 +140,7 @@ jobs:
           key: target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: target
 
-      - if: matrix.target == 'vorpal'
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: vorpal-${{ env.ARCH }}-${{ env.OS }}
           path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
