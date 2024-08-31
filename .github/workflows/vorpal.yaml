@@ -66,6 +66,11 @@ jobs:
           key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: deps
 
+      - uses: actions/cache/restore@v4
+        with:
+          key: target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: target
+
       - run: |
           echo "$PWD/deps/just/bin" >> $GITHUB_PATH
           echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
@@ -98,6 +103,11 @@ jobs:
           key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
           path: deps
 
+      - uses: actions/cache/restore@v4
+        with:
+          key: target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: target
+
       - run: |
           echo "$PWD/deps/just/bin" >> $GITHUB_PATH
           echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
@@ -124,6 +134,11 @@ jobs:
 
           echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "OS=$OS" >> $GITHUB_ENV
+
+      - uses: actions/cache/save@v4
+        with:
+          key: target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          path: target
 
       - if: matrix.target == 'vorpal'
         uses: actions/upload-artifact@v4
