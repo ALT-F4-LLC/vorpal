@@ -56,7 +56,6 @@ jobs:
           path: target
 
       - run: ./dev.sh just format
-
       - run: ./dev.sh just lint
 
   package:
@@ -83,9 +82,7 @@ jobs:
           path: target
 
       - run: ./dev.sh just check --release
-
       - run: ./dev.sh just build --release
-
       - run: ./dev.sh just test --release
 
       - run: |
@@ -135,9 +132,10 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
+          fail-on-cache-miss: true
+          key: vorpal-${{ env.ARCH }}-${{ env.OS }}
 
-      - run: tar -xzf "vorpal-${ARCH}-${OS}/vorpal-${ARCH}-${OS}.tar.gz"
+      - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
 
       - run: ./vorpal validate
 
@@ -168,6 +166,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
+          fail-on-cache-miss: true
           pattern: vorpal-*
 
       - run: git fetch --tags
