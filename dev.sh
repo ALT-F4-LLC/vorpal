@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+rustup show
+
 if ! command -v cargo &> /dev/null || [[ ! -x "$(command -v cargo)" ]]; then
     echo "cargo is not installed or not executable"
     exit 1
@@ -10,9 +12,6 @@ if ! command -v rustc &> /dev/null || [[ ! -x "$(command -v rustc)" ]]; then
     echo "rustc is not installed or not executable"
     exit 1
 fi
-
-cargo --version
-rustc --version
 
 ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')

@@ -11,7 +11,7 @@ env:
   RUST_VERSION: 1.80.1
 
 jobs:
-  deps:
+  cache-dev:
     strategy:
       matrix:
         runner:
@@ -20,18 +20,14 @@ jobs:
           - ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - run: |
-          rustup toolchain install --profile "minimal" "${{ env.RUST_VERSION }}"
-          rustup default "${{ env.RUST_VERSION }}"
-
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
           path: deps
 
-      - run: ./deps.sh
+      - run: ./dev.sh
 
       - run: |
           echo "$PWD/deps/just/bin" >> $GITHUB_PATH
@@ -46,36 +42,29 @@ jobs:
 
       - uses: actions/cache/save@v4
         with:
-          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
           path: deps
 
-  quality:
+  code-quality:
     needs:
-      - deps
+      - cache-deps
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          rustup toolchain install --profile "minimal" "${{ env.RUST_VERSION }}"
-          rustup default "${{ env.RUST_VERSION }}"
-          rustup component add clippy rustfmt
-
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
           path: deps
 
       - uses: actions/cache/restore@v4
         with:
-          key: target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: |
-          echo "$PWD/deps/just/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/openssl/bin" >> $GITHUB_PATH
-          echo "$PWD/deps/protoc/bin" >> $GITHUB_PATH
+      - run: ./dev.sh
+
+      - run: echo "$PWD/deps/just/bin" >> $GITHUB_PATH
 
       - run: just format
 
@@ -83,7 +72,7 @@ jobs:
 
   package:
     needs:
-      - quality
+      - code-quality
     strategy:
       matrix:
         runner:
@@ -92,21 +81,19 @@ jobs:
           - ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - run: |
-          rustup toolchain install --profile "minimal" "${{ env.RUST_VERSION }}"
-          rustup default "${{ env.RUST_VERSION }}"
-
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
           path: deps
 
       - uses: actions/cache/restore@v4
         with:
-          key: target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
+
+      - run: ./dev.sh
 
       - run: |
           echo "$PWD/deps/just/bin" >> $GITHUB_PATH
@@ -126,45 +113,52 @@ jobs:
           ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
           OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
-          mkdir -p dist
-
-          cp ./target/release/vorpal ./dist/vorpal
-
-          tar -czvf "vorpal-$ARCH-$OS.tar.gz" -C ./dist vorpal
-
           echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "OS=$OS" >> $GITHUB_ENV
 
-      - uses: actions/cache/save@v4
-        with:
-          key: target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          path: target
+          mkdir -p dist
+          cp ./target/release/vorpal ./dist/vorpal
+          tar -czvf "vorpal-${ARCH}-${OS}.tar.gz" -C ./dist vorpal
 
       - uses: actions/upload-artifact@v4
         with:
           name: vorpal-${{ env.ARCH }}-${{ env.OS }}
           path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
 
+      - uses: actions/cache/save@v4
+        with:
+          key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: target
+
   test:
     needs:
       - package
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runner:
+          - macos-latest
+          - ubuntu-latest
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('deps.sh') }}
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
           path: deps
 
+      - run: echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
+
       - run: |
-          echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: vorpal-x86_64-linux
+          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
 
-      - run: tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
+      - run: tar -xzf "vorpal-${ARCH}-${OS}/vorpal-${ARCH}-${OS}.tar.gz"
 
       - run: ./vorpal validate
 
