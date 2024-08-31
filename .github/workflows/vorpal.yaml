@@ -57,7 +57,7 @@ jobs:
       - run: |
           rustup toolchain install --profile "minimal" "${{ env.RUST_VERSION }}"
           rustup default "${{ env.RUST_VERSION }}"
-          rustup component add rustfmt
+          rustup component add clippy rustfmt
 
       - uses: actions/checkout@v4
 
