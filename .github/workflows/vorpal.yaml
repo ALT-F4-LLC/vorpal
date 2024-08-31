@@ -136,7 +136,7 @@ jobs:
 
       - run: ls -alh
 
-      - run: tar -xzf "vorpal-${{ env.ARCH }}-${{ env.OS }}/vorpal-${ARCH}-${OS}.tar.gz"
+      - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
 
       - run: ./vorpal validate
 
