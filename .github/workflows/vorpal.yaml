@@ -57,6 +57,7 @@ jobs:
       - run: |
           rustup toolchain install --profile "minimal" "${{ env.RUST_VERSION }}"
           rustup default "${{ env.RUST_VERSION }}"
+          rustup component add cargo-fmt
 
       - uses: actions/checkout@v4
 
@@ -81,8 +82,7 @@ jobs:
     strategy:
       matrix:
         runner:
-          - macos-13
-          - macos-14
+          - macos-latest
           - ubuntu-latest
           - ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
