@@ -46,9 +46,9 @@ pub async fn load_config(
 
     let sandbox_file = create_temp_file("ncl").await?;
 
-    write(&sandbox_file, config_str).await?;
-
     println!("=> Sandbox: {}", sandbox_file.display());
+
+    write(&sandbox_file, config_str).await?;
 
     let current_path = std::env::current_dir()?;
 
