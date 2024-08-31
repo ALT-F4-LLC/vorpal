@@ -132,10 +132,11 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          fail-on-cache-miss: true
-          key: vorpal-${{ env.ARCH }}-${{ env.OS }}
+          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
 
-      - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
+      - run: ls -alh
+
+      - run: tar -xzf "vorpal-${{ env.ARCH }}-${{ env.OS }}/vorpal-${ARCH}-${OS}.tar.gz"
 
       - run: ./vorpal validate
 
