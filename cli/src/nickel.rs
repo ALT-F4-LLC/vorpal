@@ -10,6 +10,20 @@ pub async fn load_config(
     config: &String,
     system: PackageSystem,
 ) -> Result<(Config, String), anyhow::Error> {
+    let nickel_version = Command::new("nickel").arg("--version").output().await;
+
+    match nickel_version {
+        Ok(output) if output.status.success() => {
+            println!(
+                "=> Nickel: {}",
+                String::from_utf8_lossy(&output.stdout).trim()
+            );
+        }
+        _ => {
+            anyhow::bail!("Nickel command not found or not working");
+        }
+    }
+
     let config_file_path = Path::new(config);
 
     if !config_file_path.exists() {
