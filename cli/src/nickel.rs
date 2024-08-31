@@ -30,24 +30,27 @@ pub async fn load_config(
         config_system,
     );
 
-    let temp_file = create_temp_file("ncl").await?;
+    let sandbox_file = create_temp_file("ncl").await?;
 
-    write(&temp_file, config_str).await?;
+    write(&sandbox_file, config_str).await?;
 
     let current_path = std::env::current_dir()?;
 
     let packages_path = current_path.join(".vorpal/packages");
 
-    let data = Command::new("nickel")
+    let mut command = Command::new("nickel");
+
+    let command = command
         .arg("export")
         .arg("--import-path")
         .arg(current_path.display().to_string())
         .arg("--import-path")
         .arg(packages_path.display().to_string())
-        .arg(temp_file.display().to_string())
-        .output()
-        .await?
-        .stdout;
+        .arg(sandbox_file.display().to_string());
+
+    println!("=> Running: {:?}", command);
+
+    let data = command.output().await?.stdout;
 
     let data = String::from_utf8(data)?;
 
