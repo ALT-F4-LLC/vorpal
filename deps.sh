@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+set -euo pipefail
+
+if ! command -v cargo &> /dev/null || [[ ! -x "$(command -v cargo)" ]]; then
+    echo "cargo is not installed or not executable"
+    exit 1
+fi
+
+if ! command -v rustc &> /dev/null || [[ ! -x "$(command -v rustc)" ]]; then
+    echo "rustc is not installed or not executable"
+    exit 1
+fi
+
+cargo --version
+rustc --version
 
 ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -8,31 +21,6 @@ WORKDIR=$(pwd)
 export NICKEL_IMPORT_PATH="$WORKDIR/.vorpal/packages:$WORKDIR"
 export OPENSSL_DIR="$WORKDIR/deps/openssl"
 export PATH="$WORKDIR/deps/just/bin:$WORKDIR/deps/nickel/bin:$WORKDIR/deps/openssl/bin:$WORKDIR/deps/protoc/bin:$HOME/.cargo/bin:$PATH"
-
-RUST_VERSION="1.80.1"
-
-if [[ "${OS}" == "darwin" ]]; then
-    RUST_SYSTEM="apple-darwin"
-elif [[ "${OS}" == "linux" ]]; then
-    RUST_SYSTEM="unknown-linux-gnu"
-else
-    echo "Unsupported OS: ${OS}"
-    exit 1
-fi
-
-if [[ "${ARCH}" == "x86_64" ]]; then
-    RUST_SYSTEM="x86_64-${RUST_SYSTEM}"
-elif [[ "${ARCH}" == "arm64" || "${ARCH}" == "aarch64" ]]; then
-    RUST_SYSTEM="aarch64-${RUST_SYSTEM}"
-else
-    echo "Unsupported ARCH: ${ARCH}"
-    exit 1
-fi
-
-if [[ ! -d "$HOME/.rustup/toolchains/${RUST_VERSION}-${RUST_SYSTEM}" ]]; then
-    rustup toolchain install --profile "minimal" "${RUST_VERSION}"
-    rustup default "${RUST_VERSION}"
-fi
 
 cd "${WORKDIR}"
 
@@ -87,7 +75,7 @@ if [[ ! -d "$PWD/deps/nickel/bin" ]]; then
     if [ "$OS" == "darwin" ]; then
         cargo install nickel-lang-cli
 
-        ln -s "$HOME/.cargo/bin/nickel" deps/nickel/bin/nickel
+        cp "$(which nickel)" deps/nickel/bin/nickel
     fi
 
     if [ "$OS" == "linux" ]; then
@@ -164,14 +152,4 @@ if [[ ! -d "$PWD/deps/protoc/bin" ]]; then
     rm -rf deps/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip
 
     # TODO: support hash checking for downloads
-fi
-
-if ! command -v cargo &> /dev/null || [[ ! -x "$(command -v cargo)" ]]; then
-    echo "cargo is not installed or not executable"
-    exit 1
-fi
-
-if ! command -v rustc &> /dev/null || [[ ! -x "$(command -v rustc)" ]]; then
-    echo "rustc is not installed or not executable"
-    exit 1
 fi
