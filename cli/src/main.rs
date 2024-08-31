@@ -82,14 +82,14 @@ async fn main() -> Result<(), anyhow::Error> {
             system,
             worker,
         } => {
-            let system: PackageSystem = get_package_system(system);
-
-            if system == Unknown {
-                anyhow::bail!("unknown target: {}", system.as_str_name());
-            }
-
             if worker.is_empty() {
                 anyhow::bail!("no worker specified");
+            }
+
+            let package_system: PackageSystem = get_package_system(system);
+
+            if package_system == Unknown {
+                anyhow::bail!("unknown target: {}", package_system.as_str_name());
             }
 
             setup_paths().await?;
@@ -102,7 +102,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 );
             }
 
-            let (config, config_hash) = nickel::load_config(file, system).await?;
+            println!("=> Building: {} ({})", file, system);
+
+            let (config, config_hash) = nickel::load_config(file, package_system).await?;
 
             let config_structures = config::build_structures(&config);
 
@@ -123,7 +125,8 @@ async fn main() -> Result<(), anyhow::Error> {
                             }
                         }
 
-                        let output = build(&config_hash, package, packages, system, worker).await?;
+                        let output =
+                            build(&config_hash, package, packages, package_system, worker).await?;
 
                         package_finished.insert(package_name, output);
                     }
@@ -157,13 +160,13 @@ async fn main() -> Result<(), anyhow::Error> {
         },
 
         Command::Validate { file, system } => {
-            println!("=> Validating: {}", file);
-
             let package_system: PackageSystem = get_package_system(system);
 
             if package_system == Unknown {
                 anyhow::bail!("unknown target: {}", system);
             }
+
+            println!("=> Validating: {} ({})", file, system);
 
             let (config, _) = nickel::load_config(file, package_system).await?;
 

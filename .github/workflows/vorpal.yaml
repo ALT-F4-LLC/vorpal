@@ -126,6 +126,8 @@ jobs:
 
       - run: echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
 
+      - run: which nickel
+
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -133,8 +135,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: vorpal-${{ env.ARCH }}-${{ env.OS }}
-
-      - run: ls -alh
 
       - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
 

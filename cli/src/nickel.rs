@@ -1,5 +1,6 @@
 use anyhow::Result;
 use sha256::digest;
+use std::path::Path;
 use tokio::fs::write;
 use tokio::process::Command;
 use vorpal_schema::{api::package::PackageSystem, Config};
@@ -9,6 +10,12 @@ pub async fn load_config(
     config: &String,
     system: PackageSystem,
 ) -> Result<(Config, String), anyhow::Error> {
+    let config_file_path = Path::new(config);
+
+    if !config_file_path.exists() {
+        anyhow::bail!("config not found: {}", config);
+    }
+
     let config_system = match system {
         PackageSystem::Aarch64Linux => "aarch64-linux",
         PackageSystem::Aarch64Macos => "aarch64-macos",
@@ -19,19 +26,24 @@ pub async fn load_config(
 
     let config_str = format!(
         "let config = import \"{}\" in config \"{}\"",
-        config, config_system,
+        config_file_path.display(),
+        config_system,
     );
 
     let temp_file = create_temp_file("ncl").await?;
 
     write(&temp_file, config_str).await?;
 
+    let current_path = std::env::current_dir()?;
+
+    let packages_path = current_path.join(".vorpal/packages");
+
     let data = Command::new("nickel")
         .arg("export")
         .arg("--import-path")
-        .arg(".")
+        .arg(current_path.display().to_string())
         .arg("--import-path")
-        .arg(".vorpal/packages")
+        .arg(packages_path.display().to_string())
         .arg(temp_file.display().to_string())
         .output()
         .await?
