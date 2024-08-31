@@ -47,7 +47,7 @@ jobs:
 
   code-quality:
     needs:
-      - cache-deps
+      - cache-dev
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
