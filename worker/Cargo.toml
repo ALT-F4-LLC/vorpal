@@ -4,21 +4,21 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1"
-bollard = { version = "0", features = ["buildkit"] }
-futures-util = "0"
-hex = "0"
-rsa = { version = "0", features = ["sha2"] }
-tera = { version = "1", default-features = false }
-tokio = { version = "1", features = ["full"] }
-tokio-process-stream = "0"
-tokio-stream = "0"
-tonic = "0"
-tracing = "0"
-uuid = { version = "1", features = ["v7"] }
-vorpal-notary = { path = "../notary" }
-vorpal-schema = { path = "../schema" }
-vorpal-store = { path = "../store" }
+anyhow = { default-features = false, version = "1" }
+bollard = { default-features = false, version = "0" }
+futures-util = { default-features = false, version = "0" }
+hex = { default-features = false, version = "0" }
+rsa = { default-features = false, version = "0" }
+tera = { default-features = false, version = "1" }
+tokio = { default-features = false, version = "1" }
+tokio-process-stream = { default-features = false, version = "0" }
+tokio-stream = { default-features = false, version = "0" }
+tonic = { default-features = false, version = "0" }
+tracing = { default-features = false, version = "0" }
+uuid = { default-features = false, features = ["v7"], version = "1" }
+vorpal-notary = { default-features = false, path = "../notary" }
+vorpal-schema = { default-features = false, path = "../schema" }
+vorpal-store = { default-features = false, path = "../store" }
 
 [build-dependencies]
-tonic-build = "0"
+tonic-build = { default-features = false, version = "0" }

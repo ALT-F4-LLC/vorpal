@@ -4,8 +4,8 @@ name = "vorpal-notary"
 version = "0.1.0"
 
 [dependencies]
-anyhow = "1"
-rand = "0"
-rsa = { version = "0", features = ["sha2"] }
-tokio = { version = "1", features = ["full"] }
-tracing = "0"
+anyhow = { default-features = false, version = "1" }
+rand = { default-features = false, features = ["getrandom", "std", "std_rng"], version = "0" }
+rsa = { default-features = false, features = ["pem", "pkcs5", "sha2", "std"], version = "0" }
+tokio = { default-features = false, version = "1" }
+tracing = { default-features = false, version = "0" }
