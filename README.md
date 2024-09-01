@@ -40,29 +40,32 @@ Below is the existing working diagram that illustrates the platform's design:
 
 ### Requirements
 
-The following tool(s) are used to make changes to source code:
+The following tools are required to develop:
 
-- [`docker`](https://www.docker.com/products/docker-desktop)
-- [`direnv (optional)`](https://github.com/direnv/direnv)
-
-> [!IMPORTANT]
-> Docker provides [`rootless`](https://docs.docker.com/engine/security/rootless/) containers option which solves permissions problems and is recommended to setup before running commands.
+- [`curl`](https://curl.se) (http client)
+- [`direnv`](https://direnv.net) (environment variables)
+- [`rustup`](https://rustup.rs) (language toolchains)
 
 ### Steps
 
-- To run a command inside the development environment:
+The following steps guide how to setup and run commands in the development environment.
+
+> [!NOTE]
+> Steps must be run in the root of the cloned repository.
+
+- Run `dev.sh` script to bootstrap dependencies:
 
 ```bash
-./dev.sh <command>
+./dev.sh
 ```
 
-- To enter the development environment:
+- Enter the development environment:
 
 ```bash
 direnv allow
 ```
 
-- To run a `recipe` command inside the development environment:
+- Run a `recipe` command inside the development environment:
 
 ```bash
 just <command> # or ./dev.sh just <command>

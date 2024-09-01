@@ -6,7 +6,7 @@ use tonic::transport::Server;
 use tracing::info;
 use vorpal_schema::{
     api::{
-        package::{package_service_server::PackageServiceServer, PackageSystem},
+        package::package_service_server::PackageServiceServer,
         store::store_service_server::StoreServiceServer,
     },
     get_package_system,
@@ -24,11 +24,7 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
         ));
     }
 
-    let mut system = get_package_system(format!("{}-{}", ARCH, OS).as_str());
-
-    if system == PackageSystem::Aarch64Macos {
-        system = PackageSystem::Aarch64Linux; // docker uses linux on macos
-    }
+    let system = get_package_system(format!("{}-{}", ARCH, OS).as_str());
 
     info!("worker default target: {:?}", system);
 

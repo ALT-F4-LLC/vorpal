@@ -18,7 +18,9 @@ prost = "0"
 reqwest = { version = "0", features = ["json"] }
 rsa = { version = "0", features = ["sha2"] }
 sha256 = "1"
+tera = { version = "1", default-features = false }
 tokio = { version = "1", features = ["full"] }
+tokio-process-stream = "0"
 tokio-stream = "0"
 tokio-tar = "0"
 tonic = "0"

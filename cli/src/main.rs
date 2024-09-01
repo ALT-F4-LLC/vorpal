@@ -6,10 +6,7 @@ use std::env::consts::{ARCH, OS};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
-    api::package::{
-        PackageOutput, PackageSystem,
-        PackageSystem::{Aarch64Linux, Aarch64Macos, Unknown},
-    },
+    api::package::{PackageOutput, PackageSystem, PackageSystem::Unknown},
     get_package_system,
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
@@ -85,18 +82,14 @@ async fn main() -> Result<(), anyhow::Error> {
             system,
             worker,
         } => {
-            let mut system: PackageSystem = get_package_system(system);
-
-            if system == Unknown {
-                anyhow::bail!("unknown target: {}", system.as_str_name());
-            }
-
-            if system == Aarch64Macos {
-                system = Aarch64Linux;
-            }
-
             if worker.is_empty() {
                 anyhow::bail!("no worker specified");
+            }
+
+            let package_system: PackageSystem = get_package_system(system);
+
+            if package_system == Unknown {
+                anyhow::bail!("unknown target: {}", package_system.as_str_name());
             }
 
             setup_paths().await?;
@@ -109,7 +102,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 );
             }
 
-            let (config, config_hash) = nickel::load_config(file, system).await?;
+            println!("=> Building: {} ({})", file, system);
+
+            let (config, config_hash) = nickel::load_config(file, package_system).await?;
 
             let config_structures = config::build_structures(&config);
 
@@ -130,7 +125,8 @@ async fn main() -> Result<(), anyhow::Error> {
                             }
                         }
 
-                        let output = build(&config_hash, package, packages, system, worker).await?;
+                        let output =
+                            build(&config_hash, package, packages, package_system, worker).await?;
 
                         package_finished.insert(package_name, output);
                     }
@@ -143,10 +139,21 @@ async fn main() -> Result<(), anyhow::Error> {
         Command::Keys(keys) => match keys {
             CommandKeys::Generate {} => {
                 let key_dir_path = vorpal_store::paths::get_key_dir_path();
-
                 let private_key_path = vorpal_store::paths::get_private_key_path();
-
                 let public_key_path = vorpal_store::paths::get_public_key_path();
+
+                if private_key_path.exists() && public_key_path.exists() {
+                    println!("=> Keys already exist: {}", key_dir_path.display());
+                    return Ok(());
+                }
+
+                if private_key_path.exists() && !public_key_path.exists() {
+                    anyhow::bail!("private key exists but public key is missing");
+                }
+
+                if !private_key_path.exists() && public_key_path.exists() {
+                    anyhow::bail!("public key exists but private key is missing");
+                }
 
                 vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)
                     .await?;
@@ -156,17 +163,13 @@ async fn main() -> Result<(), anyhow::Error> {
         },
 
         Command::Validate { file, system } => {
-            println!("=> Validating: {}", file);
-
-            let mut package_system: PackageSystem = get_package_system(system);
+            let package_system: PackageSystem = get_package_system(system);
 
             if package_system == Unknown {
                 anyhow::bail!("unknown target: {}", system);
             }
 
-            if package_system == Aarch64Macos {
-                package_system = Aarch64Linux;
-            }
+            println!("=> Validate: {} ({})", file, system);
 
             let (config, _) = nickel::load_config(file, package_system).await?;
 

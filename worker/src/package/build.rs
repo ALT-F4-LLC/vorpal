@@ -1,3 +1,4 @@
+use crate::package::sandbox_default;
 use bollard::{
     auth::DockerCredentials,
     container::{Config, CreateContainerOptions, LogsOptions, StartContainerOptions},
@@ -13,17 +14,14 @@ use rsa::{
     signature::Verifier,
 };
 use std::iter::Iterator;
-use std::{
-    collections::HashMap,
-    env::consts::{ARCH, OS},
-    fs::Permissions,
-    os::unix::fs::PermissionsExt,
-    path::PathBuf,
-};
+use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt, path::PathBuf};
+use tera::Tera;
+use tokio::process::Command;
 use tokio::{
     fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
     sync::mpsc::Sender,
 };
+use tokio_process_stream::ProcessLineStream;
 use tonic::{Request, Status, Streaming};
 use tracing::debug;
 use uuid::Uuid;
@@ -31,7 +29,7 @@ use vorpal_notary::get_public_key;
 use vorpal_schema::{
     api::package::{
         BuildRequest, BuildResponse, PackageSystem,
-        PackageSystem::{Aarch64Linux, Aarch64Macos, Unknown},
+        PackageSystem::{Aarch64Linux, Aarch64Macos, Unknown, X8664Linux, X8664Macos},
     },
     get_package_system,
 };
@@ -39,7 +37,7 @@ use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
         copy_files, get_file_paths, get_package_archive_path, get_package_path,
-        get_public_key_path, get_source_archive_path, get_source_path,
+        get_public_key_path, get_source_archive_path, get_source_path, replace_path_in_files,
     },
     temps::{create_temp_dir, create_temp_file},
 };
@@ -120,22 +118,6 @@ pub async fn run(
 
     if package_target == Unknown {
         send_error(tx, "unsupported build target".to_string()).await?
-    }
-
-    let mut worker_system = get_package_system(format!("{}-{}", ARCH, OS).as_str());
-
-    if worker_system == Aarch64Macos {
-        worker_system = Aarch64Linux; // docker uses linux on macos
-    }
-
-    if package_target != worker_system {
-        let message = format!(
-            "build target mismatch: {} != {}",
-            package_target.as_str_name(),
-            worker_system.as_str_name()
-        );
-
-        send_error(tx, message).await?
     }
 
     // If package exists, return
@@ -268,8 +250,6 @@ pub async fn run(
         store_paths.push(build_package_path.display().to_string());
     }
 
-    env_var.insert("output".to_string(), package_path.display().to_string());
-
     // expand any environment variables that have package references
 
     for (key, value) in env_var.clone().into_iter() {
@@ -338,158 +318,222 @@ pub async fn run(
 
     let sandbox_package_dir_path = create_temp_dir().await?;
 
-    #[cfg(unix)]
-    let docker = Docker::connect_with_socket_defaults()?;
+    let worker_system = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
 
-    let container_name = Uuid::now_v7().to_string();
+    let worker_system = get_package_system::<PackageSystem>(worker_system.as_str());
 
-    let container_options = Some(CreateContainerOptions {
-        name: container_name.clone(),
-        platform: None,
-    });
+    if worker_system == Aarch64Macos || worker_system == X8664Macos {
+        env_var.insert(
+            "output".to_string(),
+            sandbox_package_dir_path.display().to_string(),
+        );
 
-    let mut container_env = env_var
-        .iter()
-        .map(|(key, value)| format!("{}={}", key, value))
-        .collect::<Vec<String>>();
+        let sandbox_profile_path = create_temp_file("sb").await?;
 
-    if !bin_paths.is_empty() {
-        let path_default = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-        let path = format!("PATH={}:{}", bin_paths.join(":"), path_default);
-        container_env.push(path);
-    }
+        let mut tera = Tera::default();
 
-    let mut mounts = vec![
-        Mount {
-            read_only: Some(true),
-            source: Some(sandbox_script_file_path.to_str().unwrap().to_string()),
-            target: Some("/sandbox/build.sh".to_string()),
-            typ: Some(MountTypeEnum::BIND),
-            ..Default::default()
-        },
-        Mount {
-            read_only: Some(false),
-            source: Some(sandbox_source_dir_path.to_str().unwrap().to_string()),
-            target: Some("/sandbox/source".to_string()),
-            typ: Some(MountTypeEnum::BIND),
-            ..Default::default()
-        },
-        Mount {
-            read_only: Some(false),
-            source: Some(sandbox_package_dir_path.to_str().unwrap().to_string()),
-            target: Some(package_path.to_str().unwrap().to_string()),
-            typ: Some(MountTypeEnum::BIND),
-            ..Default::default()
-        },
-    ];
+        tera.add_raw_template("sandbox_default", sandbox_default::SANDBOX_DEFAULT)
+            .unwrap();
 
-    for store_path in store_paths {
-        let path = PathBuf::from(store_path);
+        let sandbox_profile_context = tera::Context::new();
 
-        if !path.exists() {
-            remove_dir_all(&sandbox_package_dir_path).await?;
-            remove_dir_all(&sandbox_source_dir_path).await?;
-            remove_file(&sandbox_script_file_path).await?;
+        let sandbox_profile_data = tera
+            .render("sandbox_default", &sandbox_profile_context)
+            .unwrap();
 
-            let message = format!("store path not found: {}", path.display());
+        write(&sandbox_profile_path, sandbox_profile_data)
+            .await
+            .map_err(|_| Status::internal("failed to write sandbox profile"))?;
 
-            send_error(tx, message).await?
+        let build_command_args = [
+            "-f",
+            sandbox_profile_path.to_str().unwrap(),
+            sandbox_script_file_path.to_str().unwrap(),
+        ];
+
+        let mut sandbox_command = Command::new("/usr/bin/sandbox-exec");
+
+        sandbox_command.args(build_command_args);
+
+        sandbox_command.current_dir(&sandbox_source_dir_path);
+
+        for (key, value) in env_var.clone().into_iter() {
+            sandbox_command.env(key, value);
         }
 
-        mounts.push(Mount {
-            read_only: Some(true),
-            source: Some(path.to_str().unwrap().to_string()),
-            target: Some(path.to_str().unwrap().to_string()),
-            typ: Some(MountTypeEnum::BIND),
-            ..Default::default()
-        });
-    }
-
-    let container_host_config = HostConfig {
-        auto_remove: Some(true),
-        mounts: Some(mounts),
-        ..Default::default()
-    };
-
-    let container_config = Config::<String> {
-        cmd: Some(vec!["/sandbox/build.sh".to_string()]),
-        entrypoint: Some(vec!["/bin/bash".to_string()]),
-        env: Some(container_env),
-        host_config: Some(container_host_config),
-        hostname: Some(container_name),
-        image: Some(package_sandbox_image.clone()),
-        network_disabled: Some(false),
-        tty: Some(true),
-        working_dir: Some("/sandbox/source".to_string()),
-        ..Default::default()
-    };
-
-    let mut filters = HashMap::new();
-
-    let image_name = package_sandbox_image.split('@').next().unwrap();
-
-    let image_digest = package_sandbox_image.split('@').last().unwrap();
-
-    filters.insert("reference".to_string(), vec![image_name.to_string()]);
-
-    let options = ListImagesOptions::<String> {
-        all: true,
-        filters,
-        ..Default::default()
-    };
-
-    let images_results = docker.list_images(Some(options)).await?;
-
-    let mut image_tag = String::new();
-
-    for image in images_results {
-        if image.id == image_digest {
-            image_tag = image.id;
-            break;
+        if !bin_paths.is_empty() {
+            let path_default = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin";
+            let path = format!("{}:{}", bin_paths.join(":"), path_default);
+            sandbox_command.env("PATH", path);
         }
+
+        let mut stream = ProcessLineStream::try_from(sandbox_command)?;
+
+        while let Some(item) = stream.next().await {
+            send(tx, item.to_string().trim().to_string()).await?
+        }
+
+        // TODO: handle cleanup for paths embedded into files
+
+        replace_path_in_files(&sandbox_package_dir_path, &package_path).await?;
     }
 
-    if image_tag.is_empty() {
-        let options = Some(bollard::image::CreateImageOptions {
-            from_image: package_sandbox_image.clone(),
-            ..Default::default()
+    if worker_system == Aarch64Linux || worker_system == X8664Linux {
+        env_var.insert("output".to_string(), package_path.display().to_string());
+
+        #[cfg(unix)]
+        let docker = Docker::connect_with_socket_defaults()?;
+
+        let container_name = Uuid::now_v7().to_string();
+
+        let container_options = Some(CreateContainerOptions {
+            name: container_name.clone(),
+            platform: None,
         });
 
-        let credentials = DockerCredentials {
-            ..Default::default()
-        };
+        let mut container_env = env_var
+            .iter()
+            .map(|(key, value)| format!("{}={}", key, value))
+            .collect::<Vec<String>>();
 
-        docker
-            .create_image(options, None, Some(credentials))
-            .try_collect::<Vec<_>>()
-            .await?;
-    }
+        if !bin_paths.is_empty() {
+            let path_default = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+            let path = format!("PATH={}:{}", bin_paths.join(":"), path_default);
+            container_env.push(path);
+        }
 
-    let container = docker
-        .create_container(container_options, container_config)
-        .await?;
+        let mut mounts = vec![
+            Mount {
+                read_only: Some(true),
+                source: Some(sandbox_script_file_path.to_str().unwrap().to_string()),
+                target: Some("/sandbox/build.sh".to_string()),
+                typ: Some(MountTypeEnum::BIND),
+                ..Default::default()
+            },
+            Mount {
+                read_only: Some(false),
+                source: Some(sandbox_source_dir_path.to_str().unwrap().to_string()),
+                target: Some("/sandbox/source".to_string()),
+                typ: Some(MountTypeEnum::BIND),
+                ..Default::default()
+            },
+            Mount {
+                read_only: Some(false),
+                source: Some(sandbox_package_dir_path.to_str().unwrap().to_string()),
+                target: Some(package_path.to_str().unwrap().to_string()),
+                typ: Some(MountTypeEnum::BIND),
+                ..Default::default()
+            },
+        ];
 
-    docker
-        .start_container(&container.id, None::<StartContainerOptions<String>>)
-        .await?;
+        for store_path in store_paths {
+            let path = PathBuf::from(store_path);
 
-    let options = Some(LogsOptions::<String> {
-        follow: true,
-        stderr: true,
-        stdout: true,
-        ..Default::default()
-    });
-
-    let mut stream = docker.logs(&container.id, options);
-
-    while let Some(output) = stream.next().await {
-        match output {
-            Ok(output) => send(tx, output.to_string().trim().to_string()).await?,
-            Err(err) => {
+            if !path.exists() {
                 remove_dir_all(&sandbox_package_dir_path).await?;
                 remove_dir_all(&sandbox_source_dir_path).await?;
                 remove_file(&sandbox_script_file_path).await?;
-                send_error(tx, format!("docker logs error: {:?}", err)).await?
+
+                let message = format!("store path not found: {}", path.display());
+
+                send_error(tx, message).await?
+            }
+
+            mounts.push(Mount {
+                read_only: Some(true),
+                source: Some(path.to_str().unwrap().to_string()),
+                target: Some(path.to_str().unwrap().to_string()),
+                typ: Some(MountTypeEnum::BIND),
+                ..Default::default()
+            });
+        }
+
+        let container_host_config = HostConfig {
+            auto_remove: Some(true),
+            mounts: Some(mounts),
+            ..Default::default()
+        };
+
+        let container_config = Config::<String> {
+            cmd: Some(vec!["/sandbox/build.sh".to_string()]),
+            entrypoint: Some(vec!["/bin/bash".to_string()]),
+            env: Some(container_env),
+            host_config: Some(container_host_config),
+            hostname: Some(container_name),
+            image: Some(package_sandbox_image.clone()),
+            network_disabled: Some(false),
+            tty: Some(true),
+            working_dir: Some("/sandbox/source".to_string()),
+            ..Default::default()
+        };
+
+        let mut filters = HashMap::new();
+
+        let image_name = package_sandbox_image.split('@').next().unwrap();
+
+        let image_digest = package_sandbox_image.split('@').last().unwrap();
+
+        filters.insert("reference".to_string(), vec![image_name.to_string()]);
+
+        let options = ListImagesOptions::<String> {
+            all: true,
+            filters,
+            ..Default::default()
+        };
+
+        let images_results = docker.list_images(Some(options)).await?;
+
+        let mut image_tag = String::new();
+
+        for image in images_results {
+            if image.id == image_digest {
+                image_tag = image.id;
+                break;
+            }
+        }
+
+        if image_tag.is_empty() {
+            let options = Some(bollard::image::CreateImageOptions {
+                from_image: package_sandbox_image.clone(),
+                ..Default::default()
+            });
+
+            let credentials = DockerCredentials {
+                ..Default::default()
+            };
+
+            docker
+                .create_image(options, None, Some(credentials))
+                .try_collect::<Vec<_>>()
+                .await?;
+        }
+
+        let container = docker
+            .create_container(container_options, container_config)
+            .await?;
+
+        docker
+            .start_container(&container.id, None::<StartContainerOptions<String>>)
+            .await?;
+
+        let options = Some(LogsOptions::<String> {
+            follow: true,
+            stderr: true,
+            stdout: true,
+            ..Default::default()
+        });
+
+        let mut stream = docker.logs(&container.id, options);
+
+        while let Some(output) = stream.next().await {
+            match output {
+                Ok(output) => send(tx, output.to_string().trim().to_string()).await?,
+                Err(err) => {
+                    remove_dir_all(&sandbox_package_dir_path).await?;
+                    remove_dir_all(&sandbox_source_dir_path).await?;
+                    remove_file(&sandbox_script_file_path).await?;
+                    send_error(tx, format!("docker logs error: {:?}", err)).await?
+                }
             }
         }
     }

@@ -1,0 +1,214 @@
+name: vorpal
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  RUST_VERSION: 1.80.1
+
+jobs:
+  cache-dev:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-latest
+          - ubuntu-latest
+          - ubuntu-latest-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
+          path: deps
+
+      - run: ./dev.sh
+      - run: ./dev.sh which just
+      - run: ./dev.sh which nickel
+      - run: ./dev.sh which openssl
+      - run: ./dev.sh which protoc
+
+      - uses: actions/cache/save@v4
+        with:
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
+          path: deps
+
+  code-quality:
+    needs:
+      - cache-dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
+          path: deps
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: target
+
+      - run: ./dev.sh just format
+      - run: ./dev.sh just lint
+
+  package:
+    needs:
+      - code-quality
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-latest
+          - ubuntu-latest
+          - ubuntu-latest-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
+          path: deps
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: target
+
+      - run: ./dev.sh just check --release
+      - run: ./dev.sh just build --release
+      - run: ./dev.sh just test --release
+
+      - run: |
+          ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "OS=$OS" >> $GITHUB_ENV
+
+          mkdir -p dist
+          cp ./target/release/vorpal ./dist/vorpal
+          tar -czvf "vorpal-${ARCH}-${OS}.tar.gz" -C ./dist vorpal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
+          path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
+
+      - uses: actions/cache/save@v4
+        with:
+          key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: target
+
+  test:
+    needs:
+      - package
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-latest
+          # - ubuntu-latest
+          # - ubuntu-latest-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
+          path: deps
+
+      - run: echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
+
+      - run: which nickel
+
+      - run: |
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
+
+      - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
+
+      - run: |
+          sudo mkdir -p /var/lib/vorpal
+          sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
+
+      - run: ./vorpal keys generate
+
+      - run: ./vorpal validate
+
+      - run: |
+          ./vorpal worker start > worker_output.log 2>&1 &
+          WORKER_PID=$(echo $!)
+          echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
+          echo "Worker pid: $WORKER_PID"
+
+      - run: ./vorpal build
+
+      - if: always()
+        run: |
+          cat worker_output.log
+          kill $WORKER_PID
+
+  # release:
+  #   needs:
+  #     - test
+  #   permissions:
+  #     attestations: write
+  #     contents: write
+  #     id-token: write
+  #     packages: write
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         fail-on-cache-miss: true
+  #         pattern: vorpal-*
+  #
+  #     - run: git fetch --tags
+  #
+  #     - if: github.ref == 'refs/heads/main'
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         if gh release view edge > /dev/null 2>&1; then
+  #           gh release delete --cleanup-tag --yes edge
+  #         fi
+  #         git tag edge
+  #         git push --tags
+  #
+  #     - if: github.ref == 'refs/heads/main'
+  #       uses: softprops/action-gh-release@v2
+  #       with:
+  #         body: Latest artifacts from `main` branch when merged.
+  #         fail_on_unmatched_files: true
+  #         files: |
+  #           vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz
+  #           vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
+  #         name: edge
+  #         prerelease: true
+  #         tag_name: refs/tags/edge
+  #
+  #     - run: |
+  #         mkdir -p dist/aarch64-linux
+  #         mkdir -p dist/x86_64-linux
+  #         tar -xzf vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
+  #         tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
+  #
+  #     - if: github.ref == 'refs/heads/main'
+  #       uses: actions/attest-build-provenance@v1
+  #       with:
+  #         subject-path: |
+  #           dist/aarch64-linux/vorpal
+  #           dist/x86_64-linux/vorpal
