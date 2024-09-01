@@ -6,7 +6,6 @@ ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
 export NICKEL_IMPORT_PATH="$WORKDIR/.vorpal/packages:$WORKDIR"
-export OPENSSL_DIR="$WORKDIR/deps/openssl"
 export PATH="$WORKDIR/deps/nickel/bin:$WORKDIR/deps/openssl/bin:$WORKDIR/deps/protoc/bin:$HOME/.cargo/bin:$PATH"
 
 rustup show active-toolchain
@@ -47,31 +46,6 @@ if [[ ! -d "$PWD/deps/nickel/bin" ]]; then
 
         chmod +x deps/nickel/bin/nickel
     fi
-fi
-
-cd "${WORKDIR}"
-
-if [[ ! -d "$PWD/deps/openssl/bin" ]]; then
-    OPENSSL_VERSION="3.3.1"
-    OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
-
-    curl -L "${OPENSSL_URL}" -o deps/openssl-${OPENSSL_VERSION}.tar.gz
-
-    tar -xvf deps/openssl-${OPENSSL_VERSION}.tar.gz -C deps
-
-    cd deps/openssl-${OPENSSL_VERSION}
-
-    ./Configure --prefix="${WORKDIR}/deps/openssl"
-
-    make -j$(sysctl -n hw.ncpu)
-
-    make install
-
-    rm -rf "${WORKDIR}/deps/openssl-${OPENSSL_VERSION}"
-
-    rm -rf "${WORKDIR}/deps/openssl-${OPENSSL_VERSION}.tar.gz"
-
-    # TODO: support hash checking for downloads
 fi
 
 cd "${WORKDIR}"

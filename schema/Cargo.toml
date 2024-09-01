@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 prost = "0"
-tonic = "0"
 serde = "1"
+tonic = "0"
 
 [build-dependencies]
 tonic-build = "0"

@@ -50,7 +50,7 @@ The following tools are required to develop:
 
 The following steps guide how to setup and run commands in the development environment.
 
-> [!NOTE]
+> [!IMPORTANT]
 > Steps must be run in the root of the cloned repository.
 
 - Run `dev.sh` script to bootstrap dependencies:
@@ -67,6 +67,9 @@ direnv allow
 
 - Build the source code with:
 
+> [!IMPORTANT]
+> Review the `makefile` for all development commands.
+
 ```bash
-cargo build
+make
 ```

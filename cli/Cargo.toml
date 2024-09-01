@@ -10,12 +10,10 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 async-compression = { version = "0", features = ["all"] }
-async-tempfile = "0"
 clap = { version = "4", features = ["derive"] }
 console = "0"
-git2 = "0"
 infer = "0"
-reqwest = { version = "0", features = ["json"] }
+reqwest = { default-features = false, features = ["json", "rustls-tls"], version = "0" }
 serde_json = "1"
 sha256 = "1"
 tokio = { version = "1", features = ["full"] }
