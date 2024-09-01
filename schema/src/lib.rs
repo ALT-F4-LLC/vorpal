@@ -51,3 +51,31 @@ impl PackageTarget for PackageSystem {
 pub fn get_package_system<T: PackageTarget>(system: &str) -> T {
     T::from_str(system)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_package_target_from_str() {
+        let pairs = vec![
+            ("aarch64-linux", Aarch64Linux),
+            ("aarch64-macos", Aarch64Macos),
+            ("x86_64-linux", X8664Linux),
+            ("x86_64-macos", X8664Macos),
+            ("unknown", PackageSystem::default()),
+            ("armv6l-linux", PackageSystem::default()),
+            ("armv7l-linux", PackageSystem::default()),
+            ("i686-linux", PackageSystem::default()),
+            ("mipsel-linux", PackageSystem::default()),
+            ("armv5tel-linux", PackageSystem::default()),
+            ("powerpc64le-linux", PackageSystem::default()),
+            ("riscv64-linux", PackageSystem::default()),
+            ("x86_64-freebsd", PackageSystem::default()),
+        ];
+
+        for (arch, expected) in pairs {
+            assert_eq!(PackageSystem::from_str(arch), expected);
+        }
+    }
+}
