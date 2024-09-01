@@ -1,12 +1,11 @@
 use crate::paths;
 use anyhow::Result;
 use std::path::PathBuf;
-use tokio::fs;
-use tokio::fs::File;
+use tokio::fs::{create_dir_all, File};
 
 pub async fn create_temp_dir() -> Result<PathBuf> {
     let temp_dir_path = paths::get_temp_dir_path();
-    fs::create_dir(&temp_dir_path).await?;
+    create_dir_all(&temp_dir_path).await?;
     Ok(temp_dir_path.canonicalize()?)
 }
 

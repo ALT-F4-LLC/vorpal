@@ -44,6 +44,8 @@ pub async fn load_config(
         config_system,
     );
 
+    println!("=> Config: {}", config_str);
+
     let sandbox_file = create_temp_file("ncl").await?;
 
     println!("=> Sandbox: {}", sandbox_file.display());
