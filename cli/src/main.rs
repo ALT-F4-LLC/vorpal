@@ -142,14 +142,17 @@ async fn main() -> Result<(), anyhow::Error> {
                 let private_key_path = vorpal_store::paths::get_private_key_path();
                 let public_key_path = vorpal_store::paths::get_public_key_path();
 
-                if private_key_path.exists() {
-                    println!("=> Private key exists: {}", private_key_path.display());
+                if private_key_path.exists() && public_key_path.exists() {
+                    println!("=> Keys already exist: {}", key_dir_path.display());
                     return Ok(());
                 }
 
-                if public_key_path.exists() {
-                    println!("=> Public key exists: {}", public_key_path.display());
-                    return Ok(());
+                if private_key_path.exists() && !public_key_path.exists() {
+                    anyhow::bail!("private key exists but public key is missing");
+                }
+
+                if !private_key_path.exists() && public_key_path.exists() {
+                    anyhow::bail!("public key exists but private key is missing");
                 }
 
                 vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)
@@ -166,7 +169,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 anyhow::bail!("unknown target: {}", system);
             }
 
-            println!("=> Validating: {} ({})", file, system);
+            println!("=> Validate: {} ({})", file, system);
 
             let (config, _) = nickel::load_config(file, package_system).await?;
 

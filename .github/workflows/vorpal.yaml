@@ -12,13 +12,13 @@ env:
 
 jobs:
   cache-dev:
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         runner:
           - macos-latest
           - ubuntu-latest
           - ubuntu-latest-arm64
-    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -61,13 +61,13 @@ jobs:
   package:
     needs:
       - code-quality
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         runner:
           - macos-latest
           - ubuntu-latest
           - ubuntu-latest-arm64
-    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -109,13 +109,13 @@ jobs:
   test:
     needs:
       - package
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         runner:
           - macos-latest
-          - ubuntu-latest
-          - ubuntu-latest-arm64
+          # - ubuntu-latest
+          # - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -138,6 +138,12 @@ jobs:
 
       - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
 
+      - run: |
+          sudo mkdir -p /var/lib/vorpal
+          sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
+
+      - run: ./vorpal keys generate
+
       - run: ./vorpal validate
 
       - run: |
@@ -150,8 +156,8 @@ jobs:
 
       - if: always()
         run: |
-          kill $WORKER_PID
           cat worker_output.log
+          kill $WORKER_PID
 
   release:
     needs:
