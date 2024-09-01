@@ -14,7 +14,7 @@ use vorpal_schema::{
         },
         store::{store_service_client::StoreServiceClient, StoreKind, StoreRequest},
     },
-    get_package_system, Package,
+    Package,
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zip, unpack_zstd},
@@ -187,22 +187,13 @@ pub async fn build(
 
     let mut request_stream: Vec<BuildRequest> = vec![];
 
-    let package_systems = package
-        .systems
-        .iter()
-        .map(|s| {
-            let target: PackageSystem = get_package_system(s);
-            target as i32
-        })
-        .collect::<Vec<i32>>();
-
     if let Some(source) = &package.source {
         let source_archive_path = get_source_archive_path(&package_source_hash, &package.name);
 
         let worker_store_source = StoreRequest {
+            hash: package_source_hash.clone(),
             kind: StoreKind::Source as i32,
             name: package.name.clone(),
-            hash: package_source_hash.clone(),
         };
 
         match worker_store.exists(worker_store_source.clone()).await {
@@ -349,17 +340,15 @@ pub async fn build(
 
                     for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
                         request_stream.push(BuildRequest {
-                            package_environment: package.environment.clone(),
-                            package_name: package.name.clone(),
-                            package_packages: packages.clone(),
-                            package_sandbox: false,
-                            package_sandbox_image: package.sandbox_image.clone(),
-                            package_script: package.script.clone(),
-                            package_source_data: Some(chunk.to_vec()),
-                            package_source_data_signature: Some(source_signature.to_string()),
-                            package_source_hash: Some(package_source_hash.clone()),
-                            package_systems: package_systems.clone(),
-                            package_target: target as i32,
+                            environment: package.environment.clone(),
+                            name: package.name.clone(),
+                            packages: packages.clone(),
+                            sandbox: false,
+                            script: package.script.clone(),
+                            source_data: Some(chunk.to_vec()),
+                            source_data_signature: Some(source_signature.to_string()),
+                            source_hash: Some(package_source_hash.clone()),
+                            target: target as i32,
                         });
                     }
                 }
@@ -371,17 +360,15 @@ pub async fn build(
 
     if request_stream.is_empty() {
         request_stream.push(BuildRequest {
-            package_environment: package.environment.clone(),
-            package_sandbox_image: package.sandbox_image.clone(),
-            package_name: package.name.clone(),
-            package_packages: packages.clone(),
-            package_sandbox: false,
-            package_script: package.script.clone(),
-            package_source_data: None,
-            package_source_data_signature: None,
-            package_source_hash: Some(package_source_hash.clone()),
-            package_systems,
-            package_target: target as i32,
+            environment: package.environment.clone(),
+            name: package.name.clone(),
+            packages: packages.clone(),
+            sandbox: false,
+            script: package.script.clone(),
+            source_data: None,
+            source_data_signature: None,
+            source_hash: Some(package_source_hash.clone()),
+            target: target as i32,
         });
     }
 
@@ -392,8 +379,8 @@ pub async fn build(
     let mut stream = response.into_inner();
 
     while let Some(res) = stream.message().await? {
-        if !res.package_log.is_empty() {
-            println!("=> {}", res.package_log);
+        if !res.output.is_empty() {
+            println!("=> {}", res.output);
         }
     }
 

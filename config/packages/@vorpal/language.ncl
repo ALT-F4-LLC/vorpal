@@ -38,11 +38,10 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
           |> match {
             "aarch64-linux" => "d782e34151df01519de86f0acace8a755cae6fad93cb0303ddd61c2642444c1c",
             "aarch64-macos" => "d8ed8e9f5ceefcfe3bca7acd0797ade24eadb17ddccaa319cd00ea290f598d00",
-            "x86_64-linux" => "linux-x86_64",
+            "x86_64-linux" => "d8ed8e9f5ceefcfe3bca7acd0797ade24eadb17ddccaa319cd00ea290f598d00",
             _ => std.fail_with "Unsupported target"
           },
         systems = config.systems,
-        target = config.target,
       } | Package
     in
 
@@ -58,11 +57,10 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
           |> match {
             "aarch64-linux" => "72d4917bb58b693b3f2c589746ed470645f96895ece3dd27f7055d3c3f7f7a79",
             "aarch64-macos" => "0689a9b2dec87c272954db9212a8f3d5243f55f777f90d84d2b3aeb2aa938ba5",
-            "x86_64-linux" => "linux-x86_64",
+            "x86_64-linux" => "0689a9b2dec87c272954db9212a8f3d5243f55f777f90d84d2b3aeb2aa938ba5",
             _ => std.fail_with "Unsupported target"
           },
         systems = config.systems,
-        target = config.target,
       } | Package
     in
 
@@ -81,11 +79,10 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
           |> match {
             "aarch64-linux" => "bc6c0e0f309805c4a9b704bbfe6be6b3c28b029ac6958c58ab5b90437a9e36ed",
             "aarch64-macos" => "1512db881f5bdd7f4bbcfede7f5217bd51ca03dc6741c3577b4d071863690211",
-            "x86_64-linux" => "linux-x86_64",
+            "x86_64-linux" => "1512db881f5bdd7f4bbcfede7f5217bd51ca03dc6741c3577b4d071863690211",
             _ => std.fail_with "Unsupported target"
           },
         systems = config.systems,
-        target = config.target,
       } | Package
     in
 
@@ -102,11 +99,10 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
           |> match {
             "aarch64-linux" => "8a592a0dd590e92b1c0d77631e683fc743d1ed8158e0b093b6cfabf0685089af",
             "aarch64-macos" => "d105abb1c1d2c024f29df884f0592f1307984d63aeb10f0e61ccb94aee2c2feb",
-            "x86_64-linux" => "linux-x86_64",
+            "x86_64-linux" => "d105abb1c1d2c024f29df884f0592f1307984d63aeb10f0e61ccb94aee2c2feb",
             _ => std.fail_with "Unsupported target"
           },
         systems = config.systems,
-        target = config.target,
       } | Package
     in
 
@@ -173,7 +169,6 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
         source_hash = config.cargo_hash,
         source_includes = sourceIncludes,
         systems = config.systems,
-        target = config.target,
       } | Package
     in
 
@@ -197,6 +192,5 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
       source_excludes = sourceExcludes,
       source = config.source,
       systems = config.systems,
-      target = config.target,
     } | Package
 }

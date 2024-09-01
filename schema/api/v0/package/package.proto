@@ -20,19 +20,17 @@ message PackageOutput {
 }
 
 message BuildRequest {
-    PackageSystem package_target = 1;
-    bool package_sandbox = 2;
-    map<string, string> package_environment = 3;
-    optional bytes package_source_data = 4;
-    optional string package_source_data_signature = 5;
-    optional string package_source_hash = 6;
-    repeated PackageOutput package_packages = 7;
-    repeated PackageSystem package_systems = 8;
-    string package_name = 9;
-    string package_sandbox_image = 10;
-    string package_script = 11;
+    PackageSystem target = 1;
+    bool sandbox = 2;
+    map<string, string> environment = 3;
+    optional bytes source_data = 4;
+    optional string source_data_signature = 5;
+    optional string source_hash = 6;
+    repeated PackageOutput packages = 7;
+    string name = 8;
+    string script = 9;
 }
 
 message BuildResponse {
-    string package_log = 2;
+    string output = 1;
 }

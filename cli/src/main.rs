@@ -1,18 +1,21 @@
 use crate::worker::build;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use console::style;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
+use std::path::Path;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
     api::package::{PackageOutput, PackageSystem, PackageSystem::Unknown},
-    get_package_system,
+    get_package_system, Package,
 };
-use vorpal_store::paths::{get_private_key_path, setup_paths};
+use vorpal_store::paths::{
+    get_package_archive_path, get_package_path, get_private_key_path, setup_paths,
+};
 use vorpal_worker::service;
 
-mod config;
 mod nickel;
 mod worker;
 
@@ -37,16 +40,16 @@ enum Command {
         worker: String,
     },
 
-    #[clap(subcommand)]
-    Keys(CommandKeys),
-
-    Validate {
+    Check {
         #[arg(default_value = "vorpal.ncl", long, short)]
         file: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
     },
+
+    #[clap(subcommand)]
+    Keys(CommandKeys),
 
     #[clap(subcommand)]
     Worker(CommandWorker),
@@ -70,6 +73,57 @@ pub enum CommandWorker {
 
 fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
+}
+
+fn render_package(
+    package_name: &str,
+    build_map: &HashMap<&str, Package>,
+    prefix: &str,
+    is_last: bool,
+) {
+    match build_map.get(package_name) {
+        None => eprintln!("Package not found: {}", package_name),
+        Some(package) => {
+            let hash_default = "none".to_string();
+
+            let hash = package.source_hash.as_ref().unwrap_or(&hash_default);
+
+            let connector = if is_last { "└── " } else { "├── " };
+
+            let exists = get_package_path(hash, package_name).exists();
+
+            let exists_archive = get_package_archive_path(hash, package_name).exists();
+
+            let cached = if exists || exists_archive {
+                style("[✓]").green()
+            } else {
+                style("[✗]").red()
+            };
+
+            let name = style(package_name).bold();
+
+            let connector = style(connector).dim();
+
+            let prefix = style(prefix).dim();
+
+            println!("{}{}{} {}", prefix, connector, name, cached);
+
+            let new_prefix = if is_last { "    " } else { "│   " };
+
+            let new_prefix = style(new_prefix).dim();
+
+            for (i, p) in package.packages.iter().enumerate() {
+                let is_last = i == package.packages.len() - 1;
+
+                render_package(
+                    p.name.as_str(),
+                    build_map,
+                    &format!("{}{}", prefix, new_prefix),
+                    is_last,
+                );
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -102,24 +156,35 @@ async fn main() -> Result<(), anyhow::Error> {
                 );
             }
 
+            let file_path = Path::new(file);
+
+            if !file_path.exists() {
+                anyhow::bail!("config not found: {}", file_path.display());
+            }
+
+            let (config, config_hash) = nickel::load_config(file_path, package_system).await?;
+
+            let (_, build_map, build_order) = nickel::load_config_build(&config.packages)?;
+
+            println!("=> Packages:");
+
+            for (index, package_name) in build_order.iter().enumerate() {
+                let is_last = index == build_order.len() - 1;
+                render_package(package_name, &build_map, "", is_last);
+            }
+
             println!("=> Building: {} ({})", file, system);
 
-            let (config, config_hash) = nickel::load_config(file, package_system).await?;
+            let mut package_output = HashMap::<String, PackageOutput>::new();
 
-            let config_structures = config::build_structures(&config);
-
-            let config_build_order = config::get_build_order(&config_structures.graph)?;
-
-            let mut package_finished = HashMap::<String, PackageOutput>::new();
-
-            for package_name in config_build_order {
-                match config_structures.map.get(&package_name) {
+            for package_name in build_order {
+                match build_map.get(&package_name) {
                     None => anyhow::bail!("Package not found: {}", package_name),
                     Some(package) => {
                         let mut packages = vec![];
 
                         for p in &package.packages {
-                            match package_finished.get(&p.name) {
+                            match package_output.get(&p.name) {
                                 None => eprintln!("Package not found: {}", p.name),
                                 Some(package) => packages.push(package.clone()),
                             }
@@ -128,9 +193,38 @@ async fn main() -> Result<(), anyhow::Error> {
                         let output =
                             build(&config_hash, package, packages, package_system, worker).await?;
 
-                        package_finished.insert(package_name, output);
+                        package_output.insert(package_name.to_string(), output);
                     }
                 }
+            }
+
+            Ok(())
+        }
+
+        Command::Check { file, system } => {
+            let package_system: PackageSystem = get_package_system(system);
+
+            if package_system == Unknown {
+                anyhow::bail!("unknown target: {}", system);
+            }
+
+            let file_path = Path::new(file);
+
+            if !file_path.exists() {
+                anyhow::bail!("config not found: {}", file_path.display());
+            }
+
+            println!("=> Config: {} ({})", file_path.display(), system);
+
+            let (config, _) = nickel::load_config(file_path, package_system).await?;
+
+            println!("=> Packages:");
+
+            let (_, build_map, build_order) = nickel::load_config_build(&config.packages)?;
+
+            for (index, package_name) in build_order.iter().enumerate() {
+                let is_last = index == build_order.len() - 1;
+                render_package(package_name, &build_map, "", is_last);
             }
 
             Ok(())
@@ -161,22 +255,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 Ok(())
             }
         },
-
-        Command::Validate { file, system } => {
-            let package_system: PackageSystem = get_package_system(system);
-
-            if package_system == Unknown {
-                anyhow::bail!("unknown target: {}", system);
-            }
-
-            println!("=> Validate: {} ({})", file, system);
-
-            let (config, _) = nickel::load_config(file, package_system).await?;
-
-            println!("{}", serde_json::to_string_pretty(&config)?);
-
-            Ok(())
-        }
 
         Command::Worker(worker) => match worker {
             CommandWorker::Start { level, port } => {

@@ -17,14 +17,12 @@ pub struct Package {
     pub environment: HashMap<String, String>,
     pub name: String,
     pub packages: Vec<Package>,
-    pub sandbox_image: String,
     pub script: String,
     pub source: Option<String>,
     pub source_excludes: Vec<String>,
     pub source_hash: Option<String>,
     pub source_includes: Vec<String>,
     pub systems: Vec<String>,
-    pub target: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
