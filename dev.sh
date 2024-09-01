@@ -7,7 +7,7 @@ OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
 export NICKEL_IMPORT_PATH="$WORKDIR/.vorpal/packages:$WORKDIR"
 export OPENSSL_DIR="$WORKDIR/deps/openssl"
-export PATH="$WORKDIR/deps/just/bin:$WORKDIR/deps/nickel/bin:$WORKDIR/deps/openssl/bin:$WORKDIR/deps/protoc/bin:$HOME/.cargo/bin:$PATH"
+export PATH="$WORKDIR/deps/nickel/bin:$WORKDIR/deps/openssl/bin:$WORKDIR/deps/protoc/bin:$HOME/.cargo/bin:$PATH"
 
 rustup show active-toolchain
 
@@ -21,44 +21,7 @@ if ! command -v rustc &> /dev/null || [[ ! -x "$(command -v rustc)" ]]; then
     exit 1
 fi
 
-cd "${WORKDIR}"
-
 mkdir -p ./deps
-
-if [[ ! -d "$PWD/deps/just/bin" ]]; then
-    JUST_SYSTEM=""
-    JUST_VERSION="1.35.0"
-
-    if [[ "${OS}" == "darwin" ]]; then
-        JUST_SYSTEM="apple-darwin"
-    elif [[ "${OS}" == "linux" ]]; then
-        JUST_SYSTEM="unknown-linux-musl"
-    else
-        echo "Unsupported OS: ${OS}"
-        exit 1
-    fi
-
-    if [[ "${ARCH}" == "x86_64" ]]; then
-        JUST_SYSTEM="x86_64-${JUST_SYSTEM}"
-    elif [[ "${ARCH}" == "arm64" || "${ARCH}" == "aarch64" ]]; then
-        JUST_SYSTEM="aarch64-${JUST_SYSTEM}"
-    else
-        echo "Unsupported ARCH: ${ARCH}"
-        exit 1
-    fi
-
-    JUST_URL="https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz"
-
-    mkdir -p deps/just/bin
-
-    curl -L "${JUST_URL}" -o deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
-
-    tar -xvf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz -C deps/just/bin
-
-    rm -rf deps/just-${JUST_VERSION}-${JUST_SYSTEM}.tar.gz
-
-    # TODO: support hash checking for downloads
-fi
 
 cd "${WORKDIR}"
 

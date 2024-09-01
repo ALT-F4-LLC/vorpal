@@ -59,33 +59,14 @@ The following steps guide how to setup and run commands in the development envir
 ./dev.sh
 ```
 
-- Enter the development environment:
+- Run to enter development environment:
 
 ```bash
 direnv allow
 ```
 
-- Run a `recipe` command inside the development environment:
+- Build the source code with:
 
 ```bash
-just <command> # or ./dev.sh just <command>
-```
-
-- To list available `recipe` commands inside the development environment:
-
-```bash
-just --list # or ./dev.sh just --list
-
-Available recipes:
-    build args=""                     # build everything
-    build-docker tag="edge"           # build (docker)
-    check args=""                     # check (cargo)
-    clean                             # clean everything
-    format                            # format cargo
-    lint                              # lint
-    start                             # start (worker)
-    test args                         # test everything
-    test-cargo args=""                # test cargo
-    test-nickel system="x86_64-linux" # test nickel
-    update                            # update (cargo)
+cargo build
 ```
