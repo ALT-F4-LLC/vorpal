@@ -42,10 +42,8 @@ Below is the existing working diagram that illustrates the platform's design:
 
 The following tools are required to develop:
 
-- [`curl`](https://curl.se/download.html) (http client)
-
+- [`curl`](https://curl.se) (http client)
 - [`direnv`](https://direnv.net) (environment variables)
-
 - [`rustup`](https://rustup.rs) (language toolchains)
 
 ### Steps
@@ -56,9 +54,6 @@ The following steps guide how to setup and run commands in the development envir
 > Steps must be run in the root of the cloned repository.
 
 - Run `dev.sh` script to bootstrap dependencies:
-
-> [!WARNING]
-> Requirements must be met for script to run properly.
 
 ```bash
 ./dev.sh
