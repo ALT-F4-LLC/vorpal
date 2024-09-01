@@ -1,10 +1,8 @@
 use anyhow::Result;
 use sha256::digest;
 use std::path::Path;
-use tokio::fs::write;
 use tokio::process::Command;
 use vorpal_schema::{api::package::PackageSystem, Config};
-use vorpal_store::temps::create_temp_file;
 
 pub async fn load_config(
     config: &String,
@@ -38,35 +36,28 @@ pub async fn load_config(
         PackageSystem::Unknown => anyhow::bail!("unknown target"),
     };
 
+    let current_path = std::env::current_dir()?;
+
+    let packages_path = current_path.join(".vorpal/packages");
+
     let config_str = format!(
         "let config = import \"{}\" in config \"{}\"",
         config_file_path.display(),
         config_system,
     );
 
-    println!("=> Config: {}", config_str);
+    let command_str = format!(
+        "echo '{}' | nickel export --import-path {} --import-path {}",
+        config_str,
+        packages_path.display(),
+        current_path.display(),
+    );
 
-    let sandbox_file = create_temp_file("ncl").await?;
+    let mut command = Command::new("sh");
 
-    println!("=> Sandbox: {}", sandbox_file.display());
+    let command = command.arg("-c").arg(command_str);
 
-    write(&sandbox_file, config_str).await?;
-
-    let current_path = std::env::current_dir()?;
-
-    let packages_path = current_path.join(".vorpal/packages");
-
-    let mut command = Command::new("nickel");
-
-    let command = command
-        .arg("export")
-        .arg("--import-path")
-        .arg(current_path.display().to_string())
-        .arg("--import-path")
-        .arg(packages_path.display().to_string())
-        .arg(sandbox_file.display().to_string());
-
-    println!("=> Command: {:?}", command);
+    println!("=> {:?}", command);
 
     let data = command.output().await?.stdout;
 

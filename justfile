@@ -72,12 +72,7 @@ test-cargo args="":
 
 # test nickel
 test-nickel system="aarch64-linux":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tmpfile="vorpal.test.ncl"
-    trap 'rm -f "$tmpfile"' EXIT
-    echo 'let config = import "vorpal.ncl" in config "{{ system }}"' > $tmpfile
-    nickel export $tmpfile
+    echo 'let config = import "vorpal.ncl" in config "{{ system }}"' | nickel export
 
 # test everything
 test args="" system="aarch64-linux": (test-cargo args) (test-nickel system)

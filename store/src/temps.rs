@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use tokio::fs::{create_dir_all, File};
 
 pub async fn create_temp_dir() -> Result<PathBuf> {
-    let temp_dir_path = paths::get_temp_dir_path();
-    create_dir_all(&temp_dir_path).await?;
-    Ok(temp_dir_path.canonicalize()?)
+    let dir_path = paths::get_temp_path();
+    create_dir_all(&dir_path).await?;
+    Ok(dir_path)
 }
 
 pub async fn create_temp_file(extension: &str) -> Result<PathBuf> {
-    let temp_file_path = paths::get_temp_dir_path().with_extension(extension);
-    File::create(&temp_file_path).await?;
-    Ok(temp_file_path.canonicalize()?)
+    let file_path = paths::get_temp_path().with_extension(extension);
+    File::create(&file_path).await?;
+    Ok(file_path)
 }
