@@ -83,7 +83,7 @@ jobs:
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-          echo "OS=$$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
         with:
