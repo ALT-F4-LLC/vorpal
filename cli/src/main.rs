@@ -75,11 +75,18 @@ fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
 }
 
+static CONNECTOR_START: &str = "├─";
+
+static CONNECTOR_HALF: &str = "──";
+
+static CONNECTOR_END: &str = "└─";
+
 fn render_package(
     package_name: &str,
     build_map: &HashMap<&str, Package>,
     prefix: &str,
     is_last: bool,
+    cached_count: &mut usize,
 ) {
     match build_map.get(package_name) {
         None => eprintln!("Package not found: {}", package_name),
@@ -87,8 +94,6 @@ fn render_package(
             let hash_default = "none".to_string();
 
             let hash = package.source_hash.as_ref().unwrap_or(&hash_default);
-
-            let connector = if is_last { "└── " } else { "├── " };
 
             let exists = get_package_path(hash, package_name).exists();
 
@@ -100,15 +105,26 @@ fn render_package(
                 style("[✗]").red()
             };
 
-            let name = style(package_name).bold();
-
-            let connector = style(connector).dim();
+            if exists || exists_archive {
+                *cached_count += 1;
+            }
 
             let prefix = style(prefix).dim();
 
-            println!("{}{}{} {}", prefix, connector, name, cached);
+            println!(
+                "{}{}{} {} {}",
+                style(CONNECTOR_START).dim(),
+                prefix,
+                style(CONNECTOR_HALF).dim(),
+                style(package_name).dim().italic(),
+                cached
+            );
 
-            let new_prefix = if is_last { "    " } else { "│   " };
+            let new_prefix = if is_last {
+                format!("{}", CONNECTOR_HALF)
+            } else {
+                format!("{}", CONNECTOR_HALF)
+            };
 
             let new_prefix = style(new_prefix).dim();
 
@@ -120,6 +136,7 @@ fn render_package(
                     build_map,
                     &format!("{}{}", prefix, new_prefix),
                     is_last,
+                    cached_count,
                 );
             }
         }
@@ -137,13 +154,17 @@ async fn main() -> Result<(), anyhow::Error> {
             worker,
         } => {
             if worker.is_empty() {
-                anyhow::bail!("no worker specified");
+                anyhow::bail!("{} no worker specified", CONNECTOR_END);
             }
 
             let package_system: PackageSystem = get_package_system(system);
 
             if package_system == Unknown {
-                anyhow::bail!("unknown target: {}", package_system.as_str_name());
+                anyhow::bail!(
+                    "{} unknown target: {}",
+                    CONNECTOR_END,
+                    package_system.as_str_name()
+                );
             }
 
             setup_paths().await?;
@@ -152,28 +173,40 @@ async fn main() -> Result<(), anyhow::Error> {
 
             if !private_key_path.exists() {
                 anyhow::bail!(
-                    "private key not found - run 'vorpal keys generate' or copy from worker"
+                    "{} private key not found - run 'vorpal keys generate' or copy from worker",
+                    CONNECTOR_END
                 );
             }
 
             let file_path = Path::new(file);
 
             if !file_path.exists() {
-                anyhow::bail!("config not found: {}", file_path.display());
+                anyhow::bail!(
+                    "{} config not found: {}",
+                    CONNECTOR_END,
+                    file_path.display()
+                );
             }
 
             let (config, config_hash) = nickel::load_config(file_path, package_system).await?;
 
             let (_, build_map, build_order) = nickel::load_config_build(&config.packages)?;
 
-            println!("=> Packages:");
+            println!("{} Packages", CONNECTOR_START);
+
+            let mut cached_count = 0;
 
             for (index, package_name) in build_order.iter().enumerate() {
                 let is_last = index == build_order.len() - 1;
-                render_package(package_name, &build_map, "", is_last);
+                render_package(package_name, &build_map, "", is_last, &mut cached_count);
             }
 
-            println!("=> Building: {} ({})", file, system);
+            if cached_count == build_order.len() {
+                println!("{} All packages are built", CONNECTOR_END);
+                return Ok(());
+            }
+
+            println!("{} Building: {} ({})", CONNECTOR_START, file, system);
 
             let mut package_output = HashMap::<String, PackageOutput>::new();
 
@@ -214,17 +247,51 @@ async fn main() -> Result<(), anyhow::Error> {
                 anyhow::bail!("config not found: {}", file_path.display());
             }
 
-            println!("=> Config: {} ({})", file_path.display(), system);
-
             let (config, _) = nickel::load_config(file_path, package_system).await?;
 
-            println!("=> Packages:");
+            let success = style("[✓]").green();
+
+            println!(
+                "{} {} {} {}",
+                style(CONNECTOR_START).dim(),
+                style("Config:").bold(),
+                style(file_path.display()).dim(),
+                success,
+            );
+
+            println!(
+                "{} {} {} {}",
+                style(CONNECTOR_START).dim(),
+                style("System:").bold(),
+                style(format!("{}", system)).dim(),
+                success,
+            );
+
+            println!(
+                "{} {}",
+                style(CONNECTOR_START).dim(),
+                style("Packages:").bold()
+            );
 
             let (_, build_map, build_order) = nickel::load_config_build(&config.packages)?;
 
+            let mut cached_count = 0;
+
             for (index, package_name) in build_order.iter().enumerate() {
                 let is_last = index == build_order.len() - 1;
-                render_package(package_name, &build_map, "", is_last);
+                render_package(package_name, &build_map, "", is_last, &mut cached_count);
+            }
+
+            println!(
+                "{} {} {} out of {} packages",
+                style(CONNECTOR_END).dim(),
+                style("Progress:").bold(),
+                style(cached_count).green(),
+                style(build_order.len())
+            );
+
+            if cached_count == build_order.len() {
+                return Ok(());
             }
 
             Ok(())
