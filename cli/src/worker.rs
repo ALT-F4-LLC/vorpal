@@ -1,3 +1,4 @@
+use crate::log::format_package_name;
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use console::style;
 use std::path::Path;
@@ -36,6 +37,30 @@ enum PackageSourceKind {
     Http,
 }
 
+pub fn print_packages_list(package_name: &str, packages: &Vec<String>) {
+    println!(
+        "{} packages: {}",
+        format_package_name(package_name),
+        style(packages.join(", ")).cyan()
+    );
+}
+
+pub fn print_package_hash(package_name: &str, package_hash: &str) {
+    println!(
+        "{} {}",
+        format_package_name(package_name),
+        style(package_hash).italic(),
+    );
+}
+
+pub fn print_package_output(package_name: &str, package_output: &PackageOutput) {
+    println!(
+        "{} output: {}",
+        format_package_name(package_name),
+        style(package_output.hash.clone()).green()
+    );
+}
+
 pub async fn build(
     config_hash: &str,
     package: &Package,
@@ -43,8 +68,6 @@ pub async fn build(
     target: PackageSystem,
     worker: &str,
 ) -> anyhow::Result<PackageOutput> {
-    println!("=> name: {}", style(package.name.clone()).magenta());
-
     if !packages.is_empty() {
         let packages_names = packages
             .clone()
@@ -52,7 +75,7 @@ pub async fn build(
             .map(|p| p.name)
             .collect::<Vec<String>>();
 
-        println!("=> packages: {}", style(packages_names.join(", ")).cyan());
+        print_packages_list(&package.name, &packages_names);
     }
 
     let mut package_source_hash = config_hash.to_owned();
@@ -103,17 +126,19 @@ pub async fn build(
         }
     }
 
-    println!("=> hash: {}", style(package_source_hash.clone()).blue());
+    print_package_hash(&package.name, &package_source_hash);
 
     let package_path = get_package_path(&package_source_hash, &package.name);
 
     if package_path.exists() {
-        println!("=> output: {}", style(package_path.display()).green());
-
-        return Ok(PackageOutput {
+        let output = PackageOutput {
             hash: package_source_hash,
             name: package.name.clone(),
-        });
+        };
+
+        print_package_output(&package.name, &output);
+
+        return Ok(output);
     }
 
     let package_archive_path = get_package_archive_path(&package_source_hash, &package.name);

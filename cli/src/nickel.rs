@@ -61,9 +61,9 @@ pub async fn load_config(
 
 pub fn load_config_build(
     packages: &HashMap<String, Package>,
-) -> Result<(DiGraphMap<&str, Package>, HashMap<&str, Package>, Vec<&str>)> {
+) -> Result<(HashMap<String, Package>, Vec<String>)> {
     let mut graph = DiGraphMap::<&str, Package>::new();
-    let mut map = HashMap::<&str, Package>::new();
+    let mut map = HashMap::<String, Package>::new();
 
     for package in packages.values() {
         add_graph_edges(package, &mut graph, &mut map);
@@ -76,22 +76,27 @@ pub fn load_config_build(
 
     order.reverse();
 
-    Ok((graph, map, order))
+    let order = order
+        .iter()
+        .map(|name| name.to_string())
+        .collect::<Vec<String>>();
+
+    Ok((map, order))
 }
 
 fn add_graph_edges<'a>(
     package: &'a Package,
     graph: &mut DiGraphMap<&'a str, Package>,
-    map: &mut HashMap<&'a str, Package>,
+    map: &mut HashMap<String, Package>,
 ) {
     if map.contains_key(package.name.as_str()) {
         return;
     }
 
-    map.insert(&package.name, package.clone());
+    map.insert(package.name.clone(), package.clone());
 
     for dependency in &package.packages {
         graph.add_edge(&package.name, &dependency.name, dependency.clone());
-        add_graph_edges(&dependency, graph, map);
+        add_graph_edges(dependency, graph, map);
     }
 }

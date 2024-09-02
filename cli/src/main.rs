@@ -1,21 +1,20 @@
+use crate::log::{connector_end, print_build_order};
 use crate::worker::build;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use console::style;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
-use std::path::Path;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
     api::package::{PackageOutput, PackageSystem, PackageSystem::Unknown},
-    get_package_system, Package,
+    get_package_system,
 };
-use vorpal_store::paths::{
-    get_package_archive_path, get_package_path, get_private_key_path, setup_paths,
-};
+use vorpal_store::paths::{get_private_key_path, setup_paths};
 use vorpal_worker::service;
 
+mod config;
+mod log;
 mod nickel;
 mod worker;
 
@@ -75,74 +74,6 @@ fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
 }
 
-static CONNECTOR_START: &str = "├─";
-
-static CONNECTOR_HALF: &str = "──";
-
-static CONNECTOR_END: &str = "└─";
-
-fn render_package(
-    package_name: &str,
-    build_map: &HashMap<&str, Package>,
-    prefix: &str,
-    is_last: bool,
-    cached_count: &mut usize,
-) {
-    match build_map.get(package_name) {
-        None => eprintln!("Package not found: {}", package_name),
-        Some(package) => {
-            let hash_default = "none".to_string();
-
-            let hash = package.source_hash.as_ref().unwrap_or(&hash_default);
-
-            let exists = get_package_path(hash, package_name).exists();
-
-            let exists_archive = get_package_archive_path(hash, package_name).exists();
-
-            let cached = if exists || exists_archive {
-                style("[✓]").green()
-            } else {
-                style("[✗]").red()
-            };
-
-            if exists || exists_archive {
-                *cached_count += 1;
-            }
-
-            let prefix = style(prefix).dim();
-
-            println!(
-                "{}{}{} {} {}",
-                style(CONNECTOR_START).dim(),
-                prefix,
-                style(CONNECTOR_HALF).dim(),
-                style(package_name).dim().italic(),
-                cached
-            );
-
-            let new_prefix = if is_last {
-                format!("{}", CONNECTOR_HALF)
-            } else {
-                format!("{}", CONNECTOR_HALF)
-            };
-
-            let new_prefix = style(new_prefix).dim();
-
-            for (i, p) in package.packages.iter().enumerate() {
-                let is_last = i == package.packages.len() - 1;
-
-                render_package(
-                    p.name.as_str(),
-                    build_map,
-                    &format!("{}{}", prefix, new_prefix),
-                    is_last,
-                    cached_count,
-                );
-            }
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
@@ -154,7 +85,7 @@ async fn main() -> Result<(), anyhow::Error> {
             worker,
         } => {
             if worker.is_empty() {
-                anyhow::bail!("{} no worker specified", CONNECTOR_END);
+                anyhow::bail!("{} no worker specified", connector_end());
             }
 
             let package_system: PackageSystem = get_package_system(system);
@@ -162,7 +93,7 @@ async fn main() -> Result<(), anyhow::Error> {
             if package_system == Unknown {
                 anyhow::bail!(
                     "{} unknown target: {}",
-                    CONNECTOR_END,
+                    connector_end(),
                     package_system.as_str_name()
                 );
             }
@@ -174,44 +105,19 @@ async fn main() -> Result<(), anyhow::Error> {
             if !private_key_path.exists() {
                 anyhow::bail!(
                     "{} private key not found - run 'vorpal keys generate' or copy from worker",
-                    CONNECTOR_END
+                    connector_end()
                 );
             }
 
-            let file_path = Path::new(file);
+            let (config_map, config_order, config_hash) =
+                config::check_config(file, system).await?;
 
-            if !file_path.exists() {
-                anyhow::bail!(
-                    "{} config not found: {}",
-                    CONNECTOR_END,
-                    file_path.display()
-                );
-            }
-
-            let (config, config_hash) = nickel::load_config(file_path, package_system).await?;
-
-            let (_, build_map, build_order) = nickel::load_config_build(&config.packages)?;
-
-            println!("{} Packages", CONNECTOR_START);
-
-            let mut cached_count = 0;
-
-            for (index, package_name) in build_order.iter().enumerate() {
-                let is_last = index == build_order.len() - 1;
-                render_package(package_name, &build_map, "", is_last, &mut cached_count);
-            }
-
-            if cached_count == build_order.len() {
-                println!("{} All packages are built", CONNECTOR_END);
-                return Ok(());
-            }
-
-            println!("{} Building: {} ({})", CONNECTOR_START, file, system);
+            print_build_order(&config_order);
 
             let mut package_output = HashMap::<String, PackageOutput>::new();
 
-            for package_name in build_order {
-                match build_map.get(&package_name) {
+            for package_name in config_order {
+                match config_map.get(&package_name) {
                     None => anyhow::bail!("Package not found: {}", package_name),
                     Some(package) => {
                         let mut packages = vec![];
@@ -235,64 +141,7 @@ async fn main() -> Result<(), anyhow::Error> {
         }
 
         Command::Check { file, system } => {
-            let package_system: PackageSystem = get_package_system(system);
-
-            if package_system == Unknown {
-                anyhow::bail!("unknown target: {}", system);
-            }
-
-            let file_path = Path::new(file);
-
-            if !file_path.exists() {
-                anyhow::bail!("config not found: {}", file_path.display());
-            }
-
-            let (config, _) = nickel::load_config(file_path, package_system).await?;
-
-            let success = style("[✓]").green();
-
-            println!(
-                "{} {} {} {}",
-                style(CONNECTOR_START).dim(),
-                style("Config:").bold(),
-                style(file_path.display()).dim(),
-                success,
-            );
-
-            println!(
-                "{} {} {} {}",
-                style(CONNECTOR_START).dim(),
-                style("System:").bold(),
-                style(format!("{}", system)).dim(),
-                success,
-            );
-
-            println!(
-                "{} {}",
-                style(CONNECTOR_START).dim(),
-                style("Packages:").bold()
-            );
-
-            let (_, build_map, build_order) = nickel::load_config_build(&config.packages)?;
-
-            let mut cached_count = 0;
-
-            for (index, package_name) in build_order.iter().enumerate() {
-                let is_last = index == build_order.len() - 1;
-                render_package(package_name, &build_map, "", is_last, &mut cached_count);
-            }
-
-            println!(
-                "{} {} {} out of {} packages",
-                style(CONNECTOR_END).dim(),
-                style("Progress:").bold(),
-                style(cached_count).green(),
-                style(build_order.len())
-            );
-
-            if cached_count == build_order.len() {
-                return Ok(());
-            }
+            let _ = config::check_config(file, system).await?;
 
             Ok(())
         }
