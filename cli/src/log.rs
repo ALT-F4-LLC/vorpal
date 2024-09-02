@@ -1,6 +1,8 @@
 use console::style;
 use std::collections::HashMap;
 use std::path::Path;
+use std::path::PathBuf;
+use vorpal_schema::api::package::PackageOutput;
 use vorpal_schema::Package;
 use vorpal_store::paths::{get_package_archive_path, get_package_path};
 
@@ -54,7 +56,7 @@ pub fn format_package_name(package_name: &str) -> String {
         "{}{} {} ➜",
         connector_start(),
         connector_half(),
-        style(package_name)
+        style(package_name).bold(),
     )
 }
 
@@ -138,6 +140,34 @@ pub fn print_packages(build_map: &HashMap<String, Package>, build_order: &Vec<St
     );
 }
 
+pub fn print_source_archive(package_name: &str, source_archive: &str) {
+    println!(
+        "{} Source archive: {} {}",
+        format_package_name(package_name),
+        style(source_archive).italic(),
+        badge_success(),
+    );
+}
+
+pub fn print_source_cache(source_cache: &str) {
+    println!(
+        "{} {} {} {}",
+        connector_start(),
+        bold("Source cache:"),
+        source_cache,
+        badge_success(),
+    );
+}
+
+pub fn print_source_url(package_name: &str, url: &str) {
+    println!(
+        "{} Source url: {} {}",
+        format_package_name(package_name),
+        style(url).italic(),
+        badge_success(),
+    );
+}
+
 pub fn print_system(system: &str) {
     println!(
         "{} {} {} {}",
@@ -145,5 +175,46 @@ pub fn print_system(system: &str) {
         bold("System:"),
         system,
         badge_success(),
+    );
+}
+
+pub fn print_packages_list(package_name: &str, packages: &Vec<String>) {
+    println!(
+        "{} Packages: {}",
+        format_package_name(package_name),
+        style(packages.join(", ")).cyan()
+    );
+}
+
+pub fn print_package_hash(package_name: &str, package_hash: &str) {
+    println!(
+        "{} Source hash: {} {}",
+        format_package_name(package_name),
+        style(package_hash).italic(),
+        badge_success(),
+    );
+}
+
+pub fn print_package_archive(package_name: &str, package_archive: &PathBuf) {
+    println!(
+        "{} Archive: {}",
+        format_package_name(package_name),
+        style(package_archive.display().to_string()).green()
+    );
+}
+
+pub fn print_package_output(package_name: &str, package_output: &PackageOutput) {
+    println!(
+        "{} Output: {}",
+        format_package_name(package_name),
+        style(package_output.hash.clone()).green()
+    );
+}
+
+pub fn print_package_log(package_name: &str, package_log: &String) {
+    println!(
+        "{} {}",
+        format_package_name(package_name),
+        style(package_log)
     );
 }

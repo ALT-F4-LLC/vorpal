@@ -1,6 +1,8 @@
-use crate::log::format_package_name;
+use crate::log::{
+    print_package_archive, print_package_hash, print_package_log, print_package_output,
+    print_packages_list, print_source_archive, print_source_cache, print_source_url,
+};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
-use console::style;
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write, File};
 use tokio::io::AsyncWriteExt;
@@ -35,30 +37,6 @@ enum PackageSourceKind {
     Local,
     Git,
     Http,
-}
-
-pub fn print_packages_list(package_name: &str, packages: &Vec<String>) {
-    println!(
-        "{} packages: {}",
-        format_package_name(package_name),
-        style(packages.join(", ")).cyan()
-    );
-}
-
-pub fn print_package_hash(package_name: &str, package_hash: &str) {
-    println!(
-        "{} {}",
-        format_package_name(package_name),
-        style(package_hash).italic(),
-    );
-}
-
-pub fn print_package_output(package_name: &str, package_output: &PackageOutput) {
-    println!(
-        "{} output: {}",
-        format_package_name(package_name),
-        style(package_output.hash.clone()).green()
-    );
 }
 
 pub async fn build(
@@ -148,7 +126,7 @@ pub async fn build(
 
         unpack_zstd(&package_path, &package_archive_path).await?;
 
-        println!("=> archive: {}", package_path.display());
+        print_package_archive(&package.name, &package_archive_path);
 
         return Ok(PackageOutput {
             hash: package_source_hash,
@@ -222,7 +200,10 @@ pub async fn build(
         };
 
         match worker_store.exists(worker_store_source.clone()).await {
-            Ok(_) => println!("=> source cache: {:?}", worker_store_source),
+            Ok(_) => {
+                let source_cache = format!("{}/{}-{}", worker, package.name, package_source_hash);
+                print_source_cache(&source_cache)
+            }
             Err(status) => {
                 if status.code() == tonic::Code::NotFound {
                     if !source_archive_path.exists() {
@@ -250,8 +231,6 @@ pub async fn build(
                                 let temp_dir_path = create_temp_dir().await?;
 
                                 if let Some(kind) = infer::get(response_bytes) {
-                                    println!("=> source kind: {}", kind.mime_type());
-
                                     if let "application/gzip" = kind.mime_type() {
                                         let gz_decoder = GzipDecoder::new(response_bytes);
                                         let mut archive = Archive::new(gz_decoder);
@@ -301,7 +280,7 @@ pub async fn build(
                                         }
                                     }
 
-                                    println!("=> source retrieved: {}", url);
+                                    print_source_url(&package.name, url.as_str());
 
                                     compress_zstd(
                                         &temp_dir_path,
@@ -380,7 +359,7 @@ pub async fn build(
             }
         }
 
-        println!("=> source archive: {}", source_archive_path.display());
+        print_source_archive(&package.name, &source_archive_path.display().to_string());
     }
 
     if request_stream.is_empty() {
@@ -405,7 +384,7 @@ pub async fn build(
 
     while let Some(res) = stream.message().await? {
         if !res.output.is_empty() {
-            println!("=> {}", res.output);
+            print_package_log(&package.name, &res.output);
         }
     }
 

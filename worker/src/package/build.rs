@@ -1,20 +1,17 @@
-use crate::package::sandbox_default;
+use crate::package::{darwin, linux};
 use futures_util::stream::StreamExt;
 use rsa::{
     pss::{Signature, VerifyingKey},
     sha2::Sha256,
     signature::Verifier,
 };
+use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
+use std::fs::Permissions;
 use std::iter::Iterator;
-use std::{collections::HashMap, fs::Permissions, os::unix::fs::PermissionsExt};
-use tera::Tera;
-use tokio::process::Command;
-use tokio::{
-    fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
-    sync::mpsc::Sender,
-};
-use tokio_process_stream::ProcessLineStream;
+use std::os::unix::fs::PermissionsExt;
+use tokio::fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write};
+use tokio::sync::mpsc::Sender;
 use tonic::{Request, Status, Streaming};
 use tracing::debug;
 use vorpal_notary::get_public_key;
@@ -146,7 +143,7 @@ pub async fn run(
     let source_path = get_source_path(&source_hash, &name);
 
     if !source_path.exists() && !source_data.is_empty() {
-        send(tx, format!("source chunk: {}", source_data_chunk)).await?;
+        send(tx, format!("Source chunks: {}", source_data_chunk)).await?;
 
         if source_data_signature.is_empty() {
             send_error(tx, "'source_signature' invalid".to_string()).await?
@@ -181,9 +178,9 @@ pub async fn run(
 
         if !source_path.exists() {
             let message = format!(
-                "{} => {}",
-                source_archive_path.display(),
-                source_path.display()
+                "Source unpack: {} => {}",
+                source_archive_path.file_name().unwrap().to_str().unwrap(),
+                source_path.file_name().unwrap().to_str().unwrap()
             );
 
             send(tx, message).await?;
@@ -248,7 +245,7 @@ pub async fn run(
         }
     }
 
-    send(tx, format!("environment: {:?}", env_var)).await?;
+    send(tx, format!("Sandbox environment: {:?}", env_var)).await?;
 
     // Create build script
 
@@ -295,65 +292,39 @@ pub async fn run(
 
     let sandbox_package_dir_path = create_temp_dir().await?;
 
-    if worker_system == Aarch64Macos || worker_system == X8664Macos {
-        env_var.insert(
-            "output".to_string(),
-            sandbox_package_dir_path.display().to_string(),
-        );
+    env_var.insert(
+        "output".to_string(),
+        sandbox_package_dir_path.display().to_string(),
+    );
 
-        let sandbox_profile_path = create_temp_file("sb").await?;
-
-        let mut tera = Tera::default();
-
-        tera.add_raw_template("sandbox_default", sandbox_default::SANDBOX_DEFAULT)
-            .unwrap();
-
-        let sandbox_profile_context = tera::Context::new();
-
-        let sandbox_profile_data = tera
-            .render("sandbox_default", &sandbox_profile_context)
-            .unwrap();
-
-        write(&sandbox_profile_path, sandbox_profile_data)
-            .await
-            .map_err(|_| Status::internal("failed to write sandbox profile"))?;
-
-        let build_command_args = [
-            "-f",
-            sandbox_profile_path.to_str().unwrap(),
-            sandbox_script_file_path.to_str().unwrap(),
-        ];
-
-        let mut sandbox_command = Command::new("/usr/bin/sandbox-exec");
-
-        sandbox_command.args(build_command_args);
-
-        sandbox_command.current_dir(&sandbox_source_dir_path);
-
-        for (key, value) in env_var.clone().into_iter() {
-            sandbox_command.env(key, value);
+    let mut sandbox_stream = match worker_system {
+        Aarch64Macos | X8664Macos => {
+            darwin::build(
+                bin_paths.clone(),
+                env_var.clone(),
+                &sandbox_script_file_path,
+                &sandbox_source_dir_path,
+            )
+            .await?
         }
-
-        if !bin_paths.is_empty() {
-            let path_default = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin";
-            let path = format!("{}:{}", bin_paths.join(":"), path_default);
-            sandbox_command.env("PATH", path);
+        Aarch64Linux | X8664Linux => {
+            linux::build(
+                bin_paths,
+                env_var.clone(),
+                &sandbox_package_dir_path,
+                &sandbox_script_file_path,
+                &sandbox_source_dir_path,
+            )
+            .await?
         }
+        _ => anyhow::bail!("unsupported worker system"),
+    };
 
-        let mut stream = ProcessLineStream::try_from(sandbox_command)?;
-
-        while let Some(item) = stream.next().await {
-            send(tx, item.to_string().trim().to_string()).await?
-        }
-
-        // TODO: handle cleanup for paths embedded into files
-
-        replace_path_in_files(&sandbox_package_dir_path, &package_path).await?;
+    while let Some(item) = sandbox_stream.next().await {
+        send(tx, item.to_string().trim().to_string()).await?
     }
 
-    if worker_system == Aarch64Linux || worker_system == X8664Linux {
-        // TODO: handle linux sandbox builds
-    }
+    // Check for output files
 
     let sandbox_package_files = get_file_paths(
         &sandbox_package_dir_path,
@@ -368,9 +339,13 @@ pub async fn run(
         send_error(tx, "no build output files found".to_string()).await?
     }
 
-    let message = format!("build output files: {}", sandbox_package_files.len());
+    let message = format!("output files: {}", sandbox_package_files.len());
 
     send(tx, message).await?;
+
+    // Replace paths in files
+
+    replace_path_in_files(&sandbox_package_dir_path, &package_path).await?;
 
     // Create package tar from build output files
 

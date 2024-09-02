@@ -57,7 +57,7 @@ let { Package, .. } = import "@vorpal/schema.ncl" in
           |> match {
             "aarch64-linux" => "72d4917bb58b693b3f2c589746ed470645f96895ece3dd27f7055d3c3f7f7a79",
             "aarch64-macos" => "0689a9b2dec87c272954db9212a8f3d5243f55f777f90d84d2b3aeb2aa938ba5",
-            "x86_64-linux" => "0689a9b2dec87c272954db9212a8f3d5243f55f777f90d84d2b3aeb2aa938ba5",
+            "x86_64-linux" => "ad734eb9699b0a9dffdd35034776ccaa4d7b45e1898fc32748be93b60453550d",
             _ => std.fail_with "Unsupported target"
           },
         systems = config.systems,
