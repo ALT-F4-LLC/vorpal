@@ -10,7 +10,7 @@ env:
   RUST_VERSION: 1.80.1
 
 jobs:
-  cache-dev:
+  sandbox:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -23,17 +23,17 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
+          path: sandbox
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh which nickel
-      - run: ./dev.sh which protoc
+      - run: ./sandbox.sh # prebake
+      - run: ./sandbox.sh which nickel
+      - run: ./sandbox.sh which protoc
 
       - uses: actions/cache/save@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
+          path: sandbox
 
   code-quality:
     needs:
@@ -44,17 +44,17 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
+          path: sandbox
 
       - uses: actions/cache/restore@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh make format
-      - run: ./dev.sh make lint
+      - run: ./sandbox.sh # prebake
+      - run: ./sandbox.sh make format
+      - run: ./sandbox.sh make lint
 
   package:
     needs:
@@ -71,16 +71,16 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
+          path: sandbox
 
       - uses: actions/cache/restore@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh make dist
+      - run: ./sandbox.sh # prebake
+      - run: ./sandbox.sh make dist
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -111,8 +111,8 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
+          path: sandbox
 
       - run: echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
 
