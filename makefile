@@ -4,7 +4,7 @@ OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 TARGET := ./target/release/vorpal
 WORK_DIR := $(shell pwd)
 
-build-packer:
+build-packer: validate-packer
 	rm -rf $(WORK_DIR)/packer_debian_vmware_arm64.box
 	packer build \
 		-var-file=$(WORK_DIR)/.packer/pkrvars/debian/fusion-13.pkrvars.hcl \
@@ -28,6 +28,9 @@ format:
 lint: format
 	cargo clippy -- -D warnings
 
+list:
+	@grep '^[^#[:space:]].*:' Makefile
+
 load-vagrant: build-packer
 	vagrant box remove --force "altf4llc/debian-bookworm" || true
 	vagrant box add \
@@ -41,3 +44,8 @@ test: build
 test-vagrant:
 	vagrant destroy --force || true
 	vagrant up --provider "vmware_desktop"
+
+validate-packer:
+	packer validate \
+		-var-file=$(WORK_DIR)/.packer/pkrvars/debian/fusion-13.pkrvars.hcl \
+		$(WORK_DIR)/.packer
