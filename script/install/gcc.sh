@@ -2,15 +2,15 @@
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 <sandbox_path>"
+    echo "Usage: $0 <prefix_path>"
     exit 1
 fi
 
 echo "Install gcc -> $1"
 
 GCC_VERSION="14.2.0"
-SANDBOX_PATH="$1"
-PATH="${SANDBOX_PATH}/bin:${PATH}"
+PREFIX_PATH="$1"
+# PATH="${PREFIX_PATH}/bin:${PATH}"
 
 curl -L \
     "https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz" \
@@ -28,9 +28,9 @@ popd
 
 pushd "/tmp/gcc-${GCC_VERSION}/build"
 
-../configure --enable-languages="c,c++,go" --prefix="${SANDBOX_PATH}"
+../configure --enable-languages="c,c++,go" --prefix="${PREFIX_PATH}"
 
-make
+make -j"$(nproc)"
 
 make install
 
