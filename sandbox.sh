@@ -47,7 +47,7 @@ if [[ "${OS}" == "linux" ]]; then
             --disable-shared \
             --enable-static \
             --prefix="${SANDBOX_PATH}"
-        make -j"$(nproc)"
+        make
         make install
 
         popd
@@ -79,7 +79,7 @@ if [[ "${OS}" == "linux" ]]; then
             --disable-shared \
             --enable-static \
             --prefix="${SANDBOX_PATH}"
-        make -j"$(nproc)"
+        make
         make check
         make install
 
@@ -111,7 +111,7 @@ if [[ "${OS}" == "linux" ]]; then
             --enable-static \
             --with-gmp="${SANDBOX_PATH}" \
             --prefix="${SANDBOX_PATH}"
-        make -j"$(nproc)"
+        make
         make check
         make install
 
@@ -143,7 +143,7 @@ if [[ "${OS}" == "linux" ]]; then
             --with-gmp="${SANDBOX_PATH}" \
             --with-mpfr="${SANDBOX_PATH}" \
             --prefix="${SANDBOX_PATH}"
-        make -j"$(nproc)"
+        make
         make check
         make install
 
@@ -168,7 +168,7 @@ if [[ "${OS}" == "linux" ]]; then
 
         tar -xzf "/tmp/gcc-${GCC_VERSION}.tar.gz" -C "/tmp"
 
-        mkdir /tmp/gcc-${GCC_VERSION}/build
+        mkdir -p /tmp/gcc-${GCC_VERSION}/build
 
         pushd "/tmp/gcc-${GCC_VERSION}/build"
 
@@ -179,7 +179,7 @@ if [[ "${OS}" == "linux" ]]; then
             --with-gmp="${SANDBOX_PATH}" \
             --with-mpc="${SANDBOX_PATH}" \
             --with-mpfr="${SANDBOX_PATH}"
-        make -j"$(nproc)"
+        make
         make install
 
         popd
@@ -207,7 +207,7 @@ if [[ ! -f "$SANDBOX_PATH/bin/bash" ]]; then
     pushd "/tmp/bash-${BASH_VERSION}"
 
     ./configure --prefix="${SANDBOX_PATH}"
-    make -j"$(nproc)"
+    make
     make install
 
     popd
@@ -233,7 +233,7 @@ if [[ ! -f "$SANDBOX_PATH/bin/cat" ]]; then
     pushd "/tmp/coreutils-${COREUTILS_VERSION}"
 
     ./configure --prefix="${SANDBOX_PATH}"
-    make -j"$(nproc)"
+    make
     make install
 
     popd

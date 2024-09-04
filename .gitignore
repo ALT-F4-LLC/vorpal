@@ -1,4 +1,6 @@
+.vagrant
 dist
+packer_*_*_*.box
 sandbox
 target
-vorpal-*-*.tar.gz
+vorpal-*-*
