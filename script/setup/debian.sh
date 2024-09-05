@@ -13,6 +13,7 @@ case "$1" in
         sudo apt-get install \
             --no-install-recommends \
             --yes \
+            bubblewrap \
             direnv \
             unzip
         echo "eval \"\$(direnv hook bash)\"" >> ~/.bashrc
