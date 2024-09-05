@@ -5,28 +5,43 @@ Vagrant.configure("2") do |config|
 
   config.vm.provider :vmware_desktop do |vmware|
     vmware.vmx["memsize"] = "8192"
-    vmware.vmx["numvcpus"] = "4"
+    vmware.vmx["numvcpus"] = "8"
   end
 
   config.vm.provision "shell", keep_color: true, privileged: false, inline: <<-SHELL
-    set -euo pipefail
+    echo 'function setup_vorpal {
+      rm -rf ${HOME}/vorpal
 
-    mkdir -p ./vorpal
+      mkdir -p ${HOME}/vorpal
 
-    rsync -aPW \
-      --exclude='.git' \
-      --exclude='.vagrant' \
-      --exclude='.vorpal/env' \
-      --exclude='target' \
-      /vagrant/. ./vorpal/.
+      rsync -aPW \
+        --exclude=".git" \
+        --exclude=".vagrant" \
+        --exclude=".vorpal/env" \
+        --exclude="target" \
+        /vagrant/. ./vorpal/.
+    }' >> ~/.bashrc
 
-    cd ./vorpal
+    echo 'function setup_dev {
+      setup_vorpal
 
-    ./script/setup/debian.sh "dev"
-    ./script/setup/dev.sh
+      cd ${HOME}/vorpal
 
-    PATH=$PWD/.vorpal/env/bin:$HOME/.cargo/bin:$PATH
+      ./script/setup/debian.sh "dev"
+      ./script/setup/dev.sh
 
-    make dist
+      PATH=$PWD/.vorpal/env/bin:$HOME/.cargo/bin:$PATH
+
+      make dist
+    }' >> ~/.bashrc
+
+    echo 'function setup_sandbox {
+      setup_vorpal
+
+      cd ${HOME}/vorpal
+
+      ./script/setup/debian.sh "sandbox"
+      ./script/setup/sandbox.sh
+    }' >> ~/.bashrc
   SHELL
 end

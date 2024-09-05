@@ -19,5 +19,6 @@ if [[ "${OS}" == "linux" ]]; then
     "${SCRIPT_PATH_INSTALL}/gcc.sh"
 fi
 
+"${SCRIPT_PATH_INSTALL}/zstd.sh"
 "${SCRIPT_PATH_INSTALL}/bash.sh"
 "${SCRIPT_PATH_INSTALL}/coreutils.sh"
