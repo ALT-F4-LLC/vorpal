@@ -5,7 +5,7 @@ build {
     inline = [
       "sudo apt-get update",
       "sudo apt-get upgrade --yes",
-      "sudo apt-get install --yes curl open-vm-tools",
+      "sudo apt-get install --yes open-vm-tools",
     ]
   }
 

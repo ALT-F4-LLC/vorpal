@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::io::BufReader;
 use tokio::process::{ChildStderr, ChildStdout, Command};
 use tokio_process_stream::{ChildStream, ProcessLineStream};
@@ -8,8 +8,8 @@ use tokio_stream::wrappers::LinesStream;
 pub async fn build(
     bin_paths: Vec<String>,
     env_var: HashMap<String, String>,
-    sandbox_package_dir_path: &PathBuf,
-    sandbox_script_path: &PathBuf,
+    // sandbox_package_dir_path: &PathBuf,
+    sandbox_script_path: &Path,
     sandbox_source_dir_path: &PathBuf,
 ) -> Result<
     ChildStream<LinesStream<BufReader<ChildStdout>>, LinesStream<BufReader<ChildStderr>>>,
@@ -31,9 +31,6 @@ pub async fn build(
         "--ro-bind",
         sandbox_script_path.to_str().unwrap(),
         sandbox_script_path.to_str().unwrap(),
-        "--ro-bind-try",
-        "/nix/store",
-        "/nix/store",
         "--unshare-all",
         sandbox_script_path.to_str().unwrap(),
     ];
@@ -44,7 +41,7 @@ pub async fn build(
 
     sandbox_command.args(build_command_args);
 
-    sandbox_command.current_dir(&sandbox_source_dir_path);
+    sandbox_command.current_dir(sandbox_source_dir_path);
 
     for (key, value) in env_var.clone().into_iter() {
         sandbox_command.env(key, value);

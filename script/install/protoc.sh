@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 3 ]; then
-    echo "Usage: $0 <sandbox_path> <arch> <os>"
-    exit 1
-fi
-
-ARCH="$2"
+ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
+OS="$(uname | tr '[:upper:]' '[:lower:]')"
 PROTOC_SYSTEM=""
 PROTOC_VERSION="28.0"
-OS="$3"
-SANDBOX_PATH="$1"
+
+if [[ -f "${VORPAL_PATH_ENV_BIN}/protoc" ]]; then
+    "${VORPAL_PATH_ENV_BIN}/protoc" --version
+    exit 0
+fi
 
 if [[ "${OS}" == "darwin" ]]; then
     PROTOC_SYSTEM="osx"
@@ -39,7 +38,7 @@ curl -L \
     "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" \
     -o "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"
 
-unzip "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" -d "${SANDBOX_PATH}"
+unzip "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" -d "${VORPAL_PATH_ENV}"
 
 rm -rf "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}"
 

@@ -8,12 +8,25 @@ Vagrant.configure("2") do |config|
     vmware.vmx["numvcpus"] = "4"
   end
 
-  config.vm.provision "file",
-    destination: "$HOME/script",
-    source: "./script"
+  config.vm.provision "shell", keep_color: true, privileged: false, inline: <<-SHELL
+    set -euo pipefail
 
-  # config.vm.provision "shell",
-  #   keep_color: true,
-  #   path: "./script/setup/sandbox.sh",
-  #   privileged: false
+    mkdir -p ./vorpal
+
+    rsync -aPW \
+      --exclude='.git' \
+      --exclude='.vagrant' \
+      --exclude='.vorpal/env' \
+      --exclude='target' \
+      /vagrant/. ./vorpal/.
+
+    cd ./vorpal
+
+    ./script/setup/debian.sh "dev"
+    ./script/setup/dev.sh
+
+    PATH=$PWD/.vorpal/env/bin:$HOME/.cargo/bin:$PATH
+
+    make dist
+  SHELL
 end

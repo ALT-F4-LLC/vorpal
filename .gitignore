@@ -1,7 +1,6 @@
 .vagrant
+.vorpal/env
 dist
 packer_*_*_*.box
-sandbox
-sandbox-*
 target
 vorpal-*-*

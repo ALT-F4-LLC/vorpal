@@ -311,7 +311,7 @@ pub async fn run(
             linux::build(
                 bin_paths,
                 env_var.clone(),
-                &sandbox_package_dir_path,
+                // &sandbox_package_dir_path,
                 &sandbox_script_file_path,
                 &sandbox_source_dir_path,
             )

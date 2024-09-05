@@ -1,7 +1,6 @@
 use console::style;
 use std::collections::HashMap;
 use std::path::Path;
-use std::path::PathBuf;
 use vorpal_schema::api::package::PackageOutput;
 use vorpal_schema::Package;
 use vorpal_store::paths::{get_package_archive_path, get_package_path};
@@ -32,7 +31,7 @@ pub fn bold(text: &str) -> String {
     style(text).bold().to_string()
 }
 
-pub fn print_build_order(build_order: &Vec<String>) {
+pub fn print_build_order(build_order: &[String]) {
     println!(
         "{} {} {}",
         connector_start(),
@@ -117,7 +116,7 @@ fn print_package(
     }
 }
 
-pub fn print_packages(build_map: &HashMap<String, Package>, build_order: &Vec<String>) {
+pub fn print_packages(build_map: &HashMap<String, Package>, build_order: &[String]) {
     println!(
         "{} {} ({} total)",
         style(CONNECTOR_START).dim(),
@@ -128,7 +127,7 @@ pub fn print_packages(build_map: &HashMap<String, Package>, build_order: &Vec<St
     let mut cached_count = 0;
 
     for package_name in build_order.iter() {
-        print_package(&build_map, &mut cached_count, package_name, "");
+        print_package(build_map, &mut cached_count, package_name, "");
     }
 
     println!(
@@ -178,7 +177,7 @@ pub fn print_system(system: &str) {
     );
 }
 
-pub fn print_packages_list(package_name: &str, packages: &Vec<String>) {
+pub fn print_packages_list(package_name: &str, packages: &[String]) {
     println!(
         "{} Packages: {}",
         format_package_name(package_name),
@@ -195,7 +194,7 @@ pub fn print_package_hash(package_name: &str, package_hash: &str) {
     );
 }
 
-pub fn print_package_archive(package_name: &str, package_archive: &PathBuf) {
+pub fn print_package_archive(package_name: &str, package_archive: &Path) {
     println!(
         "{} Archive: {}",
         format_package_name(package_name),
