@@ -5,8 +5,8 @@ set -euo pipefail
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 SANDBOX_HASH=$(cat "${PWD}/script/sandbox.sha256sum")
-SANDBOX_PATH="${VORPAL_PATH}/store/sandbox-${SANDBOX_HASH}"
-SANDBOX_PATH_PACKAGE="${SANDBOX_PATH}.package"
+SANDBOX_STORE_PATH="${VORPAL_PATH}/store/vorpal-sandbox-${SANDBOX_HASH}"
+SANDBOX_STORE_PATH_PACKAGE="${SANDBOX_STORE_PATH}.package"
 
 directories=(
     "${VORPAL_PATH}/sandbox"
@@ -57,7 +57,7 @@ if [[ "${SANDBOX_HASH}" != "${source_hash}" ]]; then
     exit 1
 fi
 
-if [[ -d "${SANDBOX_PATH_PACKAGE}" ]]; then
+if [[ -d "${SANDBOX_STORE_PATH_PACKAGE}" ]]; then
     echo "sandbox already exists"
     exit 1
 fi
@@ -69,8 +69,10 @@ for package in "${packages_installed[@]}"; do
     find "${PACKAGE_PATH}" -type f ! -path "${PACKAGE_PATH}/share/*" | while read -r file; do
         relative_path="${file#"${PACKAGE_PATH}/"}"
 
-        mkdir -p "${SANDBOX_PATH_PACKAGE}/$(dirname "${relative_path}")"
+        mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}/$(dirname "${relative_path}")"
 
-        ln -s "${file}" "${SANDBOX_PATH_PACKAGE}/${relative_path}"
+        ln -s "${file}" "${SANDBOX_STORE_PATH_PACKAGE}/${relative_path}"
     done
 done
+
+tar -cvf - -C "${SANDBOX_STORE_PATH_PACKAGE}" . | zstd -o "${SANDBOX_STORE_PATH_PACKAGE}.tar.zst"
