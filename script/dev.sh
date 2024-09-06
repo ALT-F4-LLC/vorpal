@@ -17,3 +17,5 @@ for script in "${scripts[@]}";
 do
   "${SCRIPT_PATH}/${script}"
 done
+
+"$@"

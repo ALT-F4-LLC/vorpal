@@ -3,6 +3,7 @@ let { RustPackage, .. } = import "@vorpal/language.ncl" in
 
 fun system =>
   {
+    lockfile = import "vorpal.lock.ncl",
     packages = {
       default =
         RustPackage

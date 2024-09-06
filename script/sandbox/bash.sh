@@ -54,7 +54,7 @@ cp -r "${BASH_STORE_PATH_SOURCE}/." "${BASH_STORE_PATH_SANDBOX}"
 pushd "${BASH_STORE_PATH_SANDBOX}"
 
 ./configure --prefix="${BASH_STORE_PATH_PACKAGE}"
-make -j"$(sysctl -n hw.ncpu)"
+make
 make install
 
 popd

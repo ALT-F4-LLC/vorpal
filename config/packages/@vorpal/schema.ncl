@@ -1,4 +1,17 @@
 {
+  Config = {
+    lockfile | Lock,
+    packages | { _ : Package } | default = {},
+  },
+  LockSandbox = {
+    aarch64-linux | String,
+    aarch64-macos | String,
+    x86_64-linux | String,
+    x86_64-macos | String,
+  },
+  Lock = {
+    sandbox | LockSandbox,
+  },
   Package = {
     environment | { _ : String } | default = {},
     name | String,
@@ -9,8 +22,5 @@
     source_hash | String | optional,
     source_includes | Array String | default = [],
     systems | Array String | default = [],
-  },
-  Config = {
-    packages | { _ : Package } | default = {},
   },
 }
