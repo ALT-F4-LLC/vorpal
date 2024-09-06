@@ -10,7 +10,6 @@ use tokio_process_stream::ChildStream;
 use tokio_process_stream::ProcessLineStream;
 use tokio_stream::wrappers::LinesStream;
 use tonic::Status;
-use tracing::info;
 use vorpal_store::temps::create_temp_file;
 
 mod profile;
