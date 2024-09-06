@@ -1,4 +1,4 @@
-let build_package = import "@vorpal/package.ncl" in
+let { Package, .. } = import "@vorpal/contract.ncl" in
 
 let build_rust_std = import "@vorpal/package/rust-std.ncl" in
 
@@ -27,18 +27,15 @@ fun target =>
 
   let version = "1.78.0" in
 
-  build_package
-    {
-      name = "rustc",
-      packages = [rust_std],
-      script = m%"
+  {
+    name = "rustc",
+    packages = [rust_std],
+    script = m%"
         cp -pr rustc-%{version}-%{system}/rustc/* $output/.
         cat $rust_std/manifest.in >> $output/manifest.in
         cp -pr $rust_std/lib $output
       "%,
-      source = "https://static.rust-lang.org/dist/2024-05-02/cargo-%{version}-%{system}.tar.gz",
-      source_excludes = [],
-      source_hash = hash,
-      source_includes = [],
-      systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
-    }
+    source = "https://static.rust-lang.org/dist/2024-05-02/rustc-%{version}-%{system}.tar.gz",
+    source_hash = hash,
+    systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
+  } | Package

@@ -55,7 +55,7 @@ pub fn format_package_name(package_name: &str) -> String {
         "{}{} {} ➜",
         connector_start(),
         connector_half(),
-        style(package_name).bold(),
+        style(package_name).bold().on_color256(238),
     )
 }
 

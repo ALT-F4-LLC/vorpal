@@ -5,24 +5,10 @@ let build_package = import "@vorpal/language/rust.ncl" in
 let default_package = fun system =>
   build_package
     {
-      cargo_hash = "23ee1efa1633ed7e94976dd46469535bc6bdd9749efa9fb10b0c7cf043f77715",
+      cargo_hash = "b5db8c4422119dd7b91e438f64cfcfaf9fa5ee8f020cbbbe4ed4ed868201c3f1",
       name = "vorpal",
       source = ".",
-      source_excludes = [
-        ".dockerignore",
-        ".envrc",
-        ".github",
-        "Dockerfile",
-        "Dockerfile.sandbox",
-        "LICENSE",
-        "README.md",
-        "deps",
-        "dev.sh",
-        "justfile",
-        "nickel",
-        "script",
-        "vorpal.png",
-      ],
+      source_excludes = [".env", ".packer", ".vagrant"],
       systems = ["aarch64-linux", "x86_64-linux"],
       target = system,
     }

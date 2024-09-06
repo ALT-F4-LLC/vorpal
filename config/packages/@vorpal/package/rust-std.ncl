@@ -1,4 +1,4 @@
-let build_package = import "@vorpal/package.ncl" in
+let { Package, .. } = import "@vorpal/contract.ncl" in
 
 fun target =>
   let hash =
@@ -23,14 +23,10 @@ fun target =>
 
   let version = "1.78.0" in
 
-  build_package
-    {
-      name = "rust-std",
-      packages = [],
-      script = "cp -pr rust-std-%{version}-%{system}/rust-std-%{system}/* $output/.",
-      source = "https://static.rust-lang.org/dist/2024-05-02/rust-std-%{version}-%{system}.tar.gz",
-      source_excludes = [],
-      source_hash = hash,
-      source_includes = [],
-      systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
-    }
+  {
+    name = "rust-std",
+    script = "cp -pr rust-std-%{version}-%{system}/rust-std-%{system}/* $output/.",
+    source = "https://static.rust-lang.org/dist/2024-05-02/rust-std-%{version}-%{system}.tar.gz",
+    source_hash = hash,
+    systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
+  } | Package

@@ -6,7 +6,11 @@
     environment | { _ : String } | default = {},
     name | String,
     packages | Array Package | default = [],
-    script | String,
+    script | String | default
+      = m%"
+      make check
+      make install PREFIX=$output
+    "%,
     source | String | optional,
     source_excludes | Array String | default = [],
     source_hash | String | optional,

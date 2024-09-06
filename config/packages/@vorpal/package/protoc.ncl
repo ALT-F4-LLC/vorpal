@@ -1,4 +1,4 @@
-let build_package = import "@vorpal/package.ncl" in
+let { Package, .. } = import "@vorpal/contract.ncl" in
 
 fun target =>
   let hash =
@@ -23,17 +23,13 @@ fun target =>
 
   let version = "25.4" in
 
-  build_package
-    {
-      name = "protoc",
-      packages = [],
-      script = m%"
+  {
+    name = "protoc",
+    script = m%"
         cp -pr ./bin ./include $output/.
         chmod +x $output/bin/protoc
       "%,
-      source = "https://github.com/protocolbuffers/protobuf/releases/download/v%{version}/protoc-%{version}-%{system}.zip",
-      source_excludes = [],
-      source_hash = hash,
-      source_includes = [],
-      systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
-    }
+    source = "https://github.com/protocolbuffers/protobuf/releases/download/v%{version}/protoc-%{version}-%{system}.zip",
+    source_hash = hash,
+    systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
+  } | Package

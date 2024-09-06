@@ -10,6 +10,7 @@ use tokio_process_stream::ChildStream;
 use tokio_process_stream::ProcessLineStream;
 use tokio_stream::wrappers::LinesStream;
 use tonic::Status;
+use tracing::info;
 use vorpal_store::temps::create_temp_file;
 
 mod profile;
@@ -19,10 +20,13 @@ pub async fn build(
     env_var: HashMap<String, String>,
     sandbox_script_path: &Path,
     sandbox_source_dir_path: &PathBuf,
+    sandbox_vorpal_path: &str,
 ) -> Result<
     ChildStream<LinesStream<BufReader<ChildStdout>>, LinesStream<BufReader<ChildStderr>>>,
     anyhow::Error,
 > {
+    info!("Building package");
+
     let sandbox_profile_path = create_temp_file("sb").await?;
 
     let mut tera = Tera::default();
@@ -56,9 +60,16 @@ pub async fn build(
         sandbox_command.env(key, value);
     }
 
+    let path_default = format!(
+        "{}:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin",
+        sandbox_vorpal_path
+    );
+
+    sandbox_command.env("PATH", path_default.as_str());
+
     if !bin_paths.is_empty() {
-        let path_default = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin";
         let path = format!("{}:{}", bin_paths.join(":"), path_default);
+
         sandbox_command.env("PATH", path);
     }
 

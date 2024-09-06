@@ -10,6 +10,7 @@ use std::env::consts::{ARCH, OS};
 use std::fs::Permissions;
 use std::iter::Iterator;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use tokio::fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write};
 use tokio::sync::mpsc::Sender;
 use tonic::{Request, Status, Streaming};
@@ -26,7 +27,8 @@ use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
         copy_files, get_file_paths, get_package_archive_path, get_package_path,
-        get_public_key_path, get_source_archive_path, get_source_path, replace_path_in_files,
+        get_public_key_path, get_source_archive_path, get_source_path, get_store_dir_path,
+        replace_path_in_files,
     },
     temps::{create_temp_dir, create_temp_file},
 };
@@ -253,6 +255,22 @@ pub async fn run(
         send_error(tx, "build script is empty".to_string()).await?
     }
 
+    let sandbox_vorpal_hash = "819232062aecd85c775f498b2cdb7f4bf0b8347b0a1144658a0d30c2cfebb744";
+
+    let sandbox_vorpal_dir = format!(
+        "{}/vorpal-sandbox-{}.package",
+        get_store_dir_path().display(),
+        sandbox_vorpal_hash
+    );
+
+    let sandbox_vorpal_dir_path = Path::new(&sandbox_vorpal_dir);
+
+    if !sandbox_vorpal_dir_path.exists() {
+        send_error(tx, "sandbox package missing".to_string()).await?
+    }
+
+    let sandbox_vorpal_bash_path = format!("#!{}/bin/bash", sandbox_vorpal_dir);
+
     let sandbox_script = script
         .trim()
         .split('\n')
@@ -260,7 +278,7 @@ pub async fn run(
         .collect::<Vec<&str>>()
         .join("\n");
     let sandbox_script_commands = [
-        "#!/bin/sh",
+        sandbox_vorpal_bash_path.as_str(),
         "set -euxo pipefail",
         "echo \"PATH: $PATH\"",
         "echo \"Starting build script\"",
@@ -304,6 +322,7 @@ pub async fn run(
                 env_var.clone(),
                 &sandbox_script_file_path,
                 &sandbox_source_dir_path,
+                &sandbox_vorpal_dir,
             )
             .await?
         }
