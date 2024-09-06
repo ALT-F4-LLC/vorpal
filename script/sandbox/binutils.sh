@@ -14,7 +14,7 @@ BINUTILS_STORE_PATH_SOURCE="${BINUTILS_STORE_PATH}.source"
 BINUTILS_VERSION="2.43.1"
 
 if [ -d "${BINUTILS_STORE_PATH_PACKAGE}" ]; then
-    echo "binutils already exists"
+    echo "binutils-${BINUTILS_SOURCE_HASH}"
     exit 0
 fi
 

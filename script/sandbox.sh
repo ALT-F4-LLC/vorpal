@@ -9,6 +9,7 @@ SANDBOX_STORE_PATH="${VORPAL_PATH}/store/vorpal-sandbox-${SANDBOX_HASH}"
 SANDBOX_STORE_PATH_PACKAGE="${SANDBOX_STORE_PATH}.package"
 
 directories=(
+    "${VORPAL_PATH}"
     "${VORPAL_PATH}/sandbox"
     "${VORPAL_PATH}/store"
 )
@@ -29,10 +30,11 @@ packages_hashes=()
 packages_installed=()
 
 for dir in "${directories[@]}"; do
-    sudo mkdir -p "${dir}"
+    if [[ ! -d "${dir}" ]]; then
+        sudo mkdir -p "${dir}"
+        sudo chown -R "$(id -u):$(id -g)" "${dir}"
+    fi
 done
-
-sudo chown -R "$(id -u):$(id -g)" "${VORPAL_PATH}"
 
 if [[ "${OS}" == "linux" ]]; then
     for package in "${linux_packages[@]}"; do
@@ -58,7 +60,7 @@ if [[ "${SANDBOX_HASH}" != "${source_hash}" ]]; then
 fi
 
 if [[ -d "${SANDBOX_STORE_PATH_PACKAGE}" ]]; then
-    echo "sandbox already exists"
+    echo "vorpal-sandbox-${SANDBOX_HASH}"
     exit 1
 fi
 

@@ -28,7 +28,7 @@ compile_source() {
 }
 
 if [ -d "${ZSTD_STORE_PATH_PACKAGE}" ]; then
-    echo "zstd already exists"
+    echo "zstd-${ZSTD_SOURCE_HASH}"
     exit 0
 fi
 

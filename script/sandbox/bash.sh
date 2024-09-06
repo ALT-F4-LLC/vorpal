@@ -14,7 +14,7 @@ BASH_STORE_PATH_SOURCE="${BASH_STORE_PATH}.source"
 BASH_VERSION="5.2"
 
 if [ -d "${BASH_STORE_PATH_PACKAGE}" ]; then
-    echo "bash already exists"
+    echo "bash-${BASH_SOURCE_HASH}"
     exit 0
 fi
 

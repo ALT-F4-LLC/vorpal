@@ -14,7 +14,7 @@ COREUTILS_STORE_PATH_SOURCE="${COREUTILS_STORE_PATH}.source"
 COREUTILS_VERSION="9.5"
 
 if [ -d "${COREUTILS_STORE_PATH_PACKAGE}" ]; then
-    echo "coreutils already exists"
+    echo "coreutils-${COREUTILS_SOURCE_HASH}"
     exit 0
 fi
 
