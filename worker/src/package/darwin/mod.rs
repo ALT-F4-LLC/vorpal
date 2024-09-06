@@ -25,8 +25,6 @@ pub async fn build(
     ChildStream<LinesStream<BufReader<ChildStdout>>, LinesStream<BufReader<ChildStderr>>>,
     anyhow::Error,
 > {
-    info!("Building package");
-
     let sandbox_profile_path = create_temp_file("sb").await?;
 
     let mut tera = Tera::default();
