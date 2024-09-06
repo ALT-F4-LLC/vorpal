@@ -1,5 +1,3 @@
-let { Lock, .. } = import "@vorpal/schema.ncl" in
-
 {
   sandbox = {
     aarch64-linux = "",
@@ -7,4 +5,4 @@ let { Lock, .. } = import "@vorpal/schema.ncl" in
     x86_64-linux = "",
     x86_64-macos = "",
   }
-} | Lock
+}

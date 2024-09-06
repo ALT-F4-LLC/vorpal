@@ -13,6 +13,26 @@ pub mod api {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LockfileSandbox {
+    #[serde(rename = "aarch64-linux")]
+    pub aarch64_linux: String,
+
+    #[serde(rename = "aarch64-macos")]
+    pub aarch64_macos: String,
+
+    #[serde(rename = "x86_64-linux")]
+    pub x8664_linux: String,
+
+    #[serde(rename = "x86_64-macos")]
+    pub x8664_macos: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Lockfile {
+    pub sandbox: LockfileSandbox,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Package {
     pub environment: HashMap<String, String>,
     pub name: String,
