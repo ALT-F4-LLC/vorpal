@@ -3,6 +3,7 @@ set -euo pipefail
 
 # ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+PATH="${PWD}/.env/bin:${PATH}"
 VORPAL_PATH="/var/lib/vorpal"
 SANDBOX_HASH=$(cat "${PWD}/script/sandbox.sha256sum")
 SANDBOX_STORE_PATH="${VORPAL_PATH}/store/vorpal-sandbox-${SANDBOX_HASH}"
@@ -61,7 +62,7 @@ fi
 
 if [[ -d "${SANDBOX_STORE_PATH_PACKAGE}" ]]; then
     echo "vorpal-sandbox-${SANDBOX_HASH}"
-    exit 1
+    exit 0
 fi
 
 for package in "${packages_installed[@]}"; do

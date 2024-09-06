@@ -20,4 +20,6 @@ done
 
 "${SCRIPT_PATH}/sandbox.sh"
 
+export PATH="${ENV_PATH}/bin:${HOME}/.cargo/bin:$PATH"
+
 "$@"

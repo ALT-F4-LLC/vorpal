@@ -23,7 +23,6 @@ dist: test
 	mkdir -p $(DIST_DIR)
 	cp $(TARGET) $(DIST_DIR)/vorpal
 	tar -czvf "vorpal-$(ARCH)-$(OS).tar.gz" -C $(DIST_DIR) vorpal
-	rm -rf $(DIST_DIR)
 
 format:
 	cargo fmt --check
