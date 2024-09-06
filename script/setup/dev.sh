@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export VORPAL_PATH="${PWD}/.vorpal"
-export VORPAL_PATH_ENV="${VORPAL_PATH}/env"
-export VORPAL_PATH_ENV_BIN="${VORPAL_PATH_ENV}/bin"
+export ENV_PATH="${PWD}/.env"
 readonly SCRIPT_PATH="${PWD}/script/install"
 
 scripts=(
@@ -12,7 +10,7 @@ scripts=(
   "protoc.sh"
 )
 
-mkdir -p "${VORPAL_PATH_ENV_BIN}"
+mkdir -p "${ENV_PATH}/bin"
 
 for script in "${scripts[@]}";
 do

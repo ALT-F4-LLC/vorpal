@@ -6,8 +6,8 @@ OS="$(uname | tr '[:upper:]' '[:lower:]')"
 PROTOC_SYSTEM=""
 PROTOC_VERSION="28.0"
 
-if [[ -f "${VORPAL_PATH_ENV_BIN}/protoc" ]]; then
-    "${VORPAL_PATH_ENV_BIN}/protoc" --version
+if [[ -f "${ENV_PATH}/bin/protoc" ]]; then
+    "${ENV_PATH}/bin/protoc" --version
     exit 0
 fi
 
@@ -38,7 +38,7 @@ curl -L \
     "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" \
     -o "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"
 
-unzip "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" -d "${VORPAL_PATH_ENV}"
+unzip "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" -d "${ENV_PATH}"
 
 rm -rf "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}"
 

@@ -2,12 +2,12 @@
 set -euo pipefail
 
 ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
-OS="$(uname | tr '[:upper:]' '[:lower:]')"
 NICKEL_ARCH="$ARCH"
 NICKEL_VERSION="1.7.0"
+OS="$(uname | tr '[:upper:]' '[:lower:]')"
 
-if [[ -f "${VORPAL_PATH_ENV_BIN}/nickel" ]]; then
-    "${VORPAL_PATH_ENV_BIN}/nickel" --version
+if [[ -f "${ENV_PATH}/bin/nickel" ]]; then
+    "${ENV_PATH}/bin/nickel" --version
     exit 0
 fi
 
@@ -18,13 +18,13 @@ fi
 if [ "$OS" == "darwin" ]; then
     PATH="$HOME/.cargo/bin:$PATH"
 
-    cargo install --root "${VORPAL_PATH_ENV}" nickel-lang-cli
+    cargo install --root "${ENV_PATH}" nickel-lang-cli
 fi
 
 if [ "$OS" == "linux" ]; then
     curl -L \
         "https://github.com/tweag/nickel/releases/download/${NICKEL_VERSION}/nickel-${NICKEL_ARCH}-linux" \
-        -o "${VORPAL_PATH_ENV_BIN}/nickel"
+        -o "${ENV_PATH}/bin/nickel"
 
-    chmod +x "${VORPAL_PATH_ENV_BIN}/nickel"
+    chmod +x "${ENV_PATH}/bin/nickel"
 fi

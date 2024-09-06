@@ -1,5 +1,5 @@
+.env
 .vagrant
-.vorpal/env
 dist
 packer_*_*_*.box
 target
