@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BINUTILS_SOURCE_HASH="$(cat "${SCRIPT_PATH_INSTALL}/binutils.sha256sum")"
-BINUTILS_STORE_PATH="${VORPAL_PATH_STORE}/binutils-${BINUTILS_SOURCE_HASH}"
+# Environment variables
+PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
+VORPAL_PATH="/var/lib/vorpal"
+
+# Build variables
+BINUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/binutils.sha256sum")"
+BINUTILS_STORE_PATH="${VORPAL_PATH}/store/binutils-${BINUTILS_SOURCE_HASH}"
 BINUTILS_STORE_PATH_PACKAGE="${BINUTILS_STORE_PATH}.package"
-BINUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH_SANDBOX}/binutils-${BINUTILS_SOURCE_HASH}"
+BINUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/binutils-${BINUTILS_SOURCE_HASH}"
 BINUTILS_STORE_PATH_SOURCE="${BINUTILS_STORE_PATH}.source"
 BINUTILS_VERSION="2.43.1"
 
@@ -22,7 +27,7 @@ if [ ! -d "${BINUTILS_STORE_PATH_SOURCE}" ]; then
     ## TODO: move hash as arg to script
 
     echo "Calculating source hash..."
-    SOURCE_HASH=$("${SCRIPT_PATH}/hash.sh" "/tmp/binutils-${BINUTILS_VERSION}")
+    SOURCE_HASH=$(hash_path "/tmp/binutils-${BINUTILS_VERSION}")
     echo "Calculated source hash: ${SOURCE_HASH}"
 
     if [ "$SOURCE_HASH" != "$BINUTILS_SOURCE_HASH" ]; then
@@ -41,14 +46,17 @@ if [ ! -d "${BINUTILS_STORE_PATH_SOURCE}" ]; then
 fi
 
 mkdir -p "${BINUTILS_STORE_PATH_SANDBOX}"
+
 cp -r "${BINUTILS_STORE_PATH_SOURCE}/." "${BINUTILS_STORE_PATH_SANDBOX}"
 
 pushd "${BINUTILS_STORE_PATH_SANDBOX}"
 
 ./configure --prefix="${BINUTILS_STORE_PATH_PACKAGE}"
-make -j"$(nproc)"
+make -j"$(sysctl -n hw.ncpu)"
 make install
 
 popd
+
+tar -cvf - -C "${BINUTILS_STORE_PATH_PACKAGE}" . | zstd -o "${BINUTILS_STORE_PATH_PACKAGE}.tar.zst"
 
 rm -rf "${BINUTILS_STORE_PATH_SANDBOX}"

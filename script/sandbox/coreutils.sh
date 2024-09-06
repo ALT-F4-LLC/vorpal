@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COREUTILS_SOURCE_HASH="$(cat "${SCRIPT_PATH_INSTALL}/coreutils.sha256sum")"
-COREUTILS_STORE_PATH="${VORPAL_PATH_STORE}/coreutils-${COREUTILS_SOURCE_HASH}"
+# Environment variables
+PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
+VORPAL_PATH="/var/lib/vorpal"
+
+# Build variables
+COREUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/coreutils.sha256sum")"
+COREUTILS_STORE_PATH="${VORPAL_PATH}/store/coreutils-${COREUTILS_SOURCE_HASH}"
 COREUTILS_STORE_PATH_PACKAGE="${COREUTILS_STORE_PATH}.package"
-COREUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH_SANDBOX}/coreutils-${COREUTILS_SOURCE_HASH}"
+COREUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/coreutils-${COREUTILS_SOURCE_HASH}"
 COREUTILS_STORE_PATH_SOURCE="${COREUTILS_STORE_PATH}.source"
 COREUTILS_VERSION="9.5"
 
@@ -19,10 +24,10 @@ if [ ! -d "${COREUTILS_STORE_PATH_SOURCE}" ]; then
         -o "/tmp/coreutils-${COREUTILS_VERSION}.tar.gz"
     tar -xzf "/tmp/coreutils-${COREUTILS_VERSION}.tar.gz" -C "/tmp"
 
-    ## TODO: move hash as arg to script
-
     echo "Calculating source hash..."
-    SOURCE_HASH=$("${SCRIPT_PATH}/hash.sh" "/tmp/coreutils-${COREUTILS_VERSION}")
+
+    SOURCE_HASH=$(hash_path "/tmp/coreutils-${COREUTILS_VERSION}")
+
     echo "Calculated source hash: ${SOURCE_HASH}"
 
     if [ "$SOURCE_HASH" != "$COREUTILS_SOURCE_HASH" ]; then
@@ -33,7 +38,9 @@ if [ ! -d "${COREUTILS_STORE_PATH_SOURCE}" ]; then
     ## TODO: move to separate script
 
     tar -cvf - -C "/tmp/coreutils-${COREUTILS_VERSION}" . | zstd -o "${COREUTILS_STORE_PATH_SOURCE}.tar.zst"
+
     mkdir -p "${COREUTILS_STORE_PATH_SOURCE}"
+
     zstd --decompress --stdout "${COREUTILS_STORE_PATH_SOURCE}.tar.zst" | tar -xvf - -C "${COREUTILS_STORE_PATH_SOURCE}"
 
     rm -rf "/tmp/coreutils-${COREUTILS_VERSION}"
@@ -41,14 +48,17 @@ if [ ! -d "${COREUTILS_STORE_PATH_SOURCE}" ]; then
 fi
 
 mkdir -p "${COREUTILS_STORE_PATH_SANDBOX}"
+
 cp -r "${COREUTILS_STORE_PATH_SOURCE}/." "${COREUTILS_STORE_PATH_SANDBOX}"
 
 pushd "${COREUTILS_STORE_PATH_SANDBOX}"
 
 ./configure --prefix="${COREUTILS_STORE_PATH_PACKAGE}"
-make -j"$(nproc)"
+make
 make install
 
 popd
+
+tar -cvf - -C "${COREUTILS_STORE_PATH_PACKAGE}" . | zstd -o "${COREUTILS_STORE_PATH_PACKAGE}.tar.zst"
 
 rm -rf "${COREUTILS_STORE_PATH_SANDBOX}"

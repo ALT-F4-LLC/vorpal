@@ -2,12 +2,13 @@
 set -euo pipefail
 
 export ENV_PATH="${PWD}/.env"
-readonly SCRIPT_PATH="${PWD}/script/install"
+readonly SCRIPT_PATH="${PWD}/script/dev"
 
 scripts=(
   "rustup.sh"
   "nickel.sh"
   "protoc.sh"
+  "zstd.sh"
 )
 
 mkdir -p "${ENV_PATH}/bin"

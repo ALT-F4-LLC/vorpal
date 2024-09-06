@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ -z "$1" ] || [ -z "$2" ]; then
+  echo "Usage: $0 <input-path> <output-path>"
+  exit 1
+fi
+
+INPUT_PATH="$1"
+
+tar -cvf - -C "${INPUT_PATH}" . | zstd -o "${OUTPUT_PATH}"
+
+mkdir -p "${BASH_STORE_PATH_SOURCE}"
+
+zstd --decompress --stdout "${BASH_STORE_PATH_SOURCE}.tar.zst" | tar -xvf - -C "${BASH_STORE_PATH_SOURCE}"
+
+rm -rf "/tmp/bash-${BASH_VERSION}"
+rm -rf "/tmp/bash-${BASH_VERSION}.tar.gz"

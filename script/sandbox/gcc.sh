@@ -42,6 +42,7 @@ if [ ! -d "${GCC_STORE_PATH_SOURCE}" ]; then
 fi
 
 mkdir -p "${GCC_STORE_PATH_SANDBOX}"
+
 cp -r "${GCC_STORE_PATH_SOURCE}/." "${GCC_STORE_PATH_SANDBOX}"
 
 pushd "${GCC_STORE_PATH_SANDBOX}"
@@ -55,10 +56,11 @@ popd
 pushd "${GCC_STORE_PATH_SANDBOX}/build"
 
 ../configure --enable-languages="c,c++" --prefix="${GCC_STORE_PATH_PACKAGE}"
-
 make -j"$(nproc)"
 make install
 
 popd
+
+tar -cvf - -C "${GCC_STORE_PATH_PACKAGE}" . | zstd -o "${GCC_STORE_PATH_PACKAGE}.tar.zst"
 
 rm -rf "${GCC_STORE_PATH_SANDBOX}"

@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASH_SOURCE_HASH="$(cat "${SCRIPT_PATH_INSTALL}/bash.sha256sum")"
-BASH_STORE_PATH="${VORPAL_PATH_STORE}/bash-${BASH_SOURCE_HASH}"
+# Environment variables
+PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
+VORPAL_PATH="/var/lib/vorpal"
+
+# Build variables
+BASH_SOURCE_HASH="$(cat "${PWD}/script/sandbox/bash.sha256sum")"
+BASH_STORE_PATH="${VORPAL_PATH}/store/bash-${BASH_SOURCE_HASH}"
 BASH_STORE_PATH_PACKAGE="${BASH_STORE_PATH}.package"
-BASH_STORE_PATH_SANDBOX="${VORPAL_PATH_SANDBOX}/bash-${BASH_SOURCE_HASH}"
+BASH_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/bash-${BASH_SOURCE_HASH}"
 BASH_STORE_PATH_SOURCE="${BASH_STORE_PATH}.source"
 BASH_VERSION="5.2"
 
@@ -19,10 +24,10 @@ if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then
         -o "/tmp/bash-${BASH_VERSION}.tar.gz"
     tar -xvzf "/tmp/bash-${BASH_VERSION}.tar.gz" -C "/tmp"
 
-    ## TODO: move hash as arg to script
-
     echo "Calculating source hash..."
-    SOURCE_HASH=$("${SCRIPT_PATH}/hash.sh" "/tmp/bash-${BASH_VERSION}")
+
+    SOURCE_HASH=$(hash_path "/tmp/bash-${BASH_VERSION}")
+
     echo "Calculated source hash: ${SOURCE_HASH}"
 
     if [ "$SOURCE_HASH" != "$BASH_SOURCE_HASH" ]; then
@@ -33,7 +38,9 @@ if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then
     ## TODO: move to separate script
 
     tar -cvf - -C "/tmp/bash-${BASH_VERSION}" . | zstd -o "${BASH_STORE_PATH_SOURCE}.tar.zst"
+
     mkdir -p "${BASH_STORE_PATH_SOURCE}"
+
     zstd --decompress --stdout "${BASH_STORE_PATH_SOURCE}.tar.zst" | tar -xvf - -C "${BASH_STORE_PATH_SOURCE}"
 
     rm -rf "/tmp/bash-${BASH_VERSION}"
@@ -41,14 +48,17 @@ if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then
 fi
 
 mkdir -p "${BASH_STORE_PATH_SANDBOX}"
+
 cp -r "${BASH_STORE_PATH_SOURCE}/." "${BASH_STORE_PATH_SANDBOX}"
 
 pushd "${BASH_STORE_PATH_SANDBOX}"
 
 ./configure --prefix="${BASH_STORE_PATH_PACKAGE}"
-make -j"$(nproc)"
+make -j"$(sysctl -n hw.ncpu)"
 make install
 
 popd
+
+tar -cvf - -C "${BASH_STORE_PATH_PACKAGE}" . | zstd -o "${BASH_STORE_PATH_PACKAGE}.tar.zst"
 
 rm -rf "${BASH_STORE_PATH_SANDBOX}"

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Environment variables
+PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
+VORPAL_PATH="/var/lib/vorpal"
+
 # Build variables
-ZSTD_SOURCE_HASH="$(cat "${SCRIPT_PATH_INSTALL}/zstd.sha256sum")"
-ZSTD_STORE_PATH="${VORPAL_PATH_STORE}/zstd-${ZSTD_SOURCE_HASH}"
+ZSTD_SOURCE_HASH="$(cat "${PWD}/script/sandbox/zstd.sha256sum")"
+ZSTD_STORE_PATH="${VORPAL_PATH}/store/zstd-${ZSTD_SOURCE_HASH}"
 ZSTD_STORE_PATH_PACKAGE="${ZSTD_STORE_PATH}.package"
-ZSTD_STORE_PATH_SANDBOX="${VORPAL_PATH_SANDBOX}/zstd-${ZSTD_SOURCE_HASH}"
+ZSTD_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/zstd-${ZSTD_SOURCE_HASH}"
 ZSTD_STORE_PATH_SOURCE="${ZSTD_STORE_PATH}.source"
 ZSTD_VERSION="1.5.5"
 
@@ -16,7 +20,6 @@ compile_source() {
     pushd "${ZSTD_STORE_PATH_SANDBOX}"
 
     make
-
     make install PREFIX="${ZSTD_STORE_PATH_PACKAGE}"
 
     popd
@@ -38,7 +41,7 @@ if [ ! -d "${ZSTD_STORE_PATH_SOURCE}" ]; then
     ## TODO: move hash as arg to script
 
     echo "Calculating source hash..."
-    SOURCE_HASH=$("${SCRIPT_PATH}/hash.sh" "/tmp/zstd-${ZSTD_VERSION}")
+    SOURCE_HASH=$(hash_path "/tmp/zstd-${ZSTD_VERSION}")
     echo "Calculated source hash: $SOURCE_HASH"
 
     if [ "$SOURCE_HASH" != "$ZSTD_SOURCE_HASH" ]; then
@@ -68,3 +71,5 @@ mkdir -p "${ZSTD_STORE_PATH_SANDBOX}"
 cp -r "${ZSTD_STORE_PATH_SOURCE}/." "${ZSTD_STORE_PATH_SANDBOX}"
 
 compile_source
+
+tar -cvf - -C "${ZSTD_STORE_PATH_PACKAGE}" . | zstd -o "${ZSTD_STORE_PATH_PACKAGE}.tar.zst"
