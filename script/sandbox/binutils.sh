@@ -2,11 +2,12 @@
 set -euo pipefail
 
 # Environment variables
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
 VORPAL_PATH="/var/lib/vorpal"
 
 # Build variables
-BINUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/binutils.sha256sum")"
+BINUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/binutils")"
 BINUTILS_STORE_PATH="${VORPAL_PATH}/store/binutils-${BINUTILS_SOURCE_HASH}"
 BINUTILS_STORE_PATH_PACKAGE="${BINUTILS_STORE_PATH}.package"
 BINUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/binutils-${BINUTILS_SOURCE_HASH}"
@@ -52,7 +53,7 @@ cp -r "${BINUTILS_STORE_PATH_SOURCE}/." "${BINUTILS_STORE_PATH_SANDBOX}"
 pushd "${BINUTILS_STORE_PATH_SANDBOX}"
 
 ./configure --prefix="${BINUTILS_STORE_PATH_PACKAGE}"
-make -j"$(sysctl -n hw.ncpu)"
+make
 make install
 
 popd

@@ -1,5 +1,5 @@
 use crate::package::{darwin, linux};
-use futures_util::stream::StreamExt;
+use anyhow::Result;
 use rsa::{
     pss::{Signature, VerifyingKey},
     sha2::Sha256,
@@ -11,8 +11,13 @@ use std::fs::Permissions;
 use std::iter::Iterator;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::Stdio;
 use tokio::fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write};
+use tokio::io::AsyncBufReadExt;
+use tokio::io::BufReader;
 use tokio::sync::mpsc::Sender;
+use tokio_stream::wrappers::LinesStream;
+use tokio_stream::StreamExt;
 use tonic::{Request, Status, Streaming};
 use tracing::debug;
 use vorpal_notary::get_public_key;
@@ -33,24 +38,22 @@ use vorpal_store::{
     temps::{create_temp_dir, create_temp_file},
 };
 
-async fn send(
-    tx: &Sender<Result<BuildResponse, Status>>,
-    output: String,
-) -> Result<(), anyhow::Error> {
+async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Result<()> {
     debug!("{}", output);
 
-    tx.send(Ok(BuildResponse { output })).await?;
+    tx.send(Ok(BuildResponse { output }))
+        .await
+        .expect("failed to send");
 
     Ok(())
 }
 
-async fn send_error(
-    tx: &Sender<Result<BuildResponse, Status>>,
-    message: String,
-) -> Result<(), anyhow::Error> {
+async fn send_error(tx: &Sender<Result<BuildResponse, Status>>, message: String) -> Result<()> {
     debug!("{}", message);
 
-    tx.send(Err(Status::internal(message.clone()))).await?;
+    tx.send(Err(Status::internal(message.clone())))
+        .await
+        .expect("failed to send");
 
     anyhow::bail!(message);
 }
@@ -58,7 +61,7 @@ async fn send_error(
 pub async fn run(
     request: Request<Streaming<BuildRequest>>,
     tx: &Sender<Result<BuildResponse, Status>>,
-) -> Result<(), anyhow::Error> {
+) -> Result<()> {
     let mut environment = HashMap::new();
     let mut name = String::new();
     let mut packages = vec![];
@@ -73,7 +76,7 @@ pub async fn run(
     let mut request_stream = request.into_inner();
 
     while let Some(result) = request_stream.next().await {
-        let result = result?;
+        let result = result.expect("failed to get result");
 
         if let Some(data) = result.source_data {
             source_data_chunk += 1;
@@ -93,7 +96,7 @@ pub async fn run(
         packages = result.packages;
         // sandbox = result.sandbox;
         script = result.script;
-        target = PackageSystem::try_from(result.target)?;
+        target = PackageSystem::try_from(result.target).expect("failed to convert target");
     }
 
     if name.is_empty() {
@@ -129,7 +132,9 @@ pub async fn run(
     if package_archive_path.exists() {
         send(tx, package_archive_path.display().to_string()).await?;
 
-        create_dir_all(&package_path).await?;
+        create_dir_all(&package_path)
+            .await
+            .expect("failed to create package directory");
 
         if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
             send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
@@ -166,14 +171,19 @@ pub async fn run(
             Err(e) => return send_error(tx, format!("failed to decode signature: {:?}", e)).await,
         };
 
-        let signature = Signature::try_from(signature_decode.as_slice())?;
+        let signature =
+            Signature::try_from(signature_decode.as_slice()).expect("failed to convert signature");
 
-        verifying_key.verify(&source_data, &signature)?;
+        verifying_key
+            .verify(&source_data, &signature)
+            .expect("failed to verify signature");
 
         let source_archive_path = get_source_archive_path(&source_hash, &name);
 
         if !source_archive_path.exists() {
-            write(&source_archive_path, &source_data).await?;
+            write(&source_archive_path, &source_data)
+                .await
+                .expect("failed to write source archive");
 
             send(tx, source_archive_path.display().to_string()).await?;
         }
@@ -187,7 +197,9 @@ pub async fn run(
 
             send(tx, message).await?;
 
-            create_dir_all(&source_path).await?;
+            create_dir_all(&source_path)
+                .await
+                .expect("failed to create source directory");
 
             unpack_zstd(&source_path, &source_archive_path).await?;
 
@@ -288,9 +300,13 @@ pub async fn run(
     let sandbox_script_data = sandbox_script_commands.join("\n");
     let sandbox_script_file_path = create_temp_file("sh").await?;
 
-    write(&sandbox_script_file_path, sandbox_script_data).await?;
+    write(&sandbox_script_file_path, sandbox_script_data)
+        .await
+        .expect("failed to write script");
 
-    set_permissions(&sandbox_script_file_path, Permissions::from_mode(0o755)).await?;
+    set_permissions(&sandbox_script_file_path, Permissions::from_mode(0o755))
+        .await
+        .expect("failed to set permissions");
 
     // Create source directory
 
@@ -315,7 +331,7 @@ pub async fn run(
         sandbox_package_dir_path.display().to_string(),
     );
 
-    let mut sandbox_stream = match worker_system {
+    let mut sandbox_command = match worker_system {
         Aarch64Macos | X8664Macos => {
             darwin::build(
                 bin_paths.clone(),
@@ -339,8 +355,29 @@ pub async fn run(
         _ => anyhow::bail!("unsupported worker system"),
     };
 
-    while let Some(item) = sandbox_stream.next().await {
-        send(tx, item.to_string().trim().to_string()).await?
+    let mut child = sandbox_command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn sandbox command");
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let stdout = LinesStream::new(BufReader::new(stdout).lines());
+    let stderr = LinesStream::new(BufReader::new(stderr).lines());
+
+    let mut merged = StreamExt::merge(stdout, stderr);
+
+    while let Some(line) = merged.next().await {
+        let line = line.expect("failed to parse output");
+        send(tx, line.trim().to_string()).await?;
+    }
+
+    let status = child.wait().await.expect("failed to wait for child");
+
+    if !status.success() {
+        send_error(tx, "build script failed".to_string()).await?
     }
 
     // Check for output files
@@ -352,9 +389,15 @@ pub async fn run(
     )?;
 
     if sandbox_package_files.is_empty() || sandbox_package_files.len() == 1 {
-        remove_dir_all(&sandbox_package_dir_path).await?;
-        remove_dir_all(&sandbox_source_dir_path).await?;
-        remove_file(&sandbox_script_file_path).await?;
+        remove_dir_all(&sandbox_package_dir_path)
+            .await
+            .expect("failed to remove package directory");
+        remove_dir_all(&sandbox_source_dir_path)
+            .await
+            .expect("failed to remove source directory");
+        remove_file(&sandbox_script_file_path)
+            .await
+            .expect("failed to remove script file");
         send_error(tx, "no build output files found".to_string()).await?
     }
 
@@ -375,9 +418,15 @@ pub async fn run(
     )
     .await
     {
-        remove_dir_all(&sandbox_package_dir_path).await?;
-        remove_dir_all(&sandbox_source_dir_path).await?;
-        remove_file(&sandbox_script_file_path).await?;
+        remove_dir_all(&sandbox_package_dir_path)
+            .await
+            .expect("failed to remove package directory");
+        remove_dir_all(&sandbox_source_dir_path)
+            .await
+            .expect("failed to remove source directory");
+        remove_file(&sandbox_script_file_path)
+            .await
+            .expect("failed to remove script file");
         send_error(tx, format!("failed to compress package tar: {:?}", err)).await?
     }
 
@@ -390,12 +439,20 @@ pub async fn run(
 
     // Unpack package tar to package path
 
-    create_dir_all(&package_path).await?;
+    create_dir_all(&package_path)
+        .await
+        .expect("failed to create package directory");
 
     if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
-        remove_dir_all(&sandbox_package_dir_path).await?;
-        remove_dir_all(&sandbox_source_dir_path).await?;
-        remove_file(&sandbox_script_file_path).await?;
+        remove_dir_all(&sandbox_package_dir_path)
+            .await
+            .expect("failed to remove package directory");
+        remove_dir_all(&sandbox_source_dir_path)
+            .await
+            .expect("failed to remove source directory");
+        remove_file(&sandbox_script_file_path)
+            .await
+            .expect("failed to remove script file");
         send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
     }
 
@@ -406,9 +463,15 @@ pub async fn run(
 
     send(tx, message).await?;
 
-    remove_dir_all(&sandbox_package_dir_path).await?;
-    remove_dir_all(&sandbox_source_dir_path).await?;
-    remove_file(&sandbox_script_file_path).await?;
+    remove_dir_all(&sandbox_package_dir_path)
+        .await
+        .expect("failed to remove package directory");
+    remove_dir_all(&sandbox_source_dir_path)
+        .await
+        .expect("failed to remove source directory");
+    remove_file(&sandbox_script_file_path)
+        .await
+        .expect("failed to remove script file");
 
     Ok(())
 }

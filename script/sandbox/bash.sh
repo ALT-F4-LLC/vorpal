@@ -2,11 +2,12 @@
 set -euo pipefail
 
 # Environment variables
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
 VORPAL_PATH="/var/lib/vorpal"
 
 # Build variables
-BASH_SOURCE_HASH="$(cat "${PWD}/script/sandbox/bash.sha256sum")"
+BASH_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/bash")"
 BASH_STORE_PATH="${VORPAL_PATH}/store/bash-${BASH_SOURCE_HASH}"
 BASH_STORE_PATH_PACKAGE="${BASH_STORE_PATH}.package"
 BASH_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/bash-${BASH_SOURCE_HASH}"
@@ -31,7 +32,7 @@ if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then
     echo "Calculated source hash: ${SOURCE_HASH}"
 
     if [ "$SOURCE_HASH" != "$BASH_SOURCE_HASH" ]; then
-        echo "Download source hash mismatch: ${SOURCE_HASH} != ${BASH_SOURCE_HASH}"
+        echo "Source hash mismatch: ${SOURCE_HASH} != ${BASH_SOURCE_HASH}"
         exit 1
     fi
 

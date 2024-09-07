@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GCC_SOURCE_HASH="$(cat "${SCRIPT_PATH_INSTALL}/gcc.sha256sum")"
-GCC_STORE_PATH="${VORPAL_PATH_STORE}/gcc-${GCC_SOURCE_HASH}"
+# Environment variables
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
+VORPAL_PATH="/var/lib/vorpal"
+
+# Build variables
+GCC_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/gcc")"
+GCC_STORE_PATH="${VORPAL_PATH}/store/gcc-${GCC_SOURCE_HASH}"
 GCC_STORE_PATH_PACKAGE="${GCC_STORE_PATH}.package"
-GCC_STORE_PATH_SANDBOX="${VORPAL_PATH_SANDBOX}/gcc-${GCC_SOURCE_HASH}"
+GCC_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/gcc-${GCC_SOURCE_HASH}"
 GCC_STORE_PATH_SOURCE="${GCC_STORE_PATH}.source"
 GCC_VERSION="14.2.0"
-# PATH="${PREFIX_PATH}/bin:${PATH}"
 
 if [ -d "${GCC_STORE_PATH_PACKAGE}" ]; then
     echo "gcc already exists"
@@ -23,7 +28,7 @@ if [ ! -d "${GCC_STORE_PATH_SOURCE}" ]; then
     ## TODO: move hash as arg to script
 
     echo "Calculating source hash..."
-    SOURCE_HASH=$("${SCRIPT_PATH}/hash.sh" "/tmp/gcc-${GCC_VERSION}")
+    SOURCE_HASH=$(hash_path "/tmp/gcc-${GCC_VERSION}")
     echo "Calculated source hash: $SOURCE_HASH"
 
     if [ "$SOURCE_HASH" != "$GCC_SOURCE_HASH" ]; then

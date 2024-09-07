@@ -16,7 +16,7 @@ tar -xzf "/tmp/zstd-${ZSTD_VERSION}.tar.gz" -C "/tmp"
 
 pushd "/tmp/zstd-${ZSTD_VERSION}"
 
-make -j"$(sysctl -n hw.ncpu)"
+make
 
 make install PREFIX="${ENV_PATH}"
 

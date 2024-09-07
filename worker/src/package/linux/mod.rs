@@ -1,9 +1,7 @@
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tokio::io::BufReader;
-use tokio::process::{ChildStderr, ChildStdout, Command};
-use tokio_process_stream::{ChildStream, ProcessLineStream};
-use tokio_stream::wrappers::LinesStream;
+use tokio::process::Command;
 
 pub async fn build(
     bin_paths: Vec<String>,
@@ -11,10 +9,7 @@ pub async fn build(
     // sandbox_package_dir_path: &PathBuf,
     sandbox_script_path: &Path,
     sandbox_source_dir_path: &PathBuf,
-) -> Result<
-    ChildStream<LinesStream<BufReader<ChildStdout>>, LinesStream<BufReader<ChildStderr>>>,
-    anyhow::Error,
-> {
+) -> Result<Command> {
     let build_command_args = [
         "--clearenv",
         "--ro-bind",
@@ -53,5 +48,5 @@ pub async fn build(
         sandbox_command.env("PATH", path);
     }
 
-    Ok(ProcessLineStream::try_from(sandbox_command)?)
+    Ok(sandbox_command)
 }

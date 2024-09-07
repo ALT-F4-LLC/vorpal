@@ -75,7 +75,7 @@ fn get_default_system() -> String {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {

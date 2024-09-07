@@ -1,15 +1,9 @@
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tera::Tera;
 use tokio::fs::write;
-use tokio::io::BufReader;
-use tokio::process::ChildStderr;
-use tokio::process::ChildStdout;
 use tokio::process::Command;
-use tokio_process_stream::ChildStream;
-use tokio_process_stream::ProcessLineStream;
-use tokio_stream::wrappers::LinesStream;
-use tonic::Status;
 use vorpal_store::temps::create_temp_file;
 
 mod profile;
@@ -20,10 +14,7 @@ pub async fn build(
     sandbox_script_path: &Path,
     sandbox_source_dir_path: &PathBuf,
     sandbox_vorpal_path: &str,
-) -> Result<
-    ChildStream<LinesStream<BufReader<ChildStdout>>, LinesStream<BufReader<ChildStderr>>>,
-    anyhow::Error,
-> {
+) -> Result<Command> {
     let sandbox_profile_path = create_temp_file("sb").await?;
 
     let mut tera = Tera::default();
@@ -39,7 +30,7 @@ pub async fn build(
 
     write(&sandbox_profile_path, sandbox_profile_data)
         .await
-        .map_err(|_| Status::internal("failed to write sandbox profile"))?;
+        .expect("failed to write sandbox profile");
 
     let build_command_args = [
         "-f",
@@ -70,5 +61,5 @@ pub async fn build(
         sandbox_command.env("PATH", path);
     }
 
-    Ok(ProcessLineStream::try_from(sandbox_command)?)
+    Ok(sandbox_command)
 }

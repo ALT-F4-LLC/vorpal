@@ -2,6 +2,7 @@ use crate::log::{
     print_package_archive, print_package_hash, print_package_log, print_package_output,
     print_packages_list, print_source_archive, print_source_cache, print_source_url,
 };
+use anyhow::Result;
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write, File};
@@ -45,7 +46,7 @@ pub async fn build(
     packages: Vec<PackageOutput>,
     target: PackageSystem,
     worker: &str,
-) -> anyhow::Result<PackageOutput> {
+) -> Result<PackageOutput> {
     if !packages.is_empty() {
         let packages_names = packages
             .clone()
@@ -122,7 +123,9 @@ pub async fn build(
     let package_archive_path = get_package_archive_path(&package_source_hash, &package.name);
 
     if package_archive_path.exists() {
-        create_dir_all(&package_path).await?;
+        create_dir_all(&package_path)
+            .await
+            .expect("failed to create package path");
 
         unpack_zstd(&package_path, &package_archive_path).await?;
 
@@ -140,7 +143,9 @@ pub async fn build(
         hash: package_source_hash.clone(),
     };
 
-    let mut worker_store = StoreServiceClient::connect(worker.to_owned()).await?;
+    let mut worker_store = StoreServiceClient::connect(worker.to_owned())
+        .await
+        .expect("failed to connect to store");
 
     if (worker_store.exists(worker_package.clone()).await).is_ok() {
         println!("=> cache: {:?}", worker_package);
@@ -153,12 +158,13 @@ pub async fn build(
 
         let mut stream = worker_store
             .pull(worker_store_package.clone())
-            .await?
+            .await
+            .expect("failed to pull package")
             .into_inner();
 
         let mut stream_data = Vec::new();
 
-        while let Some(chunk) = stream.message().await? {
+        while let Some(chunk) = stream.message().await.expect("failed to get message") {
             if !chunk.data.is_empty() {
                 stream_data.extend_from_slice(&chunk.data);
             }
@@ -172,11 +178,18 @@ pub async fn build(
 
         println!("=> fetched: {} bytes", stream_data_size);
 
-        let mut package_archive = File::create(&package_archive_path).await?;
+        let mut package_archive = File::create(&package_archive_path)
+            .await
+            .expect("failed to create package archive");
 
-        package_archive.write_all(&stream_data).await?;
+        package_archive
+            .write_all(&stream_data)
+            .await
+            .expect("failed to write package archive");
 
-        create_dir_all(&package_path).await?;
+        create_dir_all(&package_path)
+            .await
+            .expect("failed to create package path");
 
         unpack_zstd(&package_path, &package_archive_path).await?;
 
@@ -217,7 +230,7 @@ pub async fn build(
                             }
 
                             PackageSourceKind::Http => {
-                                let url = Url::parse(source)?;
+                                let url = Url::parse(source).expect("failed to parse source url");
 
                                 if url.scheme() != "http" && url.scheme() != "https" {
                                     anyhow::bail!(
@@ -226,8 +239,15 @@ pub async fn build(
                                     );
                                 }
 
-                                let response = reqwest::get(url.as_str()).await?.bytes().await?;
+                                let response = reqwest::get(url.as_str())
+                                    .await
+                                    .expect("failed to request source")
+                                    .bytes()
+                                    .await
+                                    .expect("failed to get source bytes");
+
                                 let response_bytes = response.as_ref();
+
                                 let temp_dir_path = create_temp_dir().await?;
 
                                 if let Some(kind) = infer::get(response_bytes) {
@@ -235,31 +255,48 @@ pub async fn build(
                                         let gz_decoder = GzipDecoder::new(response_bytes);
                                         let mut archive = Archive::new(gz_decoder);
 
-                                        archive.unpack(&temp_dir_path).await?;
+                                        archive
+                                            .unpack(&temp_dir_path)
+                                            .await
+                                            .expect("failed to unpack");
                                     } else if let "application/x-bzip2" = kind.mime_type() {
                                         let bz_decoder = BzDecoder::new(response_bytes);
                                         let mut archive = Archive::new(bz_decoder);
 
-                                        archive.unpack(&temp_dir_path).await?;
+                                        archive
+                                            .unpack(&temp_dir_path)
+                                            .await
+                                            .expect("failed to unpack");
                                     } else if let "application/x-xz" = kind.mime_type() {
                                         let xz_decoder = XzDecoder::new(response_bytes);
                                         let mut archive = Archive::new(xz_decoder);
 
-                                        archive.unpack(&temp_dir_path).await?;
+                                        archive
+                                            .unpack(&temp_dir_path)
+                                            .await
+                                            .expect("failed to unpack");
                                     } else if let "application/zip" = kind.mime_type() {
                                         let temp_file_name = Uuid::now_v7().to_string();
                                         let temp_file = format!("/tmp/{}", temp_file_name);
                                         let temp_file_path = Path::new(&temp_file).to_path_buf();
 
-                                        write(&temp_file_path, response_bytes).await?;
+                                        write(&temp_file_path, response_bytes)
+                                            .await
+                                            .expect("failed to write");
+
                                         unpack_zip(&temp_file_path, &temp_dir_path).await?;
-                                        remove_file(&temp_file_path).await?;
+
+                                        remove_file(&temp_file_path)
+                                            .await
+                                            .expect("failed to remove");
                                     } else {
                                         let file_name =
                                             url.path_segments().unwrap().last().unwrap();
                                         let file_path = temp_dir_path.join(file_name);
 
-                                        write(&file_path, response_bytes).await?;
+                                        write(&file_path, response_bytes)
+                                            .await
+                                            .expect("failed to write");
                                     }
 
                                     let source_files = get_file_paths(
@@ -289,7 +326,9 @@ pub async fn build(
                                     )
                                     .await?;
 
-                                    remove_dir_all(&temp_dir_path).await?;
+                                    remove_dir_all(&temp_dir_path)
+                                        .await
+                                        .expect("failed to remove");
                                 }
                             }
 
@@ -331,7 +370,8 @@ pub async fn build(
                         );
                     }
 
-                    let source_archive_data = read(&source_archive_path).await?;
+                    let source_archive_data =
+                        read(&source_archive_path).await.expect("failed to read");
 
                     let private_key_path = get_private_key_path();
 
@@ -376,13 +416,18 @@ pub async fn build(
         });
     }
 
-    let mut service = PackageServiceClient::connect(worker.to_owned()).await?;
+    let mut service = PackageServiceClient::connect(worker.to_owned())
+        .await
+        .expect("failed to connect to package");
 
-    let response = service.build(tokio_stream::iter(request_stream)).await?;
+    let response = service
+        .build(tokio_stream::iter(request_stream))
+        .await
+        .expect("failed to build");
 
     let mut stream = response.into_inner();
 
-    while let Some(res) = stream.message().await? {
+    while let Some(res) = stream.message().await.expect("failed to get message") {
         if !res.output.is_empty() {
             print_package_log(&package.name, &res.output);
         }

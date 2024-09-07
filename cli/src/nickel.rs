@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use petgraph::algo::toposort;
 use petgraph::graphmap::DiGraphMap;
 use sha256::digest;
@@ -7,10 +7,7 @@ use std::path::Path;
 use tokio::process::Command;
 use vorpal_schema::{api::package::PackageSystem, Config, Package};
 
-pub async fn load_config(
-    config_path: &Path,
-    system: PackageSystem,
-) -> Result<(Config, String), anyhow::Error> {
+pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<(Config, String)> {
     let nickel_version = Command::new("nickel").arg("--version").output().await;
 
     if let Ok(output) = nickel_version {
@@ -28,10 +25,10 @@ pub async fn load_config(
         PackageSystem::Aarch64Macos => "aarch64-macos",
         PackageSystem::X8664Linux => "x86_64-linux",
         PackageSystem::X8664Macos => "x86_64-macos",
-        PackageSystem::Unknown => anyhow::bail!("unknown target"),
+        PackageSystem::Unknown => bail!("unknown target"),
     };
 
-    let current_path = std::env::current_dir()?;
+    let current_path = std::env::current_dir().expect("failed to get current path");
 
     let packages_path = current_path.join(".vorpal/packages");
 
@@ -52,11 +49,18 @@ pub async fn load_config(
 
     let command = command.arg("-c").arg(command_str);
 
-    let data = command.output().await?.stdout;
+    let data = command
+        .output()
+        .await
+        .expect("failed to run command")
+        .stdout;
 
-    let data = String::from_utf8(data)?;
+    let data = String::from_utf8(data).expect("failed to convert data to string");
 
-    Ok((serde_json::from_str(&data)?, digest(data)))
+    Ok((
+        serde_json::from_str(&data).expect("failed to parse json"),
+        digest(data),
+    ))
 }
 
 pub fn load_config_build(

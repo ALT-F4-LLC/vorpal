@@ -27,6 +27,7 @@ case "$1" in
             bison \
             build-essential \
             flex \
+            gperf \
             m4 \
             perl \
             texinfo

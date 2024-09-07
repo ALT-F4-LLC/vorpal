@@ -2,11 +2,12 @@
 set -euo pipefail
 
 # Environment variables
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
 VORPAL_PATH="/var/lib/vorpal"
 
 # Build variables
-COREUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/coreutils.sha256sum")"
+COREUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/coreutils")"
 COREUTILS_STORE_PATH="${VORPAL_PATH}/store/coreutils-${COREUTILS_SOURCE_HASH}"
 COREUTILS_STORE_PATH_PACKAGE="${COREUTILS_STORE_PATH}.package"
 COREUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/coreutils-${COREUTILS_SOURCE_HASH}"

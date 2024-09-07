@@ -140,7 +140,7 @@ pub async fn copy_files(
     source_path: &PathBuf,
     source_path_files: Vec<PathBuf>,
     destination_path: &Path,
-) -> Result<(), anyhow::Error> {
+) -> Result<()> {
     if source_path_files.is_empty() {
         return Err(anyhow::anyhow!("no source files found"));
     }
@@ -148,7 +148,9 @@ pub async fn copy_files(
     for src in &source_path_files {
         if src.is_dir() {
             let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
-            create_dir_all(dest).await?;
+            create_dir_all(dest)
+                .await
+                .expect("failed to create directory");
             continue;
         }
 
@@ -158,30 +160,36 @@ pub async fn copy_files(
 
         let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
 
-        copy(src, dest).await?;
+        copy(src, dest).await.expect("failed to copy file");
     }
 
     Ok(())
 }
 
-pub async fn setup_paths() -> Result<(), anyhow::Error> {
+pub async fn setup_paths() -> Result<()> {
     let key_path = get_key_dir_path();
     if !key_path.exists() {
-        create_dir_all(&key_path).await?;
+        create_dir_all(&key_path)
+            .await
+            .expect("failed to create key directory");
     }
 
     info!("keys path: {:?}", key_path);
 
     let sandbox_path = get_sandbox_dir_path();
     if !sandbox_path.exists() {
-        create_dir_all(&sandbox_path).await?;
+        create_dir_all(&sandbox_path)
+            .await
+            .expect("failed to create sandbox directory");
     }
 
     info!("sandbox path: {:?}", sandbox_path);
 
     let store_path = get_store_dir_path();
     if !store_path.exists() {
-        create_dir_all(&store_path).await?;
+        create_dir_all(&store_path)
+            .await
+            .expect("failed to create store directory");
     }
 
     info!("store path: {:?}", store_path);
@@ -194,20 +202,22 @@ pub async fn replace_path_in_files(from_path: &Path, to_path: &Path) -> Result<(
     let to = to_path.display().to_string();
 
     for entry in WalkDir::new(from_path) {
-        let entry = entry?;
+        let entry = entry.expect("failed to read entry");
 
         if entry.file_type().is_file() {
             let path = entry.path();
-            let mut file = File::open(path).await?;
+            let mut file = File::open(path).await.expect("failed to open file");
             let mut content = Vec::new();
 
-            file.read_to_end(&mut content).await?;
+            file.read_to_end(&mut content)
+                .await
+                .expect("failed to read file");
 
             if let Ok(prev) = String::from_utf8(content) {
                 let next = prev.replace(&from, &to);
 
                 if next != prev {
-                    write(path, next).await?;
+                    write(path, next).await.expect("failed to write file");
                 }
             } else {
                 continue;

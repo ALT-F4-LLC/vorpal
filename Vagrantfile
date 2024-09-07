@@ -12,13 +12,14 @@ Vagrant.configure("2") do |config|
     echo 'function setup_vorpal {
       pushd "${HOME}"
 
-      rm -rf ./vorpal
       mkdir -p ./vorpal
 
       rsync -aPW \
+        --exclude=".env" \
         --exclude=".git" \
+        --exclude=".packer" \
         --exclude=".vagrant" \
-        --exclude=".vorpal/env" \
+        --exclude="dist" \
         --exclude="target" \
         /vagrant/. ./vorpal/.
 
@@ -41,13 +42,13 @@ Vagrant.configure("2") do |config|
     }' >> ~/.bashrc
 
     echo 'function setup_sandbox {
-      setup_vorpal
+      setup_dev
 
       pushd "${HOME}/vorpal"
 
       ./script/debian.sh "sandbox"
       ./script/sandbox.sh
-      
+
       popd
     }' >> ~/.bashrc
   SHELL

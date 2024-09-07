@@ -2,12 +2,12 @@ use anyhow::Result;
 use sha256::{digest, try_digest};
 use std::path::{Path, PathBuf};
 
-pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String, anyhow::Error> {
+pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String> {
     if !path.as_ref().is_file() {
         return Err(anyhow::anyhow!("Path is not a file"));
     }
 
-    Ok(try_digest(path)?)
+    Ok(try_digest(path).expect("Failed to get file hash"))
 }
 
 pub fn get_file_hashes(files: &[PathBuf]) -> Result<Vec<String>> {
@@ -30,7 +30,7 @@ pub fn get_hashes_digest(hashes: Vec<String>) -> Result<String> {
     Ok(digest(combined))
 }
 
-pub async fn hash_files(paths: Vec<PathBuf>) -> Result<(String, Vec<PathBuf>), anyhow::Error> {
+pub async fn hash_files(paths: Vec<PathBuf>) -> Result<(String, Vec<PathBuf>)> {
     if paths.is_empty() {
         anyhow::bail!("no source files found")
     }

@@ -3,18 +3,9 @@ set -euo pipefail
 
 SHA_COMMAND="sha256sum"
 
-# Check if the operating system is macOS
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  SHA_COMMAND="shasum"
-fi
-
 if ! command -v "$SHA_COMMAND" &> /dev/null; then
   echo "Command not found: $SHA_COMMAND"
   exit 1
-fi
-
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  SHA_COMMAND="$SHA_COMMAND -a 256"
 fi
 
 if [ -z "$1" ]; then
@@ -27,7 +18,7 @@ OUTPUT_HASH=()
 generate_hash() {
   local file=$1
   local hash
-  hash=$($SHA_COMMAND "$file" | awk '{print $1}')
+  hash=$($SHA_COMMAND --binary --zero "$file" | awk '{print $1}')
   OUTPUT_HASH+=("$hash")
 }
 

@@ -6,7 +6,8 @@ readonly SCRIPT_PATH="${PWD}/script"
 
 scripts=(
   "rustup.sh"
-  "nickel.sh"
+  "coreutils.sh"
+  "nickel.sh" # must go after rustup.sh
   "protoc.sh"
   "zstd.sh"
 )
@@ -17,8 +18,6 @@ for script in "${scripts[@]}";
 do
   "${SCRIPT_PATH}/dev/${script}"
 done
-
-"${SCRIPT_PATH}/sandbox.sh"
 
 export PATH="${ENV_PATH}/bin:${HOME}/.cargo/bin:$PATH"
 

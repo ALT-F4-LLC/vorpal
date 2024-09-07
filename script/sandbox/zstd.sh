@@ -2,11 +2,12 @@
 set -euo pipefail
 
 # Environment variables
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
 VORPAL_PATH="/var/lib/vorpal"
 
 # Build variables
-ZSTD_SOURCE_HASH="$(cat "${PWD}/script/sandbox/zstd.sha256sum")"
+ZSTD_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/zstd")"
 ZSTD_STORE_PATH="${VORPAL_PATH}/store/zstd-${ZSTD_SOURCE_HASH}"
 ZSTD_STORE_PATH_PACKAGE="${ZSTD_STORE_PATH}.package"
 ZSTD_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/zstd-${ZSTD_SOURCE_HASH}"
