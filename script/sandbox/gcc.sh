@@ -60,7 +60,9 @@ popd
 
 pushd "${GCC_STORE_PATH_SANDBOX}/build"
 
-../configure --enable-languages="c,c++" --prefix="${GCC_STORE_PATH_PACKAGE}"
+../configure \
+    --enable-languages="c,c++" \
+    --prefix="${GCC_STORE_PATH_PACKAGE}"
 make -j"$(nproc)"
 make install
 

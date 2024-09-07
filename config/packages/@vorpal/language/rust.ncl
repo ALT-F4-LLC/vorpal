@@ -14,26 +14,26 @@ fun config =>
       name = "%{config.name}-cache",
       packages = [cargo, rustc],
       script = m%"
-          dirs=("cli/src" "notary/src" "schema/src" "store/src" "worker/src")
+        dirs=("cli/src" "notary/src" "schema/src" "store/src" "worker/src")
 
-          for dir in "${dirs[@]}"; do
-              mkdir -p "$dir"
-          done
+        for dir in "${dirs[@]}"; do
+            mkdir -p "$dir"
+        done
 
-          for dir in "${dirs[@]}"; do
-              if [[ "$dir" == "cli/src" ]]; then
-                  touch "$dir/main.rs"
-              else
-                  touch "$dir/lib.rs"
-              fi
-          done
+        for dir in "${dirs[@]}"; do
+            if [[ "$dir" == "cli/src" ]]; then
+                touch "$dir/main.rs"
+            else
+                touch "$dir/lib.rs"
+            fi
+        done
 
-          mkdir -p $output/vendor
+        mkdir -p $output/vendor
 
-          export CARGO_VENDOR=$(cargo vendor --versioned-dirs $output/vendor)
+        export CARGO_VENDOR=$(cargo vendor --versioned-dirs $output/vendor)
 
-          echo "$CARGO_VENDOR" > $output/config.toml
-        "%,
+        echo "$CARGO_VENDOR" > $output/config.toml
+      "%,
       source = config.source,
       source_hash = config.cargo_hash,
       source_includes = [
@@ -53,15 +53,18 @@ fun config =>
     name = config.name,
     packages = [cargo, rustc, protoc, cache],
     script = m%"
-          mkdir -p .cargo
-          cp $%{std.string.replace "-" "_" config.name}_cache/config.toml .cargo/config.toml
+      export LD_LIBRARY_PATH="$rustc/lib:/lib"
+      export RUSTFLAGS="-C linker=gcc -L $rustc/lib:/lib"
 
-          cargo build --offline --release
-          cargo test --offline --release
+      mkdir -p .cargo
+      cp $%{std.string.replace "-" "_" config.name}_cache/config.toml .cargo/config.toml
 
-          mkdir -p $output/bin
-          cp -pr target/release/%{config.name} $output/bin/%{config.name}
-        "%,
+      cargo build --offline --release
+      cargo test --offline --release
+
+      mkdir -p $output/bin
+      cp -pr target/release/%{config.name} $output/bin/%{config.name}
+    "%,
     source = config.source,
     source_excludes =
       std.array.concat

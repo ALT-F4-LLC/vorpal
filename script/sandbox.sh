@@ -15,13 +15,14 @@ directories=(
 )
 
 linux_packages=(
+    "glibc"
     "gcc"
 )
 
 common_packages=(
-    "bash"
     "binutils"
     "coreutils"
+    "bash"
     "zstd"
 )
 
@@ -76,7 +77,7 @@ if [[ -d "${SANDBOX_STORE_PATH_PACKAGE}" ]]; then
     exit 0
 fi
 
-# Then, we need to create the package
+# Then, we need to create the sandbox package
 
 for package in "${packages_installed[@]}"; do
     PACKAGE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/${package}")"
@@ -90,6 +91,11 @@ for package in "${packages_installed[@]}"; do
         ln -s "${file}" "${SANDBOX_STORE_PATH_PACKAGE}/${relative_path}"
     done
 done
+
+GCC_PACKAGE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/gcc")"
+GCC_PACKAGE_PATH="${VORPAL_PATH}/store/gcc-${GCC_PACKAGE_HASH}.package"
+
+ln -s "${GCC_PACKAGE_PATH}/bin/gcc" "${SANDBOX_STORE_PATH_PACKAGE}/bin/cc"
 
 # Then, we need to create the package archive
 

@@ -267,21 +267,26 @@ pub async fn run(
         send_error(tx, "build script is empty".to_string()).await?
     }
 
-    let sandbox_vorpal_hash = "819232062aecd85c775f498b2cdb7f4bf0b8347b0a1144658a0d30c2cfebb744";
+    let mut sandbox_stdenv_hash =
+        "8a4a01421ebaa26c9a71c8a289ab4a9b215fd48b64331b31d94e1c30da3c5c03";
 
-    let sandbox_vorpal_dir = format!(
+    if worker_system == Aarch64Macos || worker_system == X8664Macos {
+        sandbox_stdenv_hash = "819232062aecd85c775f498b2cdb7f4bf0b8347b0a1144658a0d30c2cfebb744";
+    }
+
+    let sandbox_stdenv_dir = format!(
         "{}/vorpal-sandbox-{}.package",
         get_store_dir_path().display(),
-        sandbox_vorpal_hash
+        sandbox_stdenv_hash
     );
 
-    let sandbox_vorpal_dir_path = Path::new(&sandbox_vorpal_dir);
+    let sandbox_stdenv_dir_path = Path::new(&sandbox_stdenv_dir).to_path_buf();
 
-    if !sandbox_vorpal_dir_path.exists() {
+    if !sandbox_stdenv_dir_path.exists() {
         send_error(tx, "sandbox package missing".to_string()).await?
     }
 
-    let sandbox_vorpal_bash_path = format!("#!{}/bin/bash", sandbox_vorpal_dir);
+    let sandbox_stdenv_bash_path = format!("#!{}/bin/bash", sandbox_stdenv_dir);
 
     let sandbox_script = script
         .trim()
@@ -290,7 +295,7 @@ pub async fn run(
         .collect::<Vec<&str>>()
         .join("\n");
     let sandbox_script_commands = [
-        sandbox_vorpal_bash_path.as_str(),
+        sandbox_stdenv_bash_path.as_str(),
         "set -euxo pipefail",
         "echo \"PATH: $PATH\"",
         "echo \"Starting build script\"",
@@ -331,6 +336,8 @@ pub async fn run(
         sandbox_package_dir_path.display().to_string(),
     );
 
+    let sandbox_home_dir_path = create_temp_dir().await?;
+
     let mut sandbox_command = match worker_system {
         Aarch64Macos | X8664Macos => {
             darwin::build(
@@ -338,7 +345,7 @@ pub async fn run(
                 env_var.clone(),
                 &sandbox_script_file_path,
                 &sandbox_source_dir_path,
-                &sandbox_vorpal_dir,
+                &sandbox_stdenv_dir,
             )
             .await?
         }
@@ -346,9 +353,10 @@ pub async fn run(
             linux::build(
                 bin_paths,
                 env_var.clone(),
-                // &sandbox_package_dir_path,
+                &sandbox_home_dir_path,
                 &sandbox_script_file_path,
                 &sandbox_source_dir_path,
+                &sandbox_stdenv_dir_path,
             )
             .await?
         }

@@ -74,7 +74,9 @@ pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(),
 
     let mut archive = Archive::new(zstd_decoder);
 
-    Ok(archive.unpack(target_dir).await.expect("Failed to unpack"))
+    archive.unpack(target_dir).await.expect("Failed to unpack");
+
+    Ok(())
 }
 
 pub async fn compress_gzip(
@@ -130,7 +132,9 @@ pub async fn unpack_gzip(target_dir: &PathBuf, source_tar: &Path) -> Result<(), 
 
     let mut archive = archive_builder.build();
 
-    Ok(archive.unpack(target_dir).await.expect("Failed to unpack"))
+    archive.unpack(target_dir).await.expect("Failed to unpack");
+
+    Ok(())
 }
 
 /// Returns a relative path without reserved names, redundant separators, ".", or "..".
