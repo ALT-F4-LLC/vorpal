@@ -39,6 +39,8 @@ ls -alh /tmp
 
 if [[ "${OS}" == "darwin" ]]; then
     cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${ENV_PATH}/bin/amber"
+elif [[ "${OS}" == "linux" && "${ARCH}" == "x86_64" ]]; then
+    cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${ENV_PATH}/bin/amber"
 else
     cp "/tmp/amber" "${ENV_PATH}/bin/amber"
 fi
