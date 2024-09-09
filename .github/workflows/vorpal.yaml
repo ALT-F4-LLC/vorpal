@@ -26,7 +26,8 @@ jobs:
           key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
           path: .env
 
-      - run: ./script/debian.sh "dev"
+      - if: ${{ matrix.runner }} != 'macos-latest'
+        run: ./script/debian.sh "dev"
 
       - run: ./script/dev.sh
       - run: ./script/dev.sh cargo --version
@@ -113,7 +114,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: ./script/debian.sh "sandbox"
+      - if: ${{ matrix.runner }} != 'macos-latest'
+        run: ./script/debian.sh "sandbox"
 
       - run: ./script/sandbox.sh
 
