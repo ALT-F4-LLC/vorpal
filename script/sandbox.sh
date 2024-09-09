@@ -75,7 +75,7 @@ fi
 # Patch for includes
 mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}/usr/include"
 rsync -av --ignore-existing "${SANDBOX_STORE_PATH_PACKAGE}/include/" "${SANDBOX_STORE_PATH_PACKAGE}/usr/include"
-rm -f "${SANDBOX_STORE_PATH_PACKAGE}/include"
+rm -rf "${SANDBOX_STORE_PATH_PACKAGE}/include"
 
 # Patch for linux only
 if [[ "${OS}" == "linux" ]]; then
