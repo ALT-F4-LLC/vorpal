@@ -25,7 +25,6 @@ directories=(
 )
 
 packages_darwin=(
-    "binutils"
     "bash"
     "coreutils"
     "zstd"
