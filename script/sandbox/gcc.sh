@@ -26,7 +26,10 @@ popd
 
 pushd "/tmp/gcc-${VERSION}/build"
 
-../configure --enable-languages="c,c++" --prefix="${1}"
+../configure \
+    --disable-multilib \
+    --enable-languages="c,c++" \
+    --prefix="${1}"
 
 make -j$(nproc)
 
