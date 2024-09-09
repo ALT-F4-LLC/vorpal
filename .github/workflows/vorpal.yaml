@@ -41,37 +41,6 @@ jobs:
           key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
           path: .env
 
-  sandbox:
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        runner:
-          - macos-latest
-          - ubuntu-latest
-          - ubuntu-latest-arm64
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: ./script/debian.sh "sandbox"
-
-      - run: ./script/sandbox.sh
-
-      - run: |
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          SANDBOX_HASH=$(cat "${PWD}/script/sandbox/sha256sum/${OS}/sandbox")
-          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-          echo "OS=${OS}" >> $GITHUB_ENV
-          echo "SANDBOX_HASH=${SANDBOX_HASH}" >> $GITHUB_ENV
-
-      - run: |
-          cp "/var/lib/vorpal/store/vorpal-sandbox-${SANDBOX_HASH}.package.tar.zst" \
-            "${PWD}/vorpal-sandbox-${SANDBOX_HASH}.package.tar.zst"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: vorpal-sandbox-${{ env.ARCH }}-${{ env.OS }}
-          path: vorpal-sandbox-${{ env.SANDBOX_HASH }}.package.tar.zst
-
   code-quality:
     needs:
       - dev
@@ -133,9 +102,41 @@ jobs:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
+  package-sandbox:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-latest
+          - ubuntu-latest
+          - ubuntu-latest-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: ./script/debian.sh "sandbox"
+
+      - run: ./script/sandbox.sh
+
+      - run: |
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          SANDBOX_HASH=$(cat "${PWD}/script/sandbox/sha256sum/${OS}/sandbox")
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=${OS}" >> $GITHUB_ENV
+          echo "SANDBOX_HASH=${SANDBOX_HASH}" >> $GITHUB_ENV
+
+      - run: |
+          cp "/var/lib/vorpal/store/vorpal-sandbox-${SANDBOX_HASH}.package.tar.zst" \
+            "${PWD}/vorpal-sandbox-${SANDBOX_HASH}.package.tar.zst"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vorpal-sandbox-${{ env.ARCH }}-${{ env.OS }}
+          path: vorpal-sandbox-${{ env.SANDBOX_HASH }}.package.tar.zst
+
   test:
     needs:
       - package
+      - package-sandbox
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
