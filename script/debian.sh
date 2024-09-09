@@ -15,6 +15,7 @@ case "$1" in
             --yes \
             bubblewrap \
             direnv \
+            nproc \
             unzip
         echo "eval \"\$(direnv hook bash)\"" >> ~/.bashrc
         ;;
@@ -30,6 +31,7 @@ case "$1" in
             gawk \
             gperf \
             m4 \
+            nproc \
             perl \
             texinfo \
             zstd
