@@ -9,6 +9,7 @@ fi
 SANDBOX_PACKAGE_PATH="$1"
 
 # Environment variables
+CPU_COUNT=$(nproc)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 
@@ -18,6 +19,10 @@ COREUTILS_STORE_PATH="${VORPAL_PATH}/store/coreutils-${COREUTILS_SOURCE_HASH}"
 COREUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/coreutils-${COREUTILS_SOURCE_HASH}"
 COREUTILS_STORE_PATH_SOURCE="${COREUTILS_STORE_PATH}.source"
 COREUTILS_VERSION="9.5"
+
+if [[ "${OS}" == "darwin" ]]; then
+    CPU_COUNT=$(sysctl -n hw.ncpu)
+fi
 
 if [ ! -d "${COREUTILS_STORE_PATH_SOURCE}" ]; then
     curl -L \
@@ -55,7 +60,7 @@ cp -r "${COREUTILS_STORE_PATH_SOURCE}/." "${COREUTILS_STORE_PATH_SANDBOX}"
 pushd "${COREUTILS_STORE_PATH_SANDBOX}"
 
 ./configure --prefix="${SANDBOX_PACKAGE_PATH}"
-make -j$(nproc)
+make -j${CPU_COUNT}
 make install
 
 popd

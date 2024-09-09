@@ -10,7 +10,7 @@ env:
   RUST_VERSION: 1.80.1
 
 jobs:
-  sandbox:
+  dev:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -23,38 +23,75 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
-          path: sandbox
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
-      - run: ./sandbox.sh # prebake
-      - run: ./sandbox.sh which nickel
-      - run: ./sandbox.sh which protoc
+      - run: ./script/debian.sh "dev"
+
+      - run: ./script/dev.sh
+      - run: ./script/dev.sh cargo --version
+      - run: ./script/dev.sh rustc --version
+      - run: ./script/dev.sh sha256sum --version
+      - run: ./script/dev.sh nickel --version
+      - run: ./script/dev.sh protoc --version
+      - run: ./script/dev.sh zstd --version
 
       - uses: actions/cache/save@v4
         with:
-          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
-          path: sandbox
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
+
+  sandbox:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-latest
+          - ubuntu-latest
+          - ubuntu-latest-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: ./script/debian.sh "sandbox"
+
+      - run: ./script/sandbox.sh
+
+      - run: |
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          SANDBOX_HASH=$(cat "${PWD}/script/sandbox/sha256sum/${OS}/sandbox")
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "OS=${OS}" >> $GITHUB_ENV
+          echo "SANDBOX_HASH=${SANDBOX_HASH}" >> $GITHUB_ENV
+
+      - run: |
+          cp "/var/lib/vorpal/store/vorpal-sandbox-${SANDBOX_HASH}.package.tar.zst" \
+            "${PWD}/vorpal-sandbox-${SANDBOX_HASH}.package.tar.zst"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vorpal-sandbox-${{ env.ARCH }}-${{ env.OS }}
+          path: vorpal-sandbox-${{ env.SANDBOX_HASH }}.package.tar.zst
 
   code-quality:
     needs:
-      - cache-dev
+      - dev
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
-          path: sandbox
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
       - uses: actions/cache/restore@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./sandbox.sh # prebake
-      - run: ./sandbox.sh make format
-      - run: ./sandbox.sh make lint
+      - run: ./script/dev.sh # prebake
+      - run: ./script/dev.sh make format
+      - run: ./script/dev.sh make lint
 
   package:
     needs:
@@ -71,16 +108,16 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
-          path: sandbox
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
       - uses: actions/cache/restore@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./sandbox.sh # prebake
-      - run: ./sandbox.sh make dist
+      - run: ./script/dev.sh # prebake
+      - run: ./script/dev.sh make dist
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -111,10 +148,10 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: sandbox-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sandbox.sh') }}
-          path: sandbox
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
-      - run: echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
+      - run: echo "$PWD/.env/bin" >> $GITHUB_PATH
 
       - run: which nickel
 

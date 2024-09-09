@@ -9,6 +9,7 @@ fi
 SANDBOX_PACKAGE_PATH="$1"
 
 # Environment variables
+CPU_COUNT=$(nproc)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 
@@ -18,6 +19,10 @@ ZSTD_STORE_PATH="${VORPAL_PATH}/store/zstd-${ZSTD_SOURCE_HASH}"
 ZSTD_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/zstd-${ZSTD_SOURCE_HASH}"
 ZSTD_STORE_PATH_SOURCE="${ZSTD_STORE_PATH}.source"
 ZSTD_VERSION="1.5.5"
+
+if [[ "${OS}" == "darwin" ]]; then
+    CPU_COUNT=$(sysctl -n hw.ncpu)
+fi
 
 if [ ! -d "${ZSTD_STORE_PATH_SOURCE}" ]; then
     curl -L \
@@ -52,7 +57,7 @@ cp -r "${ZSTD_STORE_PATH_SOURCE}/." "${ZSTD_STORE_PATH_SANDBOX}"
 
 pushd "${ZSTD_STORE_PATH_SANDBOX}"
 
-make -j$(nproc)
+make -j${CPU_COUNT}
 make install PREFIX="${SANDBOX_PACKAGE_PATH}"
 
 popd

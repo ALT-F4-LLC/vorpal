@@ -9,6 +9,7 @@ fi
 SANDBOX_PACKAGE_PATH="$1"
 
 # Environment variables
+CPU_COUNT=$(nproc)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 
@@ -18,6 +19,10 @@ BASH_STORE_PATH="${VORPAL_PATH}/store/bash-${BASH_SOURCE_HASH}"
 BASH_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/bash-${BASH_SOURCE_HASH}"
 BASH_STORE_PATH_SOURCE="${BASH_STORE_PATH}.source"
 BASH_VERSION="5.2"
+
+if [[ "${OS}" == "darwin" ]]; then
+    CPU_COUNT=$(sysctl -n hw.ncpu)
+fi
 
 if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then
     curl -L \
@@ -55,7 +60,7 @@ cp -r "${BASH_STORE_PATH_SOURCE}/." "${BASH_STORE_PATH_SANDBOX}"
 pushd "${BASH_STORE_PATH_SANDBOX}"
 
 ./configure --prefix="${SANDBOX_PACKAGE_PATH}"
-make -j$(nproc)
+make -j${CPU_COUNT}
 make install
 
 popd

@@ -11,9 +11,9 @@ mod profile;
 pub async fn build(
     bin_paths: Vec<String>,
     env_var: HashMap<String, String>,
-    sandbox_script_path: &Path,
-    sandbox_source_dir_path: &PathBuf,
-    sandbox_vorpal_path: &str,
+    script_path: &Path,
+    source_dir_path: &PathBuf,
+    stdenv_dir: &str,
 ) -> Result<Command> {
     let sandbox_profile_path = create_temp_file("sb").await?;
 
@@ -35,14 +35,14 @@ pub async fn build(
     let build_command_args = [
         "-f",
         sandbox_profile_path.to_str().unwrap(),
-        sandbox_script_path.to_str().unwrap(),
+        script_path.to_str().unwrap(),
     ];
 
     let mut sandbox_command = Command::new("/usr/bin/sandbox-exec");
 
     sandbox_command.args(build_command_args);
 
-    sandbox_command.current_dir(sandbox_source_dir_path);
+    sandbox_command.current_dir(source_dir_path);
 
     for (key, value) in env_var.clone().into_iter() {
         sandbox_command.env(key, value);
@@ -50,7 +50,7 @@ pub async fn build(
 
     let path_default = format!(
         "{}:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin",
-        sandbox_vorpal_path
+        stdenv_dir
     );
 
     sandbox_command.env("PATH", path_default.as_str());
