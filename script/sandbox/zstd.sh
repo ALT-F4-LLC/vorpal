@@ -9,12 +9,17 @@ fi
 SANDBOX_PACKAGE_PATH="$1"
 
 # Environment variables
+ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
 CPU_COUNT=""
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 
+if [[ "${ARCH}" == "arm64" ]]; then
+    ARCH="aarch64"
+fi
+
 # Build variables
-ZSTD_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/zstd")"
+ZSTD_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${ARCH}-${OS}/zstd")"
 ZSTD_STORE_PATH="${VORPAL_PATH}/store/zstd-${ZSTD_SOURCE_HASH}"
 ZSTD_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/zstd-${ZSTD_SOURCE_HASH}"
 ZSTD_STORE_PATH_SOURCE="${ZSTD_STORE_PATH}.source"

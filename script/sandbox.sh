@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
-SANDBOX_HASH=$(cat "${PWD}/script/sandbox/sha256sum/${OS}/sandbox")
+
+if [[ "${ARCH}" == "arm64" ]]; then
+    ARCH="aarch64"
+fi
+
+SANDBOX_HASH=$(cat "${PWD}/script/sandbox/sha256sum/${ARCH}-${OS}/sandbox")
 SANDBOX_STORE_PATH="${VORPAL_PATH}/store/vorpal-sandbox-${SANDBOX_HASH}"
 SANDBOX_STORE_PATH_PACKAGE="${SANDBOX_STORE_PATH}.package"
 

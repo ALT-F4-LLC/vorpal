@@ -9,12 +9,17 @@ fi
 SANDBOX_PACKAGE_PATH="$1"
 
 # Environment variables
+ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
 CPU_COUNT=""
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 
+if [[ "${ARCH}" == "arm64" ]]; then
+    ARCH="aarch64"
+fi
+
 # Build variables
-COREUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/coreutils")"
+COREUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${ARCH}-${OS}/coreutils")"
 COREUTILS_STORE_PATH="${VORPAL_PATH}/store/coreutils-${COREUTILS_SOURCE_HASH}"
 COREUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/coreutils-${COREUTILS_SOURCE_HASH}"
 COREUTILS_STORE_PATH_SOURCE="${COREUTILS_STORE_PATH}.source"
