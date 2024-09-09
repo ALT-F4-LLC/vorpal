@@ -31,10 +31,10 @@ if [ ! -d "${STORE_PATH_SOURCE}" ]; then
         -o "/tmp/binutils-${VERSION}.tar.gz"
     tar -xvzf "/tmp/binutils-${VERSION}.tar.gz" -C "/tmp"
 
-    ## TODO: move hash as arg to script
-
     echo "Calculating source hash..."
+
     DOWNLOAD_SOURCE_HASH=$("${PWD}/script/hash_path.sh" "/tmp/binutils-${VERSION}")
+
     echo "Calculated source hash: ${SOURCE_HASH}"
 
     if [ "$DOWNLOAD_SOURCE_HASH" != "$SOURCE_HASH" ]; then
@@ -42,7 +42,7 @@ if [ ! -d "${STORE_PATH_SOURCE}" ]; then
         exit 1
     fi
 
-    ## TODO: move to separate script
+    chmod 644 "/tmp/binutils-${VERSION}/tests/history.list"
 
     tar -cvf - -C "/tmp/binutils-${VERSION}" . | zstd -o "${STORE_PATH_SOURCE}.tar.zst"
 

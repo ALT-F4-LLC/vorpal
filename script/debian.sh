@@ -14,8 +14,8 @@ case "$1" in
             --no-install-recommends \
             --yes \
             bubblewrap \
+            coreutils \
             direnv \
-            nproc \
             unzip
         echo "eval \"\$(direnv hook bash)\"" >> ~/.bashrc
         ;;
@@ -27,11 +27,11 @@ case "$1" in
             automake \
             bison \
             build-essential \
+            coreutils \
             flex \
             gawk \
             gperf \
             m4 \
-            nproc \
             perl \
             texinfo \
             zstd
