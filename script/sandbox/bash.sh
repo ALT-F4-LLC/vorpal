@@ -20,10 +20,6 @@ BASH_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/bash-${BASH_SOURCE_HASH}"
 BASH_STORE_PATH_SOURCE="${BASH_STORE_PATH}.source"
 BASH_VERSION="5.2"
 
-if [[ "${OS}" == "darwin" ]]; then
-    CPU_COUNT="-j$(sysctl -n hw.ncpu)"
-fi
-
 if [[ "${OS}" == "linux" ]]; then
     CPU_COUNT="-j$(nproc)"
 fi

@@ -21,10 +21,6 @@ STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/${PACKAGE_NAME}-${SOURCE_HASH}"
 STORE_PATH_SOURCE="${STORE_PATH}.source"
 VERSION="2.43.1"
 
-if [[ "${OS}" == "darwin" ]]; then
-    CPU_COUNT="-j$(sysctl -n hw.ncpu)"
-fi
-
 if [[ "${OS}" == "linux" ]]; then
     CPU_COUNT="-j$(nproc)"
 fi

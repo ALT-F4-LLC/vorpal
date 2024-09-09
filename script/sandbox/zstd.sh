@@ -20,10 +20,6 @@ ZSTD_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/zstd-${ZSTD_SOURCE_HASH}"
 ZSTD_STORE_PATH_SOURCE="${ZSTD_STORE_PATH}.source"
 ZSTD_VERSION="1.5.5"
 
-if [[ "${OS}" == "darwin" ]]; then
-    CPU_COUNT="-j$(sysctl -n hw.ncpu)"
-fi
-
 if [[ "${OS}" == "linux" ]]; then
     CPU_COUNT="-j$(nproc)"
 fi
