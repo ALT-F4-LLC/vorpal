@@ -9,7 +9,7 @@ fi
 SANDBOX_PACKAGE_PATH="$1"
 
 # Environment variables
-CPU_COUNT=$(nproc)
+CPU_COUNT=""
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 
@@ -21,7 +21,11 @@ BASH_STORE_PATH_SOURCE="${BASH_STORE_PATH}.source"
 BASH_VERSION="5.2"
 
 if [[ "${OS}" == "darwin" ]]; then
-    CPU_COUNT=$(sysctl -n hw.ncpu)
+    CPU_COUNT="-j$(sysctl -n hw.ncpu)"
+fi
+
+if [[ "${OS}" == "linux" ]]; then
+    CPU_COUNT="-j$(nproc)"
 fi
 
 if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then

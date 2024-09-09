@@ -9,7 +9,7 @@ fi
 SANDBOX_PACKAGE_PATH="$1"
 
 # Environment variables
-CPU_COUNT=$(nproc)
+CPU_COUNT=""
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 
@@ -21,7 +21,11 @@ COREUTILS_STORE_PATH_SOURCE="${COREUTILS_STORE_PATH}.source"
 COREUTILS_VERSION="9.5"
 
 if [[ "${OS}" == "darwin" ]]; then
-    CPU_COUNT=$(sysctl -n hw.ncpu)
+    CPU_COUNT="-j$(sysctl -n hw.ncpu)"
+fi
+
+if [[ "${OS}" == "linux" ]]; then
+    CPU_COUNT="-j$(nproc)"
 fi
 
 if [ ! -d "${COREUTILS_STORE_PATH_SOURCE}" ]; then

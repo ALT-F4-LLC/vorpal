@@ -9,7 +9,7 @@ fi
 SANDBOX_PACKAGE_PATH="$1"
 
 # Environment variables
-CPU_COUNT=$(nproc)
+CPU_COUNT=""
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 VORPAL_PATH="/var/lib/vorpal"
 
@@ -22,7 +22,11 @@ STORE_PATH_SOURCE="${STORE_PATH}.source"
 VERSION="2.43.1"
 
 if [[ "${OS}" == "darwin" ]]; then
-    CPU_COUNT=$(sysctl -n hw.ncpu)
+    CPU_COUNT="-j$(sysctl -n hw.ncpu)"
+fi
+
+if [[ "${OS}" == "linux" ]]; then
+    CPU_COUNT="-j$(nproc)"
 fi
 
 if [ ! -d "${STORE_PATH_SOURCE}" ]; then
@@ -67,7 +71,7 @@ popd
 pushd "${STORE_PATH_SANDBOX}/build"
 
 ../configure --prefix="${SANDBOX_PACKAGE_PATH}"
-make -j${CPU_COUNT}
+make ${CPU_COUNT}
 make install
 
 popd
