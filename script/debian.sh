@@ -36,7 +36,6 @@ case "$1" in
             texinfo \
             zstd
         ;;
-
     *)
         usage
         ;;

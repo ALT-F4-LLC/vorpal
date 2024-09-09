@@ -6,8 +6,13 @@ AMBER_VERSION="0.3.5-alpha"
 ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
 OS=$(uname | tr '[:upper:]' '[:lower:]')
 
-if [[ -f "${ENV_PATH}/bin/amber" ]]; then
-    "${ENV_PATH}/bin/amber" --version | head -n 1
+if [ -z "$1" ]; then
+  echo "Usage: $0 <sandbox-package-path>"
+  exit 1
+fi
+
+if [[ -f "${1}/bin/amber" ]]; then
+    "${1}/bin/amber" --version | head -n 1
     exit 0
 fi
 
@@ -38,11 +43,11 @@ tar -xf "/tmp/amber-${AMBER_VERSION}.tar.xz" -C "/tmp"
 ls -alh /tmp
 
 if [[ "${OS}" == "darwin" ]]; then
-    cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${ENV_PATH}/bin/amber"
+    cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${1}/bin/amber"
 elif [[ "${OS}" == "linux" && "${ARCH}" == "x86_64" ]]; then
-    cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${ENV_PATH}/bin/amber"
+    cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${1}/bin/amber"
 else
-    cp "/tmp/amber" "${ENV_PATH}/bin/amber"
+    cp "/tmp/amber" "${1}/bin/amber"
 fi
 
 rm -rf "/tmp/amber-${AMBER_VERSION}.tar.gz"

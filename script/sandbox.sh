@@ -9,12 +9,11 @@ if [[ "${ARCH}" == "arm64" ]]; then
     ARCH="aarch64"
 fi
 
-SANDBOX_HASH=$(cat "${PWD}/script/sandbox/sha256sum/${ARCH}-${OS}/sandbox")
-SANDBOX_STORE_PATH="${VORPAL_PATH}/store/vorpal-sandbox-${SANDBOX_HASH}"
-SANDBOX_STORE_PATH_PACKAGE="${SANDBOX_STORE_PATH}.package"
+SANDBOX_VERSION="0.1.0-rc.0"
+SANDBOX_PACKAGE_PATH="${VORPAL_PATH}/store/vorpal-sandbox-${SANDBOX_VERSION}"
 
-if [[ -d "${SANDBOX_STORE_PATH_PACKAGE}" ]]; then
-    echo "sandbox exists: ${SANDBOX_STORE_PATH_PACKAGE}"
+if [[ -d "${SANDBOX_PACKAGE_PATH}" ]]; then
+    echo "sandbox exists: ${SANDBOX_PACKAGE_PATH}"
     exit 1
 fi
 
@@ -29,8 +28,6 @@ packages_darwin=(
     "coreutils"
     "zstd"
 )
-packages_hashes=()
-packages_installed=()
 packages_linux=(
     "binutils"
     "gcc"
@@ -49,51 +46,37 @@ for dir in "${directories[@]}"; do
     fi
 done
 
-mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}"
+mkdir -p "${SANDBOX_PACKAGE_PATH}"
 
 if [[ "${OS}" == "darwin" ]]; then
     for package in "${packages_darwin[@]}"; do
-        "${PWD}/script/sandbox/${package}.sh" "${SANDBOX_STORE_PATH_PACKAGE}"
-        hash="$(cat "${PWD}/script/sandbox/sha256sum/${ARCH}-${OS}/${package}")"
-        packages_hashes+=("${hash}")
-        packages_installed+=("${package}")
+        "${PWD}/script/sandbox/${package}.sh" "${SANDBOX_PACKAGE_PATH}"
     done
 fi
 
 if [[ "${OS}" == "linux" ]]; then
     for package in "${packages_linux[@]}"; do
-        "${PWD}/script/sandbox/${package}.sh" "${SANDBOX_STORE_PATH_PACKAGE}"
-        hash="$(cat "${PWD}/script/sandbox/sha256sum/${ARCH}-${OS}/${package}")"
-        packages_hashes+=("${hash}")
-        packages_installed+=("${package}")
+        "${PWD}/script/sandbox/${package}.sh" "${SANDBOX_PACKAGE_PATH}"
     done
 fi
 
-source_hash=$(echo "${packages_hashes[@]}" | shasum -a 256 | awk '{print $1}')
-
-if [[ "${SANDBOX_HASH}" != "${source_hash}" ]]; then
-    echo "sandbox hash mismatch: ${SANDBOX_HASH} != ${source_hash}"
-    rm -rf "${SANDBOX_STORE_PATH_PACKAGE}"
-    exit 1
-fi
-
 # Patch for includes
-mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}/usr/include"
-rsync -av --ignore-existing "${SANDBOX_STORE_PATH_PACKAGE}/include/" "${SANDBOX_STORE_PATH_PACKAGE}/usr/include"
-rm -rf "${SANDBOX_STORE_PATH_PACKAGE}/include"
+mkdir -p "${SANDBOX_PACKAGE_PATH}/usr/include"
+rsync -av --ignore-existing "${SANDBOX_PACKAGE_PATH}/include/" "${SANDBOX_PACKAGE_PATH}/usr/include"
+rm -rf "${SANDBOX_PACKAGE_PATH}/include"
 
 # Patch for linux only
 if [[ "${OS}" == "linux" ]]; then
     # Patch for glibc
-    ln -s "${SANDBOX_STORE_PATH_PACKAGE}/bin/gcc" "${SANDBOX_STORE_PATH_PACKAGE}/bin/cc"
+    ln -s "${SANDBOX_PACKAGE_PATH}/bin/gcc" "${SANDBOX_PACKAGE_PATH}/bin/cc"
 
     # Patch for nameservers
-    echo "nameserver 1.1.1.1" > "${SANDBOX_STORE_PATH_PACKAGE}/etc/resolv.conf"
+    echo "nameserver 1.1.1.1" > "${SANDBOX_PACKAGE_PATH}/etc/resolv.conf"
 
     # Copy /etc/ssl/certs to sandbox
-    mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}/etc/ssl/certs"
-    rsync -av /etc/ssl/certs/ "${SANDBOX_STORE_PATH_PACKAGE}/etc/ssl/certs"
+    mkdir -p "${SANDBOX_PACKAGE_PATH}/etc/ssl/certs"
+    rsync -av /etc/ssl/certs/ "${SANDBOX_PACKAGE_PATH}/etc/ssl/certs"
 fi
 
 # Compress sandbox
-tar -cvf - -C "${SANDBOX_STORE_PATH_PACKAGE}" . | zstd -o "${SANDBOX_STORE_PATH_PACKAGE}.tar.zst"
+tar -cvf - -C "${SANDBOX_PACKAGE_PATH}" . | zstd -o "${SANDBOX_PACKAGE_PATH}.tar.zst"

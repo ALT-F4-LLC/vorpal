@@ -103,7 +103,7 @@ jobs:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-  package-sandbox:
+  sandbox:
     needs:
       - dev
     runs-on: ${{ matrix.runner }}
@@ -129,25 +129,23 @@ jobs:
       - run: ./script/sandbox.sh
 
       - run: |
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          SANDBOX_HASH=$(cat "${PWD}/script/sandbox/sha256sum/${OS}/sandbox")
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=${OS}" >> $GITHUB_ENV
-          echo "SANDBOX_HASH=${SANDBOX_HASH}" >> $GITHUB_ENV
 
       - run: |
-          cp "/var/lib/vorpal/store/vorpal-sandbox-${SANDBOX_HASH}.package.tar.zst" \
-            "${PWD}/vorpal-sandbox-${SANDBOX_HASH}.package.tar.zst"
+          VERSION="0.1.0-rc.0"
+          cp "/var/lib/vorpal/store/vorpal-sandbox-${VERSION}.tar.zst" \
+            "${PWD}/vorpal-sandbox.tar.zst"
 
       - uses: actions/upload-artifact@v4
         with:
           name: vorpal-sandbox-${{ env.ARCH }}-${{ env.OS }}
-          path: vorpal-sandbox-${{ env.SANDBOX_HASH }}.package.tar.zst
+          path: vorpal-sandbox.tar.zst
 
   test:
     needs:
       - package
-      - package-sandbox
+      - sandbox
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:

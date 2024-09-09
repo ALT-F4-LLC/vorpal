@@ -6,8 +6,8 @@ OS="$(uname | tr '[:upper:]' '[:lower:]')"
 PROTOC_SYSTEM=""
 PROTOC_VERSION="28.0"
 
-if [[ -f "${ENV_PATH}/bin/protoc" ]]; then
-    "${ENV_PATH}/bin/protoc" --version
+if [[ -f "${1}/bin/protoc" ]]; then
+    "${1}/bin/protoc" --version
     exit 0
 fi
 
@@ -38,7 +38,7 @@ curl -L \
     "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" \
     -o "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"
 
-unzip "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" -d "${ENV_PATH}"
+unzip "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" -d "${1}"
 
 rm -rf "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}"
 

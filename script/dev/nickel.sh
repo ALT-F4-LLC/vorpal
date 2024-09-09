@@ -6,8 +6,13 @@ NICKEL_ARCH="$ARCH"
 NICKEL_VERSION="1.7.0"
 OS="$(uname | tr '[:upper:]' '[:lower:]')"
 
-if [[ -f "${ENV_PATH}/bin/nickel" ]]; then
-    "${ENV_PATH}/bin/nickel" --version
+if [ -z "$1" ]; then
+  echo "Usage: $0 <sandbox-package-path>"
+  exit 1
+fi
+
+if [[ -f "${1}/bin/nickel" ]]; then
+    "${1}/bin/nickel" --version
     exit 0
 fi
 
@@ -18,13 +23,13 @@ fi
 if [ "$OS" == "darwin" ]; then
     PATH="$HOME/.cargo/bin:$PATH"
 
-    cargo install --root "${ENV_PATH}" nickel-lang-cli
+    cargo install --root "${1}" nickel-lang-cli
 fi
 
 if [ "$OS" == "linux" ]; then
     curl -L \
         "https://github.com/tweag/nickel/releases/download/${NICKEL_VERSION}/nickel-${NICKEL_ARCH}-linux" \
-        -o "${ENV_PATH}/bin/nickel"
+        -o "${1}/bin/nickel"
 
-    chmod +x "${ENV_PATH}/bin/nickel"
+    chmod +x "${1}/bin/nickel"
 fi
