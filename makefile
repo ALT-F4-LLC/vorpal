@@ -10,7 +10,7 @@ build-packer: validate-packer
 		-var-file=$(WORK_DIR)/.packer/pkrvars/debian/fusion-13.pkrvars.hcl \
 		$(WORK_DIR)/.packer
 
-build: clean check
+build: check
 	cargo build --release
 
 check: lint
