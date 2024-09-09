@@ -46,8 +46,6 @@ if [ ! -d "${STORE_PATH_SOURCE}" ]; then
         exit 1
     fi
 
-    chmod 644 "/tmp/binutils-${VERSION}/tests/history.list"
-
     tar -cvf - -C "/tmp/binutils-${VERSION}" . | zstd -o "${STORE_PATH_SOURCE}.tar.zst"
 
     mkdir -p "${STORE_PATH_SOURCE}"
