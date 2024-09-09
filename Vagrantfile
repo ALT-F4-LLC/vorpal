@@ -35,21 +35,19 @@ Vagrant.configure("2") do |config|
       pushd "${HOME}/vorpal"
 
       ./script/debian.sh "dev"
-      ./script/dev.sh
 
-      PATH=$PWD/.env/bin:$HOME/.cargo/bin:$PATH
-
-      make dist
+      ./script/dev.sh make dist
 
       popd
     }' >> ~/.bashrc
 
     echo 'function setup_sandbox {
-      setup_dev
+      setup_vorpal
 
       pushd "${HOME}/vorpal"
 
       ./script/debian.sh "sandbox"
+
       ./script/sandbox.sh
 
       popd

@@ -27,10 +27,12 @@ case "$1" in
             bison \
             build-essential \
             flex \
+            gawk \
             gperf \
             m4 \
             perl \
-            texinfo
+            texinfo \
+            zstd
         ;;
 
     *)

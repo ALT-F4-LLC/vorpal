@@ -6,6 +6,7 @@ readonly SCRIPT_PATH="${PWD}/script"
 
 scripts=(
   "rustup.sh"
+  "amber.sh"
   "coreutils.sh"
   "nickel.sh" # must go after rustup.sh
   "protoc.sh"

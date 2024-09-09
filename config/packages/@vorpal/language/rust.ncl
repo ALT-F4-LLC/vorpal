@@ -53,9 +53,6 @@ fun config =>
     name = config.name,
     packages = [cargo, rustc, protoc, cache],
     script = m%"
-      export LD_LIBRARY_PATH="$rustc/lib:/lib"
-      export RUSTFLAGS="-C linker=gcc -L $rustc/lib:/lib"
-
       mkdir -p .cargo
       cp $%{std.string.replace "-" "_" config.name}_cache/config.toml .cargo/config.toml
 

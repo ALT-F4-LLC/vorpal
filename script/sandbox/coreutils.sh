@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ -z "$1" ]; then
+  echo "Usage: $0 <sandbox-package-path>"
+  exit 1
+fi
+
+SANDBOX_PACKAGE_PATH="$1"
+
 # Environment variables
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
 VORPAL_PATH="/var/lib/vorpal"
 
 # Build variables
 COREUTILS_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/coreutils")"
 COREUTILS_STORE_PATH="${VORPAL_PATH}/store/coreutils-${COREUTILS_SOURCE_HASH}"
-COREUTILS_STORE_PATH_PACKAGE="${COREUTILS_STORE_PATH}.package"
 COREUTILS_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/coreutils-${COREUTILS_SOURCE_HASH}"
 COREUTILS_STORE_PATH_SOURCE="${COREUTILS_STORE_PATH}.source"
 COREUTILS_VERSION="9.5"
-
-if [ -d "${COREUTILS_STORE_PATH_PACKAGE}" ]; then
-    echo "coreutils-${COREUTILS_SOURCE_HASH}"
-    exit 0
-fi
 
 if [ ! -d "${COREUTILS_STORE_PATH_SOURCE}" ]; then
     curl -L \
@@ -27,7 +27,7 @@ if [ ! -d "${COREUTILS_STORE_PATH_SOURCE}" ]; then
 
     echo "Calculating source hash..."
 
-    SOURCE_HASH=$(hash_path "/tmp/coreutils-${COREUTILS_VERSION}")
+    SOURCE_HASH=$("${PWD}/script/hash_path.sh" "/tmp/coreutils-${COREUTILS_VERSION}")
 
     echo "Calculated source hash: ${SOURCE_HASH}"
 
@@ -54,12 +54,10 @@ cp -r "${COREUTILS_STORE_PATH_SOURCE}/." "${COREUTILS_STORE_PATH_SANDBOX}"
 
 pushd "${COREUTILS_STORE_PATH_SANDBOX}"
 
-./configure --prefix="${COREUTILS_STORE_PATH_PACKAGE}"
-make
+./configure --prefix="${SANDBOX_PACKAGE_PATH}"
+make -j$(nproc)
 make install
 
 popd
-
-tar -cvf - -C "${COREUTILS_STORE_PATH_PACKAGE}" . | zstd -o "${COREUTILS_STORE_PATH_PACKAGE}.tar.zst"
 
 rm -rf "${COREUTILS_STORE_PATH_SANDBOX}"

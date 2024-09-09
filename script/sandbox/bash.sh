@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ -z "$1" ]; then
+  echo "Usage: $0 <sandbox-package-path>"
+  exit 1
+fi
+
+SANDBOX_PACKAGE_PATH="$1"
+
 # Environment variables
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-PATH="${PWD}/script/bin:${PWD}/.env/bin:${PATH}"
 VORPAL_PATH="/var/lib/vorpal"
 
 # Build variables
 BASH_SOURCE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/bash")"
 BASH_STORE_PATH="${VORPAL_PATH}/store/bash-${BASH_SOURCE_HASH}"
-BASH_STORE_PATH_PACKAGE="${BASH_STORE_PATH}.package"
 BASH_STORE_PATH_SANDBOX="${VORPAL_PATH}/sandbox/bash-${BASH_SOURCE_HASH}"
 BASH_STORE_PATH_SOURCE="${BASH_STORE_PATH}.source"
 BASH_VERSION="5.2"
-
-if [ -d "${BASH_STORE_PATH_PACKAGE}" ]; then
-    echo "bash-${BASH_SOURCE_HASH}"
-    exit 0
-fi
 
 if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then
     curl -L \
@@ -27,7 +27,7 @@ if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then
 
     echo "Calculating source hash..."
 
-    SOURCE_HASH=$(hash_path "/tmp/bash-${BASH_VERSION}")
+    SOURCE_HASH=$("${PWD}/script/hash_path.sh" "/tmp/bash-${BASH_VERSION}")
 
     echo "Calculated source hash: ${SOURCE_HASH}"
 
@@ -54,12 +54,10 @@ cp -r "${BASH_STORE_PATH_SOURCE}/." "${BASH_STORE_PATH_SANDBOX}"
 
 pushd "${BASH_STORE_PATH_SANDBOX}"
 
-./configure --prefix="${BASH_STORE_PATH_PACKAGE}"
-make
+./configure --prefix="${SANDBOX_PACKAGE_PATH}"
+make -j$(nproc)
 make install
 
 popd
-
-tar -cvf - -C "${BASH_STORE_PATH_PACKAGE}" . | zstd -o "${BASH_STORE_PATH_PACKAGE}.tar.zst"
 
 rm -rf "${BASH_STORE_PATH_SANDBOX}"

@@ -2,7 +2,6 @@
 set -euo pipefail
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-PATH="${PWD}/.env/bin:${PATH}"
 VORPAL_PATH="/var/lib/vorpal"
 SANDBOX_HASH=$(cat "${PWD}/script/sandbox/sha256sum/${OS}/sandbox")
 SANDBOX_STORE_PATH="${VORPAL_PATH}/store/vorpal-sandbox-${SANDBOX_HASH}"
@@ -14,27 +13,18 @@ directories=(
     "${VORPAL_PATH}/store"
 )
 
-linux_packages=(
-    "glibc"
-    "gcc"
-)
-
-common_packages=(
+packages=(
     "binutils"
-    "coreutils"
+    "gcc"
+    "linux-headers"
+    "glibc"
     "bash"
+    "coreutils"
     "zstd"
+    # "libstdc++"
 )
-
 packages_hashes=()
-
 packages_installed=()
-
-# First, we need to install the development tools
-
-"${PWD}/script/dev.sh"
-
-# Then, we need to create the directories
 
 for dir in "${directories[@]}"; do
     if [[ ! -d "${dir}" ]]; then
@@ -43,32 +33,22 @@ for dir in "${directories[@]}"; do
     fi
 done
 
-# Then, we need to install the packages for Linux
+mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}"
 
 if [[ "${OS}" == "linux" ]]; then
-    for package in "${linux_packages[@]}"; do
-        "${PWD}/script/sandbox/${package}.sh"
+    for package in "${packages[@]}"; do
+        "${PWD}/script/sandbox/${package}.sh" "${SANDBOX_STORE_PATH_PACKAGE}"
         hash="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/${package}")"
         packages_hashes+=("${hash}")
         packages_installed+=("${package}")
     done
 fi
 
-# Then, we need to install the common packages
-
-for package in "${common_packages[@]}"; do
-    "${PWD}/script/sandbox/${package}.sh"
-    hash="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/${package}")"
-    packages_hashes+=("${hash}")
-    packages_installed+=("${package}")
-done
-
-# Then, we need to validate the source hash
-
 source_hash=$(echo "${packages_hashes[@]}" | shasum -a 256 | awk '{print $1}')
 
 if [[ "${SANDBOX_HASH}" != "${source_hash}" ]]; then
-    echo "source hash mismatch: ${SANDBOX_HASH} != ${source_hash}"
+    echo "sandbox hash mismatch: ${SANDBOX_HASH} != ${source_hash}"
+    rm -rf "${SANDBOX_STORE_PATH_PACKAGE}"
     exit 1
 fi
 
@@ -77,26 +57,19 @@ if [[ -d "${SANDBOX_STORE_PATH_PACKAGE}" ]]; then
     exit 0
 fi
 
-# Then, we need to create the sandbox package
+# Patch for gcc
+rsync -av --ignore-existing "${SANDBOX_STORE_PATH_PACKAGE}/include/" "${SANDBOX_STORE_PATH_PACKAGE}/usr/include"
+rm -f "${SANDBOX_STORE_PATH_PACKAGE}/include"
 
-for package in "${packages_installed[@]}"; do
-    PACKAGE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/${package}")"
-    PACKAGE_PATH="${VORPAL_PATH}/store/${package}-${PACKAGE_HASH}.package"
+# Patch for glibc
+ln -s "${SANDBOX_STORE_PATH_PACKAGE}/bin/gcc" "${SANDBOX_STORE_PATH_PACKAGE}/bin/cc"
 
-    find "${PACKAGE_PATH}" -type f ! -path "${PACKAGE_PATH}/share/*" | while read -r file; do
-        relative_path="${file#"${PACKAGE_PATH}/"}"
+# Patch for nameservers
+echo "nameserver 1.1.1.1" > "${SANDBOX_STORE_PATH_PACKAGE}/etc/resolv.conf"
 
-        mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}/$(dirname "${relative_path}")"
+# Copy /etc/ssl/certs to sandbox
+mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}/etc/ssl/certs"
+rsync -av /etc/ssl/certs/ "${SANDBOX_STORE_PATH_PACKAGE}/etc/ssl/certs"
 
-        ln -s "${file}" "${SANDBOX_STORE_PATH_PACKAGE}/${relative_path}"
-    done
-done
-
-GCC_PACKAGE_HASH="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/gcc")"
-GCC_PACKAGE_PATH="${VORPAL_PATH}/store/gcc-${GCC_PACKAGE_HASH}.package"
-
-ln -s "${GCC_PACKAGE_PATH}/bin/gcc" "${SANDBOX_STORE_PATH_PACKAGE}/bin/cc"
-
-# Then, we need to create the package archive
-
+# Compress sandbox
 tar -cvf - -C "${SANDBOX_STORE_PATH_PACKAGE}" . | zstd -o "${SANDBOX_STORE_PATH_PACKAGE}.tar.zst"

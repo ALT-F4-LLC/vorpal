@@ -268,7 +268,7 @@ pub async fn run(
     }
 
     let mut sandbox_stdenv_hash =
-        "8a4a01421ebaa26c9a71c8a289ab4a9b215fd48b64331b31d94e1c30da3c5c03";
+        "a492f1ba6ad5eb752f118f2a00ab325d39585e2610bf35a81fa4a82d03c99779";
 
     if worker_system == Aarch64Macos || worker_system == X8664Macos {
         sandbox_stdenv_hash = "819232062aecd85c775f498b2cdb7f4bf0b8347b0a1144658a0d30c2cfebb744";
@@ -354,6 +354,8 @@ pub async fn run(
                 bin_paths,
                 env_var.clone(),
                 &sandbox_home_dir_path,
+                &sandbox_package_dir_path,
+                &store_paths,
                 &sandbox_script_file_path,
                 &sandbox_source_dir_path,
                 &sandbox_stdenv_dir_path,
