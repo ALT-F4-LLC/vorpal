@@ -57,6 +57,8 @@ if [ ! -d "${BASH_STORE_PATH_SOURCE}" ]; then
     rm -rf "/tmp/bash-${BASH_VERSION}.tar.gz"
 fi
 
+rm -rf "${BASH_STORE_PATH_SANDBOX}" || true
+
 mkdir -p "${BASH_STORE_PATH_SANDBOX}"
 
 cp -r "${BASH_STORE_PATH_SOURCE}/." "${BASH_STORE_PATH_SANDBOX}"

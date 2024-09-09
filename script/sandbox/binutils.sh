@@ -56,6 +56,8 @@ if [ ! -d "${STORE_PATH_SOURCE}" ]; then
     rm -rf "/tmp/binutils-${VERSION}.tar.gz"
 fi
 
+rm -rf "${STORE_PATH_SANDBOX}" || true
+
 mkdir -p "${STORE_PATH_SANDBOX}"
 
 cp -r "${STORE_PATH_SOURCE}/." "${STORE_PATH_SANDBOX}"

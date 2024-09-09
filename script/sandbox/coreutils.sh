@@ -57,6 +57,8 @@ if [ ! -d "${COREUTILS_STORE_PATH_SOURCE}" ]; then
     rm -rf "/tmp/coreutils-${COREUTILS_VERSION}.tar.gz"
 fi
 
+rm -rf "${COREUTILS_STORE_PATH_SANDBOX}" || true
+
 mkdir -p "${COREUTILS_STORE_PATH_SANDBOX}"
 
 cp -r "${COREUTILS_STORE_PATH_SOURCE}/." "${COREUTILS_STORE_PATH_SANDBOX}"

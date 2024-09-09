@@ -55,6 +55,8 @@ if [ ! -d "${ZSTD_STORE_PATH_SOURCE}" ]; then
     rm -rf "/tmp/zstd-${ZSTD_VERSION}.tar.gz"
 fi
 
+rm -rf "${ZSTD_STORE_PATH_SANDBOX}" || true
+
 mkdir -p "${ZSTD_STORE_PATH_SANDBOX}"
 
 cp -r "${ZSTD_STORE_PATH_SOURCE}/." "${ZSTD_STORE_PATH_SANDBOX}"
