@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euxo pipefail
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <sandbox-package-path>"
