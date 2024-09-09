@@ -35,6 +35,12 @@ curl -L \
 
 tar -xf "/tmp/amber-${AMBER_VERSION}.tar.xz" -C "/tmp"
 
-cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${ENV_PATH}/bin/amber"
+ls -alh /tmp
+
+if [[ "${OS}" == "darwin" ]]; then
+    cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${ENV_PATH}/bin/amber"
+else
+    cp "/tmp/amber" "${ENV_PATH}/bin/amber"
+fi
 
 rm -rf "/tmp/amber-${AMBER_VERSION}.tar.gz"
