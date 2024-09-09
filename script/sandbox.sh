@@ -55,7 +55,7 @@ mkdir -p "${SANDBOX_STORE_PATH_PACKAGE}"
 if [[ "${OS}" == "darwin" ]]; then
     for package in "${packages_darwin[@]}"; do
         "${PWD}/script/sandbox/${package}.sh" "${SANDBOX_STORE_PATH_PACKAGE}"
-        hash="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/${package}")"
+        hash="$(cat "${PWD}/script/sandbox/sha256sum/${ARCH}-${OS}/${package}")"
         packages_hashes+=("${hash}")
         packages_installed+=("${package}")
     done
@@ -64,7 +64,7 @@ fi
 if [[ "${OS}" == "linux" ]]; then
     for package in "${packages_linux[@]}"; do
         "${PWD}/script/sandbox/${package}.sh" "${SANDBOX_STORE_PATH_PACKAGE}"
-        hash="$(cat "${PWD}/script/sandbox/sha256sum/${OS}/${package}")"
+        hash="$(cat "${PWD}/script/sandbox/sha256sum/${ARCH}-${OS}/${package}")"
         packages_hashes+=("${hash}")
         packages_installed+=("${package}")
     done
