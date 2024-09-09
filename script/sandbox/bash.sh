@@ -64,7 +64,7 @@ cp -r "${BASH_STORE_PATH_SOURCE}/." "${BASH_STORE_PATH_SANDBOX}"
 pushd "${BASH_STORE_PATH_SANDBOX}"
 
 ./configure --prefix="${SANDBOX_PACKAGE_PATH}"
-make -j${CPU_COUNT}
+make ${CPU_COUNT}
 make install
 
 popd

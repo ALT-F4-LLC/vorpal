@@ -61,7 +61,7 @@ cp -r "${ZSTD_STORE_PATH_SOURCE}/." "${ZSTD_STORE_PATH_SANDBOX}"
 
 pushd "${ZSTD_STORE_PATH_SANDBOX}"
 
-make -j${CPU_COUNT}
+make ${CPU_COUNT}
 make install PREFIX="${SANDBOX_PACKAGE_PATH}"
 
 popd
