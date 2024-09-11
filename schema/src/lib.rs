@@ -38,6 +38,7 @@ pub struct Package {
     pub name: String,
     pub packages: Vec<Package>,
     pub script: String,
+    pub sandbox: bool,
     pub source: Option<String>,
     pub source_excludes: Vec<String>,
     pub source_hash: Option<String>,

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
 #[allow(clippy::too_many_arguments)]
@@ -12,8 +12,10 @@ pub async fn build(
     package_paths: &[String],
     script_path: &Path,
     source_dir_path: &Path,
-    stdenv_dir_path: &Path,
+    stdenv_dir_path: Option<PathBuf>,
 ) -> Result<Command> {
+    let stdenv_dir_path = stdenv_dir_path.expect("failed to get stdenv path");
+
     let mut env_var_path = "/bin:/sbin".to_string();
 
     if !bin_paths.is_empty() {

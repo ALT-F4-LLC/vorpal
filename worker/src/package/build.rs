@@ -1,4 +1,4 @@
-use crate::package::{darwin, linux};
+use crate::package::{darwin, linux, native};
 use anyhow::Result;
 use rsa::{
     pss::{Signature, VerifyingKey},
@@ -65,7 +65,7 @@ pub async fn run(
     let mut environment = HashMap::new();
     let mut name = String::new();
     let mut packages = vec![];
-    // let mut sandbox = false;
+    let mut sandbox = true;
     let mut script = String::new();
     let mut source_data: Vec<u8> = Vec::new();
     let mut source_data_chunk = 0;
@@ -94,7 +94,7 @@ pub async fn run(
         environment = result.environment;
         name = result.name;
         packages = result.packages;
-        // sandbox = result.sandbox;
+        sandbox = result.sandbox;
         script = result.script;
         target = PackageSystem::try_from(result.target).expect("failed to convert target");
     }
@@ -267,26 +267,33 @@ pub async fn run(
         send_error(tx, "build script is empty".to_string()).await?
     }
 
-    let mut sandbox_stdenv_hash =
-        "a492f1ba6ad5eb752f118f2a00ab325d39585e2610bf35a81fa4a82d03c99779";
+    let mut stdenv_path = None;
+    let mut stdenv_path_bash = "#!/bin/bash".to_string();
 
-    if worker_system == Aarch64Macos || worker_system == X8664Macos {
-        sandbox_stdenv_hash = "b3953aa9fe113ccdd51f98db577a4f02a14e553f12af9e6eddd218691527632b";
+    if sandbox {
+        let mut sandbox_stdenv_hash =
+            "a492f1ba6ad5eb752f118f2a00ab325d39585e2610bf35a81fa4a82d03c99779";
+
+        if worker_system == Aarch64Macos || worker_system == X8664Macos {
+            sandbox_stdenv_hash =
+                "b3953aa9fe113ccdd51f98db577a4f02a14e553f12af9e6eddd218691527632b";
+        }
+
+        let sandbox_stdenv_dir = format!(
+            "{}/vorpal-sandbox-{}.package",
+            get_store_dir_path().display(),
+            sandbox_stdenv_hash
+        );
+
+        let sandbox_stdenv_dir_path = Path::new(&sandbox_stdenv_dir).to_path_buf();
+
+        if !sandbox_stdenv_dir_path.exists() {
+            send_error(tx, "sandbox package missing".to_string()).await?
+        }
+
+        stdenv_path = Some(sandbox_stdenv_dir_path.to_path_buf());
+        stdenv_path_bash = format!("#!{}/bin/bash", sandbox_stdenv_dir)
     }
-
-    let sandbox_stdenv_dir = format!(
-        "{}/vorpal-sandbox-{}.package",
-        get_store_dir_path().display(),
-        sandbox_stdenv_hash
-    );
-
-    let sandbox_stdenv_dir_path = Path::new(&sandbox_stdenv_dir).to_path_buf();
-
-    if !sandbox_stdenv_dir_path.exists() {
-        send_error(tx, "sandbox package missing".to_string()).await?
-    }
-
-    let sandbox_stdenv_bash_path = format!("#!{}/bin/bash", sandbox_stdenv_dir);
 
     let sandbox_script = script
         .trim()
@@ -295,12 +302,12 @@ pub async fn run(
         .collect::<Vec<&str>>()
         .join("\n");
     let sandbox_script_commands = [
-        sandbox_stdenv_bash_path.as_str(),
-        "set -euxo pipefail",
-        "echo \"PATH: $PATH\"",
-        "echo \"Starting build script\"",
+        stdenv_path_bash.as_str(),
+        "set -euo pipefail",
+        "echo \"Sandbox path: $PATH\"",
+        "echo \"Sandbox status: started\"",
         &sandbox_script,
-        "echo \"Finished build script\"",
+        "echo \"Sandbox status: finished\"",
     ];
     let sandbox_script_data = sandbox_script_commands.join("\n");
     let sandbox_script_file_path = create_temp_file("sh").await?;
@@ -338,34 +345,46 @@ pub async fn run(
 
     let sandbox_home_dir_path = create_temp_dir().await?;
 
-    let mut sandbox_command = match worker_system {
-        Aarch64Macos | X8664Macos => {
-            darwin::build(
-                bin_paths.clone(),
-                env_var.clone(),
-                &sandbox_script_file_path,
-                &sandbox_source_dir_path,
-                &sandbox_stdenv_dir,
-            )
-            .await?
-        }
-        Aarch64Linux | X8664Linux => {
-            linux::build(
+    let sandbox_command = match sandbox {
+        false => Some(
+            native::build(
                 bin_paths,
-                env_var.clone(),
-                &sandbox_home_dir_path,
-                &sandbox_package_dir_path,
-                &store_paths,
+                env_var,
                 &sandbox_script_file_path,
                 &sandbox_source_dir_path,
-                &sandbox_stdenv_dir_path,
             )
-            .await?
-        }
-        _ => anyhow::bail!("unsupported worker system"),
+            .await?,
+        ),
+        true => match worker_system {
+            Aarch64Macos | X8664Macos => Some(
+                darwin::build(
+                    bin_paths.clone(),
+                    env_var.clone(),
+                    &sandbox_script_file_path,
+                    &sandbox_source_dir_path,
+                    stdenv_path,
+                )
+                .await?,
+            ),
+            Aarch64Linux | X8664Linux => Some(
+                linux::build(
+                    bin_paths.clone(),
+                    env_var.clone(),
+                    &sandbox_home_dir_path,
+                    &sandbox_package_dir_path,
+                    &store_paths,
+                    &sandbox_script_file_path,
+                    &sandbox_source_dir_path,
+                    stdenv_path,
+                )
+                .await?,
+            ),
+            _ => None,
+        },
     };
 
     let mut child = sandbox_command
+        .expect("failed to create sandbox command")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

@@ -148,12 +148,11 @@ pub fn print_source_archive(package_name: &str, source_archive: &str) {
     );
 }
 
-pub fn print_source_cache(source_cache: &str) {
+pub fn print_source_cache(package_name: &str, source_cache: &str) {
     println!(
-        "{} {} {} {}",
-        connector_start(),
-        bold("Source cache:"),
-        source_cache,
+        "{} Source cache: {} {}",
+        format_package_name(package_name),
+        style(source_cache).italic(),
         badge_success(),
     );
 }

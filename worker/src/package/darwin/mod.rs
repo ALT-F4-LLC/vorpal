@@ -13,8 +13,10 @@ pub async fn build(
     env_var: HashMap<String, String>,
     script_path: &Path,
     source_dir_path: &PathBuf,
-    stdenv_dir: &str,
+    stdenv_dir_path: Option<PathBuf>,
 ) -> Result<Command> {
+    let stdenv_dir_path = stdenv_dir_path.expect("failed to get stdenv path");
+
     let sandbox_profile_path = create_temp_file("sb").await?;
 
     let mut tera = Tera::default();
@@ -50,7 +52,7 @@ pub async fn build(
 
     let path_default = format!(
         "{}:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin",
-        stdenv_dir
+        stdenv_dir_path.join("bin").to_str().unwrap()
     );
 
     sandbox_command.env("PATH", path_default.as_str());

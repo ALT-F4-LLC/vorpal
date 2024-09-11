@@ -9,6 +9,7 @@ use vorpal_schema::api::package::{
 mod build;
 mod darwin;
 mod linux;
+mod native;
 
 #[derive(Debug, Default)]
 pub struct PackageServer {

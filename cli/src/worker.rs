@@ -215,7 +215,7 @@ pub async fn build(
         match worker_store.exists(worker_store_source.clone()).await {
             Ok(_) => {
                 let source_cache = format!("{}/{}-{}", worker, package.name, package_source_hash);
-                print_source_cache(&source_cache)
+                print_source_cache(&package.name, &source_cache);
             }
             Err(status) => {
                 if status.code() == tonic::Code::NotFound {
@@ -387,7 +387,7 @@ pub async fn build(
                             environment: package.environment.clone(),
                             name: package.name.clone(),
                             packages: packages.clone(),
-                            sandbox: false,
+                            sandbox: package.sandbox,
                             script: package.script.clone(),
                             source_data: Some(chunk.to_vec()),
                             source_data_signature: Some(source_signature.to_string()),
@@ -407,7 +407,7 @@ pub async fn build(
             environment: package.environment.clone(),
             name: package.name.clone(),
             packages: packages.clone(),
-            sandbox: false,
+            sandbox: package.sandbox,
             script: package.script.clone(),
             source_data: None,
             source_data_signature: None,
