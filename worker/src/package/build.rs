@@ -271,7 +271,7 @@ pub async fn run(
         "a492f1ba6ad5eb752f118f2a00ab325d39585e2610bf35a81fa4a82d03c99779";
 
     if worker_system == Aarch64Macos || worker_system == X8664Macos {
-        sandbox_stdenv_hash = "4248ed20e93ce4c869bd7cb64e01849fc3e00647b0c3f051cb2154135f4a1b14";
+        sandbox_stdenv_hash = "b3953aa9fe113ccdd51f98db577a4f02a14e553f12af9e6eddd218691527632b";
     }
 
     let sandbox_stdenv_dir = format!(

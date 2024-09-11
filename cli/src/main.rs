@@ -26,11 +26,18 @@ pub struct Cli {
     command: Command,
 }
 
+fn get_default_package() -> String {
+    "default".to_string()
+}
+
 #[derive(Subcommand)]
 enum Command {
     Build {
         #[arg(default_value = "vorpal.ncl", long, short)]
         file: String,
+
+        #[arg(default_value_t = get_default_package(), long, short)]
+        package: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
@@ -81,6 +88,7 @@ async fn main() -> Result<()> {
     match &cli.command {
         Command::Build {
             file,
+            package,
             system,
             worker,
         } => {
@@ -110,7 +118,7 @@ async fn main() -> Result<()> {
             }
 
             let (config_map, config_order, config_hash) =
-                config::check_config(file, system).await?;
+                config::check_config(file, Some(package), system).await?;
 
             print_build_order(&config_order);
 
@@ -141,7 +149,7 @@ async fn main() -> Result<()> {
         }
 
         Command::Check { file, system } => {
-            let _ = config::check_config(file, system).await?;
+            let _ = config::check_config(file, None, system).await?;
 
             Ok(())
         }

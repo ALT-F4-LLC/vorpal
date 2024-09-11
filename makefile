@@ -4,14 +4,14 @@ OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 TARGET := ./target/release/vorpal
 WORK_DIR := $(shell pwd)
 
+build: check
+	cargo build --release
+
 build-packer: validate-packer
 	rm -rf $(WORK_DIR)/packer_debian_vmware_arm64.box
 	packer build \
 		-var-file=$(WORK_DIR)/.packer/pkrvars/debian/fusion-13.pkrvars.hcl \
 		$(WORK_DIR)/.packer
-
-build: check
-	cargo build --release
 
 check: lint
 	cargo check --release

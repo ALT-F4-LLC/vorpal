@@ -129,7 +129,7 @@ jobs:
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-          echo "OS=${OS}" >> $GITHUB_ENV
+          echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - run: |
           VERSION="0.1.0-rc.0"

@@ -2,7 +2,7 @@ let build_config = import "@vorpal/config.ncl" in
 
 let build_package = import "@vorpal/language/rust.ncl" in
 
-let default_package = fun system =>
+let build_default = fun system =>
   build_package
     {
       cargo_hash = "0aff48a16911e91a80c7e6dcf855700ef997ca154ef3124a528d361ea5f6a7a1",
@@ -17,7 +17,7 @@ in
 let config = fun system =>
   {
     packages = {
-      default = default_package system,
+      default = build_default system,
     }
   }
 in
