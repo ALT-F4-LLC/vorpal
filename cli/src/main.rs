@@ -1,6 +1,6 @@
 use crate::log::{connector_end, print_build_order};
 use crate::worker::build;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
@@ -93,13 +93,13 @@ async fn main() -> Result<()> {
             worker,
         } => {
             if worker.is_empty() {
-                anyhow::bail!("{} no worker specified", connector_end());
+                bail!("{} no worker specified", connector_end());
             }
 
             let package_system: PackageSystem = get_package_system(system);
 
             if package_system == Unknown {
-                anyhow::bail!(
+                bail!(
                     "{} unknown target: {}",
                     connector_end(),
                     package_system.as_str_name()
@@ -111,13 +111,13 @@ async fn main() -> Result<()> {
             let private_key_path = get_private_key_path();
 
             if !private_key_path.exists() {
-                anyhow::bail!(
+                bail!(
                     "{} private key not found - run 'vorpal keys generate' or copy from worker",
                     connector_end()
                 );
             }
 
-            let (config_map, config_order, config_hash) =
+            let (config_map, config_order) =
                 config::check_config(file, Some(package), system).await?;
 
             print_build_order(&config_order);
@@ -126,7 +126,7 @@ async fn main() -> Result<()> {
 
             for package_name in config_order {
                 match config_map.get(&package_name) {
-                    None => anyhow::bail!("Package not found: {}", package_name),
+                    None => bail!("Package not found: {}", package_name),
                     Some(package) => {
                         let mut packages = vec![];
 
@@ -137,8 +137,7 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        let output =
-                            build(&config_hash, package, packages, package_system, worker).await?;
+                        let output = build(package, packages, package_system, worker).await?;
 
                         package_output.insert(package_name.to_string(), output);
                     }
@@ -166,11 +165,11 @@ async fn main() -> Result<()> {
                 }
 
                 if private_key_path.exists() && !public_key_path.exists() {
-                    anyhow::bail!("private key exists but public key is missing");
+                    bail!("private key exists but public key is missing");
                 }
 
                 if !private_key_path.exists() && public_key_path.exists() {
-                    anyhow::bail!("public key exists but private key is missing");
+                    bail!("public key exists but private key is missing");
                 }
 
                 vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)

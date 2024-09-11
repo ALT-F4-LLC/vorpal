@@ -1,13 +1,12 @@
 use anyhow::{bail, Result};
 use petgraph::algo::toposort;
 use petgraph::graphmap::DiGraphMap;
-use sha256::digest;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::process::Command;
 use vorpal_schema::{api::package::PackageSystem, Config, Package};
 
-pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<(Config, String)> {
+pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<Config> {
     let nickel_version = Command::new("nickel").arg("--version").output().await;
 
     if let Ok(output) = nickel_version {
@@ -35,8 +34,6 @@ pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<(C
     let config_root_dir_path = config_path_canoncicalized
         .parent()
         .expect("failed to get config parent path");
-
-    println!("{}", config_root_dir_path.display());
 
     let config_str = format!(
         "let config = import \"{}\" in config \"{}\"",
@@ -80,10 +77,7 @@ pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<(C
 
     let data = String::from_utf8(command_output.stdout).expect("failed to convert data to string");
 
-    Ok((
-        serde_json::from_str(&data).expect("failed to parse json"),
-        digest(data),
-    ))
+    Ok(serde_json::from_str(&data).expect("failed to parse json"))
 }
 
 pub fn load_config_build(
@@ -104,8 +98,6 @@ pub fn load_config_build(
         Err(err) => bail!("{:?}", err),
         Ok(order) => order,
     };
-
-    println!("{:?}", order);
 
     order.reverse();
 

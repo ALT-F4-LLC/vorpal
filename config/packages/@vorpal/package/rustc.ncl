@@ -5,7 +5,7 @@ let build_rust_std = import "@vorpal/package/rust-std.ncl" in
 fun target =>
   let rust_std = build_rust_std target in
 
-  let hash =
+  let hash_dist =
     target
     |> match {
       "aarch64-linux" => "bc6c0e0f309805c4a9b704bbfe6be6b3c28b029ac6958c58ab5b90437a9e36ed",
@@ -31,11 +31,15 @@ fun target =>
     name = "rustc",
     packages = [rust_std],
     script = m%"
-        cp -pr rustc-%{version}-%{system}/rustc/* $output/.
+        cp -pr ./dist/rustc/* $output/.
         cat $rust_std/manifest.in >> $output/manifest.in
         cp -pr $rust_std/lib $output
       "%,
-    source = "https://static.rust-lang.org/dist/2024-05-02/rustc-%{version}-%{system}.tar.gz",
-    source_hash = hash,
+    source = {
+      dist = {
+        hash = hash_dist,
+        uri = "https://static.rust-lang.org/dist/2024-05-02/rustc-%{version}-%{system}.tar.gz",
+      },
+    },
     systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
   } | Package

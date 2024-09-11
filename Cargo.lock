@@ -2600,6 +2600,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "vorpal-schema",
  "walkdir",
 ]
 

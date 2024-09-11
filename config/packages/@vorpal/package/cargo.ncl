@@ -1,7 +1,7 @@
 let { Package, .. } = import "@vorpal/contract.ncl" in
 
 fun target =>
-  let hash =
+  let hash_dist =
     target
     |> match {
       "aarch64-linux" => "d782e34151df01519de86f0acace8a755cae6fad93cb0303ddd61c2642444c1c",
@@ -25,8 +25,12 @@ fun target =>
 
   {
     name = "cargo",
-    script = "cp -pr cargo-%{version}-%{system}/cargo/* $output/.",
-    source = "https://static.rust-lang.org/dist/2024-05-02/cargo-%{version}-%{system}.tar.gz",
-    source_hash = hash,
+    script = "cp -pr ./dist/cargo/* $output/.",
+    source = {
+      dist = {
+        hash = hash_dist,
+        uri = "https://static.rust-lang.org/dist/2024-05-02/cargo-%{version}-%{system}.tar.gz",
+      }
+    },
     systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
   } | Package

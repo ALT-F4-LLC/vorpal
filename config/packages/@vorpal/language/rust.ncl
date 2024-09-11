@@ -16,6 +16,8 @@ fun config =>
       script = m%"
         dirs=("cli/src" "notary/src" "schema/src" "store/src" "worker/src")
 
+        cd %{config.name}
+
         for dir in "${dirs[@]}"; do
             mkdir -p "$dir"
         done
@@ -34,17 +36,21 @@ fun config =>
 
         echo "$CARGO_VENDOR" > $output/config.toml
       "%,
-      source = config.source,
-      source_hash = config.cargo_hash,
-      source_includes = [
-        "Cargo.lock",
-        "Cargo.toml",
-        "cli/Cargo.toml",
-        "notary/Cargo.toml",
-        "schema/Cargo.toml",
-        "store/Cargo.toml",
-        "worker/Cargo.toml"
-      ],
+      source = {
+        "%{config.name}" = {
+          hash = config.cargo_hash,
+          includes = [
+            "Cargo.lock",
+            "Cargo.toml",
+            "cli/Cargo.toml",
+            "notary/Cargo.toml",
+            "schema/Cargo.toml",
+            "store/Cargo.toml",
+            "worker/Cargo.toml"
+          ],
+          uri = config.source,
+        },
+      },
       systems = config.systems,
     } | Package
   in
@@ -53,6 +59,8 @@ fun config =>
     name = config.name,
     packages = [cargo, rustc, protoc, cache],
     script = m%"
+      cd %{config.name}
+
       mkdir -p .cargo
       cp $%{std.string.replace "-" "_" config.name}_cache/config.toml .cargo/config.toml
 
@@ -62,17 +70,21 @@ fun config =>
       mkdir -p $output/bin
       cp -pr target/release/%{config.name} $output/bin/%{config.name}
     "%,
-    source = config.source,
-    source_excludes =
-      std.array.concat
-        config.source_excludes
-        [
-          ".git",
-          ".gitignore",
-          ".vorpal",
-          "target",
-          "vorpal.lock.ncl",
-          "vorpal.ncl",
-        ],
+    source = {
+      "%{config.name}" = {
+        excludes =
+          std.array.concat
+            config.source_excludes
+            [
+              ".git",
+              ".gitignore",
+              ".vorpal",
+              "target",
+              "vorpal.lock.ncl",
+              "vorpal.ncl",
+            ],
+        uri = config.source,
+      }
+    },
     systems = config.systems,
   } | Package

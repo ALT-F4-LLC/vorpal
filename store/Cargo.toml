@@ -15,4 +15,5 @@ tokio-tar = { default-features = false, version = "0" }
 tokio-util = { default-features = false, features = ["compat"], version = "0" }
 tracing = { default-features = false, version = "0" }
 uuid = { default-features = false, features = ["std", "v7"], version = "1" }
+vorpal-schema = { default-features = false, path = "../schema" }
 walkdir = { default-features = false, version = "2" }

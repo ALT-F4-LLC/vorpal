@@ -111,8 +111,6 @@ pub async fn build(
         sandbox_command_args.extend(build_command_args);
     }
 
-    println!("{:?}", sandbox_command_args);
-
     sandbox_command.args(sandbox_command_args.clone());
 
     Ok(sandbox_command)

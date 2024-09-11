@@ -12,7 +12,7 @@ pub async fn check_config<'a>(
     file: &'a str,
     package: Option<&'a str>,
     system: &'a str,
-) -> Result<(HashMap<String, Package>, Vec<String>, String)> {
+) -> Result<(HashMap<String, Package>, Vec<String>)> {
     let config_system: PackageSystem = get_package_system(system);
 
     if config_system == Unknown {
@@ -29,7 +29,7 @@ pub async fn check_config<'a>(
 
     log::print_config(config_path);
 
-    let (config, config_hash) = nickel::load_config(config_path, config_system).await?;
+    let config = nickel::load_config(config_path, config_system).await?;
 
     let packages = config.packages.clone();
 
@@ -41,7 +41,7 @@ pub async fn check_config<'a>(
 
     let (build_map, build_order) = nickel::load_config_build(&packages)?;
 
-    log::print_packages(&build_map, &build_order);
+    log::print_packages(&build_order);
 
-    Ok((build_map, build_order, config_hash))
+    Ok((build_map, build_order))
 }

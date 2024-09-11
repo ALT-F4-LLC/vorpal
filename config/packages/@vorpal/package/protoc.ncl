@@ -1,7 +1,7 @@
 let { Package, .. } = import "@vorpal/contract.ncl" in
 
 fun target =>
-  let hash =
+  let hash_release =
     target
     |> match {
       "aarch64-linux" => "8a592a0dd590e92b1c0d77631e683fc743d1ed8158e0b093b6cfabf0685089af",
@@ -26,10 +26,14 @@ fun target =>
   {
     name = "protoc",
     script = m%"
-        cp -pr ./bin ./include $output/.
+        cp -pr ./release/bin ./release/include $output/.
         chmod +x $output/bin/protoc
       "%,
-    source = "https://github.com/protocolbuffers/protobuf/releases/download/v%{version}/protoc-%{version}-%{system}.zip",
-    source_hash = hash,
+    source = {
+      release = {
+        hash = hash_release,
+        uri = "https://github.com/protocolbuffers/protobuf/releases/download/v%{version}/protoc-%{version}-%{system}.zip"
+      }
+    },
     systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
   } | Package

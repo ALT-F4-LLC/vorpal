@@ -2,6 +2,7 @@ use crate::api::package::PackageSystem;
 use crate::api::package::PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
 pub mod api {
     pub mod package {
@@ -12,24 +13,21 @@ pub mod api {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LockfileSandbox {
-    #[serde(rename = "aarch64-linux")]
-    pub aarch64_linux: String,
-
-    #[serde(rename = "aarch64-macos")]
-    pub aarch64_macos: String,
-
-    #[serde(rename = "x86_64-linux")]
-    pub x8664_linux: String,
-
-    #[serde(rename = "x86_64-macos")]
-    pub x8664_macos: String,
+#[derive(Debug, PartialEq, Eq)]
+pub enum PackageSourceKind {
+    Unknown,
+    Local,
+    Git,
+    Http,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Lockfile {
-    pub sandbox: LockfileSandbox,
+pub struct PackageSource {
+    pub excludes: Vec<String>,
+    pub hash: Option<String>,
+    pub includes: Vec<String>,
+    pub strip_prefix: bool,
+    pub uri: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,10 +37,7 @@ pub struct Package {
     pub packages: Vec<Package>,
     pub script: String,
     pub sandbox: bool,
-    pub source: Option<String>,
-    pub source_excludes: Vec<String>,
-    pub source_hash: Option<String>,
-    pub source_includes: Vec<String>,
+    pub source: HashMap<String, PackageSource>,
     pub systems: Vec<String>,
 }
 
@@ -69,4 +64,13 @@ impl PackageTarget for PackageSystem {
 
 pub fn get_package_system<T: PackageTarget>(system: &str) -> T {
     T::from_str(system)
+}
+
+pub fn get_source_type(source_uri: &str) -> PackageSourceKind {
+    match source_uri {
+        uri if Path::new(&uri).exists() => PackageSourceKind::Local,
+        uri if uri.starts_with("git") => PackageSourceKind::Git,
+        uri if uri.starts_with("http") => PackageSourceKind::Http,
+        _ => PackageSourceKind::Unknown,
+    }
 }

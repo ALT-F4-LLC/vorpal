@@ -2,6 +2,13 @@
   Config = {
     packages | { _ : Package } | default = {},
   },
+  PackageSource = {
+    excludes | Array String | default = [],
+    hash | String | optional,
+    includes | Array String | default = [],
+    strip_prefix | Bool | default = true,
+    uri | String,
+  },
   Package = {
     environment | { _ : String } | default = {},
     name | String,
@@ -12,10 +19,7 @@
       make check
       make install PREFIX=$output
     "%,
-    source | String | optional,
-    source_excludes | Array String | default = [],
-    source_hash | String | optional,
-    source_includes | Array String | default = [],
+    source | { _ : PackageSource } | default = {},
     systems | Array String | default = [],
   },
 }
