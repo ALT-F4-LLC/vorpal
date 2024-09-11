@@ -6,12 +6,12 @@
     environment | { _ : String } | default = {},
     name | String,
     packages | Array Package | default = [],
+    sandbox | Bool | default = true,
     script | String | default
       = m%"
       make check
       make install PREFIX=$output
     "%,
-    sandbox | Bool | default = true,
     source | String | optional,
     source_excludes | Array String | default = [],
     source_hash | String | optional,
