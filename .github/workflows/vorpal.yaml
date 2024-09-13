@@ -101,7 +101,6 @@ jobs:
   test:
     needs:
       - package
-      - sandbox
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
