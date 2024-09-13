@@ -117,27 +117,40 @@ async fn main() -> Result<()> {
                 );
             }
 
-            let (config_map, config_order) =
-                config::check_config(file, Some(package), system).await?;
+            let config = config::check_config(file, Some(package), system).await?;
 
-            print_build_order(&config_order);
+            let (build_map, build_order) = nickel::load_config_build(&config.packages)?;
+
+            log::print_packages(&build_order);
+
+            print_build_order(&build_order);
 
             let mut package_output = HashMap::<String, PackageOutput>::new();
 
-            for package_name in config_order {
-                match config_map.get(&package_name) {
+            for package_name in build_order {
+                match build_map.get(&package_name) {
                     None => bail!("Package not found: {}", package_name),
                     Some(package) => {
                         let mut packages = vec![];
+                        let mut package_sandbox = None;
+
+                        if let Some(s) = &package.sandbox {
+                            match package_output.get(&s.name) {
+                                None => bail!("Sandbox not found: {}", s.name),
+                                Some(package) => package_sandbox = Some(package.clone()),
+                            }
+                        }
 
                         for p in &package.packages {
                             match package_output.get(&p.name) {
-                                None => eprintln!("Package not found: {}", p.name),
+                                None => bail!("Package not found: {}", p.name),
                                 Some(package) => packages.push(package.clone()),
                             }
                         }
 
-                        let output = build(package, packages, package_system, worker).await?;
+                        let output =
+                            build(package, packages, package_sandbox, package_system, worker)
+                                .await?;
 
                         package_output.insert(package_name.to_string(), output);
                     }

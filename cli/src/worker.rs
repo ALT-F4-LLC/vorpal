@@ -1,9 +1,10 @@
 use crate::log::{
     print_package_archive, print_package_hash, print_package_log, print_package_output,
-    print_packages_list, print_source_cache, print_source_url,
+    print_packages_list, print_source_cache, print_source_url, SourceStatus,
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
+use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, rename, write, File};
 use tokio::io::AsyncWriteExt;
@@ -36,6 +37,7 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 pub async fn build(
     package: &Package,
     packages: Vec<PackageOutput>,
+    sandbox: Option<PackageOutput>,
     target: PackageSystem,
     worker: &str,
 ) -> Result<PackageOutput> {
@@ -49,7 +51,9 @@ pub async fn build(
     }
 
     let package_config = serde_json::to_string(package).expect("failed to serialize package");
+
     let package_config_hash = get_hash_digest(&package_config);
+
     let package_hash = get_package_hash(&package_config_hash, &package.source).await?;
 
     print_package_hash(&package.name, &package_hash);
@@ -185,6 +189,12 @@ pub async fn build(
                             PackageSourceKind::Unknown => bail!("Package source type unknown"),
                             PackageSourceKind::Git => bail!("Package source git not supported"),
                             PackageSourceKind::Http => {
+                                print_source_url(
+                                    &package.name,
+                                    SourceStatus::Pending,
+                                    source.uri.as_str(),
+                                );
+
                                 let url = Url::parse(&source.uri).expect("failed to parse url");
 
                                 if url.scheme() != "http" && url.scheme() != "https" {
@@ -193,16 +203,26 @@ pub async fn build(
 
                                 let response = reqwest::get(url.as_str())
                                     .await
-                                    .expect("failed to request source")
-                                    .bytes()
-                                    .await
-                                    .expect("failed to get source bytes");
+                                    .expect("failed to request source");
 
-                                let response_bytes = response.as_ref();
+                                let response_status = response.status();
 
-                                if let Some(kind) = infer::get(response_bytes) {
+                                if !response_status.is_success() {
+                                    bail!("Source response status: {:?}", response_status);
+                                }
+
+                                let response_bytes =
+                                    response.bytes().await.expect("failed to get source bytes");
+
+                                if response_bytes.is_empty() {
+                                    bail!("Source response empty");
+                                }
+
+                                let response_data = response_bytes.as_ref();
+
+                                if let Some(kind) = infer::get(response_data) {
                                     if let "application/gzip" = kind.mime_type() {
-                                        let gz_decoder = GzipDecoder::new(response_bytes);
+                                        let gz_decoder = GzipDecoder::new(response_data);
                                         let mut archive = Archive::new(gz_decoder);
 
                                         archive
@@ -210,7 +230,7 @@ pub async fn build(
                                             .await
                                             .expect("failed to unpack");
                                     } else if let "application/x-bzip2" = kind.mime_type() {
-                                        let bz_decoder = BzDecoder::new(response_bytes);
+                                        let bz_decoder = BzDecoder::new(response_data);
                                         let mut archive = Archive::new(bz_decoder);
 
                                         archive
@@ -218,7 +238,7 @@ pub async fn build(
                                             .await
                                             .expect("failed to unpack");
                                     } else if let "application/x-xz" = kind.mime_type() {
-                                        let xz_decoder = XzDecoder::new(response_bytes);
+                                        let xz_decoder = XzDecoder::new(response_data);
                                         let mut archive = Archive::new(xz_decoder);
 
                                         archive
@@ -230,7 +250,7 @@ pub async fn build(
                                         let temp_file = format!("/tmp/{}", temp_file_name);
                                         let temp_file_path = Path::new(&temp_file).to_path_buf();
 
-                                        write(&temp_file_path, response_bytes)
+                                        write(&temp_file_path, response_data)
                                             .await
                                             .expect("failed to write");
 
@@ -247,10 +267,16 @@ pub async fn build(
 
                                         let file_path = sandbox_source_path.join(file_name);
 
-                                        write(&file_path, response_bytes)
+                                        write(&file_path, response_data)
                                             .await
                                             .expect("failed to write");
                                     }
+
+                                    print_source_url(
+                                        &package.name,
+                                        SourceStatus::Complete,
+                                        source.uri.as_str(),
+                                    );
                                 }
                             }
 
@@ -260,6 +286,15 @@ pub async fn build(
                                 if !source_path.exists() {
                                     bail!("Package `source` path not found: {:?}", source_path);
                                 }
+
+                                let source_path =
+                                    source_path.canonicalize().expect("failed to canonicalize");
+
+                                print_source_url(
+                                    &package.name,
+                                    SourceStatus::Pending,
+                                    &source_path.display().to_string(),
+                                );
 
                                 let source_files = get_file_paths(
                                     &source_path.clone(),
@@ -275,6 +310,12 @@ pub async fn build(
 
                                 copy_files(&source_path, source_files, &sandbox_source_path)
                                     .await?;
+
+                                print_source_url(
+                                    &package.name,
+                                    SourceStatus::Complete,
+                                    &source_path.display().to_string(),
+                                );
                             }
                         }
 
@@ -306,8 +347,6 @@ pub async fn build(
                                 let path_updated =
                                     sandbox_source_path.join(path_parts_updated.join("/"));
 
-                                println!("=> strip: {:?}", path_updated);
-
                                 if !file_path.is_dir() {
                                     rename(file_path, path_updated)
                                         .await
@@ -320,7 +359,6 @@ pub async fn build(
                             }
 
                             if let Some(prefix) = prefix_path {
-                                println!("=> removing prefix: {:?}", prefix.display());
                                 remove_dir_all(&prefix).await.expect("failed to remove dir");
                             }
 
@@ -348,8 +386,6 @@ pub async fn build(
                                 bail!("Source hash mismatch: {:?} != {:?}", hash, source_hash);
                             }
                         }
-
-                        print_source_url(&package.name, source.uri.as_str());
                     }
 
                     let sandbox_path_files = get_file_paths(&sandbox_path, vec![], vec![])?;
@@ -379,10 +415,14 @@ pub async fn build(
 
         for chunk in source_data.chunks(DEFAULT_CHUNKS_SIZE) {
             request_stream.push(BuildRequest {
-                environment: package.environment.clone(),
+                environment: package
+                    .environment
+                    .clone()
+                    .into_iter()
+                    .collect::<HashMap<_, _>>(),
                 name: package.name.clone(),
                 packages: packages.clone(),
-                sandbox: package.sandbox,
+                sandbox: sandbox.clone(),
                 script: package.script.clone(),
                 source_data: Some(chunk.to_vec()),
                 source_data_signature: Some(source_signature.to_string()),
@@ -392,10 +432,14 @@ pub async fn build(
         }
     } else {
         request_stream.push(BuildRequest {
-            environment: package.environment.clone(),
+            environment: package
+                .environment
+                .clone()
+                .into_iter()
+                .collect::<HashMap<_, _>>(),
             name: package.name.clone(),
             packages: packages.clone(),
-            sandbox: package.sandbox,
+            sandbox,
             script: package.script.clone(),
             source_data: None,
             source_data_signature: None,

@@ -1,6 +1,7 @@
 let { Package, .. } = import "@vorpal/contract.ncl" in
 
 let build_rust_std = import "@vorpal/package/rust-std.ncl" in
+let build_sandbox = import "@vorpal/package/sandbox.ncl" in
 
 fun target =>
   let rust_std = build_rust_std target in
@@ -29,6 +30,7 @@ fun target =>
 
   {
     name = "rustc",
+    sandbox = build_sandbox target,
     packages = [rust_std],
     script = m%"
         cp -pr ./dist/rustc/* $output/.
@@ -38,6 +40,7 @@ fun target =>
     source = {
       dist = {
         hash = hash_dist,
+        strip_prefix = true,
         uri = "https://static.rust-lang.org/dist/2024-05-02/rustc-%{version}-%{system}.tar.gz",
       },
     },

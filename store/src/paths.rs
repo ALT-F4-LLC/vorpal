@@ -1,7 +1,6 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
-use tokio::fs::{copy, create_dir_all};
-use tokio::fs::{write, File};
+use tokio::fs::{copy, create_dir_all, metadata, write, File};
 use tokio::io::AsyncReadExt;
 use tracing::info;
 use uuid::Uuid;
@@ -130,7 +129,7 @@ pub fn get_file_paths(
     files.sort();
 
     if files.is_empty() {
-        return Err(anyhow::anyhow!("no files found"));
+        bail!("no files found");
     }
 
     Ok(files)
@@ -142,25 +141,38 @@ pub async fn copy_files(
     destination_path: &Path,
 ) -> Result<()> {
     if source_path_files.is_empty() {
-        return Err(anyhow::anyhow!("no source files found"));
+        bail!("no source files found");
     }
 
     for src in &source_path_files {
-        if src.is_dir() {
-            let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
-            create_dir_all(dest)
-                .await
-                .expect("failed to create directory");
-            continue;
+        if src.display().to_string().ends_with(".tar.zst") {
+            bail!("source file is a tar.zst archive");
         }
 
-        if src.display().to_string().ends_with(".tar.zst") {
-            anyhow::bail!("source file is a tar.zst archive");
+        if !src.exists() {
+            bail!("source file not found: {:?}", src);
         }
+
+        let metadata = metadata(src).await.expect("failed to read metadata");
 
         let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
 
-        copy(src, dest).await.expect("failed to copy file");
+        if metadata.is_dir() {
+            create_dir_all(dest).await.expect("create directory fail");
+        } else if metadata.is_file() {
+            let parent = dest.parent().expect("failed to get parent directory");
+            if !parent.exists() {
+                create_dir_all(parent)
+                    .await
+                    .expect("create parent directory fail");
+            }
+
+            copy(src, dest).await.expect("copy file fail");
+        } else if metadata.is_symlink() {
+            copy(src, dest).await.expect("copy symlink fail");
+        } else {
+            bail!("source file is not a file or directory: {:?}", src);
+        }
     }
 
     Ok(())
@@ -203,6 +215,8 @@ pub async fn replace_path_in_files(from_path: &Path, to_path: &Path) -> Result<(
 
     for entry in WalkDir::new(from_path) {
         let entry = entry.expect("failed to read entry");
+
+        // TODO: handle rpath changes for binaries
 
         if entry.file_type().is_file() {
             let path = entry.path();

@@ -1,18 +1,17 @@
 use crate::log;
 use crate::nickel;
 use anyhow::{bail, Result};
-use std::collections::HashMap;
 use std::path::Path;
 use vorpal_schema::{
     api::package::{PackageSystem, PackageSystem::Unknown},
-    get_package_system, Package,
+    get_package_system, Config,
 };
 
 pub async fn check_config<'a>(
     file: &'a str,
     package: Option<&'a str>,
     system: &'a str,
-) -> Result<(HashMap<String, Package>, Vec<String>)> {
+) -> Result<Config> {
     let config_system: PackageSystem = get_package_system(system);
 
     if config_system == Unknown {
@@ -39,9 +38,5 @@ pub async fn check_config<'a>(
         }
     }
 
-    let (build_map, build_order) = nickel::load_config_build(&packages)?;
-
-    log::print_packages(&build_order);
-
-    Ok((build_map, build_order))
+    Ok(config)
 }

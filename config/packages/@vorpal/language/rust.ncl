@@ -3,6 +3,7 @@ let { Package, .. } = import "@vorpal/contract.ncl" in
 let build_cargo = import "@vorpal/package/cargo.ncl" in
 let build_protoc = import "@vorpal/package/protoc.ncl" in
 let build_rustc = import "@vorpal/package/rustc.ncl" in
+let build_sandbox = import "@vorpal/package/sandbox.ncl" in
 
 fun config =>
   let cargo = build_cargo config.target in
@@ -13,6 +14,7 @@ fun config =>
     {
       name = "%{config.name}-cache",
       packages = [cargo, rustc],
+      sandbox = build_sandbox config.target,
       script = m%"
         dirs=("cli/src" "notary/src" "schema/src" "store/src" "worker/src")
 
@@ -58,6 +60,7 @@ fun config =>
   {
     name = config.name,
     packages = [cargo, rustc, protoc, cache],
+    sandbox = build_sandbox config.target,
     script = m%"
       cd %{config.name}
 

@@ -74,12 +74,22 @@ pub fn print_source_cache(package_name: &str, source_cache: &str) {
     );
 }
 
-pub fn print_source_url(package_name: &str, url: &str) {
+pub enum SourceStatus {
+    Complete,
+    Pending,
+}
+
+pub fn print_source_url(package_name: &str, status: SourceStatus, url: &str) {
+    let badge = match status {
+        SourceStatus::Complete => style("[✓]").green(),
+        SourceStatus::Pending => style("[…]").color256(208),
+    };
+
     println!(
         "{} Source url: {} {}",
         format_package_name(package_name),
         style(url).italic(),
-        badge_success(),
+        badge,
     );
 }
 

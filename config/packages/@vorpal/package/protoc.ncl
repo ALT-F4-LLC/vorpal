@@ -1,5 +1,7 @@
 let { Package, .. } = import "@vorpal/contract.ncl" in
 
+let build_sandbox = import "@vorpal/package/sandbox.ncl" in
+
 fun target =>
   let hash_release =
     target
@@ -25,8 +27,10 @@ fun target =>
 
   {
     name = "protoc",
+    sandbox = build_sandbox target,
     script = m%"
-        cp -pr ./release/bin ./release/include $output/.
+        cp -r ./release/bin $output/bin
+        cp -r ./release/include $output/include
         chmod +x $output/bin/protoc
       "%,
     source = {

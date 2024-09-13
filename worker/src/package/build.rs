@@ -10,7 +10,6 @@ use std::env::consts::{ARCH, OS};
 use std::fs::Permissions;
 use std::iter::Iterator;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
 use std::process::Stdio;
 use tokio::fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write};
 use tokio::io::AsyncBufReadExt;
@@ -32,8 +31,7 @@ use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
         copy_files, get_file_paths, get_package_archive_path, get_package_path,
-        get_public_key_path, get_source_archive_path, get_source_path, get_store_dir_path,
-        replace_path_in_files,
+        get_public_key_path, get_source_archive_path, get_source_path, replace_path_in_files,
     },
     temps::{create_temp_dir, create_temp_file},
 };
@@ -65,7 +63,7 @@ pub async fn run(
     let mut environment = HashMap::new();
     let mut name = String::new();
     let mut packages = vec![];
-    let mut sandbox = true;
+    let mut sandbox = None;
     let mut script = String::new();
     let mut source_data: Vec<u8> = Vec::new();
     let mut source_data_chunk = 0;
@@ -270,29 +268,21 @@ pub async fn run(
     let mut stdenv_path = None;
     let mut stdenv_path_bash = "#!/bin/bash".to_string();
 
-    if sandbox {
-        let mut sandbox_stdenv_hash =
-            "a492f1ba6ad5eb752f118f2a00ab325d39585e2610bf35a81fa4a82d03c99779";
+    if let Some(s) = sandbox.clone() {
+        let stdenv_package_path = get_package_path(&s.hash, &s.name);
 
-        if worker_system == Aarch64Macos || worker_system == X8664Macos {
-            sandbox_stdenv_hash =
-                "b3953aa9fe113ccdd51f98db577a4f02a14e553f12af9e6eddd218691527632b";
-        }
-
-        let sandbox_stdenv_dir = format!(
-            "{}/vorpal-sandbox-{}.package",
-            get_store_dir_path().display(),
-            sandbox_stdenv_hash
-        );
-
-        let sandbox_stdenv_dir_path = Path::new(&sandbox_stdenv_dir).to_path_buf();
-
-        if !sandbox_stdenv_dir_path.exists() {
+        if !stdenv_package_path.exists() {
             send_error(tx, "sandbox package missing".to_string()).await?
         }
 
-        stdenv_path = Some(sandbox_stdenv_dir_path.to_path_buf());
-        stdenv_path_bash = format!("#!{}/bin/bash", sandbox_stdenv_dir)
+        let sandbox_stdenv_bash_path = stdenv_package_path.join("bin/bash");
+
+        if !sandbox_stdenv_bash_path.exists() {
+            send_error(tx, "sandbox bash missing".to_string()).await?
+        }
+
+        stdenv_path = Some(stdenv_package_path.to_path_buf());
+        stdenv_path_bash = format!("#!{}", sandbox_stdenv_bash_path.display());
     }
 
     let sandbox_script = script
@@ -346,7 +336,7 @@ pub async fn run(
     let sandbox_home_dir_path = create_temp_dir().await?;
 
     let sandbox_command = match sandbox {
-        false => Some(
+        None => Some(
             native::build(
                 bin_paths,
                 env_var,
@@ -355,7 +345,7 @@ pub async fn run(
             )
             .await?,
         ),
-        true => match worker_system {
+        Some(_) => match worker_system {
             Aarch64Macos | X8664Macos => Some(
                 darwin::build(
                     bin_paths.clone(),

@@ -1,5 +1,7 @@
 let { Package, .. } = import "@vorpal/contract.ncl" in
 
+let build_sandbox = import "@vorpal/package/sandbox.ncl" in
+
 fun target =>
   let hash_dist =
     target
@@ -25,10 +27,12 @@ fun target =>
 
   {
     name = "rust-std",
+    sandbox = build_sandbox target,
     script = "cp -pr ./dist/rust-std-%{system}/* $output/.",
     source = {
       dist = {
         hash = hash_dist,
+        strip_prefix = true,
         uri = "https://static.rust-lang.org/dist/2024-05-02/rust-std-%{version}-%{system}.tar.gz",
       }
     },

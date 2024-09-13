@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use petgraph::algo::toposort;
 use petgraph::graphmap::DiGraphMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use tokio::process::Command;
 use vorpal_schema::{api::package::PackageSystem, Config, Package};
@@ -77,11 +77,13 @@ pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<Co
 
     let data = String::from_utf8(command_output.stdout).expect("failed to convert data to string");
 
-    Ok(serde_json::from_str(&data).expect("failed to parse json"))
+    let config: Config = serde_json::from_str(&data).expect("failed to parse json");
+
+    Ok(config)
 }
 
 pub fn load_config_build(
-    packages: &HashMap<String, Package>,
+    packages: &BTreeMap<String, Package>,
 ) -> Result<(HashMap<String, Package>, Vec<String>)> {
     let mut graph = DiGraphMap::<&str, Package>::new();
     let mut map = HashMap::<String, Package>::new();
@@ -89,6 +91,11 @@ pub fn load_config_build(
     for package in packages.values() {
         if package.packages.is_empty() {
             graph.add_node(&package.name);
+        }
+
+        if let Some(sandbox) = &package.sandbox {
+            graph.add_node(&sandbox.name);
+            map.insert(sandbox.name.clone(), *sandbox.clone());
         }
 
         add_graph_edges(package, &mut graph, &mut map);
