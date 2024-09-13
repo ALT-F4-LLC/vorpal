@@ -5,7 +5,7 @@ let build_package = import "@vorpal/language/rust.ncl" in
 let build_default = fun system =>
   build_package
     {
-      cargo_hash = "4d085d7de342eb39acdb9386663bbea603c45339649ad74857f1909edd088134",
+      cargo_hash = "a7e6b32589e97e78ec8c494ece841a6d7cfa904465b9a058653980cbb87c9ac0",
       name = "vorpal",
       source = ".",
       source_excludes = [".env", ".packer", ".vagrant"],
