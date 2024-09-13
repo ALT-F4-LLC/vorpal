@@ -56,6 +56,13 @@ async fn send_error(tx: &Sender<Result<BuildResponse, Status>>, message: String)
     anyhow::bail!(message);
 }
 
+async fn decode_signature(source_data_signature: String) -> Result<Vec<u8>, String> {
+    tokio::task::spawn_blocking(move || hex::decode(source_data_signature))
+        .await
+        .map_err(|e| format!("failed to join decode task: {:?}", e))?
+        .map_err(|e| format!("failed to decode signature: {:?}", e))
+}
+
 pub async fn run(
     request: Request<Streaming<BuildRequest>>,
     tx: &Sender<Result<BuildResponse, Status>>,
@@ -164,9 +171,9 @@ pub async fn run(
 
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
-        let signature_decode = match hex::decode(source_data_signature.clone()) {
+        let signature_decode = match decode_signature(source_data_signature.clone()).await {
             Ok(signature) => signature,
-            Err(e) => return send_error(tx, format!("failed to decode signature: {:?}", e)).await,
+            Err(e) => return send_error(tx, e).await,
         };
 
         let signature =

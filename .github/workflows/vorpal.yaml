@@ -27,10 +27,6 @@ jobs:
         run: ./script/debian.sh "dev"
 
       - run: ./script/dev.sh
-      - run: ./script/dev.sh cargo --version
-      - run: ./script/dev.sh rustc --version
-      - run: ./script/dev.sh nickel --version
-      - run: ./script/dev.sh protoc --version
 
       - uses: actions/cache/save@v4
         with:
