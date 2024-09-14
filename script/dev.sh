@@ -15,7 +15,7 @@ mkdir -p "${ENV_PATH}/bin"
 
 for script in "${scripts[@]}";
 do
-  "${SCRIPT_PATH}/install/${script}.sh" "${ENV_PATH}"
+  "${SCRIPT_PATH}/dev/${script}.sh" "${ENV_PATH}"
 done
 
 export PATH="${ENV_PATH}/bin:${HOME}/.cargo/bin:$PATH"

@@ -86,7 +86,7 @@ pub fn print_source_url(package_name: &str, status: SourceStatus, url: &str) {
     };
 
     println!(
-        "{} Source url: {} {}",
+        "{} Source: {} {}",
         format_package_name(package_name),
         style(url).italic(),
         badge,
@@ -113,7 +113,7 @@ pub fn print_packages_list(package_name: &str, packages: &[String]) {
 
 pub fn print_package_hash(package_name: &str, package_hash: &str) {
     println!(
-        "{} Source hash: {} {}",
+        "{} Hash: {} {}",
         format_package_name(package_name),
         style(package_hash).italic(),
         badge_success(),

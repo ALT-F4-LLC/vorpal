@@ -162,12 +162,13 @@ pub async fn run(
 
         let public_key = get_public_key(public_key_path).await?;
 
-        let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-
-        let signature_decoded = const_hex::decode(source_data_signature.clone()).unwrap();
+        let signature_decoded = const_hex::decode(source_data_signature.clone())
+            .expect("failed to decode signature hex");
 
         let signature =
             Signature::try_from(signature_decoded.as_slice()).expect("failed to decode signature");
+
+        let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
         verifying_key
             .verify(&source_data, &signature)

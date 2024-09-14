@@ -75,7 +75,15 @@ pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<Co
         Ok(output) => output,
     };
 
+    if !command_output.status.success() {
+        bail!("failed with status: {:?}", command_output.status);
+    }
+
     let data = String::from_utf8(command_output.stdout).expect("failed to convert data to string");
+
+    if data.is_empty() {
+        bail!("failed to load config");
+    }
 
     let config: Config = serde_json::from_str(&data).expect("failed to parse json");
 

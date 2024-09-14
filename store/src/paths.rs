@@ -1,5 +1,7 @@
 use anyhow::{bail, Result};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use tokio::fs::set_permissions;
 use tokio::fs::{copy, create_dir_all, metadata, write, File};
 use tokio::io::AsyncReadExt;
 use tracing::info;
@@ -209,6 +211,36 @@ pub async fn setup_paths() -> Result<()> {
     Ok(())
 }
 
+async fn update_file(path: &str, next: &str) -> Result<()> {
+    println!("fixing paths: {:?}", path);
+
+    // Get current file permissions
+    let metadata = metadata(path).await.expect("failed to get file metadata");
+    let mut permissions = metadata.permissions();
+    let was_read_only = permissions.mode() & 0o222 == 0;
+
+    // If read-only, set to writable
+    if was_read_only {
+        permissions.set_mode(permissions.mode() | 0o200); // Add write permission
+        set_permissions(path, permissions.clone())
+            .await
+            .expect("failed to set file permissions");
+    }
+
+    // Write to the file
+    write(path, next).await.expect("failed to write file");
+
+    // Set permissions back to read-only if they were initially read-only
+    if was_read_only {
+        permissions.set_mode(permissions.mode() & !0o200); // Remove write permission
+        set_permissions(path, permissions)
+            .await
+            .expect("failed to set file permissions");
+    }
+
+    Ok(())
+}
+
 pub async fn replace_path_in_files(from_path: &Path, to_path: &Path) -> Result<()> {
     let from = from_path.display().to_string();
     let to = to_path.display().to_string();
@@ -231,7 +263,9 @@ pub async fn replace_path_in_files(from_path: &Path, to_path: &Path) -> Result<(
                 let next = prev.replace(&from, &to);
 
                 if next != prev {
-                    write(path, next).await.expect("failed to write file");
+                    update_file(path.display().to_string().as_str(), next.as_str())
+                        .await
+                        .expect("failed to update file");
                 }
             } else {
                 continue;
