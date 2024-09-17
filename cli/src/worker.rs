@@ -425,7 +425,7 @@ pub async fn build(
                 sandbox: sandbox.clone(),
                 script: package.script.clone(),
                 source_data: Some(chunk.to_vec()),
-                source_data_signature: Some(source_signature.to_string()),
+                source_data_signature: Some(source_signature.to_vec()),
                 source_hash: Some(package_hash.clone()),
                 target: target as i32,
             });

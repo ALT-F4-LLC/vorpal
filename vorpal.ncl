@@ -1,5 +1,4 @@
 let build_config = import "@vorpal/config.ncl" in
-
 let build_package = import "@vorpal/language/rust.ncl" in
 
 let build_default = fun system =>

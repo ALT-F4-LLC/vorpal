@@ -1,5 +1,5 @@
 use crate::package::{darwin, linux, native};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use rsa::{
     pss::{Signature, VerifyingKey},
     sha2::Sha256,
@@ -10,10 +10,10 @@ use std::env::consts::{ARCH, OS};
 use std::fs::Permissions;
 use std::iter::Iterator;
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write};
-use tokio::io::AsyncBufReadExt;
-use tokio::io::BufReader;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
@@ -53,7 +53,29 @@ async fn send_error(tx: &Sender<Result<BuildResponse, Status>>, message: String)
         .await
         .expect("failed to send");
 
-    anyhow::bail!(message);
+    bail!(message);
+}
+
+async fn cleanup(
+    package_dir_path: &Path,
+    source_dir_path: &Path,
+    script_file_path: &Option<PathBuf>,
+) -> Result<()> {
+    remove_dir_all(package_dir_path)
+        .await
+        .expect("failed to remove package directory");
+
+    remove_dir_all(source_dir_path)
+        .await
+        .expect("failed to remove source directory");
+
+    if let Some(file_path) = script_file_path {
+        remove_file(file_path)
+            .await
+            .expect("failed to remove script file");
+    }
+
+    Ok(())
 }
 
 pub async fn run(
@@ -67,7 +89,7 @@ pub async fn run(
     let mut script = String::new();
     let mut source_data: Vec<u8> = Vec::new();
     let mut source_data_chunk = 0;
-    let mut source_data_signature = String::new();
+    let mut source_data_signature = Vec::new();
     let mut source_hash = String::new();
     let mut target = Unknown;
 
@@ -162,17 +184,18 @@ pub async fn run(
 
         let public_key = get_public_key(public_key_path).await?;
 
-        let signature_decoded = const_hex::decode(source_data_signature.clone())
-            .expect("failed to decode signature hex");
-
-        let signature =
-            Signature::try_from(signature_decoded.as_slice()).expect("failed to decode signature");
+        let signature = Signature::try_from(source_data_signature.as_slice())
+            .expect("failed to parse signature");
 
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
-        verifying_key
-            .verify(&source_data, &signature)
-            .expect("failed to verify signature");
+        if let Err(msg) = verifying_key.verify(&source_data, &signature) {
+            send_error(
+                tx,
+                format!("failed to verify signature: {}", msg.to_string()),
+            )
+            .await?
+        }
 
         let source_archive_path = get_source_archive_path(&source_hash, &name);
 
@@ -263,6 +286,7 @@ pub async fn run(
         send_error(tx, "build script is empty".to_string()).await?
     }
 
+    let mut sandbox_script_file_path = None;
     let mut stdenv_path = None;
     let mut stdenv_path_bash = "#!/bin/bash".to_string();
 
@@ -281,32 +305,45 @@ pub async fn run(
 
         stdenv_path = Some(stdenv_package_path.to_path_buf());
         stdenv_path_bash = format!("#!{}", sandbox_stdenv_bash_path.display());
+
+        let sandbox_stdenv_script_path = stdenv_package_path.join("sandbox.sh");
+
+        if sandbox_stdenv_script_path.exists() {
+            sandbox_script_file_path = Some(sandbox_stdenv_script_path.to_path_buf());
+        }
     }
 
-    let sandbox_script = script
-        .trim()
-        .split('\n')
-        .map(|line| line.trim())
-        .collect::<Vec<&str>>()
-        .join("\n");
-    let sandbox_script_commands = [
-        stdenv_path_bash.as_str(),
-        "set -euo pipefail",
-        "echo \"Sandbox path: $PATH\"",
-        "echo \"Sandbox status: started\"",
-        &sandbox_script,
-        "echo \"Sandbox status: finished\"",
-    ];
-    let sandbox_script_data = sandbox_script_commands.join("\n");
-    let sandbox_script_file_path = create_temp_file("sh").await?;
+    if sandbox_script_file_path.is_none() {
+        let sandbox_script = script
+            .trim()
+            .split('\n')
+            .map(|line| line.trim())
+            .collect::<Vec<&str>>()
+            .join("\n");
 
-    write(&sandbox_script_file_path, sandbox_script_data)
-        .await
-        .expect("failed to write script");
+        let sandbox_script_commands = [
+            stdenv_path_bash.as_str(),
+            "set -euo pipefail",
+            "echo \"Sandbox path: $PATH\"",
+            "echo \"Sandbox status: started\"",
+            &sandbox_script,
+            "echo \"Sandbox status: finished\"",
+        ];
 
-    set_permissions(&sandbox_script_file_path, Permissions::from_mode(0o755))
-        .await
-        .expect("failed to set permissions");
+        let sandbox_script_data = sandbox_script_commands.join("\n");
+
+        let sandbox_script_path = create_temp_file("sh").await?;
+
+        sandbox_script_file_path = Some(sandbox_script_path.to_path_buf());
+
+        write(&sandbox_script_path, sandbox_script_data)
+            .await
+            .expect("failed to write script");
+
+        set_permissions(&sandbox_script_path, Permissions::from_mode(0o755))
+            .await
+            .expect("failed to set permissions");
+    }
 
     // Create source directory
 
@@ -406,15 +443,13 @@ pub async fn run(
     )?;
 
     if sandbox_package_files.is_empty() || sandbox_package_files.len() == 1 {
-        remove_dir_all(&sandbox_package_dir_path)
-            .await
-            .expect("failed to remove package directory");
-        remove_dir_all(&sandbox_source_dir_path)
-            .await
-            .expect("failed to remove source directory");
-        remove_file(&sandbox_script_file_path)
-            .await
-            .expect("failed to remove script file");
+        cleanup(
+            &sandbox_package_dir_path,
+            &sandbox_source_dir_path,
+            &sandbox_script_file_path,
+        )
+        .await?;
+
         send_error(tx, "no build output files found".to_string()).await?
     }
 
@@ -435,15 +470,13 @@ pub async fn run(
     )
     .await
     {
-        remove_dir_all(&sandbox_package_dir_path)
-            .await
-            .expect("failed to remove package directory");
-        remove_dir_all(&sandbox_source_dir_path)
-            .await
-            .expect("failed to remove source directory");
-        remove_file(&sandbox_script_file_path)
-            .await
-            .expect("failed to remove script file");
+        cleanup(
+            &sandbox_package_dir_path,
+            &sandbox_source_dir_path,
+            &sandbox_script_file_path,
+        )
+        .await?;
+
         send_error(tx, format!("failed to compress package tar: {:?}", err)).await?
     }
 
@@ -461,15 +494,13 @@ pub async fn run(
         .expect("failed to create package directory");
 
     if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
-        remove_dir_all(&sandbox_package_dir_path)
-            .await
-            .expect("failed to remove package directory");
-        remove_dir_all(&sandbox_source_dir_path)
-            .await
-            .expect("failed to remove source directory");
-        remove_file(&sandbox_script_file_path)
-            .await
-            .expect("failed to remove script file");
+        cleanup(
+            &sandbox_package_dir_path,
+            &sandbox_source_dir_path,
+            &sandbox_script_file_path,
+        )
+        .await?;
+
         send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
     }
 
@@ -480,15 +511,12 @@ pub async fn run(
 
     send(tx, message).await?;
 
-    remove_dir_all(&sandbox_package_dir_path)
-        .await
-        .expect("failed to remove package directory");
-    remove_dir_all(&sandbox_source_dir_path)
-        .await
-        .expect("failed to remove source directory");
-    remove_file(&sandbox_script_file_path)
-        .await
-        .expect("failed to remove script file");
+    cleanup(
+        &sandbox_package_dir_path,
+        &sandbox_source_dir_path,
+        &sandbox_script_file_path,
+    )
+    .await?;
 
     Ok(())
 }

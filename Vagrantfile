@@ -34,10 +34,13 @@ Vagrant.configure("2") do |config|
 
       pushd "${HOME}/vorpal"
 
-      ./script/debian.sh "dev"
+      ./script/debian.sh
       ./script/dev.sh make dist
+      ./script/install.sh
 
       popd
     }' >> ~/.bashrc
+
+    echo "PATH=\"${HOME}/vorpal/.env/bin:\${PATH}\"" >> ~/.bashrc
   SHELL
 end

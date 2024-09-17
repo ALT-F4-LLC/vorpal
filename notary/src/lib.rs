@@ -1,10 +1,12 @@
 use anyhow::Result;
 use rand::rngs::OsRng;
-use rsa::pkcs8::LineEnding;
-use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
-use rsa::pss::{Signature, SigningKey};
+use rsa::pkcs8::{
+    DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding,
+};
+use rsa::pss::SigningKey;
 use rsa::sha2::Sha256;
 use rsa::signature::RandomizedSigner;
+use rsa::signature::SignatureEncoding;
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use std::path::PathBuf;
 use tokio::fs;
@@ -79,12 +81,16 @@ pub async fn get_public_key(public_key_path: PathBuf) -> Result<RsaPublicKey> {
     Ok(RsaPublicKey::from_public_key_pem(key).expect("failed to parse public key"))
 }
 
-pub async fn sign(private_key_path: PathBuf, source_data: &[u8]) -> Result<Signature> {
+pub async fn sign(private_key_path: PathBuf, source_data: &[u8]) -> Result<Box<[u8]>> {
     let private_key = get_private_key(private_key_path).await?;
 
     let signing_key = SigningKey::<Sha256>::new(private_key);
 
     let mut signing_rng = OsRng;
 
-    Ok(signing_key.sign_with_rng(&mut signing_rng, source_data))
+    let signature = signing_key.sign_with_rng(&mut signing_rng, source_data);
+
+    let signature_bytes = signature.to_bytes();
+
+    Ok(signature_bytes)
 }

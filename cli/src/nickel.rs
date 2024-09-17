@@ -102,8 +102,7 @@ pub fn load_config_build(
         }
 
         if let Some(sandbox) = &package.sandbox {
-            graph.add_node(&sandbox.name);
-            map.insert(sandbox.name.clone(), *sandbox.clone());
+            add_graph_edges(sandbox, &mut graph, &mut map);
         }
 
         add_graph_edges(package, &mut graph, &mut map);

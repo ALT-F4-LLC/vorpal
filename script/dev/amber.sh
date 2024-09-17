@@ -40,8 +40,6 @@ curl -L \
 
 tar -xf "/tmp/amber-${AMBER_VERSION}.tar.xz" -C "/tmp"
 
-ls -alh /tmp
-
 if [[ "${OS}" == "darwin" ]]; then
     cp "/tmp/amber-${ARCH}-${AMBER_SYSTEM}/amber" "${1}/bin/amber"
 elif [[ "${OS}" == "linux" && "${ARCH}" == "x86_64" ]]; then

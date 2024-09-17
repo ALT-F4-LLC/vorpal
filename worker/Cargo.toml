@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow = { default-features = false, version = "1" }
 bollard = { default-features = false, version = "0" }
-const-hex = { default-features = false, features = ["alloc"], version = "1" }
 futures-util = { default-features = false, version = "0" }
 rsa = { default-features = false, version = "0" }
 tera = { default-features = false, version = "1" }
