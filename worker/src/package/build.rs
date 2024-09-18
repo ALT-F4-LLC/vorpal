@@ -57,15 +57,15 @@ async fn send_error(tx: &Sender<Result<BuildResponse, Status>>, message: String)
 }
 
 async fn cleanup(
-    package_dir_path: &Path,
-    source_dir_path: &Path,
+    sandbox_package_dir_path: &Path,
+    sandbox_source_dir_path: &Path,
     sandbox_script_file_path: &PathBuf,
 ) -> Result<()> {
-    remove_dir_all(package_dir_path)
+    remove_dir_all(sandbox_package_dir_path)
         .await
         .expect("failed to remove package directory");
 
-    remove_dir_all(source_dir_path)
+    remove_dir_all(sandbox_source_dir_path)
         .await
         .expect("failed to remove source directory");
 
@@ -474,7 +474,7 @@ pub async fn run(
         cleanup(
             &sandbox_package_dir_path,
             &sandbox_source_dir_path,
-            &sandbox_script_file_path,
+            &sandbox_script_package_file_path,
         )
         .await?;
 
@@ -501,7 +501,7 @@ pub async fn run(
         cleanup(
             &sandbox_package_dir_path,
             &sandbox_source_dir_path,
-            &sandbox_script_file_path,
+            &sandbox_script_package_file_path,
         )
         .await?;
 
@@ -525,7 +525,7 @@ pub async fn run(
         cleanup(
             &sandbox_package_dir_path,
             &sandbox_source_dir_path,
-            &sandbox_script_file_path,
+            &sandbox_script_package_file_path,
         )
         .await?;
 
@@ -542,7 +542,7 @@ pub async fn run(
     cleanup(
         &sandbox_package_dir_path,
         &sandbox_source_dir_path,
-        &sandbox_script_file_path,
+        &sandbox_script_package_file_path,
     )
     .await?;
 

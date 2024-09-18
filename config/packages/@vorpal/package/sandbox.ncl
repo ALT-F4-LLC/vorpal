@@ -63,6 +63,9 @@ fun target =>
     cp /etc/ssl/certs/ca-certificates.crt $output/etc/ssl/certs/ca-certificates.crt
 
     ln -s $output/bin/gcc $output/bin/cc
+
+    rsync -aPW $output/include/ $output/usr/include/
+    rm -rf $output/include
   "%
   in
 
