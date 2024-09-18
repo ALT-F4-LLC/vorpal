@@ -10,6 +10,7 @@ sudo apt-get install \
     automake \
     bison \
     bubblewrap \
+    ca-certificates \
     flex \
     gawk \
     gettext \

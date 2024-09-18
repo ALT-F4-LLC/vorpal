@@ -23,6 +23,15 @@ fun target =>
   let texinfo = build_texinfo target in
   let zstd = build_zstd target in
 
+  let sed_cmd =
+    target
+    |> match {
+      "aarch64-linux" => m%"sed -i"%,
+      "aarch64-macos" => m%"sed -i ''"%,
+      _ => std.fail_with "Unsupported target"
+    }
+  in
+
   let packages_system =
     target
     |> match {
@@ -44,12 +53,40 @@ fun target =>
     }
   in
 
+  let script_linux = m%"
+    echo 'nameserver 1.1.1.1' > $output/etc/resolv.conf
+
+    mkdir -p $output/etc/ssl/certs
+    cp /etc/ssl/certs/ca-certificates.crt $output/etc/ssl/certs/ca-certificates.crt
+
+    ln -s $output/bin/gcc $output/bin/cc
+  "%
+  in
+
   {
     name = "vorpal-sandbox",
     packages = packages_system,
     script = m%"
+      export LC_ALL=C
+
       mkdir -p $output/bin
-      echo "#!$bash/bin/bash" > $output/bin/sandbox.sh
+      echo "#!$output/bin/bash" > $output/sandbox
+      echo "\"\${@}\"" >> $output/sandbox
+      chmod 755 $output/sandbox
+
+      for path in $packages; do
+        find $path -type f | while read file; do
+          if [ "$file" != "$path" ]; then
+            relative_path=${file#$path/}
+            dest="$output/$relative_path"
+            mkdir -p $(dirname "$dest")
+            cp "$file" "$dest"
+            %{sed_cmd} "s+$path+$output+g" "$dest"
+          fi
+        done
+      done
+
+      %{if (std.string.contains "linux" target) then script_linux else ""}
     "%,
     systems = [
       "aaarch64-linux",

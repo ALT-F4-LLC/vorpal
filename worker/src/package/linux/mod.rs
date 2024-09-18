@@ -1,32 +1,27 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn build(
-    bin_paths: Vec<String>,
-    env_var: HashMap<String, String>,
-    home_dir_path: &Path,
-    output_dir_path: &Path,
-    package_paths: &[String],
-    script_path: &Option<PathBuf>,
-    source_dir_path: &Path,
-    stdenv_dir_path: Option<PathBuf>,
+    sandbox_bin_paths: Vec<String>,
+    sandbox_env: HashMap<String, String>,
+    sandbox_home_dir_path: &Path,
+    sandbox_output_dir_path: &Path,
+    sandbox_package_paths: &[String],
+    sandbox_script_package_path: &Path,
+    sandbox_script_path: &Path,
+    sandbox_source_dir_path: &Path,
+    sandbox_stdenv_dir_path: Option<PathBuf>,
 ) -> Result<Command> {
-    let stdenv_dir_path = stdenv_dir_path.expect("failed to get stdenv path");
-
-    if script_path.is_none() {
-        bail!("script path is not provided")
-    }
+    let stdenv_dir_path = sandbox_stdenv_dir_path.expect("failed to get stdenv path");
 
     let mut env_path = "/bin:/sbin".to_string();
 
-    if !bin_paths.is_empty() {
-        env_path = format!("{}:{}", bin_paths.join(":"), env_path);
+    if !sandbox_bin_paths.is_empty() {
+        env_path = format!("{}:{}", sandbox_bin_paths.join(":"), env_path);
     }
-
-    let script_path = script_path.as_ref().unwrap();
 
     let bin_dir_path = stdenv_dir_path.join("bin");
     let etc_dir_path = stdenv_dir_path.join("etc");
@@ -40,27 +35,32 @@ pub async fn build(
     let mut build_command_args = vec![
         vec![
             "--bind",
-            home_dir_path.to_str().unwrap(),
-            home_dir_path.to_str().unwrap(),
+            sandbox_home_dir_path.to_str().unwrap(),
+            sandbox_home_dir_path.to_str().unwrap(),
         ],
         vec![
             "--bind",
-            output_dir_path.to_str().unwrap(),
-            output_dir_path.to_str().unwrap(),
+            sandbox_output_dir_path.to_str().unwrap(),
+            sandbox_output_dir_path.to_str().unwrap(),
         ],
         vec![
             "--bind",
-            source_dir_path.to_str().unwrap(),
-            source_dir_path.to_str().unwrap(),
+            sandbox_source_dir_path.to_str().unwrap(),
+            sandbox_source_dir_path.to_str().unwrap(),
         ],
-        vec!["--chdir", source_dir_path.to_str().unwrap()],
+        vec!["--chdir", sandbox_source_dir_path.to_str().unwrap()],
         vec!["--clearenv"],
         vec!["--dev", "/dev"],
         vec!["--proc", "/proc"],
         vec![
             "--ro-bind",
-            script_path.to_str().unwrap(),
-            script_path.to_str().unwrap(),
+            sandbox_script_package_path.to_str().unwrap(),
+            sandbox_script_package_path.to_str().unwrap(),
+        ],
+        vec![
+            "--ro-bind",
+            sandbox_script_path.to_str().unwrap(),
+            sandbox_script_path.to_str().unwrap(),
         ],
         vec!["--ro-bind", bin_dir_path.to_str().unwrap(), "/bin"],
         vec![
@@ -75,7 +75,7 @@ pub async fn build(
         vec!["--ro-bind", sbin_dir_path.to_str().unwrap(), "/sbin"],
         vec!["--ro-bind", share_dir_path.to_str().unwrap(), "/share"],
         vec!["--ro-bind", usr_dir_path.to_str().unwrap(), "/usr"],
-        vec!["--setenv", "HOME", home_dir_path.to_str().unwrap()],
+        vec!["--setenv", "HOME", sandbox_home_dir_path.to_str().unwrap()],
         vec!["--setenv", "LD_LIBRARY_PATH", "/lib:/lib64"],
         vec!["--setenv", "PATH", env_path.as_str()],
         vec!["--tmpfs", "/tmp"],
@@ -83,7 +83,7 @@ pub async fn build(
         vec!["--share-net"],
     ];
 
-    for package_path in package_paths.iter() {
+    for package_path in sandbox_package_paths.iter() {
         build_command_args.push(vec![
             "--ro-bind",
             package_path.as_str(),
@@ -93,7 +93,7 @@ pub async fn build(
 
     let mut env_vars_strings = Vec::new();
 
-    for (key, value) in env_var.clone().into_iter() {
+    for (key, value) in sandbox_env.clone().into_iter() {
         let key_str = key.to_string();
         let value_str = value.to_string();
         env_vars_strings.push((key_str, value_str));
@@ -103,7 +103,9 @@ pub async fn build(
         build_command_args.push(vec!["--setenv", key, value]);
     }
 
-    build_command_args.push(vec![script_path.to_str().unwrap()]);
+    build_command_args.push(vec![sandbox_script_path.to_str().unwrap()]);
+
+    build_command_args.push(vec![sandbox_script_package_path.to_str().unwrap()]);
 
     let mut command = Command::new("/usr/bin/bwrap");
 

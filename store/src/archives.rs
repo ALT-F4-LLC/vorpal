@@ -21,7 +21,7 @@ pub async fn compress_zstd(
     source_files: &[PathBuf],
     output_path: &PathBuf,
 ) -> Result<File, Error> {
-    let temp_file = create_temp_file("tar.zst")
+    let temp_file = create_temp_file(Some("tar.zst"))
         .await
         .expect("Failed to create temp file");
 

@@ -13,8 +13,12 @@ pub async fn create_temp_dir() -> Result<PathBuf> {
     Ok(dir_path)
 }
 
-pub async fn create_temp_file(extension: &str) -> Result<PathBuf> {
-    let file_path = paths::get_temp_path().with_extension(extension);
+pub async fn create_temp_file(extension: Option<&str>) -> Result<PathBuf> {
+    let mut file_path = paths::get_temp_path();
+
+    if let Some(extension) = extension {
+        file_path = file_path.with_extension(extension);
+    }
 
     File::create(&file_path)
         .await

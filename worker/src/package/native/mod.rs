@@ -1,34 +1,32 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use tokio::process::Command;
 
 pub async fn build(
-    bin_paths: Vec<String>,
-    env_var: HashMap<String, String>,
-    script_path: &Option<PathBuf>,
-    source_dir_path: &PathBuf,
+    sandbox_bin_paths: Vec<String>,
+    sandbox_env_var: HashMap<String, String>,
+    sandbox_script_package_path: &Path,
+    sandbox_script_path: &Path,
+    sandbox_source_dir_path: &Path,
 ) -> Result<Command> {
-    if script_path.is_none() {
-        bail!("script path is not provided")
-    }
-
-    let script_path = script_path.as_ref().unwrap();
-
     let mut command = Command::new("/bin/bash");
 
-    command.args([script_path.to_str().unwrap()]);
+    command.args([
+        sandbox_script_path.to_str().unwrap(),
+        sandbox_script_package_path.to_str().unwrap(),
+    ]);
 
-    command.current_dir(source_dir_path);
+    command.current_dir(sandbox_source_dir_path);
 
-    for (key, value) in env_var.clone().into_iter() {
+    for (key, value) in sandbox_env_var.clone().into_iter() {
         command.env(key, value);
     }
 
     let mut path = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string();
 
-    if !bin_paths.is_empty() {
-        path = format!("{}:{}", bin_paths.join(":"), path);
+    if !sandbox_bin_paths.is_empty() {
+        path = format!("{}:{}", sandbox_bin_paths.join(":"), path);
     }
 
     command.env("PATH", path);

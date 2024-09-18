@@ -1,6 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tera::Tera;
 use tokio::fs::write;
 use tokio::process::Command;
@@ -9,21 +9,16 @@ use vorpal_store::temps::create_temp_file;
 mod profile;
 
 pub async fn build(
-    bin_paths: Vec<String>,
-    env_var: HashMap<String, String>,
-    script_path: &Option<PathBuf>,
-    source_dir_path: &PathBuf,
-    stdenv_dir_path: Option<PathBuf>,
+    sandbox_bin_paths: Vec<String>,
+    sandbox_env: HashMap<String, String>,
+    sandbox_script_package_path: &Path,
+    sandbox_script_path: &Path,
+    sandbox_source_dir_path: &PathBuf,
+    sandbox_stdenv_dir_path: Option<PathBuf>,
 ) -> Result<Command> {
-    if script_path.is_none() {
-        bail!("script path is not provided")
-    }
+    let stdenv_dir_path = sandbox_stdenv_dir_path.expect("failed to get stdenv path");
 
-    let script_file_path = script_path.as_ref().unwrap();
-
-    let stdenv_dir_path = stdenv_dir_path.expect("failed to get stdenv path");
-
-    let profile_file_path = create_temp_file("sb").await?;
+    let profile_file_path = create_temp_file(Some("sb")).await?;
 
     let mut tera = Tera::default();
 
@@ -43,16 +38,17 @@ pub async fn build(
     let command_args = [
         "-f",
         profile_file_path.to_str().unwrap(),
-        script_file_path.to_str().unwrap(),
+        sandbox_script_path.to_str().unwrap(),
+        sandbox_script_package_path.to_str().unwrap(),
     ];
 
     let mut command = Command::new("/usr/bin/sandbox-exec");
 
     command.args(command_args);
 
-    command.current_dir(source_dir_path);
+    command.current_dir(sandbox_source_dir_path);
 
-    for (key, value) in env_var.clone().into_iter() {
+    for (key, value) in sandbox_env.clone().into_iter() {
         command.env(key, value);
     }
 
@@ -61,8 +57,8 @@ pub async fn build(
         stdenv_dir_path.join("bin").to_str().unwrap()
     );
 
-    if !bin_paths.is_empty() {
-        path = format!("{}:{}", bin_paths.join(":"), path);
+    if !sandbox_bin_paths.is_empty() {
+        path = format!("{}:{}", sandbox_bin_paths.join(":"), path);
     }
 
     command.env("PATH", path);

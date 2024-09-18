@@ -212,8 +212,6 @@ pub async fn setup_paths() -> Result<()> {
 }
 
 async fn update_file(path: &str, next: &str) -> Result<()> {
-    println!("fixing paths: {:?}", path);
-
     // Get current file permissions
     let metadata = metadata(path).await.expect("failed to get file metadata");
     let mut permissions = metadata.permissions();
