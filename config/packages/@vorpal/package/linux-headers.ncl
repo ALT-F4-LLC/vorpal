@@ -17,7 +17,6 @@ fun target =>
       find usr/include -type f ! -name '*.h' -delete
       mkdir -p "$output/usr"
       cp -rv usr/include "$output/usr"
-      popd
     "%,
     source = {
       linux_headers = {

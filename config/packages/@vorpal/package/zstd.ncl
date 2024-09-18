@@ -16,7 +16,6 @@ fun target =>
       pushd "${PWD}/zstd"
       make -j$(%{script_build_cpus})
       make install PREFIX="$output"
-      popd
     "%,
     source = {
       zstd = {

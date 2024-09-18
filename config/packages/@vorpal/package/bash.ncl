@@ -25,7 +25,6 @@ fun target =>
       ./configure --prefix=$output
       make -j$(%{make_cpus})
       make install
-      popd
     "%,
     source = {
       bash = {

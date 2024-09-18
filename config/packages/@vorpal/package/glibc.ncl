@@ -27,7 +27,6 @@ fun target =>
       ../glibc/configure --prefix="$output" libc_cv_slibdir="$output/lib"
       make -j$(%{script_build_cpus})
       make install
-      popd
     "%,
     source = {
       glibc = {

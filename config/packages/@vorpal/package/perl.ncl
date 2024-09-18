@@ -17,7 +17,6 @@ fun target =>
       ./Configure -des -Dprefix="$output"
       make -j$(%{script_build_cpus})
       make install
-      popd
     "%,
     source = {
       perl = {

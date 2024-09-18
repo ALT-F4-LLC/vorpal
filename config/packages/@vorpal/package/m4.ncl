@@ -17,7 +17,6 @@ fun target =>
       ./configure --prefix=$output
       make -j$(%{script_build_cpus})
       make install
-      popd
     "%,
     source = {
       m4 = {

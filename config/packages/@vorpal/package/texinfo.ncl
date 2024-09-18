@@ -18,7 +18,6 @@ fun target =>
       make -j$(%{script_build_cpus})
       make install
       make TEXMF=$output install-tex
-      popd
     "%,
     source = {
       texinfo = {

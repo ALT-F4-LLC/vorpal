@@ -9,6 +9,7 @@ let build_linux_headers = import "@vorpal/package/linux-headers.ncl" in
 let build_m4 = import "@vorpal/package/m4.ncl" in
 let build_perl = import "@vorpal/package/perl.ncl" in
 let build_texinfo = import "@vorpal/package/texinfo.ncl" in
+let build_zlib = import "@vorpal/package/zlib.ncl" in
 let build_zstd = import "@vorpal/package/zstd.ncl" in
 
 fun target =>
@@ -21,6 +22,7 @@ fun target =>
   let m4 = build_m4 target in
   let perl = build_perl target in
   let texinfo = build_texinfo target in
+  let zlib = build_zlib target in
   let zstd = build_zstd target in
 
   let sed_cmd =
@@ -46,6 +48,7 @@ fun target =>
           m4,
           perl,
           texinfo,
+          zlib,
           zstd
         ],
       "aarch64-macos" => [bash, coreutils, zstd],
