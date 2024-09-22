@@ -18,6 +18,14 @@ fun target =>
       ./Configure -des -Dprefix="$output"
       make -j$(%{script_build_cpus})
       make install
+
+      mv "$output/bin/perl" "$output/bin/.perl-wrapped"
+      wrapper="$output/bin/perl"
+      touch "$wrapper"
+      echo "#!/bin/sh -e" > "$wrapper"
+      echo "export PERL5LIB=$output/lib/perl5/5.40.0" >> $wrapper
+      echo exec $output/bin/.perl-wrapped '"$@"' >> "$wrapper"
+      chmod +x "$wrapper"
     "%,
     source = {
       perl = {
