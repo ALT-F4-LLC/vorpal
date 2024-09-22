@@ -4,6 +4,7 @@ fun target =>
   let script_build_cpus =
     target
     |> match {
+      "x86_64-linux" => "nproc",
       "aarch64-linux" => "nproc",
       "aarch64-macos" => "sysctl -n hw.ncpu",
       _ => std.fail_with "Unsupported target"

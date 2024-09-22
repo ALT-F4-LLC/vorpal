@@ -1,11 +1,15 @@
 let { Package, .. } = import "@vorpal/contract.ncl" in
+let build_perl = import "@vorpal/package/perl.ncl" in
 
 fun target =>
+  let perl = build_perl target in
+
   let script_build_cpus =
     target
     |> match {
       "aarch64-linux" => "nproc",
       "aarch64-macos" => "sysctl -n hw.ncpu",
+      "x86_64-linux" => "nproc",
       _ => std.fail_with "Unsupported target"
     }
   in
@@ -19,6 +23,7 @@ fun target =>
       make install
       make TEXMF=$output install-tex
     "%,
+    packages = [perl],
     source = {
       texinfo = {
         hash = "6e34604552af91db0b4ccf0bcceba63dd3073da2a492ebcf33c6e188a64d2b63",
