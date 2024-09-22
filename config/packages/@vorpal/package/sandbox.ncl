@@ -30,6 +30,7 @@ fun target =>
     |> match {
       "aarch64-linux" => m%"sed -i"%,
       "aarch64-macos" => m%"sed -i ''"%,
+      "x86_64-linux" => m%"sed -i"%,
       _ => std.fail_with "Unsupported target"
     }
   in
@@ -52,6 +53,20 @@ fun target =>
           zstd
         ],
       "aarch64-macos" => [bash, coreutils, zstd],
+      "x86_64-linux" =>
+        [
+          bash,
+          binutils,
+          coreutils,
+          gcc,
+          glibc,
+          linux_headers,
+          m4,
+          perl,
+          texinfo,
+          zlib,
+          zstd
+        ],
       _ => std.fail_with "Unsupported target"
     }
   in
