@@ -25,10 +25,10 @@ message BuildRequest {
     optional PackageOutput sandbox = 3;
     optional bytes source_data = 4;
     optional bytes source_data_signature = 5;
-    optional string source_hash = 6;
-    repeated PackageOutput packages = 7;
-    string name = 8;
-    string script = 9;
+    repeated PackageOutput packages = 6;
+    string name = 7;
+    string script = 8;
+    string source_hash = 9;
 }
 
 message BuildResponse {

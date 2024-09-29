@@ -1,22 +1,25 @@
 use crate::package::{darwin, linux, native};
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use rsa::{
     pss::{Signature, VerifyingKey},
     sha2::Sha256,
     signature::Verifier,
 };
-use std::collections::HashMap;
-use std::env::consts::{ARCH, OS};
-use std::fs::Permissions;
-use std::iter::Iterator;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use tokio::fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc::Sender;
-use tokio_stream::wrappers::LinesStream;
-use tokio_stream::StreamExt;
+use std::{
+    collections::HashMap,
+    env::consts::{ARCH, OS},
+    fs::Permissions,
+    iter::Iterator,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    process::Stdio,
+};
+use tokio::{
+    fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
+    io::{AsyncBufReadExt, BufReader},
+    sync::mpsc::Sender,
+};
+use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tonic::{Request, Status, Streaming};
 use tracing::debug;
 use vorpal_notary::get_public_key;
@@ -41,37 +44,27 @@ async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Res
 
     tx.send(Ok(BuildResponse { output }))
         .await
-        .expect("failed to send");
+        .map_err(|err| anyhow!("failed to send response: {:?}", err))?;
 
     Ok(())
 }
 
-async fn send_error(tx: &Sender<Result<BuildResponse, Status>>, message: String) -> Result<()> {
-    debug!("{}", message);
-
-    tx.send(Err(Status::internal(message.clone())))
-        .await
-        .expect("failed to send");
-
-    bail!(message);
-}
-
 async fn cleanup(
-    sandbox_package_dir_path: &Path,
-    sandbox_source_dir_path: &Path,
-    sandbox_script_file_path: &PathBuf,
+    sandbox_package_dir: &Path,
+    sandbox_source_dir: &Path,
+    sandbox_script_file: &PathBuf,
 ) -> Result<()> {
-    remove_dir_all(sandbox_package_dir_path)
+    remove_dir_all(sandbox_package_dir)
         .await
-        .expect("failed to remove package directory");
+        .map_err(|err| anyhow!("failed to remove package directory: {:?}", err))?;
 
-    remove_dir_all(sandbox_source_dir_path)
+    remove_dir_all(sandbox_source_dir)
         .await
-        .expect("failed to remove source directory");
+        .map_err(|err| anyhow!("failed to remove source directory: {:?}", err))?;
 
-    remove_file(sandbox_script_file_path)
+    remove_file(sandbox_script_file)
         .await
-        .expect("failed to remove script file");
+        .map_err(|err| anyhow!("failed to remove script file: {:?}", err))?;
 
     Ok(())
 }
@@ -81,65 +74,63 @@ pub async fn run(
     tx: &Sender<Result<BuildResponse, Status>>,
 ) -> Result<()> {
     let mut package_environment = HashMap::new();
-    let mut packge_name = String::new();
+    let mut package_name = String::new();
     let mut package_packages = vec![];
     let mut package_sandbox = None;
     let mut package_script = String::new();
-    let mut package_source_data: Vec<u8> = Vec::new();
+    let mut package_source_data: Vec<u8> = vec![];
     let mut package_source_data_chunk = 0;
-    let mut package_source_data_signature = Vec::new();
+    let mut package_source_data_signature = None;
     let mut package_source_hash = String::new();
     let mut package_target = Unknown;
-
     let mut request_stream = request.into_inner();
 
     while let Some(result) = request_stream.next().await {
-        let result = result.expect("failed to get result");
+        let result = result.map_err(|err| anyhow!("failed to parse request: {:?}", err))?;
 
         if let Some(data) = result.source_data {
             package_source_data_chunk += 1;
             package_source_data.extend_from_slice(&data);
         }
 
-        if let Some(signature) = result.source_data_signature {
-            package_source_data_signature = signature;
-        }
-
-        if let Some(hash) = result.source_hash {
-            package_source_hash = hash;
-        }
-
         package_environment = result.environment;
-        packge_name = result.name;
+        package_name = result.name;
         package_packages = result.packages;
         package_sandbox = result.sandbox;
         package_script = result.script;
-        package_target = PackageSystem::try_from(result.target).expect("failed to convert target");
+        package_source_data_signature = result.source_data_signature;
+        package_source_hash = result.source_hash;
+        package_target = PackageSystem::try_from(result.target)
+            .map_err(|err| anyhow!("failed to parse target: {:?}", err))?;
     }
 
-    if packge_name.is_empty() {
-        send_error(tx, "'name' missing in configuration".to_string()).await?
+    if package_name.is_empty() {
+        bail!("'name' missing in configuration")
     }
 
     if package_script.is_empty() {
-        send_error(tx, "'script' missing in configuration".to_string()).await?
+        bail!("'script' missing in configuration")
+    }
+
+    if package_source_hash.is_empty() {
+        bail!("'source_hash' is missing in configuration")
     }
 
     if package_target == Unknown {
-        send_error(tx, "'target' unsupported".to_string()).await?
+        bail!("'target' missing in configuration")
     }
 
     let worker_system = format!("{}-{}", ARCH, OS);
 
-    let worker_system = get_package_system::<PackageSystem>(worker_system.as_str());
+    let worker_target = get_package_system::<PackageSystem>(worker_system.as_str());
 
-    if worker_system != package_target {
-        send_error(tx, "'target' does not match worker system".to_string()).await?
+    if package_target != worker_target {
+        bail!("'target' mismatch")
     }
 
     // If package exists, return
 
-    let package_path = get_package_path(&package_source_hash, &packge_name);
+    let package_path = get_package_path(&package_source_hash, &package_name);
 
     if package_path.exists() {
         send(tx, package_path.display().to_string()).await?;
@@ -149,17 +140,17 @@ pub async fn run(
 
     // If package archive exists, unpack it to package path
 
-    let package_archive_path = get_package_archive_path(&package_source_hash, &packge_name);
+    let package_archive_path = get_package_archive_path(&package_source_hash, &package_name);
 
     if package_archive_path.exists() {
         send(tx, package_archive_path.display().to_string()).await?;
 
         create_dir_all(&package_path)
             .await
-            .expect("failed to create package directory");
+            .map_err(|err| anyhow!("failed to create package directory: {:?}", err))?;
 
         if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
-            send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
+            bail!("failed to unpack package archive: {:?}", err)
         }
 
         send(tx, package_path.display().to_string()).await?;
@@ -169,38 +160,39 @@ pub async fn run(
 
     // at this point we should be ready to prepare the source
 
-    let package_source_path = get_source_path(&package_source_hash, &packge_name);
+    let package_source_path = get_source_path(&package_source_hash, &package_name);
 
     if !package_source_path.exists() && !package_source_data.is_empty() {
         send(tx, format!("Source chunks: {}", package_source_data_chunk)).await?;
 
-        if package_source_data_signature.is_empty() {
-            send_error(tx, "'source_signature' invalid".to_string()).await?
+        match package_source_data_signature {
+            None => bail!("'source_signature' missing in configuration"),
+            Some(signature) => {
+                if signature.is_empty() {
+                    bail!("'source_signature' missing in configuration")
+                }
+
+                let public_key_path = get_public_key_path();
+
+                let public_key = get_public_key(public_key_path).await?;
+
+                let signature = Signature::try_from(signature.as_slice())
+                    .map_err(|err| anyhow!("failed to parse signature: {:?}", err))?;
+
+                let verifying_key = VerifyingKey::<Sha256>::new(public_key);
+
+                if let Err(msg) = verifying_key.verify(&package_source_data, &signature) {
+                    bail!("failed to verify signature: {:?}", msg)
+                }
+            }
         }
 
-        if package_source_hash.is_empty() {
-            send_error(tx, "'source_hash' missing in configuration".to_string()).await?
-        }
-
-        let public_key_path = get_public_key_path();
-
-        let public_key = get_public_key(public_key_path).await?;
-
-        let signature = Signature::try_from(package_source_data_signature.as_slice())
-            .expect("failed to parse signature");
-
-        let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-
-        if let Err(msg) = verifying_key.verify(&package_source_data, &signature) {
-            send_error(tx, format!("failed to verify signature: {}", msg)).await?
-        }
-
-        let source_archive_path = get_source_archive_path(&package_source_hash, &packge_name);
+        let source_archive_path = get_source_archive_path(&package_source_hash, &package_name);
 
         if !source_archive_path.exists() {
             write(&source_archive_path, &package_source_data)
                 .await
-                .expect("failed to write source archive");
+                .map_err(|err| anyhow!("failed to write source archive: {:?}", err))?;
 
             send(tx, source_archive_path.display().to_string()).await?;
         }
@@ -216,7 +208,7 @@ pub async fn run(
 
             create_dir_all(&package_source_path)
                 .await
-                .expect("failed to create source directory");
+                .map_err(|err| anyhow!("failed to create source directory: {:?}", err))?;
 
             unpack_zstd(&package_source_path, &source_archive_path).await?;
 
@@ -242,7 +234,7 @@ pub async fn run(
         if !path.exists() {
             let message = format!("package missing: {}", path.display());
 
-            send_error(tx, message).await?
+            bail!(message)
         }
 
         let bin_path = path.join("bin");
@@ -288,7 +280,7 @@ pub async fn run(
         let stdenv_dir_path = get_package_path(&s.hash, &s.name);
 
         if !stdenv_dir_path.exists() {
-            send_error(tx, "sandbox package missing".to_string()).await?
+            bail!("sandbox stdenv missing: {}", stdenv_dir_path.display())
         }
 
         sandbox_stdenv_path = Some(stdenv_dir_path.to_path_buf());
@@ -307,7 +299,7 @@ pub async fn run(
     }
 
     if sandbox_script_file_path.is_none() {
-        let stdenv_bash_path = "/bin/bash".to_string();
+        let stdenv_bash_path = "/bin/sh".to_string();
 
         let sandbox_script_commands = [
             format!("#!{}", stdenv_bash_path),
@@ -320,11 +312,11 @@ pub async fn run(
 
         write(&sandbox_script_path, sandbox_script_data)
             .await
-            .expect("failed to write script");
+            .map_err(|err| anyhow!("failed to write script: {:?}", err))?;
 
         set_permissions(&sandbox_script_path, Permissions::from_mode(0o755))
             .await
-            .expect("failed to set permissions");
+            .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
         sandbox_script_file_path = Some(sandbox_script_path.to_path_buf());
         sandbox_stdenv_bash_path = Some(stdenv_bash_path.to_string());
@@ -357,14 +349,14 @@ pub async fn run(
         sandbox_script_package_data,
     )
     .await
-    .expect("failed to write package script");
+    .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
 
     set_permissions(
         &sandbox_script_package_file_path,
         Permissions::from_mode(0o755),
     )
     .await
-    .expect("failed to set permissions");
+    .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
     // Create source directory
 
     let sandbox_source_dir_path = create_temp_dir().await?;
@@ -406,7 +398,7 @@ pub async fn run(
             )
             .await?,
         ),
-        Some(_) => match worker_system {
+        Some(_) => match worker_target {
             Aarch64Macos | X8664Macos => Some(
                 darwin::build(
                     bin_paths.clone(),
@@ -441,7 +433,7 @@ pub async fn run(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("failed to spawn sandbox command");
+        .map_err(|err| anyhow!("failed to spawn sandbox command: {:?}", err))?;
 
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -452,14 +444,17 @@ pub async fn run(
     let mut merged = StreamExt::merge(stdout, stderr);
 
     while let Some(line) = merged.next().await {
-        let line = line.expect("failed to parse output");
+        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
         send(tx, line.trim().to_string()).await?;
     }
 
-    let status = child.wait().await.expect("failed to wait for child");
+    let status = child
+        .wait()
+        .await
+        .map_err(|err| anyhow!("failed to wait for sandbox: {:?}", err))?;
 
     if !status.success() {
-        send_error(tx, "build script failed".to_string()).await?
+        bail!("failed to build package")
     }
 
     // Check for output files
@@ -471,14 +466,7 @@ pub async fn run(
     )?;
 
     if sandbox_package_files.is_empty() || sandbox_package_files.len() == 1 {
-        cleanup(
-            &sandbox_package_dir_path,
-            &sandbox_source_dir_path,
-            &sandbox_script_package_file_path,
-        )
-        .await?;
-
-        send_error(tx, "no build output files found".to_string()).await?
+        bail!("no build output files found")
     }
 
     let message = format!("output files: {}", sandbox_package_files.len());
@@ -498,14 +486,7 @@ pub async fn run(
     )
     .await
     {
-        cleanup(
-            &sandbox_package_dir_path,
-            &sandbox_source_dir_path,
-            &sandbox_script_package_file_path,
-        )
-        .await?;
-
-        send_error(tx, format!("failed to compress package tar: {:?}", err)).await?
+        bail!("failed to compress package tar: {:?}", err)
     }
 
     let message = format!(
@@ -519,17 +500,10 @@ pub async fn run(
 
     create_dir_all(&package_path)
         .await
-        .expect("failed to create package directory");
+        .map_err(|err| anyhow!("failed to create package directory: {:?}", err))?;
 
     if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
-        cleanup(
-            &sandbox_package_dir_path,
-            &sandbox_source_dir_path,
-            &sandbox_script_package_file_path,
-        )
-        .await?;
-
-        send_error(tx, format!("failed to unpack package archive: {:?}", err)).await?
+        bail!("failed to unpack package archive: {:?}", err)
     }
 
     let message = format!(
@@ -538,13 +512,6 @@ pub async fn run(
     );
 
     send(tx, message).await?;
-
-    cleanup(
-        &sandbox_package_dir_path,
-        &sandbox_source_dir_path,
-        &sandbox_script_package_file_path,
-    )
-    .await?;
 
     Ok(())
 }

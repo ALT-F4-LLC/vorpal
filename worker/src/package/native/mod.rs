@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::env;
 use std::path::Path;
 use tokio::process::Command;
 
@@ -10,7 +11,7 @@ pub async fn build(
     sandbox_script_path: &Path,
     sandbox_source_dir_path: &Path,
 ) -> Result<Command> {
-    let mut command = Command::new("/bin/bash");
+    let mut command = Command::new("/bin/sh");
 
     command.args([
         sandbox_script_path.to_str().unwrap(),
@@ -23,7 +24,7 @@ pub async fn build(
         command.env(key, value);
     }
 
-    let mut path = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string();
+    let mut path = env::var("PATH").unwrap_or_default();
 
     if !sandbox_bin_paths.is_empty() {
         path = format!("{}:{}", sandbox_bin_paths.join(":"), path);

@@ -1,17 +1,9 @@
+let { MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
 let { Package, .. } = import "@vorpal/contract.ncl" in
 
 let build_binutils = import "@vorpal/package/binutils.ncl" in
 
 fun target =>
-  let script_build_cpus =
-    target
-    |> match {
-      "aarch64-linux" => "nproc",
-      "aarch64-macos" => "sysctl -n hw.ncpu",
-      _ => std.fail_with "Unsupported target"
-    }
-  in
-
   {
     name = "gcc",
     packages = [build_binutils target],
@@ -43,7 +35,7 @@ fun target =>
         --prefix=$output \
         --with-system-zlib
 
-      make -j$(%{script_build_cpus})
+      make -j$(%{MakeCpus target})
 
       make install
 
@@ -57,7 +49,7 @@ fun target =>
       }
     },
     systems = [
-      "aaarch64-linux",
+      "aarch64-linux",
       "aarch64-macos",
       "x86_64-linux",
       "x86_64-macos"

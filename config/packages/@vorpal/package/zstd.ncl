@@ -1,20 +1,12 @@
+let { MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
 let { Package, .. } = import "@vorpal/contract.ncl" in
 
 fun target =>
-  let script_build_cpus =
-    target
-    |> match {
-      "aarch64-linux" => "nproc",
-      "aarch64-macos" => "sysctl -n hw.ncpu",
-      _ => std.fail_with "Unsupported target"
-    }
-  in
-
   {
     name = "zstd",
     script = m%"
       pushd "${PWD}/zstd"
-      make -j$(%{script_build_cpus})
+      make -j$(%{MakeCpus target})
       make install PREFIX="$output"
     "%,
     source = {
@@ -25,7 +17,7 @@ fun target =>
       }
     },
     systems = [
-      "aaarch64-linux",
+      "aarch64-linux",
       "aarch64-macos",
       "x86_64-linux",
       "x86_64-macos"

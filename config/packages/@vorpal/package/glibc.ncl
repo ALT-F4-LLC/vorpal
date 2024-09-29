@@ -1,3 +1,4 @@
+let { MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
 let { Package, .. } = import "@vorpal/contract.ncl" in
 
 let build_binutils = import "@vorpal/package/binutils.ncl" in
@@ -9,15 +10,6 @@ fun target =>
   let gcc = build_gcc target in
   let linux_headers = build_linux_headers target in
 
-  let script_build_cpus =
-    target
-    |> match {
-      "aarch64-linux" => "nproc",
-      "aarch64-macos" => "sysctl -n hw.ncpu",
-      _ => std.fail_with "Unsupported target"
-    }
-  in
-
   {
     name = "glibc",
     packages = [binutils, gcc, linux_headers],
@@ -25,7 +17,7 @@ fun target =>
       mkdir -p "${PWD}/glibc-build"
       pushd "${PWD}/glibc-build"
       ../glibc/configure --prefix="$output" libc_cv_slibdir="$output/lib"
-      make -j$(%{script_build_cpus})
+      make -j$(%{MakeCpus target})
       make install
     "%,
     source = {
@@ -36,7 +28,7 @@ fun target =>
       }
     },
     systems = [
-      "aaarch64-linux",
+      "aarch64-linux",
       "aarch64-macos",
       "x86_64-linux",
       "x86_64-macos"

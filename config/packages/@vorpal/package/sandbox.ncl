@@ -30,28 +30,41 @@ fun target =>
     |> match {
       "aarch64-linux" => m%"sed -i"%,
       "aarch64-macos" => m%"sed -i ''"%,
+      "x86_64-linux" => m%"sed -i"%,
+      "x86_64-macos" => m%"sed -i ''"%,
       _ => std.fail_with "Unsupported target"
     }
+  in
+
+  let packages_system_linux = [
+    bash,
+    binutils,
+    coreutils,
+    gcc,
+    glibc,
+    linux_headers,
+    m4,
+    perl,
+    texinfo,
+    zlib,
+    zstd
+  ]
+  in
+
+  let packages_system_macos = [
+    bash,
+    coreutils,
+    zstd
+  ]
   in
 
   let packages_system =
     target
     |> match {
-      "aarch64-linux" =>
-        [
-          bash,
-          binutils,
-          coreutils,
-          gcc,
-          glibc,
-          linux_headers,
-          m4,
-          perl,
-          texinfo,
-          zlib,
-          zstd
-        ],
-      "aarch64-macos" => [bash, coreutils, zstd],
+      "aarch64-linux" => packages_system_linux,
+      "aarch64-macos" => packages_system_macos,
+      "x86_64-linux" => packages_system_linux,
+      "x86_64-macos" => packages_system_macos,
       _ => std.fail_with "Unsupported target"
     }
   in
@@ -95,7 +108,7 @@ fun target =>
       %{if (std.string.contains "linux" target) then script_linux else ""}
     "%,
     systems = [
-      "aaarch64-linux",
+      "aarch64-linux",
       "aarch64-macos",
       "x86_64-linux",
       "x86_64-macos"

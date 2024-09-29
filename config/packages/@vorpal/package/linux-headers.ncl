@@ -26,7 +26,7 @@ fun target =>
       }
     },
     systems = [
-      "aaarch64-linux",
+      "aarch64-linux",
       "aarch64-macos",
       "x86_64-linux",
       "x86_64-macos"

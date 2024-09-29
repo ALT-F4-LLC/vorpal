@@ -75,6 +75,7 @@ pub async fn build(
         vec!["--ro-bind", sbin_dir_path.to_str().unwrap(), "/sbin"],
         vec!["--ro-bind", share_dir_path.to_str().unwrap(), "/share"],
         vec!["--ro-bind", usr_dir_path.to_str().unwrap(), "/usr"],
+        vec!["--ro-bind", "/nix/store", "/nix/store"],
         vec!["--setenv", "HOME", sandbox_home_dir_path.to_str().unwrap()],
         vec!["--setenv", "LD_LIBRARY_PATH", "/lib:/lib64"],
         vec!["--setenv", "PATH", env_path.as_str()],
@@ -107,7 +108,7 @@ pub async fn build(
 
     build_command_args.push(vec![sandbox_script_package_path.to_str().unwrap()]);
 
-    let mut command = Command::new("/usr/bin/bwrap");
+    let mut command = Command::new("bwrap");
 
     let mut command_args = vec![];
 

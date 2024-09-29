@@ -426,7 +426,7 @@ pub async fn build(
                 script: package.script.clone(),
                 source_data: Some(chunk.to_vec()),
                 source_data_signature: Some(source_signature.to_vec()),
-                source_hash: Some(package_hash.clone()),
+                source_hash: package_hash.clone(),
                 target: target as i32,
             });
         }
@@ -443,7 +443,7 @@ pub async fn build(
             script: package.script.clone(),
             source_data: None,
             source_data_signature: None,
-            source_hash: Some(package_hash.clone()),
+            source_hash: package_hash.clone(),
             target: target as i32,
         });
     }

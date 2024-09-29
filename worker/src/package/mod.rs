@@ -36,6 +36,8 @@ impl PackageService for PackageServer {
             match build::run(request, &tx).await {
                 Ok(_) => (),
                 Err(e) => {
+                    // TODO: also clean up all files in the sandbox if they exists
+
                     tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
                 }
             }
