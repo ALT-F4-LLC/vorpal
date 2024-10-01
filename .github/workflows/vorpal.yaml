@@ -103,8 +103,19 @@ jobs:
         runner:
           - macos-latest
           - ubuntu-latest
-          # - ubuntu-latest-arm64
     steps:
+      - if: matrix.runner == 'ubuntu-latest'
+        run: |
+          apt-get update
+          apt-get install --yes \
+            autoconf \
+            automake \
+            build-essential \
+            flex \
+            gettext \
+            help2man \
+            zlib
+
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
@@ -131,7 +142,6 @@ jobs:
           sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
 
       - run: ./vorpal keys generate
-
       - run: ./vorpal check
 
       - run: |
