@@ -106,8 +106,8 @@ jobs:
     steps:
       - if: matrix.runner == 'ubuntu-latest'
         run: |
-          apt-get update
-          apt-get install --yes \
+          sudo apt-get update
+          sudo apt-get install --yes \
             autoconf \
             automake \
             build-essential \
