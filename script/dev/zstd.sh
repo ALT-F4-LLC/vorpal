@@ -20,6 +20,10 @@ if [[ "${ARCH}" == "arm64" ]]; then
     ARCH="aarch64"
 fi
 
+if [[ "${OS}" == "macos" ]]; then
+    CPU_COUNT="-j$(sysctl -n hw.ncpu)"
+fi
+
 if [[ "${OS}" == "linux" ]]; then
     CPU_COUNT="-j$(nproc)"
 fi
@@ -30,14 +34,10 @@ curl -L \
 
 tar -xzf "/tmp/zstd-${VERSION}.tar.gz" -C "/tmp"
 
-pushd "/tmp/zstd-${VERSION}"
+cd "/tmp/zstd-${VERSION}"
 
 make ${CPU_COUNT}
-
 make install PREFIX="${1}"
 
-popd
-
 rm -rf "/tmp/zstd-${VERSION}"
-
 rm -rf "/tmp/zstd-${VERSION}.tar.gz"

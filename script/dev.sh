@@ -6,9 +6,9 @@ readonly SCRIPT_PATH="${PWD}/script"
 
 scripts=(
   "rustup"
-  "amber"
   "nickel" # must go after rustup.sh
   "protoc"
+  "zstd"
 )
 
 mkdir -p "${ENV_PATH}/bin"
