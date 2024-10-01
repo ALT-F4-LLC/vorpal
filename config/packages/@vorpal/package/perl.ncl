@@ -5,7 +5,7 @@ fun target =>
   {
     name = "perl",
     script = m%"
-      pushd "${PWD}/perl"
+      cd ${PWD}/perl
       ./Configure -des -Dprefix="$output"
       make -j$(%{MakeCpus target})
       make install

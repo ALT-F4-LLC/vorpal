@@ -5,7 +5,7 @@ fun target =>
   {
     name = "zlib",
     script = m%"
-      pushd "${PWD}/zlib"
+      cd ${PWD}/zlib
       ./configure --prefix=$output
       make -j$(%{MakeCpus target})
       make install

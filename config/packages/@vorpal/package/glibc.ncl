@@ -14,8 +14,8 @@ fun target =>
     name = "glibc",
     packages = [binutils, gcc, linux_headers],
     script = m%"
-      mkdir -p "${PWD}/glibc-build"
-      pushd "${PWD}/glibc-build"
+      mkdir -p ${PWD}/glibc-build
+      cd ${PWD}/glibc-build
       ../glibc/configure --prefix="$output" libc_cv_slibdir="$output/lib"
       make -j$(%{MakeCpus target})
       make install

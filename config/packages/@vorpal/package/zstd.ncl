@@ -5,7 +5,7 @@ fun target =>
   {
     name = "zstd",
     script = m%"
-      pushd "${PWD}/zstd"
+      cd ${PWD}/zstd
       make -j$(%{MakeCpus target})
       make install PREFIX="$output"
     "%,

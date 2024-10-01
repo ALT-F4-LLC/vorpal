@@ -5,7 +5,7 @@ fun target =>
   {
     name = "binutils",
     script = m%"
-      pushd "${PWD}/binutils"
+      cd ${PWD}/binutils
       ./configure --prefix=$output
       make -j$(%{MakeCpus target})
       make install

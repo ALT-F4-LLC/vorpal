@@ -5,7 +5,7 @@ fun target =>
   {
     name = "coreutils",
     script = m%"
-      pushd "${PWD}/coreutils"
+      cd ${PWD}/coreutils
       ./configure --prefix="$output"
       make -j$(%{MakeCpus target})
       make install

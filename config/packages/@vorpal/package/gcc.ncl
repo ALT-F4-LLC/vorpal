@@ -8,7 +8,7 @@ fun target =>
     name = "gcc",
     packages = [build_binutils target],
     script = m%"
-      pushd "${PWD}/gcc"
+      cd ${PWD}/gcc
 
       ./contrib/download_prerequisites
 
@@ -20,9 +20,7 @@ fun target =>
 
       mkdir -p build
 
-      popd
-
-      pushd "${PWD}/gcc/build"
+      cd ${PWD}/gcc/build
 
       ../configure \
         --disable-bootstrap \
@@ -36,10 +34,7 @@ fun target =>
         --with-system-zlib
 
       make -j$(%{MakeCpus target})
-
       make install
-
-      popd
     "%,
     source = {
       gcc = {

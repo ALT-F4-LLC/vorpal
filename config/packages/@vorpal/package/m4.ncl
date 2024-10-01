@@ -5,7 +5,7 @@ fun target =>
   {
     name = "m4",
     script = m%"
-      pushd "${PWD}/m4"
+      cd ${PWD}/m4
       ./configure --prefix=$output
       make -j$(%{MakeCpus target})
       make install

@@ -13,7 +13,7 @@ fun target =>
   {
     name = "bash",
     script = m%"
-      pushd "${PWD}/bash"
+      cd ${PWD}/bash
       ./configure --prefix=$output
       make -j$(%{MakeCpus target})
       make install

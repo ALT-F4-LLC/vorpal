@@ -11,7 +11,7 @@ fun target =>
     name = "linux-headers",
     packages = [binutils, gcc],
     script = m%"
-      pushd "${PWD}/linux_headers"
+      cd ${PWD}/linux_headers
       make mrproper
       make headers
       find usr/include -type f ! -name '*.h' -delete

@@ -5,7 +5,7 @@ fun target =>
   {
     name = "texinfo",
     script = m%"
-      pushd "${PWD}/texinfo"
+      cd ${PWD}/texinfo
       ./configure --prefix="$output"
       make -j$(%{MakeCpus target})
       make install

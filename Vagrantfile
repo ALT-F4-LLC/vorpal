@@ -12,7 +12,7 @@ Vagrant.configure("2") do |config|
 
   config.vm.provision "shell", keep_color: true, privileged: false, inline: <<-SHELL
     echo 'function setup_vorpal {
-      pushd "${HOME}"
+      cd ${HOME}
 
       mkdir -p ./vorpal
 
@@ -25,20 +25,16 @@ Vagrant.configure("2") do |config|
         --exclude="packer_debian_vmware_arm64.box" \
         --exclude="target" \
         /vagrant/. ./vorpal/.
-
-      popd
     }' >> ~/.bashrc
 
     echo 'function setup_dev {
       setup_vorpal
 
-      pushd "${HOME}/vorpal"
+      cd ${HOME}/vorpal
 
       ./script/debian.sh
       ./script/dev.sh make dist
       ./script/install.sh
-
-      popd
     }' >> ~/.bashrc
 
     echo "PATH=\"${HOME}/vorpal/.env/bin:\${PATH}\"" >> ~/.bashrc
