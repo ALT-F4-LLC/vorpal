@@ -20,7 +20,7 @@ fun target =>
 
       mkdir -p build
 
-      cd ${PWD}/gcc/build
+      cd ./build
 
       ../configure \
         --disable-bootstrap \
