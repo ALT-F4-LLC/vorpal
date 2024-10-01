@@ -114,7 +114,7 @@ jobs:
             flex \
             gettext \
             help2man \
-            zlib
+            zlib1g-dev
 
       - uses: actions/checkout@v4
 
