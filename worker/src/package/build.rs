@@ -337,7 +337,7 @@ pub async fn run(
 
     let sandbox_script_package_commands = [
         format!("#!{}", sandbox_stdenv_bash_path),
-        "set -euo pipefail".to_string(),
+        "set -eu".to_string(),
         sandbox_script_package,
     ];
 
