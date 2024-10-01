@@ -14,7 +14,6 @@ jobs:
         runner:
           - macos-latest
           - ubuntu-latest
-          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +62,6 @@ jobs:
         runner:
           - macos-latest
           - ubuntu-latest
-          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
