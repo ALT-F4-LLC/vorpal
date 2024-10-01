@@ -11,11 +11,10 @@ use std::{
     fs::Permissions,
     iter::Iterator,
     os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
     process::Stdio,
 };
 use tokio::{
-    fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
+    fs::{create_dir_all, set_permissions, write},
     io::{AsyncBufReadExt, BufReader},
     sync::mpsc::Sender,
 };
@@ -49,25 +48,25 @@ async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Res
     Ok(())
 }
 
-async fn cleanup(
-    sandbox_package_dir: &Path,
-    sandbox_source_dir: &Path,
-    sandbox_script_file: &PathBuf,
-) -> Result<()> {
-    remove_dir_all(sandbox_package_dir)
-        .await
-        .map_err(|err| anyhow!("failed to remove package directory: {:?}", err))?;
-
-    remove_dir_all(sandbox_source_dir)
-        .await
-        .map_err(|err| anyhow!("failed to remove source directory: {:?}", err))?;
-
-    remove_file(sandbox_script_file)
-        .await
-        .map_err(|err| anyhow!("failed to remove script file: {:?}", err))?;
-
-    Ok(())
-}
+// async fn cleanup(
+//     sandbox_package_dir: &Path,
+//     sandbox_source_dir: &Path,
+//     sandbox_script_file: &PathBuf,
+// ) -> Result<()> {
+//     remove_dir_all(sandbox_package_dir)
+//         .await
+//         .map_err(|err| anyhow!("failed to remove package directory: {:?}", err))?;
+//
+//     remove_dir_all(sandbox_source_dir)
+//         .await
+//         .map_err(|err| anyhow!("failed to remove source directory: {:?}", err))?;
+//
+//     remove_file(sandbox_script_file)
+//         .await
+//         .map_err(|err| anyhow!("failed to remove script file: {:?}", err))?;
+//
+//     Ok(())
+// }
 
 pub async fn run(
     request: Request<Streaming<BuildRequest>>,
