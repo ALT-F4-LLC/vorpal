@@ -114,7 +114,10 @@ jobs:
             gettext \
             help2man \
             zlib1g-dev
-          sudo chmod u+s /usr/bin/bubblewrap
+          export BWRAP_PATH=$(which -a bwrap | head -n 1)
+          echo $BWRAP_PATH
+          sudo chmod u+s $BWRAP_PATH
+          $BWRAP_PATH --version
 
       - uses: actions/checkout@v4
 
