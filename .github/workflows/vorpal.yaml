@@ -114,8 +114,7 @@ jobs:
             gettext \
             help2man \
             zlib1g-dev
-          sudo sh -c "echo 'kernel.apparmor_restrict_unprivileged_userns = 0' \
-            > /etc/sysctl.d/60-apparmor-namespace.conf"
+          sudo chown u+s /usr/bin/bubblewrap
 
       - uses: actions/checkout@v4
 
