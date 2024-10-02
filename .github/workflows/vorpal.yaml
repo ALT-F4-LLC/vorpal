@@ -114,7 +114,7 @@ jobs:
             gettext \
             help2man \
             zlib1g-dev
-          sudo chown u+s /usr/bin/bubblewrap
+          sudo chmod u+s /usr/bin/bubblewrap
 
       - uses: actions/checkout@v4
 
