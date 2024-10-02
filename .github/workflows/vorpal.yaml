@@ -114,6 +114,8 @@ jobs:
             gettext \
             help2man \
             zlib1g-dev
+          sudo sh -c "echo 'kernel.apparmor_restrict_unprivileged_userns = 0' \
+            > /etc/sysctl.d/60-apparmor-namespace.conf"
 
       - uses: actions/checkout@v4
 
