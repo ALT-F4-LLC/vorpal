@@ -92,6 +92,8 @@ fun target =>
       echo "#!$output/bin/bash" > $output/sandbox.sh
       echo "\"\${@}\"" >> $output/sandbox.sh
       chmod 755 $output/sandbox.sh
+      ls -alh $output
+      cat $output/sandbox.sh
 
       for path in $packages; do
         find $path -type f | while read file; do
