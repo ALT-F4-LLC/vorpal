@@ -11,7 +11,7 @@ pub async fn build(
     sandbox_script_path: &Path,
     sandbox_source_dir_path: &Path,
 ) -> Result<Command> {
-    let mut command = Command::new("/bin/sh");
+    let mut command = Command::new("/bin/bash");
 
     command.args([
         sandbox_script_path.to_str().unwrap(),

@@ -298,11 +298,11 @@ pub async fn run(
     }
 
     if sandbox_script_file_path.is_none() {
-        let stdenv_bash_path = "/bin/sh".to_string();
+        let stdenv_bash_path = "/bin/bash".to_string();
 
         let sandbox_script_commands = [
             format!("#!{}", stdenv_bash_path),
-            "set -eu".to_string(),
+            "set -euxo pipefail".to_string(),
             r"${@}".to_string(),
         ];
 
