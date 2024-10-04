@@ -5,29 +5,43 @@ use std::path::Path;
 use tokio::process::Command;
 
 pub async fn build(
-    sandbox_bin_paths: Vec<String>,
-    sandbox_env_var: HashMap<String, String>,
-    sandbox_script_package_path: &Path,
-    sandbox_script_path: &Path,
-    sandbox_source_dir_path: &Path,
+    build_bin_paths: Vec<String>,
+    build_env: HashMap<String, String>,
+    build_path: &Path,
+    sandbox_path: &Path,
 ) -> Result<Command> {
-    let mut command = Command::new("/bin/bash");
+    let sandbox_script_path = sandbox_path.join("sandbox.sh");
 
-    command.args([
-        sandbox_script_path.to_str().unwrap(),
-        sandbox_script_package_path.to_str().unwrap(),
-    ]);
+    if !sandbox_script_path.exists() {
+        return Err(anyhow::anyhow!("sandbox 'sandbox.sh' not found"));
+    }
 
-    command.current_dir(sandbox_source_dir_path);
+    let mut command = Command::new(sandbox_script_path);
 
-    for (key, value) in sandbox_env_var.clone().into_iter() {
+    let build_script_path = build_path.join("package.sh");
+
+    if !build_script_path.exists() {
+        return Err(anyhow::anyhow!("build 'package.sh' not found"));
+    }
+
+    command.args([build_script_path.to_str().unwrap()]);
+
+    let build_source_path = build_path.join("source");
+
+    if !build_source_path.exists() {
+        return Err(anyhow::anyhow!("build 'source' not found"));
+    }
+
+    command.current_dir(build_source_path);
+
+    for (key, value) in build_env.clone().into_iter() {
         command.env(key, value);
     }
 
     let mut path = env::var("PATH").unwrap_or_default();
 
-    if !sandbox_bin_paths.is_empty() {
-        path = format!("{}:{}", sandbox_bin_paths.join(":"), path);
+    if !build_bin_paths.is_empty() {
+        path = format!("{}:{}", build_bin_paths.join(":"), path);
     }
 
     command.env("PATH", path);

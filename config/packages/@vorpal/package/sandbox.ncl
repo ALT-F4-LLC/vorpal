@@ -89,9 +89,9 @@ fun target =>
       export LC_ALL=C
 
       mkdir -p $output/bin
-      echo "#!$output/bin/bash" > $output/sandbox
-      echo "\"\${@}\"" >> $output/sandbox
-      chmod 755 $output/sandbox
+      echo "#!$output/bin/bash" > $output/sandbox.sh
+      echo "\"\${@}\"" >> $output/sandbox.sh
+      chmod 755 $output/sandbox.sh
 
       for path in $packages; do
         find $path -type f | while read file; do

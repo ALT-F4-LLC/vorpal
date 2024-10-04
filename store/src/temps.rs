@@ -1,5 +1,5 @@
 use crate::paths;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 use tokio::fs::{create_dir_all, File};
 
@@ -8,7 +8,7 @@ pub async fn create_temp_dir() -> Result<PathBuf> {
 
     create_dir_all(&dir_path)
         .await
-        .expect("Failed to create temp dir");
+        .map_err(|e| anyhow!("failed to create temp dir: {}", e))?;
 
     Ok(dir_path)
 }
@@ -22,7 +22,7 @@ pub async fn create_temp_file(extension: Option<&str>) -> Result<PathBuf> {
 
     File::create(&file_path)
         .await
-        .expect("Failed to create temp file");
+        .map_err(|e| anyhow!("failed to create temp file: {}", e))?;
 
     Ok(file_path)
 }

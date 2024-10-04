@@ -32,6 +32,8 @@ impl PackageService for PackageServer {
     ) -> Result<Response<Self::BuildStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
+        // TODO: create build environment directory
+
         tokio::spawn(async move {
             match build::run(request, &tx).await {
                 Ok(_) => (),

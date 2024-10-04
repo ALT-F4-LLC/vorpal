@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tokio::fs::set_permissions;
-use tokio::fs::{copy, create_dir_all, metadata, write, File};
+use tokio::fs::{copy, create_dir_all, metadata, symlink, write, File};
 use tokio::io::AsyncReadExt;
 use tracing::info;
 use uuid::Uuid;
@@ -171,7 +171,7 @@ pub async fn copy_files(
 
             copy(src, dest).await.expect("copy file fail");
         } else if metadata.is_symlink() {
-            copy(src, dest).await.expect("copy symlink fail");
+            symlink(src, dest).await.expect("symlink file fail");
         } else {
             bail!("source file is not a file or directory: {:?}", src);
         }

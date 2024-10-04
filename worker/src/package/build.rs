@@ -11,10 +11,11 @@ use std::{
     fs::Permissions,
     iter::Iterator,
     os::unix::fs::PermissionsExt,
+    path::Path,
     process::Stdio,
 };
 use tokio::{
-    fs::{create_dir_all, set_permissions, write},
+    fs::{create_dir_all, set_permissions, symlink, write},
     io::{AsyncBufReadExt, BufReader},
     sync::mpsc::Sender,
 };
@@ -35,7 +36,7 @@ use vorpal_store::{
         copy_files, get_file_paths, get_package_archive_path, get_package_path,
         get_public_key_path, get_source_archive_path, get_source_path, replace_path_in_files,
     },
-    temps::{create_temp_dir, create_temp_file},
+    temps::create_temp_dir,
 };
 
 async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Result<()> {
@@ -215,16 +216,16 @@ pub async fn run(
         }
     }
 
-    // Handle remote source paths
+    // TODO: Handle remote source paths
 
     // Create build environment
 
-    let mut bin_paths = vec![];
-    let mut env_var = HashMap::new();
-    let mut store_paths = vec![];
+    let mut build_bin_paths = vec![];
+    let mut build_env = HashMap::new();
+    let mut build_packages = vec![];
 
     for (key, value) in package_environment.clone() {
-        env_var.insert(key, value);
+        build_env.insert(key, value);
     }
 
     for p in package_packages.iter() {
@@ -239,20 +240,20 @@ pub async fn run(
         let bin_path = path.join("bin");
 
         if bin_path.exists() {
-            bin_paths.push(bin_path.display().to_string());
+            build_bin_paths.push(bin_path.display().to_string());
         }
 
-        env_var.insert(
+        build_env.insert(
             p.name.to_lowercase().replace('-', "_"),
             path.display().to_string(),
         );
 
-        store_paths.push(path.display().to_string());
+        build_packages.push(path.display().to_string());
     }
 
     // expand any environment variables that have package references
 
-    for (key, value) in env_var.clone().into_iter() {
+    for (key, value) in build_env.clone().into_iter() {
         for package in package_packages.iter() {
             let package_name = package.name.to_lowercase();
 
@@ -262,52 +263,56 @@ pub async fn run(
                 let value =
                     value.replace(&format!("${}", package_name), &path.display().to_string());
 
-                env_var.insert(key.clone(), value);
+                build_env.insert(key.clone(), value);
             }
         }
     }
 
-    send(tx, format!("Sandbox environment: {:?}", env_var)).await?;
+    send(tx, format!("Stdenv environment: {:?}", build_env)).await?;
 
-    // Create build scripts
+    // Setup sandbox path
 
-    let mut sandbox_script_file_path = None;
-    let mut sandbox_stdenv_path = None;
-    let mut sandbox_stdenv_bash_path = None;
+    let mut sandbox_path = None;
 
     if let Some(s) = package_sandbox.clone() {
-        let stdenv_dir_path = get_package_path(&s.hash, &s.name);
+        let package_path = get_package_path(&s.hash, &s.name);
 
-        if !stdenv_dir_path.exists() {
-            bail!("sandbox stdenv missing: {}", stdenv_dir_path.display())
+        if !package_path.exists() {
+            bail!("sandbox package missing: {}", package_path.display())
         }
 
-        sandbox_stdenv_path = Some(stdenv_dir_path.to_path_buf());
-
-        let sandbox_stdenv_script_path = stdenv_dir_path.join("sandbox");
-
-        if sandbox_stdenv_script_path.exists() {
-            sandbox_script_file_path = Some(sandbox_stdenv_script_path.to_path_buf());
-        }
-
-        let sandbox_stdenv_bash_script_path = stdenv_dir_path.join("bin/bash");
-
-        if sandbox_stdenv_bash_script_path.exists() {
-            sandbox_stdenv_bash_path = Some(sandbox_stdenv_bash_script_path.display().to_string());
-        }
+        sandbox_path = Some(package_path.to_path_buf());
     }
 
-    if sandbox_script_file_path.is_none() {
-        let stdenv_bash_path = "/bin/bash".to_string();
+    if sandbox_path.is_none() {
+        let temp_path = create_temp_dir().await?;
+
+        let bash_path = Path::new("/bin/bash");
+
+        if !bash_path.exists() {
+            bail!("bash missing: {}", bash_path.display())
+        }
+
+        let sandbox_bin_path = temp_path.join("bin");
+
+        create_dir_all(&sandbox_bin_path)
+            .await
+            .map_err(|err| anyhow!("failed to create directory: {:?}", err))?;
+
+        let sandbox_bash_path = sandbox_bin_path.join("bash");
+
+        symlink(bash_path, &sandbox_bash_path)
+            .await
+            .map_err(|err| anyhow!("failed to create symlink: {:?}", err))?;
 
         let sandbox_script_commands = [
-            format!("#!{}", stdenv_bash_path),
+            format!("#!{}", sandbox_bash_path.display()),
             "set -euxo pipefail".to_string(),
             r"${@}".to_string(),
         ];
 
         let sandbox_script_data = sandbox_script_commands.join("\n");
-        let sandbox_script_path = create_temp_file(None).await?;
+        let sandbox_script_path = temp_path.join("sandbox.sh");
 
         write(&sandbox_script_path, sandbox_script_data)
             .await
@@ -317,109 +322,92 @@ pub async fn run(
             .await
             .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
-        sandbox_script_file_path = Some(sandbox_script_path.to_path_buf());
-        sandbox_stdenv_bash_path = Some(stdenv_bash_path.to_string());
+        sandbox_path = Some(temp_path);
     }
 
-    let sandbox_stdenv_bash_path =
-        sandbox_stdenv_bash_path.expect("failed to get stdenv bash path");
+    if sandbox_path.is_none() {
+        bail!("sandbox missing")
+    }
 
-    let sandbox_script_file_path = sandbox_script_file_path.expect("failed to get script path");
+    // Setup build path
 
-    let sandbox_script_package_file_path = create_temp_file(None).await?;
-
-    let sandbox_script_package = package_script
+    let build_path = create_temp_dir().await?;
+    let build_bash_path = sandbox_path.clone().unwrap().join("bin/bash");
+    let build_script_lines = package_script
         .trim()
         .split('\n')
         .map(|line| line.trim())
         .collect::<Vec<&str>>()
         .join("\n");
-
-    let sandbox_script_package_commands = [
-        format!("#!{}", sandbox_stdenv_bash_path),
-        "set -eu".to_string(),
-        sandbox_script_package,
+    let build_script_data = [
+        format!("#!{}", build_bash_path.display()),
+        "set -euxo pipefail".to_string(),
+        build_script_lines,
     ];
+    let build_script_path = build_path.join("package.sh");
 
-    let sandbox_script_package_data = sandbox_script_package_commands.join("\n");
+    write(&build_script_path, build_script_data.join("\n"))
+        .await
+        .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
 
-    write(
-        &sandbox_script_package_file_path,
-        sandbox_script_package_data,
-    )
-    .await
-    .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
+    set_permissions(&build_script_path, Permissions::from_mode(0o755))
+        .await
+        .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
-    set_permissions(
-        &sandbox_script_package_file_path,
-        Permissions::from_mode(0o755),
-    )
-    .await
-    .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
     // Create source directory
 
-    let sandbox_source_dir_path = create_temp_dir().await?;
+    let build_source_path = build_path.join("source");
+
+    create_dir_all(&build_source_path)
+        .await
+        .map_err(|err| anyhow!("failed to create source directory: {:?}", err))?;
 
     if package_source_path.exists() {
-        let source_store_path_files = get_file_paths(
-            &package_source_path,
-            Vec::<String>::new(),
-            Vec::<String>::new(),
-        )?;
+        let build_source_files = get_file_paths(&package_source_path, vec![], vec![])?;
 
-        copy_files(
-            &package_source_path,
-            source_store_path_files,
-            &sandbox_source_dir_path,
-        )
-        .await?;
+        copy_files(&package_source_path, build_source_files, &build_source_path).await?;
     }
 
-    let sandbox_package_dir_path = create_temp_dir().await?;
+    let build_output_path = build_path.join("output");
 
-    env_var.insert(
+    create_dir_all(&build_output_path)
+        .await
+        .map_err(|err| anyhow!("failed to create output directory: {:?}", err))?;
+
+    build_env.insert(
         "output".to_string(),
-        sandbox_package_dir_path.display().to_string(),
+        build_output_path.display().to_string(),
     );
 
-    env_var.insert("packages".to_string(), store_paths.join(" ").to_string());
-
-    let sandbox_home_dir_path = create_temp_dir().await?;
+    build_env.insert("packages".to_string(), build_packages.join(" ").to_string());
 
     let sandbox_command = match package_sandbox {
         None => Some(
             native::build(
-                bin_paths,
-                env_var,
-                &sandbox_script_package_file_path,
-                &sandbox_script_file_path,
-                &sandbox_source_dir_path,
+                build_bin_paths,
+                build_env,
+                &build_path,
+                &sandbox_path.unwrap(),
             )
             .await?,
         ),
         Some(_) => match worker_target {
             Aarch64Macos | X8664Macos => Some(
                 darwin::build(
-                    bin_paths.clone(),
-                    env_var.clone(),
-                    &sandbox_script_package_file_path,
-                    &sandbox_script_file_path,
-                    &sandbox_source_dir_path,
-                    sandbox_stdenv_path,
+                    build_bin_paths,
+                    build_env,
+                    &build_path,
+                    &sandbox_path.unwrap(),
                 )
                 .await?,
             ),
             Aarch64Linux | X8664Linux => Some(
                 linux::build(
-                    bin_paths.clone(),
-                    env_var.clone(),
-                    &sandbox_home_dir_path,
-                    &sandbox_package_dir_path,
-                    &store_paths,
-                    &sandbox_script_package_file_path,
-                    &sandbox_script_file_path,
-                    &sandbox_source_dir_path,
-                    sandbox_stdenv_path,
+                    build_bin_paths.clone(),
+                    build_env.clone(),
+                    &build_path,
+                    &build_packages,
+                    &sandbox_path.clone().unwrap(),
                 )
                 .await?,
             ),
@@ -458,29 +446,25 @@ pub async fn run(
 
     // Check for output files
 
-    let sandbox_package_files = get_file_paths(
-        &sandbox_package_dir_path,
-        Vec::<String>::new(),
-        Vec::<String>::new(),
-    )?;
+    let build_output_files = get_file_paths(&build_output_path, vec![], vec![])?;
 
-    if sandbox_package_files.is_empty() || sandbox_package_files.len() == 1 {
+    if build_output_files.is_empty() || build_output_files.len() == 1 {
         bail!("no build output files found")
     }
 
-    let message = format!("output files: {}", sandbox_package_files.len());
+    let message = format!("output files: {}", build_output_files.len());
 
     send(tx, message).await?;
 
     // Replace paths in files
 
-    replace_path_in_files(&sandbox_package_dir_path, &package_path).await?;
+    replace_path_in_files(&build_output_path, &package_path).await?;
 
     // Create package tar from build output files
 
     if let Err(err) = compress_zstd(
-        &sandbox_package_dir_path,
-        &sandbox_package_files,
+        &build_output_path,
+        &build_output_files,
         &package_archive_path,
     )
     .await
