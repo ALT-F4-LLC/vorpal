@@ -106,8 +106,6 @@ fun target =>
           fi
         done
       done
-
-      %{if (std.string.contains "linux" target) then script_linux else ""}
     "%,
     systems = [
       "aarch64-linux",
