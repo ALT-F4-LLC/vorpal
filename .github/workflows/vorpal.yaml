@@ -99,29 +99,17 @@ jobs:
           - macos-latest
           - ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - if: matrix.runner == 'ubuntu-latest'
         run: |
+          ./script/dev/debian.sh
           sudo apt-get update
-          sudo apt-get install --yes \
-            autoconf \
-            automake \
-            bubblewrap \
-            build-essential \
-            flex \
-            gettext \
-            help2man \
-            zlib1g-dev
+          sudo apt-get install --yes software-properties-common
+          sudo add-apt-repository ppa:apparmor-dev/apparmor-sru
+          sudo apt-get update
+          sudo apt-get install --yes apparmor
           sudo chmod u+s $(which -a bwrap | head -n 1)
-          sudo bash -c 'cat <<EOF > /etc/apparmor.d/usr.bin.bwrap
-          #include <tunables/global>
-          /usr/bin/bwrap {
-            #include <abstractions/base>
-            /proc/sys/kernel/overflowuid r,
-           }
-          EOF'
-          sudo systemctl restart apparmor.service
-
-      - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
