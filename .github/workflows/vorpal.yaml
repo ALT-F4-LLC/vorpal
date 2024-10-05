@@ -114,10 +114,13 @@ jobs:
             gettext \
             help2man \
             zlib1g-dev
-          export BWRAP_PATH=$(which -a bwrap | head -n 1)
-          echo $BWRAP_PATH
-          sudo chmod u+s $BWRAP_PATH
-          $BWRAP_PATH --version
+          sudo bash -c 'cat <<EOF > /etc/apparmor.d/usr.bin.bwrap
+          #include <tunables/global>
+          /usr/bin/bwrap {
+            #include <abstractions/base>
+            # Add your custom rules here
+           }
+          EOF'
 
       - uses: actions/checkout@v4
 
