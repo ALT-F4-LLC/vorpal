@@ -121,6 +121,7 @@ jobs:
             # Add your custom rules here
            }
           EOF'
+          sudo systemctl restart apparmor.service
 
       - uses: actions/checkout@v4
 
