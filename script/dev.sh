@@ -11,6 +11,10 @@ scripts=(
   "zstd"
 )
 
+if [[ "$(uname -s)" == "Linux" ]]; then
+    "${SCRIPT_PATH}/dev/debian.sh"
+fi
+
 mkdir -p "${ENV_PATH}/bin"
 
 for script in "${scripts[@]}";

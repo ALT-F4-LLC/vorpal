@@ -22,9 +22,6 @@ jobs:
           key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
           path: .env
 
-      - if: matrix.runner != 'macos-latest'
-        run: ./script/debian.sh "dev"
-
       - run: ./script/dev.sh
 
       - uses: actions/cache/save@v4
@@ -119,7 +116,7 @@ jobs:
           #include <tunables/global>
           /usr/bin/bwrap {
             #include <abstractions/base>
-            # Add your custom rules here
+            /proc/sys/kernel/overflowuid r,
            }
           EOF'
           sudo systemctl restart apparmor.service

@@ -5,7 +5,7 @@ guest_os_type        = "arm-debian-64"
 hardware_version     = 21
 iso_checksum         = "93646d88c7ce54f8a2a846f938cdcf25a9123c36c3788208b27f5fbad7bbd855"
 iso_url              = "https://cdimage.debian.org/cdimage/archive/12.6.0/arm64/iso-dvd/debian-12.6.0-arm64-DVD-1.iso"
-name              = "debian_aarch64"
+name                 = "debian_aarch64"
 network_adapter_type = "e1000e"
 
 vmx_data = {

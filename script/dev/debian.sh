@@ -10,12 +10,16 @@ sudo apt-get install \
     automake \
     bison \
     bubblewrap \
+    build-essential \
     ca-certificates \
     flex \
     gawk \
     gettext \
     help2man \
     m4 \
+    make \
     perl \
+    rsync \
     texinfo \
-    unzip
+    unzip \
+    zlib1g-dev
