@@ -114,6 +114,7 @@ jobs:
             gettext \
             help2man \
             zlib1g-dev
+          sudo chmod u+s $(which -a bwrap | head -n 1)
           sudo bash -c 'cat <<EOF > /etc/apparmor.d/usr.bin.bwrap
           #include <tunables/global>
           /usr/bin/bwrap {
