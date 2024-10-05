@@ -1,6 +1,7 @@
 ARCH := $(shell uname -m | tr '[:upper:]' '[:lower:]')
 DIST_DIR := ./dist
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+OS_TYPE ?= debian
 TARGET := ./target/release/vorpal
 WORK_DIR := $(shell pwd)
 
@@ -8,9 +9,9 @@ build: check
 	cargo build --release
 
 build-packer: validate-packer
-	rm -rf $(WORK_DIR)/packer_debian_vmware_arm64.box
+	rm -rf $(WORK_DIR)/packer_$(OS_TYPE)_vmware_arm64.box
 	packer build \
-		-var-file=$(WORK_DIR)/.packer/pkrvars/debian/fusion-13.pkrvars.hcl \
+		-var-file=$(WORK_DIR)/.packer/pkrvars/$(OS_TYPE)/fusion-13.pkrvars.hcl \
 		$(WORK_DIR)/.packer
 
 check: lint
@@ -49,5 +50,5 @@ test-vagrant:
 
 validate-packer:
 	packer validate \
-		-var-file=$(WORK_DIR)/.packer/pkrvars/debian/fusion-13.pkrvars.hcl \
+		-var-file=$(WORK_DIR)/.packer/pkrvars/$(OS_TYPE)/fusion-13.pkrvars.hcl \
 		$(WORK_DIR)/.packer
