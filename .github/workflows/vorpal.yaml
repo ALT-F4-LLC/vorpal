@@ -99,6 +99,10 @@ jobs:
           - macos-latest
           - ubuntu-latest
     steps:
+      - uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+
       - uses: actions/checkout@v4
 
       - if: matrix.runner == 'ubuntu-latest'
