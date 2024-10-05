@@ -61,9 +61,9 @@ fun target =>
   let packages_system =
     target
     |> match {
-      "aarch64-linux" => packages_system_macos,
+      "aarch64-linux" => packages_system_linux,
       "aarch64-macos" => packages_system_macos,
-      "x86_64-linux" => packages_system_macos,
+      "x86_64-linux" => packages_system_linux,
       "x86_64-macos" => packages_system_macos,
       _ => std.fail_with "Unsupported target"
     }
@@ -106,6 +106,8 @@ fun target =>
           fi
         done
       done
+
+      %{if (std.string.contains "linux" target) then script_linux else ""}
     "%,
     systems = [
       "aarch64-linux",
