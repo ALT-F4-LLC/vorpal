@@ -307,7 +307,7 @@ pub async fn run(
 
         let sandbox_script_commands = [
             format!("#!{}", sandbox_bash_path.display()),
-            "set -euxo pipefail".to_string(),
+            "set -euo pipefail".to_string(),
             r"${@}".to_string(),
         ];
 
@@ -341,7 +341,7 @@ pub async fn run(
         .join("\n");
     let build_script_data = [
         format!("#!{}", build_bash_path.display()),
-        "set -euxo pipefail".to_string(),
+        "set -euo pipefail".to_string(),
         build_script_lines,
     ];
     let build_script_path = build_path.join("package.sh");
