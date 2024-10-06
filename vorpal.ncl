@@ -1,14 +1,24 @@
-let { Config, .. } = import "@vorpal/schema.ncl" in
-let { RustPackage, .. } = import "@vorpal/language.ncl" in
+let build_config = import "@vorpal/config.ncl" in
 
-fun system => {
-  packages = {
-    default = RustPackage {
-      cargo_hash = "23ee1efa1633ed7e94976dd46469535bc6bdd9749efa9fb10b0c7cf043f77715",
-      name = "vorpal",
-      source = ".",
-      systems = ["aarch64-linux", "x86_64-linux"],
-      target = system
+let build_rust = import "@vorpal/language/rust.ncl" in
+
+let build_default = fun system =>
+  build_rust {
+    cargo_hash = "fc3a0a6127c3d33b3d93961e4969edf5099a756166cf6f60499b69b2147639b1",
+    name = "vorpal",
+    source = ".",
+    source_excludes = ["config", ".env", ".packer", ".vagrant"],
+    systems = ["aarch64-linux", "aarch64-macos", "x86_64-linux", "x86_64-macos"],
+    target = system,
+  }
+in
+
+let config = fun system =>
+  {
+    packages = {
+      default = build_default system,
     }
   }
-} | Config
+in
+
+fun system => build_config (config system)

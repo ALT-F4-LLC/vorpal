@@ -9,7 +9,7 @@ use vorpal_store::paths::{get_package_archive_path, get_source_archive_path};
 pub async fn stream(
     tx: &Sender<Result<StorePullResponse, Status>>,
     request: Request<StoreRequest>,
-) -> Result<(), anyhow::Error> {
+) -> Result<()> {
     let req = request.into_inner();
 
     let package_chunks_size = 8192;
@@ -28,7 +28,7 @@ pub async fn stream(
 
     let data = read(&store_path)
         .await
-        .map_err(|_| Status::internal("failed to read store path"))?;
+        .expect("failed to read store path data");
 
     let data_size = data.len();
 
@@ -38,7 +38,8 @@ pub async fn stream(
         tx.send(Ok(StorePullResponse {
             data: package_chunk.to_vec(),
         }))
-        .await?;
+        .await
+        .expect("failed to send store chunk");
     }
 
     Ok(())

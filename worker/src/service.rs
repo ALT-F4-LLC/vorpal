@@ -13,7 +13,7 @@ use vorpal_schema::{
 };
 use vorpal_store::paths::{get_public_key_path, setup_paths};
 
-pub async fn start(port: u16) -> Result<(), anyhow::Error> {
+pub async fn start(port: u16) -> Result<()> {
     setup_paths().await?;
 
     let public_key_path = get_public_key_path();
@@ -28,7 +28,9 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
 
     info!("worker default target: {:?}", system);
 
-    let addr = format!("[::]:{}", port).parse()?;
+    let addr = format!("[::]:{}", port)
+        .parse()
+        .expect("failed to parse address");
 
     info!("worker address: {}", addr);
 
@@ -36,7 +38,8 @@ pub async fn start(port: u16) -> Result<(), anyhow::Error> {
         .add_service(PackageServiceServer::new(PackageServer::new(system)))
         .add_service(StoreServiceServer::new(StoreServer::default()))
         .serve(addr)
-        .await?;
+        .await
+        .expect("failed to start worker server");
 
     Ok(())
 }

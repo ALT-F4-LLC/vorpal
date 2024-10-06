@@ -1,5 +1,6 @@
+use crate::log::{connector_end, print_build_order};
 use crate::worker::build;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
@@ -13,6 +14,7 @@ use vorpal_store::paths::{get_private_key_path, setup_paths};
 use vorpal_worker::service;
 
 mod config;
+mod log;
 mod nickel;
 mod worker;
 
@@ -24,11 +26,18 @@ pub struct Cli {
     command: Command,
 }
 
+fn get_default_package() -> String {
+    "default".to_string()
+}
+
 #[derive(Subcommand)]
 enum Command {
     Build {
         #[arg(default_value = "vorpal.ncl", long, short)]
         file: String,
+
+        #[arg(default_value_t = get_default_package(), long, short)]
+        package: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
@@ -37,16 +46,16 @@ enum Command {
         worker: String,
     },
 
-    #[clap(subcommand)]
-    Keys(CommandKeys),
-
-    Validate {
+    Check {
         #[arg(default_value = "vorpal.ncl", long, short)]
         file: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
     },
+
+    #[clap(subcommand)]
+    Keys(CommandKeys),
 
     #[clap(subcommand)]
     Worker(CommandWorker),
@@ -73,23 +82,28 @@ fn get_default_system() -> String {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
         Command::Build {
             file,
+            package,
             system,
             worker,
         } => {
             if worker.is_empty() {
-                anyhow::bail!("no worker specified");
+                bail!("{} no worker specified", connector_end());
             }
 
             let package_system: PackageSystem = get_package_system(system);
 
             if package_system == Unknown {
-                anyhow::bail!("unknown target: {}", package_system.as_str_name());
+                bail!(
+                    "{} unknown target: {}",
+                    connector_end(),
+                    package_system.as_str_name()
+                );
             }
 
             setup_paths().await?;
@@ -97,41 +111,57 @@ async fn main() -> Result<(), anyhow::Error> {
             let private_key_path = get_private_key_path();
 
             if !private_key_path.exists() {
-                anyhow::bail!(
-                    "private key not found - run 'vorpal keys generate' or copy from worker"
+                bail!(
+                    "{} private key not found - run 'vorpal keys generate' or copy from worker",
+                    connector_end()
                 );
             }
 
-            println!("=> Building: {} ({})", file, system);
+            let config = config::check_config(file, Some(package), system).await?;
 
-            let (config, config_hash) = nickel::load_config(file, package_system).await?;
+            let (build_map, build_order) = nickel::load_config_build(&config.packages)?;
 
-            let config_structures = config::build_structures(&config);
+            log::print_packages(&build_order);
 
-            let config_build_order = config::get_build_order(&config_structures.graph)?;
+            print_build_order(&build_order);
 
-            let mut package_finished = HashMap::<String, PackageOutput>::new();
+            let mut package_output = HashMap::<String, PackageOutput>::new();
 
-            for package_name in config_build_order {
-                match config_structures.map.get(&package_name) {
-                    None => anyhow::bail!("Package not found: {}", package_name),
+            for package_name in build_order {
+                match build_map.get(&package_name) {
+                    None => bail!("Package not found: {}", package_name),
                     Some(package) => {
                         let mut packages = vec![];
+                        let mut package_sandbox = None;
+
+                        if let Some(s) = &package.sandbox {
+                            match package_output.get(&s.name) {
+                                None => bail!("Sandbox not found: {}", s.name),
+                                Some(package) => package_sandbox = Some(package.clone()),
+                            }
+                        }
 
                         for p in &package.packages {
-                            match package_finished.get(&p.name) {
-                                None => eprintln!("Package not found: {}", p.name),
+                            match package_output.get(&p.name) {
+                                None => bail!("Package not found: {}", p.name),
                                 Some(package) => packages.push(package.clone()),
                             }
                         }
 
                         let output =
-                            build(&config_hash, package, packages, package_system, worker).await?;
+                            build(package, packages, package_sandbox, package_system, worker)
+                                .await?;
 
-                        package_finished.insert(package_name, output);
+                        package_output.insert(package_name.to_string(), output);
                     }
                 }
             }
+
+            Ok(())
+        }
+
+        Command::Check { file, system } => {
+            let _ = config::check_config(file, None, system).await?;
 
             Ok(())
         }
@@ -148,11 +178,11 @@ async fn main() -> Result<(), anyhow::Error> {
                 }
 
                 if private_key_path.exists() && !public_key_path.exists() {
-                    anyhow::bail!("private key exists but public key is missing");
+                    bail!("private key exists but public key is missing");
                 }
 
                 if !private_key_path.exists() && public_key_path.exists() {
-                    anyhow::bail!("public key exists but private key is missing");
+                    bail!("public key exists but private key is missing");
                 }
 
                 vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)
@@ -161,22 +191,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 Ok(())
             }
         },
-
-        Command::Validate { file, system } => {
-            let package_system: PackageSystem = get_package_system(system);
-
-            if package_system == Unknown {
-                anyhow::bail!("unknown target: {}", system);
-            }
-
-            println!("=> Validate: {} ({})", file, system);
-
-            let (config, _) = nickel::load_config(file, package_system).await?;
-
-            println!("{}", serde_json::to_string_pretty(&config)?);
-
-            Ok(())
-        }
 
         Command::Worker(worker) => match worker {
             CommandWorker::Start { level, port } => {

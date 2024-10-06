@@ -6,55 +6,49 @@ on:
     branches:
       - main
 
-env:
-  RUST_VERSION: 1.80.1
-
 jobs:
-  cache-dev:
+  dev:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         runner:
           - macos-latest
           - ubuntu-latest
-          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh which nickel
-      - run: ./dev.sh which protoc
+      - run: ./script/dev.sh
 
       - uses: actions/cache/save@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
   code-quality:
     needs:
-      - cache-dev
+      - dev
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
       - uses: actions/cache/restore@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh make format
-      - run: ./dev.sh make lint
+      - run: ./script/dev.sh # prebake
+      - run: ./script/dev.sh make format
+      - run: ./script/dev.sh make lint
 
   package:
     needs:
@@ -65,22 +59,21 @@ jobs:
         runner:
           - macos-latest
           - ubuntu-latest
-          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
       - uses: actions/cache/restore@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh make dist
+      - run: ./script/dev.sh # prebake
+      - run: ./script/dev.sh make dist
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -104,17 +97,25 @@ jobs:
       matrix:
         runner:
           - macos-latest
-          # - ubuntu-latest
-          # - ubuntu-latest-arm64
+          - ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - if: matrix.runner == 'ubuntu-latest'
+        run: |
+          ./script/dev/debian.sh
+          sudo chmod u+s $(which -a bwrap | head -n 1)
+          sudo aa-teardown || true
+          sudo systemctl stop apparmor
+          sudo systemctl disable apparmor
+          sudo rm -rf /etc/apparmor.d/*
+
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
-      - run: echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
+      - run: echo "$PWD/.env/bin" >> $GITHUB_PATH
 
       - run: which nickel
 
@@ -133,8 +134,7 @@ jobs:
           sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
 
       - run: ./vorpal keys generate
-
-      - run: ./vorpal validate
+      - run: ./vorpal check
 
       - run: |
           ./vorpal worker start > worker_output.log 2>&1 &
@@ -143,6 +143,12 @@ jobs:
           echo "Worker pid: $WORKER_PID"
 
       - run: ./vorpal build
+
+      - if: failure()
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+          timeout-minutes: 10
 
       - if: always()
         run: |

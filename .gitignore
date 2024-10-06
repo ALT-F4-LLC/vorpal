@@ -1,4 +1,6 @@
-deps
+.env
+.vagrant
 dist
+packer_*_*_*.box
 target
-vorpal-*-*.tar.gz
+vorpal-*-*

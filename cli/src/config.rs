@@ -1,87 +1,42 @@
-use anyhow::Result;
-use std::collections::{HashMap, HashSet};
-use vorpal_schema::{Config, Package};
+use crate::log;
+use crate::nickel;
+use anyhow::{bail, Result};
+use std::path::Path;
+use vorpal_schema::{
+    api::package::{PackageSystem, PackageSystem::Unknown},
+    get_package_system, Config,
+};
 
-pub struct PackageStructures {
-    pub graph: HashMap<String, HashSet<String>>,
-    pub map: HashMap<String, Package>,
-}
+pub async fn check_config<'a>(
+    file: &'a str,
+    package: Option<&'a str>,
+    system: &'a str,
+) -> Result<Config> {
+    let config_system: PackageSystem = get_package_system(system);
 
-pub fn build_structures(config: &Config) -> PackageStructures {
-    let mut package_graph: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut package_map = HashMap::new();
-
-    for package_name in config.packages.keys() {
-        add_to_graph(&mut package_graph, &config.packages[package_name]);
-        add_to_map(&mut package_map, &config.packages[package_name]);
+    if config_system == Unknown {
+        bail!("unknown system: {}", system);
     }
 
-    PackageStructures {
-        graph: package_graph,
-        map: package_map,
-    }
-}
+    log::print_system(system);
 
-pub fn topological_sort(
-    package_graph: &HashMap<String, HashSet<String>>,
-    build_order: &mut Vec<String>,
-    visited: &mut HashSet<String>,
-    stack: &mut HashSet<String>,
-    package: &str,
-) -> Result<()> {
-    if stack.contains(package) {
-        anyhow::bail!(format!("Circular dependency detected: {}", package));
+    let config_path = Path::new(file);
+
+    if !config_path.exists() {
+        bail!("config not found: {}", config_path.display());
     }
 
-    if visited.contains(package) {
-        return Ok(());
-    }
+    log::print_config(config_path);
 
-    stack.insert(package.to_string());
+    let config = nickel::load_config(config_path, config_system).await?;
 
-    if let Some(deps) = package_graph.get(package) {
-        for dep in deps {
-            topological_sort(package_graph, build_order, visited, stack, dep)?;
+    let packages = config.packages.clone();
+
+    if let Some(package) = package {
+        if !packages.contains_key(package) {
+            bail!("package not found: {}", package);
         }
     }
 
-    stack.remove(package);
-
-    visited.insert(package.to_string());
-
-    build_order.push(package.to_string());
-
-    Ok(())
-}
-
-pub fn add_to_map(package_map: &mut HashMap<String, Package>, package: &Package) {
-    package_map.insert(package.name.clone(), package.clone());
-
-    for dep in &package.packages {
-        add_to_map(package_map, dep);
-    }
-}
-
-pub fn add_to_graph(package_graph: &mut HashMap<String, HashSet<String>>, package: &Package) {
-    let dependencies: HashSet<String> = package.packages.iter().map(|p| p.name.clone()).collect();
-
-    package_graph.insert(package.name.clone(), dependencies);
-
-    for dep in &package.packages {
-        add_to_graph(package_graph, dep);
-    }
-}
-
-pub fn get_build_order(graph: &HashMap<String, HashSet<String>>) -> Result<Vec<String>> {
-    let mut build_order = Vec::new();
-    let mut stack = HashSet::new();
-    let mut visited = HashSet::new();
-
-    for package in graph.keys() {
-        if !visited.contains(package) {
-            topological_sort(graph, &mut build_order, &mut visited, &mut stack, package)?;
-        }
-    }
-
-    Ok(build_order)
+    Ok(config)
 }

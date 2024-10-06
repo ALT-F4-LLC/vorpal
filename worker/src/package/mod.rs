@@ -7,7 +7,9 @@ use vorpal_schema::api::package::{
 };
 
 mod build;
-mod sandbox_default;
+mod darwin;
+mod linux;
+mod native;
 
 #[derive(Debug, Default)]
 pub struct PackageServer {
@@ -30,10 +32,14 @@ impl PackageService for PackageServer {
     ) -> Result<Response<Self::BuildStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
+        // TODO: create build environment directory
+
         tokio::spawn(async move {
             match build::run(request, &tx).await {
                 Ok(_) => (),
                 Err(e) => {
+                    // TODO: also clean up all files in the sandbox if they exists
+
                     tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
                 }
             }
