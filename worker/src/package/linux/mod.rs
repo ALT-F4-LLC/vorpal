@@ -89,10 +89,10 @@ pub async fn build(
         build_command_args.push(vec!["--setenv", key, value]);
     }
 
-    let sandbox_script_path = sandbox_path.join("sandbox.sh");
+    let sandbox_script_path = sandbox_path.join("bin").join("sandbox.sh");
 
     if !sandbox_script_path.exists() {
-        return Err(anyhow!("sandbox 'sandbox.sh' not found"));
+        return Err(anyhow!("sandbox 'bin/sandbox.sh' not found"));
     }
 
     build_command_args.push(vec![sandbox_script_path.to_str().unwrap()]);

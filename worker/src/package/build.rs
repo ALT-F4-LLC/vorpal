@@ -15,7 +15,7 @@ use std::{
     process::Stdio,
 };
 use tokio::{
-    fs::{create_dir_all, set_permissions, symlink, write},
+    fs::{create_dir_all, set_permissions, write},
     io::{AsyncBufReadExt, BufReader},
     sync::mpsc::Sender,
 };
@@ -293,26 +293,21 @@ pub async fn run(
             bail!("bash missing: {}", bash_path.display())
         }
 
+        let sandbox_script_commands = [
+            format!("#!{}", bash_path.display()),
+            "set -euo pipefail".to_string(),
+            r"${@}".to_string(),
+        ];
+
         let sandbox_bin_path = temp_path.join("bin");
 
         create_dir_all(&sandbox_bin_path)
             .await
             .map_err(|err| anyhow!("failed to create directory: {:?}", err))?;
 
-        let sandbox_bash_path = sandbox_bin_path.join("bash");
-
-        symlink(bash_path, &sandbox_bash_path)
-            .await
-            .map_err(|err| anyhow!("failed to create symlink: {:?}", err))?;
-
-        let sandbox_script_commands = [
-            format!("#!{}", sandbox_bash_path.display()),
-            "set -euo pipefail".to_string(),
-            r"${@}".to_string(),
-        ];
-
         let sandbox_script_data = sandbox_script_commands.join("\n");
-        let sandbox_script_path = temp_path.join("sandbox.sh");
+
+        let sandbox_script_path = sandbox_bin_path.join("sandbox.sh");
 
         write(&sandbox_script_path, sandbox_script_data)
             .await
@@ -332,21 +327,27 @@ pub async fn run(
     // Setup build path
 
     let build_path = create_temp_dir().await?;
-    let build_bash_path = sandbox_path.clone().unwrap().join("bin/bash");
-    let build_script_lines = package_script
+    let mut build_script_data = package_script
         .trim()
         .split('\n')
         .map(|line| line.trim())
         .collect::<Vec<&str>>()
         .join("\n");
-    let build_script_data = [
-        format!("#!{}", build_bash_path.display()),
-        "set -euo pipefail".to_string(),
-        build_script_lines,
-    ];
+
+    for package in package_packages.iter() {
+        let package_path = get_package_path(&package.hash, &package.name);
+        let package_placeholder = format!("${}", package.name);
+        let package_replacement = package_path.display().to_string();
+
+        while build_script_data.contains(&package_placeholder) {
+            build_script_data =
+                build_script_data.replace(&package_placeholder, &package_replacement);
+        }
+    }
+
     let build_script_path = build_path.join("package.sh");
 
-    write(&build_script_path, build_script_data.join("\n"))
+    write(&build_script_path, build_script_data)
         .await
         .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
 

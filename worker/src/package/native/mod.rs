@@ -10,10 +10,10 @@ pub async fn build(
     build_path: &Path,
     sandbox_path: &Path,
 ) -> Result<Command> {
-    let sandbox_script_path = sandbox_path.join("sandbox.sh");
+    let sandbox_script_path = sandbox_path.join("bin").join("sandbox.sh");
 
     if !sandbox_script_path.exists() {
-        return Err(anyhow::anyhow!("sandbox 'sandbox.sh' not found"));
+        return Err(anyhow::anyhow!("sandbox 'bin/sandbox.sh' not found"));
     }
 
     let mut command = Command::new(sandbox_script_path);
