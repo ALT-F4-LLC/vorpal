@@ -14,9 +14,7 @@ fun target =>
     name = "bash",
     script = m%"
       cd ${PWD}/bash
-      ./configure \
-        --enable-static-link \
-        --prefix=$output
+      ./configure --prefix=$output
       make -j$(%{MakeCpus target})
       make install
     "%,
