@@ -4,6 +4,7 @@ use crate::log::{
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, rename, write, File};
@@ -50,7 +51,14 @@ pub async fn build(
         print_packages_list(&package.name, &package_list);
     }
 
-    let package_config = serde_json::to_string(package).expect("failed to serialize package");
+    let mut package_json = serde_json::to_value(&package).expect("failed to serialize package");
+
+    if let Value::Object(ref mut map) = package_json {
+        map.remove("packages");
+        map.remove("sandbox");
+    }
+
+    let package_config = package_json.to_string();
 
     let package_config_hash = get_hash_digest(&package_config);
 
