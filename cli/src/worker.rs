@@ -51,10 +51,9 @@ pub async fn build(
         print_packages_list(&package.name, &package_list);
     }
 
-    let mut package_json = serde_json::to_value(&package).expect("failed to serialize package");
+    let mut package_json = serde_json::to_value(package).expect("failed to serialize package");
 
     if let Value::Object(ref mut map) = package_json {
-        map.remove("packages");
         map.remove("sandbox");
     }
 

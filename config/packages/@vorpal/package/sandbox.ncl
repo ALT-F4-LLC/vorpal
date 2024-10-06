@@ -67,8 +67,9 @@ fun target =>
       {
         name = "vorpal-sandbox-script",
         script = m%"
+        export CC="gcc"
         export LC_ALL="C"
-        ${@}
+        "${@}"
         "%,
       }
   in

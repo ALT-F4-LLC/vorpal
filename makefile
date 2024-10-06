@@ -19,6 +19,7 @@ check: lint
 
 clean:
 	cargo clean
+	rm -rf $(DIST_DIR)
 
 dist: test
 	mkdir -p $(DIST_DIR)
