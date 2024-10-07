@@ -1,9 +1,6 @@
 use anyhow::{bail, Result};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use tokio::fs::set_permissions;
-use tokio::fs::{copy, create_dir_all, metadata, symlink, write, File};
-use tokio::io::AsyncReadExt;
+use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use tracing::info;
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -207,69 +204,6 @@ pub async fn setup_paths() -> Result<()> {
     }
 
     info!("store path: {:?}", store_path);
-
-    Ok(())
-}
-
-async fn update_file(path: &str, next: &str) -> Result<()> {
-    // Get current file permissions
-    let metadata = metadata(path).await.expect("failed to get file metadata");
-    let mut permissions = metadata.permissions();
-    let was_read_only = permissions.mode() & 0o222 == 0;
-
-    // If read-only, set to writable
-    if was_read_only {
-        permissions.set_mode(permissions.mode() | 0o200); // Add write permission
-        set_permissions(path, permissions.clone())
-            .await
-            .expect("failed to set file permissions");
-    }
-
-    // Write to the file
-    write(path, next).await.expect("failed to write file");
-
-    // Set permissions back to read-only if they were initially read-only
-    if was_read_only {
-        permissions.set_mode(permissions.mode() & !0o200); // Remove write permission
-        set_permissions(path, permissions)
-            .await
-            .expect("failed to set file permissions");
-    }
-
-    Ok(())
-}
-
-pub async fn replace_path_in_files(from_path: &Path, to_path: &Path) -> Result<()> {
-    let from = from_path.display().to_string();
-    let to = to_path.display().to_string();
-
-    for entry in WalkDir::new(from_path) {
-        let entry = entry.expect("failed to read entry");
-
-        // TODO: handle rpath changes for binaries
-
-        if entry.file_type().is_file() {
-            let path = entry.path();
-            let mut file = File::open(path).await.expect("failed to open file");
-            let mut content = Vec::new();
-
-            file.read_to_end(&mut content)
-                .await
-                .expect("failed to read file");
-
-            if let Ok(prev) = String::from_utf8(content) {
-                let next = prev.replace(&from, &to);
-
-                if next != prev {
-                    update_file(path.display().to_string().as_str(), next.as_str())
-                        .await
-                        .expect("failed to update file");
-                }
-            } else {
-                continue;
-            }
-        }
-    }
 
     Ok(())
 }

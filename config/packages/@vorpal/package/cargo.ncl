@@ -1,10 +1,9 @@
-let { Package, .. } = import "@vorpal/contract.ncl" in
-
+let build_package = import "@vorpal/package.ncl" in
 let build_sandbox = import "@vorpal/package/sandbox.ncl" in
 
-fun target =>
+fun system =>
   let hash_dist =
-    target
+    system
     |> match {
       "aarch64-linux" => "d782e34151df01519de86f0acace8a755cae6fad93cb0303ddd61c2642444c1c",
       "aarch64-macos" => "d8ed8e9f5ceefcfe3bca7acd0797ade24eadb17ddccaa319cd00ea290f598d00",
@@ -13,8 +12,8 @@ fun target =>
     }
   in
 
-  let system =
-    target
+  let target =
+    system
     |> match {
       "aarch64-linux" => "aarch64-unknown-linux-gnu",
       "aarch64-macos" => "aarch64-apple-darwin",
@@ -27,14 +26,14 @@ fun target =>
 
   {
     name = "cargo",
-    sandbox = build_sandbox target,
-    script = "cp -pr ./dist/cargo/* $output/.",
+    script | default = "cp -pr ./dist/cargo/* $output/.",
     source = {
       dist = {
         hash = hash_dist,
         strip_prefix = true,
-        uri = "https://static.rust-lang.org/dist/2024-05-02/cargo-%{version}-%{system}.tar.gz",
+        uri = "https://static.rust-lang.org/dist/2024-05-02/cargo-%{version}-%{target}.tar.gz",
       }
     },
     systems = ["aaarch64-linux", "aarch64-macos", "x86_64-linux"],
-  } | Package
+  }
+  |> build_package

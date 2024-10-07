@@ -3,18 +3,20 @@ let build_package = import "@vorpal/package.ncl" in
 
 fun system =>
   {
-    name = "zstd",
+    name = "patchelf",
     script | default
       = m%"
-        cd ${PWD}/zstd
+        cd ${PWD}/patchelf
+        ./bootstrap.sh
+        ./configure --prefix=$output
         make -j$(%{MakeCpus system})
-        make install PREFIX="$output"
+        make install
       "%,
     source = {
-      zstd = {
-        hash = "7ad49c2d889f82744c95206e9fe38ecde31fc116d1dad8def68776c69887efcf",
+      patchelf = {
+        hash = "a278eec544da9f0a82ad7e07b3670cf0f4d85ee13286fa9ad4f4416b700ac19d",
         strip_prefix = true,
-        uri = "https://github.com/facebook/zstd/releases/download/v1.5.5/zstd-1.5.5.tar.gz"
+        uri = "https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz",
       }
     },
     systems = [

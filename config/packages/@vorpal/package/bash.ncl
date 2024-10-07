@@ -1,21 +1,23 @@
-let { MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
-let { Package, .. } = import "@vorpal/contract.ncl" in
-
-let build_binutils = import "@vorpal/package/binutils.ncl" in
-let build_gcc = import "@vorpal/package/gcc.ncl" in
+let { IsLinux, MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
 let build_glibc = import "@vorpal/package/glibc.ncl" in
+let build_package = import "@vorpal/package.ncl" in
+let build_patchelf = import "@vorpal/package/patchelf.ncl" in
 
-fun target =>
-  let binutils = build_binutils target in
-  let gcc = build_gcc target in
-  let glibc = build_glibc target in
+fun system =>
+  let glibc = system |> build_glibc in
+  let patchelf = system |> build_patchelf in
 
   {
+    environment = {
+      LC_ALL = "C",
+    },
     name = "bash",
-    script = m%"
+    packages = if (IsLinux system) then [glibc, patchelf] else [],
+    script | default
+      = m%"
       cd ${PWD}/bash
       ./configure --prefix=$output
-      make -j$(%{MakeCpus target})
+      make -j$(%{MakeCpus system})
       make install
     "%,
     source = {
@@ -31,4 +33,5 @@ fun target =>
       "x86_64-linux",
       "x86_64-macos"
     ],
-  } | Package
+  }
+  |> build_package

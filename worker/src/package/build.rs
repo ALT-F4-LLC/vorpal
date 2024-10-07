@@ -34,7 +34,7 @@ use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
         copy_files, get_file_paths, get_package_archive_path, get_package_path,
-        get_public_key_path, get_source_archive_path, get_source_path, replace_path_in_files,
+        get_public_key_path, get_source_archive_path, get_source_path,
     },
     temps::create_temp_dir,
 };
@@ -327,6 +327,7 @@ pub async fn run(
     // Setup build path
 
     let build_path = create_temp_dir().await?;
+
     let mut build_script_data = package_script
         .trim()
         .split('\n')
@@ -374,6 +375,11 @@ pub async fn run(
     create_dir_all(&build_output_path)
         .await
         .map_err(|err| anyhow!("failed to create output directory: {:?}", err))?;
+
+    build_env.insert(
+        package_name.to_lowercase().replace('-', "_"),
+        package_path.display().to_string(),
+    );
 
     build_env.insert(
         "output".to_string(),
@@ -456,10 +462,6 @@ pub async fn run(
     let message = format!("output files: {}", build_output_files.len());
 
     send(tx, message).await?;
-
-    // Replace paths in files
-
-    replace_path_in_files(&build_output_path, &package_path).await?;
 
     // Create package tar from build output files
 

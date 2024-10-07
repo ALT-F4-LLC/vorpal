@@ -1,15 +1,16 @@
 let { MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
-let { Package, .. } = import "@vorpal/contract.ncl" in
+let build_package = import "@vorpal/package.ncl" in
 
-fun target =>
+fun system =>
   {
     name = "coreutils",
-    script = m%"
-      cd ${PWD}/coreutils
-      ./configure --prefix="$output"
-      make -j$(%{MakeCpus target})
-      make install
-    "%,
+    script | default
+      = m%"
+        cd ${PWD}/coreutils
+        ./configure --prefix="$output"
+        make -j$(%{MakeCpus system})
+        make install
+      "%,
     source = {
       coreutils = {
         hash = "af6d643afd6241ec35c7781b7f999b97a66c84bea4710ad2bb15e75a5caf11b4",
@@ -23,4 +24,5 @@ fun target =>
       "x86_64-linux",
       "x86_64-macos"
     ],
-  } | Package
+  }
+  |> build_package

@@ -1,16 +1,17 @@
 let { MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
-let { Package, .. } = import "@vorpal/contract.ncl" in
+let build_package = import "@vorpal/package.ncl" in
 
-fun target =>
+fun system =>
   {
     name = "texinfo",
-    script = m%"
-      cd ${PWD}/texinfo
-      ./configure --prefix="$output"
-      make -j$(%{MakeCpus target})
-      make install
-      make TEXMF=$output install-tex
-    "%,
+    script | default
+      = m%"
+        cd ${PWD}/texinfo
+        ./configure --prefix="$output"
+        make -j$(%{MakeCpus system})
+        make install
+        make TEXMF=$output install-tex
+      "%,
     source = {
       texinfo = {
         hash = "6e34604552af91db0b4ccf0bcceba63dd3073da2a492ebcf33c6e188a64d2b63",
@@ -24,4 +25,5 @@ fun target =>
       "x86_64-linux",
       "x86_64-macos"
     ],
-  } | Package
+  }
+  |> build_package

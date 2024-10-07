@@ -14,11 +14,7 @@
     name | String,
     packages | Array Package | default = [],
     sandbox | Package | optional,
-    script | String | default
-      = m%"
-        make check
-        make install PREFIX=$output
-      "%,
+    script | String,
     source | { _ : PackageSource } | default = {},
     systems | Array String | default = [],
   },

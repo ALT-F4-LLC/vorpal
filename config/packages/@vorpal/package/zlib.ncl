@@ -1,15 +1,16 @@
 let { MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
-let { Package, .. } = import "@vorpal/contract.ncl" in
+let build_package = import "@vorpal/package.ncl" in
 
-fun target =>
+fun system =>
   {
     name = "zlib",
-    script = m%"
-      cd ${PWD}/zlib
-      ./configure --prefix=$output
-      make -j$(%{MakeCpus target})
-      make install
-    "%,
+    script | default
+      = m%"
+        cd ${PWD}/zlib
+        ./configure --prefix=$output
+        make -j$(%{MakeCpus system})
+        make install
+      "%,
     source = {
       zlib = {
         hash = "3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683",
@@ -23,4 +24,5 @@ fun target =>
       "x86_64-linux",
       "x86_64-macos"
     ],
-  } | Package
+  }
+  |> build_package

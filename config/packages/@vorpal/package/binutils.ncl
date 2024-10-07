@@ -1,15 +1,16 @@
 let { MakeCpus, .. } = import "@vorpal/cross-platform.ncl" in
-let { Package, .. } = import "@vorpal/contract.ncl" in
+let build_package = import "@vorpal/package.ncl" in
 
-fun target =>
+fun system =>
   {
     name = "binutils",
-    script = m%"
-      cd ${PWD}/binutils
-      ./configure --prefix=$output
-      make -j$(%{MakeCpus target})
-      make install
-    "%,
+    script | default
+      = m%"
+        cd ${PWD}/binutils
+        ./configure --prefix=$output
+        make -j$(%{MakeCpus system})
+        make install
+      "%,
     source = {
       binutils = {
         hash = "c0d3e5ee772ee201eefe17544b2b2cc3a0a3d6833a21b9ea56371efaad0c5528",
@@ -23,4 +24,5 @@ fun target =>
       "x86_64-linux",
       "x86_64-macos"
     ],
-  } | Package
+  }
+  |> build_package
