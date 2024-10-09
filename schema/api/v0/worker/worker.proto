@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package vorpal.worker.v0;
+
+import "v0/package/package.proto";
+
+service WorkerService {
+    rpc Build (stream BuildRequest) returns (stream BuildResponse);
+}
+
+message BuildRequest {
+    vorpal.package.v0.PackageSystem target = 1;
+    bool sandbox = 2;
+    map<string, string> environment = 3;
+    map<string, string> script = 4;
+    optional bytes source_data = 5;
+    optional bytes source_data_signature = 6;
+    repeated vorpal.package.v0.PackageOutput packages = 7;
+    string name = 8;
+    string source_hash = 9;
+}
+
+message BuildResponse {
+    string output = 1;
+}

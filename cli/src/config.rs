@@ -3,8 +3,11 @@ use crate::nickel;
 use anyhow::{bail, Result};
 use std::path::Path;
 use vorpal_schema::{
-    api::package::{PackageSystem, PackageSystem::Unknown},
-    get_package_system, Config,
+    get_package_system,
+    vorpal::{
+        config::v0::Config,
+        package::v0::{PackageSystem, PackageSystem::UnknownSystem},
+    },
 };
 
 pub async fn check_config<'a>(
@@ -12,9 +15,9 @@ pub async fn check_config<'a>(
     package: Option<&'a str>,
     system: &'a str,
 ) -> Result<Config> {
-    let config_system: PackageSystem = get_package_system(system);
+    let package_system: PackageSystem = get_package_system(system);
 
-    if config_system == Unknown {
+    if package_system == UnknownSystem {
         bail!("unknown system: {}", system);
     }
 
@@ -28,7 +31,7 @@ pub async fn check_config<'a>(
 
     log::print_config(config_path);
 
-    let config = nickel::load_config(config_path, config_system).await?;
+    let config = nickel::load_config(config_path, package_system).await?;
 
     let packages = config.packages.clone();
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use tonic::Request;
-use vorpal_schema::api::store::{StoreExistsResponse, StoreKind, StoreRequest};
+use vorpal_schema::vorpal::store::v0::{StoreExistsResponse, StoreKind, StoreRequest};
 use vorpal_store::paths::{get_package_archive_path, get_source_archive_path};
 
 pub async fn get(request: Request<StoreRequest>) -> Result<StoreExistsResponse> {

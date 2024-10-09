@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use std::env::consts::{ARCH, OS};
-use vorpal_schema::{api::package::PackageSystem, get_package_system};
+use vorpal_schema::{get_package_system, vorpal::package::v0::PackageSystem};
 
 pub fn get_cpu_count() -> Result<String> {
     let system = format!("{}-{}", ARCH, OS);

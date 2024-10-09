@@ -1,11 +1,11 @@
 use crate::{build_package, cross_platform::get_cpu_count, glibc};
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::BTreeMap;
-use vorpal_schema::{Package, PackageSource};
+use std::collections::HashMap;
+use vorpal_schema::vorpal::package::v0::{Package, PackageSource, PackageSystem};
 
 pub fn package() -> Result<Package> {
-    let environment = BTreeMap::from([("LC_ALL".to_string(), "C".to_string())]);
+    let environment = HashMap::from([("LC_ALL".to_string(), "C".to_string())]);
 
     let name = "bash";
 
@@ -33,13 +33,13 @@ pub fn package() -> Result<Package> {
         name: name.to_string(),
         packages: vec![glibc],
         sandbox: false,
-        script: BTreeMap::from([("install".to_string(), script_install)]),
-        source: BTreeMap::from([(name.to_string(), source_bash)]),
+        script: HashMap::from([("install".to_string(), script_install)]),
+        source: HashMap::from([(name.to_string(), source_bash)]),
         systems: vec![
-            "aarch64-linux".to_string(),
-            "aarch64-macos".to_string(),
-            "x86_64-linux".to_string(),
-            "x86_64-macos".to_string(),
+            PackageSystem::Aarch64Linux.into(),
+            PackageSystem::Aarch64Macos.into(),
+            PackageSystem::X8664Linux.into(),
+            PackageSystem::X8664Macos.into(),
         ],
     };
 

@@ -1,6 +1,6 @@
 use console::style;
 use std::path::Path;
-use vorpal_schema::api::package::PackageOutput;
+use vorpal_schema::vorpal::package::v0::PackageOutput;
 
 pub static CONNECTOR_START: &str = "├─";
 

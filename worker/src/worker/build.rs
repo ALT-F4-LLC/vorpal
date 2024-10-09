@@ -1,4 +1,4 @@
-use crate::package::{darwin, linux, native};
+use crate::worker::{darwin, linux, native};
 use anyhow::{anyhow, bail, Result};
 use rsa::{
     pss::{Signature, VerifyingKey},
@@ -10,7 +10,6 @@ use std::{
     env::consts::{ARCH, OS},
     fs::Permissions,
     os::unix::fs::PermissionsExt,
-    path::Path,
     process::Stdio,
 };
 use tokio::{
@@ -23,11 +22,14 @@ use tonic::{Request, Status, Streaming};
 use tracing::debug;
 use vorpal_notary::get_public_key;
 use vorpal_schema::{
-    api::package::{
-        BuildRequest, BuildResponse, PackageSystem,
-        PackageSystem::{Aarch64Linux, Aarch64Macos, Unknown, X8664Linux, X8664Macos},
-    },
     get_package_system,
+    vorpal::{
+        package::v0::PackageSystem,
+        package::v0::PackageSystem::{
+            Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos,
+        },
+        worker::v0::{BuildRequest, BuildResponse},
+    },
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
@@ -48,26 +50,6 @@ async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Res
     Ok(())
 }
 
-// async fn cleanup(
-//     sandbox_package_dir: &Path,
-//     sandbox_source_dir: &Path,
-//     sandbox_script_file: &PathBuf,
-// ) -> Result<()> {
-//     remove_dir_all(sandbox_package_dir)
-//         .await
-//         .map_err(|err| anyhow!("failed to remove package directory: {:?}", err))?;
-//
-//     remove_dir_all(sandbox_source_dir)
-//         .await
-//         .map_err(|err| anyhow!("failed to remove source directory: {:?}", err))?;
-//
-//     remove_file(sandbox_script_file)
-//         .await
-//         .map_err(|err| anyhow!("failed to remove script file: {:?}", err))?;
-//
-//     Ok(())
-// }
-
 pub async fn run(
     request: Request<Streaming<BuildRequest>>,
     tx: &Sender<Result<BuildResponse, Status>>,
@@ -75,13 +57,13 @@ pub async fn run(
     let mut package_environment = HashMap::new();
     let mut package_name = String::new();
     let mut package_packages = vec![];
-    let mut package_sandbox = None;
-    let mut package_script = String::new();
+    let mut package_sandbox = true;
+    let mut package_script = HashMap::new();
     let mut package_source_data: Vec<u8> = vec![];
     let mut package_source_data_chunk = 0;
     let mut package_source_data_signature = None;
     let mut package_source_hash = String::new();
-    let mut package_target = Unknown;
+    let mut package_target = UnknownSystem;
     let mut request_stream = request.into_inner();
 
     while let Some(result) = request_stream.next().await {
@@ -115,7 +97,7 @@ pub async fn run(
         bail!("'source_hash' is missing in configuration")
     }
 
-    if package_target == Unknown {
+    if package_target == UnknownSystem {
         bail!("'target' missing in configuration")
     }
 
@@ -250,7 +232,7 @@ pub async fn run(
         build_packages.push(path.display().to_string());
     }
 
-    // expand any environment variables that have package references
+    // expand environment variables that have package references
 
     for (key, value) in build_env.clone().into_iter() {
         for package in package_packages.iter() {
@@ -267,78 +249,21 @@ pub async fn run(
         }
     }
 
-    send(tx, format!("Stdenv environment: {:?}", build_env)).await?;
-
-    // Setup sandbox path
-
-    let mut sandbox_path = None;
-
-    if let Some(s) = package_sandbox.clone() {
-        let package_path = get_package_path(&s.hash, &s.name);
-
-        if !package_path.exists() {
-            bail!("sandbox package missing: {}", package_path.display())
-        }
-
-        sandbox_path = Some(package_path.to_path_buf());
-    }
-
-    if sandbox_path.is_none() {
-        let temp_path = create_temp_dir().await?;
-
-        let bash_path = Path::new("/bin/bash");
-
-        if !bash_path.exists() {
-            bail!("bash missing: {}", bash_path.display())
-        }
-
-        let sandbox_script_commands = [
-            format!("#!{}", bash_path.display()),
-            "set -euo pipefail".to_string(),
-            r"${@}".to_string(),
-        ];
-
-        let sandbox_bin_path = temp_path.join("bin");
-
-        create_dir_all(&sandbox_bin_path)
-            .await
-            .map_err(|err| anyhow!("failed to create directory: {:?}", err))?;
-
-        let sandbox_script_data = sandbox_script_commands.join("\n");
-
-        let sandbox_script_path = sandbox_bin_path.join("sandbox.sh");
-
-        write(&sandbox_script_path, sandbox_script_data)
-            .await
-            .map_err(|err| anyhow!("failed to write script: {:?}", err))?;
-
-        set_permissions(&sandbox_script_path, Permissions::from_mode(0o755))
-            .await
-            .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
-
-        sandbox_path = Some(temp_path);
-    }
-
-    if sandbox_path.is_none() {
-        bail!("sandbox missing")
-    }
+    send(tx, format!("Build environment: {:?}", build_env)).await?;
 
     // Setup build path
 
     let build_path = create_temp_dir().await?;
+    let build_path_source = build_path.join("source");
 
-    // Create source directory
-
-    let build_source_path = build_path.join("source");
-
-    create_dir_all(&build_source_path)
+    create_dir_all(&build_path_source)
         .await
         .map_err(|err| anyhow!("failed to create source directory: {:?}", err))?;
 
     if package_source_path.exists() {
         let build_source_files = get_file_paths(&package_source_path, vec![], vec![])?;
 
-        copy_files(&package_source_path, build_source_files, &build_source_path).await?;
+        copy_files(&package_source_path, build_source_files, &build_path_source).await?;
     }
 
     // Create output directory
@@ -361,16 +286,19 @@ pub async fn run(
 
     build_env.insert("packages".to_string(), build_packages.join(" ").to_string());
 
-    let mut build_script_data = package_script.clone();
+    let mut build_script_data = String::new();
+
+    for (_, script) in package_script.iter() {
+        build_script_data.push_str(script);
+    }
 
     for package in package_packages.iter() {
-        let package_placeholder = format!("${}", package.name);
-        let package_path = get_package_path(&package.hash, &package.name);
-        let package_replacement = package_path.display().to_string();
+        let placeholder = format!("${}", package.name);
+        let path = get_package_path(&package.hash, &package.name);
 
-        while build_script_data.contains(&package_placeholder) {
+        while build_script_data.contains(&placeholder) {
             build_script_data =
-                build_script_data.replace(&package_placeholder, &package_replacement);
+                build_script_data.replace(&placeholder, &path.display().to_string());
         }
     }
 
@@ -386,44 +314,28 @@ pub async fn run(
         .await
         .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
-    let sandbox_command = match package_sandbox {
-        None => Some(
-            native::build(
-                build_bin_paths,
-                build_env,
-                &build_path,
-                &sandbox_path.unwrap(),
-            )
-            .await?,
-        ),
-        Some(_) => match worker_target {
-            Aarch64Macos | X8664Macos => Some(
-                darwin::build(
-                    build_bin_paths,
-                    build_env,
-                    &build_path,
-                    &sandbox_path.unwrap(),
-                )
-                .await?,
-            ),
-            Aarch64Linux | X8664Linux => Some(
+    let mut sandbox_command = match package_sandbox {
+        false => native::build(build_bin_paths, build_env, &build_path).await?,
+        true => match worker_target {
+            Aarch64Macos | X8664Macos => {
+                darwin::build(build_bin_paths, build_env, &build_path).await?
+            }
+            Aarch64Linux | X8664Linux => {
                 linux::build(
                     build_bin_paths.clone(),
                     build_env.clone(),
                     &build_path,
-                    &build_packages,
-                    &sandbox_path.clone().unwrap(),
+                    build_packages,
                 )
-                .await?,
-            ),
-            _ => None,
+                .await?
+            }
+            _ => bail!("unknown target"),
         },
     };
 
     // Run sandbox command
 
     let mut child = sandbox_command
-        .expect("failed to create sandbox command")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -435,9 +347,9 @@ pub async fn run(
     let stdout = LinesStream::new(BufReader::new(stdout).lines());
     let stderr = LinesStream::new(BufReader::new(stderr).lines());
 
-    let mut merged = StreamExt::merge(stdout, stderr);
+    let mut stdio_merged = StreamExt::merge(stdout, stderr);
 
-    while let Some(line) = merged.next().await {
+    while let Some(line) = stdio_merged.next().await {
         let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
         send(tx, line.trim().to_string()).await?;
     }

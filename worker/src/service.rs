@@ -1,15 +1,14 @@
-use crate::package::PackageServer;
-use crate::store::StoreServer;
+use crate::{store::StoreServer, worker::WorkerServer};
 use anyhow::Result;
 use std::env::consts::{ARCH, OS};
 use tonic::transport::Server;
 use tracing::info;
 use vorpal_schema::{
-    api::{
-        package::package_service_server::PackageServiceServer,
-        store::store_service_server::StoreServiceServer,
-    },
     get_package_system,
+    vorpal::{
+        store::v0::store_service_server::StoreServiceServer,
+        worker::v0::worker_service_server::WorkerServiceServer,
+    },
 };
 use vorpal_store::paths::{get_public_key_path, setup_paths};
 
@@ -35,7 +34,7 @@ pub async fn start(port: u16) -> Result<()> {
     info!("worker address: {}", addr);
 
     Server::builder()
-        .add_service(PackageServiceServer::new(PackageServer::new(system)))
+        .add_service(WorkerServiceServer::new(WorkerServer::new(system)))
         .add_service(StoreServiceServer::new(StoreServer::default()))
         .serve(addr)
         .await

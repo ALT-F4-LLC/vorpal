@@ -9,7 +9,6 @@ service StoreService {
 
 enum StoreKind {
     UNKNOWN = 0;
-    INPUT = 1;
     PACKAGE = 2;
     SOURCE = 3;
 }

@@ -1,5 +1,7 @@
-use crate::log::{connector_end, print_build_order};
-use crate::worker::build;
+use crate::{
+    log::{connector_end, print_build_order},
+    worker::build,
+};
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
@@ -7,8 +9,8 @@ use std::env::consts::{ARCH, OS};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
-    api::package::{PackageOutput, PackageSystem, PackageSystem::Unknown},
     get_package_system,
+    vorpal::package::v0::{PackageOutput, PackageSystem, PackageSystem::UnknownSystem},
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
 use vorpal_worker::service;
@@ -98,7 +100,7 @@ async fn main() -> Result<()> {
 
             let package_system: PackageSystem = get_package_system(system);
 
-            if package_system == Unknown {
+            if package_system == UnknownSystem {
                 bail!(
                     "{} unknown target: {}",
                     connector_end(),
@@ -127,19 +129,11 @@ async fn main() -> Result<()> {
 
             let mut package_output = HashMap::<String, PackageOutput>::new();
 
-            for package_name in build_order {
-                match build_map.get(&package_name) {
+            for package_name in &build_order {
+                match build_map.get(package_name) {
                     None => bail!("Package not found: {}", package_name),
                     Some(package) => {
                         let mut packages = vec![];
-                        let mut package_sandbox = None;
-
-                        if let Some(s) = &package.sandbox {
-                            match package_output.get(&s.name) {
-                                None => bail!("Sandbox not found: {}", s.name),
-                                Some(package) => package_sandbox = Some(package.clone()),
-                            }
-                        }
 
                         for p in &package.packages {
                             match package_output.get(&p.name) {
@@ -148,9 +142,7 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        let output =
-                            build(package, packages, package_sandbox, package_system, worker)
-                                .await?;
+                        let output = build(package, packages, package_system, worker).await?;
 
                         package_output.insert(package_name.to_string(), output);
                     }

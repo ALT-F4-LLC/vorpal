@@ -3,7 +3,7 @@ use tokio::fs::read;
 use tokio::sync::mpsc::Sender;
 use tonic::{Request, Status};
 use tracing::info;
-use vorpal_schema::api::store::{StoreKind, StorePullResponse, StoreRequest};
+use vorpal_schema::vorpal::store::v0::{StoreKind, StorePullResponse, StoreRequest};
 use vorpal_store::paths::{get_package_archive_path, get_source_archive_path};
 
 pub async fn stream(

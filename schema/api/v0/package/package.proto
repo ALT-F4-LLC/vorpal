@@ -2,16 +2,19 @@ syntax = "proto3";
 
 package vorpal.package.v0;
 
-service PackageService {
-    rpc Build (stream BuildRequest) returns (stream BuildResponse);
-}
-
 enum PackageSystem {
-    UNKNOWN = 0;
+    UNKNOWN_SYSTEM = 0;
     AARCH64_LINUX = 1;
     AARCH64_MACOS = 2;
     X86_64_LINUX = 3;
     X86_64_MACOS = 4;
+}
+
+enum PackageSourceKind {
+    UNKNOWN_KIND = 0;
+    GIT = 1;
+    LOCAL = 2;
+    HTTP = 3;
 }
 
 message PackageOutput {
@@ -19,18 +22,20 @@ message PackageOutput {
     string name = 2;
 }
 
-message BuildRequest {
-    PackageSystem target = 1;
-    bool sandbox = 2;
-    map<string, string> environment = 3;
-    map<string, string> script = 4;
-    optional bytes source_data = 5;
-    optional bytes source_data_signature = 6;
-    repeated PackageOutput packages = 7;
-    string name = 8;
-    string source_hash = 9;
+message PackageSource {
+    bool strip_prefix = 1;
+    optional string hash = 2;
+    repeated string excludes = 3;
+    repeated string includes = 4;
+    string uri = 5;
 }
 
-message BuildResponse {
-    string output = 1;
+message Package {
+    bool sandbox = 1;
+    map<string, string> environment = 2;
+    map<string, string> script = 3;
+    map<string, PackageSource> source = 4;
+    repeated Package packages = 5;
+    repeated PackageSystem systems = 6;
+    string name = 7;
 }

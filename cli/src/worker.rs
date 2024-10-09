@@ -14,14 +14,12 @@ use tonic::Code::NotFound;
 use url::Url;
 use uuid::Uuid;
 use vorpal_schema::{
-    api::{
-        package::{
-            package_service_client::PackageServiceClient, BuildRequest, PackageOutput,
-            PackageSystem,
-        },
-        store::{store_service_client::StoreServiceClient, StoreKind, StoreRequest},
+    get_source_type,
+    vorpal::{
+        package::v0::{Package, PackageOutput, PackageSourceKind, PackageSystem},
+        store::v0::{store_service_client::StoreServiceClient, StoreKind, StoreRequest},
+        worker::v0::{worker_service_client::WorkerServiceClient, BuildRequest},
     },
-    get_source_type, Package, PackageSourceKind,
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zip, unpack_zstd},
@@ -38,7 +36,6 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 pub async fn build(
     package: &Package,
     packages: Vec<PackageOutput>,
-    sandbox: Option<PackageOutput>,
     target: PackageSystem,
     worker: &str,
 ) -> Result<PackageOutput> {
@@ -193,7 +190,7 @@ pub async fn build(
                         let source_type = get_source_type(&source.uri);
 
                         match source_type {
-                            PackageSourceKind::Unknown => bail!("Package source type unknown"),
+                            PackageSourceKind::UnknownKind => bail!("Package source type unknown"),
                             PackageSourceKind::Git => bail!("Package source git not supported"),
                             PackageSourceKind::Http => {
                                 print_source_url(
@@ -429,7 +426,7 @@ pub async fn build(
                     .collect::<HashMap<_, _>>(),
                 name: package.name.clone(),
                 packages: packages.clone(),
-                sandbox: sandbox.clone(),
+                sandbox: package.sandbox,
                 script: package.script.clone(),
                 source_data: Some(chunk.to_vec()),
                 source_data_signature: Some(source_signature.to_vec()),
@@ -446,7 +443,7 @@ pub async fn build(
                 .collect::<HashMap<_, _>>(),
             name: package.name.clone(),
             packages: packages.clone(),
-            sandbox,
+            sandbox: package.sandbox,
             script: package.script.clone(),
             source_data: None,
             source_data_signature: None,
@@ -455,7 +452,7 @@ pub async fn build(
         });
     }
 
-    let mut service = PackageServiceClient::connect(worker.to_owned())
+    let mut service = WorkerServiceClient::connect(worker.to_owned())
         .await
         .expect("failed to connect to package");
 

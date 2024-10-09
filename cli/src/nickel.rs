@@ -1,10 +1,13 @@
 use anyhow::{bail, Result};
 use petgraph::algo::toposort;
 use petgraph::graphmap::DiGraphMap;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 use tokio::process::Command;
-use vorpal_schema::{api::package::PackageSystem, Config, Package};
+use vorpal_schema::vorpal::{
+    config::v0::Config,
+    package::v0::{Package, PackageSystem},
+};
 
 pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<Config> {
     let nickel_version = Command::new("nickel").arg("--version").output().await;
@@ -24,7 +27,7 @@ pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<Co
         PackageSystem::Aarch64Macos => "aarch64-macos",
         PackageSystem::X8664Linux => "x86_64-linux",
         PackageSystem::X8664Macos => "x86_64-macos",
-        PackageSystem::Unknown => bail!("unknown target"),
+        PackageSystem::UnknownSystem => bail!("unknown target"),
     };
 
     let config_path_canoncicalized = config_path
@@ -91,7 +94,7 @@ pub async fn load_config(config_path: &Path, system: PackageSystem) -> Result<Co
 }
 
 pub fn load_config_build(
-    packages: &BTreeMap<String, Package>,
+    packages: &HashMap<String, Package>,
 ) -> Result<(HashMap<String, Package>, Vec<String>)> {
     let mut graph = DiGraphMap::<&str, Package>::new();
     let mut map = HashMap::<String, Package>::new();
@@ -99,10 +102,6 @@ pub fn load_config_build(
     for package in packages.values() {
         if package.packages.is_empty() {
             graph.add_node(&package.name);
-        }
-
-        if let Some(sandbox) = &package.sandbox {
-            add_graph_edges(sandbox, &mut graph, &mut map);
         }
 
         add_graph_edges(package, &mut graph, &mut map);

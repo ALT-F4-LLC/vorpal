@@ -1,9 +1,12 @@
 use crate::paths::get_file_paths;
 use anyhow::{bail, Result};
 use sha256::{digest, try_digest};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use vorpal_schema::{get_source_type, PackageSource, PackageSourceKind};
+use vorpal_schema::{
+    get_source_type,
+    vorpal::package::v0::{PackageSource, PackageSourceKind},
+};
 
 pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String> {
     if !path.as_ref().is_file() {
@@ -47,7 +50,7 @@ pub async fn hash_files(paths: Vec<PathBuf>) -> Result<String> {
 
 pub async fn get_package_hash(
     config_hash: &str,
-    source: &BTreeMap<String, PackageSource>,
+    source: &HashMap<String, PackageSource>,
 ) -> Result<String> {
     let mut source_hashes = vec![config_hash.to_string()];
 

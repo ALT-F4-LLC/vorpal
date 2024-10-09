@@ -1,7 +1,7 @@
 use crate::cross_platform::get_sed_cmd;
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::Package;
+use vorpal_schema::vorpal::package::v0::Package;
 
 pub mod bash;
 pub mod glibc;
