@@ -42,8 +42,8 @@ pub struct Package {
     pub environment: BTreeMap<String, String>,
     pub name: String,
     pub packages: Vec<Package>,
-    pub script: String,
-    pub sandbox: Option<Box<Package>>,
+    pub script: BTreeMap<String, String>,
+    pub sandbox: bool,
     pub source: BTreeMap<String, PackageSource>,
     pub systems: Vec<String>,
 }

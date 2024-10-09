@@ -32,7 +32,6 @@ Vagrant.configure("2") do |config|
 
       cd ${HOME}/vorpal
 
-      ./script/debian.sh
       ./script/dev.sh make dist
       ./script/install.sh
     }' >> ~/.bashrc

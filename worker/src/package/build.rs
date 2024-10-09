@@ -9,7 +9,6 @@ use std::{
     collections::HashMap,
     env::consts::{ARCH, OS},
     fs::Permissions,
-    iter::Iterator,
     os::unix::fs::PermissionsExt,
     path::Path,
     process::Stdio,
@@ -328,34 +327,6 @@ pub async fn run(
 
     let build_path = create_temp_dir().await?;
 
-    let mut build_script_data = package_script
-        .trim()
-        .split('\n')
-        .map(|line| line.trim())
-        .collect::<Vec<&str>>()
-        .join("\n");
-
-    for package in package_packages.iter() {
-        let package_path = get_package_path(&package.hash, &package.name);
-        let package_placeholder = format!("${}", package.name);
-        let package_replacement = package_path.display().to_string();
-
-        while build_script_data.contains(&package_placeholder) {
-            build_script_data =
-                build_script_data.replace(&package_placeholder, &package_replacement);
-        }
-    }
-
-    let build_script_path = build_path.join("package.sh");
-
-    write(&build_script_path, build_script_data)
-        .await
-        .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
-
-    set_permissions(&build_script_path, Permissions::from_mode(0o755))
-        .await
-        .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
-
     // Create source directory
 
     let build_source_path = build_path.join("source");
@@ -369,6 +340,8 @@ pub async fn run(
 
         copy_files(&package_source_path, build_source_files, &build_source_path).await?;
     }
+
+    // Create output directory
 
     let build_output_path = build_path.join("output");
 
@@ -387,6 +360,31 @@ pub async fn run(
     );
 
     build_env.insert("packages".to_string(), build_packages.join(" ").to_string());
+
+    let mut build_script_data = package_script.clone();
+
+    for package in package_packages.iter() {
+        let package_placeholder = format!("${}", package.name);
+        let package_path = get_package_path(&package.hash, &package.name);
+        let package_replacement = package_path.display().to_string();
+
+        while build_script_data.contains(&package_placeholder) {
+            build_script_data =
+                build_script_data.replace(&package_placeholder, &package_replacement);
+        }
+    }
+
+    build_script_data = build_script_data.replace("$packages", &build_packages.join(" "));
+
+    let build_script_path = build_path.join("package.sh");
+
+    write(&build_script_path, build_script_data)
+        .await
+        .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
+
+    set_permissions(&build_script_path, Permissions::from_mode(0o755))
+        .await
+        .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
     let sandbox_command = match package_sandbox {
         None => Some(
@@ -421,6 +419,8 @@ pub async fn run(
             _ => None,
         },
     };
+
+    // Run sandbox command
 
     let mut child = sandbox_command
         .expect("failed to create sandbox command")
