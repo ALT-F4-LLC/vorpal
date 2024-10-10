@@ -1,10 +1,15 @@
 use crate::cross_platform::get_sed_cmd;
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::vorpal::package::v0::Package;
+use std::collections::HashMap;
+use vorpal_schema::vorpal::{config::v0::Config, package::v0::Package};
 
 pub mod bash;
 pub mod glibc;
+
+pub fn build_config(packages: HashMap<String, Package>) -> Config {
+    Config { packages }
+}
 
 pub fn build_package(package: Package) -> Result<Package> {
     let mut script = package.script.clone();

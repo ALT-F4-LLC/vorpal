@@ -48,7 +48,30 @@ pub async fn build(
         print_packages_list(&package.name, &package_list);
     }
 
-    let mut package_json = serde_json::to_value(package).expect("failed to serialize package");
+    let package_sorted = Package {
+        environment: package
+            .environment
+            .clone()
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
+        name: package.name.clone(),
+        sandbox: package.sandbox,
+        packages: package.packages.clone().into_iter().collect::<Vec<_>>(),
+        script: package
+            .script
+            .clone()
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
+        source: package
+            .source
+            .clone()
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
+        systems: package.systems.clone().into_iter().collect::<Vec<_>>(),
+    };
+
+    let mut package_json =
+        serde_json::to_value(package_sorted).expect("failed to serialize package");
 
     if let Value::Object(ref mut map) = package_json {
         map.remove("sandbox");

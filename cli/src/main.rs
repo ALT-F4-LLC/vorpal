@@ -2,22 +2,25 @@ use crate::{
     log::{connector_end, print_build_order},
     worker::build,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
+use port_selector::random_free_port;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
+use tokio::process;
+use tokio::process::Child;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
     get_package_system,
+    vorpal::config::v0::{config_service_client::ConfigServiceClient, Config, EvaluateRequest},
     vorpal::package::v0::{PackageOutput, PackageSystem, PackageSystem::UnknownSystem},
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
 use vorpal_worker::service;
 
-mod config;
+mod build;
 mod log;
-mod nickel;
 mod worker;
 
 #[derive(Parser)]
@@ -32,10 +35,58 @@ fn get_default_package() -> String {
     "default".to_string()
 }
 
+async fn shutdown_config(mut process: Child) -> Result<()> {
+    process
+        .kill()
+        .await
+        .map_err(|_| anyhow!("{} failed to kill config server", connector_end()))?;
+
+    Ok(())
+}
+
+async fn get_config(file: String) -> Result<Config> {
+    let config_port = random_free_port()
+        .ok_or_else(|| anyhow!("{} failed to find free port", connector_end()))?;
+
+    let mut config_command = process::Command::new(file);
+
+    config_command.args(&["start", "--port", &config_port.to_string()]);
+
+    let config_process = config_command
+        .spawn()
+        .map_err(|_| anyhow!("{} failed to start config server", connector_end()))?;
+
+    let config_host = format!("http://localhost:{}", config_port);
+
+    let mut config_service = match ConfigServiceClient::connect(config_host).await {
+        Ok(config_service) => config_service,
+        Err(e) => {
+            shutdown_config(config_process).await?;
+            bail!(
+                "{} failed to connect to config server: {}",
+                connector_end(),
+                e
+            );
+        }
+    };
+
+    let config_response = match config_service.evaluate(EvaluateRequest {}).await {
+        Ok(response) => response,
+        Err(error) => {
+            shutdown_config(config_process).await?;
+            bail!("{} failed to evaluate config: {}", connector_end(), error);
+        }
+    };
+
+    shutdown_config(config_process).await?;
+
+    Ok(config_response.into_inner().config.unwrap())
+}
+
 #[derive(Subcommand)]
 enum Command {
     Build {
-        #[arg(default_value = "vorpal.ncl", long, short)]
+        #[arg(long, short)]
         file: String,
 
         #[arg(default_value_t = get_default_package(), long, short)]
@@ -48,8 +99,8 @@ enum Command {
         worker: String,
     },
 
-    Check {
-        #[arg(default_value = "vorpal.ncl", long, short)]
+    Config {
+        #[arg(long, short)]
         file: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
@@ -119,9 +170,13 @@ async fn main() -> Result<()> {
                 );
             }
 
-            let config = config::check_config(file, Some(package), system).await?;
+            let config = get_config(file.to_string()).await?;
 
-            let (build_map, build_order) = nickel::load_config_build(&config.packages)?;
+            if !config.packages.contains_key(package) {
+                bail!("package not found: {}", package);
+            }
+
+            let (build_map, build_order) = build::load_config(&config.packages)?;
 
             log::print_packages(&build_order);
 
@@ -152,8 +207,18 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        Command::Check { file, system } => {
-            let _ = config::check_config(file, None, system).await?;
+        Command::Config { file, .. } => {
+            let config = get_config(file.to_string()).await?;
+
+            let config_json = serde_json::to_string_pretty(&config).map_err(|e| {
+                anyhow!(
+                    "{} failed to serialize config to json: {}",
+                    connector_end(),
+                    e
+                )
+            })?;
+
+            println!("{}", config_json);
 
             Ok(())
         }

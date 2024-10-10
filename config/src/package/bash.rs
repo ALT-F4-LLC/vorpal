@@ -1,4 +1,4 @@
-use crate::{build_package, cross_platform::get_cpu_count, glibc};
+use crate::{cross_platform::get_cpu_count, glibc, package::build_package};
 use anyhow::Result;
 use indoc::formatdoc;
 use std::collections::HashMap;

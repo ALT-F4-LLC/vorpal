@@ -1476,6 +1476,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 
 [[package]]
+name = "port-selector"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd119ef551a50cd8939f0ff93bd062891f7b0dbb771b4a05df8a9c13aebaff68"
+dependencies = [
+ "rand",
+]
+
+[[package]]
 name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2551,6 +2560,7 @@ dependencies = [
  "console",
  "infer",
  "petgraph",
+ "port-selector",
  "reqwest",
  "serde_json",
  "sha256",
@@ -2573,8 +2583,12 @@ name = "vorpal-config"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "indoc",
  "serde_json",
+ "tokio",
+ "tonic",
+ "tracing",
  "vorpal-schema",
 ]
 

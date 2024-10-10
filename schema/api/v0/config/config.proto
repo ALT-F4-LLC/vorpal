@@ -5,15 +5,15 @@ package vorpal.config.v0;
 import "v0/package/package.proto";
 
 service ConfigService {
-    rpc Package (PackageRequest) returns (PackageResults) {};
+    rpc Evaluate (EvaluateRequest) returns (EvaluateResponse) {};
 }
-
-message PackageRequest {}
 
 message Config {
     map<string, vorpal.package.v0.Package> packages = 1;
 }
 
-message PackageResults {
-    repeated vorpal.package.v0.Package results = 1;
+message EvaluateRequest {}
+
+message EvaluateResponse {
+    Config config = 1;
 }
