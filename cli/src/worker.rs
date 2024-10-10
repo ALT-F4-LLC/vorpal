@@ -4,7 +4,6 @@ use crate::log::{
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, rename, write, File};
@@ -39,15 +38,6 @@ pub async fn build(
     target: PackageSystem,
     worker: &str,
 ) -> Result<PackageOutput> {
-    if !packages.is_empty() {
-        let package_list = packages
-            .clone()
-            .into_iter()
-            .map(|p| p.name)
-            .collect::<Vec<String>>();
-        print_packages_list(&package.name, &package_list);
-    }
-
     let package_sorted = Package {
         environment: package
             .environment
@@ -57,11 +47,7 @@ pub async fn build(
         name: package.name.clone(),
         sandbox: package.sandbox,
         packages: package.packages.clone().into_iter().collect::<Vec<_>>(),
-        script: package
-            .script
-            .clone()
-            .into_iter()
-            .collect::<HashMap<_, _>>(),
+        script: package.script.clone(),
         source: package
             .source
             .clone()
@@ -70,20 +56,13 @@ pub async fn build(
         systems: package.systems.clone().into_iter().collect::<Vec<_>>(),
     };
 
-    let mut package_json =
-        serde_json::to_value(package_sorted).expect("failed to serialize package");
-
-    if let Value::Object(ref mut map) = package_json {
-        map.remove("sandbox");
-    }
+    let package_json = serde_json::to_value(package_sorted).expect("failed to serialize package");
 
     let package_config = package_json.to_string();
 
     let package_config_hash = get_hash_digest(&package_config);
 
     let package_hash = get_package_hash(&package_config_hash, &package.source).await?;
-
-    print_package_hash(&package.name, &package_hash);
 
     let package_path = get_package_path(&package_hash, &package.name);
 
@@ -177,6 +156,17 @@ pub async fn build(
             hash: package_hash,
             name: package.name.clone(),
         });
+    }
+
+    print_package_hash(&package.name, &package_hash);
+
+    if !packages.is_empty() {
+        let package_list = packages
+            .clone()
+            .into_iter()
+            .map(|p| p.name)
+            .collect::<Vec<String>>();
+        print_packages_list(&package.name, &package_list);
     }
 
     let mut request_stream: Vec<BuildRequest> = vec![];

@@ -58,7 +58,7 @@ pub async fn run(
     let mut package_name = String::new();
     let mut package_packages = vec![];
     let mut package_sandbox = true;
-    let mut package_script = HashMap::new();
+    let mut package_script = String::new();
     let mut package_source_data: Vec<u8> = vec![];
     let mut package_source_data_chunk = 0;
     let mut package_source_data_signature = None;
@@ -286,27 +286,17 @@ pub async fn run(
 
     build_env.insert("packages".to_string(), build_packages.join(" ").to_string());
 
-    let mut build_script_data = String::new();
-
-    for (_, script) in package_script.iter() {
-        build_script_data.push_str(script);
-    }
-
     for package in package_packages.iter() {
-        let placeholder = format!("${}", package.name);
+        let placeholder = format!(r"${}", package.name.replace('-', "_").to_lowercase());
         let path = get_package_path(&package.hash, &package.name);
-
-        while build_script_data.contains(&placeholder) {
-            build_script_data =
-                build_script_data.replace(&placeholder, &path.display().to_string());
-        }
+        package_script = package_script.replace(&placeholder, &path.display().to_string());
     }
 
-    build_script_data = build_script_data.replace("$packages", &build_packages.join(" "));
+    package_script = package_script.replace("$packages", &build_packages.join(" "));
 
     let build_script_path = build_path.join("package.sh");
 
-    write(&build_script_path, build_script_data)
+    write(&build_script_path, package_script)
         .await
         .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
 

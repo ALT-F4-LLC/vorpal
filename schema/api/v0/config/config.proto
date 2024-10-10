@@ -12,7 +12,9 @@ message Config {
     map<string, vorpal.package.v0.Package> packages = 1;
 }
 
-message EvaluateRequest {}
+message EvaluateRequest {
+    vorpal.package.v0.PackageSystem system = 1;
+}
 
 message EvaluateResponse {
     Config config = 1;

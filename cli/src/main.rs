@@ -44,7 +44,7 @@ async fn shutdown_config(mut process: Child) -> Result<()> {
     Ok(())
 }
 
-async fn get_config(file: String) -> Result<Config> {
+async fn get_config(file: String, system: PackageSystem) -> Result<Config> {
     let config_port = random_free_port()
         .ok_or_else(|| anyhow!("{} failed to find free port", connector_end()))?;
 
@@ -55,6 +55,10 @@ async fn get_config(file: String) -> Result<Config> {
     let config_process = config_command
         .spawn()
         .map_err(|_| anyhow!("{} failed to start config server", connector_end()))?;
+
+    // TODO: wait for output then proceed instead of sleeping
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     let config_host = format!("http://localhost:{}", config_port);
 
@@ -70,7 +74,12 @@ async fn get_config(file: String) -> Result<Config> {
         }
     };
 
-    let config_response = match config_service.evaluate(EvaluateRequest {}).await {
+    let config_response = match config_service
+        .evaluate(EvaluateRequest {
+            system: system.into(),
+        })
+        .await
+    {
         Ok(response) => response,
         Err(error) => {
             shutdown_config(config_process).await?;
@@ -170,7 +179,7 @@ async fn main() -> Result<()> {
                 );
             }
 
-            let config = get_config(file.to_string()).await?;
+            let config = get_config(file.to_string(), package_system).await?;
 
             if !config.packages.contains_key(package) {
                 bail!("package not found: {}", package);
@@ -207,8 +216,18 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        Command::Config { file, .. } => {
-            let config = get_config(file.to_string()).await?;
+        Command::Config { file, system } => {
+            let package_system: PackageSystem = get_package_system(system);
+
+            if package_system == UnknownSystem {
+                bail!(
+                    "{} unknown target: {}",
+                    connector_end(),
+                    package_system.as_str_name()
+                );
+            }
+
+            let config = get_config(file.to_string(), package_system).await?;
 
             let config_json = serde_json::to_string_pretty(&config).map_err(|e| {
                 anyhow!(

@@ -37,15 +37,15 @@ pub fn print_build_order(build_order: &[String]) {
     );
 }
 
-pub fn print_config(file_path: &Path) {
-    println!(
-        "{} {} {} {}",
-        connector_start(),
-        bold("Config:"),
-        file_path.display(),
-        badge_success(),
-    );
-}
+// pub fn print_config(file_path: &Path) {
+//     println!(
+//         "{} {} {} {}",
+//         connector_start(),
+//         bold("Config:"),
+//         file_path.display(),
+//         badge_success(),
+//     );
+// }
 
 pub fn format_package_name(package_name: &str) -> String {
     format!(
@@ -93,15 +93,15 @@ pub fn print_source_url(package_name: &str, status: SourceStatus, url: &str) {
     );
 }
 
-pub fn print_system(system: &str) {
-    println!(
-        "{} {} {} {}",
-        connector_start(),
-        bold("System:"),
-        system,
-        badge_success(),
-    );
-}
+// pub fn print_system(system: &str) {
+//     println!(
+//         "{} {} {} {}",
+//         connector_start(),
+//         bold("System:"),
+//         system,
+//         badge_success(),
+//     );
+// }
 
 pub fn print_packages_list(package_name: &str, packages: &[String]) {
     println!(

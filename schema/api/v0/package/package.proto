@@ -32,10 +32,10 @@ message PackageSource {
 
 message Package {
     bool sandbox = 1;
-    map<string, string> environment = 2;
-    map<string, string> script = 3;
-    map<string, PackageSource> source = 4;
-    repeated Package packages = 5;
-    repeated PackageSystem systems = 6;
-    string name = 7;
+    map<string, PackageSource> source = 2;
+    map<string, string> environment = 3;
+    repeated Package packages = 4;
+    repeated PackageSystem systems = 5;
+    string name = 6;
+    string script = 7;
 }

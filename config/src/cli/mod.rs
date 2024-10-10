@@ -1,9 +1,8 @@
-use crate::{package::build_config, service};
+use crate::service;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::collections::HashMap;
 use tracing::Level;
-use vorpal_schema::vorpal::package::v0::Package;
+use vorpal_schema::vorpal::{config::v0::Config, package::v0::PackageSystem};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -24,13 +23,13 @@ enum Command {
     },
 }
 
-pub async fn execute(packages: HashMap<String, Package>) -> Result<()> {
+pub type BuildConfigFn = fn(system: PackageSystem) -> Config;
+
+pub async fn execute(config: BuildConfigFn) -> Result<()> {
     let args = Cli::parse();
 
     match args.command {
         Command::Start { port, .. } => {
-            let config = build_config(packages);
-
             service::listen(config, port).await?;
         }
     }

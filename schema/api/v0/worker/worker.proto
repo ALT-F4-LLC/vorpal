@@ -9,15 +9,15 @@ service WorkerService {
 }
 
 message BuildRequest {
-    vorpal.package.v0.PackageSystem target = 1;
-    bool sandbox = 2;
-    map<string, string> environment = 3;
-    map<string, string> script = 4;
-    optional bytes source_data = 5;
-    optional bytes source_data_signature = 6;
-    repeated vorpal.package.v0.PackageOutput packages = 7;
-    string name = 8;
-    string source_hash = 9;
+    bool sandbox = 1;
+    map<string, string> environment = 2;
+    optional bytes source_data = 3;
+    optional bytes source_data_signature = 4;
+    repeated vorpal.package.v0.PackageOutput packages = 5;
+    string name = 6;
+    string script = 7;
+    string source_hash = 8;
+    vorpal.package.v0.PackageSystem target = 9;
 }
 
 message BuildResponse {

@@ -1,18 +1,22 @@
+use crate::cli::BuildConfigFn;
 use anyhow::Result;
 use tonic::transport::Server;
 use tracing::info;
-use vorpal_schema::vorpal::config::v0::{
-    config_service_server::{ConfigService, ConfigServiceServer},
-    Config, EvaluateRequest, EvaluateResponse,
+use vorpal_schema::vorpal::{
+    config::v0::{
+        config_service_server::{ConfigService, ConfigServiceServer},
+        EvaluateRequest, EvaluateResponse,
+    },
+    package::v0::PackageSystem,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ConfigServer {
-    pub config: Config,
+    pub config: BuildConfigFn,
 }
 
 impl ConfigServer {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: BuildConfigFn) -> Self {
         Self { config }
     }
 }
@@ -23,17 +27,24 @@ impl ConfigService for ConfigServer {
         &self,
         request: tonic::Request<EvaluateRequest>,
     ) -> Result<tonic::Response<EvaluateResponse>, tonic::Status> {
-        info!("received config: {:?}", request.get_ref());
+        let request = request.into_inner();
+
+        info!("received evaluate request: {:?}", request);
+
+        let system = PackageSystem::try_from(request.system)
+            .map_err(|e| tonic::Status::invalid_argument(format!("invalid system: {}", e)))?;
+
+        let config = (self.config)(system);
 
         let response = EvaluateResponse {
-            config: Some(self.config.clone()),
+            config: Some(config),
         };
 
         Ok(tonic::Response::new(response))
     }
 }
 
-pub async fn listen(config: Config, port: u16) -> Result<()> {
+pub async fn listen(config: BuildConfigFn, port: u16) -> Result<()> {
     let addr = format!("[::]:{}", port)
         .parse()
         .expect("failed to parse address");
