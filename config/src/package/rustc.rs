@@ -24,7 +24,7 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         Aarch64Macos => "1512db881f5bdd7f4bbcfede7f5217bd51ca03dc6741c3577b4d071863690211",
         X8664Linux => "1512db881f5bdd7f4bbcfede7f5217bd51ca03dc6741c3577b4d071863690211",
         X8664Macos => "",
-        UnknownSystem => bail!("Unsupported system: {:?}", system),
+        UnknownSystem => bail!("Unsupported rustc system: {:?}", system),
     };
 
     let target = match system {
@@ -32,7 +32,7 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         Aarch64Macos => "aarch64-apple-darwin",
         X8664Linux => "x86_64-unknown-linux-gnu",
         X8664Macos => "x86_64-apple-darwin",
-        UnknownSystem => bail!("Unsupported system: {:?}", system),
+        UnknownSystem => bail!("Unsupported rustc target: {:?}", system),
     };
 
     let version = "1.78.0";

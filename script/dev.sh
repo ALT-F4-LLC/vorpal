@@ -4,12 +4,7 @@ set -euo pipefail
 export ENV_PATH="${PWD}/.env"
 readonly SCRIPT_PATH="${PWD}/script"
 
-scripts=(
-  "rustup"
-  "nickel" # must go after rustup.sh
-  "protoc"
-  "zstd"
-)
+scripts=("rustup" "protoc" "zstd")
 
 if [[ "$(uname -s)" == "Linux" ]]; then
     "${SCRIPT_PATH}/dev/debian.sh"

@@ -1,13 +1,19 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
+    package::{add_default_environment, add_default_script, native_gcc, native_glibc},
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use std::collections::HashMap;
-use vorpal_schema::vorpal::package::v0::{Package, PackageSource, PackageSystem};
+use vorpal_schema::vorpal::package::v0::{
+    Package, PackageSource, PackageSystem,
+    PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
+};
 
 pub fn package(system: PackageSystem) -> Result<Package> {
+    let gcc = native_gcc::package(system)?;
+    let glibc = native_glibc::package(system)?;
+
     let name = "patchelf-native";
 
     let script = formatdoc! {"
@@ -16,7 +22,6 @@ pub fn package(system: PackageSystem) -> Result<Package> {
 
         cd \"${{PWD}}/{source}\"
 
-        ./bootstrap.sh
         ./configure --prefix=\"$output\"
 
         make -j$({cores})
@@ -37,20 +42,20 @@ pub fn package(system: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![],
+        packages: vec![gcc, glibc],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
         systems: vec![
-            PackageSystem::Aarch64Linux.into(),
-            PackageSystem::Aarch64Macos.into(),
-            PackageSystem::X8664Linux.into(),
-            PackageSystem::X8664Macos.into(),
+            Aarch64Linux.into(),
+            Aarch64Macos.into(),
+            X8664Linux.into(),
+            X8664Macos.into(),
         ],
     };
 
-    let package = add_default_environment(package);
-    let package = add_default_script(package, system)?;
+    let package = add_default_environment(package, None);
+    let package = add_default_script(package, system, None)?;
 
     Ok(package)
 }

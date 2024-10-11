@@ -50,8 +50,8 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         ],
     };
 
-    let package = add_default_environment(package);
-    let package = add_default_script(package, system)?;
+    let package = add_default_environment(package, None);
+    let package = add_default_script(package, system, None)?;
 
     Ok(package)
 }

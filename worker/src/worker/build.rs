@@ -232,25 +232,6 @@ pub async fn run(
         build_packages.push(path.display().to_string());
     }
 
-    // expand environment variables that have package references
-
-    for (key, value) in build_env.clone().into_iter() {
-        for package in package_packages.iter() {
-            let package_name = package.name.to_lowercase();
-
-            if value.starts_with(&format!("${}", package_name)) {
-                let path = get_package_path(&package_name, &package.hash);
-
-                let value =
-                    value.replace(&format!("${}", package_name), &path.display().to_string());
-
-                build_env.insert(key.clone(), value);
-            }
-        }
-    }
-
-    send(tx, format!("Build environment: {:?}", build_env)).await?;
-
     // Setup build path
 
     let build_path = create_temp_dir().await?;
@@ -285,6 +266,39 @@ pub async fn run(
     );
 
     build_env.insert("packages".to_string(), build_packages.join(" ").to_string());
+
+    // expand environment variables that have references
+
+    for (key, _) in build_env.clone().into_iter() {
+        for p in package_packages.iter() {
+            let p_key = p.name.to_lowercase().replace('-', "_");
+
+            let p_path = get_package_path(&p.hash, &p.name);
+
+            let p_envvar = format!("${}", p_key);
+
+            let value = build_env.get(&key).unwrap().clone();
+
+            let p_value = value.replace(&p_envvar, &p_path.display().to_string());
+
+            if p_value == value {
+                continue;
+            }
+
+            build_env.insert(key.clone(), p_value);
+        }
+
+        let value = build_env.get(&key).unwrap().clone();
+
+        let value = value.replace(
+            &format!("${}", package_name.to_lowercase().replace('-', "_")),
+            &package_path.display().to_string(),
+        );
+
+        build_env.insert(key.clone(), value.clone());
+    }
+
+    send(tx, format!("Build environment: {:?}", build_env)).await?;
 
     for package in package_packages.iter() {
         let placeholder = format!(r"${}", package.name.replace('-', "_").to_lowercase());

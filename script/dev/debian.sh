@@ -18,6 +18,7 @@ sudo apt-get install \
     help2man \
     m4 \
     make \
+    patchelf \
     perl \
     rsync \
     texinfo \

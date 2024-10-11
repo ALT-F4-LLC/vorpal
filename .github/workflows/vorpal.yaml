@@ -75,6 +75,8 @@ jobs:
       - run: ./script/dev.sh # prebake
       - run: ./script/dev.sh make dist
 
+      # TODO: upload vorpal-config artifact
+
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -109,15 +111,6 @@ jobs:
           sudo systemctl stop apparmor
           sudo systemctl disable apparmor
           sudo rm -rf /etc/apparmor.d/*
-
-      - uses: actions/cache/restore@v4
-        with:
-          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
-          path: .env
-
-      - run: echo "$PWD/.env/bin" >> $GITHUB_PATH
-
-      - run: which nickel
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV

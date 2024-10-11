@@ -37,7 +37,7 @@ pub fn package(system: PackageSystem) -> Result<Package> {
 
     let mut packages = vec![];
 
-    if system == PackageSystem::Aarch64Linux || system == PackageSystem::X8664Linux {
+    if system == Aarch64Linux || system == X8664Linux {
         packages.push(native_glibc::package(system)?);
         packages.push(native_patchelf::package(system)?);
     }
@@ -57,8 +57,8 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         ],
     };
 
-    let package = add_default_environment(package);
-    let package = add_default_script(package, system)?;
+    let package = add_default_environment(package, None);
+    let package = add_default_script(package, system, None)?;
 
     Ok(package)
 }

@@ -50,7 +50,7 @@ async fn get_config(file: String, system: PackageSystem) -> Result<Config> {
 
     let mut config_command = process::Command::new(file);
 
-    config_command.args(&["start", "--port", &config_port.to_string()]);
+    config_command.args(["start", "--port", &config_port.to_string()]);
 
     let config_process = config_command
         .spawn()
