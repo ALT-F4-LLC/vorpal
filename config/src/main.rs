@@ -14,7 +14,8 @@ mod cross_platform;
 mod package;
 mod service;
 
-fn build_config(system: PackageSystem) -> Config {
+// Configuration function that returns a Config struct
+fn build_config(target: PackageSystem) -> Config {
     // TODO: add any custom logic you want here
 
     let package = build_rust_package(
@@ -25,7 +26,7 @@ fn build_config(system: PackageSystem) -> Config {
             source_excludes: vec![".env", ".packer", ".vagrant", "script"],
             systems: vec![Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos],
         },
-        system,
+        target,
     )
     .expect("Failed to build package");
 

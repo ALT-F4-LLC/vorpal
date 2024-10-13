@@ -1,7 +1,8 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{
-        add_default_environment, add_default_script, native_glibc, BuildPackageOptionsEnvironment,
+        add_default_environment, add_default_script, native_binutils,
+        BuildPackageOptionsEnvironment, BuildPackageOptionsScripts,
     },
 };
 use anyhow::Result;
@@ -9,13 +10,13 @@ use indoc::formatdoc;
 use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
     Package, PackageSource, PackageSystem,
-    PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
+    PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(system: PackageSystem) -> Result<Package> {
-    let glibc = native_glibc::package(system)?;
+pub fn package(target: PackageSystem) -> Result<Package> {
+    let binutils_native = native_binutils::package(target)?;
 
-    let name = "gcc-native";
+    let name = "gcc-native-stage-01";
 
     let script = formatdoc! {"
         #!/bin/bash
@@ -33,25 +34,41 @@ pub fn package(system: PackageSystem) -> Result<Package> {
 
         mkdir -p build
 
-        cd ./build
+        cd build
 
         ../configure \
-          --disable-bootstrap \
-          --disable-fixincludes \
-          --disable-multilib \
-          --enable-default-pie \
-          --enable-default-ssp \
-          --enable-host-pie \
-          --enable-languages=c,c++ \
-          --prefix=\"$output\" \
-          --with-system-zlib
+            --disable-libatomic \
+            --disable-libcc1 \
+            --disable-libgomp \
+            --disable-libquadmath \
+            --disable-libssp \
+            --disable-libvtv \
+            --disable-multilib \
+            --disable-nls \
+            --disable-shared \
+            --disable-threads \
+            --enable-default-pie \
+            --enable-default-ssp \
+            --enable-languages=\"c,c++\" \
+            --prefix=\"$output\" \
+            --with-newlib \
+            --without-headers
 
         make -j$({cores})
         make install
 
-        ln -s $output/bin/gcc $output/bin/cc",
+        cd ..
+
+        OUTPUT_LIBGCC=$(cd $output && bin/{target}-gcc -print-libgcc-file-name)
+        OUTPUT_LIBGCC_DIR=$(dirname \"${{OUTPUT_LIBGCC}}\")
+
+        cat gcc/limitx.h gcc/glimits.h gcc/limity.h > \
+            ${{OUTPUT_LIBGCC_DIR}}/include/limits.h
+
+        cp $output/bin/gcc $output/bin/cc",
         source = name,
-        cores = get_cpu_count()?
+        cores = get_cpu_count(target)?,
+        target = "aarch64-unknown-linux-gnu",
     };
 
     let source = PackageSource {
@@ -65,25 +82,27 @@ pub fn package(system: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![glibc],
+        packages: vec![binutils_native],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
-        systems: vec![
-            Aarch64Linux.into(),
-            Aarch64Macos.into(),
-            X8664Linux.into(),
-            X8664Macos.into(),
-        ],
+        systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
     let environment_options = BuildPackageOptionsEnvironment {
+        binutils: true,
         gcc: false,
-        glibc: false,
+        // glibc: false,
     };
 
     let package = add_default_environment(package, Some(environment_options));
-    let package = add_default_script(package, system, None)?;
+
+    let script_options = BuildPackageOptionsScripts {
+        sanitize_interpreters: false,
+        sanitize_paths: true,
+    };
+
+    let package = add_default_script(package, target, Some(script_options))?;
 
     Ok(package)
 }

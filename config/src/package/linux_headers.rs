@@ -1,9 +1,6 @@
-use crate::{
-    cross_platform::get_cpu_count,
-    package::{
-        add_default_environment, add_default_script, linux_headers, native_binutils, native_gcc,
-        BuildPackageOptionsEnvironment, BuildPackageOptionsScripts,
-    },
+use crate::package::{
+    add_default_environment, add_default_script, native_binutils, native_gcc,
+    BuildPackageOptionsEnvironment, BuildPackageOptionsScripts,
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -16,44 +13,37 @@ use vorpal_schema::vorpal::package::v0::{
 pub fn package(target: PackageSystem) -> Result<Package> {
     let binutils_native = native_binutils::package(target)?;
     let gcc_native = native_gcc::package(target)?;
-    let linux_headers = linux_headers::package(target)?;
 
-    let name = "glibc-native-stage-01";
+    let name = "linux-headers";
 
     let script = formatdoc! {"
         #!/bin/bash
         set -euo pipefail
 
-        mkdir -p \"${{PWD}}/{source}/build\"
-        cd \"${{PWD}}/{source}/build\"
-        
-        echo \"rootsbindir=$output/sbin\" > configparms
+        cd ${{PWD}}/{source}
 
-        ../configure \
-            --build=$(../scripts/config.guess) \
-            --disable-nscd \
-            --prefix=\"$output\" \
-            --with-headers=\"$linux_headers/usr/include\" \
-            libc_cv_slibdir=\"$output/lib\"
+        make mrproper
+        make headers
 
-        make -j$({cores})
-        make install",
+        find usr/include -type f ! -name '*.h' -delete
+
+        mkdir -p \"$output/usr\"
+        cp -rv usr/include \"$output/usr\"",
         source = name,
-        cores = get_cpu_count(target)?
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("da2594c64d61dacf80d85e568136bf31fba36c4ff1ececff59c6fb786a2a126b".to_string()),
+        hash: Some("3fa3f4f3d010de5b9bde09d08a251fa3ef578d356d3a7a29b6784a6916ea0d50".to_string()),
         includes: vec![],
         strip_prefix: true,
-        uri: "https://ftp.gnu.org/gnu/glibc/glibc-2.40.tar.gz".to_string(),
+        uri: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.10.8.tar.xz".to_string(),
     };
 
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![binutils_native, gcc_native, linux_headers],
+        packages: vec![binutils_native, gcc_native],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),

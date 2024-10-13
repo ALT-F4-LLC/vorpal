@@ -8,7 +8,9 @@ use vorpal_schema::vorpal::package::v0::{
 
 pub mod cargo;
 pub mod language;
+pub mod linux_headers;
 pub mod native_bash;
+pub mod native_binutils;
 pub mod native_coreutils;
 pub mod native_gcc;
 pub mod native_glibc;
@@ -33,8 +35,9 @@ pub struct BuildPackageOptionsScripts {
 
 #[derive(Clone, Debug)]
 pub struct BuildPackageOptionsEnvironment {
+    pub binutils: bool,
     pub gcc: bool,
-    pub glibc: bool,
+    // pub glibc: bool,
 }
 
 pub fn add_default_environment(
@@ -45,99 +48,46 @@ pub fn add_default_environment(
 
     environment.insert("LC_ALL".to_string(), "C".to_string());
 
-    let c_include_path_glibc = "$glibc_native/include";
-    let c_include_path_key = "C_INCLUDE_PATH".to_string();
-    let ld_library_path_gcc = "$gcc_native/lib:$gcc_native/lib64";
-    let ld_library_path_glibc = "$glibc_native/lib";
     let ld_library_path_key = "LD_LIBRARY_PATH".to_string();
-    let library_path_key = "LIBRARY_PATH".to_string();
-    let library_path_glibc = "$glibc_native/lib";
 
-    if let Some(options) = options.clone() {
-        if options.gcc {
-            // let ld_library_path = environment.get_mut(&ld_library_path_key).unwrap();
+    let mut ld_library_path = environment
+        .get(&ld_library_path_key)
+        .unwrap_or(&"".to_string())
+        .clone();
 
-            // if ld_library_path.is_empty() {
-            //     ld_library_path.push_str(ld_library_path_gcc);
-            // } else {
-            //     ld_library_path.push_str(format!(":{}", ld_library_path_gcc).as_str());
-            // }
-        }
-
-        if options.glibc {
-            let env = environment.clone();
-
-            let mut c_include_path =
-                String::from(env.get(&c_include_path_key).unwrap_or(&"".to_string()));
-            let mut ld_library_path =
-                String::from(env.get(&ld_library_path_key).unwrap_or(&"".to_string()));
-            let mut library_path =
-                String::from(env.get(&library_path_key).unwrap_or(&"".to_string()));
-
-            if c_include_path.is_empty() {
-                c_include_path.push_str(c_include_path_glibc);
-            } else {
-                c_include_path.push_str(format!(":{}", c_include_path_glibc).as_str());
-            }
-
-            if ld_library_path.is_empty() {
-                ld_library_path.push_str(ld_library_path_glibc);
-            } else {
-                ld_library_path.push_str(format!(":{}", ld_library_path_glibc).as_str());
-            }
-
-            if library_path.is_empty() {
-                library_path.push_str(library_path_glibc);
-            } else {
-                library_path.push_str(format!(":{}", library_path_glibc).as_str());
-            }
-
-            environment.insert("C_INCLUDE_PATH".to_string(), c_include_path.to_string());
-            environment.insert("LD_LIBRARY_PATH".to_string(), ld_library_path.to_string());
-            environment.insert("LIBRARY_PATH".to_string(), library_path.to_string());
-        }
-    }
+    let mut ld_library_paths = vec![];
 
     if options.is_none() {
-        let mut c_include_path = String::from(
-            environment
-                .get(&c_include_path_key)
-                .unwrap_or(&"".to_string()),
-        );
-        let mut ld_library_path = String::from(
-            environment
-                .get(&ld_library_path_key)
-                .unwrap_or(&"".to_string()),
-        );
-        let mut library_path = String::from(
-            environment
-                .get(&library_path_key)
-                .unwrap_or(&"".to_string()),
-        );
+        ld_library_paths = vec![
+            "$binutils_native_stage_01/lib",
+            "$gcc_native_stage_01/lib",
+            "$gcc_native_stage_01/lib64",
+        ];
+    }
 
-        if c_include_path.is_empty() {
-            c_include_path.push_str(c_include_path_glibc);
-        } else {
-            c_include_path.push_str(format!(":{}", c_include_path_glibc).as_str());
+    if let Some(options) = options.clone() {
+        if options.binutils {
+            ld_library_paths.push("$binutils_native_stage_01/lib");
         }
 
-        if ld_library_path.is_empty() {
-            ld_library_path.push_str(ld_library_path_gcc);
-            ld_library_path.push_str(format!(":{}", ld_library_path_glibc).as_str());
-        } else {
-            ld_library_path.push_str(format!(":{}", ld_library_path_gcc).as_str());
-            ld_library_path.push_str(format!(":{}", ld_library_path_glibc).as_str());
+        if options.gcc {
+            ld_library_paths.push("$gcc_native_stage_01/lib");
+            ld_library_paths.push("$gcc_native_stage_01/lib64");
         }
 
-        if library_path.is_empty() {
-            library_path.push_str(library_path_glibc);
-        } else {
-            library_path.push_str(format!(":{}", library_path_glibc).as_str());
+        // if options.glibc {}
+    }
+
+    let ld_library_paths = ld_library_paths.join(":");
+
+    if !ld_library_paths.is_empty() {
+        if !ld_library_path.is_empty() {
+            ld_library_path.insert(ld_library_path.len(), ':');
         }
 
-        environment.insert("C_INCLUDE_PATH".to_string(), c_include_path.to_string());
-        environment.insert("LD_LIBRARY_PATH".to_string(), ld_library_path.to_string());
-        environment.insert("LIBRARY_PATH".to_string(), library_path.to_string());
+        ld_library_path.insert_str(ld_library_path.len(), ld_library_paths.as_str());
+
+        environment.insert(ld_library_path_key.clone(), ld_library_path);
     }
 
     Package {
@@ -149,6 +99,51 @@ pub fn add_default_environment(
         source: package.source,
         systems: package.systems,
     }
+}
+
+pub fn add_default_packages(package: Package, system: PackageSystem) -> Result<Package> {
+    let bash = native_bash::package(system)?;
+
+    let mut packages = vec![
+        bash.clone(),
+        native_coreutils::package(system)?,
+        native_zstd::package(system)?,
+    ];
+
+    if system == Aarch64Linux || system == X8664Linux {
+        packages.push(linux_headers::package(system)?);
+        packages.push(native_binutils::package(system)?);
+        packages.push(native_gcc::package(system)?);
+        packages.push(native_glibc::package(system)?);
+        packages.push(native_patchelf::package(system)?);
+    }
+
+    for package in package.packages {
+        packages.push(package);
+    }
+
+    let mut script = formatdoc! {"
+        #!${bash}/bin/bash
+        set -euo pipefail
+        export LC_ALL=\"C\"",
+        bash = bash.name.to_lowercase().replace("-", "_"),
+    };
+
+    if package.script.is_empty() {
+        bail!("Package script is empty");
+    }
+
+    script.push_str(format!("\n\n{}", package.script).as_str());
+
+    Ok(Package {
+        environment: package.environment,
+        name: package.name,
+        packages,
+        sandbox: package.sandbox,
+        script,
+        source: package.source,
+        systems: package.systems,
+    })
 }
 
 pub fn add_default_script(
@@ -168,7 +163,7 @@ pub fn add_default_script(
 
         sanitize_interpreters = formatdoc! {"
             find \"$output\" -type f -executable | while read -r file; do
-                \"patchelf\" --set-interpreter \"$glibc_native/lib/ld-linux-{arch}.so.1\" \"$file\" || true
+                \"patchelf\" --set-interpreter \"$glibc_native_stage_01/lib/ld-linux-{arch}.so.1\" \"$file\" || true
             done",
             arch = sanitize_arch,
         };
@@ -215,49 +210,6 @@ pub fn add_default_script(
         environment: package.environment,
         name: package.name,
         packages: package.packages,
-        sandbox: package.sandbox,
-        script,
-        source: package.source,
-        systems: package.systems,
-    })
-}
-
-pub fn add_default_packages(package: Package, system: PackageSystem) -> Result<Package> {
-    let bash = native_bash::package(system)?;
-
-    let mut packages = vec![
-        bash.clone(),
-        native_coreutils::package(system)?,
-        native_zstd::package(system)?,
-    ];
-
-    if system == Aarch64Linux || system == X8664Linux {
-        packages.push(native_gcc::package(system)?);
-        packages.push(native_glibc::package(system)?);
-        packages.push(native_patchelf::package(system)?);
-    }
-
-    for package in package.packages {
-        packages.push(package);
-    }
-
-    let mut script = formatdoc! {"
-        #!${bash}/bin/bash
-        set -euo pipefail
-        export LC_ALL=\"C\"",
-        bash = bash.name.to_lowercase().replace("-", "_"),
-    };
-
-    if package.script.is_empty() {
-        bail!("Package script is empty");
-    }
-
-    script.push_str(format!("\n\n{}", package.script).as_str());
-
-    Ok(Package {
-        environment: package.environment,
-        name: package.name,
-        packages,
         sandbox: package.sandbox,
         script,
         source: package.source,

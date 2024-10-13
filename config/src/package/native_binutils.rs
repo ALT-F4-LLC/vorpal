@@ -1,8 +1,8 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{
-        add_default_environment, add_default_script, linux_headers, native_binutils, native_gcc,
-        BuildPackageOptionsEnvironment, BuildPackageOptionsScripts,
+        add_default_environment, add_default_script, BuildPackageOptionsEnvironment,
+        BuildPackageOptionsScripts,
     },
 };
 use anyhow::Result;
@@ -14,27 +14,22 @@ use vorpal_schema::vorpal::package::v0::{
 };
 
 pub fn package(target: PackageSystem) -> Result<Package> {
-    let binutils_native = native_binutils::package(target)?;
-    let gcc_native = native_gcc::package(target)?;
-    let linux_headers = linux_headers::package(target)?;
-
-    let name = "glibc-native-stage-01";
+    let name = "binutils-native-stage-01";
 
     let script = formatdoc! {"
         #!/bin/bash
         set -euo pipefail
 
-        mkdir -p \"${{PWD}}/{source}/build\"
-        cd \"${{PWD}}/{source}/build\"
-        
-        echo \"rootsbindir=$output/sbin\" > configparms
+        mkdir -p \"${{PWD}}/{source}\"/build
+        cd \"${{PWD}}/{source}\"/build
 
         ../configure \
-            --build=$(../scripts/config.guess) \
-            --disable-nscd \
-            --prefix=\"$output\" \
-            --with-headers=\"$linux_headers/usr/include\" \
-            libc_cv_slibdir=\"$output/lib\"
+             --disable-nls \
+             --disable-werror \
+             --enable-default-hash-style=\"gnu\" \
+             --enable-gprofng=\"no\" \
+             --enable-new-dtags \
+             --prefix=\"$output\"
 
         make -j$({cores})
         make install",
@@ -44,16 +39,16 @@ pub fn package(target: PackageSystem) -> Result<Package> {
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("da2594c64d61dacf80d85e568136bf31fba36c4ff1ececff59c6fb786a2a126b".to_string()),
+        hash: Some("c0d3e5ee772ee201eefe17544b2b2cc3a0a3d6833a21b9ea56371efaad0c5528".to_string()),
         includes: vec![],
         strip_prefix: true,
-        uri: "https://ftp.gnu.org/gnu/glibc/glibc-2.40.tar.gz".to_string(),
+        uri: "https://ftp.gnu.org/gnu/binutils/binutils-2.43.1.tar.gz".to_string(),
     };
 
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![binutils_native, gcc_native, linux_headers],
+        packages: vec![],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
@@ -61,8 +56,8 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     };
 
     let environment_options = BuildPackageOptionsEnvironment {
-        binutils: true,
-        gcc: true,
+        binutils: false,
+        gcc: false,
         // glibc: false,
     };
 

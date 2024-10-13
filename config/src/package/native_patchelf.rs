@@ -1,18 +1,21 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script, native_gcc, native_glibc},
+    package::{
+        add_default_environment, add_default_script, native_binutils, native_gcc, native_glibc,
+    },
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
     Package, PackageSource, PackageSystem,
-    PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
+    PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(system: PackageSystem) -> Result<Package> {
-    let gcc = native_gcc::package(system)?;
-    let glibc = native_glibc::package(system)?;
+pub fn package(target: PackageSystem) -> Result<Package> {
+    let binutils_native = native_binutils::package(target)?;
+    let gcc_native = native_gcc::package(target)?;
+    let glibc_native = native_glibc::package(target)?;
 
     let name = "patchelf-native";
 
@@ -27,7 +30,7 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         make -j$({cores})
         make install",
         source = name,
-        cores = get_cpu_count()?
+        cores = get_cpu_count(target)?
     };
 
     let source = PackageSource {
@@ -42,20 +45,15 @@ pub fn package(system: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![gcc, glibc],
+        packages: vec![binutils_native, gcc_native, glibc_native],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
-        systems: vec![
-            Aarch64Linux.into(),
-            Aarch64Macos.into(),
-            X8664Linux.into(),
-            X8664Macos.into(),
-        ],
+        systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
     let package = add_default_environment(package, None);
-    let package = add_default_script(package, system, None)?;
+    let package = add_default_script(package, target, None)?;
 
     Ok(package)
 }

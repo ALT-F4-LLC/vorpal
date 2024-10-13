@@ -10,7 +10,7 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
-pub fn package(system: PackageSystem) -> Result<Package> {
+pub fn package(target: PackageSystem) -> Result<Package> {
     let name = "coreutils-native";
 
     let script = formatdoc! {"
@@ -24,7 +24,7 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         make -j$({cores})
         make install",
         source = name,
-        cores = get_cpu_count()?
+        cores = get_cpu_count(target)?
     };
 
     let source = PackageSource {
@@ -51,7 +51,7 @@ pub fn package(system: PackageSystem) -> Result<Package> {
     };
 
     let package = add_default_environment(package, None);
-    let package = add_default_script(package, system, None)?;
+    let package = add_default_script(package, target, None)?;
 
     Ok(package)
 }

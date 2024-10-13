@@ -15,10 +15,10 @@ pub struct PackageRust<'a> {
     pub systems: Vec<PackageSystem>,
 }
 
-pub fn build_rust_package(package: PackageRust, system: PackageSystem) -> Result<Package> {
-    let cargo = cargo::package(system)?;
-    let rustc = rustc::package(system)?;
-    let protoc = protoc::package(system)?;
+pub fn build_rust_package(package: PackageRust, target: PackageSystem) -> Result<Package> {
+    let cargo = cargo::package(target)?;
+    let rustc = rustc::package(target)?;
+    let protoc = protoc::package(target)?;
 
     let systems = package
         .systems
@@ -52,7 +52,7 @@ pub fn build_rust_package(package: PackageRust, system: PackageSystem) -> Result
 
         {sed} \"s|$output|${envkey}|g\" \"$output/config.toml\"",
         envkey = format!("{}_cache", package_name_envkey),
-        sed = get_sed_cmd(system)?,
+        sed = get_sed_cmd(target)?,
         source = package.name,
     };
 
@@ -92,7 +92,7 @@ pub fn build_rust_package(package: PackageRust, system: PackageSystem) -> Result
             source: HashMap::from([(package.name.to_string(), package_cache_source)]),
             systems: systems.clone(),
         },
-        system,
+        target,
         Some(package_cache_options),
     )?;
 
@@ -140,7 +140,7 @@ pub fn build_rust_package(package: PackageRust, system: PackageSystem) -> Result
             )]),
             systems,
         },
-        system,
+        target,
         None,
     )?;
 
