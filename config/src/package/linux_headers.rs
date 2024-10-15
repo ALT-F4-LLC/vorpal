@@ -1,5 +1,5 @@
 use crate::package::{
-    add_default_environment, add_default_script, native_binutils, native_gcc,
+    add_default_environment, add_default_script, native_binutils, native_gcc, native_zlib,
     BuildPackageOptionsEnvironment, BuildPackageOptionsScripts,
 };
 use anyhow::Result;
@@ -13,6 +13,7 @@ use vorpal_schema::vorpal::package::v0::{
 pub fn package(target: PackageSystem) -> Result<Package> {
     let binutils_native = native_binutils::package(target)?;
     let gcc_native = native_gcc::package(target)?;
+    let zlib_native = native_zlib::package(target)?;
 
     let name = "linux-headers";
 
@@ -43,7 +44,7 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![binutils_native, gcc_native],
+        packages: vec![binutils_native, gcc_native, zlib_native],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
@@ -53,7 +54,8 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let environment_options = BuildPackageOptionsEnvironment {
         binutils: true,
         gcc: true,
-        // glibc: false,
+        glibc: false,
+        zlib: true,
     };
 
     let package = add_default_environment(package, Some(environment_options));

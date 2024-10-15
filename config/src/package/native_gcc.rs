@@ -1,7 +1,7 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{
-        add_default_environment, add_default_script, native_binutils,
+        add_default_environment, add_default_script, native_binutils, native_zlib,
         BuildPackageOptionsEnvironment, BuildPackageOptionsScripts,
     },
 };
@@ -15,6 +15,7 @@ use vorpal_schema::vorpal::package::v0::{
 
 pub fn package(target: PackageSystem) -> Result<Package> {
     let binutils_native = native_binutils::package(target)?;
+    let zlib_native = native_zlib::package(target)?;
 
     let name = "gcc-native-stage-01";
 
@@ -45,12 +46,12 @@ pub fn package(target: PackageSystem) -> Result<Package> {
             --disable-libvtv \
             --disable-multilib \
             --disable-nls \
-            --disable-shared \
             --disable-threads \
             --enable-default-pie \
             --enable-default-ssp \
             --enable-languages=\"c,c++\" \
             --prefix=\"$output\" \
+            --with-ld=\"$binutils_native_stage_01/bin/ld\" \
             --with-newlib \
             --without-headers
 
@@ -82,7 +83,7 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![binutils_native],
+        packages: vec![binutils_native, zlib_native],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
@@ -92,7 +93,8 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let environment_options = BuildPackageOptionsEnvironment {
         binutils: true,
         gcc: false,
-        // glibc: false,
+        glibc: false,
+        zlib: true,
     };
 
     let package = add_default_environment(package, Some(environment_options));

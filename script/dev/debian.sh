@@ -34,6 +34,7 @@ sudo apt-get install \
     patch \
     patchelf \
     perl \
+    pkg-config \
     python3 \
     ripgrep \
     rsync \

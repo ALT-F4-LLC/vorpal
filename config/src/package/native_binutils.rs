@@ -1,7 +1,7 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{
-        add_default_environment, add_default_script, BuildPackageOptionsEnvironment,
+        add_default_environment, add_default_script, native_zlib, BuildPackageOptionsEnvironment,
         BuildPackageOptionsScripts,
     },
 };
@@ -14,6 +14,8 @@ use vorpal_schema::vorpal::package::v0::{
 };
 
 pub fn package(target: PackageSystem) -> Result<Package> {
+    let zlib_native = native_zlib::package(target)?;
+
     let name = "binutils-native-stage-01";
 
     let script = formatdoc! {"
@@ -24,12 +26,12 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         cd \"${{PWD}}/{source}\"/build
 
         ../configure \
-             --disable-nls \
-             --disable-werror \
-             --enable-default-hash-style=\"gnu\" \
-             --enable-gprofng=\"no\" \
-             --enable-new-dtags \
-             --prefix=\"$output\"
+            --disable-nls \
+            --disable-werror \
+            --enable-default-hash-style=\"gnu\" \
+            --enable-gprofng=\"no\" \
+            --enable-new-dtags \
+            --prefix=\"$output\"
 
         make -j$({cores})
         make install",
@@ -48,7 +50,7 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![],
+        packages: vec![zlib_native],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
@@ -58,7 +60,8 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let environment_options = BuildPackageOptionsEnvironment {
         binutils: false,
         gcc: false,
-        // glibc: false,
+        glibc: false,
+        zlib: true,
     };
 
     let package = add_default_environment(package, Some(environment_options));

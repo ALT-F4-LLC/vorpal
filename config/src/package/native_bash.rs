@@ -1,6 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script, native_glibc, native_patchelf},
+    package::{add_default_environment, add_default_script, native_patchelf},
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -38,7 +38,6 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let mut packages = vec![];
 
     if target == Aarch64Linux || target == X8664Linux {
-        packages.push(native_glibc::package(target)?);
         packages.push(native_patchelf::package(target)?);
     }
 
