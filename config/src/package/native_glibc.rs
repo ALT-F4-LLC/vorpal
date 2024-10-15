@@ -2,7 +2,7 @@ use crate::{
     cross_platform::get_cpu_count,
     package::{
         add_default_environment, add_default_script, linux_headers, native_binutils, native_gcc,
-        native_zlib, BuildPackageOptionsEnvironment, BuildPackageOptionsScripts,
+        native_zlib, BuildPackageOptionsEnvironment,
     },
 };
 use anyhow::Result;
@@ -66,17 +66,14 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         binutils: true,
         gcc: true,
         glibc: false,
+        libstdcpp: false,
+        linux_headers: true,
         zlib: true,
     };
 
     let package = add_default_environment(package, Some(environment_options));
 
-    let script_options = BuildPackageOptionsScripts {
-        sanitize_interpreters: false,
-        sanitize_paths: true,
-    };
-
-    let package = add_default_script(package, target, Some(script_options))?;
+    let package = add_default_script(package, target, None)?;
 
     Ok(package)
 }

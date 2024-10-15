@@ -1,7 +1,8 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{
-        add_default_environment, add_default_script, native_binutils, native_gcc, native_glibc,
+        add_default_environment, add_default_script, linux_headers, native_binutils, native_gcc,
+        native_glibc, native_libstdcpp, native_m4, native_ncurses, native_zlib,
     },
 };
 use anyhow::Result;
@@ -16,6 +17,11 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let binutils_native = native_binutils::package(target)?;
     let gcc_native = native_gcc::package(target)?;
     let glibc_native = native_glibc::package(target)?;
+    let libstdcpp_native = native_libstdcpp::package(target)?;
+    let linux_headers = linux_headers::package(target)?;
+    let m4_native = native_m4::package(target)?;
+    let ncurses_native = native_ncurses::package(target)?;
+    let zlib_native = native_zlib::package(target)?;
 
     let name = "patchelf-native";
 
@@ -45,7 +51,16 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![binutils_native, gcc_native, glibc_native],
+        packages: vec![
+            binutils_native,
+            gcc_native,
+            glibc_native,
+            libstdcpp_native,
+            linux_headers,
+            m4_native,
+            ncurses_native,
+            zlib_native,
+        ],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
@@ -53,6 +68,7 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     };
 
     let package = add_default_environment(package, None);
+
     let package = add_default_script(package, target, None)?;
 
     Ok(package)

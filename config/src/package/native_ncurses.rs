@@ -2,7 +2,7 @@ use crate::{
     cross_platform::get_cpu_count,
     package::{
         add_default_environment, add_default_script, linux_headers, native_binutils, native_gcc,
-        native_glibc, native_zlib, BuildPackageOptionsEnvironment,
+        native_glibc, native_libstdcpp, native_m4, native_zlib, BuildPackageOptionsEnvironment,
     },
 };
 use anyhow::Result;
@@ -17,10 +17,12 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let binutils_native = native_binutils::package(target)?;
     let gcc_native = native_gcc::package(target)?;
     let glibc_native = native_glibc::package(target)?;
+    let libstdcpp_native = native_libstdcpp::package(target)?;
     let linux_headers = linux_headers::package(target)?;
+    let m4_native = native_m4::package(target)?;
     let zlib_native = native_zlib::package(target)?;
 
-    let name = "libstdcpp-native-stage-01";
+    let name = "ncurses-native";
 
     let script = formatdoc! {"
         #!/bin/bash
@@ -28,32 +30,47 @@ pub fn package(target: PackageSystem) -> Result<Package> {
 
         cd ${{PWD}}/{source}
 
-        mkdir -p build
+        mkdir build
 
-        cd build
+        pushd build
 
-        ../libstdc++-v3/configure \
-            --build=$(../config.guess) \
-            --disable-libstdcxx-pch \
-            --disable-multilib \
-            --disable-nls \
+        ../configure AWK=gawk
+
+        make -C include
+
+        make -C progs tic
+
+        popd
+
+        ./configure \
+            --build=$(./config.guess) \
+            --disable-stripping \
             --prefix=\"$output\" \
-            --with-gxx-include-dir=\"$gcc_native_stage_01/include/c++/14.2.0\"
+            --with-cxx-shared \
+            --with-manpage-format=normal \
+            --with-shared \
+            --without-ada \
+            --without-debug \
+            --without-normal \
+            AWK=gawk
 
         make -j$({cores})
-        make install
 
-        rm -v $output/lib64/lib{{stdc++{{,exp,fs}},supc++}}.la",
+        make TIC_PATH=$(pwd)/build/progs/tic install
+
+        ln -sv libncursesw.so $LFS/usr/lib/libncurses.so
+
+        sed -e 's/^#if.*XOPEN.*$/#if 1/' -i $LFS/usr/include/curses.h",
         source = name,
         cores = get_cpu_count(target)?,
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("cc20ef929f4a1c07594d606ca4f2ed091e69fac5c6779887927da82b0a62f583".to_string()),
+        hash: Some("fd793cdfc421fac76f4af23c7d960cbe4a29cbb18f5badf37b85e16a894b3b6d".to_string()),
         includes: vec![],
         strip_prefix: true,
-        uri: "https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.gz".to_string(),
+        uri: "https://invisible-island.net/archives/ncurses/ncurses-6.5.tar.gz".to_string(),
     };
 
     let package = Package {
@@ -63,7 +80,9 @@ pub fn package(target: PackageSystem) -> Result<Package> {
             binutils_native,
             gcc_native,
             glibc_native,
+            libstdcpp_native,
             linux_headers,
+            m4_native,
             zlib_native,
         ],
         sandbox: false,
@@ -76,7 +95,7 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         binutils: true,
         gcc: true,
         glibc: false,
-        libstdcpp: false,
+        libstdcpp: true,
         linux_headers: true,
         zlib: true,
     };

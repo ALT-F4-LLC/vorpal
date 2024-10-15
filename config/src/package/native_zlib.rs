@@ -53,6 +53,8 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         binutils: false,
         gcc: false,
         glibc: false,
+        libstdcpp: false,
+        linux_headers: false,
         zlib: false,
     };
 

@@ -94,6 +94,8 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         binutils: true,
         gcc: false,
         glibc: false,
+        libstdcpp: false,
+        linux_headers: false,
         zlib: true,
     };
 

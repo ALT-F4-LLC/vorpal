@@ -15,6 +15,8 @@ pub mod native_coreutils;
 pub mod native_gcc;
 pub mod native_glibc;
 pub mod native_libstdcpp;
+pub mod native_m4;
+pub mod native_ncurses;
 pub mod native_patchelf;
 pub mod native_zlib;
 pub mod native_zstd;
@@ -40,6 +42,8 @@ pub struct BuildPackageOptionsEnvironment {
     pub binutils: bool,
     pub gcc: bool,
     pub glibc: bool,
+    pub libstdcpp: bool,
+    pub linux_headers: bool,
     pub zlib: bool,
 }
 
@@ -93,6 +97,7 @@ pub fn add_default_environment(
             "$binutils_native_stage_01/include",
             "$gcc_native_stage_01/include",
             "$glibc_native_stage_01/include",
+            "$linux_headers/usr/include",
             "$zlib_native/include",
         ];
 
@@ -101,6 +106,8 @@ pub fn add_default_environment(
             "-L$gcc_native_stage_01/lib",
             "-L$gcc_native_stage_01/lib64",
             "-L$glibc_native_stage_01/lib",
+            "-L$libstdcpp_native_stage_01/lib",
+            "-L$libstdcpp_native_stage_01/lib64",
             "-L$zlib_native/lib",
         ];
 
@@ -109,6 +116,8 @@ pub fn add_default_environment(
             "$gcc_native_stage_01/lib",
             "$gcc_native_stage_01/lib64",
             "$glibc_native_stage_01/lib",
+            "$libstdcpp_native_stage_01/lib",
+            "$libstdcpp_native_stage_01/lib64",
             "$zlib_native/lib",
         ];
 
@@ -117,6 +126,8 @@ pub fn add_default_environment(
             "$gcc_native_stage_01/lib",
             "$gcc_native_stage_01/lib64",
             "$glibc_native_stage_01/lib",
+            "$libstdcpp_native_stage_01/lib",
+            "$libstdcpp_native_stage_01/lib64",
             "$zlib_native/lib",
         ];
 
@@ -131,9 +142,9 @@ pub fn add_default_environment(
         if options.binutils {
             c_include_paths.push("$binutils_native_stage_01/include");
 
-            ldflags_args.push("-L$binutils_native_stage_01/lib");
-
             ld_library_paths.push("$binutils_native_stage_01/lib");
+
+            ldflags_args.push("-L$binutils_native_stage_01/lib");
 
             library_paths.push("$binutils_native_stage_01/lib");
         }
@@ -156,11 +167,26 @@ pub fn add_default_environment(
         if options.glibc {
             c_include_paths.push("$glibc_native_stage_01/include");
 
-            ldflags_args.push("-L$glibc_native_stage_01/lib");
-
             ld_library_paths.push("$glibc_native_stage_01/lib");
 
+            ldflags_args.push("-L$glibc_native_stage_01/lib");
+
             library_paths.push("$glibc_native_stage_01/lib");
+        }
+
+        if options.libstdcpp {
+            ld_library_paths.push("$libstdcpp_native_stage_01/lib");
+            ld_library_paths.push("$libstdcpp_native_stage_01/lib64");
+
+            ldflags_args.push("-L$libstdcpp_native_stage_01/lib");
+            ldflags_args.push("-L$libstdcpp_native_stage_01/lib64");
+
+            library_paths.push("$libstdcpp_native_stage_01/lib");
+            library_paths.push("$libstdcpp_native_stage_01/lib64");
+        }
+
+        if options.linux_headers {
+            c_include_paths.push("$linux_headers/usr/include");
         }
 
         if options.zlib {
@@ -244,6 +270,8 @@ pub fn add_default_packages(package: Package, system: PackageSystem) -> Result<P
         packages.push(native_gcc::package(system)?);
         packages.push(native_glibc::package(system)?);
         packages.push(native_libstdcpp::package(system)?);
+        packages.push(native_m4::package(system)?);
+        packages.push(native_ncurses::package(system)?);
         packages.push(native_patchelf::package(system)?);
         packages.push(native_zlib::package(system)?);
     }
@@ -292,9 +320,15 @@ pub fn add_default_script(
         };
 
         sanitize_interpreters = formatdoc! {"
-            find \"$output\" -type f -executable | while read -r file; do
-                \"patchelf\" --set-interpreter \"$glibc_native_stage_01/lib/ld-linux-{arch}.so.1\" \"$file\" || true
-            done",
+            set +e
+
+            find \"$output\" -type f | while read -r file; do
+                if file \"$file\" | grep -q 'interpreter'; then
+                    \"patchelf\" --set-interpreter \"$glibc_native_stage_01/lib/ld-linux-{arch}.so.1\" \"$file\"
+                fi
+            done
+
+            set -e",
             arch = sanitize_arch,
         };
     }
