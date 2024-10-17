@@ -1,4 +1,5 @@
 use anyhow::Result;
+// use tokio::fs::remove_dir_all;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
@@ -6,6 +7,7 @@ use vorpal_schema::vorpal::{
     package::v0::PackageSystem,
     worker::v0::{worker_service_server::WorkerService, BuildRequest, BuildResponse},
 };
+use vorpal_store::temps::create_temp_dir;
 
 mod build;
 mod darwin;
@@ -33,17 +35,22 @@ impl WorkerService for WorkerServer {
     ) -> Result<Response<Self::BuildStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
-        // TODO: create build environment directory
-
         tokio::spawn(async move {
-            match build::run(request, &tx).await {
-                Ok(_) => (),
+            let build_path = match create_temp_dir().await {
+                Ok(path) => path,
                 Err(e) => {
-                    // TODO: also clean up all files in the sandbox if they exists
-
                     tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
+                    return;
                 }
+            };
+
+            if let Err(e) = build::run(&build_path, request, &tx).await {
+                tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
             }
+
+            // if let Err(e) = remove_dir_all(build_path.clone()).await {
+            //     tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
+            // }
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))

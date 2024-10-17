@@ -1,4 +1,4 @@
-use crate::worker::{darwin, linux, native};
+use crate::worker::{darwin, darwin::profile, linux, native};
 use anyhow::{anyhow, bail, Result};
 use rsa::{
     pss::{Signature, VerifyingKey},
@@ -10,8 +10,10 @@ use std::{
     env::consts::{ARCH, OS},
     fs::Permissions,
     os::unix::fs::PermissionsExt,
+    path::Path,
     process::Stdio,
 };
+use tera::Tera;
 use tokio::{
     fs::{create_dir_all, set_permissions, write},
     io::{AsyncBufReadExt, BufReader},
@@ -37,7 +39,6 @@ use vorpal_store::{
         copy_files, get_file_paths, get_package_archive_path, get_package_path,
         get_public_key_path, get_source_archive_path, get_source_path,
     },
-    temps::create_temp_dir,
 };
 
 async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Result<()> {
@@ -51,6 +52,7 @@ async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Res
 }
 
 pub async fn run(
+    build_path: &Path,
     request: Request<Streaming<BuildRequest>>,
     tx: &Sender<Result<BuildResponse, Status>>,
 ) -> Result<()> {
@@ -202,11 +204,12 @@ pub async fn run(
     // Create build environment
 
     let mut build_bin_paths = vec![];
-    let mut build_env = HashMap::new();
+    let mut build_sbin_paths = vec![];
+    let mut env_vars = HashMap::new();
     let mut build_packages = vec![];
 
     for (key, value) in package_environment.clone() {
-        build_env.insert(key, value);
+        env_vars.insert(key, value);
     }
 
     for p in package_packages.iter() {
@@ -224,7 +227,13 @@ pub async fn run(
             build_bin_paths.push(bin_path.display().to_string());
         }
 
-        build_env.insert(
+        let sbin_path = path.join("sbin");
+
+        if sbin_path.exists() {
+            build_sbin_paths.push(sbin_path.display().to_string());
+        }
+
+        env_vars.insert(
             p.name.to_lowercase().replace('-', "_"),
             path.display().to_string(),
         );
@@ -234,17 +243,16 @@ pub async fn run(
 
     // Setup build path
 
-    let build_path = create_temp_dir().await?;
-    let build_path_source = build_path.join("source");
+    let build_source_path = build_path.join("source");
 
-    create_dir_all(&build_path_source)
+    create_dir_all(&build_source_path)
         .await
         .map_err(|err| anyhow!("failed to create source directory: {:?}", err))?;
 
     if package_source_path.exists() {
         let build_source_files = get_file_paths(&package_source_path, vec![], vec![])?;
 
-        copy_files(&package_source_path, build_source_files, &build_path_source).await?;
+        copy_files(&package_source_path, build_source_files, &build_source_path).await?;
     }
 
     // Create output directory
@@ -255,50 +263,47 @@ pub async fn run(
         .await
         .map_err(|err| anyhow!("failed to create output directory: {:?}", err))?;
 
-    build_env.insert(
+    env_vars.insert(
         package_name.to_lowercase().replace('-', "_"),
         package_path.display().to_string(),
     );
 
-    build_env.insert(
+    env_vars.insert(
         "output".to_string(),
         build_output_path.display().to_string(),
     );
 
-    build_env.insert("packages".to_string(), build_packages.join(" ").to_string());
+    env_vars.insert("packages".to_string(), build_packages.join(" ").to_string());
 
     // expand environment variables that have references
 
-    for (key, _) in build_env.clone().into_iter() {
+    for (key, _) in env_vars.clone().into_iter() {
         for p in package_packages.iter() {
             let p_key = p.name.to_lowercase().replace('-', "_");
-
             let p_path = get_package_path(&p.hash, &p.name);
-
             let p_envvar = format!("${}", p_key);
 
-            let value = build_env.get(&key).unwrap().clone();
-
+            let value = env_vars.get(&key).unwrap().clone();
             let p_value = value.replace(&p_envvar, &p_path.display().to_string());
 
             if p_value == value {
                 continue;
             }
 
-            build_env.insert(key.clone(), p_value);
+            env_vars.insert(key.clone(), p_value);
         }
 
-        let value = build_env.get(&key).unwrap().clone();
+        let value = env_vars.get(&key).unwrap().clone();
 
         let value = value.replace(
             &format!("${}", package_name.to_lowercase().replace('-', "_")),
             &package_path.display().to_string(),
         );
 
-        build_env.insert(key.clone(), value.clone());
+        env_vars.insert(key.clone(), value.clone());
     }
 
-    send(tx, format!("Build environment: {:?}", build_env)).await?;
+    send(tx, format!("Build environment: {:?}", env_vars)).await?;
 
     for package in package_packages.iter() {
         let placeholder = format!(r"${}", package.name.replace('-', "_").to_lowercase());
@@ -318,18 +323,62 @@ pub async fn run(
         .await
         .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
+    let env_paths = build_bin_paths
+        .iter()
+        .chain(build_sbin_paths.iter())
+        .cloned()
+        .collect();
+
     let mut sandbox_command = match package_sandbox {
-        false => native::build(build_bin_paths, build_env, &build_path).await?,
+        false => {
+            native::build(
+                env_paths,
+                env_vars,
+                build_script_path.as_path(),
+                build_source_path.as_path(),
+            )
+            .await?
+        }
         true => match worker_target {
             Aarch64Macos | X8664Macos => {
-                darwin::build(build_bin_paths, build_env, &build_path).await?
+                let profile_path = build_path.join("package.sb");
+
+                let mut tera = Tera::default();
+
+                tera.add_raw_template("build_default", profile::STDENV_DEFAULT)
+                    .unwrap();
+
+                let profile_context = tera::Context::new();
+
+                let profile_data = tera.render("build_default", &profile_context).unwrap();
+
+                write(&profile_path, profile_data)
+                    .await
+                    .expect("failed to write sandbox profile");
+
+                darwin::build(
+                    env_paths,
+                    env_vars,
+                    profile_path.as_path(),
+                    build_script_path.as_path(),
+                    build_source_path.as_path(),
+                )
+                .await?
             }
             Aarch64Linux | X8664Linux => {
+                let home_path = build_path.join("home");
+
+                create_dir_all(&home_path)
+                    .await
+                    .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
+
                 linux::build(
+                    env_paths,
+                    env_vars,
+                    home_path.as_path(),
                     build_bin_paths.clone(),
-                    build_env.clone(),
-                    &build_path,
-                    build_packages,
+                    build_script_path.as_path(),
+                    build_source_path.as_path(),
                 )
                 .await?
             }

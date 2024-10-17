@@ -1,6 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script, native_patchelf},
+    package::{add_default_environment, add_default_script},
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -10,8 +10,19 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
-pub fn package(target: PackageSystem) -> Result<Package> {
-    let name = "bash-native";
+#[allow(clippy::too_many_arguments)]
+pub fn package(
+    target: PackageSystem,
+    binutils: Option<Package>,
+    gcc: Option<Package>,
+    glibc: Option<Package>,
+    libstdcpp: Option<Package>,
+    linux_headers: Option<Package>,
+    m4: Option<Package>,
+    ncurses: Option<Package>,
+    zlib: Option<Package>,
+) -> Result<Package> {
+    let name = "bash-native-stage-01";
 
     let script = formatdoc! {"
         #!/bin/bash
@@ -19,10 +30,16 @@ pub fn package(target: PackageSystem) -> Result<Package> {
 
         cd \"${{PWD}}/{source}\"
 
-        ./configure --prefix=\"$output\"
+        ./configure \
+            --build=$(sh support/config.guess) \
+            --prefix=\"$output\" \
+            --without-bash-malloc \
+            bash_cv_strtold_broken=\"no\"
 
         make -j$({cores})
-        make install",
+        make install
+
+        ln -s $output/bin/bash $output/bin/sh",
         source = name,
         cores = get_cpu_count(target)?
     };
@@ -38,7 +55,37 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let mut packages = vec![];
 
     if target == Aarch64Linux || target == X8664Linux {
-        packages.push(native_patchelf::package(target)?);
+        if let Some(binutils) = &binutils {
+            packages.push(binutils.clone());
+        }
+
+        if let Some(gcc) = &gcc {
+            packages.push(gcc.clone());
+        }
+
+        if let Some(glibc) = &glibc {
+            packages.push(glibc.clone());
+        }
+
+        if let Some(libstdcpp) = &libstdcpp {
+            packages.push(libstdcpp.clone());
+        }
+
+        if let Some(linux_headers) = &linux_headers {
+            packages.push(linux_headers.clone());
+        }
+
+        if let Some(m4) = &m4 {
+            packages.push(m4.clone());
+        }
+
+        if let Some(ncurses) = &ncurses {
+            packages.push(ncurses.clone());
+        }
+
+        if let Some(zlib) = &zlib {
+            packages.push(zlib.clone());
+        }
     }
 
     let package = Package {
@@ -56,8 +103,19 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         ],
     };
 
-    let package = add_default_environment(package, None);
-    let package = add_default_script(package, target, None)?;
+    let package = add_default_environment(
+        package,
+        None,
+        binutils,
+        gcc,
+        glibc.clone(),
+        libstdcpp,
+        linux_headers,
+        ncurses,
+        zlib,
+    );
+
+    let package = add_default_script(package, target, glibc)?;
 
     Ok(package)
 }

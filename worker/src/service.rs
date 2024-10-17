@@ -33,9 +33,12 @@ pub async fn start(port: u16) -> Result<()> {
 
     info!("worker address: {}", addr);
 
+    let worker_service = WorkerServiceServer::new(WorkerServer::new(system));
+    let store_service = StoreServiceServer::new(StoreServer::default());
+
     Server::builder()
-        .add_service(WorkerServiceServer::new(WorkerServer::new(system)))
-        .add_service(StoreServiceServer::new(StoreServer::default()))
+        .add_service(store_service)
+        .add_service(worker_service)
         .serve(addr)
         .await
         .expect("failed to start worker server");

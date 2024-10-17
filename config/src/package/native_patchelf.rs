@@ -1,9 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{
-        add_default_environment, add_default_script, linux_headers, native_binutils, native_gcc,
-        native_glibc, native_libstdcpp, native_m4, native_ncurses, native_zlib,
-    },
+    package::{add_default_environment, add_default_script},
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -13,20 +10,25 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(target: PackageSystem) -> Result<Package> {
-    let binutils_native = native_binutils::package(target)?;
-    let gcc_native = native_gcc::package(target)?;
-    let glibc_native = native_glibc::package(target)?;
-    let libstdcpp_native = native_libstdcpp::package(target)?;
-    let linux_headers = linux_headers::package(target)?;
-    let m4_native = native_m4::package(target)?;
-    let ncurses_native = native_ncurses::package(target)?;
-    let zlib_native = native_zlib::package(target)?;
-
+#[allow(clippy::too_many_arguments)]
+pub fn package(
+    target: PackageSystem,
+    bash: Package,
+    binutils: Package,
+    coreutils: Package,
+    diffutils: Package,
+    gcc: Package,
+    glibc: Package,
+    libstdcpp: Package,
+    linux_headers: Package,
+    m4: Package,
+    ncurses: Package,
+    zlib: Package,
+) -> Result<Package> {
     let name = "patchelf-native";
 
     let script = formatdoc! {"
-        #!/bin/bash
+        #!$bash_native_stage_01/bin/bash
         set -euo pipefail
 
         cd \"${{PWD}}/{source}\"
@@ -52,14 +54,17 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         environment: HashMap::new(),
         name: name.to_string(),
         packages: vec![
-            binutils_native,
-            gcc_native,
-            glibc_native,
-            libstdcpp_native,
-            linux_headers,
-            m4_native,
-            ncurses_native,
-            zlib_native,
+            bash.clone(),
+            binutils.clone(),
+            coreutils.clone(),
+            diffutils.clone(),
+            gcc.clone(),
+            glibc.clone(),
+            libstdcpp.clone(),
+            linux_headers.clone(),
+            m4.clone(),
+            ncurses.clone(),
+            zlib.clone(),
         ],
         sandbox: false,
         script,
@@ -67,9 +72,19 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(package, None);
+    let package = add_default_environment(
+        package,
+        Some(bash),
+        Some(binutils),
+        Some(gcc),
+        Some(glibc.clone()),
+        Some(libstdcpp),
+        Some(linux_headers),
+        Some(ncurses),
+        Some(zlib),
+    );
 
-    let package = add_default_script(package, target, None)?;
+    let package = add_default_script(package, target, Some(glibc))?;
 
     Ok(package)
 }

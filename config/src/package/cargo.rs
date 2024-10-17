@@ -53,5 +53,5 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         ],
     };
 
-    build_package(package, system, None)
+    build_package(package, system)
 }

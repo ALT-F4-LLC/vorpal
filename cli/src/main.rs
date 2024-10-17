@@ -62,7 +62,7 @@ async fn get_config(file: String, system: PackageSystem) -> Result<Config> {
 
     let config_host = format!("http://localhost:{}", config_port);
 
-    let mut config_service = match ConfigServiceClient::connect(config_host).await {
+    let config_service = match ConfigServiceClient::connect(config_host).await {
         Ok(config_service) => config_service,
         Err(e) => {
             shutdown_config(config_process).await?;
@@ -73,6 +73,8 @@ async fn get_config(file: String, system: PackageSystem) -> Result<Config> {
             );
         }
     };
+
+    let mut config_service = config_service.max_decoding_message_size(100000000);
 
     let config_response = match config_service
         .evaluate(EvaluateRequest {

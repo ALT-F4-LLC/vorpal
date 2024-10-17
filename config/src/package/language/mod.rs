@@ -1,7 +1,4 @@
-use crate::package::{
-    build_package, cargo, get_sed_cmd, protoc, rustc, BuildPackageOptions,
-    BuildPackageOptionsScripts,
-};
+use crate::package::{build_package, cargo, get_sed_cmd, protoc, rustc};
 use anyhow::Result;
 use indoc::formatdoc;
 use std::collections::HashMap;
@@ -56,15 +53,6 @@ pub fn build_rust_package(package: PackageRust, target: PackageSystem) -> Result
         source = package.name,
     };
 
-    let package_cache_options = BuildPackageOptions {
-        environment: None,
-        packages: true,
-        scripts: Some(BuildPackageOptionsScripts {
-            sanitize_interpreters: false,
-            sanitize_paths: true,
-        }),
-    };
-
     let package_cache_source = PackageSource {
         excludes: vec![],
         hash: Some(package.cargo_hash.to_string()),
@@ -93,7 +81,6 @@ pub fn build_rust_package(package: PackageRust, target: PackageSystem) -> Result
             systems: systems.clone(),
         },
         target,
-        Some(package_cache_options),
     )?;
 
     let package_script = formatdoc! {"
@@ -141,7 +128,6 @@ pub fn build_rust_package(package: PackageRust, target: PackageSystem) -> Result
             systems,
         },
         target,
-        None,
     )?;
 
     Ok(package)

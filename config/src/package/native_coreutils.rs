@@ -10,19 +10,46 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
-pub fn package(target: PackageSystem) -> Result<Package> {
+#[allow(clippy::too_many_arguments)]
+pub fn package(
+    target: PackageSystem,
+    bash: Package,
+    binutils: Option<Package>,
+    gcc: Option<Package>,
+    glibc: Option<Package>,
+    libstdcpp: Option<Package>,
+    linux_headers: Option<Package>,
+    m4: Option<Package>,
+    ncurses: Option<Package>,
+    zlib: Option<Package>,
+) -> Result<Package> {
     let name = "coreutils-native";
 
     let script = formatdoc! {"
-        #!/bin/bash
+        #!$bash_native_stage_01/bin/bash
         set -euo pipefail
 
         cd \"${{PWD}}/{source}\"
 
-        ./configure --prefix=\"$output\"
+        ./configure \
+            --build=$(build-aux/config.guess) \
+            --enable-install-program=\"hostname\" \
+            --enable-no-install-program=\"kill,uptime\" \
+            --prefix=\"$output\"
 
         make -j$({cores})
-        make install",
+        make install
+
+        mkdir -pv $output/sbin
+
+        mv -v $output/bin/chroot $output/sbin/chroot
+
+        mkdir -pv $output/share/man/man8
+
+        mv -v $output/share/man/man1/chroot.1 \
+            $output/share/man/man8/chroot.8
+
+        sed -i 's/\"1\"/\"8\"/' $output/share/man/man8/chroot.8",
         source = name,
         cores = get_cpu_count(target)?
     };
@@ -35,10 +62,46 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         uri: "https://ftp.gnu.org/gnu/coreutils/coreutils-9.5.tar.gz".to_string(),
     };
 
+    let mut packages = vec![bash.clone()];
+
+    if target == Aarch64Linux || target == X8664Linux {
+        if let Some(binutils) = &binutils {
+            packages.push(binutils.clone());
+        }
+
+        if let Some(gcc) = &gcc {
+            packages.push(gcc.clone());
+        }
+
+        if let Some(glibc) = &glibc {
+            packages.push(glibc.clone());
+        }
+
+        if let Some(libstdcpp) = &libstdcpp {
+            packages.push(libstdcpp.clone());
+        }
+
+        if let Some(linux_headers) = &linux_headers {
+            packages.push(linux_headers.clone());
+        }
+
+        if let Some(m4) = &m4 {
+            packages.push(m4.clone());
+        }
+
+        if let Some(ncurses) = &ncurses {
+            packages.push(ncurses.clone());
+        }
+
+        if let Some(zlib) = &zlib {
+            packages.push(zlib.clone());
+        }
+    }
+
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![],
+        packages,
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
@@ -50,8 +113,19 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         ],
     };
 
-    let package = add_default_environment(package, None);
-    let package = add_default_script(package, target, None)?;
+    let package = add_default_environment(
+        package,
+        Some(bash),
+        binutils,
+        gcc,
+        glibc.clone(),
+        libstdcpp,
+        linux_headers,
+        ncurses,
+        zlib,
+    );
+
+    let package = add_default_script(package, target, glibc)?;
 
     Ok(package)
 }

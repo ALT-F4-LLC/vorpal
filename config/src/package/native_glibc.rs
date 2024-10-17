@@ -1,9 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{
-        add_default_environment, add_default_script, linux_headers, native_binutils, native_gcc,
-        native_zlib, BuildPackageOptionsEnvironment,
-    },
+    package::{add_default_environment, add_default_script},
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -13,12 +10,13 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(target: PackageSystem) -> Result<Package> {
-    let binutils_native = native_binutils::package(target)?;
-    let gcc_native = native_gcc::package(target)?;
-    let linux_headers = linux_headers::package(target)?;
-    let zlib_native = native_zlib::package(target)?;
-
+pub fn package(
+    target: PackageSystem,
+    binutils: Package,
+    gcc: Package,
+    linux_headers: Package,
+    zlib: Package,
+) -> Result<Package> {
     let name = "glibc-native-stage-01";
 
     let script = formatdoc! {"
@@ -55,23 +53,29 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![binutils_native, gcc_native, linux_headers, zlib_native],
+        packages: vec![
+            binutils.clone(),
+            gcc.clone(),
+            linux_headers.clone(),
+            zlib.clone(),
+        ],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let environment_options = BuildPackageOptionsEnvironment {
-        binutils: true,
-        gcc: true,
-        glibc: false,
-        libstdcpp: false,
-        linux_headers: true,
-        zlib: true,
-    };
-
-    let package = add_default_environment(package, Some(environment_options));
+    let package = add_default_environment(
+        package,
+        None,
+        Some(binutils),
+        Some(gcc),
+        None,
+        None,
+        Some(linux_headers),
+        None,
+        Some(zlib),
+    );
 
     let package = add_default_script(package, target, None)?;
 

@@ -1,9 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{
-        add_default_environment, add_default_script, native_zlib, BuildPackageOptionsEnvironment,
-        BuildPackageOptionsScripts,
-    },
+    package::{add_default_environment, add_default_script},
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -13,9 +10,7 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(target: PackageSystem) -> Result<Package> {
-    let zlib_native = native_zlib::package(target)?;
-
+pub fn package(target: PackageSystem, zlib: Package) -> Result<Package> {
     let name = "binutils-native-stage-01";
 
     let script = formatdoc! {"
@@ -50,30 +45,26 @@ pub fn package(target: PackageSystem) -> Result<Package> {
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![zlib_native],
+        packages: vec![zlib.clone()],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let environment_options = BuildPackageOptionsEnvironment {
-        binutils: false,
-        gcc: false,
-        glibc: false,
-        libstdcpp: false,
-        linux_headers: false,
-        zlib: true,
-    };
+    let package = add_default_environment(
+        package,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(zlib),
+    );
 
-    let package = add_default_environment(package, Some(environment_options));
-
-    let script_options = BuildPackageOptionsScripts {
-        sanitize_interpreters: false,
-        sanitize_paths: true,
-    };
-
-    let package = add_default_script(package, target, Some(script_options))?;
+    let package = add_default_script(package, target, None)?;
 
     Ok(package)
 }

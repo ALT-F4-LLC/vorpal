@@ -1,9 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{
-        add_default_environment, add_default_script, linux_headers, native_binutils, native_gcc,
-        native_glibc, native_libstdcpp, native_m4, native_zlib, BuildPackageOptionsEnvironment,
-    },
+    package::{add_default_environment, add_default_script},
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -13,15 +10,17 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(target: PackageSystem) -> Result<Package> {
-    let binutils_native = native_binutils::package(target)?;
-    let gcc_native = native_gcc::package(target)?;
-    let glibc_native = native_glibc::package(target)?;
-    let libstdcpp_native = native_libstdcpp::package(target)?;
-    let linux_headers = linux_headers::package(target)?;
-    let m4_native = native_m4::package(target)?;
-    let zlib_native = native_zlib::package(target)?;
-
+#[allow(clippy::too_many_arguments)]
+pub fn package(
+    target: PackageSystem,
+    binutils: Package,
+    gcc: Package,
+    glibc: Package,
+    libstdcpp: Package,
+    linux_headers: Package,
+    m4: Package,
+    zlib: Package,
+) -> Result<Package> {
     let name = "ncurses-native";
 
     let script = formatdoc! {"
@@ -58,16 +57,16 @@ pub fn package(target: PackageSystem) -> Result<Package> {
 
         make TIC_PATH=$(pwd)/build/progs/tic install
 
-        ln -sv libncursesw.so $LFS/usr/lib/libncurses.so
+        ln -sv libncursesw.so $output/lib/libncurses.so
 
-        sed -e 's/^#if.*XOPEN.*$/#if 1/' -i $LFS/usr/include/curses.h",
+        sed -e 's/^#if.*XOPEN.*$/#if 1/' -i $output/include/ncursesw/curses.h",
         source = name,
         cores = get_cpu_count(target)?,
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("fd793cdfc421fac76f4af23c7d960cbe4a29cbb18f5badf37b85e16a894b3b6d".to_string()),
+        hash: Some("aab234a3b7a22e2632151fbe550cb36e371d3ee5318a633ee43af057f9f112fb".to_string()),
         includes: vec![],
         strip_prefix: true,
         uri: "https://invisible-island.net/archives/ncurses/ncurses-6.5.tar.gz".to_string(),
@@ -77,13 +76,13 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         environment: HashMap::new(),
         name: name.to_string(),
         packages: vec![
-            binutils_native,
-            gcc_native,
-            glibc_native,
-            libstdcpp_native,
-            linux_headers,
-            m4_native,
-            zlib_native,
+            binutils.clone(),
+            gcc.clone(),
+            glibc.clone(),
+            libstdcpp.clone(),
+            linux_headers.clone(),
+            m4.clone(),
+            zlib.clone(),
         ],
         sandbox: false,
         script,
@@ -91,18 +90,19 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let environment_options = BuildPackageOptionsEnvironment {
-        binutils: true,
-        gcc: true,
-        glibc: false,
-        libstdcpp: true,
-        linux_headers: true,
-        zlib: true,
-    };
+    let package = add_default_environment(
+        package,
+        None,
+        Some(binutils),
+        Some(gcc),
+        Some(glibc.clone()),
+        Some(libstdcpp),
+        Some(linux_headers),
+        Some(m4),
+        Some(zlib),
+    );
 
-    let package = add_default_environment(package, Some(environment_options));
-
-    let package = add_default_script(package, target, None)?;
+    let package = add_default_script(package, target, Some(glibc))?;
 
     Ok(package)
 }

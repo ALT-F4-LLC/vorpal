@@ -51,8 +51,10 @@ pub async fn listen(config: BuildConfigFn, port: u16) -> Result<()> {
 
     info!("config address: {}", addr);
 
+    let config_service = ConfigServiceServer::new(ConfigServer::new(config));
+
     Server::builder()
-        .add_service(ConfigServiceServer::new(ConfigServer::new(config)))
+        .add_service(config_service)
         .serve(addr)
         .await
         .expect("failed to start worker server");

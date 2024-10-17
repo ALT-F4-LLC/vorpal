@@ -1,9 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{
-        add_default_environment, add_default_script, BuildPackageOptionsEnvironment,
-        BuildPackageOptionsScripts,
-    },
+    package::{add_default_environment, add_default_script},
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -49,23 +46,9 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let environment_options = BuildPackageOptionsEnvironment {
-        binutils: false,
-        gcc: false,
-        glibc: false,
-        libstdcpp: false,
-        linux_headers: false,
-        zlib: false,
-    };
+    let package = add_default_environment(package, None, None, None, None, None, None, None, None);
 
-    let package = add_default_environment(package, Some(environment_options));
-
-    let script_options = BuildPackageOptionsScripts {
-        sanitize_interpreters: false,
-        sanitize_paths: true,
-    };
-
-    let package = add_default_script(package, target, Some(script_options))?;
+    let package = add_default_script(package, target, None)?;
 
     Ok(package)
 }
