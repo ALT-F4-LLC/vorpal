@@ -16,7 +16,6 @@ pub fn package(
     bash: Package,
     binutils: Package,
     coreutils: Package,
-    diffutils: Package,
     gcc: Package,
     glibc: Package,
     libstdcpp: Package,
@@ -25,29 +24,31 @@ pub fn package(
     ncurses: Package,
     zlib: Package,
 ) -> Result<Package> {
-    let name = "patchelf-native";
+    let name = "diffutils-stage-01";
 
     let script = formatdoc! {"
-        #!$bash_native_stage_01/bin/bash
+        #!${bash}/bin/bash
         set -euo pipefail
 
         cd \"${{PWD}}/{source}\"
 
-        ./configure --prefix=\"$output\"
+        ./configure \
+            --prefix=\"$output\" \
+            --build=$(./build-aux/config.guess)
 
         make -j$({cores})
         make install",
+        bash = bash.name.to_lowercase().replace("-", "_"),
         source = name,
         cores = get_cpu_count(target)?
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("a278eec544da9f0a82ad7e07b3670cf0f4d85ee13286fa9ad4f4416b700ac19d".to_string()),
+        hash: Some("5045e29e7fa0ffe017f63da7741c800cbc0f89e04aebd78efcd661d6e5673326".to_string()),
         includes: vec![],
         strip_prefix: true,
-        uri: "https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz"
-            .to_string(),
+        uri: "https://ftp.gnu.org/gnu/diffutils/diffutils-3.10.tar.xz".to_string(),
     };
 
     let package = Package {
@@ -57,7 +58,6 @@ pub fn package(
             bash.clone(),
             binutils.clone(),
             coreutils.clone(),
-            diffutils.clone(),
             gcc.clone(),
             glibc.clone(),
             libstdcpp.clone(),
@@ -77,7 +77,7 @@ pub fn package(
         Some(bash),
         Some(binutils),
         Some(gcc),
-        Some(glibc.clone()),
+        None,
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),

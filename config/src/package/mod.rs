@@ -6,21 +6,23 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
+pub mod bash_stage_01;
+pub mod binutils_stage_01;
 pub mod cargo;
+pub mod coreutils_stage_01;
+pub mod diffutils_stage_01;
+pub mod file_stage_01;
+pub mod findutils_stage_01;
+pub mod gcc_stage_01;
+pub mod glibc_stage_01;
 pub mod language;
+pub mod libstdcpp_stage_01;
 pub mod linux_headers;
-pub mod native_bash;
-pub mod native_binutils;
-pub mod native_coreutils;
-pub mod native_diffutils;
-pub mod native_gcc;
-pub mod native_glibc;
-pub mod native_libstdcpp;
-pub mod native_m4;
-pub mod native_ncurses;
-pub mod native_patchelf;
-pub mod native_zlib;
-// pub mod native_zstd;
+pub mod m4_stage_01;
+pub mod ncurses_stage_01;
+pub mod patchelf_stage_01;
+pub mod zlib_stage_01;
+// pub mod zstd_stage_01;
 pub mod protoc;
 pub mod rust_std;
 pub mod rustc;
@@ -251,6 +253,8 @@ pub fn add_default_packages(
     coreutils: Package,
     binutils: Option<Package>,
     diffutils: Option<Package>,
+    file: Option<Package>,
+    findutils: Option<Package>,
     gcc: Option<Package>,
     glibc: Option<Package>,
     libstdcpp: Option<Package>,
@@ -260,11 +264,7 @@ pub fn add_default_packages(
     patchelf: Option<Package>,
     zlib: Option<Package>,
 ) -> Result<Package> {
-    let mut packages = vec![
-        bash.clone(),
-        coreutils,
-        // native_zstd::package(system)?,
-    ];
+    let mut packages = vec![bash.clone(), coreutils];
 
     if system == Aarch64Linux || system == X8664Linux {
         if let Some(binutils) = binutils {
@@ -273,6 +273,14 @@ pub fn add_default_packages(
 
         if let Some(diffutils) = diffutils {
             packages.push(diffutils);
+        }
+
+        if let Some(file) = file {
+            packages.push(file);
+        }
+
+        if let Some(findutils) = findutils {
+            packages.push(findutils);
         }
 
         if let Some(gcc) = gcc {
@@ -346,28 +354,29 @@ pub fn add_default_script(
     let script_paths = formatdoc! {"
         find \"$output\" -type f | while read -r file; do
             if file \"$file\" | grep -q 'interpreter'; then
-                rpath=\"\"
+                pkg_rpath=\"$(patchelf --print-rpath \"$file\")\"
+                pkg_rpath_new=\"\"
 
-                for package in \"$packages\"; do
-                    if [ -d \"$package/lib64\" ]; then
-                        rpath=\"$rpath:$package/lib64\"
+                for pkg in $packages; do
+                    if [ -d \"$pkg/lib\" ]; then
+                        pkg_rpath_new=\"$pkg_rpath_new:$pkg/lib\"
                     fi
 
-                    if [ -d \"$package/lib\" ]; then
-                        rpath=\"$rpath:$package/lib\"
+                    if [ -d \"$pkg/lib64\" ]; then
+                        pkg_rpath_new=\"$pkg_rpath_new:$pkg/lib64\"
                     fi
                 done
 
-                if [[ \"$rpath\" == :* ]]; then
-                    rpath=\"${{rpath:1}}\"
+                if [ -d \"$output/lib\" ]; then
+                    pkg_rpath_new=\"$pkg_rpath_new:${envkey}/lib\"
                 fi
 
-                if [[ \"$rpath\" == *: ]]; then
-                    rpath=\"${{rpath::-1}}\"
+                if [ -d \"$output/lib64\" ]; then
+                    pkg_rpath_new=\"$pkg_rpath_new:${envkey}/lib64\"
                 fi
 
-                if [[ \"$rpath\" != \"\" ]]; then
-                    \"patchelf\" --set-rpath \"$rpath\" \"$file\"
+                if [ \"$pkg_rpath_new\" != \"\" ]; then
+                    patchelf --set-rpath \"$pkg_rpath_new\" \"$file\"
                 fi
             fi
 
@@ -375,8 +384,7 @@ pub fn add_default_script(
                 {sed} \"s|$output|${envkey}|g\" \"$file\"
                 {sed} \"s|$PWD|${envkey}|g\" \"$file\"
             fi
-        done
-        ",
+        done",
         envkey = package.name.to_lowercase().replace("-", "_"),
         sed = get_sed_cmd(system)?,
     };
@@ -384,7 +392,7 @@ pub fn add_default_script(
     script.push_str(format!("\n\n{}", script_paths).as_str());
 
     if let Some(glibc) = glibc {
-        let script_archtype = match system {
+        let script_arch = match system {
             Aarch64Linux => "aarch64",
             X8664Linux => "x86_64",
             _ => bail!("Unsupported interpreter system"),
@@ -393,11 +401,11 @@ pub fn add_default_script(
         let script_glibc = formatdoc! {"
             find \"$output\" -type f | while read -r file; do
                 if file \"$file\" | grep -q 'interpreter'; then
-                    \"patchelf\" --set-interpreter \"${interpreter}/lib/ld-linux-{archtype}.so.1\" \"$file\"
+                    \"patchelf\" --set-interpreter \"${glibc}/lib/ld-linux-{arch}.so.1\" \"$file\"
                 fi
             done",
-            archtype = script_archtype,
-            interpreter = glibc.name.to_lowercase().replace("-", "_"),
+            arch = script_arch,
+            glibc = glibc.name.to_lowercase().replace("-", "_"),
         };
 
         script.push_str(format!("\n\n{}", script_glibc).as_str());
@@ -417,9 +425,9 @@ pub fn add_default_script(
 pub fn build_package(package: Package, target: PackageSystem) -> Result<Package> {
     let mut package = package.clone();
 
-    let mut bash = native_bash::package(target, None, None, None, None, None, None, None, None)?;
+    let mut bash = bash_stage_01::package(target, None, None, None, None, None, None, None, None)?;
 
-    let mut coreutils = native_coreutils::package(
+    let mut coreutils = coreutils_stage_01::package(
         target,
         bash.clone(),
         None,
@@ -434,6 +442,8 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
 
     let mut binutils = None;
     let mut diffutils = None;
+    let mut file = None;
+    let mut findutils = None;
     let mut gcc = None;
     let mut glibc = None;
     let mut libstdcpp = None;
@@ -444,12 +454,12 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
     let mut zlib = None;
 
     if target == Aarch64Linux || target == X8664Linux {
-        let zlib_package = native_zlib::package(target)?;
+        let zlib_package = zlib_stage_01::package(target)?;
 
-        let binutils_package = native_binutils::package(target, zlib_package.clone())?;
+        let binutils_package = binutils_stage_01::package(target, zlib_package.clone())?;
 
         let gcc_package =
-            native_gcc::package(target, binutils_package.clone(), zlib_package.clone())?;
+            gcc_stage_01::package(target, binutils_package.clone(), zlib_package.clone())?;
 
         let linux_headers_package = linux_headers::package(
             target,
@@ -458,7 +468,7 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             zlib_package.clone(),
         )?;
 
-        let glibc_package = native_glibc::package(
+        let glibc_package = glibc_stage_01::package(
             target,
             binutils_package.clone(),
             gcc_package.clone(),
@@ -466,7 +476,7 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             zlib_package.clone(),
         )?;
 
-        let libstdcpp_package = native_libstdcpp::package(
+        let libstdcpp_package = libstdcpp_stage_01::package(
             target,
             binutils_package.clone(),
             gcc_package.clone(),
@@ -475,7 +485,7 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             zlib_package.clone(),
         )?;
 
-        let m4_package = native_m4::package(
+        let m4_package = m4_stage_01::package(
             target,
             binutils_package.clone(),
             gcc_package.clone(),
@@ -485,7 +495,7 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             zlib_package.clone(),
         )?;
 
-        let ncurses_package = native_ncurses::package(
+        let ncurses_package = ncurses_stage_01::package(
             target,
             binutils_package.clone(),
             gcc_package.clone(),
@@ -496,7 +506,7 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             zlib_package.clone(),
         )?;
 
-        let bash_package = native_bash::package(
+        let bash_package = bash_stage_01::package(
             target,
             Some(binutils_package.clone()),
             Some(gcc_package.clone()),
@@ -508,7 +518,7 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             Some(zlib_package.clone()),
         )?;
 
-        let coreutils_package = native_coreutils::package(
+        let coreutils_package = coreutils_stage_01::package(
             target,
             bash_package.clone(),
             Some(binutils_package.clone()),
@@ -521,7 +531,7 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             Some(zlib_package.clone()),
         )?;
 
-        let diffutils_package = native_diffutils::package(
+        let diffutils_package = diffutils_stage_01::package(
             target,
             bash.clone(),
             binutils_package.clone(),
@@ -535,12 +545,44 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             zlib_package.clone(),
         )?;
 
-        let patchelf_package = native_patchelf::package(
+        let file_package = file_stage_01::package(
+            target,
+            bash.clone(),
+            binutils_package.clone(),
+            coreutils_package.clone(),
+            diffutils_package.clone(),
+            gcc_package.clone(),
+            glibc_package.clone(),
+            libstdcpp_package.clone(),
+            linux_headers_package.clone(),
+            m4_package.clone(),
+            ncurses_package.clone(),
+            zlib_package.clone(),
+        )?;
+
+        let findutils_package = findutils_stage_01::package(
+            target,
+            bash.clone(),
+            binutils_package.clone(),
+            coreutils_package.clone(),
+            file_package.clone(),
+            gcc_package.clone(),
+            glibc_package.clone(),
+            libstdcpp_package.clone(),
+            linux_headers_package.clone(),
+            m4_package.clone(),
+            ncurses_package.clone(),
+            zlib_package.clone(),
+        )?;
+
+        let patchelf_package = patchelf_stage_01::package(
             target,
             bash_package.clone(),
             binutils_package.clone(),
             coreutils_package.clone(),
             diffutils_package.clone(),
+            file_package.clone(),
+            findutils_package.clone(),
             gcc_package.clone(),
             glibc_package.clone(),
             libstdcpp_package.clone(),
@@ -555,6 +597,8 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
 
         binutils = Some(binutils_package);
         diffutils = Some(diffutils_package);
+        file = Some(file_package);
+        findutils = Some(findutils_package);
         gcc = Some(gcc_package);
         glibc = Some(glibc_package);
         libstdcpp = Some(libstdcpp_package);
@@ -584,6 +628,8 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
         coreutils,
         binutils,
         diffutils,
+        file,
+        findutils,
         gcc,
         glibc.clone(),
         libstdcpp,

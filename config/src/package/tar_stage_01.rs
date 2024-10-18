@@ -24,10 +24,10 @@ pub fn package(
     ncurses: Package,
     zlib: Package,
 ) -> Result<Package> {
-    let name = "diffutils-native";
+    let name = "diffutils-stage-01";
 
     let script = formatdoc! {"
-        #!$bash_native_stage_01/bin/bash
+        #!${bash}/bin/bash
         set -euo pipefail
 
         cd \"${{PWD}}/{source}\"
@@ -38,6 +38,7 @@ pub fn package(
 
         make -j$({cores})
         make install",
+        bash = bash.name.to_lowercase().replace("-", "_"),
         source = name,
         cores = get_cpu_count(target)?
     };
@@ -76,7 +77,7 @@ pub fn package(
         Some(bash),
         Some(binutils),
         Some(gcc),
-        Some(glibc.clone()),
+        None,
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),

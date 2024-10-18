@@ -23,10 +23,10 @@ pub fn package(
     ncurses: Option<Package>,
     zlib: Option<Package>,
 ) -> Result<Package> {
-    let name = "coreutils-native";
+    let name = "coreutils-stage-01";
 
     let script = formatdoc! {"
-        #!$bash_native_stage_01/bin/bash
+        #!${bash}/bin/bash
         set -euo pipefail
 
         cd \"${{PWD}}/{source}\"
@@ -50,6 +50,7 @@ pub fn package(
             $output/share/man/man8/chroot.8
 
         sed -i 's/\"1\"/\"8\"/' $output/share/man/man8/chroot.8",
+        bash = bash.name.to_lowercase().replace("-", "_"),
         source = name,
         cores = get_cpu_count(target)?
     };
@@ -118,7 +119,7 @@ pub fn package(
         Some(bash),
         binutils,
         gcc,
-        glibc.clone(),
+        None,
         libstdcpp,
         linux_headers,
         ncurses,

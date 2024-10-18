@@ -7,30 +7,32 @@ use indoc::formatdoc;
 use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
     Package, PackageSource, PackageSystem,
-    PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
+    PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
 pub fn package(target: PackageSystem) -> Result<Package> {
-    let name = "zstd-native";
+    let name = "zlib-stage-01";
 
     let script = formatdoc! {"
         #!/bin/bash
         set -euo pipefail
 
-        cd \"${{PWD}}/{source}\"
+        cd ${{PWD}}/{source}
+
+        ./configure --prefix=$output
 
         make -j$({cores})
-        make install PREFIX=\"$output\"",
+        make install",
         source = name,
-        cores = get_cpu_count(target)?
+        cores = get_cpu_count(target)?,
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("7ad49c2d889f82744c95206e9fe38ecde31fc116d1dad8def68776c69887efcf".to_string()),
+        hash: Some("3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683".to_string()),
         includes: vec![],
         strip_prefix: true,
-        uri: "https://github.com/facebook/zstd/releases/download/v1.5.5/zstd-1.5.5.tar.gz"
+        uri: "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz"
             .to_string(),
     };
 
@@ -41,15 +43,11 @@ pub fn package(target: PackageSystem) -> Result<Package> {
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
-        systems: vec![
-            Aarch64Linux.into(),
-            Aarch64Macos.into(),
-            X8664Linux.into(),
-            X8664Macos.into(),
-        ],
+        systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(package, None);
+    let package = add_default_environment(package, None, None, None, None, None, None, None, None);
+
     let package = add_default_script(package, target, None)?;
 
     Ok(package)

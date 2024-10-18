@@ -74,7 +74,7 @@ async fn get_config(file: String, system: PackageSystem) -> Result<Config> {
         }
     };
 
-    let mut config_service = config_service.max_decoding_message_size(100000000);
+    let mut config_service = config_service.max_decoding_message_size(1000000000);
 
     let config_response = match config_service
         .evaluate(EvaluateRequest {

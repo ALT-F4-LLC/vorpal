@@ -10,8 +10,15 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(target: PackageSystem, binutils: Package, zlib: Package) -> Result<Package> {
-    let name = "gcc-native-stage-01";
+pub fn package(
+    target: PackageSystem,
+    binutils: Package,
+    gcc: Package,
+    glibc: Package,
+    linux_headers: Package,
+    zlib: Package,
+) -> Result<Package> {
+    let name = "libstdcpp-stage-01";
 
     let script = formatdoc! {"
         #!/bin/bash
@@ -19,51 +26,25 @@ pub fn package(target: PackageSystem, binutils: Package, zlib: Package) -> Resul
 
         cd ${{PWD}}/{source}
 
-        ./contrib/download_prerequisites
-
-        case $(uname -m) in
-          x86_64)
-            sed -e '/m64=/s/lib64/lib/' -i.orig gcc/config/i386/t-linux64
-         ;;
-        esac
-
         mkdir -p build
 
         cd build
 
-        ../configure \
-            --disable-libatomic \
-            --disable-libcc1 \
-            --disable-libgomp \
-            --disable-libquadmath \
-            --disable-libssp \
-            --disable-libvtv \
+        ../libstdc++-v3/configure \
+            --build=$(../config.guess) \
+            --disable-libstdcxx-pch \
             --disable-multilib \
             --disable-nls \
-            --disable-threads \
-            --enable-default-pie \
-            --enable-default-ssp \
-            --enable-languages=\"c,c++\" \
             --prefix=\"$output\" \
-            --with-ld=\"$binutils_native_stage_01/bin/ld\" \
-            --with-newlib \
-            --without-headers
+            --with-gxx-include-dir=\"${gcc}/include/c++/14.2.0\"
 
         make -j$({cores})
         make install
 
-        cd ..
-
-        OUTPUT_LIBGCC=$(cd $output && bin/{target}-gcc -print-libgcc-file-name)
-        OUTPUT_LIBGCC_DIR=$(dirname \"${{OUTPUT_LIBGCC}}\")
-
-        cat gcc/limitx.h gcc/glimits.h gcc/limity.h > \
-            ${{OUTPUT_LIBGCC_DIR}}/include/limits.h
-
-        cp $output/bin/gcc $output/bin/cc",
-        source = name,
+        rm -v $output/lib64/lib{{stdc++{{,exp,fs}},supc++}}.la",
         cores = get_cpu_count(target)?,
-        target = "aarch64-unknown-linux-gnu",
+        gcc = gcc.name.to_lowercase().replace("-", "_"),
+        source = name,
     };
 
     let source = PackageSource {
@@ -77,7 +58,13 @@ pub fn package(target: PackageSystem, binutils: Package, zlib: Package) -> Resul
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
-        packages: vec![binutils.clone(), zlib.clone()],
+        packages: vec![
+            binutils.clone(),
+            gcc.clone(),
+            glibc.clone(),
+            linux_headers.clone(),
+            zlib.clone(),
+        ],
         sandbox: false,
         script,
         source: HashMap::from([(name.to_string(), source)]),
@@ -88,15 +75,16 @@ pub fn package(target: PackageSystem, binutils: Package, zlib: Package) -> Resul
         package,
         None,
         Some(binutils),
+        Some(gcc),
+        // Some(glibc.clone()),
         None,
         None,
-        None,
-        None,
+        Some(linux_headers),
         None,
         Some(zlib),
     );
 
-    let package = add_default_script(package, target, None)?;
+    let package = add_default_script(package, target, Some(glibc))?;
 
     Ok(package)
 }

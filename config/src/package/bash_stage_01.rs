@@ -22,7 +22,7 @@ pub fn package(
     ncurses: Option<Package>,
     zlib: Option<Package>,
 ) -> Result<Package> {
-    let name = "bash-native-stage-01";
+    let name = "bash-stage-01";
 
     let script = formatdoc! {"
         #!/bin/bash
@@ -108,7 +108,7 @@ pub fn package(
         None,
         binutils,
         gcc,
-        glibc.clone(),
+        None,
         libstdcpp,
         linux_headers,
         ncurses,

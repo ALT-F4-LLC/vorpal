@@ -15,8 +15,7 @@ pub fn package(system: PackageSystem) -> Result<Package> {
     let script = formatdoc! {"
         cp -pr ./rustc/rustc/* \"$output/.\"
         cat \"$rust_std/manifest.in\" >> \"$output/manifest.in\"
-        cp -pr \"$rust_std/lib\" \"$output\"
-        "
+        cp -pr \"$rust_std/lib\" \"$output\""
     };
 
     let hash = match system {

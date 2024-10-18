@@ -10,58 +10,60 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn package(
     target: PackageSystem,
+    bash: Package,
     binutils: Package,
+    coreutils: Package,
     gcc: Package,
     glibc: Package,
+    libstdcpp: Package,
     linux_headers: Package,
+    m4: Package,
+    ncurses: Package,
     zlib: Package,
 ) -> Result<Package> {
-    let name = "libstdcpp-native-stage-01";
+    let name = "diffutils-stage-01";
 
     let script = formatdoc! {"
-        #!/bin/bash
+        #!${bash}/bin/bash
         set -euo pipefail
 
-        cd ${{PWD}}/{source}
+        cd \"${{PWD}}/{source}\"
 
-        mkdir -p build
-
-        cd build
-
-        ../libstdc++-v3/configure \
-            --build=$(../config.guess) \
-            --disable-libstdcxx-pch \
-            --disable-multilib \
-            --disable-nls \
+        ./configure \
             --prefix=\"$output\" \
-            --with-gxx-include-dir=\"$gcc_native_stage_01/include/c++/14.2.0\"
+            --build=$(./build-aux/config.guess)
 
         make -j$({cores})
-        make install
-
-        rm -v $output/lib64/lib{{stdc++{{,exp,fs}},supc++}}.la",
+        make install",
+        bash = bash.name.to_lowercase().replace("-", "_"),
         source = name,
-        cores = get_cpu_count(target)?,
+        cores = get_cpu_count(target)?
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("cc20ef929f4a1c07594d606ca4f2ed091e69fac5c6779887927da82b0a62f583".to_string()),
+        hash: Some("5045e29e7fa0ffe017f63da7741c800cbc0f89e04aebd78efcd661d6e5673326".to_string()),
         includes: vec![],
         strip_prefix: true,
-        uri: "https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.gz".to_string(),
+        uri: "https://ftp.gnu.org/gnu/diffutils/diffutils-3.10.tar.xz".to_string(),
     };
 
     let package = Package {
         environment: HashMap::new(),
         name: name.to_string(),
         packages: vec![
+            bash.clone(),
             binutils.clone(),
+            coreutils.clone(),
             gcc.clone(),
             glibc.clone(),
+            libstdcpp.clone(),
             linux_headers.clone(),
+            m4.clone(),
+            ncurses.clone(),
             zlib.clone(),
         ],
         sandbox: false,
@@ -72,13 +74,13 @@ pub fn package(
 
     let package = add_default_environment(
         package,
-        None,
+        Some(bash),
         Some(binutils),
         Some(gcc),
-        Some(glibc.clone()),
         None,
+        Some(libstdcpp),
         Some(linux_headers),
-        None,
+        Some(ncurses),
         Some(zlib),
     );
 
