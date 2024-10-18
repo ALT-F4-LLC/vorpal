@@ -17,20 +17,19 @@ pub fn package(
     binutils: Package,
     coreutils: Package,
     diffutils: Package,
-    findutils: Package,
     file: Package,
+    findutils: Package,
     gawk: Package,
     gcc: Package,
     glibc: Package,
     grep: Package,
-    gzip: Package,
     libstdcpp: Package,
     linux_headers: Package,
     m4: Package,
     ncurses: Package,
     zlib: Package,
 ) -> Result<Package> {
-    let name = "patchelf-stage-01";
+    let name = "gzip-stage-01";
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
@@ -38,22 +37,23 @@ pub fn package(
 
         cd \"${{PWD}}/{source}\"
 
-        ./configure --prefix=\"$output\"
+        ./configure \
+            --build=$(build-aux/config.guess) \
+            --prefix=\"$output\"
 
         make -j$({cores})
         make install",
         bash = bash.name.to_lowercase().replace("-", "_"),
-        cores = get_cpu_count(target)?,
         source = name,
+        cores = get_cpu_count(target)?
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("a278eec544da9f0a82ad7e07b3670cf0f4d85ee13286fa9ad4f4416b700ac19d".to_string()),
+        hash: Some("25e51d46402bab819045d452ded6c4558ef980f5249c470d9499e9eae34b59b1".to_string()),
         includes: vec![],
         strip_prefix: true,
-        uri: "https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz"
-            .to_string(),
+        uri: "https://ftp.gnu.org/gnu/gzip/gzip-1.13.tar.xz".to_string(),
     };
 
     let package = Package {
@@ -70,7 +70,6 @@ pub fn package(
             gcc.clone(),
             glibc.clone(),
             grep.clone(),
-            gzip.clone(),
             libstdcpp.clone(),
             linux_headers.clone(),
             m4.clone(),
@@ -88,7 +87,7 @@ pub fn package(
         Some(bash),
         Some(binutils),
         Some(gcc),
-        Some(glibc.clone()),
+        None,
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),

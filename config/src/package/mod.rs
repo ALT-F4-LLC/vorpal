@@ -13,8 +13,11 @@ pub mod coreutils_stage_01;
 pub mod diffutils_stage_01;
 pub mod file_stage_01;
 pub mod findutils_stage_01;
+pub mod gawk_stage_01;
 pub mod gcc_stage_01;
 pub mod glibc_stage_01;
+pub mod grep_stage_01;
+pub mod gzip_stage_01;
 pub mod language;
 pub mod libstdcpp_stage_01;
 pub mod linux_headers;
@@ -250,13 +253,16 @@ pub fn add_default_packages(
     package: Package,
     system: PackageSystem,
     bash: Package,
-    coreutils: Package,
     binutils: Option<Package>,
+    coreutils: Package,
     diffutils: Option<Package>,
     file: Option<Package>,
     findutils: Option<Package>,
+    gawk: Option<Package>,
     gcc: Option<Package>,
     glibc: Option<Package>,
+    grep: Option<Package>,
+    gzip: Option<Package>,
     libstdcpp: Option<Package>,
     linux_headers: Option<Package>,
     m4: Option<Package>,
@@ -283,12 +289,24 @@ pub fn add_default_packages(
             packages.push(findutils);
         }
 
+        if let Some(gawk) = gawk {
+            packages.push(gawk);
+        }
+
         if let Some(gcc) = gcc {
             packages.push(gcc);
         }
 
         if let Some(glibc) = glibc {
             packages.push(glibc);
+        }
+
+        if let Some(grep) = grep {
+            packages.push(grep);
+        }
+
+        if let Some(gzip) = gzip {
+            packages.push(gzip);
         }
 
         if let Some(libstdcpp) = libstdcpp {
@@ -444,8 +462,11 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
     let mut diffutils = None;
     let mut file = None;
     let mut findutils = None;
+    let mut gawk = None;
     let mut gcc = None;
     let mut glibc = None;
+    let mut grep = None;
+    let mut gzip = None;
     let mut libstdcpp = None;
     let mut linux_headers = None;
     let mut m4 = None;
@@ -575,6 +596,59 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             zlib_package.clone(),
         )?;
 
+        let gawk_package = gawk_stage_01::package(
+            target,
+            bash.clone(),
+            binutils_package.clone(),
+            coreutils_package.clone(),
+            file_package.clone(),
+            findutils_package.clone(),
+            gcc_package.clone(),
+            glibc_package.clone(),
+            libstdcpp_package.clone(),
+            linux_headers_package.clone(),
+            m4_package.clone(),
+            ncurses_package.clone(),
+            zlib_package.clone(),
+        )?;
+
+        let grep_package = grep_stage_01::package(
+            target,
+            bash.clone(),
+            binutils_package.clone(),
+            coreutils_package.clone(),
+            diffutils_package.clone(),
+            file_package.clone(),
+            findutils_package.clone(),
+            gawk_package.clone(),
+            gcc_package.clone(),
+            glibc_package.clone(),
+            libstdcpp_package.clone(),
+            linux_headers_package.clone(),
+            m4_package.clone(),
+            ncurses_package.clone(),
+            zlib_package.clone(),
+        )?;
+
+        let gzip_package = gzip_stage_01::package(
+            target,
+            bash.clone(),
+            binutils_package.clone(),
+            coreutils_package.clone(),
+            diffutils_package.clone(),
+            file_package.clone(),
+            findutils_package.clone(),
+            gawk_package.clone(),
+            gcc_package.clone(),
+            glibc_package.clone(),
+            grep_package.clone(),
+            libstdcpp_package.clone(),
+            linux_headers_package.clone(),
+            m4_package.clone(),
+            ncurses_package.clone(),
+            zlib_package.clone(),
+        )?;
+
         let patchelf_package = patchelf_stage_01::package(
             target,
             bash_package.clone(),
@@ -583,8 +657,11 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
             diffutils_package.clone(),
             file_package.clone(),
             findutils_package.clone(),
+            gawk_package.clone(),
             gcc_package.clone(),
             glibc_package.clone(),
+            grep_package.clone(),
+            gzip_package.clone(),
             libstdcpp_package.clone(),
             linux_headers_package.clone(),
             m4_package.clone(),
@@ -599,8 +676,11 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
         diffutils = Some(diffutils_package);
         file = Some(file_package);
         findutils = Some(findutils_package);
+        gawk = Some(gawk_package);
         gcc = Some(gcc_package);
         glibc = Some(glibc_package);
+        grep = Some(grep_package);
+        gzip = Some(gzip_package);
         libstdcpp = Some(libstdcpp_package);
         linux_headers = Some(linux_headers_package);
         m4 = Some(m4_package);
@@ -625,13 +705,16 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
         package,
         target,
         bash,
-        coreutils,
         binutils,
+        coreutils,
         diffutils,
         file,
         findutils,
+        gawk,
         gcc,
         glibc.clone(),
+        grep,
+        gzip,
         libstdcpp,
         linux_headers,
         m4,

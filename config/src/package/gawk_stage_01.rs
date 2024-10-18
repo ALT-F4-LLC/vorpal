@@ -16,6 +16,8 @@ pub fn package(
     bash: Package,
     binutils: Package,
     coreutils: Package,
+    file: Package,
+    findutils: Package,
     gcc: Package,
     glibc: Package,
     libstdcpp: Package,
@@ -24,7 +26,7 @@ pub fn package(
     ncurses: Package,
     zlib: Package,
 ) -> Result<Package> {
-    let name = "diffutils-stage-01";
+    let name = "gawk-stage-01";
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
@@ -32,9 +34,11 @@ pub fn package(
 
         cd \"${{PWD}}/{source}\"
 
+        sed -i 's/extras//' Makefile.in
+
         ./configure \
-            --prefix=\"$output\" \
-            --build=$(./build-aux/config.guess)
+            --build=$(build-aux/config.guess) \
+            --prefix=\"$output\"
 
         make -j$({cores})
         make install",
@@ -45,10 +49,10 @@ pub fn package(
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("5045e29e7fa0ffe017f63da7741c800cbc0f89e04aebd78efcd661d6e5673326".to_string()),
+        hash: Some("f82947e3d4fed9bec5ec686b4a511d6720a23eb809f41b1dbcee30a347f9cb7b".to_string()),
         includes: vec![],
         strip_prefix: true,
-        uri: "https://ftp.gnu.org/gnu/diffutils/diffutils-3.10.tar.xz".to_string(),
+        uri: "https://ftp.gnu.org/gnu/gawk/gawk-5.3.1.tar.xz".to_string(),
     };
 
     let package = Package {
@@ -58,6 +62,8 @@ pub fn package(
             bash.clone(),
             binutils.clone(),
             coreutils.clone(),
+            file.clone(),
+            findutils.clone(),
             gcc.clone(),
             glibc.clone(),
             libstdcpp.clone(),
