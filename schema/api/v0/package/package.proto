@@ -22,19 +22,25 @@ message PackageOutput {
     string name = 2;
 }
 
+message PackageEnvironment {
+    string key = 1;
+    string value = 2;
+}
+
 message PackageSource {
     bool strip_prefix = 1;
     optional string hash = 2;
     repeated string excludes = 3;
     repeated string includes = 4;
-    string uri = 5;
+    string name = 5;
+    string uri = 6;
 }
 
 message Package {
     bool sandbox = 1;
-    map<string, PackageSource> source = 2;
-    map<string, string> environment = 3;
-    repeated Package packages = 4;
+    repeated PackageEnvironment environment = 2;
+    repeated PackageOutput packages = 3;
+    repeated PackageSource source = 4;
     repeated PackageSystem systems = 5;
     string name = 6;
     string script = 7;

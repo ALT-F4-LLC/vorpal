@@ -12,7 +12,7 @@ use vorpal_schema::{
 };
 use vorpal_store::paths::{get_public_key_path, setup_paths};
 
-pub async fn start(port: u16) -> Result<()> {
+pub async fn listen(port: u16) -> Result<()> {
     setup_paths().await?;
 
     let public_key_path = get_public_key_path();

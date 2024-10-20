@@ -1,27 +1,28 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
 #[allow(clippy::too_many_arguments)]
 pub fn package(
+    context: &mut ContextConfig,
     target: PackageSystem,
-    binutils: Option<Package>,
-    gcc: Option<Package>,
-    glibc: Option<Package>,
-    libstdcpp: Option<Package>,
-    linux_headers: Option<Package>,
-    m4: Option<Package>,
-    ncurses: Option<Package>,
-    zlib: Option<Package>,
-) -> Result<Package> {
+    binutils: Option<&PackageOutput>,
+    gcc: Option<&PackageOutput>,
+    glibc: Option<&PackageOutput>,
+    libstdcpp: Option<&PackageOutput>,
+    linux_headers: Option<&PackageOutput>,
+    m4: Option<&PackageOutput>,
+    ncurses: Option<&PackageOutput>,
+    zlib: Option<&PackageOutput>,
+) -> Result<PackageOutput> {
     let name = "bash-stage-01";
 
     let script = formatdoc! {"
@@ -48,6 +49,7 @@ pub fn package(
         excludes: vec![],
         hash: Some("7e3fb70a22919015dfda7602317daa86dc66afa8eb60b99a8dd9d1d8decff662".to_string()),
         includes: vec![],
+        name: name.to_string(),
         strip_prefix: true,
         uri: "https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz".to_string(),
     };
@@ -55,46 +57,46 @@ pub fn package(
     let mut packages = vec![];
 
     if target == Aarch64Linux || target == X8664Linux {
-        if let Some(binutils) = &binutils {
+        if let Some(binutils) = binutils {
             packages.push(binutils.clone());
         }
 
-        if let Some(gcc) = &gcc {
+        if let Some(gcc) = gcc {
             packages.push(gcc.clone());
         }
 
-        if let Some(glibc) = &glibc {
+        if let Some(glibc) = glibc {
             packages.push(glibc.clone());
         }
 
-        if let Some(libstdcpp) = &libstdcpp {
+        if let Some(libstdcpp) = libstdcpp {
             packages.push(libstdcpp.clone());
         }
 
-        if let Some(linux_headers) = &linux_headers {
+        if let Some(linux_headers) = linux_headers {
             packages.push(linux_headers.clone());
         }
 
-        if let Some(m4) = &m4 {
+        if let Some(m4) = m4 {
             packages.push(m4.clone());
         }
 
-        if let Some(ncurses) = &ncurses {
+        if let Some(ncurses) = ncurses {
             packages.push(ncurses.clone());
         }
 
-        if let Some(zlib) = &zlib {
+        if let Some(zlib) = zlib {
             packages.push(zlib.clone());
         }
     }
 
     let package = Package {
-        environment: HashMap::new(),
+        environment: vec![],
         name: name.to_string(),
         packages,
         sandbox: false,
         script,
-        source: HashMap::from([(name.to_string(), source)]),
+        source: vec![source],
         systems: vec![
             Aarch64Linux.into(),
             Aarch64Macos.into(),
@@ -117,5 +119,7 @@ pub fn package(
 
     let package = add_default_script(package, target, glibc)?;
 
-    Ok(package)
+    let package_output = context.add_package(package)?;
+
+    Ok(package_output)
 }

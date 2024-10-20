@@ -1,24 +1,26 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn package(
+    context: &mut ContextConfig,
     target: PackageSystem,
-    binutils: Package,
-    gcc: Package,
-    glibc: Package,
-    libstdcpp: Package,
-    linux_headers: Package,
-    zlib: Package,
-) -> Result<Package> {
+    binutils: &PackageOutput,
+    gcc: &PackageOutput,
+    glibc: &PackageOutput,
+    libstdcpp: &PackageOutput,
+    linux_headers: &PackageOutput,
+    zlib: &PackageOutput,
+) -> Result<PackageOutput> {
     let name = "m4-stage-01";
 
     let script = formatdoc! {"
@@ -41,12 +43,13 @@ pub fn package(
         excludes: vec![],
         hash: Some("fd793cdfc421fac76f4af23c7d960cbe4a29cbb18f5badf37b85e16a894b3b6d".to_string()),
         includes: vec![],
+        name: name.to_string(),
         strip_prefix: true,
         uri: "https://ftp.gnu.org/gnu/m4/m4-1.4.19.tar.gz".to_string(),
     };
 
     let package = Package {
-        environment: HashMap::new(),
+        environment: vec![],
         name: name.to_string(),
         packages: vec![
             binutils.clone(),
@@ -58,7 +61,7 @@ pub fn package(
         ],
         sandbox: false,
         script,
-        source: HashMap::from([(name.to_string(), source)]),
+        source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
@@ -76,5 +79,7 @@ pub fn package(
 
     let package = add_default_script(package, target, Some(glibc))?;
 
-    Ok(package)
+    let package_output = context.add_package(package)?;
+
+    Ok(package_output)
 }

@@ -28,7 +28,12 @@ pub fn bold(text: &str) -> String {
     style(text).bold().to_string()
 }
 
-pub fn print_build_order(build_order: &[String]) {
+pub fn print_build_order(build_order: &[PackageOutput]) {
+    let build_order = build_order
+        .iter()
+        .map(|p| p.name.clone())
+        .collect::<Vec<String>>();
+
     println!(
         "{} {} {}",
         connector_start(),
@@ -56,7 +61,7 @@ pub fn format_package_name(package_name: &str) -> String {
     )
 }
 
-pub fn print_packages(build_order: &[String]) {
+pub fn print_packages(build_order: &[PackageOutput]) {
     println!(
         "{} {} {} total",
         style(CONNECTOR_START).dim(),

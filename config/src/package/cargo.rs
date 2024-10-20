@@ -1,12 +1,11 @@
-use crate::package::build_package;
+use crate::{package::build_package, ContextConfig};
 use anyhow::{bail, Result};
-use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub fn package(system: PackageSystem) -> Result<Package> {
+pub fn package(context: &mut ContextConfig, system: PackageSystem) -> Result<PackageOutput> {
     let name = "cargo";
 
     let hash = match system {
@@ -31,6 +30,7 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         excludes: vec![],
         hash: Some(hash.to_string()),
         includes: vec![],
+        name: name.to_string(),
         strip_prefix: true,
         uri: format!(
             "https://static.rust-lang.org/dist/2024-05-02/cargo-{}-{}.tar.gz",
@@ -39,12 +39,12 @@ pub fn package(system: PackageSystem) -> Result<Package> {
     };
 
     let package = Package {
-        environment: HashMap::new(),
+        environment: vec![],
         name: name.to_string(),
         packages: vec![],
         sandbox: true,
         script: format!("cp -pr ./{}/{}/* \"$output/.\"", name, name),
-        source: HashMap::from([(name.to_string(), source)]),
+        source: vec![source],
         systems: vec![
             Aarch64Linux.into(),
             Aarch64Macos.into(),
@@ -53,5 +53,5 @@ pub fn package(system: PackageSystem) -> Result<Package> {
         ],
     };
 
-    build_package(package, system)
+    build_package(context, package, system)
 }

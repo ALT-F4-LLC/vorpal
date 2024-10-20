@@ -1,16 +1,21 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(target: PackageSystem, binutils: Package, zlib: Package) -> Result<Package> {
+pub fn package(
+    context: &mut ContextConfig,
+    target: PackageSystem,
+    binutils: &PackageOutput,
+    zlib: &PackageOutput,
+) -> Result<PackageOutput> {
     let name = "gcc-stage-01";
 
     let script = formatdoc! {"
@@ -71,17 +76,18 @@ pub fn package(target: PackageSystem, binutils: Package, zlib: Package) -> Resul
         excludes: vec![],
         hash: Some("cc20ef929f4a1c07594d606ca4f2ed091e69fac5c6779887927da82b0a62f583".to_string()),
         includes: vec![],
+        name: name.to_string(),
         strip_prefix: true,
         uri: "https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.gz".to_string(),
     };
 
     let package = Package {
-        environment: HashMap::new(),
+        environment: vec![],
         name: name.to_string(),
         packages: vec![binutils.clone(), zlib.clone()],
         sandbox: false,
         script,
-        source: HashMap::from([(name.to_string(), source)]),
+        source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
@@ -99,5 +105,7 @@ pub fn package(target: PackageSystem, binutils: Package, zlib: Package) -> Resul
 
     let package = add_default_script(package, target, None)?;
 
-    Ok(package)
+    let package_input = context.add_package(package)?;
+
+    Ok(package_input)
 }

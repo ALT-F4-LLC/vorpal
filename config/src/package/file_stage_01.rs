@@ -1,30 +1,31 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
 #[allow(clippy::too_many_arguments)]
 pub fn package(
+    context: &mut ContextConfig,
     target: PackageSystem,
-    bash: Package,
-    binutils: Package,
-    coreutils: Package,
-    diffutils: Package,
-    gcc: Package,
-    glibc: Package,
-    libstdcpp: Package,
-    linux_headers: Package,
-    m4: Package,
-    ncurses: Package,
-    zlib: Package,
-) -> Result<Package> {
+    bash: &PackageOutput,
+    binutils: &PackageOutput,
+    coreutils: &PackageOutput,
+    diffutils: &PackageOutput,
+    gcc: &PackageOutput,
+    glibc: &PackageOutput,
+    libstdcpp: &PackageOutput,
+    linux_headers: &PackageOutput,
+    m4: &PackageOutput,
+    ncurses: &PackageOutput,
+    zlib: &PackageOutput,
+) -> Result<PackageOutput> {
     let name = "file-stage-01";
 
     let script = formatdoc! {"
@@ -62,12 +63,13 @@ pub fn package(
         excludes: vec![],
         hash: Some("c118ab56efa05798022a5a488827594a82d844f65159e95b918d5501adf1e58f".to_string()),
         includes: vec![],
+        name: name.to_string(),
         strip_prefix: true,
         uri: "https://astron.com/pub/file/file-5.45.tar.gz".to_string(),
     };
 
     let package = Package {
-        environment: HashMap::new(),
+        environment: vec![],
         name: name.to_string(),
         packages: vec![
             bash.clone(),
@@ -84,7 +86,7 @@ pub fn package(
         ],
         sandbox: false,
         script,
-        source: HashMap::from([(name.to_string(), source)]),
+        source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
@@ -102,5 +104,7 @@ pub fn package(
 
     let package = add_default_script(package, target, Some(glibc))?;
 
-    Ok(package)
+    let package_output = context.add_package(package)?;
+
+    Ok(package_output)
 }

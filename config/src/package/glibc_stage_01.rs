@@ -1,22 +1,23 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
 pub fn package(
+    context: &mut ContextConfig,
     target: PackageSystem,
-    binutils: Package,
-    gcc: Package,
-    linux_headers: Package,
-    zlib: Package,
-) -> Result<Package> {
+    binutils: &PackageOutput,
+    gcc: &PackageOutput,
+    linux_headers: &PackageOutput,
+    zlib: &PackageOutput,
+) -> Result<PackageOutput> {
     let name = "glibc-stage-01";
 
     let script = formatdoc! {"
@@ -48,12 +49,13 @@ pub fn package(
         excludes: vec![],
         hash: Some("da2594c64d61dacf80d85e568136bf31fba36c4ff1ececff59c6fb786a2a126b".to_string()),
         includes: vec![],
+        name: name.to_string(),
         strip_prefix: true,
         uri: "https://ftp.gnu.org/gnu/glibc/glibc-2.40.tar.gz".to_string(),
     };
 
     let package = Package {
-        environment: HashMap::new(),
+        environment: vec![],
         name: name.to_string(),
         packages: vec![
             binutils.clone(),
@@ -63,7 +65,7 @@ pub fn package(
         ],
         sandbox: false,
         script,
-        source: HashMap::from([(name.to_string(), source)]),
+        source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
@@ -81,5 +83,7 @@ pub fn package(
 
     let package = add_default_script(package, target, None)?;
 
-    Ok(package)
+    let package_output = context.add_package(package)?;
+
+    Ok(package_output)
 }

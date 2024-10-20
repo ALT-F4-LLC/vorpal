@@ -1,7 +1,4 @@
-use crate::{
-    log::{connector_end, print_build_order},
-    worker::build,
-};
+use crate::{log::connector_end, worker::build};
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
@@ -9,12 +6,15 @@ use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
 use tokio::process;
 use tokio::process::Child;
+use tonic::transport::Channel;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
     get_package_system,
-    vorpal::config::v0::{config_service_client::ConfigServiceClient, Config, EvaluateRequest},
-    vorpal::package::v0::{PackageOutput, PackageSystem, PackageSystem::UnknownSystem},
+    vorpal::{
+        config::v0::config_service_client::ConfigServiceClient,
+        package::v0::{PackageOutput, PackageSystem, PackageSystem::UnknownSystem},
+    },
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
 use vorpal_worker::service;
@@ -31,67 +31,37 @@ pub struct Cli {
     command: Command,
 }
 
-fn get_default_package() -> String {
-    "default".to_string()
-}
-
-async fn shutdown_config(mut process: Child) -> Result<()> {
-    process
-        .kill()
-        .await
-        .map_err(|_| anyhow!("{} failed to kill config server", connector_end()))?;
-
-    Ok(())
-}
-
-async fn get_config(file: String, system: PackageSystem) -> Result<Config> {
-    let config_port = random_free_port()
+async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channel>)> {
+    let port = random_free_port()
         .ok_or_else(|| anyhow!("{} failed to find free port", connector_end()))?;
 
-    let mut config_command = process::Command::new(file);
+    let mut command = process::Command::new(file);
 
-    config_command.args(["start", "--port", &config_port.to_string()]);
+    command.args(["start", "--port", &port.to_string()]);
 
-    let config_process = config_command
+    let mut process = command
         .spawn()
-        .map_err(|_| anyhow!("{} failed to start config server", connector_end()))?;
+        .map_err(|_| anyhow!("failed to start config server"))?;
 
     // TODO: wait for output then proceed instead of sleeping
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    let config_host = format!("http://localhost:{}", config_port);
+    let host = format!("http://localhost:{:?}", port);
 
-    let config_service = match ConfigServiceClient::connect(config_host).await {
-        Ok(config_service) => config_service,
+    let service = match ConfigServiceClient::connect(host).await {
+        Ok(srv) => srv,
         Err(e) => {
-            shutdown_config(config_process).await?;
-            bail!(
-                "{} failed to connect to config server: {}",
-                connector_end(),
-                e
-            );
+            let _ = process
+                .kill()
+                .await
+                .map_err(|_| anyhow!("failed to kill config server"));
+
+            bail!("failed to connect to config server: {}", e);
         }
     };
 
-    let mut config_service = config_service.max_decoding_message_size(10000000000);
-
-    let config_response = match config_service
-        .evaluate(EvaluateRequest {
-            system: system.into(),
-        })
-        .await
-    {
-        Ok(response) => response,
-        Err(error) => {
-            shutdown_config(config_process).await?;
-            bail!("{} failed to evaluate config: {}", connector_end(), error);
-        }
-    };
-
-    shutdown_config(config_process).await?;
-
-    Ok(config_response.into_inner().config.unwrap())
+    Ok((process, service))
 }
 
 #[derive(Subcommand)]
@@ -100,7 +70,7 @@ enum Command {
         #[arg(long, short)]
         file: String,
 
-        #[arg(default_value_t = get_default_package(), long, short)]
+        #[arg(long, short)]
         package: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
@@ -113,6 +83,9 @@ enum Command {
     Config {
         #[arg(long, short)]
         file: String,
+
+        #[arg(long, short)]
+        package: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
@@ -181,44 +154,44 @@ async fn main() -> Result<()> {
                 );
             }
 
-            let config = get_config(file.to_string(), package_system).await?;
+            let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
 
-            if !config.packages.contains_key(package) {
-                bail!("package not found: {}", package);
-            }
-
-            let (build_map, build_order) = build::load_config(&config.packages)?;
-
-            log::print_packages(&build_order);
-
-            print_build_order(&build_order);
+            let (packages_map, packages_order) =
+                build::load_config(package, &mut config_service).await?;
 
             let mut package_output = HashMap::<String, PackageOutput>::new();
 
-            for package_name in &build_order {
-                match build_map.get(package_name) {
-                    None => bail!("Package not found: {}", package_name),
+            for package in &packages_order {
+                match packages_map.get(package) {
+                    None => bail!("Build package not found: {}", package.name),
                     Some(package) => {
                         let mut packages = vec![];
 
                         for p in &package.packages {
                             match package_output.get(&p.name) {
-                                None => bail!("Package not found: {}", p.name),
+                                None => bail!("Package output not found: {}", p.name),
                                 Some(package) => packages.push(package.clone()),
                             }
                         }
 
                         let output = build(package, packages, package_system, worker).await?;
 
-                        package_output.insert(package_name.to_string(), output);
+                        package_output.insert(package.name.to_string(), output);
                     }
                 }
             }
 
-            Ok(())
+            config_process
+                .kill()
+                .await
+                .map_err(|_| anyhow!("failed to kill config server"))
         }
 
-        Command::Config { file, system } => {
+        Command::Config {
+            file,
+            package,
+            system,
+        } => {
             let package_system: PackageSystem = get_package_system(system);
 
             if package_system == UnknownSystem {
@@ -229,19 +202,14 @@ async fn main() -> Result<()> {
                 );
             }
 
-            let config = get_config(file.to_string(), package_system).await?;
+            let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
 
-            let config_json = serde_json::to_string_pretty(&config).map_err(|e| {
-                anyhow!(
-                    "{} failed to serialize config to json: {}",
-                    connector_end(),
-                    e
-                )
-            })?;
+            let _ = build::load_config(package, &mut config_service).await?;
 
-            println!("{}", config_json);
-
-            Ok(())
+            config_process
+                .kill()
+                .await
+                .map_err(|_| anyhow!("failed to kill config server"))
         }
 
         Command::Keys(keys) => match keys {
@@ -283,7 +251,7 @@ async fn main() -> Result<()> {
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber");
 
-                service::start(*port).await?;
+                service::listen(*port).await?;
 
                 Ok(())
             }

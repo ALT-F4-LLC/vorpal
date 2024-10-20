@@ -1,57 +1,92 @@
-use crate::cli::BuildConfigFn;
 use anyhow::Result;
+use sha256::digest;
+use std::collections::HashMap;
 use tonic::transport::Server;
-use tracing::info;
 use vorpal_schema::vorpal::{
     config::v0::{
         config_service_server::{ConfigService, ConfigServiceServer},
-        EvaluateRequest, EvaluateResponse,
+        Config, ConfigRequest,
     },
-    package::v0::PackageSystem,
+    package::v0::{Package, PackageOutput},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
+pub struct ContextConfig {
+    package: HashMap<String, Package>,
+}
+
+impl ContextConfig {
+    pub fn add_package(&mut self, package: Package) -> Result<PackageOutput> {
+        let package_json = serde_json::to_string(&package).map_err(|e| anyhow::anyhow!(e))?;
+
+        let package_hash = digest(package_json.as_bytes());
+
+        let package_key = format!("{}-{}", package.name, package_hash);
+
+        if !self.package.contains_key(&package_key) {
+            self.package.insert(package_key.clone(), package.clone());
+        }
+
+        let package_output = PackageOutput {
+            hash: package_hash,
+            name: package.name,
+        };
+
+        Ok(package_output)
+    }
+
+    pub fn get_package(&self, hash: &str, name: &str) -> Option<&Package> {
+        let package_key = format!("{}-{}", name, hash);
+
+        self.package.get(&package_key)
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct ConfigServer {
-    pub config: BuildConfigFn,
+    pub context: ContextConfig,
+    pub config: Config,
 }
 
 impl ConfigServer {
-    pub fn new(config: BuildConfigFn) -> Self {
-        Self { config }
+    pub fn new(context: ContextConfig, config: Config) -> Self {
+        Self { context, config }
     }
 }
 
 #[tonic::async_trait]
 impl ConfigService for ConfigServer {
-    async fn evaluate(
+    async fn get_config(
         &self,
-        request: tonic::Request<EvaluateRequest>,
-    ) -> Result<tonic::Response<EvaluateResponse>, tonic::Status> {
+        _request: tonic::Request<ConfigRequest>,
+    ) -> Result<tonic::Response<Config>, tonic::Status> {
+        Ok(tonic::Response::new(self.config.clone()))
+    }
+
+    async fn get_package(
+        &self,
+        request: tonic::Request<PackageOutput>,
+    ) -> Result<tonic::Response<Package>, tonic::Status> {
         let request = request.into_inner();
 
-        info!("received evaluate request: {:?}", request);
+        let package = self
+            .context
+            .get_package(request.hash.as_str(), request.name.as_str());
 
-        let system = PackageSystem::try_from(request.system)
-            .map_err(|e| tonic::Status::invalid_argument(format!("invalid system: {}", e)))?;
+        if package.is_none() {
+            return Err(tonic::Status::not_found("Package input not found"));
+        }
 
-        let config = (self.config)(system);
-
-        let response = EvaluateResponse {
-            config: Some(config),
-        };
-
-        Ok(tonic::Response::new(response))
+        Ok(tonic::Response::new(package.unwrap().clone()))
     }
 }
 
-pub async fn listen(config: BuildConfigFn, port: u16) -> Result<()> {
+pub async fn listen(context: ContextConfig, config: Config, port: u16) -> Result<()> {
     let addr = format!("[::]:{}", port)
         .parse()
         .expect("failed to parse address");
 
-    info!("config address: {}", addr);
-
-    let config_service = ConfigServiceServer::new(ConfigServer::new(config));
+    let config_service = ConfigServiceServer::new(ConfigServer::new(context, config));
 
     Server::builder()
         .add_service(config_service)

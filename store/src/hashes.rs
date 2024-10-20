@@ -1,7 +1,6 @@
 use crate::paths::get_file_paths;
 use anyhow::{bail, Result};
 use sha256::{digest, try_digest};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use vorpal_schema::{
     get_source_type,
@@ -48,24 +47,21 @@ pub async fn hash_files(paths: Vec<PathBuf>) -> Result<String> {
     Ok(paths_hashes_joined)
 }
 
-pub async fn get_package_hash(
-    config_hash: &str,
-    source: &HashMap<String, PackageSource>,
-) -> Result<String> {
+pub async fn get_package_hash(config_hash: &str, source: &[PackageSource]) -> Result<String> {
     let mut source_hashes = vec![config_hash.to_string()];
 
-    for (source_name, source) in source.iter() {
+    for source in source.iter() {
         let source_type = get_source_type(&source.uri);
 
         if source_type != PackageSourceKind::Local && source.hash.is_none() {
-            bail!("Package `source.{}.hash` not found for remote", source_name);
+            bail!("Package `source.{}.hash` not found for remote", source.name);
         }
 
         if source_type == PackageSourceKind::Local {
             let path = Path::new(&source.uri).to_path_buf();
 
             if !path.exists() {
-                bail!("Package `source.{}.uri` not found: {:?}", source_name, path);
+                bail!("Package `source.{}.uri` not found: {:?}", source.name, path);
             }
 
             let source_files =
@@ -77,7 +73,7 @@ pub async fn get_package_hash(
                 if hash != source_hash {
                     bail!(
                         "Package `source.{}.hash` mismatch: {} != {}",
-                        source_name,
+                        source.name,
                         hash,
                         source_hash
                     );

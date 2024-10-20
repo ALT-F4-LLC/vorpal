@@ -1,6 +1,8 @@
-use crate::vorpal::package::v0::PackageSystem;
-use crate::vorpal::package::v0::PackageSystem::{
-    Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos,
+use crate::vorpal::package::v0::{
+    PackageSourceKind,
+    PackageSourceKind::{Git, Http, Local, UnknownKind},
+    PackageSystem,
+    PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 use std::path::Path;
 
@@ -46,15 +48,15 @@ impl PackageTarget for PackageSystem {
     }
 }
 
-pub fn get_package_system<T: PackageTarget>(system: &str) -> T {
-    T::from_str(system)
+pub fn get_package_system<T: PackageTarget>(target: &str) -> T {
+    T::from_str(target)
 }
 
-pub fn get_source_type(source_uri: &str) -> vorpal::package::v0::PackageSourceKind {
+pub fn get_source_type(source_uri: &str) -> PackageSourceKind {
     match source_uri {
-        uri if Path::new(&uri).exists() => vorpal::package::v0::PackageSourceKind::Local,
-        uri if uri.starts_with("git") => vorpal::package::v0::PackageSourceKind::Git,
-        uri if uri.starts_with("http") => vorpal::package::v0::PackageSourceKind::Http,
-        _ => vorpal::package::v0::PackageSourceKind::UnknownKind,
+        uri if Path::new(&uri).exists() => Local,
+        uri if uri.starts_with("git") => Git,
+        uri if uri.starts_with("http") => Http,
+        _ => UnknownKind,
     }
 }

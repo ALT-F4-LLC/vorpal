@@ -4,7 +4,6 @@ use crate::log::{
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
-use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, rename, write, File};
 use tokio::io::AsyncWriteExt;
@@ -38,25 +37,22 @@ pub async fn build(
     target: PackageSystem,
     worker: &str,
 ) -> Result<PackageOutput> {
-    let package_sorted = Package {
-        environment: package
-            .environment
-            .clone()
-            .into_iter()
-            .collect::<HashMap<_, _>>(),
-        name: package.name.clone(),
-        sandbox: package.sandbox,
-        packages: package.packages.clone().into_iter().collect::<Vec<_>>(),
-        script: package.script.clone(),
-        source: package
-            .source
-            .clone()
-            .into_iter()
-            .collect::<HashMap<_, _>>(),
-        systems: package.systems.clone().into_iter().collect::<Vec<_>>(),
-    };
+    // let package_sorted = Package {
+    //     environment: package
+    //         .environmen,
+    //     name: package.name.clone(),
+    //     sandbox: package.sandbox,
+    //     packages: package.packages.clone().into_iter().collect::<Vec<_>>(),
+    //     script: package.script.clone(),
+    //     source: package
+    //         .source
+    //         .clone()
+    //         .into_iter()
+    //         .collect::<HashMap<_, _>>(),
+    //     systems: package.systems.clone().into_iter().collect::<Vec<_>>(),
+    // };
 
-    let package_json = serde_json::to_value(package_sorted).expect("failed to serialize package");
+    let package_json = serde_json::to_value(package).expect("failed to serialize package");
 
     let package_config = package_json.to_string();
 
@@ -193,8 +189,8 @@ pub async fn build(
                 if !archive_path.exists() {
                     let sandbox_path = create_temp_dir().await?;
 
-                    for (source_name, source) in package.source.iter() {
-                        let sandbox_source_path = sandbox_path.join(source_name);
+                    for source in package.source.iter() {
+                        let sandbox_source_path = sandbox_path.join(source.name.clone());
 
                         create_dir_all(&sandbox_source_path)
                             .await
@@ -432,11 +428,7 @@ pub async fn build(
 
         for chunk in source_data.chunks(DEFAULT_CHUNKS_SIZE) {
             request_stream.push(BuildRequest {
-                environment: package
-                    .environment
-                    .clone()
-                    .into_iter()
-                    .collect::<HashMap<_, _>>(),
+                environment: package.environment.clone(),
                 name: package.name.clone(),
                 packages: packages.clone(),
                 sandbox: package.sandbox,
@@ -449,11 +441,7 @@ pub async fn build(
         }
     } else {
         request_stream.push(BuildRequest {
-            environment: package
-                .environment
-                .clone()
-                .into_iter()
-                .collect::<HashMap<_, _>>(),
+            environment: package.environment.clone(),
             name: package.name.clone(),
             packages: packages.clone(),
             sandbox: package.sandbox,

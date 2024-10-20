@@ -1,8 +1,8 @@
-use crate::cross_platform::get_sed_cmd;
+use crate::{cross_platform::get_sed_cmd, ContextConfig};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageSystem,
+    Package, PackageEnvironment, PackageOutput, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
@@ -33,18 +33,23 @@ pub mod rustc;
 #[allow(clippy::too_many_arguments)]
 fn add_default_environment(
     package: Package,
-    bash: Option<Package>,
-    binutils: Option<Package>,
-    gcc: Option<Package>,
-    glibc: Option<Package>,
-    libstdcpp: Option<Package>,
-    linux_headers: Option<Package>,
-    ncurses: Option<Package>,
-    zlib: Option<Package>,
+    bash: Option<&PackageOutput>,
+    binutils: Option<&PackageOutput>,
+    gcc: Option<&PackageOutput>,
+    glibc: Option<&PackageOutput>,
+    libstdcpp: Option<&PackageOutput>,
+    linux_headers: Option<&PackageOutput>,
+    ncurses: Option<&PackageOutput>,
+    zlib: Option<&PackageOutput>,
 ) -> Package {
-    let mut environment = package.environment.clone();
+    let mut environment = vec![];
 
-    environment.insert("LC_ALL".to_string(), "C".to_string());
+    let lc_all = PackageEnvironment {
+        key: "LC_ALL".to_string(),
+        value: "C".to_string(),
+    };
+
+    environment.push(lc_all);
 
     let c_include_path_key = "C_INCLUDE_PATH".to_string();
     let cppflags_key = "CPPFLAGS".to_string();
@@ -52,31 +57,6 @@ fn add_default_environment(
     let ldflags_key = "LDFLAGS".to_string();
     let library_path_key = "LIBRARY_PATH".to_string();
     let pkg_config_path_key = "PKG_CONFIG_PATH".to_string();
-
-    let mut c_include_path = environment
-        .get(&c_include_path_key)
-        .unwrap_or(&"".to_string())
-        .clone();
-    let mut cppflags = environment
-        .get(&cppflags_key)
-        .unwrap_or(&"".to_string())
-        .clone();
-    let mut ldflags = environment
-        .get(&ldflags_key)
-        .unwrap_or(&"".to_string())
-        .clone();
-    let mut ld_library_path = environment
-        .get(&ld_library_path_key)
-        .unwrap_or(&"".to_string())
-        .clone();
-    let mut library_path = environment
-        .get(&library_path_key)
-        .unwrap_or(&"".to_string())
-        .clone();
-    let mut pkg_config_path = environment
-        .get(&pkg_config_path_key)
-        .unwrap_or(&"".to_string())
-        .clone();
 
     let mut c_include_paths = vec![];
     let mut cppflags_args = vec![];
@@ -128,8 +108,18 @@ fn add_default_environment(
         let gcc_key = "GCC".to_string();
         let gcc_path = format!("{}/bin/gcc", env_key);
 
-        environment.insert(cc_key.clone(), gcc_path.clone());
-        environment.insert(gcc_key.clone(), gcc_path);
+        let cc = PackageEnvironment {
+            key: cc_key.clone(),
+            value: gcc_path.clone(),
+        };
+
+        let gcc = PackageEnvironment {
+            key: gcc_key.clone(),
+            value: gcc_path.clone(),
+        };
+
+        environment.push(cc);
+        environment.push(gcc);
     }
 
     if let Some(glibc) = glibc {
@@ -199,43 +189,124 @@ fn add_default_environment(
     let library_paths = library_paths.join(":");
     let pkg_config_paths = pkg_config_paths.join(":");
 
-    if !c_include_path.is_empty() {
-        c_include_path.insert(c_include_path.len(), ':');
+    let mut c_include_path = package
+        .environment
+        .iter()
+        .find(|env| env.key == c_include_path_key)
+        .unwrap_or(&PackageEnvironment {
+            key: c_include_path_key.clone(),
+            value: "".to_string(),
+        })
+        .clone();
+
+    let mut cppflags = package
+        .environment
+        .iter()
+        .find(|env| env.key == cppflags_key)
+        .unwrap_or(&PackageEnvironment {
+            key: cppflags_key.clone(),
+            value: "".to_string(),
+        })
+        .clone();
+
+    let mut ldflags = package
+        .environment
+        .iter()
+        .find(|env| env.key == ldflags_key)
+        .unwrap_or(&PackageEnvironment {
+            key: ldflags_key.clone(),
+            value: "".to_string(),
+        })
+        .clone();
+
+    let mut ld_library_path = package
+        .environment
+        .iter()
+        .find(|env| env.key == ld_library_path_key)
+        .unwrap_or(&PackageEnvironment {
+            key: ld_library_path_key.clone(),
+            value: "".to_string(),
+        })
+        .clone();
+
+    let mut library_path = package
+        .environment
+        .iter()
+        .find(|env| env.key == library_path_key)
+        .unwrap_or(&PackageEnvironment {
+            key: library_path_key.clone(),
+            value: "".to_string(),
+        })
+        .clone();
+
+    let mut pkg_config_path = package
+        .environment
+        .iter()
+        .find(|env| env.key == pkg_config_path_key)
+        .unwrap_or(&PackageEnvironment {
+            key: pkg_config_path_key.clone(),
+            value: "".to_string(),
+        })
+        .clone();
+
+    if !c_include_path.value.is_empty() {
+        c_include_path.value.insert(c_include_path.value.len(), ':');
     }
 
-    if !cppflags.is_empty() {
-        cppflags.insert(cppflags.len(), ' ');
+    if !cppflags.value.is_empty() {
+        cppflags.value.insert(cppflags.value.len(), ' ');
     }
 
-    if !ld_library_path.is_empty() {
-        ld_library_path.insert(ld_library_path.len(), ':');
+    if !ld_library_path.value.is_empty() {
+        ld_library_path
+            .value
+            .insert(ld_library_path.value.len(), ':');
     }
 
-    if !ldflags.is_empty() {
-        ldflags.insert(ldflags.len(), ' ');
+    if !ldflags.value.is_empty() {
+        ldflags.value.insert(ldflags.value.len(), ' ');
     }
 
-    if !library_path.is_empty() {
-        library_path.insert(library_path.len(), ':');
+    if !library_path.value.is_empty() {
+        library_path.value.insert(library_path.value.len(), ':');
     }
 
-    if !pkg_config_path.is_empty() {
-        pkg_config_path.insert(pkg_config_path.len(), ':');
+    if !pkg_config_path.value.is_empty() {
+        pkg_config_path
+            .value
+            .insert(pkg_config_path.value.len(), ':');
     }
 
-    c_include_path.insert_str(c_include_path.len(), c_include_paths.as_str());
-    cppflags.insert_str(cppflags.len(), cppflags_args.as_str());
-    ld_library_path.insert_str(ld_library_path.len(), ld_library_paths.as_str());
-    ldflags.insert_str(ldflags.len(), ldflags_args.as_str());
-    library_path.insert_str(library_path.len(), library_paths.as_str());
-    pkg_config_path.insert_str(pkg_config_path.len(), pkg_config_paths.as_str());
+    c_include_path
+        .value
+        .insert_str(c_include_path.value.len(), c_include_paths.as_str());
 
-    environment.insert(c_include_path_key.clone(), c_include_path);
-    environment.insert(cppflags_key.clone(), cppflags);
-    environment.insert(ld_library_path_key.clone(), ld_library_path);
-    environment.insert(ldflags_key.clone(), ldflags);
-    environment.insert(library_path_key.clone(), library_path);
-    environment.insert(pkg_config_path_key.clone(), pkg_config_path);
+    cppflags
+        .value
+        .insert_str(cppflags.value.len(), cppflags_args.as_str());
+
+    ld_library_path
+        .value
+        .insert_str(ld_library_path.value.len(), ld_library_paths.as_str());
+
+    ldflags
+        .value
+        .insert_str(ldflags.value.len(), ldflags_args.as_str());
+
+    library_path
+        .value
+        .insert_str(library_path.value.len(), library_paths.as_str());
+
+    pkg_config_path
+        .value
+        .insert_str(pkg_config_path.value.len(), pkg_config_paths.as_str());
+
+    environment.push(c_include_path);
+    environment.push(cppflags);
+    environment.push(ld_library_path);
+    environment.push(ldflags);
+    environment.push(library_path);
+    environment.push(pkg_config_path);
 
     Package {
         environment,
@@ -251,86 +322,86 @@ fn add_default_environment(
 #[allow(clippy::too_many_arguments)]
 pub fn add_default_packages(
     package: Package,
-    system: PackageSystem,
-    bash: Package,
-    binutils: Option<Package>,
-    coreutils: Package,
-    diffutils: Option<Package>,
-    file: Option<Package>,
-    findutils: Option<Package>,
-    gawk: Option<Package>,
-    gcc: Option<Package>,
-    glibc: Option<Package>,
-    grep: Option<Package>,
-    gzip: Option<Package>,
-    libstdcpp: Option<Package>,
-    linux_headers: Option<Package>,
-    m4: Option<Package>,
-    ncurses: Option<Package>,
-    patchelf: Option<Package>,
-    zlib: Option<Package>,
+    target: PackageSystem,
+    bash: &PackageOutput,
+    binutils: Option<&PackageOutput>,
+    coreutils: &PackageOutput,
+    diffutils: Option<&PackageOutput>,
+    file: Option<&PackageOutput>,
+    findutils: Option<&PackageOutput>,
+    gawk: Option<&PackageOutput>,
+    gcc: Option<&PackageOutput>,
+    glibc: Option<&PackageOutput>,
+    grep: Option<&PackageOutput>,
+    gzip: Option<&PackageOutput>,
+    libstdcpp: Option<&PackageOutput>,
+    linux_headers: Option<&PackageOutput>,
+    m4: Option<&PackageOutput>,
+    ncurses: Option<&PackageOutput>,
+    patchelf: Option<&PackageOutput>,
+    zlib: Option<&PackageOutput>,
 ) -> Result<Package> {
-    let mut packages = vec![bash.clone(), coreutils];
+    let mut packages = vec![bash.clone(), coreutils.clone()];
 
-    if system == Aarch64Linux || system == X8664Linux {
+    if target == Aarch64Linux || target == X8664Linux {
         if let Some(binutils) = binutils {
-            packages.push(binutils);
+            packages.push(binutils.clone());
         }
 
         if let Some(diffutils) = diffutils {
-            packages.push(diffutils);
+            packages.push(diffutils.clone());
         }
 
         if let Some(file) = file {
-            packages.push(file);
+            packages.push(file.clone());
         }
 
         if let Some(findutils) = findutils {
-            packages.push(findutils);
+            packages.push(findutils.clone());
         }
 
         if let Some(gawk) = gawk {
-            packages.push(gawk);
+            packages.push(gawk.clone());
         }
 
         if let Some(gcc) = gcc {
-            packages.push(gcc);
+            packages.push(gcc.clone());
         }
 
         if let Some(glibc) = glibc {
-            packages.push(glibc);
+            packages.push(glibc.clone());
         }
 
         if let Some(grep) = grep {
-            packages.push(grep);
+            packages.push(grep.clone());
         }
 
         if let Some(gzip) = gzip {
-            packages.push(gzip);
+            packages.push(gzip.clone());
         }
 
         if let Some(libstdcpp) = libstdcpp {
-            packages.push(libstdcpp);
+            packages.push(libstdcpp.clone());
         }
 
         if let Some(linux_headers) = linux_headers {
-            packages.push(linux_headers);
+            packages.push(linux_headers.clone());
         }
 
         if let Some(m4) = m4 {
-            packages.push(m4);
+            packages.push(m4.clone());
         }
 
         if let Some(ncurses) = ncurses {
-            packages.push(ncurses);
+            packages.push(ncurses.clone());
         }
 
         if let Some(patchelf) = patchelf {
-            packages.push(patchelf);
+            packages.push(patchelf.clone());
         }
 
         if let Some(zlib) = zlib {
-            packages.push(zlib);
+            packages.push(zlib.clone());
         }
     }
 
@@ -365,7 +436,7 @@ pub fn add_default_packages(
 pub fn add_default_script(
     package: Package,
     system: PackageSystem,
-    glibc: Option<Package>,
+    glibc: Option<&PackageOutput>,
 ) -> Result<Package> {
     let mut script = package.script.clone();
 
@@ -440,22 +511,19 @@ pub fn add_default_script(
     })
 }
 
-pub fn build_package(package: Package, target: PackageSystem) -> Result<Package> {
+pub fn build_package(
+    context: &mut ContextConfig,
+    package: Package,
+    target: PackageSystem,
+) -> Result<PackageOutput> {
     let mut package = package.clone();
 
-    let mut bash = bash_stage_01::package(target, None, None, None, None, None, None, None, None)?;
+    let mut bash = bash_stage_01::package(
+        context, target, None, None, None, None, None, None, None, None,
+    )?;
 
     let mut coreutils = coreutils_stage_01::package(
-        target,
-        bash.clone(),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        context, target, &bash, None, None, None, None, None, None, None, None,
     )?;
 
     let mut binutils = None;
@@ -475,201 +543,214 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
     let mut zlib = None;
 
     if target == Aarch64Linux || target == X8664Linux {
-        let zlib_package = zlib_stage_01::package(target)?;
+        let zlib_package = zlib_stage_01::package(context, target)?;
 
-        let binutils_package = binutils_stage_01::package(target, zlib_package.clone())?;
+        let binutils_package = binutils_stage_01::package(context, target, &zlib_package)?;
 
-        let gcc_package =
-            gcc_stage_01::package(target, binutils_package.clone(), zlib_package.clone())?;
+        let gcc_package = gcc_stage_01::package(context, target, &binutils_package, &zlib_package)?;
 
         let linux_headers_package = linux_headers::package(
+            context,
             target,
-            binutils_package.clone(),
-            gcc_package.clone(),
-            zlib_package.clone(),
+            &binutils_package,
+            &gcc_package,
+            &zlib_package,
         )?;
 
         let glibc_package = glibc_stage_01::package(
+            context,
             target,
-            binutils_package.clone(),
-            gcc_package.clone(),
-            linux_headers_package.clone(),
-            zlib_package.clone(),
+            &binutils_package,
+            &gcc_package,
+            &linux_headers_package,
+            &zlib_package,
         )?;
 
         let libstdcpp_package = libstdcpp_stage_01::package(
+            context,
             target,
-            binutils_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            linux_headers_package.clone(),
-            zlib_package.clone(),
+            &binutils_package,
+            &gcc_package,
+            &glibc_package,
+            &linux_headers_package,
+            &zlib_package,
         )?;
 
         let m4_package = m4_stage_01::package(
+            context,
             target,
-            binutils_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            zlib_package.clone(),
+            &binutils_package,
+            &gcc_package,
+            &glibc_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &zlib_package,
         )?;
 
         let ncurses_package = ncurses_stage_01::package(
+            context,
             target,
-            binutils_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            m4_package.clone(),
-            zlib_package.clone(),
+            &binutils_package,
+            &gcc_package,
+            &glibc_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &zlib_package,
         )?;
 
         let bash_package = bash_stage_01::package(
+            context,
             target,
-            Some(binutils_package.clone()),
-            Some(gcc_package.clone()),
-            Some(glibc_package.clone()),
-            Some(libstdcpp_package.clone()),
-            Some(linux_headers_package.clone()),
-            Some(m4_package.clone()),
-            Some(ncurses_package.clone()),
-            Some(zlib_package.clone()),
+            Some(&binutils_package),
+            Some(&gcc_package),
+            Some(&glibc_package),
+            Some(&libstdcpp_package),
+            Some(&linux_headers_package),
+            Some(&m4_package),
+            Some(&ncurses_package),
+            Some(&zlib_package),
         )?;
 
         let coreutils_package = coreutils_stage_01::package(
+            context,
             target,
-            bash_package.clone(),
-            Some(binutils_package.clone()),
-            Some(gcc_package.clone()),
-            Some(glibc_package.clone()),
-            Some(libstdcpp_package.clone()),
-            Some(linux_headers_package.clone()),
-            Some(m4_package.clone()),
-            Some(ncurses_package.clone()),
-            Some(zlib_package.clone()),
+            &bash_package,
+            Some(&binutils_package),
+            Some(&gcc_package),
+            Some(&glibc_package),
+            Some(&libstdcpp_package),
+            Some(&linux_headers_package),
+            Some(&m4_package),
+            Some(&ncurses_package),
+            Some(&zlib_package),
         )?;
 
         let diffutils_package = diffutils_stage_01::package(
+            context,
             target,
-            bash.clone(),
-            binutils_package.clone(),
-            coreutils_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            m4_package.clone(),
-            ncurses_package.clone(),
-            zlib_package.clone(),
+            &bash,
+            &binutils_package,
+            &coreutils_package,
+            &gcc_package,
+            &glibc_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &ncurses_package,
+            &zlib_package,
         )?;
 
         let file_package = file_stage_01::package(
+            context,
             target,
-            bash.clone(),
-            binutils_package.clone(),
-            coreutils_package.clone(),
-            diffutils_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            m4_package.clone(),
-            ncurses_package.clone(),
-            zlib_package.clone(),
+            &bash,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &gcc_package,
+            &glibc_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &ncurses_package,
+            &zlib_package,
         )?;
 
         let findutils_package = findutils_stage_01::package(
+            context,
             target,
-            bash.clone(),
-            binutils_package.clone(),
-            coreutils_package.clone(),
-            file_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            m4_package.clone(),
-            ncurses_package.clone(),
-            zlib_package.clone(),
+            &bash,
+            &binutils_package,
+            &coreutils_package,
+            &file_package,
+            &gcc_package,
+            &glibc_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &ncurses_package,
+            &zlib_package,
         )?;
 
         let gawk_package = gawk_stage_01::package(
+            context,
             target,
-            bash.clone(),
-            binutils_package.clone(),
-            coreutils_package.clone(),
-            file_package.clone(),
-            findutils_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            m4_package.clone(),
-            ncurses_package.clone(),
-            zlib_package.clone(),
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &file_package,
+            &findutils_package,
+            &gcc_package,
+            &glibc_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &ncurses_package,
+            &zlib_package,
         )?;
 
         let grep_package = grep_stage_01::package(
+            context,
             target,
-            bash.clone(),
-            binutils_package.clone(),
-            coreutils_package.clone(),
-            diffutils_package.clone(),
-            file_package.clone(),
-            findutils_package.clone(),
-            gawk_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            m4_package.clone(),
-            ncurses_package.clone(),
-            zlib_package.clone(),
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &ncurses_package,
+            &zlib_package,
         )?;
 
         let gzip_package = gzip_stage_01::package(
+            context,
             target,
-            bash.clone(),
-            binutils_package.clone(),
-            coreutils_package.clone(),
-            diffutils_package.clone(),
-            file_package.clone(),
-            findutils_package.clone(),
-            gawk_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            grep_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            m4_package.clone(),
-            ncurses_package.clone(),
-            zlib_package.clone(),
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &ncurses_package,
+            &zlib_package,
         )?;
 
         let patchelf_package = patchelf_stage_01::package(
+            context,
             target,
-            bash_package.clone(),
-            binutils_package.clone(),
-            coreutils_package.clone(),
-            diffutils_package.clone(),
-            file_package.clone(),
-            findutils_package.clone(),
-            gawk_package.clone(),
-            gcc_package.clone(),
-            glibc_package.clone(),
-            grep_package.clone(),
-            gzip_package.clone(),
-            libstdcpp_package.clone(),
-            linux_headers_package.clone(),
-            m4_package.clone(),
-            ncurses_package.clone(),
-            zlib_package.clone(),
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &findutils_package,
+            &file_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &ncurses_package,
+            &zlib_package,
         )?;
 
-        bash = bash_package.clone();
+        bash = bash_package;
         coreutils = coreutils_package.clone();
 
         binutils = Some(binutils_package);
@@ -691,41 +772,41 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
 
     package = add_default_environment(
         package,
-        Some(bash.clone()),
-        binutils.clone(),
-        gcc.clone(),
-        glibc.clone(),
-        libstdcpp.clone(),
-        linux_headers.clone(),
-        ncurses.clone(),
-        zlib.clone(),
+        Some(&bash),
+        binutils.as_ref(),
+        gcc.as_ref(),
+        glibc.as_ref(),
+        libstdcpp.as_ref(),
+        linux_headers.as_ref(),
+        ncurses.as_ref(),
+        zlib.as_ref(),
     );
 
     package = add_default_packages(
         package,
         target,
-        bash,
-        binutils,
-        coreutils,
-        diffutils,
-        file,
-        findutils,
-        gawk,
-        gcc,
-        glibc.clone(),
-        grep,
-        gzip,
-        libstdcpp,
-        linux_headers,
-        m4,
-        ncurses,
-        patchelf,
-        zlib,
+        &bash,
+        binutils.as_ref(),
+        &coreutils,
+        diffutils.as_ref(),
+        file.as_ref(),
+        findutils.as_ref(),
+        gawk.as_ref(),
+        gcc.as_ref(),
+        glibc.as_ref(),
+        grep.as_ref(),
+        gzip.as_ref(),
+        libstdcpp.as_ref(),
+        linux_headers.as_ref(),
+        m4.as_ref(),
+        ncurses.as_ref(),
+        patchelf.as_ref(),
+        zlib.as_ref(),
     )?;
 
-    package = add_default_script(package, target, glibc)?;
+    package = add_default_script(package, target, glibc.as_ref())?;
 
-    Ok(Package {
+    package = Package {
         environment: package.environment,
         name: package.name,
         packages: package.packages,
@@ -733,5 +814,7 @@ pub fn build_package(package: Package, target: PackageSystem) -> Result<Package>
         script: package.script,
         source: package.source,
         systems: package.systems,
-    })
+    };
+
+    context.add_package(package.clone())
 }

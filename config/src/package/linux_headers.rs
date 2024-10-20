@@ -1,18 +1,21 @@
-use crate::package::{add_default_environment, add_default_script};
+use crate::{
+    package::{add_default_environment, add_default_script},
+    ContextConfig,
+};
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::HashMap;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
 pub fn package(
+    context: &mut ContextConfig,
     target: PackageSystem,
-    binutils: Package,
-    gcc: Package,
-    zlib: Package,
-) -> Result<Package> {
+    binutils: &PackageOutput,
+    gcc: &PackageOutput,
+    zlib: &PackageOutput,
+) -> Result<PackageOutput> {
     let name = "linux-headers";
 
     let script = formatdoc! {"
@@ -35,17 +38,18 @@ pub fn package(
         excludes: vec![],
         hash: Some("3fa3f4f3d010de5b9bde09d08a251fa3ef578d356d3a7a29b6784a6916ea0d50".to_string()),
         includes: vec![],
+        name: name.to_string(),
         strip_prefix: true,
         uri: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.10.8.tar.xz".to_string(),
     };
 
     let package = Package {
-        environment: HashMap::new(),
+        environment: vec![],
         name: name.to_string(),
         packages: vec![binutils.clone(), gcc.clone(), zlib.clone()],
         sandbox: false,
         script,
-        source: HashMap::from([(name.to_string(), source)]),
+        source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
@@ -63,5 +67,7 @@ pub fn package(
 
     let package = add_default_script(package, target, None)?;
 
-    Ok(package)
+    let package_output = context.add_package(package)?;
+
+    Ok(package_output)
 }

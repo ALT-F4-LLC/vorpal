@@ -56,7 +56,7 @@ pub async fn run(
     request: Request<Streaming<BuildRequest>>,
     tx: &Sender<Result<BuildResponse, Status>>,
 ) -> Result<()> {
-    let mut package_environment = HashMap::new();
+    let mut package_environment = vec![];
     let mut package_name = String::new();
     let mut package_packages = vec![];
     let mut package_sandbox = true;
@@ -208,8 +208,8 @@ pub async fn run(
     let mut env_vars = HashMap::new();
     let mut build_packages = vec![];
 
-    for (key, value) in package_environment.clone() {
-        env_vars.insert(key, value);
+    for env in package_environment.clone() {
+        env_vars.insert(env.key, env.value);
     }
 
     for p in package_packages.iter() {

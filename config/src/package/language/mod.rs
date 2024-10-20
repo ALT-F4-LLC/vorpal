@@ -1,8 +1,10 @@
-use crate::package::{build_package, cargo, get_sed_cmd, protoc, rustc};
+use crate::{
+    package::{build_package, cargo, get_sed_cmd, protoc, rustc},
+    ContextConfig,
+};
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::HashMap;
-use vorpal_schema::vorpal::package::v0::{Package, PackageSource, PackageSystem};
+use vorpal_schema::vorpal::package::v0::{Package, PackageOutput, PackageSource, PackageSystem};
 
 pub struct PackageRust<'a> {
     pub cargo_hash: &'a str,
@@ -12,10 +14,14 @@ pub struct PackageRust<'a> {
     pub systems: Vec<PackageSystem>,
 }
 
-pub fn build_rust_package(package: PackageRust, target: PackageSystem) -> Result<Package> {
-    let cargo = cargo::package(target)?;
-    let rustc = rustc::package(target)?;
-    let protoc = protoc::package(target)?;
+pub fn build_rust_package(
+    context: &mut ContextConfig,
+    package: PackageRust,
+    target: PackageSystem,
+) -> Result<PackageOutput> {
+    let cargo = cargo::package(context, target)?;
+    let rustc = rustc::package(context, target)?;
+    let protoc = protoc::package(context, target)?;
 
     let systems = package
         .systems
@@ -66,18 +72,20 @@ pub fn build_rust_package(package: PackageRust, target: PackageSystem) -> Result
             "store/Cargo.toml".to_string(),
             "worker/Cargo.toml".to_string(),
         ],
+        name: package.name.to_string(),
         strip_prefix: false,
         uri: package.source.to_string(),
     };
 
     let package_cache = build_package(
+        context,
         Package {
-            environment: HashMap::new(),
+            environment: vec![],
             name: format!("{}-cache", package.name),
             packages: vec![cargo.clone(), rustc.clone()],
             sandbox: true,
             script: package_cache_script,
-            source: HashMap::from([(package.name.to_string(), package_cache_source)]),
+            source: vec![package_cache_source],
             systems: systems.clone(),
         },
         target,
@@ -94,8 +102,7 @@ pub fn build_rust_package(package: PackageRust, target: PackageSystem) -> Result
         cargo test --offline --release
 
         mkdir -p \"$output/bin\"
-        cp -pr target/release/{name} $output/bin/{name}
-        ",
+        cp -pr target/release/{name} $output/bin/{name}",
         name = package.name,
         name_envkey = package_name_envkey,
     };
@@ -109,22 +116,21 @@ pub fn build_rust_package(package: PackageRust, target: PackageSystem) -> Result
     package_excludes.extend(package.source_excludes.iter().map(|e| e.to_string()));
 
     let package = build_package(
+        context,
         Package {
-            environment: HashMap::new(),
+            environment: vec![],
             name: package.name.to_string(),
             packages: vec![cargo, rustc, protoc, package_cache],
             sandbox: true,
             script: package_script,
-            source: HashMap::from([(
-                package.name.to_string(),
-                PackageSource {
-                    excludes: package_excludes,
-                    hash: None,
-                    includes: vec![],
-                    strip_prefix: false,
-                    uri: package.source.to_string(),
-                },
-            )]),
+            source: vec![PackageSource {
+                excludes: package_excludes,
+                hash: None,
+                includes: vec![],
+                name: package.name.to_string(),
+                strip_prefix: false,
+                uri: package.source.to_string(),
+            }],
             systems,
         },
         target,
