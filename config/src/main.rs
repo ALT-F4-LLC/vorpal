@@ -21,7 +21,7 @@ fn build_config(context: &mut ContextConfig, target: PackageSystem) -> Result<Co
     // TODO: add any custom logic you want here
 
     let vorpal_config = PackageRust {
-        cargo_hash: "38c665871adcb33761b255945fab59be4a225d8ff14834d2c3924a99aec49630",
+        cargo_hash: "a763b89e7a0fa55e18aba19b797fb47a556814f02b858b1d9142fa60d473a88f",
         name: "vorpal",
         source: ".",
         source_excludes: vec![".env", ".packer", ".vagrant", "script"],

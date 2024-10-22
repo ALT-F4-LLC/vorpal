@@ -92,7 +92,7 @@ pub fn package(
         Some(zlib),
     );
 
-    let package = add_default_script(package, target, Some(file), Some(glibc))?;
+    let package = add_default_script(package, target, Some(glibc))?;
 
     let package_input = context.add_package(package)?;
 

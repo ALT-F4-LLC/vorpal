@@ -504,67 +504,18 @@ pub fn add_default_packages(
 pub fn add_default_script(
     package: Package,
     system: PackageSystem,
-    file: Option<&PackageOutput>,
     glibc: Option<&PackageOutput>,
 ) -> Result<Package> {
     let mut script = package.script.clone();
 
     // TODO: add option for enabling or disabling rpath patches
 
-    let mut file_cmd = "file".to_string();
-
-    if let Some(file) = file {
-        let file_env = format!("${}", file.name.to_lowercase().replace("-", "_"));
-        let file_args = format!("--magic-file {}/share/misc/magic.mgc", file_env);
-
-        file_cmd = format!("{}/bin/file {}", file_env, file_args);
-    }
-
     let script_paths = formatdoc! {"
         find \"$output\" -type f | while read -r file; do
-            if {file} \"$file\" | grep -q 'text'; then
-                echo \"Patching text: $file\"
-
-                {sed} \"s|$output|${envkey}|g\" \"$file\"
-
+            if file \"$file\" | grep -q 'text'; then
                 {sed} \"s|$PWD|${envkey}|g\" \"$file\"
-
-                echo \"Patched text: $file\"
-            fi
-
-            if {file} \"$file\" | grep -q 'interpreter'; then
-                pkg_rpath_new=\"\"
-
-                for pkg in $packages; do
-                    if [ -d \"$pkg/lib\" ]; then
-                        pkg_rpath_new=\"$pkg_rpath_new:$pkg/lib\"
-                    fi
-
-                    if [ -d \"$pkg/lib64\" ]; then
-                        pkg_rpath_new=\"$pkg_rpath_new:$pkg/lib64\"
-                    fi
-                done
-
-                if [ -d \"$output/lib\" ]; then
-                    pkg_rpath_new=\"$pkg_rpath_new:${envkey}/lib\"
-                fi
-
-                if [ -d \"$output/lib64\" ]; then
-                    pkg_rpath_new=\"$pkg_rpath_new:${envkey}/lib64\"
-                fi
-
-                if [ \"$pkg_rpath_new\" != \"\" ]; then
-                    pkg_rpath=\"$(patchelf --print-rpath \"$file\")\"
-
-                    echo \"Patching rpath: $pkg_rpath -> $pkg_rpath_new\"
-
-                    patchelf --set-rpath \"$pkg_rpath_new\" \"$file\"
-
-                    echo \"Patched rpath: $(patchelf --print-rpath $file)\"
-                fi
             fi
         done",
-        file = file_cmd,
         envkey = package.name.to_lowercase().replace("-", "_"),
         sed = get_sed_cmd(system)?,
     };
@@ -580,14 +531,13 @@ pub fn add_default_script(
 
         let script_glibc = formatdoc! {"
             find \"$output\" -type f | while read -r file; do
-                if {file} \"$file\" | grep -q 'interpreter'; then
+                if file \"$file\" | grep -q 'interpreter'; then
                     echo \"Patching interpreter: $file -> ${glibc}/lib/ld-linux-{arch}.so.1\"
 
                     \"patchelf\" --set-interpreter \"${glibc}/lib/ld-linux-{arch}.so.1\" \"$file\"
                 fi
             done",
             arch = script_arch,
-            file = file_cmd,
             glibc = glibc.name.to_lowercase().replace("-", "_"),
         };
 
@@ -1280,7 +1230,7 @@ pub fn build_package(
         zlib.as_ref(),
     )?;
 
-    package = add_default_script(package, target, file.as_ref(), glibc.as_ref())?;
+    package = add_default_script(package, target, glibc.as_ref())?;
 
     package = Package {
         environment: package.environment,

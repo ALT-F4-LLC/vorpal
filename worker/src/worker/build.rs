@@ -15,7 +15,7 @@ use std::{
 };
 use tera::Tera;
 use tokio::{
-    fs::{create_dir_all, set_permissions, write},
+    fs::{create_dir_all, remove_file, set_permissions, write},
     io::{AsyncBufReadExt, BufReader},
     sync::mpsc::Sender,
 };
@@ -36,8 +36,8 @@ use vorpal_schema::{
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
-        copy_files, get_file_paths, get_package_archive_path, get_package_path,
-        get_public_key_path, get_source_archive_path, get_source_path,
+        copy_files, get_file_paths, get_package_archive_path, get_package_lock_path,
+        get_package_path, get_public_key_path, get_source_archive_path, get_source_path,
     },
 };
 
@@ -52,7 +52,7 @@ async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Res
 }
 
 pub async fn run(
-    build_path: &Path,
+    sandbox_path: &Path,
     request: Request<Streaming<BuildRequest>>,
     tx: &Sender<Result<BuildResponse, Status>>,
 ) -> Result<()> {
@@ -67,6 +67,8 @@ pub async fn run(
     let mut package_source_hash = String::new();
     let mut package_target = UnknownSystem;
     let mut request_stream = request.into_inner();
+
+    // Parse request stream
 
     while let Some(result) = request_stream.next().await {
         let result = result.map_err(|err| anyhow!("failed to parse request: {:?}", err))?;
@@ -87,6 +89,8 @@ pub async fn run(
             .map_err(|err| anyhow!("failed to parse target: {:?}", err))?;
     }
 
+    // Check if required fields are present
+
     if package_name.is_empty() {
         bail!("'name' missing in configuration")
     }
@@ -103,12 +107,22 @@ pub async fn run(
         bail!("'target' missing in configuration")
     }
 
+    // Check if worker target matches package target
+
     let worker_system = format!("{}-{}", ARCH, OS);
 
     let worker_target = get_package_system::<PackageSystem>(worker_system.as_str());
 
     if package_target != worker_target {
         bail!("'target' mismatch")
+    }
+
+    // Check if package is locked
+
+    let package_lock_path = get_package_lock_path(&package_source_hash, &package_name);
+
+    if package_lock_path.exists() {
+        bail!("package is locked") // TODO: figure out better way to handle this
     }
 
     // If package exists, return
@@ -141,12 +155,40 @@ pub async fn run(
         return Ok(());
     }
 
-    // at this point we should be ready to prepare the source
+    // create package directory and lock file to prevent concurrent builds
 
-    let package_source_path = get_source_path(&package_source_hash, &package_name);
+    create_dir_all(&package_path)
+        .await
+        .map_err(|err| anyhow!("failed to create package directory: {:?}", err))?;
 
-    if !package_source_path.exists() && !package_source_data.is_empty() {
+    // TODO: add metadata to the lockfile to know how to clean up
+
+    write(&package_lock_path, "")
+        .await
+        .map_err(|err| anyhow!("failed to write package lock: {:?}", err))?;
+
+    // Check if source archive is present
+
+    let source_archive_path = get_source_archive_path(&package_source_hash, &package_name);
+
+    let source_path = get_source_path(&package_source_hash, &package_name);
+
+    if source_archive_path.exists() {
+        create_dir_all(&source_path)
+            .await
+            .map_err(|err| anyhow!("failed to create source directory: {:?}", err))?;
+
+        unpack_zstd(&source_path, &source_archive_path).await?;
+
+        send(tx, source_path.display().to_string()).await?;
+    }
+
+    // Check if source data is present and verify signature
+
+    if !source_path.exists() && !package_source_data.is_empty() {
         send(tx, format!("Source chunks: {}", package_source_data_chunk)).await?;
+
+        // Verify source data signature
 
         match package_source_data_signature {
             None => bail!("'source_signature' missing in configuration"),
@@ -172,176 +214,187 @@ pub async fn run(
 
         let source_archive_path = get_source_archive_path(&package_source_hash, &package_name);
 
-        if !source_archive_path.exists() {
-            write(&source_archive_path, &package_source_data)
-                .await
-                .map_err(|err| anyhow!("failed to write source archive: {:?}", err))?;
-
-            send(tx, source_archive_path.display().to_string()).await?;
+        if source_archive_path.exists() {
+            bail!("source archive already exists")
         }
 
-        if !package_source_path.exists() {
-            let message = format!(
-                "Source unpack: {} => {}",
-                source_archive_path.file_name().unwrap().to_str().unwrap(),
-                package_source_path.file_name().unwrap().to_str().unwrap()
-            );
+        write(&source_archive_path, &package_source_data)
+            .await
+            .map_err(|err| anyhow!("failed to write source archive: {:?}", err))?;
 
-            send(tx, message).await?;
+        send(tx, source_archive_path.display().to_string()).await?;
 
-            create_dir_all(&package_source_path)
-                .await
-                .map_err(|err| anyhow!("failed to create source directory: {:?}", err))?;
-
-            unpack_zstd(&package_source_path, &source_archive_path).await?;
-
-            send(tx, package_source_path.display().to_string()).await?;
+        if source_path.exists() {
+            bail!("source path already exists")
         }
+
+        let message = format!(
+            "Source unpack: {} => {}",
+            source_archive_path.file_name().unwrap().to_str().unwrap(),
+            source_path.file_name().unwrap().to_str().unwrap()
+        );
+
+        send(tx, message).await?;
+
+        create_dir_all(&source_path)
+            .await
+            .map_err(|err| anyhow!("failed to create source directory: {:?}", err))?;
+
+        unpack_zstd(&source_path, &source_archive_path).await?;
+
+        send(tx, source_path.display().to_string()).await?;
     }
 
-    // TODO: Handle remote source paths
+    // Create sandbox environment
 
-    // Create build environment
+    let mut sandbox_bin_paths = vec![];
+    let mut sandbox_packages = vec![];
+    let mut sandbox_sbin_paths = vec![];
+    let mut sandbox_env_vars = HashMap::new();
 
-    let mut build_bin_paths = vec![];
-    let mut build_sbin_paths = vec![];
-    let mut env_vars = HashMap::new();
-    let mut build_packages = vec![];
+    // Add package environment variables
 
     for env in package_environment.clone() {
-        env_vars.insert(env.key, env.value);
+        sandbox_env_vars.insert(env.key, env.value);
     }
 
-    for p in package_packages.iter() {
-        let path = get_package_path(&p.hash, &p.name);
+    // Add package environment variables and paths
 
-        if !path.exists() {
-            let message = format!("package missing: {}", path.display());
+    for p in package_packages.iter() {
+        let p_path = get_package_path(&p.hash, &p.name);
+
+        if !p_path.exists() {
+            let message = format!("package missing: {}", p_path.display());
 
             bail!(message)
         }
 
-        let bin_path = path.join("bin");
+        let p_bin_path = p_path.join("bin");
 
-        if bin_path.exists() {
-            build_bin_paths.push(bin_path.display().to_string());
+        if p_bin_path.exists() {
+            sandbox_bin_paths.push(p_bin_path.display().to_string());
         }
 
-        let sbin_path = path.join("sbin");
+        let p_sbin_path = p_path.join("sbin");
 
-        if sbin_path.exists() {
-            build_sbin_paths.push(sbin_path.display().to_string());
+        if p_sbin_path.exists() {
+            sandbox_sbin_paths.push(p_sbin_path.display().to_string());
         }
 
-        env_vars.insert(
+        sandbox_env_vars.insert(
             p.name.to_lowercase().replace('-', "_"),
-            path.display().to_string(),
+            p_path.display().to_string(),
         );
 
-        build_packages.push(path.display().to_string());
+        sandbox_packages.push(p_path.display().to_string());
     }
 
-    // Setup build path
+    // Setup sandbox path source
 
-    let build_source_path = build_path.join("source");
+    let sandbox_source_path = sandbox_path.join("source");
 
-    create_dir_all(&build_source_path)
+    create_dir_all(&sandbox_source_path)
         .await
         .map_err(|err| anyhow!("failed to create source directory: {:?}", err))?;
 
-    if package_source_path.exists() {
-        let build_source_files = get_file_paths(&package_source_path, vec![], vec![])?;
+    if source_path.exists() {
+        let source_files = get_file_paths(&source_path, vec![], vec![])?;
 
-        copy_files(&package_source_path, build_source_files, &build_source_path).await?;
+        copy_files(&source_path, source_files, &sandbox_source_path).await?;
     }
 
-    // Create output directory
+    // Add package(s) environment variables
 
-    let build_output_path = build_path.join("output");
-
-    create_dir_all(&build_output_path)
-        .await
-        .map_err(|err| anyhow!("failed to create output directory: {:?}", err))?;
-
-    env_vars.insert(
-        package_name.to_lowercase().replace('-', "_"),
+    sandbox_env_vars.insert(
+        format!("{}", package_name.to_lowercase().replace('-', "_")),
         package_path.display().to_string(),
     );
 
-    env_vars.insert(
-        "output".to_string(),
-        build_output_path.display().to_string(),
-    );
+    sandbox_env_vars.insert("output".to_string(), package_path.display().to_string());
 
-    env_vars.insert("packages".to_string(), build_packages.join(" ").to_string());
+    sandbox_env_vars.insert(
+        "packages".to_string(),
+        sandbox_packages.join(" ").to_string(),
+    );
 
     // expand environment variables that have references
 
-    for (key, _) in env_vars.clone().into_iter() {
+    for (key, _) in sandbox_env_vars.clone().into_iter() {
         for p in package_packages.iter() {
             let p_key = p.name.to_lowercase().replace('-', "_");
             let p_path = get_package_path(&p.hash, &p.name);
             let p_envvar = format!("${}", p_key);
 
-            let value = env_vars.get(&key).unwrap().clone();
+            let value = sandbox_env_vars.get(&key).unwrap().clone();
             let p_value = value.replace(&p_envvar, &p_path.display().to_string());
 
             if p_value == value {
                 continue;
             }
 
-            env_vars.insert(key.clone(), p_value);
+            sandbox_env_vars.insert(key.clone(), p_value);
         }
 
-        let value = env_vars.get(&key).unwrap().clone();
+        let value = sandbox_env_vars.get(&key).unwrap().clone();
 
         let value = value.replace(
             &format!("${}", package_name.to_lowercase().replace('-', "_")),
             &package_path.display().to_string(),
         );
 
-        env_vars.insert(key.clone(), value.clone());
+        sandbox_env_vars.insert(key.clone(), value.clone());
     }
 
-    send(tx, format!("Build environment: {:?}", env_vars)).await?;
+    send(tx, format!("Sandbox environment: {:?}", sandbox_env_vars)).await?;
+
+    // Expand references in package script
 
     for package in package_packages.iter() {
         let placeholder = format!(r"${}", package.name.replace('-', "_").to_lowercase());
         let path = get_package_path(&package.hash, &package.name);
+
         package_script = package_script.replace(&placeholder, &path.display().to_string());
     }
 
-    package_script = package_script.replace("$packages", &build_packages.join(" "));
+    // Write package script
 
-    let build_script_path = build_path.join("package.sh");
+    let sandbox_script_path = sandbox_path.join("package.sh");
 
-    write(&build_script_path, package_script)
+    write(&sandbox_script_path, package_script.clone())
         .await
         .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
 
-    set_permissions(&build_script_path, Permissions::from_mode(0o755))
+    set_permissions(&sandbox_script_path, Permissions::from_mode(0o755))
         .await
         .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
-    let env_paths = build_bin_paths
+    send(tx, format!("Sandbox script: {:?}", package_script)).await?;
+
+    // Combine sandbox 'bin, sbin, etc' paths
+
+    let sandbox_env_paths = sandbox_bin_paths
         .iter()
-        .chain(build_sbin_paths.iter())
+        .chain(sandbox_sbin_paths.iter())
         .cloned()
         .collect();
+
+    send(tx, format!("Sandbox $PATH paths: {:?}", sandbox_env_paths)).await?;
+
+    // Create package directory for build output
 
     let mut sandbox_command = match package_sandbox {
         false => {
             native::build(
-                env_paths,
-                env_vars,
-                build_script_path.as_path(),
-                build_source_path.as_path(),
+                sandbox_env_paths,
+                sandbox_env_vars,
+                sandbox_script_path.as_path(),
+                sandbox_source_path.as_path(),
             )
             .await?
         }
         true => match worker_target {
             Aarch64Macos | X8664Macos => {
-                let profile_path = build_path.join("package.sb");
+                let profile_path = sandbox_path.join("package.sb");
 
                 let mut tera = Tera::default();
 
@@ -357,28 +410,29 @@ pub async fn run(
                     .expect("failed to write sandbox profile");
 
                 darwin::build(
-                    env_paths,
-                    env_vars,
+                    sandbox_env_paths,
+                    sandbox_env_vars,
                     profile_path.as_path(),
-                    build_script_path.as_path(),
-                    build_source_path.as_path(),
+                    sandbox_script_path.as_path(),
+                    sandbox_source_path.as_path(),
                 )
                 .await?
             }
             Aarch64Linux | X8664Linux => {
-                let home_path = build_path.join("home");
+                let home_path = sandbox_path.join("home");
 
                 create_dir_all(&home_path)
                     .await
                     .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
 
                 linux::build(
-                    env_paths,
-                    env_vars,
+                    sandbox_env_paths,
+                    sandbox_env_vars,
                     home_path.as_path(),
-                    build_bin_paths.clone(),
-                    build_script_path.as_path(),
-                    build_source_path.as_path(),
+                    package_path.as_path(),
+                    sandbox_bin_paths.clone(),
+                    sandbox_script_path.as_path(),
+                    sandbox_source_path.as_path(),
                 )
                 .await?
             }
@@ -418,24 +472,19 @@ pub async fn run(
 
     // Check for output files
 
-    let build_output_files = get_file_paths(&build_output_path, vec![], vec![])?;
+    let package_path_files = get_file_paths(&package_path, vec![], vec![])?;
 
-    if build_output_files.is_empty() || build_output_files.len() == 1 {
+    if package_path_files.is_empty() || package_path_files.len() == 1 {
         bail!("no build output files found")
     }
 
-    let message = format!("output files: {}", build_output_files.len());
+    let message = format!("output files: {}", package_path_files.len());
 
     send(tx, message).await?;
 
     // Create package tar from build output files
 
-    if let Err(err) = compress_zstd(
-        &build_output_path,
-        &build_output_files,
-        &package_archive_path,
-    )
-    .await
+    if let Err(err) = compress_zstd(&package_path, &package_path_files, &package_archive_path).await
     {
         bail!("failed to compress package tar: {:?}", err)
     }
@@ -447,22 +496,11 @@ pub async fn run(
 
     send(tx, message).await?;
 
-    // Unpack package tar to package path
+    // Remove lock file
 
-    create_dir_all(&package_path)
+    remove_file(&package_lock_path)
         .await
-        .map_err(|err| anyhow!("failed to create package directory: {:?}", err))?;
-
-    if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
-        bail!("failed to unpack package archive: {:?}", err)
-    }
-
-    let message = format!(
-        "package created: {}",
-        package_path.file_name().unwrap().to_str().unwrap()
-    );
-
-    send(tx, message).await?;
+        .map_err(|err| anyhow!("failed to remove package lock: {:?}", err))?;
 
     Ok(())
 }

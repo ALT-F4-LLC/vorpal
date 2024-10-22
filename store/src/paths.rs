@@ -65,6 +65,12 @@ pub fn get_package_archive_path(hash: &str, name: &str) -> PathBuf {
         .with_extension("package.tar.zst")
 }
 
+pub fn get_package_lock_path(hash: &str, name: &str) -> PathBuf {
+    get_store_dir_path()
+        .join(get_store_dir_name(hash, name))
+        .with_extension("package.lock")
+}
+
 // Source paths - "/var/lib/vorpal/store/{hash}.source"
 
 pub fn get_source_path(hash: &str, name: &str) -> PathBuf {

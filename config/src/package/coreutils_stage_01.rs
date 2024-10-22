@@ -1,5 +1,5 @@
 use crate::{
-    cross_platform::get_cpu_count,
+    cross_platform::{get_cpu_count, get_sed_cmd},
     package::{add_default_environment, add_default_script},
     ContextConfig,
 };
@@ -50,10 +50,11 @@ pub fn package(
         mv -v $output/share/man/man1/chroot.1 \
             $output/share/man/man8/chroot.8
 
-        sed -i 's/\"1\"/\"8\"/' $output/share/man/man8/chroot.8",
+        {sed} 's/\"1\"/\"8\"/' $output/share/man/man8/chroot.8",
         bash = bash.name.to_lowercase().replace("-", "_"),
+        cores = get_cpu_count(target)?,
+        sed = get_sed_cmd(target)?,
         source = name,
-        cores = get_cpu_count(target)?
     };
 
     let source = PackageSource {
@@ -128,7 +129,7 @@ pub fn package(
         zlib,
     );
 
-    let package = add_default_script(package, target, None, glibc)?;
+    let package = add_default_script(package, target, glibc)?;
 
     let package_output = context.add_package(package.clone())?;
 

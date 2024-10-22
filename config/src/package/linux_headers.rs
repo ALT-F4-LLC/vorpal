@@ -65,7 +65,7 @@ pub fn package(
         Some(zlib),
     );
 
-    let package = add_default_script(package, target, None, None)?;
+    let package = add_default_script(package, target, None)?;
 
     let package_output = context.add_package(package)?;
 
