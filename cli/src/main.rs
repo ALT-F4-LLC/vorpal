@@ -45,7 +45,7 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
 
     // TODO: wait for output then proceed instead of sleeping
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
 
     let host = format!("http://localhost:{:?}", port);
 

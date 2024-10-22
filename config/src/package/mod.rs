@@ -8,6 +8,8 @@ use vorpal_schema::vorpal::package::v0::{
 
 pub mod bash_stage_01;
 pub mod binutils_stage_01;
+pub mod binutils_stage_02;
+pub mod bison_stage_01;
 pub mod cargo;
 pub mod coreutils_stage_01;
 pub mod diffutils_stage_01;
@@ -15,6 +17,8 @@ pub mod file_stage_01;
 pub mod findutils_stage_01;
 pub mod gawk_stage_01;
 pub mod gcc_stage_01;
+pub mod gcc_stage_02;
+pub mod gettext_stage_01;
 pub mod glibc_stage_01;
 pub mod grep_stage_01;
 pub mod gzip_stage_01;
@@ -22,8 +26,17 @@ pub mod language;
 pub mod libstdcpp_stage_01;
 pub mod linux_headers;
 pub mod m4_stage_01;
+pub mod make_stage_01;
 pub mod ncurses_stage_01;
+pub mod patch_stage_01;
 pub mod patchelf_stage_01;
+pub mod perl_stage_01;
+pub mod python_stage_01;
+pub mod sed_stage_01;
+pub mod tar_stage_01;
+pub mod texinfo_stage_01;
+pub mod util_linux_stage_01;
+pub mod xz_stage_01;
 pub mod zlib_stage_01;
 // pub mod zstd_stage_01;
 pub mod protoc;
@@ -325,20 +338,31 @@ pub fn add_default_packages(
     target: PackageSystem,
     bash: &PackageOutput,
     binutils: Option<&PackageOutput>,
+    bison: Option<&PackageOutput>,
     coreutils: &PackageOutput,
     diffutils: Option<&PackageOutput>,
     file: Option<&PackageOutput>,
     findutils: Option<&PackageOutput>,
     gawk: Option<&PackageOutput>,
     gcc: Option<&PackageOutput>,
+    gettext: Option<&PackageOutput>,
     glibc: Option<&PackageOutput>,
     grep: Option<&PackageOutput>,
     gzip: Option<&PackageOutput>,
     libstdcpp: Option<&PackageOutput>,
     linux_headers: Option<&PackageOutput>,
     m4: Option<&PackageOutput>,
+    make: Option<&PackageOutput>,
     ncurses: Option<&PackageOutput>,
+    patch: Option<&PackageOutput>,
     patchelf: Option<&PackageOutput>,
+    perl: Option<&PackageOutput>,
+    python: Option<&PackageOutput>,
+    sed: Option<&PackageOutput>,
+    tar: Option<&PackageOutput>,
+    texinfo: Option<&PackageOutput>,
+    util_linux: Option<&PackageOutput>,
+    xz: Option<&PackageOutput>,
     zlib: Option<&PackageOutput>,
 ) -> Result<Package> {
     let mut packages = vec![bash.clone(), coreutils.clone()];
@@ -346,6 +370,10 @@ pub fn add_default_packages(
     if target == Aarch64Linux || target == X8664Linux {
         if let Some(binutils) = binutils {
             packages.push(binutils.clone());
+        }
+
+        if let Some(bison) = bison {
+            packages.push(bison.clone());
         }
 
         if let Some(diffutils) = diffutils {
@@ -366,6 +394,10 @@ pub fn add_default_packages(
 
         if let Some(gcc) = gcc {
             packages.push(gcc.clone());
+        }
+
+        if let Some(gettext) = gettext {
+            packages.push(gettext.clone());
         }
 
         if let Some(glibc) = glibc {
@@ -392,12 +424,48 @@ pub fn add_default_packages(
             packages.push(m4.clone());
         }
 
+        if let Some(make) = make {
+            packages.push(make.clone());
+        }
+
         if let Some(ncurses) = ncurses {
             packages.push(ncurses.clone());
         }
 
+        if let Some(patch) = patch {
+            packages.push(patch.clone());
+        }
+
         if let Some(patchelf) = patchelf {
             packages.push(patchelf.clone());
+        }
+
+        if let Some(perl) = perl {
+            packages.push(perl.clone());
+        }
+
+        if let Some(python) = python {
+            packages.push(python.clone());
+        }
+
+        if let Some(sed) = sed {
+            packages.push(sed.clone());
+        }
+
+        if let Some(tar) = tar {
+            packages.push(tar.clone());
+        }
+
+        if let Some(texinfo) = texinfo {
+            packages.push(texinfo.clone());
+        }
+
+        if let Some(util_linux) = util_linux {
+            packages.push(util_linux.clone());
+        }
+
+        if let Some(xz) = xz {
+            packages.push(xz.clone());
         }
 
         if let Some(zlib) = zlib {
@@ -436,14 +504,35 @@ pub fn add_default_packages(
 pub fn add_default_script(
     package: Package,
     system: PackageSystem,
+    file: Option<&PackageOutput>,
     glibc: Option<&PackageOutput>,
 ) -> Result<Package> {
     let mut script = package.script.clone();
 
+    // TODO: add option for enabling or disabling rpath patches
+
+    let mut file_cmd = "file".to_string();
+
+    if let Some(file) = file {
+        let file_env = format!("${}", file.name.to_lowercase().replace("-", "_"));
+        let file_args = format!("--magic-file {}/share/misc/magic.mgc", file_env);
+
+        file_cmd = format!("{}/bin/file {}", file_env, file_args);
+    }
+
     let script_paths = formatdoc! {"
         find \"$output\" -type f | while read -r file; do
-            if file \"$file\" | grep -q 'interpreter'; then
-                pkg_rpath=\"$(patchelf --print-rpath \"$file\")\"
+            if {file} \"$file\" | grep -q 'text'; then
+                echo \"Patching text: $file\"
+
+                {sed} \"s|$output|${envkey}|g\" \"$file\"
+
+                {sed} \"s|$PWD|${envkey}|g\" \"$file\"
+
+                echo \"Patched text: $file\"
+            fi
+
+            if {file} \"$file\" | grep -q 'interpreter'; then
                 pkg_rpath_new=\"\"
 
                 for pkg in $packages; do
@@ -465,15 +554,17 @@ pub fn add_default_script(
                 fi
 
                 if [ \"$pkg_rpath_new\" != \"\" ]; then
+                    pkg_rpath=\"$(patchelf --print-rpath \"$file\")\"
+
+                    echo \"Patching rpath: $pkg_rpath -> $pkg_rpath_new\"
+
                     patchelf --set-rpath \"$pkg_rpath_new\" \"$file\"
+
+                    echo \"Patched rpath: $(patchelf --print-rpath $file)\"
                 fi
             fi
-
-            if file \"$file\" | grep -q 'text'; then
-                {sed} \"s|$output|${envkey}|g\" \"$file\"
-                {sed} \"s|$PWD|${envkey}|g\" \"$file\"
-            fi
         done",
+        file = file_cmd,
         envkey = package.name.to_lowercase().replace("-", "_"),
         sed = get_sed_cmd(system)?,
     };
@@ -489,11 +580,14 @@ pub fn add_default_script(
 
         let script_glibc = formatdoc! {"
             find \"$output\" -type f | while read -r file; do
-                if file \"$file\" | grep -q 'interpreter'; then
+                if {file} \"$file\" | grep -q 'interpreter'; then
+                    echo \"Patching interpreter: $file -> ${glibc}/lib/ld-linux-{arch}.so.1\"
+
                     \"patchelf\" --set-interpreter \"${glibc}/lib/ld-linux-{arch}.so.1\" \"$file\"
                 fi
             done",
             arch = script_arch,
+            file = file_cmd,
             glibc = glibc.name.to_lowercase().replace("-", "_"),
         };
 
@@ -527,19 +621,30 @@ pub fn build_package(
     )?;
 
     let mut binutils = None;
+    let mut bison = None;
     let mut diffutils = None;
     let mut file = None;
     let mut findutils = None;
     let mut gawk = None;
     let mut gcc = None;
+    let mut gettext = None;
     let mut glibc = None;
     let mut grep = None;
     let mut gzip = None;
     let mut libstdcpp = None;
     let mut linux_headers = None;
     let mut m4 = None;
+    let mut make = None;
     let mut ncurses = None;
+    let mut patch = None;
     let mut patchelf = None;
+    let mut perl = None;
+    let mut python = None;
+    let mut sed = None;
+    let mut tar = None;
+    let mut texinfo = None;
+    let mut util_linux = None;
+    let mut xz = None;
     let mut zlib = None;
 
     if target == Aarch64Linux || target == X8664Linux {
@@ -729,15 +834,15 @@ pub fn build_package(
             &zlib_package,
         )?;
 
-        let patchelf_package = patchelf_stage_01::package(
+        let make_package = make_stage_01::package(
             context,
             target,
             &bash_package,
             &binutils_package,
             &coreutils_package,
             &diffutils_package,
-            &findutils_package,
             &file_package,
+            &findutils_package,
             &gawk_package,
             &gcc_package,
             &glibc_package,
@@ -750,23 +855,383 @@ pub fn build_package(
             &zlib_package,
         )?;
 
+        let patch_package = patch_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &zlib_package,
+        )?;
+
+        let sed_package = sed_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &zlib_package,
+        )?;
+
+        let tar_package = tar_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &sed_package,
+            &zlib_package,
+        )?;
+
+        let xz_package = xz_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &sed_package,
+            &tar_package,
+            &zlib_package,
+        )?;
+
+        let binutils_package = binutils_stage_02::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &sed_package,
+            &tar_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
+        let gcc_package = gcc_stage_02::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &sed_package,
+            &tar_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
+        let gettext_package = gettext_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &sed_package,
+            &tar_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
+        let bison_package = bison_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &gettext_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &sed_package,
+            &tar_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
+        let perl_package = perl_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &bison_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &gettext_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &sed_package,
+            &tar_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
+        let python_package = python_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &bison_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &gettext_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &perl_package,
+            &sed_package,
+            &tar_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
+        let texinfo_package = texinfo_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &bison_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &gettext_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &perl_package,
+            &python_package,
+            &sed_package,
+            &tar_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
+        let util_linux_package = util_linux_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &bison_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &gettext_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &perl_package,
+            &python_package,
+            &sed_package,
+            &tar_package,
+            &texinfo_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
+        let patchelf_package = patchelf_stage_01::package(
+            context,
+            target,
+            &bash_package,
+            &binutils_package,
+            &bison_package,
+            &coreutils_package,
+            &diffutils_package,
+            &file_package,
+            &findutils_package,
+            &gawk_package,
+            &gcc_package,
+            &gettext_package,
+            &glibc_package,
+            &grep_package,
+            &gzip_package,
+            &libstdcpp_package,
+            &linux_headers_package,
+            &m4_package,
+            &make_package,
+            &ncurses_package,
+            &patch_package,
+            &perl_package,
+            &python_package,
+            &sed_package,
+            &tar_package,
+            &texinfo_package,
+            &util_linux_package,
+            &xz_package,
+            &zlib_package,
+        )?;
+
         bash = bash_package;
         coreutils = coreutils_package.clone();
 
         binutils = Some(binutils_package);
+        bison = Some(bison_package);
         diffutils = Some(diffutils_package);
         file = Some(file_package);
         findutils = Some(findutils_package);
         gawk = Some(gawk_package);
         gcc = Some(gcc_package);
+        gettext = Some(gettext_package);
         glibc = Some(glibc_package);
         grep = Some(grep_package);
         gzip = Some(gzip_package);
         libstdcpp = Some(libstdcpp_package);
         linux_headers = Some(linux_headers_package);
         m4 = Some(m4_package);
+        make = Some(make_package);
         ncurses = Some(ncurses_package);
+        patch = Some(patch_package);
         patchelf = Some(patchelf_package);
+        perl = Some(perl_package);
+        python = Some(python_package);
+        sed = Some(sed_package);
+        tar = Some(tar_package);
+        texinfo = Some(texinfo_package);
+        util_linux = Some(util_linux_package);
+        xz = Some(xz_package);
         zlib = Some(zlib_package);
     }
 
@@ -787,24 +1252,35 @@ pub fn build_package(
         target,
         &bash,
         binutils.as_ref(),
+        bison.as_ref(),
         &coreutils,
         diffutils.as_ref(),
         file.as_ref(),
         findutils.as_ref(),
         gawk.as_ref(),
         gcc.as_ref(),
+        gettext.as_ref(),
         glibc.as_ref(),
         grep.as_ref(),
         gzip.as_ref(),
         libstdcpp.as_ref(),
         linux_headers.as_ref(),
         m4.as_ref(),
+        make.as_ref(),
         ncurses.as_ref(),
+        patch.as_ref(),
         patchelf.as_ref(),
+        perl.as_ref(),
+        python.as_ref(),
+        sed.as_ref(),
+        tar.as_ref(),
+        texinfo.as_ref(),
+        util_linux.as_ref(),
+        xz.as_ref(),
         zlib.as_ref(),
     )?;
 
-    package = add_default_script(package, target, glibc.as_ref())?;
+    package = add_default_script(package, target, file.as_ref(), glibc.as_ref())?;
 
     package = Package {
         environment: package.environment,

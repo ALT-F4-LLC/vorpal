@@ -16,17 +16,30 @@ pub fn package(
     target: PackageSystem,
     bash: &PackageOutput,
     binutils: &PackageOutput,
+    bison: &PackageOutput,
     coreutils: &PackageOutput,
+    diffutils: &PackageOutput,
     file: &PackageOutput,
+    findutils: &PackageOutput,
+    gawk: &PackageOutput,
     gcc: &PackageOutput,
+    gettext: &PackageOutput,
     glibc: &PackageOutput,
+    grep: &PackageOutput,
+    gzip: &PackageOutput,
     libstdcpp: &PackageOutput,
     linux_headers: &PackageOutput,
     m4: &PackageOutput,
+    make: &PackageOutput,
     ncurses: &PackageOutput,
+    patch: &PackageOutput,
+    perl: &PackageOutput,
+    sed: &PackageOutput,
+    tar: &PackageOutput,
+    xz: &PackageOutput,
     zlib: &PackageOutput,
 ) -> Result<PackageOutput> {
-    let name = "findutils-stage-01";
+    let name = "python-stage-01";
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
@@ -35,24 +48,24 @@ pub fn package(
         cd \"${{PWD}}/{source}\"
 
         ./configure \
-            --build=$(build-aux/config.guess) \
-            --localstatedir=\"$output/var/lib/locate\" \
-            --prefix=\"$output\"
+            --enable-shared \
+            --prefix=\"$output\" \
+            --without-ensurepip
 
         make -j$({cores})
         make install",
         bash = bash.name.to_lowercase().replace("-", "_"),
+        cores = get_cpu_count(target)?,
         source = name,
-        cores = get_cpu_count(target)?
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("242f804d87a5036bb0fab99966227dc61e853e5a67e1b10c3cc45681c792657e".to_string()),
+        hash: Some("cc20ef929f4a1c07594d606ca4f2ed091e69fac5c6779887927da82b0a62f583".to_string()),
         includes: vec![],
         name: name.to_string(),
         strip_prefix: true,
-        uri: "https://ftp.gnu.org/gnu/findutils/findutils-4.10.0.tar.xz".to_string(),
+        uri: "https://www.python.org/ftp/python/3.12.7/Python-3.12.7.tar.xz".to_string(),
     };
 
     let package = Package {
@@ -61,14 +74,27 @@ pub fn package(
         packages: vec![
             bash.clone(),
             binutils.clone(),
+            bison.clone(),
             coreutils.clone(),
+            diffutils.clone(),
             file.clone(),
+            findutils.clone(),
+            gawk.clone(),
             gcc.clone(),
+            gettext.clone(),
             glibc.clone(),
+            grep.clone(),
+            gzip.clone(),
             libstdcpp.clone(),
             linux_headers.clone(),
             m4.clone(),
+            make.clone(),
             ncurses.clone(),
+            patch.clone(),
+            perl.clone(),
+            sed.clone(),
+            tar.clone(),
+            xz.clone(),
             zlib.clone(),
         ],
         sandbox: false,

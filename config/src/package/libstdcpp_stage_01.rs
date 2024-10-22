@@ -78,7 +78,6 @@ pub fn package(
         None,
         Some(binutils),
         Some(gcc),
-        // Some(glibc.clone()),
         None,
         None,
         Some(linux_headers),
@@ -86,7 +85,7 @@ pub fn package(
         Some(zlib),
     );
 
-    let package = add_default_script(package, target, Some(glibc))?;
+    let package = add_default_script(package, target, None, Some(glibc))?;
 
     let package_output = context.add_package(package)?;
 

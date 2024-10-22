@@ -49,7 +49,7 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
 
     let package = add_default_environment(package, None, None, None, None, None, None, None, None);
 
-    let package = add_default_script(package, target, None)?;
+    let package = add_default_script(package, target, None, None)?;
 
     let package_output = context.add_package(package)?;
 

@@ -16,22 +16,33 @@ pub fn package(
     target: PackageSystem,
     bash: &PackageOutput,
     binutils: &PackageOutput,
+    bison: &PackageOutput,
     coreutils: &PackageOutput,
     diffutils: &PackageOutput,
-    findutils: &PackageOutput,
     file: &PackageOutput,
+    findutils: &PackageOutput,
     gawk: &PackageOutput,
     gcc: &PackageOutput,
+    gettext: &PackageOutput,
     glibc: &PackageOutput,
     grep: &PackageOutput,
     gzip: &PackageOutput,
     libstdcpp: &PackageOutput,
     linux_headers: &PackageOutput,
     m4: &PackageOutput,
+    make: &PackageOutput,
     ncurses: &PackageOutput,
+    patch: &PackageOutput,
+    perl: &PackageOutput,
+    python: &PackageOutput,
+    sed: &PackageOutput,
+    tar: &PackageOutput,
+    texinfo: &PackageOutput,
+    util_linux: &PackageOutput,
+    xz: &PackageOutput,
     zlib: &PackageOutput,
 ) -> Result<PackageOutput> {
-    let name = "patchelf-stage-01";
+    let name = "patchelf";
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
@@ -64,22 +75,33 @@ pub fn package(
         packages: vec![
             bash.clone(),
             binutils.clone(),
+            bison.clone(),
             coreutils.clone(),
             diffutils.clone(),
             file.clone(),
             findutils.clone(),
             gawk.clone(),
             gcc.clone(),
+            gettext.clone(),
             glibc.clone(),
             grep.clone(),
             gzip.clone(),
             libstdcpp.clone(),
             linux_headers.clone(),
             m4.clone(),
+            make.clone(),
             ncurses.clone(),
+            patch.clone(),
+            perl.clone(),
+            python.clone(),
+            sed.clone(),
+            tar.clone(),
+            texinfo.clone(),
+            util_linux.clone(),
+            xz.clone(),
             zlib.clone(),
         ],
-        sandbox: false,
+        sandbox: true,
         script,
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
@@ -97,7 +119,7 @@ pub fn package(
         Some(zlib),
     );
 
-    let package = add_default_script(package, target, Some(glibc))?;
+    let package = add_default_script(package, target, Some(file), Some(glibc))?;
 
     let package_output = context.add_package(package)?;
 

@@ -135,7 +135,7 @@ pub fn print_package_archive(package_name: &str, package_archive: &Path) {
 
 pub fn print_package_output(package_name: &str, package_output: &PackageOutput) {
     println!(
-        "{} Output: {}",
+        "{} {}",
         format_package_name(package_name),
         style(package_output.hash.clone()).green()
     );
