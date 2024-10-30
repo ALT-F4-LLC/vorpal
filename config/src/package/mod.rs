@@ -568,13 +568,13 @@ pub fn add_default_script(
     script.push_str(format!("\n\n{}", script_paths).as_str());
 
     if let Some(glibc) = glibc {
-        let script_arch = match system {
+        let glibc_arch = match system {
             Aarch64Linux => "aarch64",
             X8664Linux => "x86_64",
             _ => bail!("Unsupported interpreter system"),
         };
 
-        let script_glibc = formatdoc! {"
+        let glibc_script = formatdoc! {"
             find \"$output\" -type f | while read -r file; do
                 if file \"$file\" | grep -q 'interpreter /lib/ld-linux-{arch}.so.1'; then
                     echo \"Patching interpreter: $file -> ${glibc}/lib/ld-linux-{arch}.so.1\"
@@ -582,11 +582,11 @@ pub fn add_default_script(
                     \"patchelf\" --set-interpreter \"${glibc}/lib/ld-linux-{arch}.so.1\" \"$file\"
                 fi
             done",
-            arch = script_arch,
+            arch = glibc_arch,
             glibc = glibc.name.to_lowercase().replace("-", "_"),
         };
 
-        script.push_str(format!("\n\n{}", script_glibc).as_str());
+        script.push_str(format!("\n\n{}", glibc_script).as_str());
     }
 
     Ok(Package {
