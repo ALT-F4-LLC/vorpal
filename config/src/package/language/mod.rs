@@ -83,7 +83,7 @@ pub fn build_rust_package(
             environment: vec![],
             name: format!("{}-cache", package.name),
             packages: vec![cargo.clone(), rustc.clone()],
-            sandbox: true,
+            sandbox: None,
             script: package_cache_script,
             source: vec![package_cache_source],
             systems: systems.clone(),
@@ -121,7 +121,7 @@ pub fn build_rust_package(
             environment: vec![],
             name: package.name.to_string(),
             packages: vec![cargo, rustc, protoc, package_cache],
-            sandbox: true,
+            sandbox: None,
             script: package_script,
             source: vec![PackageSource {
                 excludes: package_excludes,

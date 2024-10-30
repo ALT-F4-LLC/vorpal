@@ -7,6 +7,9 @@ edition = "2021"
 anyhow = { default-features = false, version = "1" }
 bollard = { default-features = false, version = "0" }
 futures-util = { default-features = false, version = "0" }
+infer = { default-features = false, features = ["std"], version = "0" }
+itertools = "0"
+lddtree = "0.3"
 rsa = { default-features = false, version = "0" }
 tera = { default-features = false, version = "1" }
 tokio = { default-features = false, features = ["process", "rt-multi-thread"], version = "1" }

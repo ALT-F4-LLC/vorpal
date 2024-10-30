@@ -54,7 +54,7 @@ pub fn package(context: &mut ContextConfig, system: PackageSystem) -> Result<Pac
         environment: vec![],
         name: name.to_string(),
         packages: vec![rust_std],
-        sandbox: true,
+        sandbox: None,
         script,
         source: vec![source],
         systems: vec![

@@ -36,8 +36,24 @@ message PackageSource {
     string uri = 6;
 }
 
+message PackageSandboxPath {
+    string source = 1;
+    string target = 2;
+}
+
+// message PackageSandboxPermission {
+//     string path = 1;
+//     bool read = 2;
+//     bool write = 3;
+// }
+
+message PackageSandbox {
+    repeated PackageSandboxPath paths = 1;
+    // repeated PackageSandboxPermission permissions = 2;
+}
+
 message Package {
-    bool sandbox = 1;
+    optional PackageSandbox sandbox = 1;
     repeated PackageEnvironment environment = 2;
     repeated PackageOutput packages = 3;
     repeated PackageSource source = 4;

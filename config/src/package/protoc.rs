@@ -50,7 +50,7 @@ pub fn package(context: &mut ContextConfig, system: PackageSystem) -> Result<Pac
         environment: vec![],
         name: name.to_string(),
         packages: vec![],
-        sandbox: true,
+        sandbox: None,
         script,
         source: vec![source],
         systems: vec![

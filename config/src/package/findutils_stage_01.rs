@@ -1,12 +1,13 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    sandbox::{add_default_host_paths, SandboxDefaultPaths},
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource, PackageSystem,
+    Package, PackageEnvironment, PackageOutput, PackageSandbox, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
@@ -24,13 +25,60 @@ pub fn package(
     linux_headers: &PackageOutput,
     m4: &PackageOutput,
     ncurses: &PackageOutput,
-    zlib: &PackageOutput,
 ) -> Result<PackageOutput> {
+    let environment = vec![PackageEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+    }];
+
     let name = "findutils-stage-01";
+
+    let sandbox_paths = SandboxDefaultPaths {
+        autoconf: true,
+        automake: true,
+        bash: false,
+        binutils: false,
+        bison: true,
+        bzip2: true,
+        coreutils: false,
+        curl: true,
+        diffutils: false,
+        file: false,
+        findutils: true,
+        flex: false,
+        gawk: true,
+        gcc: false,
+        gcc_12: false,
+        glibc: false,
+        grep: true,
+        gzip: true,
+        help2man: true,
+        includes: true,
+        lib: true,
+        m4: false,
+        make: true,
+        patchelf: true,
+        perl: true,
+        python: true,
+        sed: true,
+        tar: true,
+        texinfo: true,
+        wget: true,
+    };
+
+    let sandbox = PackageSandbox {
+        paths: add_default_host_paths(sandbox_paths),
+    };
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
         set -euo pipefail
+
+        mkdir -pv /bin
+
+        ln -s ${bash}/bin/bash /bin/bash
+        ln -s ${bash}/bin/bash /bin/sh
+        ln -s ${m4}/bin/m4 /usr/bin/m4
 
         cd \"${{PWD}}/{source}\"
 
@@ -42,6 +90,7 @@ pub fn package(
         make -j$({cores})
         make install",
         bash = bash.name.to_lowercase().replace("-", "_"),
+        m4 = m4.name.to_lowercase().replace("-", "_"),
         source = name,
         cores = get_cpu_count(target)?
     };
@@ -56,7 +105,7 @@ pub fn package(
     };
 
     let package = Package {
-        environment: vec![],
+        environment,
         name: name.to_string(),
         packages: vec![
             bash.clone(),
@@ -69,9 +118,8 @@ pub fn package(
             linux_headers.clone(),
             m4.clone(),
             ncurses.clone(),
-            zlib.clone(),
         ],
-        sandbox: false,
+        sandbox: Some(sandbox),
         script,
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
@@ -86,7 +134,7 @@ pub fn package(
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),
-        Some(zlib),
+        None,
     );
 
     let package = add_default_script(package, target, Some(glibc))?;

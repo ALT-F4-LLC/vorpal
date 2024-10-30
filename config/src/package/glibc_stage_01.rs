@@ -1,12 +1,13 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
+    package::{add_default_environment, add_default_script, PackageEnvironment},
+    sandbox::{add_default_host_paths, SandboxDefaultPaths},
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSandbox, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
@@ -16,7 +17,6 @@ pub fn package(
     binutils: &PackageOutput,
     gcc: &PackageOutput,
     linux_headers: &PackageOutput,
-    zlib: &PackageOutput,
 ) -> Result<PackageOutput> {
     let name = "glibc-stage-01";
 
@@ -54,16 +54,53 @@ pub fn package(
         uri: "https://ftp.gnu.org/gnu/glibc/glibc-2.40.tar.gz".to_string(),
     };
 
+    let environment = vec![PackageEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+    }];
+
+    let sandbox_paths = SandboxDefaultPaths {
+        autoconf: false,
+        automake: true,
+        bash: true,
+        binutils: false,
+        bison: true,
+        bzip2: true,
+        coreutils: true,
+        curl: true,
+        diffutils: true,
+        file: true,
+        findutils: true,
+        flex: false,
+        gawk: true,
+        gcc: false,
+        gcc_12: false,
+        glibc: true,
+        grep: true,
+        gzip: true,
+        help2man: false,
+        includes: true,
+        lib: true,
+        m4: true,
+        make: true,
+        patchelf: false,
+        perl: true,
+        python: true,
+        sed: true,
+        tar: true,
+        texinfo: true,
+        wget: true,
+    };
+
+    let sandbox = PackageSandbox {
+        paths: add_default_host_paths(sandbox_paths),
+    };
+
     let package = Package {
-        environment: vec![],
+        environment,
         name: name.to_string(),
-        packages: vec![
-            binutils.clone(),
-            gcc.clone(),
-            linux_headers.clone(),
-            zlib.clone(),
-        ],
-        sandbox: false,
+        packages: vec![binutils.clone(), gcc.clone(), linux_headers.clone()],
+        sandbox: Some(sandbox),
         script,
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
@@ -78,7 +115,7 @@ pub fn package(
         None,
         Some(linux_headers),
         None,
-        Some(zlib),
+        None,
     );
 
     let package = add_default_script(package, target, None)?;

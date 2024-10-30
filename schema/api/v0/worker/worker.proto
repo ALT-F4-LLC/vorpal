@@ -9,9 +9,9 @@ service WorkerService {
 }
 
 message BuildRequest {
-    bool sandbox = 1;
-    optional bytes source_data = 2;
-    optional bytes source_data_signature = 3;
+    optional bytes source_data = 1;
+    optional bytes source_data_signature = 2;
+    optional vorpal.package.v0.PackageSandbox sandbox = 3;
     repeated vorpal.package.v0.PackageEnvironment environment = 4;
     repeated vorpal.package.v0.PackageOutput packages = 5;
     string name = 6;

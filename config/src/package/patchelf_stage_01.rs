@@ -101,7 +101,7 @@ pub fn package(
             xz.clone(),
             zlib.clone(),
         ],
-        sandbox: true,
+        sandbox: None,
         script,
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],

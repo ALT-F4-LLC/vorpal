@@ -1,12 +1,13 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    sandbox::{add_default_host_paths, SandboxDefaultPaths},
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource, PackageSystem,
+    Package, PackageEnvironment, PackageOutput, PackageSandbox, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
@@ -38,13 +39,60 @@ pub fn package(
     sed: &PackageOutput,
     tar: &PackageOutput,
     xz: &PackageOutput,
-    zlib: &PackageOutput,
 ) -> Result<PackageOutput> {
+    let environment = vec![PackageEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+    }];
+
     let name = "texinfo-stage-01";
+
+    let sandbox_paths = SandboxDefaultPaths {
+        autoconf: true,
+        automake: true,
+        bash: false,
+        binutils: false,
+        bison: false,
+        bzip2: true,
+        coreutils: false,
+        curl: true,
+        diffutils: false,
+        file: false,
+        findutils: false,
+        flex: false,
+        gawk: false,
+        gcc: false,
+        gcc_12: false,
+        glibc: false,
+        grep: false,
+        gzip: false,
+        help2man: true,
+        includes: true,
+        lib: true,
+        m4: false,
+        make: false,
+        patchelf: true,
+        perl: false,
+        python: false,
+        sed: false,
+        tar: false,
+        texinfo: true,
+        wget: true,
+    };
+
+    let sandbox = PackageSandbox {
+        paths: add_default_host_paths(sandbox_paths),
+    };
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
         set -euo pipefail
+
+        mkdir -pv /bin
+
+        ln -s ${bash}/bin/bash /bin/bash
+        ln -s ${bash}/bin/bash /bin/sh
+        ln -s ${m4}/bin/m4 /usr/bin/m4
 
         cd \"${{PWD}}/{source}\"
 
@@ -54,12 +102,13 @@ pub fn package(
         make install",
         bash = bash.name.to_lowercase().replace("-", "_"),
         cores = get_cpu_count(target)?,
+        m4 = m4.name.to_lowercase().replace("-", "_"),
         source = name,
     };
 
     let source = PackageSource {
         excludes: vec![],
-        hash: Some("cc20ef929f4a1c07594d606ca4f2ed091e69fac5c6779887927da82b0a62f583".to_string()),
+        hash: Some("6e34604552af91db0b4ccf0bcceba63dd3073da2a492ebcf33c6e188a64d2b63".to_string()),
         includes: vec![],
         name: name.to_string(),
         strip_prefix: true,
@@ -67,7 +116,7 @@ pub fn package(
     };
 
     let package = Package {
-        environment: vec![],
+        environment,
         name: name.to_string(),
         packages: vec![
             bash.clone(),
@@ -94,9 +143,8 @@ pub fn package(
             sed.clone(),
             tar.clone(),
             xz.clone(),
-            zlib.clone(),
         ],
-        sandbox: false,
+        sandbox: Some(sandbox),
         script,
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
@@ -111,7 +159,7 @@ pub fn package(
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),
-        Some(zlib),
+        None,
     );
 
     let package = add_default_script(package, target, Some(glibc))?;

@@ -1,12 +1,13 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    sandbox::{add_default_host_paths, SandboxDefaultPaths},
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource, PackageSystem,
+    Package, PackageEnvironment, PackageOutput, PackageSandbox, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
@@ -19,7 +20,6 @@ pub fn package(
     glibc: &PackageOutput,
     libstdcpp: &PackageOutput,
     linux_headers: &PackageOutput,
-    zlib: &PackageOutput,
 ) -> Result<PackageOutput> {
     let name = "m4-stage-01";
 
@@ -39,6 +39,48 @@ pub fn package(
         cores = get_cpu_count(target)?,
     };
 
+    let environment = vec![PackageEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+    }];
+
+    let sandbox_paths = SandboxDefaultPaths {
+        autoconf: true,
+        automake: true,
+        bash: true,
+        binutils: false,
+        bison: true,
+        bzip2: true,
+        coreutils: true,
+        curl: true,
+        diffutils: true,
+        file: true,
+        findutils: true,
+        flex: false,
+        gawk: true,
+        gcc: false,
+        gcc_12: false,
+        glibc: false,
+        grep: true,
+        gzip: true,
+        help2man: true,
+        includes: true,
+        lib: true,
+        m4: true,
+        make: true,
+        patchelf: true,
+        perl: true,
+        python: true,
+        sed: true,
+        tar: true,
+        texinfo: true,
+        wget: true,
+    };
+
+    let sandbox = PackageSandbox {
+        paths: add_default_host_paths(sandbox_paths),
+    };
+
     let source = PackageSource {
         excludes: vec![],
         hash: Some("fd793cdfc421fac76f4af23c7d960cbe4a29cbb18f5badf37b85e16a894b3b6d".to_string()),
@@ -49,7 +91,7 @@ pub fn package(
     };
 
     let package = Package {
-        environment: vec![],
+        environment,
         name: name.to_string(),
         packages: vec![
             binutils.clone(),
@@ -57,9 +99,8 @@ pub fn package(
             glibc.clone(),
             libstdcpp.clone(),
             linux_headers.clone(),
-            zlib.clone(),
         ],
-        sandbox: false,
+        sandbox: Some(sandbox),
         script,
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
@@ -74,7 +115,7 @@ pub fn package(
         Some(libstdcpp),
         Some(linux_headers),
         None,
-        Some(zlib),
+        None,
     );
 
     let package = add_default_script(package, target, Some(glibc))?;

@@ -17,6 +17,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
+            "vorpal.package.v0.PackageSandbox",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
+            "vorpal.package.v0.PackageSandboxPath",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
             "vorpal.package.v0.PackageSource",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )

@@ -1,11 +1,12 @@
 use crate::{
     package::{add_default_environment, add_default_script},
+    sandbox::{add_default_host_paths, SandboxDefaultPaths},
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource, PackageSystem,
+    Package, PackageEnvironment, PackageOutput, PackageSandbox, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
@@ -14,7 +15,6 @@ pub fn package(
     target: PackageSystem,
     binutils: &PackageOutput,
     gcc: &PackageOutput,
-    zlib: &PackageOutput,
 ) -> Result<PackageOutput> {
     let name = "linux-headers";
 
@@ -43,11 +43,53 @@ pub fn package(
         uri: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.10.8.tar.xz".to_string(),
     };
 
+    let environment = vec![PackageEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+    }];
+
+    let sandbox_paths = SandboxDefaultPaths {
+        autoconf: false,
+        automake: true,
+        bash: true,
+        binutils: false,
+        bison: true,
+        bzip2: true,
+        coreutils: true,
+        curl: true,
+        diffutils: true,
+        file: true,
+        findutils: true,
+        flex: false,
+        gawk: true,
+        gcc: false,
+        gcc_12: false,
+        glibc: true,
+        grep: true,
+        gzip: true,
+        help2man: false,
+        includes: true,
+        lib: true,
+        m4: true,
+        make: true,
+        patchelf: false,
+        perl: true,
+        python: true,
+        sed: true,
+        tar: true,
+        texinfo: true,
+        wget: true,
+    };
+
+    let sandbox = PackageSandbox {
+        paths: add_default_host_paths(sandbox_paths),
+    };
+
     let package = Package {
-        environment: vec![],
+        environment,
         name: name.to_string(),
-        packages: vec![binutils.clone(), gcc.clone(), zlib.clone()],
-        sandbox: false,
+        packages: vec![binutils.clone(), gcc.clone()],
+        sandbox: Some(sandbox),
         script,
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
@@ -62,7 +104,7 @@ pub fn package(
         None,
         None,
         None,
-        Some(zlib),
+        None,
     );
 
     let package = add_default_script(package, target, None)?;

@@ -6,7 +6,6 @@ use tokio::process::Command;
 pub mod profile;
 
 pub async fn build(
-    env_paths: Vec<String>,
     env_vars: HashMap<String, String>,
     profile_path: &Path,
     script_path: &Path,
@@ -27,14 +26,6 @@ pub async fn build(
     for (key, value) in env_vars.clone().into_iter() {
         command.env(key, value);
     }
-
-    let mut path = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string();
-
-    if !env_paths.is_empty() {
-        path = format!("{}:{}", env_paths.join(":"), path);
-    }
-
-    command.env("PATH", path);
 
     Ok(command)
 }

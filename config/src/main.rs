@@ -14,6 +14,7 @@ use vorpal_schema::vorpal::{
 mod cli;
 mod cross_platform;
 mod package;
+mod sandbox;
 mod service;
 
 // Configuration function that returns a Config struct

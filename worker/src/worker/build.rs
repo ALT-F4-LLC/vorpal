@@ -1,4 +1,4 @@
-use crate::worker::{darwin, darwin::profile, linux, native};
+use crate::worker::{darwin, darwin::profile, linux};
 use anyhow::{anyhow, bail, Result};
 use rsa::{
     pss::{Signature, VerifyingKey},
@@ -59,7 +59,7 @@ pub async fn run(
     let mut package_environment = vec![];
     let mut package_name = String::new();
     let mut package_packages = vec![];
-    let mut package_sandbox = true;
+    let mut package_sandbox = None;
     let mut package_script = String::new();
     let mut package_source_data: Vec<u8> = vec![];
     let mut package_source_data_chunk = 0;
@@ -122,7 +122,7 @@ pub async fn run(
     let package_lock_path = get_package_lock_path(&package_source_hash, &package_name);
 
     if package_lock_path.exists() {
-        bail!("package is locked") // TODO: figure out better way to handle this
+        bail!("package is locked") // TODO: figure out better way to handle this (e.g. prompt, ui, etc)
     }
 
     // If package exists, return
@@ -248,14 +248,14 @@ pub async fn run(
     // Create sandbox environment
 
     let mut sandbox_bin_paths = vec![];
-    let mut sandbox_packages = vec![];
+    let mut sandbox_package_paths = vec![];
     let mut sandbox_sbin_paths = vec![];
-    let mut sandbox_env_vars = HashMap::new();
+    let mut sandbox_env = HashMap::new();
 
     // Add package environment variables
 
     for env in package_environment.clone() {
-        sandbox_env_vars.insert(env.key, env.value);
+        sandbox_env.insert(env.key, env.value);
     }
 
     // Add package environment variables and paths
@@ -281,12 +281,12 @@ pub async fn run(
             sandbox_sbin_paths.push(p_sbin_path.display().to_string());
         }
 
-        sandbox_env_vars.insert(
+        sandbox_env.insert(
             p.name.to_lowercase().replace('-', "_"),
             p_path.display().to_string(),
         );
 
-        sandbox_packages.push(p_path.display().to_string());
+        sandbox_package_paths.push(p_path.display().to_string());
     }
 
     // Setup sandbox path source
@@ -305,47 +305,44 @@ pub async fn run(
 
     // Add package(s) environment variables
 
-    sandbox_env_vars.insert(
-        format!("{}", package_name.to_lowercase().replace('-', "_")),
-        package_path.display().to_string(),
-    );
+    let package_name_env = package_name.to_lowercase().replace('-', "_");
 
-    sandbox_env_vars.insert("output".to_string(), package_path.display().to_string());
+    sandbox_env.insert(package_name_env.clone(), package_path.display().to_string());
 
-    sandbox_env_vars.insert(
+    sandbox_env.insert("output".to_string(), package_path.display().to_string());
+
+    sandbox_env.insert(
         "packages".to_string(),
-        sandbox_packages.join(" ").to_string(),
+        sandbox_package_paths.join(" ").to_string(),
     );
 
     // expand environment variables that have references
 
-    for (key, _) in sandbox_env_vars.clone().into_iter() {
+    for (key, _) in sandbox_env.clone().into_iter() {
         for p in package_packages.iter() {
             let p_key = p.name.to_lowercase().replace('-', "_");
             let p_path = get_package_path(&p.hash, &p.name);
             let p_envvar = format!("${}", p_key);
 
-            let value = sandbox_env_vars.get(&key).unwrap().clone();
+            let value = sandbox_env.get(&key).unwrap().clone();
             let p_value = value.replace(&p_envvar, &p_path.display().to_string());
 
             if p_value == value {
                 continue;
             }
 
-            sandbox_env_vars.insert(key.clone(), p_value);
+            sandbox_env.insert(key.clone(), p_value);
         }
 
-        let value = sandbox_env_vars.get(&key).unwrap().clone();
+        let value = sandbox_env.get(&key).unwrap().clone();
 
         let value = value.replace(
             &format!("${}", package_name.to_lowercase().replace('-', "_")),
             &package_path.display().to_string(),
         );
 
-        sandbox_env_vars.insert(key.clone(), value.clone());
+        sandbox_env.insert(key.clone(), value.clone());
     }
-
-    send(tx, format!("Sandbox environment: {:?}", sandbox_env_vars)).await?;
 
     // Expand references in package script
 
@@ -368,76 +365,77 @@ pub async fn run(
         .await
         .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
-    send(tx, format!("Sandbox script: {:?}", package_script)).await?;
-
     // Combine sandbox 'bin, sbin, etc' paths
 
-    let sandbox_env_paths = sandbox_bin_paths
+    let mut sandbox_env_path = sandbox_bin_paths
         .iter()
         .chain(sandbox_sbin_paths.iter())
         .cloned()
-        .collect();
+        .collect::<Vec<String>>()
+        .join(":");
 
-    send(tx, format!("Sandbox $PATH paths: {:?}", sandbox_env_paths)).await?;
+    if let Some(path) = sandbox_env.get("PATH") {
+        if !path.is_empty() {
+            sandbox_env_path = format!("{}:{}", sandbox_env_path, path);
+        }
+    }
 
-    // Create package directory for build output
+    sandbox_env.insert("PATH".to_string(), sandbox_env_path);
 
-    let mut sandbox_command = match package_sandbox {
-        false => {
-            native::build(
-                sandbox_env_paths,
-                sandbox_env_vars,
+    // Create sandbox command
+
+    let mut package_sandbox_paths = vec![];
+
+    if let Some(sandbox) = package_sandbox {
+        package_sandbox_paths.extend(sandbox.paths);
+    }
+
+    let mut sandbox_command = match worker_target {
+        Aarch64Macos | X8664Macos => {
+            let profile_path = sandbox_path.join("package.sb");
+
+            let mut tera = Tera::default();
+
+            tera.add_raw_template("build_default", profile::STDENV_DEFAULT)
+                .unwrap();
+
+            let profile_context = tera::Context::new();
+
+            let profile_data = tera.render("build_default", &profile_context).unwrap();
+
+            write(&profile_path, profile_data)
+                .await
+                .expect("failed to write sandbox profile");
+
+            darwin::build(
+                sandbox_env,
+                profile_path.as_path(),
                 sandbox_script_path.as_path(),
                 sandbox_source_path.as_path(),
             )
             .await?
         }
-        true => match worker_target {
-            Aarch64Macos | X8664Macos => {
-                let profile_path = sandbox_path.join("package.sb");
 
-                let mut tera = Tera::default();
+        Aarch64Linux | X8664Linux => {
+            let home_path = sandbox_path.join("home");
 
-                tera.add_raw_template("build_default", profile::STDENV_DEFAULT)
-                    .unwrap();
+            create_dir_all(&home_path)
+                .await
+                .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
 
-                let profile_context = tera::Context::new();
+            linux::build(
+                sandbox_env,
+                home_path.as_path(),
+                package_path.as_path(),
+                sandbox_package_paths.clone(),
+                package_sandbox_paths,
+                sandbox_script_path.as_path(),
+                sandbox_source_path.as_path(),
+            )
+            .await?
+        }
 
-                let profile_data = tera.render("build_default", &profile_context).unwrap();
-
-                write(&profile_path, profile_data)
-                    .await
-                    .expect("failed to write sandbox profile");
-
-                darwin::build(
-                    sandbox_env_paths,
-                    sandbox_env_vars,
-                    profile_path.as_path(),
-                    sandbox_script_path.as_path(),
-                    sandbox_source_path.as_path(),
-                )
-                .await?
-            }
-            Aarch64Linux | X8664Linux => {
-                let home_path = sandbox_path.join("home");
-
-                create_dir_all(&home_path)
-                    .await
-                    .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
-
-                linux::build(
-                    sandbox_env_paths,
-                    sandbox_env_vars,
-                    home_path.as_path(),
-                    package_path.as_path(),
-                    sandbox_bin_paths.clone(),
-                    sandbox_script_path.as_path(),
-                    sandbox_source_path.as_path(),
-                )
-                .await?
-            }
-            _ => bail!("unknown target"),
-        },
+        _ => bail!("unknown target"),
     };
 
     // Run sandbox command

@@ -1,20 +1,17 @@
 use crate::{
     cross_platform::get_cpu_count,
     package::{add_default_environment, add_default_script},
+    sandbox::{add_default_host_paths, SandboxDefaultPaths},
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource, PackageSystem,
+    Package, PackageEnvironment, PackageOutput, PackageSandbox, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(
-    context: &mut ContextConfig,
-    target: PackageSystem,
-    zlib: &PackageOutput,
-) -> Result<PackageOutput> {
+pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<PackageOutput> {
     let name = "binutils-stage-01";
 
     let script = formatdoc! {"
@@ -38,6 +35,21 @@ pub fn package(
         cores = get_cpu_count(target)?
     };
 
+    let environment = vec![
+        PackageEnvironment {
+            key: "CC".to_string(),
+            value: "/usr/bin/gcc".to_string(),
+        },
+        PackageEnvironment {
+            key: "GCC".to_string(),
+            value: "/usr/bin/gcc".to_string(),
+        },
+        PackageEnvironment {
+            key: "PATH".to_string(),
+            value: "/usr/lib/gcc/aarch64-linux-gnu/12:/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+        },
+    ];
+
     let source = PackageSource {
         excludes: vec![],
         hash: Some("c0d3e5ee772ee201eefe17544b2b2cc3a0a3d6833a21b9ea56371efaad0c5528".to_string()),
@@ -47,27 +59,54 @@ pub fn package(
         uri: "https://ftp.gnu.org/gnu/binutils/binutils-2.43.1.tar.gz".to_string(),
     };
 
+    let sandbox_paths = SandboxDefaultPaths {
+        autoconf: false,
+        automake: true,
+        bash: true,
+        binutils: true,
+        bison: true,
+        bzip2: true,
+        coreutils: true,
+        curl: true,
+        diffutils: true,
+        file: true,
+        findutils: true,
+        flex: false,
+        gawk: true,
+        gcc: true,
+        gcc_12: true,
+        glibc: true,
+        grep: true,
+        gzip: true,
+        help2man: false,
+        includes: true,
+        lib: true,
+        m4: true,
+        make: true,
+        patchelf: false,
+        perl: true,
+        python: true,
+        sed: true,
+        tar: true,
+        texinfo: true,
+        wget: true,
+    };
+
+    let sandbox = PackageSandbox {
+        paths: add_default_host_paths(sandbox_paths),
+    };
+
     let package = Package {
-        environment: vec![],
+        environment,
         name: name.to_string(),
-        packages: vec![zlib.clone()],
-        sandbox: false,
+        packages: vec![],
+        sandbox: Some(sandbox),
         script,
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(
-        package,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(zlib),
-    );
+    let package = add_default_environment(package, None, None, None, None, None, None, None, None);
 
     let package = add_default_script(package, target, None)?;
 

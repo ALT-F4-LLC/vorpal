@@ -1,9 +1,9 @@
 use crate::{cross_platform::get_sed_cmd, ContextConfig};
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
     Package, PackageEnvironment, PackageOutput, PackageSystem,
-    PackageSystem::{Aarch64Linux, X8664Linux},
+    PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
 pub mod bash_stage_01;
@@ -31,17 +31,16 @@ pub mod ncurses_stage_01;
 pub mod patch_stage_01;
 pub mod patchelf_stage_01;
 pub mod perl_stage_01;
+pub mod protoc;
 pub mod python_stage_01;
+pub mod rust_std;
+pub mod rustc;
 pub mod sed_stage_01;
 pub mod tar_stage_01;
 pub mod texinfo_stage_01;
 pub mod util_linux_stage_01;
 pub mod xz_stage_01;
 pub mod zlib_stage_01;
-// pub mod zstd_stage_01;
-pub mod protoc;
-pub mod rust_std;
-pub mod rustc;
 
 #[allow(clippy::too_many_arguments)]
 fn add_default_environment(
@@ -55,27 +54,12 @@ fn add_default_environment(
     ncurses: Option<&PackageOutput>,
     zlib: Option<&PackageOutput>,
 ) -> Package {
-    let mut environment = vec![];
-
-    let lc_all = PackageEnvironment {
-        key: "LC_ALL".to_string(),
-        value: "C".to_string(),
-    };
-
-    environment.push(lc_all);
-
-    let c_include_path_key = "C_INCLUDE_PATH".to_string();
-    let cppflags_key = "CPPFLAGS".to_string();
-    let ld_library_path_key = "LD_LIBRARY_PATH".to_string();
-    let ldflags_key = "LDFLAGS".to_string();
-    let library_path_key = "LIBRARY_PATH".to_string();
-    let pkg_config_path_key = "PKG_CONFIG_PATH".to_string();
-
     let mut c_include_paths = vec![];
     let mut cppflags_args = vec![];
     let mut ld_library_paths = vec![];
     let mut ldflags_args = vec![];
     let mut library_paths = vec![];
+    let mut path_paths = vec![];
     let mut pkg_config_paths = vec![];
 
     if let Some(bash) = bash {
@@ -105,34 +89,22 @@ fn add_default_environment(
     if let Some(gcc) = gcc {
         let env_key = format!("${}", gcc.name.to_lowercase().replace("-", "_"));
         let include_path = format!("{}/include", env_key);
-        let lib_path = format!("{}/lib", env_key);
         let lib64_path = format!("{}/lib64", env_key);
+        let lib_path = format!("{}/lib", env_key);
+        let libexec_path = format!("{}/libexec/gcc/aarch64-unknown-linux-gnu/14.2.0", env_key);
 
         c_include_paths.push(include_path.clone());
         cppflags_args.push(format!("-I{}", include_path));
-        ld_library_paths.push(lib_path.clone());
         ld_library_paths.push(lib64_path.clone());
-        ldflags_args.push(format!("-L{}", lib_path));
+        ld_library_paths.push(lib_path.clone());
+        ld_library_paths.push(libexec_path.clone());
         ldflags_args.push(format!("-L{}", lib64_path));
-        library_paths.push(lib_path.clone());
+        ldflags_args.push(format!("-L{}", lib_path));
+        ldflags_args.push(format!("-L{}", libexec_path));
         library_paths.push(lib64_path.clone());
-
-        let cc_key = "CC".to_string();
-        let gcc_key = "GCC".to_string();
-        let gcc_path = format!("{}/bin/gcc", env_key);
-
-        let cc = PackageEnvironment {
-            key: cc_key.clone(),
-            value: gcc_path.clone(),
-        };
-
-        let gcc = PackageEnvironment {
-            key: gcc_key.clone(),
-            value: gcc_path.clone(),
-        };
-
-        environment.push(cc);
-        environment.push(gcc);
+        library_paths.push(lib_path.clone());
+        library_paths.push(libexec_path.clone());
+        path_paths.push(libexec_path.clone());
     }
 
     if let Some(glibc) = glibc {
@@ -195,11 +167,20 @@ fn add_default_environment(
         pkg_config_paths.push(pkgconfig_path);
     }
 
+    let c_include_path_key = "C_INCLUDE_PATH".to_string();
+    let cppflags_key = "CPPFLAGS".to_string();
+    let ld_library_path_key = "LD_LIBRARY_PATH".to_string();
+    let ldflags_key = "LDFLAGS".to_string();
+    let library_path_key = "LIBRARY_PATH".to_string();
+    let path_key = "PATH".to_string();
+    let pkg_config_path_key = "PKG_CONFIG_PATH".to_string();
+
     let c_include_paths = c_include_paths.join(":");
     let cppflags_args = cppflags_args.join(" ");
     let ld_library_paths = ld_library_paths.join(":");
     let ldflags_args = ldflags_args.join(" ");
     let library_paths = library_paths.join(":");
+    let path_paths = path_paths.join(":");
     let pkg_config_paths = pkg_config_paths.join(":");
 
     let mut c_include_path = package
@@ -252,6 +233,16 @@ fn add_default_environment(
         })
         .clone();
 
+    let mut path = package
+        .environment
+        .iter()
+        .find(|env| env.key == path_key)
+        .unwrap_or(&PackageEnvironment {
+            key: path_key.clone(),
+            value: "".to_string(),
+        })
+        .clone();
+
     let mut pkg_config_path = package
         .environment
         .iter()
@@ -284,6 +275,10 @@ fn add_default_environment(
         library_path.value.insert(library_path.value.len(), ':');
     }
 
+    if !path.value.is_empty() {
+        path.value.insert(path.value.len(), ':');
+    }
+
     if !pkg_config_path.value.is_empty() {
         pkg_config_path
             .value
@@ -310,15 +305,45 @@ fn add_default_environment(
         .value
         .insert_str(library_path.value.len(), library_paths.as_str());
 
+    path.value.insert_str(path.value.len(), path_paths.as_str());
+
     pkg_config_path
         .value
         .insert_str(pkg_config_path.value.len(), pkg_config_paths.as_str());
+
+    let mut environment = vec![];
+
+    environment.push(PackageEnvironment {
+        key: "LC_ALL".to_string(),
+        value: "C".to_string(),
+    });
+
+    if let Some(gcc) = gcc {
+        let cc_key = "CC".to_string();
+        let gcc_key = "GCC".to_string();
+        let gcc_env_key = format!("${}", gcc.name.to_lowercase().replace("-", "_"));
+        let gcc_path = format!("{}/bin/gcc", gcc_env_key);
+
+        let cc = PackageEnvironment {
+            key: cc_key.clone(),
+            value: gcc_path.clone(),
+        };
+
+        let gcc = PackageEnvironment {
+            key: gcc_key.clone(),
+            value: gcc_path.clone(),
+        };
+
+        environment.push(cc);
+        environment.push(gcc);
+    }
 
     environment.push(c_include_path);
     environment.push(cppflags);
     environment.push(ld_library_path);
     environment.push(ldflags);
     environment.push(library_path);
+    environment.push(path);
     environment.push(pkg_config_path);
 
     Package {
@@ -336,10 +361,10 @@ fn add_default_environment(
 pub fn add_default_packages(
     package: Package,
     target: PackageSystem,
-    bash: &PackageOutput,
+    bash: Option<&PackageOutput>,
     binutils: Option<&PackageOutput>,
     bison: Option<&PackageOutput>,
-    coreutils: &PackageOutput,
+    coreutils: Option<&PackageOutput>,
     diffutils: Option<&PackageOutput>,
     file: Option<&PackageOutput>,
     findutils: Option<&PackageOutput>,
@@ -365,15 +390,33 @@ pub fn add_default_packages(
     xz: Option<&PackageOutput>,
     zlib: Option<&PackageOutput>,
 ) -> Result<Package> {
-    let mut packages = vec![bash.clone(), coreutils.clone()];
+    let mut packages = vec![];
+
+    if target == Aarch64Macos || target == X8664Macos {
+        if let Some(bash) = bash {
+            packages.push(bash.clone());
+        }
+
+        if let Some(coreutils) = coreutils {
+            packages.push(coreutils.clone());
+        }
+    }
 
     if target == Aarch64Linux || target == X8664Linux {
+        if let Some(bash) = bash {
+            packages.push(bash.clone());
+        }
+
         if let Some(binutils) = binutils {
             packages.push(binutils.clone());
         }
 
         if let Some(bison) = bison {
             packages.push(bison.clone());
+        }
+
+        if let Some(coreutils) = coreutils {
+            packages.push(coreutils.clone());
         }
 
         if let Some(diffutils) = diffutils {
@@ -477,6 +520,8 @@ pub fn add_default_packages(
         packages.push(package);
     }
 
+    let bash = bash.ok_or_else(|| anyhow!("Bash package not found"))?;
+
     let mut script = formatdoc! {"
         #!${bash}/bin/bash
         set -euo pipefail
@@ -531,7 +576,7 @@ pub fn add_default_script(
 
         let script_glibc = formatdoc! {"
             find \"$output\" -type f | while read -r file; do
-                if file \"$file\" | grep -q 'interpreter'; then
+                if file \"$file\" | grep -q 'interpreter /lib/ld-linux-{arch}.so.1'; then
                     echo \"Patching interpreter: $file -> ${glibc}/lib/ld-linux-{arch}.so.1\"
 
                     \"patchelf\" --set-interpreter \"${glibc}/lib/ld-linux-{arch}.so.1\" \"$file\"
@@ -562,16 +607,10 @@ pub fn build_package(
 ) -> Result<PackageOutput> {
     let mut package = package.clone();
 
-    let mut bash = bash_stage_01::package(
-        context, target, None, None, None, None, None, None, None, None,
-    )?;
-
-    let mut coreutils = coreutils_stage_01::package(
-        context, target, &bash, None, None, None, None, None, None, None, None,
-    )?;
-
+    let mut bash = None;
     let mut binutils = None;
     let mut bison = None;
+    let mut coreutils = None;
     let mut diffutils = None;
     let mut file = None;
     let mut findutils = None;
@@ -597,20 +636,36 @@ pub fn build_package(
     let mut xz = None;
     let mut zlib = None;
 
-    if target == Aarch64Linux || target == X8664Linux {
-        let zlib_package = zlib_stage_01::package(context, target)?;
+    if target == Aarch64Macos || target == X8664Macos {
+        let bash_package =
+            bash_stage_01::package(context, target, None, None, None, None, None, None, None)?;
 
-        let binutils_package = binutils_stage_01::package(context, target, &zlib_package)?;
-
-        let gcc_package = gcc_stage_01::package(context, target, &binutils_package, &zlib_package)?;
-
-        let linux_headers_package = linux_headers::package(
+        let coreutils_package = coreutils_stage_01::package(
             context,
             target,
-            &binutils_package,
-            &gcc_package,
-            &zlib_package,
+            &bash_package,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         )?;
+
+        bash = Some(bash_package);
+        coreutils = Some(coreutils_package);
+    }
+
+    if target == Aarch64Linux || target == X8664Linux {
+        let binutils_package = binutils_stage_01::package(context, target)?;
+
+        let zlib_package = zlib_stage_01::package(context, target)?;
+
+        let gcc_package = gcc_stage_01::package(context, target, &binutils_package)?;
+
+        let linux_headers_package =
+            linux_headers::package(context, target, &binutils_package, &gcc_package)?;
 
         let glibc_package = glibc_stage_01::package(
             context,
@@ -618,7 +673,6 @@ pub fn build_package(
             &binutils_package,
             &gcc_package,
             &linux_headers_package,
-            &zlib_package,
         )?;
 
         let libstdcpp_package = libstdcpp_stage_01::package(
@@ -628,7 +682,6 @@ pub fn build_package(
             &gcc_package,
             &glibc_package,
             &linux_headers_package,
-            &zlib_package,
         )?;
 
         let m4_package = m4_stage_01::package(
@@ -639,7 +692,6 @@ pub fn build_package(
             &glibc_package,
             &libstdcpp_package,
             &linux_headers_package,
-            &zlib_package,
         )?;
 
         let ncurses_package = ncurses_stage_01::package(
@@ -651,7 +703,6 @@ pub fn build_package(
             &libstdcpp_package,
             &linux_headers_package,
             &m4_package,
-            &zlib_package,
         )?;
 
         let bash_package = bash_stage_01::package(
@@ -664,7 +715,6 @@ pub fn build_package(
             Some(&linux_headers_package),
             Some(&m4_package),
             Some(&ncurses_package),
-            Some(&zlib_package),
         )?;
 
         let coreutils_package = coreutils_stage_01::package(
@@ -678,13 +728,12 @@ pub fn build_package(
             Some(&linux_headers_package),
             Some(&m4_package),
             Some(&ncurses_package),
-            Some(&zlib_package),
         )?;
 
         let diffutils_package = diffutils_stage_01::package(
             context,
             target,
-            &bash,
+            &bash_package,
             &binutils_package,
             &coreutils_package,
             &gcc_package,
@@ -693,13 +742,12 @@ pub fn build_package(
             &linux_headers_package,
             &m4_package,
             &ncurses_package,
-            &zlib_package,
         )?;
 
         let file_package = file_stage_01::package(
             context,
             target,
-            &bash,
+            &bash_package,
             &binutils_package,
             &coreutils_package,
             &diffutils_package,
@@ -709,13 +757,12 @@ pub fn build_package(
             &linux_headers_package,
             &m4_package,
             &ncurses_package,
-            &zlib_package,
         )?;
 
         let findutils_package = findutils_stage_01::package(
             context,
             target,
-            &bash,
+            &bash_package,
             &binutils_package,
             &coreutils_package,
             &file_package,
@@ -725,7 +772,6 @@ pub fn build_package(
             &linux_headers_package,
             &m4_package,
             &ncurses_package,
-            &zlib_package,
         )?;
 
         let gawk_package = gawk_stage_01::package(
@@ -742,7 +788,6 @@ pub fn build_package(
             &linux_headers_package,
             &m4_package,
             &ncurses_package,
-            &zlib_package,
         )?;
 
         let grep_package = grep_stage_01::package(
@@ -761,7 +806,6 @@ pub fn build_package(
             &linux_headers_package,
             &m4_package,
             &ncurses_package,
-            &zlib_package,
         )?;
 
         let gzip_package = gzip_stage_01::package(
@@ -781,7 +825,6 @@ pub fn build_package(
             &linux_headers_package,
             &m4_package,
             &ncurses_package,
-            &zlib_package,
         )?;
 
         let make_package = make_stage_01::package(
@@ -802,7 +845,6 @@ pub fn build_package(
             &linux_headers_package,
             &m4_package,
             &ncurses_package,
-            &zlib_package,
         )?;
 
         let patch_package = patch_stage_01::package(
@@ -824,7 +866,6 @@ pub fn build_package(
             &m4_package,
             &make_package,
             &ncurses_package,
-            &zlib_package,
         )?;
 
         let sed_package = sed_stage_01::package(
@@ -847,7 +888,6 @@ pub fn build_package(
             &make_package,
             &ncurses_package,
             &patch_package,
-            &zlib_package,
         )?;
 
         let tar_package = tar_stage_01::package(
@@ -871,7 +911,6 @@ pub fn build_package(
             &ncurses_package,
             &patch_package,
             &sed_package,
-            &zlib_package,
         )?;
 
         let xz_package = xz_stage_01::package(
@@ -896,7 +935,6 @@ pub fn build_package(
             &patch_package,
             &sed_package,
             &tar_package,
-            &zlib_package,
         )?;
 
         let binutils_package = binutils_stage_02::package(
@@ -922,7 +960,6 @@ pub fn build_package(
             &sed_package,
             &tar_package,
             &xz_package,
-            &zlib_package,
         )?;
 
         let gcc_package = gcc_stage_02::package(
@@ -948,7 +985,6 @@ pub fn build_package(
             &sed_package,
             &tar_package,
             &xz_package,
-            &zlib_package,
         )?;
 
         let gettext_package = gettext_stage_01::package(
@@ -974,7 +1010,6 @@ pub fn build_package(
             &sed_package,
             &tar_package,
             &xz_package,
-            &zlib_package,
         )?;
 
         let bison_package = bison_stage_01::package(
@@ -1001,7 +1036,6 @@ pub fn build_package(
             &sed_package,
             &tar_package,
             &xz_package,
-            &zlib_package,
         )?;
 
         let perl_package = perl_stage_01::package(
@@ -1029,7 +1063,6 @@ pub fn build_package(
             &sed_package,
             &tar_package,
             &xz_package,
-            &zlib_package,
         )?;
 
         let python_package = python_stage_01::package(
@@ -1058,7 +1091,6 @@ pub fn build_package(
             &sed_package,
             &tar_package,
             &xz_package,
-            &zlib_package,
         )?;
 
         let texinfo_package = texinfo_stage_01::package(
@@ -1088,7 +1120,6 @@ pub fn build_package(
             &sed_package,
             &tar_package,
             &xz_package,
-            &zlib_package,
         )?;
 
         let util_linux_package = util_linux_stage_01::package(
@@ -1154,11 +1185,10 @@ pub fn build_package(
             &zlib_package,
         )?;
 
-        bash = bash_package;
-        coreutils = coreutils_package.clone();
-
+        bash = Some(bash_package);
         binutils = Some(binutils_package);
         bison = Some(bison_package);
+        coreutils = Some(coreutils_package.clone());
         diffutils = Some(diffutils_package);
         file = Some(file_package);
         findutils = Some(findutils_package);
@@ -1187,7 +1217,7 @@ pub fn build_package(
 
     package = add_default_environment(
         package,
-        Some(&bash),
+        bash.as_ref(),
         binutils.as_ref(),
         gcc.as_ref(),
         glibc.as_ref(),
@@ -1200,10 +1230,10 @@ pub fn build_package(
     package = add_default_packages(
         package,
         target,
-        &bash,
+        bash.as_ref(),
         binutils.as_ref(),
         bison.as_ref(),
-        &coreutils,
+        coreutils.as_ref(),
         diffutils.as_ref(),
         file.as_ref(),
         findutils.as_ref(),
