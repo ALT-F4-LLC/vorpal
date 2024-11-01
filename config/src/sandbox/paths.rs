@@ -33,7 +33,7 @@ pub struct SandboxDefaultPaths {
     pub wget: bool,
 }
 
-pub fn add_default_host_paths(options: SandboxDefaultPaths) -> Vec<PackageSandboxPath> {
+pub fn add_paths(options: SandboxDefaultPaths) -> Vec<PackageSandboxPath> {
     let mut paths = vec!["/etc/resolv.conf", "/etc/ssl/certs"];
 
     if options.autoconf {

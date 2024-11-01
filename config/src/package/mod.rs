@@ -1,8 +1,11 @@
-use crate::{cross_platform::get_sed_cmd, ContextConfig};
-use anyhow::{anyhow, bail, Result};
-use indoc::formatdoc;
+use crate::{
+    cross_platform::get_sed_cmd,
+    sandbox::{environments::add_environments, packages::add_packages, scripts::add_scripts},
+    ContextConfig,
+};
+use anyhow::Result;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageEnvironment, PackageOutput, PackageSystem,
+    Package, PackageOutput, PackageSystem,
     PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
@@ -40,565 +43,7 @@ pub mod tar_stage_01;
 pub mod texinfo_stage_01;
 pub mod util_linux_stage_01;
 pub mod xz_stage_01;
-pub mod zlib_stage_01;
-
-#[allow(clippy::too_many_arguments)]
-fn add_default_environment(
-    package: Package,
-    bash: Option<&PackageOutput>,
-    binutils: Option<&PackageOutput>,
-    gcc: Option<&PackageOutput>,
-    glibc: Option<&PackageOutput>,
-    libstdcpp: Option<&PackageOutput>,
-    linux_headers: Option<&PackageOutput>,
-    ncurses: Option<&PackageOutput>,
-    zlib: Option<&PackageOutput>,
-) -> Package {
-    let mut c_include_paths = vec![];
-    let mut cppflags_args = vec![];
-    let mut ld_library_paths = vec![];
-    let mut ldflags_args = vec![];
-    let mut library_paths = vec![];
-    let mut path_paths = vec![];
-    let mut pkg_config_paths = vec![];
-
-    if let Some(bash) = bash {
-        let env_key = format!("${}", bash.name.to_lowercase().replace("-", "_"));
-        let include_path = format!("{}/include", env_key);
-        let lib_path = format!("{}/lib", env_key);
-
-        c_include_paths.push(include_path.clone());
-        cppflags_args.push(format!("-I{}", include_path));
-        ld_library_paths.push(lib_path.clone());
-        ldflags_args.push(format!("-L{}", lib_path));
-        library_paths.push(lib_path);
-    }
-
-    if let Some(binutils) = binutils {
-        let env_key = format!("${}", binutils.name.to_lowercase().replace("-", "_"));
-        let include_path = format!("{}/include", env_key);
-        let lib_path = format!("{}/lib", env_key);
-
-        c_include_paths.push(include_path.clone());
-        cppflags_args.push(format!("-I{}", include_path));
-        ld_library_paths.push(lib_path.clone());
-        ldflags_args.push(format!("-L{}", lib_path));
-        library_paths.push(lib_path.clone());
-    }
-
-    if let Some(gcc) = gcc {
-        let env_key = format!("${}", gcc.name.to_lowercase().replace("-", "_"));
-        let include_path = format!("{}/include", env_key);
-        let lib64_path = format!("{}/lib64", env_key);
-        let lib_path = format!("{}/lib", env_key);
-        let libexec_path = format!("{}/libexec/gcc/aarch64-unknown-linux-gnu/14.2.0", env_key);
-
-        c_include_paths.push(include_path.clone());
-        cppflags_args.push(format!("-I{}", include_path));
-        ld_library_paths.push(lib64_path.clone());
-        ld_library_paths.push(lib_path.clone());
-        ld_library_paths.push(libexec_path.clone());
-        ldflags_args.push(format!("-L{}", lib64_path));
-        ldflags_args.push(format!("-L{}", lib_path));
-        ldflags_args.push(format!("-L{}", libexec_path));
-        library_paths.push(lib64_path.clone());
-        library_paths.push(lib_path.clone());
-        library_paths.push(libexec_path.clone());
-        path_paths.push(libexec_path.clone());
-    }
-
-    if let Some(glibc) = glibc {
-        let env_key = format!("${}", glibc.name.to_lowercase().replace("-", "_"));
-        let include_path = format!("{}/include", env_key);
-        let lib_path = format!("{}/lib", env_key);
-
-        c_include_paths.push(include_path.clone());
-        cppflags_args.push(format!("-I{}", include_path));
-        ld_library_paths.push(lib_path.clone());
-        ldflags_args.push(format!("-L{}", lib_path));
-        library_paths.push(lib_path.clone());
-    }
-
-    if let Some(libstdcpp) = libstdcpp {
-        let env_key = format!("${}", libstdcpp.name.to_lowercase().replace("-", "_"));
-        let lib_path = format!("{}/lib", env_key);
-        let lib64_path = format!("{}/lib64", env_key);
-
-        ld_library_paths.push(lib_path.clone());
-        ld_library_paths.push(lib64_path.clone());
-        ldflags_args.push(format!("-L{}", lib_path));
-        ldflags_args.push(format!("-L{}", lib64_path));
-        library_paths.push(lib_path.clone());
-        library_paths.push(lib64_path.clone());
-    }
-
-    if let Some(linux_headers) = linux_headers {
-        let env_key = format!("${}", linux_headers.name.to_lowercase().replace("-", "_"));
-        let include_path = format!("{}/include", env_key);
-
-        c_include_paths.push(include_path.clone());
-        cppflags_args.push(format!("-I{}", include_path));
-    }
-
-    if let Some(ncurses) = ncurses {
-        let env_key = format!("${}", ncurses.name.to_lowercase().replace("-", "_"));
-        let include_path = format!("{}/include/ncursesw", env_key);
-        let lib_path = format!("{}/lib", env_key);
-
-        c_include_paths.push(include_path.clone());
-        cppflags_args.push(format!("-I{}", include_path));
-        ld_library_paths.push(lib_path.clone());
-        ldflags_args.push(format!("-L{}", lib_path));
-        library_paths.push(lib_path.clone());
-    }
-
-    if let Some(zlib) = zlib {
-        let env_key = format!("${}", zlib.name.to_lowercase().replace("-", "_"));
-        let include_path = format!("{}/include", env_key);
-        let lib_path = format!("{}/lib", env_key);
-        let pkgconfig_path = format!("{}/lib/pkgconfig", env_key);
-
-        c_include_paths.push(include_path.clone());
-        cppflags_args.push(format!("-I{}", include_path));
-        ld_library_paths.push(lib_path.clone());
-        ldflags_args.push(format!("-L{}", lib_path));
-        library_paths.push(lib_path.clone());
-
-        pkg_config_paths.push(pkgconfig_path);
-    }
-
-    let c_include_path_key = "C_INCLUDE_PATH".to_string();
-    let cppflags_key = "CPPFLAGS".to_string();
-    let ld_library_path_key = "LD_LIBRARY_PATH".to_string();
-    let ldflags_key = "LDFLAGS".to_string();
-    let library_path_key = "LIBRARY_PATH".to_string();
-    let path_key = "PATH".to_string();
-    let pkg_config_path_key = "PKG_CONFIG_PATH".to_string();
-
-    let c_include_paths = c_include_paths.join(":");
-    let cppflags_args = cppflags_args.join(" ");
-    let ld_library_paths = ld_library_paths.join(":");
-    let ldflags_args = ldflags_args.join(" ");
-    let library_paths = library_paths.join(":");
-    let path_paths = path_paths.join(":");
-    let pkg_config_paths = pkg_config_paths.join(":");
-
-    let mut c_include_path = package
-        .environment
-        .iter()
-        .find(|env| env.key == c_include_path_key)
-        .unwrap_or(&PackageEnvironment {
-            key: c_include_path_key.clone(),
-            value: "".to_string(),
-        })
-        .clone();
-
-    let mut cppflags = package
-        .environment
-        .iter()
-        .find(|env| env.key == cppflags_key)
-        .unwrap_or(&PackageEnvironment {
-            key: cppflags_key.clone(),
-            value: "".to_string(),
-        })
-        .clone();
-
-    let mut ldflags = package
-        .environment
-        .iter()
-        .find(|env| env.key == ldflags_key)
-        .unwrap_or(&PackageEnvironment {
-            key: ldflags_key.clone(),
-            value: "".to_string(),
-        })
-        .clone();
-
-    let mut ld_library_path = package
-        .environment
-        .iter()
-        .find(|env| env.key == ld_library_path_key)
-        .unwrap_or(&PackageEnvironment {
-            key: ld_library_path_key.clone(),
-            value: "".to_string(),
-        })
-        .clone();
-
-    let mut library_path = package
-        .environment
-        .iter()
-        .find(|env| env.key == library_path_key)
-        .unwrap_or(&PackageEnvironment {
-            key: library_path_key.clone(),
-            value: "".to_string(),
-        })
-        .clone();
-
-    let mut path = package
-        .environment
-        .iter()
-        .find(|env| env.key == path_key)
-        .unwrap_or(&PackageEnvironment {
-            key: path_key.clone(),
-            value: "".to_string(),
-        })
-        .clone();
-
-    let mut pkg_config_path = package
-        .environment
-        .iter()
-        .find(|env| env.key == pkg_config_path_key)
-        .unwrap_or(&PackageEnvironment {
-            key: pkg_config_path_key.clone(),
-            value: "".to_string(),
-        })
-        .clone();
-
-    if !c_include_path.value.is_empty() {
-        c_include_path.value.insert(c_include_path.value.len(), ':');
-    }
-
-    if !cppflags.value.is_empty() {
-        cppflags.value.insert(cppflags.value.len(), ' ');
-    }
-
-    if !ld_library_path.value.is_empty() {
-        ld_library_path
-            .value
-            .insert(ld_library_path.value.len(), ':');
-    }
-
-    if !ldflags.value.is_empty() {
-        ldflags.value.insert(ldflags.value.len(), ' ');
-    }
-
-    if !library_path.value.is_empty() {
-        library_path.value.insert(library_path.value.len(), ':');
-    }
-
-    if !path.value.is_empty() {
-        path.value.insert(path.value.len(), ':');
-    }
-
-    if !pkg_config_path.value.is_empty() {
-        pkg_config_path
-            .value
-            .insert(pkg_config_path.value.len(), ':');
-    }
-
-    c_include_path
-        .value
-        .insert_str(c_include_path.value.len(), c_include_paths.as_str());
-
-    cppflags
-        .value
-        .insert_str(cppflags.value.len(), cppflags_args.as_str());
-
-    ld_library_path
-        .value
-        .insert_str(ld_library_path.value.len(), ld_library_paths.as_str());
-
-    ldflags
-        .value
-        .insert_str(ldflags.value.len(), ldflags_args.as_str());
-
-    library_path
-        .value
-        .insert_str(library_path.value.len(), library_paths.as_str());
-
-    path.value.insert_str(path.value.len(), path_paths.as_str());
-
-    pkg_config_path
-        .value
-        .insert_str(pkg_config_path.value.len(), pkg_config_paths.as_str());
-
-    let mut environment = vec![];
-
-    environment.push(PackageEnvironment {
-        key: "LC_ALL".to_string(),
-        value: "C".to_string(),
-    });
-
-    if let Some(gcc) = gcc {
-        let cc_key = "CC".to_string();
-        let gcc_key = "GCC".to_string();
-        let gcc_env_key = format!("${}", gcc.name.to_lowercase().replace("-", "_"));
-        let gcc_path = format!("{}/bin/gcc", gcc_env_key);
-
-        let cc = PackageEnvironment {
-            key: cc_key.clone(),
-            value: gcc_path.clone(),
-        };
-
-        let gcc = PackageEnvironment {
-            key: gcc_key.clone(),
-            value: gcc_path.clone(),
-        };
-
-        environment.push(cc);
-        environment.push(gcc);
-    }
-
-    environment.push(c_include_path);
-    environment.push(cppflags);
-    environment.push(ld_library_path);
-    environment.push(ldflags);
-    environment.push(library_path);
-    environment.push(path);
-    environment.push(pkg_config_path);
-
-    Package {
-        environment,
-        name: package.name,
-        packages: package.packages,
-        sandbox: package.sandbox,
-        script: package.script,
-        source: package.source,
-        systems: package.systems,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn add_default_packages(
-    package: Package,
-    target: PackageSystem,
-    bash: Option<&PackageOutput>,
-    binutils: Option<&PackageOutput>,
-    bison: Option<&PackageOutput>,
-    coreutils: Option<&PackageOutput>,
-    diffutils: Option<&PackageOutput>,
-    file: Option<&PackageOutput>,
-    findutils: Option<&PackageOutput>,
-    gawk: Option<&PackageOutput>,
-    gcc: Option<&PackageOutput>,
-    gettext: Option<&PackageOutput>,
-    glibc: Option<&PackageOutput>,
-    grep: Option<&PackageOutput>,
-    gzip: Option<&PackageOutput>,
-    libstdcpp: Option<&PackageOutput>,
-    linux_headers: Option<&PackageOutput>,
-    m4: Option<&PackageOutput>,
-    make: Option<&PackageOutput>,
-    ncurses: Option<&PackageOutput>,
-    patch: Option<&PackageOutput>,
-    patchelf: Option<&PackageOutput>,
-    perl: Option<&PackageOutput>,
-    python: Option<&PackageOutput>,
-    sed: Option<&PackageOutput>,
-    tar: Option<&PackageOutput>,
-    texinfo: Option<&PackageOutput>,
-    util_linux: Option<&PackageOutput>,
-    xz: Option<&PackageOutput>,
-    zlib: Option<&PackageOutput>,
-) -> Result<Package> {
-    let mut packages = vec![];
-
-    if target == Aarch64Macos || target == X8664Macos {
-        if let Some(bash) = bash {
-            packages.push(bash.clone());
-        }
-
-        if let Some(coreutils) = coreutils {
-            packages.push(coreutils.clone());
-        }
-    }
-
-    if target == Aarch64Linux || target == X8664Linux {
-        if let Some(bash) = bash {
-            packages.push(bash.clone());
-        }
-
-        if let Some(binutils) = binutils {
-            packages.push(binutils.clone());
-        }
-
-        if let Some(bison) = bison {
-            packages.push(bison.clone());
-        }
-
-        if let Some(coreutils) = coreutils {
-            packages.push(coreutils.clone());
-        }
-
-        if let Some(diffutils) = diffutils {
-            packages.push(diffutils.clone());
-        }
-
-        if let Some(file) = file {
-            packages.push(file.clone());
-        }
-
-        if let Some(findutils) = findutils {
-            packages.push(findutils.clone());
-        }
-
-        if let Some(gawk) = gawk {
-            packages.push(gawk.clone());
-        }
-
-        if let Some(gcc) = gcc {
-            packages.push(gcc.clone());
-        }
-
-        if let Some(gettext) = gettext {
-            packages.push(gettext.clone());
-        }
-
-        if let Some(glibc) = glibc {
-            packages.push(glibc.clone());
-        }
-
-        if let Some(grep) = grep {
-            packages.push(grep.clone());
-        }
-
-        if let Some(gzip) = gzip {
-            packages.push(gzip.clone());
-        }
-
-        if let Some(libstdcpp) = libstdcpp {
-            packages.push(libstdcpp.clone());
-        }
-
-        if let Some(linux_headers) = linux_headers {
-            packages.push(linux_headers.clone());
-        }
-
-        if let Some(m4) = m4 {
-            packages.push(m4.clone());
-        }
-
-        if let Some(make) = make {
-            packages.push(make.clone());
-        }
-
-        if let Some(ncurses) = ncurses {
-            packages.push(ncurses.clone());
-        }
-
-        if let Some(patch) = patch {
-            packages.push(patch.clone());
-        }
-
-        if let Some(patchelf) = patchelf {
-            packages.push(patchelf.clone());
-        }
-
-        if let Some(perl) = perl {
-            packages.push(perl.clone());
-        }
-
-        if let Some(python) = python {
-            packages.push(python.clone());
-        }
-
-        if let Some(sed) = sed {
-            packages.push(sed.clone());
-        }
-
-        if let Some(tar) = tar {
-            packages.push(tar.clone());
-        }
-
-        if let Some(texinfo) = texinfo {
-            packages.push(texinfo.clone());
-        }
-
-        if let Some(util_linux) = util_linux {
-            packages.push(util_linux.clone());
-        }
-
-        if let Some(xz) = xz {
-            packages.push(xz.clone());
-        }
-
-        if let Some(zlib) = zlib {
-            packages.push(zlib.clone());
-        }
-    }
-
-    for package in package.packages {
-        packages.push(package);
-    }
-
-    let bash = bash.ok_or_else(|| anyhow!("Bash package not found"))?;
-
-    let mut script = formatdoc! {"
-        #!${bash}/bin/bash
-        set -euo pipefail
-        export LC_ALL=\"C\"",
-        bash = bash.name.to_lowercase().replace("-", "_"),
-    };
-
-    if package.script.is_empty() {
-        bail!("Package script is empty");
-    }
-
-    script.push_str(format!("\n\n{}", package.script).as_str());
-
-    Ok(Package {
-        environment: package.environment,
-        name: package.name,
-        packages,
-        sandbox: package.sandbox,
-        script,
-        source: package.source,
-        systems: package.systems,
-    })
-}
-
-pub fn add_default_script(
-    package: Package,
-    system: PackageSystem,
-    glibc: Option<&PackageOutput>,
-) -> Result<Package> {
-    let mut script = package.script.clone();
-
-    // TODO: add option for enabling or disabling rpath patches
-
-    let script_paths = formatdoc! {"
-        find \"$output\" -type f | while read -r file; do
-            if file \"$file\" | grep -q 'text'; then
-                {sed} \"s|$PWD|${envkey}|g\" \"$file\"
-            fi
-        done",
-        envkey = package.name.to_lowercase().replace("-", "_"),
-        sed = get_sed_cmd(system)?,
-    };
-
-    script.push_str(format!("\n\n{}", script_paths).as_str());
-
-    if let Some(glibc) = glibc {
-        let glibc_arch = match system {
-            Aarch64Linux => "aarch64",
-            X8664Linux => "x86_64",
-            _ => bail!("Unsupported interpreter system"),
-        };
-
-        let glibc_script = formatdoc! {"
-            find \"$output\" -type f | while read -r file; do
-                if file \"$file\" | grep -q 'interpreter /lib/ld-linux-{arch}.so.1'; then
-                    echo \"Patching interpreter: $file -> ${glibc}/lib/ld-linux-{arch}.so.1\"
-
-                    \"patchelf\" --set-interpreter \"${glibc}/lib/ld-linux-{arch}.so.1\" \"$file\"
-                fi
-            done",
-            arch = glibc_arch,
-            glibc = glibc.name.to_lowercase().replace("-", "_"),
-        };
-
-        script.push_str(format!("\n\n{}", glibc_script).as_str());
-    }
-
-    Ok(Package {
-        environment: package.environment,
-        name: package.name,
-        packages: package.packages,
-        sandbox: package.sandbox,
-        script,
-        source: package.source,
-        systems: package.systems,
-    })
-}
+// pub mod zlib_stage_01;
 
 pub fn build_package(
     context: &mut ContextConfig,
@@ -634,7 +79,7 @@ pub fn build_package(
     let mut texinfo = None;
     let mut util_linux = None;
     let mut xz = None;
-    let mut zlib = None;
+    // let mut zlib = None;
 
     if target == Aarch64Macos || target == X8664Macos {
         let bash_package =
@@ -659,8 +104,6 @@ pub fn build_package(
 
     if target == Aarch64Linux || target == X8664Linux {
         let binutils_package = binutils_stage_01::package(context, target)?;
-
-        let zlib_package = zlib_stage_01::package(context, target)?;
 
         let gcc_package = gcc_stage_01::package(context, target, &binutils_package)?;
 
@@ -1150,7 +593,6 @@ pub fn build_package(
             &tar_package,
             &texinfo_package,
             &xz_package,
-            &zlib_package,
         )?;
 
         let patchelf_package = patchelf_stage_01::package(
@@ -1182,8 +624,9 @@ pub fn build_package(
             &texinfo_package,
             &util_linux_package,
             &xz_package,
-            &zlib_package,
         )?;
+
+        // let zlib_package = zlib_stage_01::package(context, target)?;
 
         bash = Some(bash_package);
         binutils = Some(binutils_package);
@@ -1212,10 +655,10 @@ pub fn build_package(
         texinfo = Some(texinfo_package);
         util_linux = Some(util_linux_package);
         xz = Some(xz_package);
-        zlib = Some(zlib_package);
+        // zlib = Some(zlib_package);
     }
 
-    package = add_default_environment(
+    package = add_environments(
         package,
         bash.as_ref(),
         binutils.as_ref(),
@@ -1224,10 +667,10 @@ pub fn build_package(
         libstdcpp.as_ref(),
         linux_headers.as_ref(),
         ncurses.as_ref(),
-        zlib.as_ref(),
+        // zlib.as_ref(),
     );
 
-    package = add_default_packages(
+    package = add_packages(
         package,
         target,
         bash.as_ref(),
@@ -1257,10 +700,10 @@ pub fn build_package(
         texinfo.as_ref(),
         util_linux.as_ref(),
         xz.as_ref(),
-        zlib.as_ref(),
+        // zlib.as_ref(),
     )?;
 
-    package = add_default_script(package, target, glibc.as_ref())?;
+    package = add_scripts(package, target, glibc.as_ref(), vec![])?;
 
     package = Package {
         environment: package.environment,

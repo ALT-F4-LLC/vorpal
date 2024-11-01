@@ -1,13 +1,16 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script, PackageEnvironment},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    sandbox::{
+        environments::add_environments,
+        paths::{add_paths, SandboxDefaultPaths},
+        scripts::add_scripts,
+    },
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSandbox, PackageSource, PackageSystem,
+    Package, PackageEnvironment, PackageOutput, PackageSandbox, PackageSource, PackageSystem,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
@@ -18,6 +21,11 @@ pub fn package(
     gcc: &PackageOutput,
     linux_headers: &PackageOutput,
 ) -> Result<PackageOutput> {
+    let environment = vec![PackageEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+    }];
+
     let name = "glibc-stage-01";
 
     let script = formatdoc! {"
@@ -54,11 +62,6 @@ pub fn package(
         uri: "https://ftp.gnu.org/gnu/glibc/glibc-2.40.tar.gz".to_string(),
     };
 
-    let environment = vec![PackageEnvironment {
-        key: "PATH".to_string(),
-        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
-    }];
-
     let sandbox_paths = SandboxDefaultPaths {
         autoconf: false,
         automake: true,
@@ -83,7 +86,7 @@ pub fn package(
         lib: true,
         m4: true,
         make: true,
-        patchelf: false,
+        patchelf: true,
         perl: true,
         python: true,
         sed: true,
@@ -93,7 +96,7 @@ pub fn package(
     };
 
     let sandbox = PackageSandbox {
-        paths: add_default_host_paths(sandbox_paths),
+        paths: add_paths(sandbox_paths),
     };
 
     let package = Package {
@@ -106,7 +109,7 @@ pub fn package(
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(
+    let package = add_environments(
         package,
         None,
         Some(binutils),
@@ -115,10 +118,9 @@ pub fn package(
         None,
         Some(linux_headers),
         None,
-        None,
     );
 
-    let package = add_default_script(package, target, None)?;
+    let package = add_scripts(package, target, None, vec![])?;
 
     let package_output = context.add_package(package)?;
 

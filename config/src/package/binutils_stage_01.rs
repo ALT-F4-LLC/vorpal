@@ -1,7 +1,10 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    sandbox::{
+        environments::add_environments,
+        paths::{add_paths, SandboxDefaultPaths},
+        scripts::add_scripts,
+    },
     ContextConfig,
 };
 use anyhow::Result;
@@ -71,7 +74,7 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
         diffutils: true,
         file: true,
         findutils: true,
-        flex: false,
+        flex: true,
         gawk: true,
         gcc: true,
         gcc_12: true,
@@ -83,7 +86,7 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
         lib: true,
         m4: true,
         make: true,
-        patchelf: false,
+        patchelf: true,
         perl: true,
         python: true,
         sed: true,
@@ -93,7 +96,7 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
     };
 
     let sandbox = PackageSandbox {
-        paths: add_default_host_paths(sandbox_paths),
+        paths: add_paths(sandbox_paths),
     };
 
     let package = Package {
@@ -106,9 +109,9 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(package, None, None, None, None, None, None, None, None);
+    let package = add_environments(package, None, None, None, None, None, None, None);
 
-    let package = add_default_script(package, target, None)?;
+    let package = add_scripts(package, target, None, vec![])?;
 
     let package_input = context.add_package(package)?;
 

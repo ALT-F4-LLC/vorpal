@@ -1,7 +1,10 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    sandbox::{
+        environments::add_environments,
+        paths::{add_paths, SandboxDefaultPaths},
+        scripts::add_scripts,
+    },
     ContextConfig,
 };
 use anyhow::Result;
@@ -81,7 +84,7 @@ pub fn package(
     };
 
     let sandbox = PackageSandbox {
-        paths: add_default_host_paths(sandbox_paths),
+        paths: add_paths(sandbox_paths),
     };
 
     let script = formatdoc! {"
@@ -150,7 +153,7 @@ pub fn package(
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(
+    let package = add_environments(
         package,
         Some(bash),
         Some(binutils),
@@ -159,10 +162,9 @@ pub fn package(
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),
-        None,
     );
 
-    let package = add_default_script(package, target, Some(glibc))?;
+    let package = add_scripts(package, target, Some(glibc), vec![])?;
 
     let package_output = context.add_package(package)?;
 

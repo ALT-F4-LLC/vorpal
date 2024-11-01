@@ -1,7 +1,10 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    sandbox::{
+        environments::add_environments,
+        paths::{add_paths, SandboxDefaultPaths},
+        scripts::{add_scripts, PackageRpath},
+    },
     ContextConfig,
 };
 use anyhow::{anyhow, Result};
@@ -29,6 +32,7 @@ pub fn package(
 ) -> Result<PackageOutput> {
     let mut environment = vec![];
     let mut packages = vec![];
+    let mut packages_rpaths = vec![];
     let mut sandbox = None;
 
     if target == Aarch64Linux || target == X8664Linux {
@@ -87,7 +91,16 @@ pub fn package(
         };
 
         sandbox = Some(PackageSandbox {
-            paths: add_default_host_paths(sandbox_paths),
+            paths: add_paths(sandbox_paths),
+        });
+
+        let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
+        let ncurses_env_key = ncurses.name.to_lowercase().replace("-", "_");
+
+        packages_rpaths.push(PackageRpath {
+            rpath: format!("${}/lib:${}/lib", ncurses_env_key, glibc_env_key),
+            shrink: false,
+            target: "$output".to_string(),
         });
     }
 
@@ -137,7 +150,7 @@ pub fn package(
         ],
     };
 
-    let package = add_default_environment(
+    let package = add_environments(
         package,
         None,
         binutils,
@@ -146,10 +159,9 @@ pub fn package(
         libstdcpp,
         linux_headers,
         ncurses,
-        None,
     );
 
-    let package = add_default_script(package, target, glibc)?;
+    let package = add_scripts(package, target, glibc, packages_rpaths)?;
 
     let package_output = context.add_package(package)?;
 

@@ -77,7 +77,7 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
         lib: true,
         m4: true,
         make: true,
-        patchelf: false,
+        patchelf: true,
         perl: true,
         python: true,
         sed: true,
@@ -100,7 +100,7 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(package, None, None, None, None, None, None, None, None);
+    let package = add_default_environment(package, None, None, None, None, None, None, None);
 
     let package = add_default_script(package, target, None)?;
 

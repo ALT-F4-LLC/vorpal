@@ -1,7 +1,9 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    sandbox::{
+        environments::add_environments,
+        scripts::{add_scripts, PackageRpath},
+    },
     ContextConfig,
 };
 use anyhow::Result;
@@ -41,66 +43,38 @@ pub fn package(
         value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
     }];
 
-    let name = "gettext-stage-01";
+    let name = "gettext";
 
-    let sandbox_paths = SandboxDefaultPaths {
-        autoconf: true,
-        automake: true,
-        bash: false,
-        binutils: false,
-        bison: true,
-        bzip2: true,
-        coreutils: false,
-        curl: true,
-        diffutils: false,
-        file: false,
-        findutils: false,
-        flex: false,
-        gawk: false,
-        gcc: false,
-        gcc_12: false,
-        glibc: false,
-        grep: false,
-        gzip: false,
-        help2man: true,
-        includes: true,
-        lib: true,
-        m4: false,
-        make: false,
-        patchelf: true,
-        perl: true,
-        python: true,
-        sed: false,
-        tar: false,
-        texinfo: true,
-        wget: true,
-    };
-
-    let sandbox = PackageSandbox {
-        paths: add_default_host_paths(sandbox_paths),
-    };
+    let sandbox = PackageSandbox { paths: vec![] };
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
         set -euo pipefail
 
         mkdir -pv /bin
+        mkdir -pv /lib
+        mkdir -pv /lib64
+        mkdir -pv /usr/bin
 
         ln -s ${bash}/bin/bash /bin/bash
         ln -s ${bash}/bin/bash /bin/sh
-        ln -s ${m4}/bin/m4 /usr/bin/m4
+        ln -s ${gcc}/bin/cpp /lib/cpp
+        ln -s ${glibc}/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1
+        ln -s ${glibc}/lib/ld-linux-aarch64.so.1 /lib64/ld-linux-aarch64.so.1
 
         cd \"${{PWD}}/{source}\"
 
-        ./configure \
-            --disable-shared \
-            --prefix=\"$output\"
+        ./configure --disable-shared
 
         make -j$({cores})
-        make install",
+
+        mkdir -pv \"$output/bin\"
+
+        cp -v gettext-tools/src/{{msgfmt,msgmerge,xgettext}} \"$output/bin\"",
         bash = bash.name.to_lowercase().replace("-", "_"),
         cores = get_cpu_count(target)?,
-        m4 = m4.name.to_lowercase().replace("-", "_"),
+        gcc = gcc.name.to_lowercase().replace("-", "_"),
+        glibc = glibc.name.to_lowercase().replace("-", "_"),
         source = name,
     };
 
@@ -144,19 +118,26 @@ pub fn package(
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(
+    let package = add_environments(
         package,
         Some(bash),
         Some(binutils),
         Some(gcc),
-        None,
+        Some(glibc),
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),
-        None,
     );
 
-    let package = add_default_script(package, target, None)?;
+    let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
+
+    let package_rpaths = vec![PackageRpath {
+        rpath: format!("${}/lib", glibc_env_key),
+        shrink: true,
+        target: "$output".to_string(),
+    }];
+
+    let package = add_scripts(package, target, Some(glibc), package_rpaths)?;
 
     let package_output = context.add_package(package)?;
 

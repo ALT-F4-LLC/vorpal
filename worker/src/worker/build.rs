@@ -316,7 +316,7 @@ pub async fn run(
         sandbox_package_paths.join(" ").to_string(),
     );
 
-    // expand environment variables that have references
+    // Expand package references in environment variables
 
     for (key, _) in sandbox_env.clone().into_iter() {
         for p in package_packages.iter() {
@@ -344,7 +344,22 @@ pub async fn run(
         sandbox_env.insert(key.clone(), value.clone());
     }
 
-    // Expand references in package script
+    // Expand self '$<package>' references in script
+
+    package_script = package_script.replace(
+        format!(r"${}", package_name_env).as_str(),
+        &package_path.display().to_string(),
+    );
+
+    // Expand self '$output' references in script
+
+    package_script = package_script.replace(r"$output", &package_path.display().to_string());
+
+    // Expand other '$packages' references in script
+
+    package_script = package_script.replace(r"$packages", &sandbox_package_paths.join(" "));
+
+    // Expand other '$<package>' references in script
 
     for package in package_packages.iter() {
         let placeholder = format!(r"${}", package.name.replace('-', "_").to_lowercase());

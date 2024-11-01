@@ -1,7 +1,10 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    sandbox::{
+        environments::add_environments,
+        paths::{add_paths, SandboxDefaultPaths},
+        scripts::{add_scripts, PackageRpath},
+    },
     ContextConfig,
 };
 use anyhow::Result;
@@ -22,7 +25,49 @@ pub fn package(
     linux_headers: &PackageOutput,
     m4: &PackageOutput,
 ) -> Result<PackageOutput> {
+    let environment = vec![PackageEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+    }];
+
     let name = "ncurses-stage-01";
+
+    let sandbox_paths = SandboxDefaultPaths {
+        autoconf: true,
+        automake: true,
+        bash: true,
+        binutils: false,
+        bison: true,
+        bzip2: true,
+        coreutils: true,
+        curl: true,
+        diffutils: true,
+        file: true,
+        findutils: true,
+        flex: false,
+        gawk: true,
+        gcc: false,
+        gcc_12: false,
+        glibc: false,
+        grep: true,
+        gzip: true,
+        help2man: true,
+        includes: true,
+        lib: true,
+        m4: true,
+        make: true,
+        patchelf: true,
+        perl: true,
+        python: true,
+        sed: true,
+        tar: true,
+        texinfo: true,
+        wget: true,
+    };
+
+    let sandbox = PackageSandbox {
+        paths: add_paths(sandbox_paths),
+    };
 
     let script = formatdoc! {"
         #!/bin/bash
@@ -65,48 +110,6 @@ pub fn package(
         cores = get_cpu_count(target)?,
     };
 
-    let environment = vec![PackageEnvironment {
-        key: "PATH".to_string(),
-        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
-    }];
-
-    let sandbox_paths = SandboxDefaultPaths {
-        autoconf: true,
-        automake: true,
-        bash: true,
-        binutils: false,
-        bison: true,
-        bzip2: true,
-        coreutils: true,
-        curl: true,
-        diffutils: true,
-        file: true,
-        findutils: true,
-        flex: false,
-        gawk: true,
-        gcc: false,
-        gcc_12: false,
-        glibc: false,
-        grep: true,
-        gzip: true,
-        help2man: true,
-        includes: true,
-        lib: true,
-        m4: true,
-        make: true,
-        patchelf: true,
-        perl: true,
-        python: true,
-        sed: true,
-        tar: true,
-        texinfo: true,
-        wget: true,
-    };
-
-    let sandbox = PackageSandbox {
-        paths: add_default_host_paths(sandbox_paths),
-    };
-
     let source = PackageSource {
         excludes: vec![],
         hash: Some("aab234a3b7a22e2632151fbe550cb36e371d3ee5318a633ee43af057f9f112fb".to_string()),
@@ -133,7 +136,7 @@ pub fn package(
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(
+    let package = add_environments(
         package,
         None,
         Some(binutils),
@@ -142,10 +145,24 @@ pub fn package(
         Some(libstdcpp),
         Some(linux_headers),
         None,
-        None,
     );
 
-    let package = add_default_script(package, target, Some(glibc))?;
+    let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
+
+    let packages_rpaths = vec![
+        PackageRpath {
+            rpath: format!("$output/lib:${}/lib", glibc_env_key),
+            shrink: false,
+            target: "$output/bin".to_string(),
+        },
+        PackageRpath {
+            rpath: format!("${}/lib", glibc_env_key),
+            shrink: false,
+            target: "$output/lib".to_string(),
+        },
+    ];
+
+    let package = add_scripts(package, target, Some(glibc), packages_rpaths)?;
 
     let package_output = context.add_package(package)?;
 

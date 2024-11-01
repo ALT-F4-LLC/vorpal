@@ -1,7 +1,10 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    sandbox::{
+        environments::add_environments,
+        paths::{add_paths, SandboxDefaultPaths},
+        scripts::add_scripts,
+    },
     ContextConfig,
 };
 use anyhow::Result;
@@ -76,7 +79,7 @@ pub fn package(
         lib: true,
         m4: true,
         make: true,
-        patchelf: false,
+        patchelf: true,
         perl: true,
         python: true,
         sed: true,
@@ -86,7 +89,7 @@ pub fn package(
     };
 
     let sandbox = PackageSandbox {
-        paths: add_default_host_paths(sandbox_paths),
+        paths: add_paths(sandbox_paths),
     };
 
     let source = PackageSource {
@@ -113,7 +116,7 @@ pub fn package(
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(
+    let package = add_environments(
         package,
         None,
         Some(binutils),
@@ -122,10 +125,9 @@ pub fn package(
         None,
         Some(linux_headers),
         None,
-        None,
     );
 
-    let package = add_default_script(package, target, Some(glibc))?;
+    let package = add_scripts(package, target, None, vec![])?;
 
     let package_output = context.add_package(package)?;
 

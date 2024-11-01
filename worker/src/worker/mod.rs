@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tokio::fs::remove_dir_all;
+// use tokio::fs::remove_dir_all;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
@@ -47,9 +47,9 @@ impl WorkerService for WorkerServer {
                 tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
             }
 
-            if let Err(e) = remove_dir_all(build_path.clone()).await {
-                tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
-            }
+            // if let Err(e) = remove_dir_all(build_path.clone()).await {
+            //     tx.send(Err(Status::internal(e.to_string()))).await.unwrap();
+            // }
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))

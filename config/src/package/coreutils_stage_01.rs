@@ -1,7 +1,11 @@
 use crate::{
-    cross_platform::{get_cpu_count, get_sed_cmd},
-    package::{add_default_environment, add_default_script},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    cross_platform::get_cpu_count,
+    package::get_sed_cmd,
+    sandbox::{
+        environments::add_environments,
+        paths::{add_paths, SandboxDefaultPaths},
+        scripts::{add_scripts, PackageRpath},
+    },
     ContextConfig,
 };
 use anyhow::{anyhow, Result};
@@ -30,6 +34,7 @@ pub fn package(
 ) -> Result<PackageOutput> {
     let mut environment = vec![];
     let mut packages = vec![bash.clone()];
+    let mut packages_rpaths = vec![];
     let mut sandbox = None;
 
     let mut script = formatdoc! {"
@@ -99,7 +104,7 @@ pub fn package(
         };
 
         sandbox = Some(PackageSandbox {
-            paths: add_default_host_paths(sandbox_paths),
+            paths: add_paths(sandbox_paths),
         });
 
         let script_linux = formatdoc! {"\nln -s \"${m4}/bin/m4\" /usr/bin/m4\n",
@@ -107,6 +112,14 @@ pub fn package(
         };
 
         script.push_str(&script_linux);
+
+        let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
+
+        packages_rpaths.push(PackageRpath {
+            rpath: format!("${}/lib", glibc_env_key),
+            shrink: true,
+            target: "$output".to_string(),
+        });
     }
 
     let name = "coreutils-stage-01";
@@ -164,7 +177,7 @@ pub fn package(
         ],
     };
 
-    let package = add_default_environment(
+    let package = add_environments(
         package,
         Some(bash),
         binutils,
@@ -173,10 +186,9 @@ pub fn package(
         libstdcpp,
         linux_headers,
         ncurses,
-        None,
     );
 
-    let package = add_default_script(package, target, glibc)?;
+    let package = add_scripts(package, target, glibc, packages_rpaths)?;
 
     let package_output = context.add_package(package.clone())?;
 

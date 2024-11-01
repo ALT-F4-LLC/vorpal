@@ -1,7 +1,10 @@
 use crate::{
     cross_platform::get_cpu_count,
-    package::{add_default_environment, add_default_script},
-    sandbox::{add_default_host_paths, SandboxDefaultPaths},
+    sandbox::{
+        environments::add_environments,
+        paths::{add_paths, SandboxDefaultPaths},
+        scripts::{add_scripts, PackageRpath},
+    },
     ContextConfig,
 };
 use anyhow::Result;
@@ -70,7 +73,7 @@ pub fn package(
     };
 
     let sandbox = PackageSandbox {
-        paths: add_default_host_paths(sandbox_paths),
+        paths: add_paths(sandbox_paths),
     };
 
     let script = formatdoc! {"
@@ -130,7 +133,7 @@ pub fn package(
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    let package = add_default_environment(
+    let package = add_environments(
         package,
         Some(bash),
         Some(binutils),
@@ -139,10 +142,17 @@ pub fn package(
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),
-        None,
     );
 
-    let package = add_default_script(package, target, Some(glibc))?;
+    let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
+
+    let package_rpaths = vec![PackageRpath {
+        rpath: format!("${}/lib", glibc_env_key),
+        shrink: true,
+        target: "$output".to_string(),
+    }];
+
+    let package = add_scripts(package, target, Some(glibc), package_rpaths)?;
 
     let package_output = context.add_package(package)?;
 

@@ -117,5 +117,7 @@ pub async fn build(
 
     command.args(command_args.iter().flatten());
 
+    println!("command: {:?}", command);
+
     Ok(command)
 }
