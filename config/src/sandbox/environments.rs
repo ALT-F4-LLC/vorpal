@@ -1,5 +1,26 @@
 use vorpal_schema::vorpal::package::v0::{Package, PackageEnvironment, PackageOutput};
 
+// pub struct SandboxEnvironment {
+//     pub c_include_path: String,
+//     pub cppflags: String,
+//     pub ld_library_path: String,
+//     pub ldflags: String,
+//     pub library_path: String,
+//     pub package: Package,
+// }
+
+// pub fn add_package_environment() {}
+
+// pub struct SandboxEnvironments {
+//     pub bash: Option<SandboxEnvironmentsConfig>,
+//     pub binutils: Option<SandboxEnvironmentsConfig>,
+//     pub gcc: Option<SandboxEnvironmentsConfig>,
+//     pub glibc: Option<SandboxEnvironmentsConfig>,
+//     pub libstdcpp: Option<SandboxEnvironmentsConfig>,
+//     pub linux_headers: Option<SandboxEnvironmentsConfig>,
+//     pub ncurses: Option<SandboxEnvironmentsConfig>,
+// }
+
 #[allow(clippy::too_many_arguments)]
 pub fn add_environments(
     package: Package,
@@ -46,7 +67,7 @@ pub fn add_environments(
 
     if let Some(gcc) = gcc {
         let env_key = format!("${}", gcc.name.to_lowercase().replace("-", "_"));
-        let include_path = format!("{}/include", env_key);
+        let include_path = format!("{}/include/c++/14.2.0", env_key);
         let lib64_path = format!("{}/lib64", env_key);
         let lib_path = format!("{}/lib", env_key);
         let libexec_path = format!("{}/libexec/gcc/aarch64-unknown-linux-gnu/14.2.0", env_key);
@@ -65,6 +86,18 @@ pub fn add_environments(
         path_paths.push(libexec_path.clone());
     }
 
+    if let Some(libstdcpp) = libstdcpp {
+        let env_key = format!("${}", libstdcpp.name.to_lowercase().replace("-", "_"));
+        let include_path = format!("{}/include/c++/14.2.0", env_key);
+        let lib64_path = format!("{}/lib64", env_key);
+
+        c_include_paths.push(include_path.clone());
+        cppflags_args.push(format!("-I{}", include_path));
+        ld_library_paths.push(lib64_path.clone());
+        ldflags_args.push(format!("-L{}", lib64_path));
+        library_paths.push(lib64_path.clone());
+    }
+
     if let Some(glibc) = glibc {
         let env_key = format!("${}", glibc.name.to_lowercase().replace("-", "_"));
         let include_path = format!("{}/include", env_key);
@@ -75,19 +108,6 @@ pub fn add_environments(
         // ld_library_paths.push(lib_path.clone());
         ldflags_args.push(format!("-L{}", lib_path));
         library_paths.push(lib_path.clone());
-    }
-
-    if let Some(libstdcpp) = libstdcpp {
-        let env_key = format!("${}", libstdcpp.name.to_lowercase().replace("-", "_"));
-        let lib_path = format!("{}/lib", env_key);
-        let lib64_path = format!("{}/lib64", env_key);
-
-        ld_library_paths.push(lib_path.clone());
-        ld_library_paths.push(lib64_path.clone());
-        ldflags_args.push(format!("-L{}", lib_path));
-        ldflags_args.push(format!("-L{}", lib64_path));
-        library_paths.push(lib_path.clone());
-        library_paths.push(lib64_path.clone());
     }
 
     if let Some(linux_headers) = linux_headers {

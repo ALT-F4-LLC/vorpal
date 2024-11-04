@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = { default-features = false, version = "1" }
 async-compression = { default-features = false, features = ["bzip2", "gzip", "tokio", "xz", "zstd"], version = "0" }
 async_zip = { default-features = false, features = ["deflate", "tokio"], version = "0" }
+filetime = { version = "0" }
 futures-lite = { default-features = false, version = "2" }
 sanitize-filename = { default-features = false, version = "0" }
 sha256 = { default-features = false, version = "1" }

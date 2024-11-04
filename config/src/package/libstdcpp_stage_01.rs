@@ -56,8 +56,6 @@ pub fn package(
     }];
 
     let sandbox_paths = SandboxDefaultPaths {
-        autoconf: false,
-        automake: true,
         bash: true,
         binutils: false,
         bison: true,
@@ -120,7 +118,7 @@ pub fn package(
         package,
         None,
         Some(binutils),
-        Some(gcc),
+        None,
         None,
         None,
         Some(linux_headers),

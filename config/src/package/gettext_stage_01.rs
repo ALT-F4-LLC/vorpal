@@ -34,6 +34,7 @@ pub fn package(
     make: &PackageOutput,
     ncurses: &PackageOutput,
     patch: &PackageOutput,
+    patchelf: &PackageOutput,
     sed: &PackageOutput,
     tar: &PackageOutput,
     xz: &PackageOutput,
@@ -64,7 +65,7 @@ pub fn package(
 
         cd \"${{PWD}}/{source}\"
 
-        ./configure --disable-shared
+        CFLAGS=\"$(echo $CFLAGS | sed 's/-s//g')\" ./configure --disable-shared
 
         make -j$({cores})
 
@@ -108,6 +109,7 @@ pub fn package(
             make.clone(),
             ncurses.clone(),
             patch.clone(),
+            patchelf.clone(),
             sed.clone(),
             tar.clone(),
             xz.clone(),

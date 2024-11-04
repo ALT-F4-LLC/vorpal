@@ -43,8 +43,6 @@ pub fn package(
     let name = "patch-stage-01";
 
     let sandbox_paths = SandboxDefaultPaths {
-        autoconf: true,
-        automake: true,
         bash: false,
         binutils: false,
         bison: true,
@@ -90,8 +88,6 @@ pub fn package(
         ln -s ${m4}/bin/m4 /usr/bin/m4
 
         cd \"${{PWD}}/{source}\"
-
-        autoreconf -f -i
 
         ./configure \
             --prefix=\"$output\" \

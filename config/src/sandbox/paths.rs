@@ -1,8 +1,6 @@
 use vorpal_schema::vorpal::package::v0::PackageSandboxPath;
 
 pub struct SandboxDefaultPaths {
-    pub autoconf: bool,
-    pub automake: bool,
     pub bash: bool,
     pub binutils: bool,
     pub bison: bool,
@@ -35,31 +33,6 @@ pub struct SandboxDefaultPaths {
 
 pub fn add_paths(options: SandboxDefaultPaths) -> Vec<PackageSandboxPath> {
     let mut paths = vec!["/etc/resolv.conf", "/etc/ssl/certs"];
-
-    if options.autoconf {
-        paths.extend([
-            "/usr/bin/autoconf",
-            "/usr/bin/autoheader",
-            "/usr/bin/autom4te",
-            "/usr/bin/autoreconf",
-            "/usr/bin/autoscan",
-            "/usr/bin/autoupdate",
-            "/usr/bin/ifnames",
-            "/usr/share/autoconf",
-        ]);
-    }
-
-    if options.automake {
-        paths.extend([
-            "/usr/bin/aclocal",
-            "/usr/bin/aclocal-1.16",
-            "/usr/bin/automake",
-            "/usr/bin/automake-1.16",
-            "/usr/share/aclocal",
-            "/usr/share/aclocal-1.16",
-            "/usr/share/automake-1.16",
-        ]);
-    }
 
     if options.bash {
         paths.push("/bin/bash");

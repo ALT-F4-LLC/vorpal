@@ -15,6 +15,21 @@ use vorpal_schema::vorpal::package::v0::{
 };
 
 pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<PackageOutput> {
+    let environment = vec![
+        PackageEnvironment {
+            key: "CC".to_string(),
+            value: "/usr/bin/gcc".to_string(),
+        },
+        PackageEnvironment {
+            key: "GCC".to_string(),
+            value: "/usr/bin/gcc".to_string(),
+        },
+        PackageEnvironment {
+            key: "PATH".to_string(),
+            value: "/usr/lib/gcc/aarch64-linux-gnu/12:/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+        },
+    ];
+
     let name = "binutils-stage-01";
 
     let script = formatdoc! {"
@@ -38,33 +53,7 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
         cores = get_cpu_count(target)?
     };
 
-    let environment = vec![
-        PackageEnvironment {
-            key: "CC".to_string(),
-            value: "/usr/bin/gcc".to_string(),
-        },
-        PackageEnvironment {
-            key: "GCC".to_string(),
-            value: "/usr/bin/gcc".to_string(),
-        },
-        PackageEnvironment {
-            key: "PATH".to_string(),
-            value: "/usr/lib/gcc/aarch64-linux-gnu/12:/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
-        },
-    ];
-
-    let source = PackageSource {
-        excludes: vec![],
-        hash: Some("c0d3e5ee772ee201eefe17544b2b2cc3a0a3d6833a21b9ea56371efaad0c5528".to_string()),
-        includes: vec![],
-        name: name.to_string(),
-        strip_prefix: true,
-        uri: "https://ftp.gnu.org/gnu/binutils/binutils-2.43.1.tar.gz".to_string(),
-    };
-
     let sandbox_paths = SandboxDefaultPaths {
-        autoconf: false,
-        automake: true,
         bash: true,
         binutils: true,
         bison: true,
@@ -97,6 +86,15 @@ pub fn package(context: &mut ContextConfig, target: PackageSystem) -> Result<Pac
 
     let sandbox = PackageSandbox {
         paths: add_paths(sandbox_paths),
+    };
+
+    let source = PackageSource {
+        excludes: vec![],
+        hash: Some("c0d3e5ee772ee201eefe17544b2b2cc3a0a3d6833a21b9ea56371efaad0c5528".to_string()),
+        includes: vec![],
+        name: name.to_string(),
+        strip_prefix: true,
+        uri: "https://ftp.gnu.org/gnu/binutils/binutils-2.43.1.tar.gz".to_string(),
     };
 
     let package = Package {

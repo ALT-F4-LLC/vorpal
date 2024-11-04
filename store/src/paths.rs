@@ -1,4 +1,5 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Error, Result};
+use filetime::{set_file_times, FileTime};
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use tracing::info;
@@ -140,6 +141,15 @@ pub fn get_file_paths(
     Ok(files)
 }
 
+pub async fn set_paths_timestamps(target_files: &[PathBuf]) -> Result<(), Error> {
+    for path in target_files {
+        let epoc = FileTime::from_unix_time(0, 0);
+        set_file_times(path, epoc, epoc).expect("Failed to set file times");
+    }
+
+    Ok(())
+}
+
 pub async fn copy_files(
     source_path: &PathBuf,
     source_path_files: Vec<PathBuf>,
@@ -179,6 +189,10 @@ pub async fn copy_files(
             bail!("source file is not a file or directory: {:?}", src);
         }
     }
+
+    let package_paths = get_file_paths(&destination_path.to_path_buf(), vec![], vec![])?;
+
+    set_paths_timestamps(&package_paths).await?;
 
     Ok(())
 }

@@ -2,8 +2,7 @@ use crate::{
     cross_platform::get_cpu_count,
     sandbox::{
         environments::add_environments,
-        paths::{add_paths, SandboxDefaultPaths},
-        scripts::add_scripts,
+        scripts::{add_scripts, PackageRpath},
     },
     ContextConfig,
 };
@@ -37,6 +36,7 @@ pub fn package(
     make: &PackageOutput,
     ncurses: &PackageOutput,
     patch: &PackageOutput,
+    patchelf: &PackageOutput,
     perl: &PackageOutput,
     sed: &PackageOutput,
     tar: &PackageOutput,
@@ -49,52 +49,32 @@ pub fn package(
 
     let name = "python-stage-01";
 
-    let sandbox_paths = SandboxDefaultPaths {
-        autoconf: true,
-        automake: true,
-        bash: false,
-        binutils: false,
-        bison: false,
-        bzip2: true,
-        coreutils: false,
-        curl: true,
-        diffutils: false,
-        file: false,
-        findutils: false,
-        flex: false,
-        gawk: false,
-        gcc: false,
-        gcc_12: false,
-        glibc: false,
-        grep: false,
-        gzip: false,
-        help2man: true,
-        includes: true,
-        lib: true,
-        m4: false,
-        make: false,
-        patchelf: true,
-        perl: true,
-        python: true,
-        sed: false,
-        tar: false,
-        texinfo: true,
-        wget: true,
-    };
-
-    let sandbox = PackageSandbox {
-        paths: add_paths(sandbox_paths),
-    };
+    let sandbox = PackageSandbox { paths: vec![] };
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
         set -euo pipefail
 
         mkdir -pv /bin
+        mkdir -pv /lib
+        mkdir -pv /lib64
+        mkdir -pv /usr/bin
 
         ln -s ${bash}/bin/bash /bin/bash
         ln -s ${bash}/bin/bash /bin/sh
-        ln -s ${m4}/bin/m4 /usr/bin/m4
+        ln -s ${gcc}/bin/cpp /lib/cpp
+        ln -s ${glibc}/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1
+        ln -s ${glibc}/lib/ld-linux-aarch64.so.1 /lib64/ld-linux-aarch64.so.1
+
+        export I18NPATH=${glibc}/share/i18n
+        mkdir -pv \"$output/C.UTF-8\"
+        localedef -i POSIX -f UTF-8 \"$output/C.UTF-8\" || true
+
+        export LOCPATH=\"$output\"
+        export LC_ALL=\"C.UTF-8\"
+
+        export C_INCLUDE_PATH=\"${glibc}/include:${linux_headers}/usr/include\"
+        export CPPFLAGS=\"-I${glibc}/include -I${linux_headers}/usr/include\"
 
         cd \"${{PWD}}/{source}\"
 
@@ -107,7 +87,9 @@ pub fn package(
         make install",
         bash = bash.name.to_lowercase().replace("-", "_"),
         cores = get_cpu_count(target)?,
-        m4 = m4.name.to_lowercase().replace("-", "_"),
+        gcc = gcc.name.to_lowercase().replace("-", "_"),
+        glibc = glibc.name.to_lowercase().replace("-", "_"),
+        linux_headers = linux_headers.name.to_lowercase().replace("-", "_"),
         source = name,
     };
 
@@ -143,6 +125,7 @@ pub fn package(
             make.clone(),
             ncurses.clone(),
             patch.clone(),
+            patchelf.clone(),
             perl.clone(),
             sed.clone(),
             tar.clone(),
@@ -156,16 +139,32 @@ pub fn package(
 
     let package = add_environments(
         package,
-        Some(bash),
-        Some(binutils),
-        Some(gcc),
         None,
+        None,
+        Some(gcc),
+        Some(glibc),
         Some(libstdcpp),
         Some(linux_headers),
-        Some(ncurses),
+        None,
     );
 
-    let package = add_scripts(package, target, Some(glibc), vec![])?;
+    let gcc_env_key = gcc.name.to_lowercase().replace("-", "_");
+    let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
+
+    let package_rpaths = vec![
+        PackageRpath {
+            rpath: format!("$output/lib:${}/lib:${}/lib64", glibc_env_key, gcc_env_key),
+            shrink: true,
+            target: "$output/bin".to_string(),
+        },
+        PackageRpath {
+            rpath: format!("${}/lib:${}/lib64", glibc_env_key, gcc_env_key),
+            shrink: true,
+            target: "$output/lib".to_string(),
+        },
+    ];
+
+    let package = add_scripts(package, target, Some(glibc), package_rpaths)?;
 
     let package_output = context.add_package(package)?;
 

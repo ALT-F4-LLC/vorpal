@@ -71,8 +71,6 @@ pub fn package(
         packages.push(ncurses.clone());
 
         let sandbox_paths = SandboxDefaultPaths {
-            autoconf: true,
-            automake: true,
             bash: false,
             binutils: false,
             bison: true,

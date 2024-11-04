@@ -1,4 +1,7 @@
-use crate::temps::create_temp_file;
+use crate::{
+    paths::{get_file_paths, set_paths_timestamps},
+    temps::create_temp_file,
+};
 use anyhow::{Error, Result};
 use async_compression::tokio::{
     bufread::{GzipDecoder, ZstdDecoder},
@@ -76,6 +79,10 @@ pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(),
 
     archive.unpack(target_dir).await.expect("Failed to unpack");
 
+    let package_paths = get_file_paths(target_dir, vec![], vec![])?;
+
+    set_paths_timestamps(&package_paths).await?;
+
     Ok(())
 }
 
@@ -134,6 +141,10 @@ pub async fn unpack_gzip(target_dir: &PathBuf, source_tar: &Path) -> Result<(), 
 
     archive.unpack(target_dir).await.expect("Failed to unpack");
 
+    let package_paths = get_file_paths(target_dir, vec![], vec![])?;
+
+    set_paths_timestamps(&package_paths).await?;
+
     Ok(())
 }
 
@@ -146,7 +157,8 @@ fn sanitize_file_path(path: &str) -> PathBuf {
         .map(sanitize_filename::sanitize)
         .collect()
 }
-pub async fn unpack_zip(source_path: &PathBuf, out_dir: &Path) -> Result<(), Error> {
+
+pub async fn unpack_zip(source_path: &PathBuf, target_dir: &Path) -> Result<(), Error> {
     let archive_file = File::open(source_path).await.expect("Failed to open file");
 
     let archive = BufReader::new(archive_file).compat();
@@ -158,7 +170,7 @@ pub async fn unpack_zip(source_path: &PathBuf, out_dir: &Path) -> Result<(), Err
     for index in 0..reader.file().entries().len() {
         let entry = reader.file().entries().get(index).unwrap();
 
-        let path = out_dir.join(sanitize_file_path(entry.filename().as_str().unwrap()));
+        let path = target_dir.join(sanitize_file_path(entry.filename().as_str().unwrap()));
 
         // If the filename of the entry ends with '/', it is treated as a directory.
         // This is implemented by previous versions of this crate and the Python Standard Library.
@@ -205,6 +217,10 @@ pub async fn unpack_zip(source_path: &PathBuf, out_dir: &Path) -> Result<(), Err
             // Closes the file and manipulates its metadata here if you wish to preserve its metadata from the archive.
         }
     }
+
+    let package_paths = get_file_paths(&target_dir.to_path_buf(), vec![], vec![])?;
+
+    set_paths_timestamps(&package_paths).await?;
 
     Ok(())
 }

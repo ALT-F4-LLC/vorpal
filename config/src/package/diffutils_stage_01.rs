@@ -36,8 +36,6 @@ pub fn package(
     let name = "diffutils-stage-01";
 
     let sandbox_paths = SandboxDefaultPaths {
-        autoconf: true,
-        automake: true,
         bash: false,
         binutils: false,
         bison: true,

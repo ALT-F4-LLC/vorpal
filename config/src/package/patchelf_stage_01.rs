@@ -2,8 +2,7 @@ use crate::{
     cross_platform::get_cpu_count,
     sandbox::{
         environments::add_environments,
-        paths::{add_paths, SandboxDefaultPaths},
-        scripts::add_scripts,
+        scripts::{add_scripts, PackageRpath},
     },
     ContextConfig,
 };
@@ -20,14 +19,12 @@ pub fn package(
     target: PackageSystem,
     bash: &PackageOutput,
     binutils: &PackageOutput,
-    bison: &PackageOutput,
     coreutils: &PackageOutput,
     diffutils: &PackageOutput,
     file: &PackageOutput,
     findutils: &PackageOutput,
     gawk: &PackageOutput,
     gcc: &PackageOutput,
-    gettext: &PackageOutput,
     glibc: &PackageOutput,
     grep: &PackageOutput,
     gzip: &PackageOutput,
@@ -37,12 +34,8 @@ pub fn package(
     make: &PackageOutput,
     ncurses: &PackageOutput,
     patch: &PackageOutput,
-    perl: &PackageOutput,
-    python: &PackageOutput,
     sed: &PackageOutput,
     tar: &PackageOutput,
-    texinfo: &PackageOutput,
-    util_linux: &PackageOutput,
     xz: &PackageOutput,
 ) -> Result<PackageOutput> {
     let environment = vec![PackageEnvironment {
@@ -52,62 +45,53 @@ pub fn package(
 
     let name = "patchelf";
 
-    let sandbox_paths = SandboxDefaultPaths {
-        autoconf: true,
-        automake: true,
-        bash: false,
-        binutils: false,
-        bison: false,
-        bzip2: true,
-        coreutils: false,
-        curl: true,
-        diffutils: false,
-        file: false,
-        findutils: false,
-        flex: true,
-        gawk: false,
-        gcc: false,
-        gcc_12: false,
-        glibc: false,
-        grep: false,
-        gzip: false,
-        help2man: true,
-        includes: true,
-        lib: true,
-        m4: false,
-        make: false,
-        patchelf: true,
-        perl: false,
-        python: false,
-        sed: false,
-        tar: false,
-        texinfo: false,
-        wget: true,
-    };
-
-    let sandbox = PackageSandbox {
-        paths: add_paths(sandbox_paths),
-    };
+    let sandbox = PackageSandbox { paths: vec![] };
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
         set -euo pipefail
 
         mkdir -pv /bin
+        mkdir -pv /lib
+        mkdir -pv /lib64
+        mkdir -pv /usr/bin
 
         ln -s ${bash}/bin/bash /bin/bash
         ln -s ${bash}/bin/bash /bin/sh
-        ln -s ${m4}/bin/m4 /usr/bin/m4
+        ln -s ${gcc}/bin/cpp /lib/cpp
+        ln -s ${glibc}/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1
+        ln -s ${glibc}/lib/ld-linux-aarch64.so.1 /lib64/ld-linux-aarch64.so.1
 
         cd \"${{PWD}}/{source}\"
 
         ./configure --prefix=\"$output\"
 
         make -j$({cores})
-        make install",
+        make install
+
+        export PATH=\"$output/bin:$PATH\"
+
+        mkdir -pv /lib/aarch64-linux-gnu
+
+        ln -s ${gcc}/lib64/libgcc_s.so.1 /lib/aarch64-linux-gnu/libgcc_s.so.1
+        ln -s ${glibc}/lib/libc.so.6 /lib/aarch64-linux-gnu/libc.so.6
+        ln -s ${glibc}/lib/libm.so.6 /lib/aarch64-linux-gnu/libm.so.6
+        ln -s ${libstdcpp}/lib64/libstdc++.so.6 /lib/aarch64-linux-gnu/libstdc++.so.6
+
+        ldd $output/bin/patchelf
+
+        mkdir -pv bin
+
+        cp -v $output/bin/patchelf bin/patchelf
+
+        export PATH=\"${{PWD}}/bin:$PATH\"
+
+        patchelf --version",
         bash = bash.name.to_lowercase().replace("-", "_"),
         cores = get_cpu_count(target)?,
-        m4 = m4.name.to_lowercase().replace("-", "_"),
+        gcc = gcc.name.to_lowercase().replace("-", "_"),
+        glibc = glibc.name.to_lowercase().replace("-", "_"),
+        libstdcpp = libstdcpp.name.to_lowercase().replace("-", "_"),
         source = name,
     };
 
@@ -127,14 +111,12 @@ pub fn package(
         packages: vec![
             bash.clone(),
             binutils.clone(),
-            bison.clone(),
             coreutils.clone(),
             diffutils.clone(),
             file.clone(),
             findutils.clone(),
             gawk.clone(),
             gcc.clone(),
-            gettext.clone(),
             glibc.clone(),
             grep.clone(),
             gzip.clone(),
@@ -144,12 +126,8 @@ pub fn package(
             make.clone(),
             ncurses.clone(),
             patch.clone(),
-            perl.clone(),
-            python.clone(),
             sed.clone(),
             tar.clone(),
-            texinfo.clone(),
-            util_linux.clone(),
             xz.clone(),
         ],
         sandbox: Some(sandbox),
@@ -160,16 +138,25 @@ pub fn package(
 
     let package = add_environments(
         package,
-        Some(bash),
-        Some(binutils),
-        Some(gcc),
         None,
+        None,
+        Some(gcc),
+        Some(glibc),
         Some(libstdcpp),
         Some(linux_headers),
-        Some(ncurses),
+        None,
     );
 
-    let package = add_scripts(package, target, Some(glibc), vec![])?;
+    let gcc_env_key = gcc.name.to_lowercase().replace("-", "_");
+    let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
+
+    let package_rpaths = vec![PackageRpath {
+        rpath: format!("${}/lib:${}/lib64", glibc_env_key, gcc_env_key),
+        shrink: true,
+        target: "$output".to_string(),
+    }];
+
+    let package = add_scripts(package, target, Some(glibc), package_rpaths)?;
 
     let package_output = context.add_package(package)?;
 

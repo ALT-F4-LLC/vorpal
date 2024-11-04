@@ -2,8 +2,7 @@ use crate::{
     cross_platform::get_cpu_count,
     sandbox::{
         environments::add_environments,
-        paths::{add_paths, SandboxDefaultPaths},
-        scripts::add_scripts,
+        scripts::{add_scripts, PackageRpath},
     },
     ContextConfig,
 };
@@ -37,6 +36,7 @@ pub fn package(
     make: &PackageOutput,
     ncurses: &PackageOutput,
     patch: &PackageOutput,
+    patchelf: &PackageOutput,
     sed: &PackageOutput,
     tar: &PackageOutput,
     xz: &PackageOutput,
@@ -48,58 +48,38 @@ pub fn package(
 
     let name = "perl-stage-01";
 
-    let sandbox_paths = SandboxDefaultPaths {
-        autoconf: true,
-        automake: true,
-        bash: false,
-        binutils: false,
-        bison: false,
-        bzip2: true,
-        coreutils: false,
-        curl: true,
-        diffutils: false,
-        file: false,
-        findutils: false,
-        flex: false,
-        gawk: false,
-        gcc: false,
-        gcc_12: false,
-        glibc: false,
-        grep: false,
-        gzip: false,
-        help2man: true,
-        includes: true,
-        lib: true,
-        m4: false,
-        make: false,
-        patchelf: true,
-        perl: true,
-        python: true,
-        sed: false,
-        tar: false,
-        texinfo: true,
-        wget: true,
-    };
-
-    let sandbox = PackageSandbox {
-        paths: add_paths(sandbox_paths),
-    };
+    let sandbox = PackageSandbox { paths: vec![] };
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
         set -euo pipefail
 
         mkdir -pv /bin
+        mkdir -pv /lib
+        mkdir -pv /lib64
+        mkdir -pv /usr/bin
 
         ln -s ${bash}/bin/bash /bin/bash
         ln -s ${bash}/bin/bash /bin/sh
-        ln -s ${m4}/bin/m4 /usr/bin/m4
+        ln -s ${gcc}/bin/cpp /lib/cpp
+        ln -s ${glibc}/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1
+        ln -s ${glibc}/lib/ld-linux-aarch64.so.1 /lib64/ld-linux-aarch64.so.1
+
+        export I18NPATH=${glibc}/share/i18n
+        mkdir -pv \"$output/C.UTF-8\"
+        localedef -i POSIX -f UTF-8 \"$output/C.UTF-8\" || true
+
+        export LOCPATH=\"$output\"
+        export LC_ALL=\"C.UTF-8\"
+
+        export C_INCLUDE_PATH=\"${gcc}/include/c++/14.2.0/aarch64-unknown-linux-gnu:${gcc}/include/c++/14.2.0:${glibc}/include:${linux_headers}/usr/include\"
+        export CFLAGS=\"\"
+        export CPPFLAGS=\"\"
 
         cd \"${{PWD}}/{source}\"
 
         ./Configure \
             -des \
-            -Dlibs=\"-lpthread -lnsl -ldl -lm -lutil -lc\" \
             -D prefix=\"$output\" \
             -D vendorprefix=\"$output\" \
             -D useshrplib \
@@ -111,10 +91,21 @@ pub fn package(
             -D vendorlib=\"$output/lib/vendor_perl\"
 
         make -j$({cores})
-        make install",
+        make install
+
+        # TODO: move this to script function
+
+        find \"$output\" -type f | while read -r file; do
+            if file \"$file\" | grep -q 'dynamically linked'; then
+                chmod 755 \"$file\"
+            fi
+        done
+        ",
         bash = bash.name.to_lowercase().replace("-", "_"),
         cores = get_cpu_count(target)?,
-        m4 = m4.name.to_lowercase().replace("-", "_"),
+        gcc = gcc.name.to_lowercase().replace("-", "_"),
+        glibc = glibc.name.to_lowercase().replace("-", "_"),
+        linux_headers = linux_headers.name.to_lowercase().replace("-", "_"),
         source = name,
     };
 
@@ -150,6 +141,7 @@ pub fn package(
             make.clone(),
             ncurses.clone(),
             patch.clone(),
+            patchelf.clone(),
             sed.clone(),
             tar.clone(),
             xz.clone(),
@@ -165,13 +157,21 @@ pub fn package(
         Some(bash),
         Some(binutils),
         Some(gcc),
-        None,
+        Some(glibc),
         Some(libstdcpp),
         Some(linux_headers),
         Some(ncurses),
     );
 
-    let package = add_scripts(package, target, Some(glibc), vec![])?;
+    let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
+
+    let package_rpaths = vec![PackageRpath {
+        rpath: format!("${}/lib", glibc_env_key),
+        shrink: true,
+        target: "$output".to_string(),
+    }];
+
+    let package = add_scripts(package, target, Some(glibc), package_rpaths)?;
 
     let package_output = context.add_package(package)?;
 

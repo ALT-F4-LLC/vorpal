@@ -33,8 +33,6 @@ pub fn package(
     let name = "ncurses-stage-01";
 
     let sandbox_paths = SandboxDefaultPaths {
-        autoconf: true,
-        automake: true,
         bash: true,
         binutils: false,
         bison: true,
