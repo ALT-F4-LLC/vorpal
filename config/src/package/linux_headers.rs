@@ -23,27 +23,27 @@ pub fn package(
         sandbox: Some(PackageSandbox {
             paths: vec![
                 PackageSandboxPath {
-                    source: "/var/lib/vorpal/sandbox-rootfs/usr/bin".to_string(),
+                    source: "/vorpal/sandbox-rootfs/usr/bin".to_string(),
                     symlink: false,
                     target: "/bin".to_string(),
                 },
                 PackageSandboxPath {
-                    source: "/var/lib/vorpal/sandbox-rootfs/etc".to_string(),
+                    source: "/vorpal/sandbox-rootfs/etc".to_string(),
                     symlink: false,
                     target: "/etc".to_string(),
                 },
                 PackageSandboxPath {
-                    source: "/var/lib/vorpal/sandbox-rootfs/usr/lib".to_string(),
+                    source: "/vorpal/sandbox-rootfs/usr/lib".to_string(),
                     symlink: false,
                     target: "/lib".to_string(),
                 },
                 PackageSandboxPath {
-                    source: "/var/lib/vorpal/sandbox-rootfs/usr".to_string(),
+                    source: "/vorpal/sandbox-rootfs/usr".to_string(),
                     symlink: false,
                     target: "/usr".to_string(),
                 },
                 PackageSandboxPath {
-                    source: "/var/lib/vorpal/sandbox-rootfs/usr/sbin".to_string(),
+                    source: "/vorpal/sandbox-rootfs/usr/sbin".to_string(),
                     symlink: false,
                     target: "/sbin".to_string(),
                 },

@@ -17,11 +17,10 @@ pub struct PackageRust<'a> {
 pub fn build_rust_package(
     context: &mut ContextConfig,
     package: PackageRust,
-    target: PackageSystem,
 ) -> Result<PackageOutput> {
-    let cargo = cargo::package(context, target)?;
-    let rustc = rustc::package(context, target)?;
-    let protoc = protoc::package(context, target)?;
+    let cargo = cargo::package(context)?;
+    let rustc = rustc::package(context)?;
+    let protoc = protoc::package(context)?;
 
     let systems = package
         .systems
@@ -55,7 +54,7 @@ pub fn build_rust_package(
 
         {sed} \"s|$output|${envkey}|g\" \"$output/config.toml\"",
         envkey = format!("{}_cache", package_name_envkey),
-        sed = get_sed_cmd(target)?,
+        sed = get_sed_cmd(context.get_target())?,
         source = package.name,
     };
 
@@ -88,7 +87,6 @@ pub fn build_rust_package(
             source: vec![package_cache_source],
             systems: systems.clone(),
         },
-        target,
     )?;
 
     let package_script = formatdoc! {"
@@ -133,7 +131,6 @@ pub fn build_rust_package(
             }],
             systems,
         },
-        target,
     )?;
 
     Ok(package)

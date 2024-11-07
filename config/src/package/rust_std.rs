@@ -1,27 +1,27 @@
 use crate::{package::build_package, ContextConfig};
 use anyhow::{bail, Result};
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource,
     PackageSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub fn package(context: &mut ContextConfig, system: PackageSystem) -> Result<PackageOutput> {
+pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
     let name = "rust-std";
 
-    let source_hash = match system {
+    let source_hash = match context.get_target() {
         Aarch64Linux => "72d4917bb58b693b3f2c589746ed470645f96895ece3dd27f7055d3c3f7f7a79",
         Aarch64Macos => "0689a9b2dec87c272954db9212a8f3d5243f55f777f90d84d2b3aeb2aa938ba5",
         X8664Linux => "ad734eb9699b0a9dffdd35034776ccaa4d7b45e1898fc32748be93b60453550d",
         X8664Macos => "",
-        UnknownSystem => bail!("Unsupported system: {:?}", system),
+        UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
     };
 
-    let source_target = match system {
+    let source_target = match context.get_target() {
         Aarch64Linux => "aarch64-unknown-linux-gnu",
         Aarch64Macos => "aarch64-apple-darwin",
         X8664Linux => "x86_64-unknown-linux-gnu",
         X8664Macos => "x86_64-apple-darwin",
-        UnknownSystem => bail!("Unsupported system: {:?}", system),
+        UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
     };
 
     let source_version = "1.78.0";
@@ -56,5 +56,5 @@ pub fn package(context: &mut ContextConfig, system: PackageSystem) -> Result<Pac
         ],
     };
 
-    build_package(context, package, system)
+    build_package(context, package)
 }

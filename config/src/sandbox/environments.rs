@@ -1,49 +1,81 @@
-use vorpal_schema::vorpal::package::v0::{Package, PackageEnvironment, PackageOutput};
+use anyhow::{bail, Result};
+use vorpal_schema::vorpal::package::v0::{
+    Package, PackageEnvironment, PackageOutput, PackageSystem,
+    PackageSystem::{Aarch64Linux, X8664Linux},
+};
 
-// pub struct SandboxEnvironment {
-//     pub c_include_path: String,
-//     pub cppflags: String,
-//     pub ld_library_path: String,
-//     pub ldflags: String,
-//     pub library_path: String,
-//     pub package: Package,
-// }
+pub fn add_rootfs(target: PackageSystem) -> Result<Vec<PackageEnvironment>> {
+    let arch_target = match target {
+        Aarch64Linux => "aarch64",
+        X8664Linux => "x86_64",
+        _ => bail!("Unsupported system: {:?}", target),
+    };
 
-// pub fn add_package_environment() {}
+    let arch_gcc = match target {
+        Aarch64Linux => "aarch64-linux-gnu",
+        X8664Linux => "x86_64-linux-gnu",
+        _ => bail!("Unsupported system: {:?}", target),
+    };
 
-// pub struct SandboxEnvironments {
-//     pub bash: Option<SandboxEnvironmentsConfig>,
-//     pub binutils: Option<SandboxEnvironmentsConfig>,
-//     pub gcc: Option<SandboxEnvironmentsConfig>,
-//     pub glibc: Option<SandboxEnvironmentsConfig>,
-//     pub libstdcpp: Option<SandboxEnvironmentsConfig>,
-//     pub linux_headers: Option<SandboxEnvironmentsConfig>,
-//     pub ncurses: Option<SandboxEnvironmentsConfig>,
-// }
+    let path_gcc = format!("/usr/bin/{}-gcc-14", arch_gcc);
+    let path_gpp = format!("/usr/bin/{}-g++-14", arch_gcc);
 
-pub fn add_rootfs() -> Vec<PackageEnvironment> {
-    vec![
+    let environments = vec![
+        PackageEnvironment {
+            key: "CC".to_string(),
+            value: path_gcc.clone(),
+        },
         PackageEnvironment {
             key: "CXX".to_string(),
-            value: "/usr/bin/aarch64-linux-gnu-g++-14".to_string(),
+            value: path_gpp.clone(),
         },
         PackageEnvironment {
             key: "GCC".to_string(),
-            value: "/usr/bin/aarch64-linux-gnu-gcc-14".to_string(),
+            value: path_gcc.clone(),
+        },
+        PackageEnvironment {
+            key: "C_INCLUDE_PATH".to_string(),
+            value: "/usr/include".to_string(),
+        },
+        PackageEnvironment {
+            key: "CPPFLAGS".to_string(),
+            value: "-I/usr/include".to_string(),
+        },
+        PackageEnvironment {
+            key: "LD_LIBRARY_PATH".to_string(),
+            value: "/lib:/lib64".to_string(),
+        },
+        PackageEnvironment {
+            key: "LDFLAGS".to_string(),
+            value: "-L/lib -L/lib64".to_string(),
+        },
+        PackageEnvironment {
+            key: "LC_ALL".to_string(),
+            value: "POSIX".to_string(),
+        },
+        PackageEnvironment {
+            key: "LIBRARY_PATH".to_string(),
+            value: "/lib:/lib64".to_string(),
         },
         PackageEnvironment {
             key: "CC_FOR_TARGET".to_string(),
-            value: "/usr/bin/aarch64-linux-gnu-gcc-14".to_string(),
+            value: path_gcc.clone(),
         },
         PackageEnvironment {
             key: "CXX_FOR_TARGET".to_string(),
-            value: "/usr/bin/aarch64-linux-gnu-g++-14".to_string(),
+            value: path_gpp.clone(),
+        },
+        PackageEnvironment {
+            key: "GCC_FOR_TARGET".to_string(),
+            value: path_gcc.clone(),
         },
         PackageEnvironment {
             key: "PATH".to_string(),
-            value: "/bin:/sbin".to_string(),
+            value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
         },
-    ]
+    ];
+
+    Ok(environments)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -7,15 +7,23 @@ use vorpal_schema::vorpal::{
         config_service_server::{ConfigService, ConfigServiceServer},
         Config, ConfigRequest,
     },
-    package::v0::{Package, PackageOutput},
+    package::v0::{Package, PackageOutput, PackageSystem},
 };
 
 #[derive(Debug, Default)]
 pub struct ContextConfig {
     package: HashMap<String, Package>,
+    target: PackageSystem,
 }
 
 impl ContextConfig {
+    pub fn new(target: PackageSystem) -> Self {
+        Self {
+            package: HashMap::new(),
+            target,
+        }
+    }
+
     pub fn add_package(&mut self, package: Package) -> Result<PackageOutput> {
         let package_json = serde_json::to_string(&package).map_err(|e| anyhow::anyhow!(e))?;
 
@@ -39,6 +47,10 @@ impl ContextConfig {
         let package_key = format!("{}-{}", name, hash);
 
         self.package.get(&package_key)
+    }
+
+    pub fn get_target(&self) -> PackageSystem {
+        self.target
     }
 }
 

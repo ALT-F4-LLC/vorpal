@@ -13,7 +13,7 @@ pub fn get_store_dir_name(hash: &str, name: &str) -> String {
 }
 
 pub fn get_root_dir_path() -> PathBuf {
-    Path::new("/var/lib/vorpal").to_path_buf()
+    Path::new("/vorpal").to_path_buf()
 }
 
 pub fn get_key_dir_path() -> PathBuf {
@@ -38,7 +38,7 @@ pub fn get_public_key_path() -> PathBuf {
     get_key_dir_path().join("public").with_extension("pem")
 }
 
-// Input paths - "/var/lib/vorpal/store/{hash}.input"
+// Input paths - "/vorpal/store/{hash}.input"
 
 pub fn get_input_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
@@ -52,7 +52,7 @@ pub fn get_input_archive_path(hash: &str, name: &str) -> PathBuf {
         .with_extension("input.tar.zst")
 }
 
-// Package paths - "/var/lib/vorpal/store/{hash}.package"
+// Package paths - "/vorpal/store/{hash}.package"
 
 pub fn get_package_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
@@ -72,7 +72,7 @@ pub fn get_package_lock_path(hash: &str, name: &str) -> PathBuf {
         .with_extension("package.lock")
 }
 
-// Source paths - "/var/lib/vorpal/store/{hash}.source"
+// Source paths - "/vorpal/store/{hash}.source"
 
 pub fn get_source_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()

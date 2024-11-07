@@ -13,7 +13,7 @@ pub fn package(context: &mut ContextConfig, binutils: &PackageOutput) -> Result<
     let name = "gcc-stage-01";
 
     let package = Package {
-        environment: environments::add_rootfs(),
+        environment: environments::add_rootfs(context.get_target())?,
         name: name.to_string(),
         packages: vec![binutils.clone()],
         sandbox: Some(PackageSandbox {
@@ -52,9 +52,10 @@ pub fn package(context: &mut ContextConfig, binutils: &PackageOutput) -> Result<
                 --enable-default-ssp \
                 --enable-languages=\"c,c++\" \
                 --prefix=\"$output\" \
-                --with-glibc-version=2.40 \
+                --with-glibc-version=\"2.40\" \
                 --with-ld=\"${binutils}/bin/ld\" \
                 --with-newlib \
+                --with-sysroot=\"$output\" \
                 --without-headers
 
             make -j$(nproc)

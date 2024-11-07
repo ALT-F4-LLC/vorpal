@@ -64,29 +64,11 @@ pub async fn build(
             bail!("sandbox 'source' path does not exist: {:?}", source_path);
         }
 
-        if !sandbox_path.symlink {
-            command_args.push(vec![
-                "--ro-bind",
-                sandbox_path.source.as_str(),
-                sandbox_path.target.as_str(),
-            ]);
-        }
-    }
-
-    for sandbox_path in &package_sandbox_paths {
-        let source_path = Path::new(&sandbox_path.source).to_path_buf();
-
-        if !source_path.exists() {
-            bail!("sandbox 'source' path does not exist: {:?}", source_path);
-        }
-
-        if sandbox_path.symlink {
-            command_args.push(vec![
-                "--symlink",
-                sandbox_path.source.as_str(),
-                sandbox_path.target.as_str(),
-            ]);
-        }
+        command_args.push(vec![
+            "--ro-bind",
+            sandbox_path.source.as_str(),
+            sandbox_path.target.as_str(),
+        ]);
     }
 
     // Add environment variables to command

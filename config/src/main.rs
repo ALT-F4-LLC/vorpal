@@ -5,10 +5,7 @@ use crate::{
 use anyhow::Result;
 use vorpal_schema::vorpal::{
     config::v0::Config,
-    package::v0::{
-        PackageSystem,
-        PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
-    },
+    package::v0::PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
 mod cli;
@@ -18,7 +15,7 @@ mod sandbox;
 mod service;
 
 // Configuration function that returns a Config struct
-fn build_config(context: &mut ContextConfig, target: PackageSystem) -> Result<Config> {
+fn build_config(context: &mut ContextConfig) -> Result<Config> {
     // TODO: add any custom logic you want here
 
     let vorpal_config = PackageRust {
@@ -29,7 +26,7 @@ fn build_config(context: &mut ContextConfig, target: PackageSystem) -> Result<Co
         systems: vec![Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos],
     };
 
-    let vorpal = build_rust_package(context, vorpal_config, target)?;
+    let vorpal = build_rust_package(context, vorpal_config)?;
 
     Ok(Config {
         packages: vec![vorpal],

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Setup directories
-sudo mkdir -p /var/lib/vorpal
-sudo chown "$(id -u):$(id -g)" /var/lib/vorpal
+sudo mkdir -p /vorpal
+sudo chown "$(id -u):$(id -g)" /vorpal
 
 # Setup keys
 ./dist/vorpal keys generate

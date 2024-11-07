@@ -13,7 +13,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
     let name = "binutils-stage-01";
 
     let package = Package {
-        environment: environments::add_rootfs(),
+        environment: environments::add_rootfs(context.get_target())?,
         name: name.to_string(),
         packages: vec![],
         sandbox: Some(PackageSandbox {

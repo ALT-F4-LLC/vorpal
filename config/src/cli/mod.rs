@@ -33,7 +33,7 @@ enum Command {
     },
 }
 
-pub type ConfigFunction = fn(context: &mut ContextConfig, system: PackageSystem) -> Result<Config>;
+pub type ConfigFunction = fn(context: &mut ContextConfig) -> Result<Config>;
 
 pub async fn execute(config: ConfigFunction) -> Result<()> {
     let args = Cli::parse();
@@ -46,11 +46,11 @@ pub async fn execute(config: ConfigFunction) -> Result<()> {
                 return Err(anyhow::anyhow!("Invalid target system"));
             }
 
-            let mut context = ContextConfig::default();
+            let mut config_context = ContextConfig::new(target);
 
-            let config = config(&mut context, target)?;
+            let config = config(&mut config_context)?;
 
-            service::listen(context, config, port).await?;
+            service::listen(config_context, config, port).await?;
         }
     }
 

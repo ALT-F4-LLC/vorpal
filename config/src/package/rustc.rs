@@ -5,12 +5,12 @@ use crate::{
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource, PackageSystem,
+    Package, PackageOutput, PackageSource,
     PackageSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub fn package(context: &mut ContextConfig, system: PackageSystem) -> Result<PackageOutput> {
-    let rust_std = rust_std::package(context, system)?;
+pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
+    let rust_std = rust_std::package(context)?;
 
     let name = "rustc";
 
@@ -20,20 +20,20 @@ pub fn package(context: &mut ContextConfig, system: PackageSystem) -> Result<Pac
         cp -pr \"$rust_std/lib\" \"$output\""
     };
 
-    let hash = match system {
+    let hash = match context.get_target() {
         Aarch64Linux => "bc6c0e0f309805c4a9b704bbfe6be6b3c28b029ac6958c58ab5b90437a9e36ed",
         Aarch64Macos => "1512db881f5bdd7f4bbcfede7f5217bd51ca03dc6741c3577b4d071863690211",
         X8664Linux => "1512db881f5bdd7f4bbcfede7f5217bd51ca03dc6741c3577b4d071863690211",
         X8664Macos => "",
-        UnknownSystem => bail!("Unsupported rustc system: {:?}", system),
+        UnknownSystem => bail!("Unsupported rustc system: {:?}", context.get_target()),
     };
 
-    let target = match system {
+    let target = match context.get_target() {
         Aarch64Linux => "aarch64-unknown-linux-gnu",
         Aarch64Macos => "aarch64-apple-darwin",
         X8664Linux => "x86_64-unknown-linux-gnu",
         X8664Macos => "x86_64-apple-darwin",
-        UnknownSystem => bail!("Unsupported rustc target: {:?}", system),
+        UnknownSystem => bail!("Unsupported rustc target: {:?}", context.get_target()),
     };
 
     let version = "1.78.0";
@@ -65,5 +65,5 @@ pub fn package(context: &mut ContextConfig, system: PackageSystem) -> Result<Pac
         ],
     };
 
-    build_package(context, package, system)
+    build_package(context, package)
 }

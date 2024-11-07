@@ -31,16 +31,16 @@ in
     ];
 
     buildInputs = with pkgs; [
-      autoconf
-      automake
-      bison
+      # autoconf
+      # automake
+      # bison
+      # flex
+      # gettext
+      # help2man
+      # nickel
+      # zlib
       bubblewrap
-      flex
-      gettext
-      help2man
-      nickel
       protobuf
-      zlib
 
       clang
       # Replace llvmPackages with llvmPackages_X, where X is the latest LLVM version (at the time of writing, 16)

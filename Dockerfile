@@ -5,11 +5,6 @@ RUN apt-get update \
     build-essential \
     ca-certificates \
     curl \
+    file \
     texinfo \
-    # bzip2 \
-    # g++ \
-    # gcc \
-    # libc++-dev \
-    # libc6-dev \
-    # make \
     && rm -rf /var/lib/apt/lists/*

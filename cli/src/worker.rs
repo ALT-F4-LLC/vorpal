@@ -213,7 +213,9 @@ pub async fn build(
                                 PackageSourceKind::UnknownKind => {
                                     bail!("Package source type unknown")
                                 }
+
                                 PackageSourceKind::Git => bail!("Package source git not supported"),
+
                                 PackageSourceKind::Http => {
                                     print_source_url(
                                         &package.name,
@@ -293,6 +295,8 @@ pub async fn build(
                                                 url.path_segments().unwrap().last().unwrap();
 
                                             let file_path = sandbox_source_path.join(file_name);
+
+                                            println!("=> {:?}", file_path);
 
                                             write(&file_path, response_data)
                                                 .await
@@ -436,11 +440,9 @@ pub async fn build(
 
     match worker_store.exists(worker_store_source.clone()).await {
         Ok(_) => {
-            print_source_cache(
-                &package.name,
-                format!("{} => {}-{}", worker, package.name, package_hash).as_str(),
-            );
+            print_source_cache(&package.name, worker);
         }
+
         Err(status) => {
             if status.code() == NotFound {
                 if let Some(source_archive_path) = request_source_data_path {
