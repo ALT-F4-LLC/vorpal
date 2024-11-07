@@ -31,6 +31,36 @@ pub struct SandboxDefaultPaths {
     pub wget: bool,
 }
 
+pub fn add_rootfs() -> Vec<PackageSandboxPath> {
+    vec![
+        PackageSandboxPath {
+            source: "/var/lib/vorpal/sandbox-rootfs/etc".to_string(),
+            symlink: false,
+            target: "/etc".to_string(),
+        },
+        PackageSandboxPath {
+            source: "/var/lib/vorpal/sandbox-rootfs/usr".to_string(),
+            symlink: false,
+            target: "/usr".to_string(),
+        },
+        PackageSandboxPath {
+            source: "/usr/bin".to_string(),
+            symlink: true,
+            target: "/bin".to_string(),
+        },
+        PackageSandboxPath {
+            source: "/usr/lib".to_string(),
+            symlink: true,
+            target: "/lib".to_string(),
+        },
+        PackageSandboxPath {
+            source: "/usr/sbin".to_string(),
+            symlink: true,
+            target: "/sbin".to_string(),
+        },
+    ]
+}
+
 pub fn add_paths(options: SandboxDefaultPaths) -> Vec<PackageSandboxPath> {
     let mut paths = vec!["/etc/resolv.conf", "/etc/ssl/certs"];
 
@@ -406,6 +436,7 @@ pub fn add_paths(options: SandboxDefaultPaths) -> Vec<PackageSandboxPath> {
         .iter()
         .map(|p| PackageSandboxPath {
             source: p.to_string(),
+            symlink: false,
             target: p.to_string(),
         })
         .collect::<Vec<PackageSandboxPath>>();
@@ -413,6 +444,7 @@ pub fn add_paths(options: SandboxDefaultPaths) -> Vec<PackageSandboxPath> {
     if options.bash {
         paths.push(PackageSandboxPath {
             source: "/bin/bash".to_string(),
+            symlink: false,
             target: "/bin/sh".to_string(),
         });
     }
@@ -420,6 +452,7 @@ pub fn add_paths(options: SandboxDefaultPaths) -> Vec<PackageSandboxPath> {
     if options.texinfo {
         paths.push(PackageSandboxPath {
             source: "/usr/bin/texi2any".to_string(),
+            symlink: false,
             target: "/usr/bin/makeinfo".to_string(),
         });
     }

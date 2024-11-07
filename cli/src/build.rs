@@ -19,8 +19,6 @@ pub async fn load_packages(
             continue;
         }
 
-        println!("Fetching: {}-{}", package_output.name, package_output.hash);
-
         let package_request = tonic::Request::new(package_output.clone());
 
         let package_response = match service.get_package(package_request).await {

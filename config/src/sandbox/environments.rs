@@ -21,6 +21,31 @@ use vorpal_schema::vorpal::package::v0::{Package, PackageEnvironment, PackageOut
 //     pub ncurses: Option<SandboxEnvironmentsConfig>,
 // }
 
+pub fn add_rootfs() -> Vec<PackageEnvironment> {
+    vec![
+        PackageEnvironment {
+            key: "CXX".to_string(),
+            value: "/usr/bin/aarch64-linux-gnu-g++-14".to_string(),
+        },
+        PackageEnvironment {
+            key: "GCC".to_string(),
+            value: "/usr/bin/aarch64-linux-gnu-gcc-14".to_string(),
+        },
+        PackageEnvironment {
+            key: "CC_FOR_TARGET".to_string(),
+            value: "/usr/bin/aarch64-linux-gnu-gcc-14".to_string(),
+        },
+        PackageEnvironment {
+            key: "CXX_FOR_TARGET".to_string(),
+            value: "/usr/bin/aarch64-linux-gnu-g++-14".to_string(),
+        },
+        PackageEnvironment {
+            key: "PATH".to_string(),
+            value: "/bin:/sbin".to_string(),
+        },
+    ]
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn add_environments(
     package: Package,

@@ -2,45 +2,75 @@
 set -euo pipefail
 
 sudo apt-get update
-
 sudo apt-get install \
     --no-install-recommends \
     --yes \
-    autoconf \
-    automake \
-    bash \
-    binutils \
-    bison \
-    bubblewrap \
-    build-essential \
-    bzip2 \
     ca-certificates \
-    coreutils \
-    diffutils \
-    file \
-    findutils \
-    flex \
-    g++ \
-    gawk \
-    gcc \
-    gettext \
-    grep \
-    gzip \
-    help2man \
-    libbison-dev \
-    libc6-dev \
-    m4 \
-    make \
-    patch \
-    patchelf \
-    perl \
-    pkg-config \
-    python3 \
-    ripgrep \
-    rsync \
-    sed \
-    tar \
-    texinfo \
-    unzip \
-    xz-utils \
-    zlib1g-dev
+    curl
+
+if [ ! -d /etc/apt/keyrings ]; then
+    sudo install -m 0755 -d /etc/apt/keyrings
+fi
+
+if [ ! -f /etc/apt/keyrings/docker.asc ]; then
+    sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+fi
+
+if [ ! -f /etc/apt/sources.list.d/docker.list ]; then
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+fi
+
+sudo apt-get update
+sudo apt-get install \
+    --no-install-recommends \
+    --yes \
+    bubblewrap \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-ce \
+    docker-ce-cli \
+    docker-compose-plugin \
+    unzip
+
+sudo usermod -aG docker "${USER}"
+
+# autoconf \
+# automake \
+# bash \
+# binutils \
+# bison \
+# build-essential \
+# bzip2 \
+# ca-certificates \
+# coreutils \
+# diffutils \
+# file \
+# findutils \
+# flex \
+# g++ \
+# gawk \
+# gcc \
+# gettext \
+# grep \
+# gzip \
+# help2man \
+# libbison-dev \
+# libc6-dev \
+# m4 \
+# make \
+# patch \
+# patchelf \
+# perl \
+# pkg-config \
+# python3 \
+# ripgrep \
+# rsync \
+# sed \
+# tar \
+# texinfo \
+# xz-utils \
+# zlib1g-dev

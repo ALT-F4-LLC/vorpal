@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail, Result};
-use itertools::Itertools;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::{fs::create_dir_all, process::Command};
@@ -50,7 +49,13 @@ pub async fn build(
         vec!["--share-net"],
     ];
 
-    let mut sandbox_library_paths = vec![];
+    // Add package paths to command
+
+    for package in &package_paths {
+        command_args.push(vec!["--ro-bind", package.as_str(), package.as_str()]);
+    }
+
+    // Add package sandbox paths to command
 
     for sandbox_path in &package_sandbox_paths {
         let source_path = Path::new(&sandbox_path.source).to_path_buf();
@@ -59,46 +64,29 @@ pub async fn build(
             bail!("sandbox 'source' path does not exist: {:?}", source_path);
         }
 
-        // Add library paths for executables
+        if !sandbox_path.symlink {
+            command_args.push(vec![
+                "--ro-bind",
+                sandbox_path.source.as_str(),
+                sandbox_path.target.as_str(),
+            ]);
+        }
+    }
 
-        if let Ok(Some(kind)) = infer::get_from_path(source_path.clone()) {
-            if kind.mime_type() == "application/x-executable" {
-                let analyzer = lddtree::DependencyAnalyzer::default();
-                let analyzer_deps = analyzer.analyze(source_path.clone()).unwrap();
+    for sandbox_path in &package_sandbox_paths {
+        let source_path = Path::new(&sandbox_path.source).to_path_buf();
 
-                analyzer_deps.libraries.iter().for_each(|(_, library)| {
-                    sandbox_library_paths.push(library.path.display().to_string());
-                });
-            }
+        if !source_path.exists() {
+            bail!("sandbox 'source' path does not exist: {:?}", source_path);
         }
 
-        // Add path with mapping
-
-        command_args.push(vec![
-            "--ro-bind",
-            sandbox_path.source.as_str(),
-            sandbox_path.target.as_str(),
-        ]);
-    }
-
-    // Deduplicate library paths
-
-    let sandbox_library_paths = sandbox_library_paths.iter().unique().collect::<Vec<_>>();
-
-    // Add library paths to command
-
-    for library_path in sandbox_library_paths {
-        command_args.push(vec![
-            "--ro-bind",
-            library_path.as_str(),
-            library_path.as_str(),
-        ]);
-    }
-
-    // Add package paths to command
-
-    for package in &package_paths {
-        command_args.push(vec!["--ro-bind", package.as_str(), package.as_str()]);
+        if sandbox_path.symlink {
+            command_args.push(vec![
+                "--symlink",
+                sandbox_path.source.as_str(),
+                sandbox_path.target.as_str(),
+            ]);
+        }
     }
 
     // Add environment variables to command

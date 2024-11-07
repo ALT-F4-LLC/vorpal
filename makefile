@@ -8,6 +8,17 @@ WORK_DIR := $(shell pwd)
 build: check
 	cargo build --release
 
+build-docker:
+	docker buildx build --load --progress="plain" --tag "altf4llc/vorpal-rootfs:latest" .
+	docker container create --name 'vorpal-rootfs' 'altf4llc/vorpal-rootfs:latest'
+	mkdir -pv $(DIST_DIR)
+	docker export 'vorpal-rootfs' | zstd -v > $(DIST_DIR)/vorpal-rootfs.tar.zst
+	docker container rm --force 'vorpal-rootfs'
+	rm -rf /var/lib/vorpal/sandbox-rootfs
+	mkdir -p /var/lib/vorpal/sandbox-rootfs
+	tar -xvf $(DIST_DIR)/vorpal-rootfs.tar.zst -C /var/lib/vorpal/sandbox-rootfs
+	echo 'nameserver 1.1.1.1' > /var/lib/vorpal/sandbox-rootfs/etc/resolv.conf
+
 build-packer: validate-packer
 	rm -rf $(WORK_DIR)/packer_$(OS_TYPE)_vmware_arm64.box
 	packer build \

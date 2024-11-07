@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Setup root directory
+# Setup directories
 sudo mkdir -p /var/lib/vorpal
 sudo chown "$(id -u):$(id -g)" /var/lib/vorpal
 
-# TODO: Generate keys
-# vorpal keys generate
+# Setup keys
+./dist/vorpal keys generate

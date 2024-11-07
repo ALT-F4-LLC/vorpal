@@ -103,12 +103,12 @@ pub fn build_package(
     }
 
     if target == Aarch64Linux || target == X8664Linux {
-        let binutils_package = binutils_stage_01::package(context, target)?;
+        let binutils_package = binutils_stage_01::package(context)?;
 
-        let gcc_package = gcc_stage_01::package(context, target, &binutils_package)?;
+        let gcc_package = gcc_stage_01::package(context, &binutils_package)?;
 
         let linux_headers_package =
-            linux_headers::package(context, target, &binutils_package, &gcc_package)?;
+            linux_headers::package(context, &binutils_package, &gcc_package)?;
 
         let glibc_package = glibc_stage_01::package(
             context,
@@ -117,6 +117,8 @@ pub fn build_package(
             &gcc_package,
             &linux_headers_package,
         )?;
+
+        // TODO: move patchelf to here
 
         let libstdcpp_package = libstdcpp_stage_01::package(
             context,

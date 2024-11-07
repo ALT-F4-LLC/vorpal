@@ -393,6 +393,14 @@ pub async fn run(
         if !path.is_empty() {
             sandbox_env_path = format!("{}:{}", sandbox_env_path, path);
         }
+
+        if sandbox_env_path.starts_with(":") {
+            sandbox_env_path.remove(0);
+        }
+
+        if sandbox_env_path.ends_with(":") {
+            sandbox_env_path.pop();
+        }
     }
 
     sandbox_env.insert("PATH".to_string(), sandbox_env_path);
