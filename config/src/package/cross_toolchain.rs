@@ -13,7 +13,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
     let name = "cross-toolchain";
 
     let package = Package {
-        environment: environments::add_rootfs(context.get_target())?,
+        environment: environments::add_rootfs()?,
         name: name.to_string(),
         packages: vec![],
         sandbox: Some(PackageSandbox {
@@ -22,12 +22,37 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
         script: formatdoc! {"
             #!/bin/bash
             set -euo +h pipefail
+            umask 022
+
+            ### Set global values
+
+            export CONFIG_SITE=\"$output/usr/share/config.site\"
+            export LC_ALL=\"POSIX\"
+            export MAKEFLAGS=\"-j$(nproc)\"
+            export PATH=\"$output/bin:$PATH\"
+
+            ### Set build values
+
+            export CXX=\"/usr/bin/{target_host}-g++\"
+            export GCC=\"/usr/bin/{target_host}-gcc\"
+            export CC=\"$GCC\"
+
+            export CXX_FOR_TARGET=\"$CXX\"
+            export GCC_FOR_TARGET=\"$GCC\"
+            export CC_FOR_TARGET=\"$CC\"
+
+            export CPPFLAGS=\"-I$output/usr/include -I/usr/include\"
+            export C_INCLUDE_PATH=\"$output/usr/include:/usr/include\"
+
+            export LDFLAGS=\"-L$output/lib -L/lib -L/lib64\"
+            export LD_LIBRARY_PATH=\"$output/lib:/lib:/lib64\"
+            export LIBRARY_PATH=\"$output/lib:/lib:/lib64\"
+
+            ### Set local values
 
             target=\"$(uname -m)-vorpal-linux-gnu\"
 
-            export PATH=\"$output/$target/bin:$PATH\"
-
-            ## Build binutils
+            ### Build binutils
 
             mkdir -pv ./binutils/build
             pushd ./binutils/build
@@ -42,16 +67,17 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
                 --target=\"$target\" \
                 --with-sysroot=\"$output\"
 
-            make -j$(nproc)
+            make
             make install
 
             popd
 
-            ## Build gcc
+            ### Build gcc
 
             pushd ./gcc
 
             ./contrib/download_prerequisites
+
             case $(uname -m) in
               x86_64)
                 sed -e '/m64=/s/lib64/lib/' -i.orig gcc/config/i386/t-linux64
@@ -83,24 +109,33 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
                 --with-sysroot=\"$output\" \
                 --without-headers
 
-            make -j$(nproc)
+            make
             make install
 
             popd
 
-            OUTPUT_LIBGCC=$(cd $output && bin/{target}-gcc -print-libgcc-file-name)
+            OUTPUT_LIBGCC=$(cd $output && bin/$target-gcc -print-libgcc-file-name)
             OUTPUT_LIBGCC_DIR=$(dirname \"${{OUTPUT_LIBGCC}}\")
 
             cat gcc/limitx.h gcc/glimits.h gcc/limity.h > \
                 ${{OUTPUT_LIBGCC_DIR}}/include/limits.h
 
             # TODO: see if we can remove this
-
-            cp $output/$target/bin/gcc $output/$target/bin/cc
+            # cp -v $output/bin/$target-gcc $output/bin/$target-cc
 
             popd
 
-            ## Build linux headers
+            ### Update build values for new gcc
+
+            export CXX=\"$output/bin/$target-g++\"
+            export GCC=\"$output/bin/$target-gcc\"
+            export CC=\"$GCC\"
+
+            export CXX_FOR_TARGET=\"$CXX\"
+            export GCC_FOR_TARGET=\"$GCC\"
+            export CC_FOR_TARGET=\"$CC\"
+
+            ### Build linux headers
 
             pushd ./linux-headers
 
@@ -114,46 +149,63 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
 
             popd
 
-            ## Build glibc
+            ### Build glibc
 
             case $(uname -m) in
                 i?86)   ln -sfv ld-linux.so.2 $output/lib/ld-lsb.so.3
                 ;;
-                x86_64) ln -sfv /lib64/ld-linux-x86-64.so.2 $output/lib64
-                        ln -sfv /lib64/ld-linux-x86-64.so.2 $output/lib64/ld-lsb-x86-64.so.3
+                x86_64) mkdir -pv $output/lib64
+                        ln -sfv /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 $output/lib64/ld-linux-x86-64.so.2
+                        ln -sfv /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 $output/lib64/ld-lsb-x86-64.so.3
                 ;;
             esac
 
             pushd ./glibc
 
-            patch -Np1 -i ../glibc-2.40-fhs-1.patch
+            patch -Np1 -i ../glibc-patch/glibc-2.40-fhs-1.patch
 
             mkdir -pv ./build
             pushd ./build
 
-            echo \"rootsbindir=$output/usr/sbin\" > configparms
+            echo \"rootsbindir=/usr/sbin\" > configparms
 
             ../configure \
                 --build=$(../scripts/config.guess) \
                 --disable-nscd \
                 --enable-kernel=\"4.19\" \
                 --host=\"$target\" \
-                --prefix=\"$output\" \
+                --prefix=\"/usr\" \
                 --with-headers=\"$output/usr/include\" \
-                libc_cv_slibdir=\"$output/usr/lib\"
+                libc_cv_slibdir=\"/usr/lib\"
 
-            make -j$(nproc)
-            make DESTDIR=\"$output\" install
+            make
+            make DESTDIR=$output install
+
+            # TODO: this needs to be prefix with $output
 
             sed '/RTLDLIST=/s@/usr@@g' -i $output/usr/bin/ldd
 
             popd
             popd
 
+            ## Replace linux symlinks
+
+            rm -v $output/lib64/ld-linux-x86-64.so.2
+            rm -v $output/lib64/ld-lsb-x86-64.so.3
+
+            ln -sfv $output/usr/lib/ld-linux-x86-64.so.2 $output/lib64/ld-linux-x86-64.so.2
+            ln -sfv $output/usr/lib/ld-linux-x86-64.so.2 $output/lib64/ld-lsb-x86-64.so.3
+
             ## Test glibc
 
-            echo 'int main(){{}}' | $output/bin/{target}-gcc -xc -
+            echo 'Testing glibc'
+
+            echo 'int main(){{}}' | $output/bin/$target-gcc -xc -
+
+            ls -alh
+
             readelf -l a.out | grep ld-linux
+
             rm -v a.out
 
             ## Build libstdc++
@@ -169,14 +221,14 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
                 --disable-multilib \
                 --disable-nls \
                 --host=\"$target\" \
-                --prefix=\"$output\" \
-                --with-gxx-include-dir=$output/$target/include/c++/14.2.0
+                --prefix=\"/usr\" \
+                --with-gxx-include-dir=/usr/include/c++/14
 
-            make -j$(nproc)
+            make
             make DESTDIR=\"$output\" install
 
             rm -v $output/usr/lib/lib{{stdc++{{,exp,fs}},supc++}}.la",
-            target = "x86_64-linux-gnu",
+            target_host = "x86_64-linux-gnu",
         },
         // TODO: explore making docker image a source
         source: vec![
@@ -213,10 +265,10 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             PackageSource {
                 excludes: vec![],
                 hash: Some(
-                    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+                    "69cf0653ad0a6a178366d291f30629d4e1cb633178aa4b8efbea0c851fb944ca".to_string(),
                 ),
                 includes: vec![],
-                name: "glibc-2.40-fhs-1.patch".to_string(),
+                name: "glibc-patch".to_string(),
                 strip_prefix: false,
                 uri: "https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-2.40-fhs-1.patch"
                     .to_string(),

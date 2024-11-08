@@ -1,79 +1,11 @@
 use anyhow::{bail, Result};
-use vorpal_schema::vorpal::package::v0::{
-    Package, PackageEnvironment, PackageOutput, PackageSystem,
-    PackageSystem::{Aarch64Linux, X8664Linux},
-};
+use vorpal_schema::vorpal::package::v0::{Package, PackageEnvironment, PackageOutput};
 
-pub fn add_rootfs(target: PackageSystem) -> Result<Vec<PackageEnvironment>> {
-    let arch_target = match target {
-        Aarch64Linux => "aarch64",
-        X8664Linux => "x86_64",
-        _ => bail!("Unsupported system: {:?}", target),
-    };
-
-    let arch_gcc = match target {
-        Aarch64Linux => "aarch64-linux-gnu",
-        X8664Linux => "x86_64-linux-gnu",
-        _ => bail!("Unsupported system: {:?}", target),
-    };
-
-    let path_gcc = format!("/usr/bin/{}-gcc-14", arch_gcc);
-    let path_gpp = format!("/usr/bin/{}-g++-14", arch_gcc);
-
-    let environments = vec![
-        PackageEnvironment {
-            key: "CC".to_string(),
-            value: path_gcc.clone(),
-        },
-        PackageEnvironment {
-            key: "CXX".to_string(),
-            value: path_gpp.clone(),
-        },
-        PackageEnvironment {
-            key: "GCC".to_string(),
-            value: path_gcc.clone(),
-        },
-        PackageEnvironment {
-            key: "C_INCLUDE_PATH".to_string(),
-            value: "/usr/include".to_string(),
-        },
-        PackageEnvironment {
-            key: "CPPFLAGS".to_string(),
-            value: "-I/usr/include".to_string(),
-        },
-        PackageEnvironment {
-            key: "LD_LIBRARY_PATH".to_string(),
-            value: "/lib:/lib64".to_string(),
-        },
-        PackageEnvironment {
-            key: "LDFLAGS".to_string(),
-            value: "-L/lib -L/lib64".to_string(),
-        },
-        PackageEnvironment {
-            key: "LC_ALL".to_string(),
-            value: "POSIX".to_string(),
-        },
-        PackageEnvironment {
-            key: "LIBRARY_PATH".to_string(),
-            value: "/lib:/lib64".to_string(),
-        },
-        PackageEnvironment {
-            key: "CC_FOR_TARGET".to_string(),
-            value: path_gcc.clone(),
-        },
-        PackageEnvironment {
-            key: "CXX_FOR_TARGET".to_string(),
-            value: path_gpp.clone(),
-        },
-        PackageEnvironment {
-            key: "GCC_FOR_TARGET".to_string(),
-            value: path_gcc.clone(),
-        },
-        PackageEnvironment {
-            key: "PATH".to_string(),
-            value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
-        },
-    ];
+pub fn add_rootfs() -> Result<Vec<PackageEnvironment>> {
+    let environments = vec![PackageEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
+    }];
 
     Ok(environments)
 }

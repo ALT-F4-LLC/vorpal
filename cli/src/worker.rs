@@ -4,7 +4,7 @@ use crate::log::{
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, rename, write, File};
 use tokio::io::AsyncWriteExt;
 use tokio_tar::Archive;
@@ -14,7 +14,7 @@ use uuid::Uuid;
 use vorpal_schema::{
     get_source_type,
     vorpal::{
-        package::v0::{Package, PackageOutput, PackageSourceKind, PackageSystem},
+        package::v0::{Package, PackageOutput, PackageSource, PackageSourceKind, PackageSystem},
         store::v0::{store_service_client::StoreServiceClient, StoreKind, StoreRequest},
         worker::v0::{worker_service_client::WorkerServiceClient, BuildRequest},
     },
@@ -30,6 +30,220 @@ use vorpal_store::{
 };
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
+
+async fn fetch_source(
+    sandbox_path: PathBuf,
+    package_name: String,
+    source: PackageSource,
+) -> Result<String> {
+    print_source_url(&package_name, SourceStatus::Pending, source.uri.as_str());
+
+    let sandbox_source_path = sandbox_path.join(source.name.clone());
+
+    create_dir_all(&sandbox_source_path)
+        .await
+        .expect("failed to create sandbox path");
+
+    let source_type = get_source_type(&source.uri);
+
+    match source_type {
+        PackageSourceKind::UnknownKind => {
+            bail!("Package source type unknown")
+        }
+
+        PackageSourceKind::Git => bail!("Package source git not supported"),
+
+        PackageSourceKind::Http => {
+            let url = Url::parse(&source.uri).expect("failed to parse url");
+
+            if url.scheme() != "http" && url.scheme() != "https" {
+                bail!("Source scheme not supported: {:?}", url.scheme());
+            }
+
+            let response = reqwest::get(url.as_str())
+                .await
+                .expect("failed to request source");
+
+            let response_status = response.status();
+
+            if !response_status.is_success() {
+                bail!("Source response status: {:?}", response_status);
+            }
+
+            let response_bytes = response.bytes().await.expect("failed to get source bytes");
+
+            if response_bytes.is_empty() {
+                bail!("Source response empty");
+            }
+
+            let response_data = response_bytes.as_ref();
+
+            let response_data_type = infer::get(response_data);
+
+            if response_data_type.is_none() {
+                let file_name = url.path_segments().unwrap().last().unwrap();
+
+                let file_path = sandbox_source_path.join(file_name);
+
+                write(&file_path, response_data)
+                    .await
+                    .expect("failed to write");
+            }
+
+            if let Some(kind) = response_data_type {
+                if let "application/gzip" = kind.mime_type() {
+                    let gz_decoder = GzipDecoder::new(response_data);
+                    let mut archive = Archive::new(gz_decoder);
+
+                    archive
+                        .unpack(&sandbox_source_path)
+                        .await
+                        .expect("failed to unpack");
+                } else if let "application/x-bzip2" = kind.mime_type() {
+                    let bz_decoder = BzDecoder::new(response_data);
+                    let mut archive = Archive::new(bz_decoder);
+
+                    archive
+                        .unpack(&sandbox_source_path)
+                        .await
+                        .expect("failed to unpack");
+                } else if let "application/x-xz" = kind.mime_type() {
+                    let xz_decoder = XzDecoder::new(response_data);
+                    let mut archive = Archive::new(xz_decoder);
+
+                    archive
+                        .unpack(&sandbox_source_path)
+                        .await
+                        .expect("failed to unpack");
+                } else if let "application/zip" = kind.mime_type() {
+                    let temp_file_name = Uuid::now_v7().to_string();
+                    let temp_file = format!("/tmp/{}", temp_file_name);
+                    let temp_file_path = Path::new(&temp_file).to_path_buf();
+
+                    write(&temp_file_path, response_data)
+                        .await
+                        .expect("failed to write");
+
+                    unpack_zip(&temp_file_path, &sandbox_source_path)
+                        .await
+                        .expect("failed to unpack");
+
+                    remove_file(&temp_file_path)
+                        .await
+                        .expect("failed to remove");
+                } else {
+                    let file_name = url.path_segments().unwrap().last().unwrap();
+
+                    let file_path = sandbox_source_path.join(file_name);
+
+                    println!("=> {:?}", file_path);
+
+                    write(&file_path, response_data)
+                        .await
+                        .expect("failed to write");
+                }
+            }
+        }
+
+        PackageSourceKind::Local => {
+            let source_path = Path::new(&source.uri).to_path_buf();
+
+            if !source_path.exists() {
+                bail!("Package `source` path not found: {:?}", source_path);
+            }
+
+            // TODO: check if source is a directory or file
+
+            if source_path.is_dir() {
+                let dir_path = source_path.canonicalize().expect("failed to canonicalize");
+
+                let dir_files = get_file_paths(
+                    &dir_path.clone(),
+                    source.excludes.clone(),
+                    source.includes.clone(),
+                )?;
+
+                for file_path in &dir_files {
+                    if file_path.display().to_string().ends_with(".tar.zst") {
+                        bail!("Package source archive found: {:?}", file_path);
+                    }
+                }
+
+                copy_files(&dir_path, dir_files, &sandbox_source_path).await?;
+            }
+        }
+    }
+
+    let mut source_files = get_file_paths(
+        &sandbox_source_path,
+        source.excludes.clone(),
+        source.includes.clone(),
+    )?;
+
+    if source.strip_prefix {
+        let mut prefix_path = None;
+
+        for file_path in &source_files {
+            if *file_path == sandbox_source_path {
+                continue;
+            }
+
+            let path = file_path
+                .strip_prefix(sandbox_source_path.parent().unwrap())
+                .unwrap();
+
+            let path_parts: Vec<&str> = path.to_str().unwrap().split('/').collect();
+
+            prefix_path = Some(sandbox_source_path.join(path_parts[1]));
+
+            let path_parts_updated = &path_parts[2_usize..];
+
+            let path_updated = sandbox_source_path.join(path_parts_updated.join("/"));
+
+            if !file_path.is_dir() {
+                rename(file_path, path_updated)
+                    .await
+                    .expect("failed to rename");
+            } else {
+                create_dir_all(&path_updated)
+                    .await
+                    .expect("failed to create new path");
+            }
+        }
+
+        if let Some(prefix) = prefix_path {
+            remove_dir_all(&prefix).await.expect("failed to remove dir");
+        }
+
+        let source_files_stripped = get_file_paths(
+            &sandbox_source_path,
+            source.excludes.clone(),
+            source.includes.clone(),
+        )?;
+
+        if source_files_stripped.len() != (source_files.len() - 1) {
+            bail!(
+                "Source files stripped mismatch {} != {}",
+                source_files.len(),
+                source_files_stripped.len()
+            );
+        }
+
+        source_files = source_files_stripped;
+    }
+
+    let source_hash = hash_files(source_files.clone()).await?;
+
+    if let Some(hash) = source.hash.clone() {
+        if hash != source_hash {
+            bail!("Source hash mismatch: {:?} != {:?}", hash, source_hash);
+        }
+    }
+
+    print_source_url(&package_name, SourceStatus::Complete, source.uri.as_str());
+
+    Ok(source_hash)
+}
 
 pub async fn build(
     package: &Package,
@@ -198,226 +412,40 @@ pub async fn build(
                     let source_archive_path = get_source_archive_path(&package_hash, &package.name);
 
                     if !source_archive_path.exists() {
+                        let mut sandbox_fetches = vec![];
+                        let mut sandbox_source_hashes = vec![];
+
                         let sandbox_path = create_temp_dir().await?;
 
-                        for source in package.source.iter() {
-                            let sandbox_source_path = sandbox_path.join(source.name.clone());
+                        for package_source in &package.source {
+                            let handle = tokio::spawn(fetch_source(
+                                sandbox_path.clone(),
+                                package.name.clone(),
+                                package_source.clone(),
+                            ));
 
-                            create_dir_all(&sandbox_source_path)
-                                .await
-                                .expect("failed to create sandbox path");
+                            sandbox_fetches.push(handle);
+                        }
 
-                            let source_type = get_source_type(&source.uri);
-
-                            match source_type {
-                                PackageSourceKind::UnknownKind => {
-                                    bail!("Package source type unknown")
-                                }
-
-                                PackageSourceKind::Git => bail!("Package source git not supported"),
-
-                                PackageSourceKind::Http => {
-                                    print_source_url(
-                                        &package.name,
-                                        SourceStatus::Pending,
-                                        source.uri.as_str(),
-                                    );
-
-                                    let url = Url::parse(&source.uri).expect("failed to parse url");
-
-                                    if url.scheme() != "http" && url.scheme() != "https" {
-                                        bail!("Source scheme not supported: {:?}", url.scheme());
+                        for handle in sandbox_fetches {
+                            match handle.await {
+                                Ok(result) => {
+                                    if result.is_err() {
+                                        bail!("Task error: {:?}", result);
                                     }
 
-                                    let response = reqwest::get(url.as_str())
-                                        .await
-                                        .expect("failed to request source");
-
-                                    let response_status = response.status();
-
-                                    if !response_status.is_success() {
-                                        bail!("Source response status: {:?}", response_status);
-                                    }
-
-                                    let response_bytes =
-                                        response.bytes().await.expect("failed to get source bytes");
-
-                                    if response_bytes.is_empty() {
-                                        bail!("Source response empty");
-                                    }
-
-                                    let response_data = response_bytes.as_ref();
-
-                                    if let Some(kind) = infer::get(response_data) {
-                                        if let "application/gzip" = kind.mime_type() {
-                                            let gz_decoder = GzipDecoder::new(response_data);
-                                            let mut archive = Archive::new(gz_decoder);
-
-                                            archive
-                                                .unpack(&sandbox_source_path)
-                                                .await
-                                                .expect("failed to unpack");
-                                        } else if let "application/x-bzip2" = kind.mime_type() {
-                                            let bz_decoder = BzDecoder::new(response_data);
-                                            let mut archive = Archive::new(bz_decoder);
-
-                                            archive
-                                                .unpack(&sandbox_source_path)
-                                                .await
-                                                .expect("failed to unpack");
-                                        } else if let "application/x-xz" = kind.mime_type() {
-                                            let xz_decoder = XzDecoder::new(response_data);
-                                            let mut archive = Archive::new(xz_decoder);
-
-                                            archive
-                                                .unpack(&sandbox_source_path)
-                                                .await
-                                                .expect("failed to unpack");
-                                        } else if let "application/zip" = kind.mime_type() {
-                                            let temp_file_name = Uuid::now_v7().to_string();
-                                            let temp_file = format!("/tmp/{}", temp_file_name);
-                                            let temp_file_path =
-                                                Path::new(&temp_file).to_path_buf();
-
-                                            write(&temp_file_path, response_data)
-                                                .await
-                                                .expect("failed to write");
-
-                                            unpack_zip(&temp_file_path, &sandbox_source_path)
-                                                .await
-                                                .expect("failed to unpack");
-
-                                            remove_file(&temp_file_path)
-                                                .await
-                                                .expect("failed to remove");
-                                        } else {
-                                            let file_name =
-                                                url.path_segments().unwrap().last().unwrap();
-
-                                            let file_path = sandbox_source_path.join(file_name);
-
-                                            println!("=> {:?}", file_path);
-
-                                            write(&file_path, response_data)
-                                                .await
-                                                .expect("failed to write");
-                                        }
-
-                                        print_source_url(
-                                            &package.name,
-                                            SourceStatus::Complete,
-                                            source.uri.as_str(),
-                                        );
+                                    if let Ok(result) = result {
+                                        sandbox_source_hashes.push(result);
                                     }
                                 }
 
-                                PackageSourceKind::Local => {
-                                    let source_path = Path::new(&source.uri).to_path_buf();
-
-                                    if !source_path.exists() {
-                                        bail!("Package `source` path not found: {:?}", source_path);
-                                    }
-
-                                    let source_path =
-                                        source_path.canonicalize().expect("failed to canonicalize");
-
-                                    print_source_url(
-                                        &package.name,
-                                        SourceStatus::Pending,
-                                        &source_path.display().to_string(),
-                                    );
-
-                                    let source_files = get_file_paths(
-                                        &source_path.clone(),
-                                        source.excludes.clone(),
-                                        source.includes.clone(),
-                                    )?;
-
-                                    for file_path in &source_files {
-                                        if file_path.display().to_string().ends_with(".tar.zst") {
-                                            bail!("Package source archive found: {:?}", file_path);
-                                        }
-                                    }
-
-                                    copy_files(&source_path, source_files, &sandbox_source_path)
-                                        .await?;
-
-                                    print_source_url(
-                                        &package.name,
-                                        SourceStatus::Complete,
-                                        &source_path.display().to_string(),
-                                    );
-                                }
-                            }
-
-                            let mut source_files = get_file_paths(
-                                &sandbox_source_path,
-                                source.excludes.clone(),
-                                source.includes.clone(),
-                            )?;
-
-                            if source.strip_prefix {
-                                let mut prefix_path = None;
-
-                                for file_path in &source_files {
-                                    if *file_path == sandbox_source_path {
-                                        continue;
-                                    }
-
-                                    let path = file_path
-                                        .strip_prefix(sandbox_source_path.parent().unwrap())
-                                        .unwrap();
-
-                                    let path_parts: Vec<&str> =
-                                        path.to_str().unwrap().split('/').collect();
-
-                                    prefix_path = Some(sandbox_source_path.join(path_parts[1]));
-
-                                    let path_parts_updated = &path_parts[2_usize..];
-
-                                    let path_updated =
-                                        sandbox_source_path.join(path_parts_updated.join("/"));
-
-                                    if !file_path.is_dir() {
-                                        rename(file_path, path_updated)
-                                            .await
-                                            .expect("failed to rename");
-                                    } else {
-                                        create_dir_all(&path_updated)
-                                            .await
-                                            .expect("failed to create new path");
-                                    }
-                                }
-
-                                if let Some(prefix) = prefix_path {
-                                    remove_dir_all(&prefix).await.expect("failed to remove dir");
-                                }
-
-                                let source_files_stripped = get_file_paths(
-                                    &sandbox_source_path,
-                                    source.excludes.clone(),
-                                    source.includes.clone(),
-                                )?;
-
-                                if source_files_stripped.len() != (source_files.len() - 1) {
-                                    bail!(
-                                        "Source files stripped mismatch {} != {}",
-                                        source_files.len(),
-                                        source_files_stripped.len()
-                                    );
-                                }
-
-                                source_files = source_files_stripped;
-                            }
-
-                            let source_hash = hash_files(source_files.clone()).await?;
-
-                            if let Some(hash) = source.hash.clone() {
-                                if hash != source_hash {
-                                    bail!("Source hash mismatch: {:?} != {:?}", hash, source_hash);
-                                }
+                                Err(e) => eprintln!("Task failed: {}", e),
                             }
                         }
+
+                        // TODO: instead of compiling one source, compile sources for hashes
+
+                        println!("=> hashes: {:?}", sandbox_source_hashes);
 
                         let sandbox_path_files = get_file_paths(&sandbox_path, vec![], vec![])?;
 
@@ -427,6 +455,8 @@ pub async fn build(
                         remove_dir_all(&sandbox_path)
                             .await
                             .expect("failed to remove");
+
+                        println!("=> archive: {:?}", source_archive_path);
                     }
 
                     request_source_data_path = Some(source_archive_path);

@@ -13,7 +13,7 @@ pub fn package(context: &mut ContextConfig, binutils: &PackageOutput) -> Result<
     let name = "gcc-stage-01";
 
     let package = Package {
-        environment: environments::add_rootfs(context.get_target())?,
+        environment: environments::add_rootfs()?,
         name: name.to_string(),
         packages: vec![binutils.clone()],
         sandbox: Some(PackageSandbox {
