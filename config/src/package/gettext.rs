@@ -1,9 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    sandbox::{
-        environments::add_environments,
-        scripts::{add_scripts, PackageRpath},
-    },
+    sandbox::scripts::{add_scripts, PackageRpath},
     ContextConfig,
 };
 use anyhow::Result;
@@ -119,17 +116,6 @@ pub fn package(
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
-
-    let package = add_environments(
-        package,
-        Some(bash),
-        Some(binutils),
-        Some(gcc),
-        Some(glibc),
-        Some(libstdcpp),
-        Some(linux_headers),
-        Some(ncurses),
-    );
 
     let glibc_env_key = glibc.name.to_lowercase().replace("-", "_");
 

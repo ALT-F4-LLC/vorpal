@@ -1,8 +1,4 @@
-use crate::{
-    cross_platform::get_cpu_count,
-    sandbox::{environments::add_environments, scripts::add_scripts},
-    ContextConfig,
-};
+use crate::{cross_platform::get_cpu_count, sandbox::scripts::add_scripts, ContextConfig};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
@@ -130,17 +126,6 @@ pub fn package(
         source: vec![source],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
-
-    let package = add_environments(
-        package,
-        Some(bash),
-        Some(binutils),
-        Some(gcc),
-        None,
-        Some(libstdcpp),
-        Some(linux_headers),
-        Some(ncurses),
-    );
 
     let package = add_scripts(package, target, Some(glibc), vec![])?;
 
