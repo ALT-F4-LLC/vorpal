@@ -1,10 +1,10 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use vorpal_schema::vorpal::package::v0::{Package, PackageEnvironment, PackageOutput};
 
 pub fn add_rootfs() -> Result<Vec<PackageEnvironment>> {
     let environments = vec![PackageEnvironment {
         key: "PATH".to_string(),
-        value: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
+        value: "/usr/bin".to_string(),
     }];
 
     Ok(environments)

@@ -1,116 +1,69 @@
-use crate::{
-    cross_platform::get_sed_cmd,
-    sandbox::{environments::add_environments, packages::add_packages, scripts::add_scripts},
-    ContextConfig,
-};
+use crate::{cross_platform::get_sed_cmd, ContextConfig};
 use anyhow::Result;
 use vorpal_schema::vorpal::package::v0::{
     Package, PackageOutput,
     PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
-pub mod bash_stage_01;
-pub mod binutils_stage_01;
-pub mod binutils_stage_02;
-pub mod bison_stage_01;
+pub mod bison;
 pub mod cargo;
-pub mod coreutils_stage_01;
 pub mod cross_toolchain;
-pub mod diffutils_stage_01;
-pub mod file_stage_01;
-pub mod findutils_stage_01;
-pub mod gawk_stage_01;
-pub mod gcc_stage_01;
-pub mod gcc_stage_02;
-pub mod gettext_stage_01;
-pub mod glibc_stage_01;
-pub mod grep_stage_01;
-pub mod gzip_stage_01;
+pub mod gettext;
 pub mod language;
-pub mod libstdcpp_stage_01;
-pub mod linux_headers;
-pub mod m4_stage_01;
-pub mod make_stage_01;
-pub mod ncurses_stage_01;
-pub mod patch_stage_01;
-pub mod patchelf_stage_01;
-pub mod perl_stage_01;
+pub mod patchelf;
+pub mod perl;
 pub mod protoc;
-pub mod python_stage_01;
+pub mod python3;
 pub mod rust_std;
 pub mod rustc;
-pub mod sed_stage_01;
-pub mod tar_stage_01;
-pub mod texinfo_stage_01;
-pub mod util_linux_stage_01;
-pub mod xz_stage_01;
-// pub mod zlib_stage_01;
+pub mod texinfo;
+pub mod util_linux;
 
 pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<PackageOutput> {
     let mut package = package.clone();
     let mut package_packages = vec![];
+    let package_target = context.get_target();
 
-    let target = context.get_target();
-
-    // let mut zlib = None;
-    let mut bash = None;
-    // let mut binutils = None;
+    // let mut bash = None;
     // let mut bison = None;
-    let mut coreutils = None;
-    let mut cross_toolchain = None;
-    // let mut diffutils = None;
-    // let mut file = None;
-    // let mut findutils = None;
-    // let mut gawk = None;
-    // let mut gcc = None;
+    // let mut coreutils = None;
+    // let mut cross_toolchain = None;
     // let mut gettext = None;
-    // let mut glibc = None;
-    // let mut grep = None;
-    // let mut gzip = None;
-    // let mut libstdcpp = None;
-    // let mut linux_headers = None;
-    // let mut m4 = None;
-    // let mut make = None;
-    // let mut ncurses = None;
-    // let mut patch = None;
     // let mut patchelf = None;
     // let mut perl = None;
     // let mut python = None;
-    // let mut sed = None;
-    // let mut tar = None;
     // let mut texinfo = None;
     // let mut util_linux = None;
-    // let mut xz = None;
 
-    if target == Aarch64Macos || target == X8664Macos {
-        let bash_package =
-            bash_stage_01::package(context, target, None, None, None, None, None, None, None)?;
+    if package_target == Aarch64Macos || package_target == X8664Macos {
+        // let bash_package =
+        //     bash_stage_01::package(context, target, None, None, None, None, None, None, None)?;
 
-        let coreutils_package = coreutils_stage_01::package(
-            context,
-            target,
-            &bash_package,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )?;
+        // let coreutils_package = coreutils_stage_01::package(
+        //     context,
+        //     target,
+        //     &bash_package,
+        //     None,
+        //     None,
+        //     None,
+        //     None,
+        //     None,
+        //     None,
+        //     None,
+        // )?;
 
-        bash = Some(bash_package);
-        coreutils = Some(coreutils_package);
+        // bash = Some(bash_package);
+        // coreutils = Some(coreutils_package);
     }
 
-    if target == Aarch64Linux || target == X8664Linux {
+    if package_target == Aarch64Linux || package_target == X8664Linux {
         let cross_toolchain_package = cross_toolchain::package(context)?;
 
         package_packages.push(cross_toolchain_package.clone());
 
         // let linux_headers_package =
         //     linux_headers::package(context, &binutils_package, &gcc_package)?;
-        //
+
         // let glibc_package = glibc_stage_01::package(
         //     context,
         //     target,
@@ -118,7 +71,7 @@ pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<Pa
         //     &gcc_package,
         //     &linux_headers_package,
         // )?;
-        //
+
         // // TODO: move patchelf to here
         //
         // let libstdcpp_package = libstdcpp_stage_01::package(
@@ -630,11 +583,11 @@ pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<Pa
         // // let zlib_package = zlib_stage_01::package(context, target)?;
         //
 
-        cross_toolchain = Some(cross_toolchain_package);
         // bash = Some(bash_package);
         // binutils = Some(binutils_package);
         // bison = Some(bison_package);
         // coreutils = Some(coreutils_package.clone());
+        // cross_toolchain = Some(cross_toolchain_package);
         // diffutils = Some(diffutils_package);
         // file = Some(file_package);
         // findutils = Some(findutils_package);
@@ -658,7 +611,7 @@ pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<Pa
         // texinfo = Some(texinfo_package);
         // util_linux = Some(util_linux_package);
         // xz = Some(xz_package);
-        // // zlib = Some(zlib_package);
+        // zlib = Some(zlib_package);
     }
 
     // package = add_environments(

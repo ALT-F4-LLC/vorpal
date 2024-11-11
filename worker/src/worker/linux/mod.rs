@@ -47,6 +47,8 @@ pub async fn build(
         vec!["--tmpfs", "/tmp"],
         vec!["--unshare-all"],
         vec!["--share-net"],
+        vec!["--gid", "1000"],
+        vec!["--uid", "1000"],
     ];
 
     // Add package paths to command

@@ -1,10 +1,6 @@
 use crate::{
     cross_platform::get_cpu_count,
-    sandbox::{
-        environments::add_environments,
-        paths::{add_paths, SandboxDefaultPaths},
-        scripts::add_scripts,
-    },
+    sandbox::{environments::add_environments, scripts::add_scripts},
     ContextConfig,
 };
 use anyhow::Result;
@@ -50,40 +46,7 @@ pub fn package(
 
     let name = "texinfo-stage-01";
 
-    let sandbox_paths = SandboxDefaultPaths {
-        bash: false,
-        binutils: false,
-        bison: false,
-        bzip2: true,
-        coreutils: false,
-        curl: true,
-        diffutils: false,
-        file: false,
-        findutils: false,
-        flex: false,
-        gawk: false,
-        gcc: false,
-        gcc_12: false,
-        glibc: false,
-        grep: false,
-        gzip: false,
-        help2man: true,
-        includes: true,
-        lib: true,
-        m4: false,
-        make: false,
-        patchelf: true,
-        perl: false,
-        python: false,
-        sed: false,
-        tar: false,
-        texinfo: true,
-        wget: true,
-    };
-
-    let sandbox = PackageSandbox {
-        paths: add_paths(sandbox_paths),
-    };
+    let sandbox = PackageSandbox { paths: vec![] };
 
     let script = formatdoc! {"
         #!${bash}/bin/bash
