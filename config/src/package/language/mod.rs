@@ -70,7 +70,7 @@ pub fn build_rust_package(
                 echo \"$CARGO_VENDOR\" > \"$output/config.toml\"
 
                 {sed} \"s|$output|${envkey}|g\" \"$output/config.toml\"",
-                envkey = format!("{}_cache", name_envkey),
+                envkey = format!("cache_{}", name_envkey),
                 sed = get_sed_cmd(context.get_target())?,
                 source = package.name,
             },
