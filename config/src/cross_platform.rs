@@ -4,15 +4,15 @@ use vorpal_schema::vorpal::package::v0::{
     PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
-pub fn get_cpu_count(target: PackageSystem) -> Result<String> {
-    let system_cpus = match target {
-        Aarch64Linux | X8664Linux => "nproc".to_string(),
-        Aarch64Macos | X8664Macos => "sysctl -n hw.ncpu".to_string(),
-        _ => bail!("unsupported system: {}", target.as_str_name()),
-    };
-
-    Ok(system_cpus)
-}
+// pub fn get_cpu_count(target: PackageSystem) -> Result<String> {
+//     let system_cpus = match target {
+//         Aarch64Linux | X8664Linux => "nproc".to_string(),
+//         Aarch64Macos | X8664Macos => "sysctl -n hw.ncpu".to_string(),
+//         _ => bail!("unsupported system: {}", target.as_str_name()),
+//     };
+//
+//     Ok(system_cpus)
+// }
 
 pub fn get_sed_cmd(system: PackageSystem) -> Result<String> {
     let system_sed = match system {

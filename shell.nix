@@ -31,14 +31,6 @@ in
     ];
 
     buildInputs = with pkgs; [
-      # autoconf
-      # automake
-      # bison
-      # flex
-      # gettext
-      # help2man
-      # nickel
-      # zlib
       bubblewrap
       protobuf
 
