@@ -14,16 +14,10 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
 
     let name = "rustc";
 
-    let script = formatdoc! {"
-        cp -pr ./rustc/rustc/* \"$output/.\"
-        cat \"$rust_std/manifest.in\" >> \"$output/manifest.in\"
-        cp -pr \"$rust_std/lib\" \"$output\""
-    };
-
     let hash = match context.get_target() {
         Aarch64Linux => "bc6c0e0f309805c4a9b704bbfe6be6b3c28b029ac6958c58ab5b90437a9e36ed",
         Aarch64Macos => "1512db881f5bdd7f4bbcfede7f5217bd51ca03dc6741c3577b4d071863690211",
-        X8664Linux => "1512db881f5bdd7f4bbcfede7f5217bd51ca03dc6741c3577b4d071863690211",
+        X8664Linux => "2e94d4f43ca8390d1558b8c58a096e654cdb98ada396b539c3e518e95ce04746",
         X8664Macos => "",
         UnknownSystem => bail!("Unsupported rustc system: {:?}", context.get_target()),
     };
@@ -38,25 +32,27 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
 
     let version = "1.78.0";
 
-    let source = PackageSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        name: name.to_string(),
-        strip_prefix: true,
-        uri: format!(
-            "https://static.rust-lang.org/dist/2024-05-02/rustc-{}-{}.tar.gz",
-            version, target
-        ),
-    };
-
     let package = Package {
         environment: vec![],
         name: name.to_string(),
         packages: vec![rust_std],
         sandbox: None,
-        script,
-        source: vec![source],
+        script: formatdoc! {"
+            cp -pr ./rustc/rustc/* \"$output/.\"
+            cat \"$rust_std/manifest.in\" >> \"$output/manifest.in\"
+            cp -pr \"$rust_std/lib\" \"$output\""
+        },
+        source: vec![PackageSource {
+            excludes: vec![],
+            hash: Some(hash.to_string()),
+            includes: vec![],
+            name: name.to_string(),
+            strip_prefix: true,
+            uri: format!(
+                "https://static.rust-lang.org/dist/2024-05-02/rustc-{}-{}.tar.gz",
+                version, target
+            ),
+        }],
         systems: vec![
             Aarch64Linux.into(),
             Aarch64Macos.into(),

@@ -355,8 +355,6 @@ pub async fn build(
 
         unpack_zstd(&package_path, &package_archive_path).await?;
 
-        println!("=> archive: {:?}", package_path);
-
         print_package_hash(&package.name, &package_hash);
 
         return Ok(PackageOutput {
@@ -445,8 +443,6 @@ pub async fn build(
 
                         // TODO: instead of compiling one source, compile sources for hashes
 
-                        println!("=> hashes: {:?}", sandbox_source_hashes);
-
                         let sandbox_path_files = get_file_paths(&sandbox_path, vec![], vec![])?;
 
                         compress_zstd(&sandbox_path, &sandbox_path_files, &source_archive_path)
@@ -455,8 +451,6 @@ pub async fn build(
                         remove_dir_all(&sandbox_path)
                             .await
                             .expect("failed to remove");
-
-                        println!("=> archive: {:?}", source_archive_path);
                     }
 
                     request_source_data_path = Some(source_archive_path);

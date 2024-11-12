@@ -25,37 +25,30 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             paths: vec![
                 PackageSandboxPath {
                     source: format!("{}/bin", rootfs_path),
-                    symlink: false,
                     target: "/bin".to_string(),
                 },
                 PackageSandboxPath {
                     source: format!("{}/etc", rootfs_path),
-                    symlink: false,
                     target: "/etc".to_string(),
                 },
                 PackageSandboxPath {
                     source: format!("{}/lib", rootfs_path),
-                    symlink: false,
                     target: "/lib".to_string(),
                 },
                 PackageSandboxPath {
                     source: format!("{}/usr/lib/x86_64-linux-gnu", rootfs_path),
-                    symlink: false,
                     target: "/lib64".to_string(),
                 },
                 PackageSandboxPath {
                     source: format!("{}/usr", rootfs_path),
-                    symlink: false,
                     target: "/usr".to_string(),
                 },
                 PackageSandboxPath {
                     source: format!("{}/sbin", rootfs_path),
-                    symlink: false,
                     target: "/sbin".to_string(),
                 },
                 PackageSandboxPath {
                     source: format!("{}/var", rootfs_path),
-                    symlink: false,
                     target: "/var".to_string(),
                 },
             ],
@@ -86,6 +79,19 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             export PATH=\"$output/tools/bin:$PATH\"
             export CONFIG_SITE=\"$output/usr/share/config.site\"
             export MAKEFLAGS=\"-j$(nproc)\"
+
+            ## Setup certificates
+
+            mkdir -pv $output/etc/ssl/certs
+            mkdir -pv $output/usr/share/ca-certificates/mozilla
+
+            rsync -av /etc/ssl/certs/ca-certificates.crt $output/etc/ssl/certs
+            rsync -av /usr/share/ca-certificates/mozilla/* $output/usr/share/ca-certificates/mozilla
+            cp -v /etc/ca-certificates.conf $output/etc
+
+            ## Setup resolv.conf
+
+            echo 'nameserver 1.1.1.1' > $output/etc/resolv.conf
 
             ### Setup duplicate sources
 
@@ -730,13 +736,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             mkdir -pv /var/{{cache,local,log,mail,opt,spool}}
             mkdir -pv /var/lib/{{color,misc,locate}}
 
-            ln -sfv /run /var/run
-            ln -sfv /run/lock /var/lock
-
             install -dv -m 0750 /root
-            install -dv -m 1777 /tmp /var/tmp
-
-            ln -sv /proc/self/mounts /etc/mtab
 
             localedef -i C -f UTF-8 C.UTF-8
 

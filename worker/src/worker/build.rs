@@ -26,10 +26,10 @@ use vorpal_notary::get_public_key;
 use vorpal_schema::{
     get_package_system,
     vorpal::{
-        package::v0::PackageSystem,
         package::v0::PackageSystem::{
             Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos,
         },
+        package::v0::{PackageSandboxPath, PackageSystem},
         worker::v0::{BuildRequest, BuildResponse},
     },
 };
@@ -247,46 +247,32 @@ pub async fn run(
 
     // Create sandbox environment
 
-    let mut sandbox_bin_paths = vec![];
-    let mut sandbox_package_paths = vec![];
-    let mut sandbox_sbin_paths = vec![];
-    let mut sandbox_env = HashMap::new();
+    let mut packages_paths = vec![];
+    let mut package_env = HashMap::new();
 
     // Add package environment variables
 
     for env in package_environment.clone() {
-        sandbox_env.insert(env.key, env.value);
+        package_env.insert(env.key, env.value);
     }
 
     // Add package environment variables and paths
 
     for p in package_packages.iter() {
-        let p_path = get_package_path(&p.hash, &p.name);
+        let path = get_package_path(&p.hash, &p.name);
 
-        if !p_path.exists() {
-            let message = format!("package missing: {}", p_path.display());
+        if !path.exists() {
+            let message = format!("package missing: {}", path.display());
 
             bail!(message)
         }
 
-        let p_bin_path = p_path.join("bin");
+        packages_paths.push(path.display().to_string());
 
-        if p_bin_path.exists() {
-            sandbox_bin_paths.push(p_bin_path.display().to_string());
-        }
-
-        let p_sbin_path = p_path.join("sbin");
-
-        if p_sbin_path.exists() {
-            sandbox_sbin_paths.push(p_sbin_path.display().to_string());
-        }
-
-        sandbox_env.insert(
+        package_env.insert(
             p.name.to_lowercase().replace('-', "_"),
-            p_path.display().to_string(),
+            path.display().to_string(),
         );
-
-        sandbox_package_paths.push(p_path.display().to_string());
     }
 
     // Setup sandbox path source
@@ -305,49 +291,46 @@ pub async fn run(
 
     // Add package(s) environment variables
 
-    let package_name_env = package_name.to_lowercase().replace('-', "_");
+    let package_env_name = package_name.to_lowercase().replace('-', "_");
 
-    sandbox_env.insert(package_name_env.clone(), package_path.display().to_string());
+    package_env.insert(package_env_name.clone(), package_path.display().to_string());
 
-    sandbox_env.insert("output".to_string(), package_path.display().to_string());
+    package_env.insert("output".to_string(), package_path.display().to_string());
 
-    sandbox_env.insert(
-        "packages".to_string(),
-        sandbox_package_paths.join(" ").to_string(),
-    );
+    package_env.insert("packages".to_string(), packages_paths.join(" ").to_string());
 
     // Expand package references in environment variables
 
-    for (key, _) in sandbox_env.clone().into_iter() {
+    for (key, _) in package_env.clone().into_iter() {
         for p in package_packages.iter() {
             let p_key = p.name.to_lowercase().replace('-', "_");
             let p_path = get_package_path(&p.hash, &p.name);
             let p_envvar = format!("${}", p_key);
 
-            let value = sandbox_env.get(&key).unwrap().clone();
+            let value = package_env.get(&key).unwrap().clone();
             let p_value = value.replace(&p_envvar, &p_path.display().to_string());
 
             if p_value == value {
                 continue;
             }
 
-            sandbox_env.insert(key.clone(), p_value);
+            package_env.insert(key.clone(), p_value);
         }
 
-        let value = sandbox_env.get(&key).unwrap().clone();
+        let value = package_env.get(&key).unwrap().clone();
 
         let value = value.replace(
             &format!("${}", package_name.to_lowercase().replace('-', "_")),
             &package_path.display().to_string(),
         );
 
-        sandbox_env.insert(key.clone(), value.clone());
+        package_env.insert(key.clone(), value.clone());
     }
 
     // Expand self '$<package>' references in script
 
     package_script = package_script.replace(
-        format!(r"${}", package_name_env).as_str(),
+        format!(r"${}", package_env_name).as_str(),
         &package_path.display().to_string(),
     );
 
@@ -357,7 +340,7 @@ pub async fn run(
 
     // Expand other '$packages' references in script
 
-    package_script = package_script.replace(r"$packages", &sandbox_package_paths.join(" "));
+    package_script = package_script.replace(r"$packages", &packages_paths.join(" "));
 
     // Expand other '$<package>' references in script
 
@@ -380,37 +363,25 @@ pub async fn run(
         .await
         .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
-    // Combine sandbox 'bin, sbin, etc' paths
-
-    let mut sandbox_env_path = sandbox_bin_paths
-        .iter()
-        .chain(sandbox_sbin_paths.iter())
-        .cloned()
-        .collect::<Vec<String>>()
-        .join(":");
-
-    if let Some(path) = sandbox_env.get("PATH") {
-        if !path.is_empty() {
-            sandbox_env_path = format!("{}:{}", sandbox_env_path, path);
-        }
-
-        if sandbox_env_path.starts_with(":") {
-            sandbox_env_path.remove(0);
-        }
-
-        if sandbox_env_path.ends_with(":") {
-            sandbox_env_path.pop();
-        }
-    }
-
-    sandbox_env.insert("PATH".to_string(), sandbox_env_path);
-
     // Create sandbox command
 
     let mut package_sandbox_paths = vec![];
 
     if let Some(sandbox) = package_sandbox {
-        package_sandbox_paths.extend(sandbox.paths);
+        for sandbox_path in sandbox.paths {
+            let mut source = sandbox_path.source.clone();
+            let mut target = sandbox_path.target.clone();
+
+            for package in package_packages.iter() {
+                let placeholder = format!(r"${}", package.name.replace('-', "_").to_lowercase());
+                let path = get_package_path(&package.hash, &package.name);
+
+                source = source.replace(&placeholder, &path.display().to_string());
+                target = target.replace(&placeholder, &path.display().to_string());
+            }
+
+            package_sandbox_paths.push(PackageSandboxPath { source, target });
+        }
     }
 
     let mut sandbox_command = match worker_target {
@@ -431,7 +402,7 @@ pub async fn run(
                 .expect("failed to write sandbox profile");
 
             darwin::build(
-                sandbox_env,
+                package_env,
                 profile_path.as_path(),
                 sandbox_script_path.as_path(),
                 sandbox_source_path.as_path(),
@@ -447,10 +418,10 @@ pub async fn run(
                 .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
 
             linux::build(
-                sandbox_env,
+                package_env,
                 home_path.as_path(),
                 package_path.as_path(),
-                sandbox_package_paths.clone(),
+                packages_paths.clone(),
                 package_sandbox_paths,
                 sandbox_script_path.as_path(),
                 sandbox_source_path.as_path(),
