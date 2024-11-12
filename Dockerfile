@@ -5,6 +5,7 @@ RUN apt-get update \
     bash \
     binutils \
     bison \
+    bubblewrap \
     bzip2 \
     ca-certificates \
     coreutils \
@@ -21,8 +22,8 @@ RUN apt-get update \
     patch \
     perl \
     python3 \
-    sed \
     rsync \
+    sed \
     tar \
     texinfo \
     xz-utils \

@@ -11,7 +11,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
 
     // TODO: explore making exported image a source
 
-    let sandbox_rootfs_path = "/vorpal/sandbox-rootfs";
+    let rootfs_path = "/vorpal/sandbox-rootfs";
 
     let package = Package {
         // TODO: explore moving environment into sandbox
@@ -24,37 +24,37 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
         sandbox: Some(PackageSandbox {
             paths: vec![
                 PackageSandboxPath {
-                    source: format!("{}/bin", sandbox_rootfs_path),
+                    source: format!("{}/bin", rootfs_path),
                     symlink: false,
                     target: "/bin".to_string(),
                 },
                 PackageSandboxPath {
-                    source: format!("{}/etc", sandbox_rootfs_path),
+                    source: format!("{}/etc", rootfs_path),
                     symlink: false,
                     target: "/etc".to_string(),
                 },
                 PackageSandboxPath {
-                    source: format!("{}/lib", sandbox_rootfs_path),
+                    source: format!("{}/lib", rootfs_path),
                     symlink: false,
                     target: "/lib".to_string(),
                 },
                 PackageSandboxPath {
-                    source: format!("{}/usr/lib/x86_64-linux-gnu", sandbox_rootfs_path),
+                    source: format!("{}/usr/lib/x86_64-linux-gnu", rootfs_path),
                     symlink: false,
                     target: "/lib64".to_string(),
                 },
                 PackageSandboxPath {
-                    source: format!("{}/usr", sandbox_rootfs_path),
+                    source: format!("{}/usr", rootfs_path),
                     symlink: false,
                     target: "/usr".to_string(),
                 },
                 PackageSandboxPath {
-                    source: format!("{}/sbin", sandbox_rootfs_path),
+                    source: format!("{}/sbin", rootfs_path),
                     symlink: false,
                     target: "/sbin".to_string(),
                 },
                 PackageSandboxPath {
-                    source: format!("{}/var", sandbox_rootfs_path),
+                    source: format!("{}/var", rootfs_path),
                     symlink: false,
                     target: "/var".to_string(),
                 },
@@ -657,7 +657,256 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             popd
 
             rm -rf ./gcc-pass-02
-            ",
+
+            ### Setup sandbox in sandbox
+
+            mkdir -pv sandbox/home
+            mkdir -pv sandbox/source
+
+            mv -v bison sandbox/source
+            mv -v gettext sandbox/source
+            mv -v patchelf sandbox/source
+            mv -v perl sandbox/source
+            mv -v python sandbox/source
+            mv -v texinfo sandbox/source
+            mv -v util-linux sandbox/source
+
+            cat > $output/etc/hosts << EOF
+            127.0.0.1  localhost
+            ::1        localhost
+            EOF
+
+            cat > $output/etc/passwd << \"EOF\"
+            root:x:0:0:root:/root:/bin/bash
+            bin:x:1:1:bin:/dev/null:/usr/bin/false
+            daemon:x:6:6:Daemon User:/dev/null:/usr/bin/false
+            messagebus:x:18:18:D-Bus Message Daemon User:/run/dbus:/usr/bin/false
+            uuidd:x:80:80:UUID Generation Daemon User:/dev/null:/usr/bin/false
+            nobody:x:65534:65534:Unprivileged User:/dev/null:/usr/bin/false
+            EOF
+
+            cat > $output/etc/group << \"EOF\"
+            root:x:0:
+            bin:x:1:daemon
+            sys:x:2:
+            kmem:x:3:
+            tape:x:4:
+            tty:x:5:
+            daemon:x:6:
+            floppy:x:7:
+            disk:x:8:
+            lp:x:9:
+            dialout:x:10:
+            audio:x:11:
+            video:x:12:
+            utmp:x:13:
+            cdrom:x:15:
+            adm:x:16:
+            messagebus:x:18:
+            input:x:24:
+            mail:x:34:
+            kvm:x:61:
+            uuidd:x:80:
+            wheel:x:97:
+            users:x:999:
+            nogroup:x:65534:
+            EOF
+
+            cat > sandbox/package.sh<< EOF
+            #!/bin/bash
+            set -euo pipefail
+
+            mkdir -pv /{{boot,home,mnt,opt,srv}}
+
+            mkdir -pv /etc/{{opt,sysconfig}}
+            mkdir -pv /lib/firmware
+            mkdir -pv /media/{{floppy,cdrom}}
+            mkdir -pv /usr/{{,local/}}{{include,src}}
+            mkdir -pv /usr/lib/locale
+            mkdir -pv /usr/local/{{bin,lib,sbin}}
+            mkdir -pv /usr/{{,local/}}share/{{color,dict,doc,info,locale,man}}
+            mkdir -pv /usr/{{,local/}}share/{{misc,terminfo,zoneinfo}}
+            mkdir -pv /usr/{{,local/}}share/man/man{{1..8}}
+            mkdir -pv /var/{{cache,local,log,mail,opt,spool}}
+            mkdir -pv /var/lib/{{color,misc,locate}}
+
+            ln -sfv /run /var/run
+            ln -sfv /run/lock /var/lock
+
+            install -dv -m 0750 /root
+            install -dv -m 1777 /tmp /var/tmp
+
+            ln -sv /proc/self/mounts /etc/mtab
+
+            localedef -i C -f UTF-8 C.UTF-8
+
+            ## Build gettext
+
+            pushd ./gettext
+
+            ./configure --disable-shared
+
+            make
+
+            cp -v gettext-tools/src/{{msgfmt,msgmerge,xgettext}} /usr/bin
+
+            popd
+
+            rm -rf ./gettext
+
+            ## Build bison
+
+            pushd ./bison
+
+            ./configure \
+                --prefix=\"/usr\" \
+                --docdir=\"/usr/share/doc/bison-3.8.2\"
+
+            make
+            make install
+
+            popd
+
+            rm -rf ./bison
+
+            ## Build perl
+
+            pushd ./perl
+
+            sh Configure \
+                -des \
+                -D prefix=\"/usr\" \
+                -D vendorprefix=\"/usr\" \
+                -D useshrplib \
+                -D privlib=\"/usr/lib/perl5/5.40/core_perl\" \
+                -D archlib=\"/usr/lib/perl5/5.40/core_perl\" \
+                -D sitelib=\"/usr/lib/perl5/5.40/site_perl\" \
+                -D sitearch=\"/usr/lib/perl5/5.40/site_perl\" \
+                -D vendorlib=\"/usr/lib/perl5/5.40/vendor_perl\" \
+                -D vendorarch=\"/usr/lib/perl5/5.40/vendor_perl\"
+
+            make
+            make install
+
+            popd
+
+            rm -rf ./perl
+
+            ## Build Python
+
+            pushd ./python
+
+            ./configure \
+                --prefix=\"/usr\" \
+                --enable-shared \
+                --without-ensurepip
+
+            make
+            make install
+
+            popd
+
+            rm -rf ./python
+
+            ## Build texinfo
+
+            pushd ./texinfo
+
+            ./configure --prefix=\"/usr\"
+
+            make
+            make install
+
+            popd
+
+            rm -rf ./texinfo
+
+            ## Build util-linux
+
+            pushd ./util-linux
+
+            mkdir -pv /var/lib/hwclock
+
+            # note: \"--disable-makeinstall-chown\" for bwrap limitations
+
+            ./configure \
+                --libdir=\"/usr/lib\" \
+                --runstatedir=\"/run\" \
+                --disable-chfn-chsh \
+                --disable-login \
+                --disable-nologin \
+                --disable-su \
+                --disable-setpriv \
+                --disable-runuser \
+                --disable-pylibmount \
+                --disable-static \
+                --disable-liblastlog2 \
+                --disable-makeinstall-chown \
+                --without-python \
+                ADJTIME_PATH=\"/var/lib/hwclock/adjtime\" \
+                --docdir=\"/usr/share/doc/util-linux-2.40.2\"
+
+            make
+            make install
+
+            popd
+
+            rm -rf ./util-linux
+
+            ## Build patchelf
+
+            pushd ./patchelf
+
+            ./configure --prefix=\"$output\"
+
+            make
+            make install
+
+            popd
+
+            rm -rf ./patchelf
+
+            ## Cleanup
+
+            rm -rf /usr/share/{{info,man,doc}}/*
+
+            find /usr/{{lib,libexec}} -name \\*.la -delete
+
+            echo 'Done'
+            EOF
+
+            chmod +x sandbox/package.sh
+
+            ## Run sandbox
+
+            bwrap \
+                --bind \"$PWD\" \"$PWD\" \
+                --bind \"$output\" \"$output\" \
+                --chdir \"$PWD/sandbox/source\" \
+                --clearenv \
+                --dev \"/dev\" \
+                --proc \"/proc\" \
+                --setenv \"HOME\" \"$PWD/sandbox/home\" \
+                --tmpfs \"/tmp\" \
+                --unshare-all \
+                --share-net \
+                --gid \"0\" \
+                --uid \"0\" \
+                --bind \"$output/bin\" \"/bin\" \
+                --bind \"$output/etc\" \"/etc\" \
+                --bind \"$output/lib\" \"/lib\" \
+                --bind \"$output/lib64\" \"/lib64\" \
+                --bind \"$output/sbin\" \"/sbin\" \
+                --bind \"$output/usr\" \"/usr\" \
+                --bind \"$output/var\" \"/var\" \
+                --setenv \"MAKEFLAGS\" \"-j$(nproc)\" \
+                --setenv \"PATH\" \"/usr/bin:/usr/sbin\" \
+                --setenv \"PS1\" \"(sandbox) \\u:\\w\\$ \" \
+                --setenv \"TESTSUITEFLAGS\" \"-j$(nproc)\" \
+                --setenv \"output\" \"$output\" \
+                $PWD/sandbox/package.sh
+
+            rm -rf $output/tools",
         },
         source: vec![
             PackageSource {
@@ -679,6 +928,16 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
                 name: "binutils".to_string(),
                 strip_prefix: true,
                 uri: "https://ftpmirror.gnu.org/gnu/binutils/binutils-2.43.1.tar.gz".to_string(),
+            },
+            PackageSource {
+                excludes: vec![],
+                hash: Some(
+                    "cb18c2c8562fc01bf3ae17ffe9cf8274e3dd49d39f89397c1a8bac7ee14ce85f".to_string(),
+                ),
+                includes: vec![],
+                name: "bison".to_string(),
+                strip_prefix: true,
+                uri: "https://ftpmirror.gnu.org/gnu/bison/bison-3.8.2.tar.xz".to_string(),
             },
             PackageSource {
                 excludes: vec![],
@@ -739,6 +998,16 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
                 name: "gcc".to_string(),
                 strip_prefix: true,
                 uri: "https://ftpmirror.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.gz".to_string(),
+            },
+            PackageSource {
+                excludes: vec![],
+                hash: Some(
+                    "6e3ef842d1006a6af7778a8549a8e8048fc3b923e5cf48eaa5b82b5d142220ae".to_string(),
+                ),
+                includes: vec![],
+                name: "gettext".to_string(),
+                strip_prefix: true,
+                uri: "https://ftpmirror.gnu.org/gnu/gettext/gettext-0.22.5.tar.xz".to_string(),
             },
             PackageSource {
                 excludes: vec![],
@@ -823,6 +1092,15 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             },
             PackageSource {
                 excludes: vec![],
+                hash: Some("a278eec544da9f0a82ad7e07b3670cf0f4d85ee13286fa9ad4f4416b700ac19d".to_string()),
+                includes: vec![],
+                name: "patchelf".to_string(),
+                strip_prefix: true,
+                uri: "https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz"
+                    .to_string(),
+            },
+            PackageSource {
+                excludes: vec![],
                 hash: Some(
                     "af8c281a05a6802075799c0c179e5fb3a218be6a21b726d8b672cd0f4c37eae9".to_string(),
                 ),
@@ -830,6 +1108,26 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
                 name: "patch".to_string(),
                 strip_prefix: true,
                 uri: "https://ftpmirror.gnu.org/gnu/patch/patch-2.7.6.tar.xz".to_string(),
+            },
+            PackageSource {
+                excludes: vec![],
+                hash: Some(
+                    "59b6437a3da1d9de0126135b31f1f16aee9c3b7a0f61f6364b2da3e8bb5f771f".to_string(),
+                ),
+                includes: vec![],
+                name: "perl".to_string(),
+                strip_prefix: true,
+                uri: "https://www.cpan.org/src/5.0/perl-5.40.0.tar.xz".to_string(),
+            },
+            PackageSource {
+                excludes: vec![],
+                hash: Some(
+                    "3d42c796194dcd35b6e74770d5a85e24aad0c15135c559b4eadb171982a47eec".to_string(),
+                ),
+                includes: vec![],
+                name: "python".to_string(),
+                strip_prefix: true,
+                uri: "https://www.python.org/ftp/python/3.13.0/Python-3.13.0.tar.xz".to_string(),
             },
             PackageSource {
                 excludes: vec![],
@@ -850,6 +1148,26 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
                 name: "tar".to_string(),
                 strip_prefix: true,
                 uri: "https://ftpmirror.gnu.org/gnu/tar/tar-1.35.tar.xz".to_string(),
+            },
+            PackageSource {
+                excludes: vec![],
+                hash: Some(
+                    "6e34604552af91db0b4ccf0bcceba63dd3073da2a492ebcf33c6e188a64d2b63".to_string(),
+                ),
+                includes: vec![],
+                name: "texinfo".to_string(),
+                strip_prefix: true,
+                uri: "https://ftpmirror.gnu.org/gnu/texinfo/texinfo-7.1.1.tar.xz".to_string(),
+            },
+            PackageSource {
+                excludes: vec![],
+                hash: Some(
+                    "7db19a1819ac5c743b52887a4571e42325b2bfded63d93b6a1797ae2b1f8019a".to_string(),
+                ),
+                includes: vec![],
+                name: "util-linux".to_string(),
+                strip_prefix: true,
+                uri: "https://www.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-2.40.2.tar.xz".to_string(),
             },
             PackageSource {
                 excludes: vec![],
