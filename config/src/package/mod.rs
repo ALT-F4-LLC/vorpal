@@ -83,16 +83,16 @@ pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<Pa
                     target: "/lib64".to_string(),
                 },
                 PackageSandboxPath {
-                    source: format!("${}/usr", cross_toolchain_envkey),
-                    target: "/usr".to_string(),
-                },
-                PackageSandboxPath {
                     source: format!("${}/sbin", cross_toolchain_envkey),
                     target: "/sbin".to_string(),
                 },
                 PackageSandboxPath {
                     source: format!("${}/share", cross_toolchain_envkey),
                     target: "/share".to_string(),
+                },
+                PackageSandboxPath {
+                    source: format!("${}/usr", cross_toolchain_envkey),
+                    target: "/usr".to_string(),
                 },
                 PackageSandboxPath {
                     source: format!("${}/var", cross_toolchain_envkey),

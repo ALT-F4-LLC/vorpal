@@ -9,9 +9,45 @@ use vorpal_schema::vorpal::package::v0::{
 pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
     let name = "cross-toolchain";
 
+    let target = context.get_target();
+
     // TODO: explore making exported image a source
 
     let rootfs_path = "/vorpal/sandbox-rootfs";
+
+    let mut rootfs_path_dirs = vec![
+        PackageSandboxPath {
+            source: format!("{}/bin", rootfs_path),
+            target: "/bin".to_string(),
+        },
+        PackageSandboxPath {
+            source: format!("{}/etc", rootfs_path),
+            target: "/etc".to_string(),
+        },
+        PackageSandboxPath {
+            source: format!("{}/lib", rootfs_path),
+            target: "/lib".to_string(),
+        },
+        PackageSandboxPath {
+            source: format!("{}/sbin", rootfs_path),
+            target: "/sbin".to_string(),
+        },
+        PackageSandboxPath {
+            source: format!("{}/usr", rootfs_path),
+            target: "/usr".to_string(),
+        },
+        PackageSandboxPath {
+            source: format!("{}/var", rootfs_path),
+            target: "/var".to_string(),
+        },
+    ];
+
+    if target == X8664Linux {
+        rootfs_path_dirs.push(PackageSandboxPath {
+            source: format!("{}/usr/lib/x86_64-linux-gnu", rootfs_path),
+            target: "/lib64".to_string(),
+        });
+    }
 
     let package = Package {
         // TODO: explore moving environment into sandbox
@@ -22,36 +58,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
         name: name.to_string(),
         packages: vec![],
         sandbox: Some(PackageSandbox {
-            paths: vec![
-                PackageSandboxPath {
-                    source: format!("{}/bin", rootfs_path),
-                    target: "/bin".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("{}/etc", rootfs_path),
-                    target: "/etc".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("{}/lib", rootfs_path),
-                    target: "/lib".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("{}/usr/lib/x86_64-linux-gnu", rootfs_path),
-                    target: "/lib64".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("{}/usr", rootfs_path),
-                    target: "/usr".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("{}/sbin", rootfs_path),
-                    target: "/sbin".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("{}/var", rootfs_path),
-                    target: "/var".to_string(),
-                },
-            ],
+            paths: rootfs_path_dirs,
         }),
         script: formatdoc! {"
             #!/bin/bash
@@ -67,6 +74,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             done
 
             case $(uname -m) in
+              aarch64) mkdir -pv $output/lib64 ;;
               x86_64) mkdir -pv $output/lib64 ;;
             esac
 
@@ -139,7 +147,11 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             ./contrib/download_prerequisites
 
             case $(uname -m) in
-              x86_64)
+              aarch64)
+                sed -e '/lp64=/s/lib64/lib/' \
+                    -i.orig gcc/config/aarch64/t-aarch64-linux
+             ;;
+             x86_64)
                 sed -e '/m64=/s/lib64/lib/' \
                     -i.orig gcc/config/i386/t-linux64
              ;;
@@ -209,14 +221,14 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             pushd ./glibc
 
             case $(uname -m) in
+                aarch64) ln -sfv ../lib/ld-linux-aarch64.so.1 $output/lib64
+                ;;
                 i?86)   ln -sfv ld-linux.so.2 $output/lib/ld-lsb.so.3
                 ;;
                 x86_64) ln -sfv ../lib/ld-linux-x86-64.so.2 $output/lib64
                         ln -sfv ../lib/ld-linux-x86-64.so.2 $output/lib64/ld-lsb-x86-64.so.3
                 ;;
             esac
-
-            ls -alh $output/lib64
 
             patch -Np1 -i ../glibc-patch/glibc-2.40-fhs-1.patch
 
@@ -622,6 +634,10 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             ./contrib/download_prerequisites
 
             case $(uname -m) in
+              aarch64)
+                sed -e '/lp64=/s/lib64/lib/' \
+                    -i.orig gcc/config/aarch64/t-aarch64-linux
+              ;;
               x86_64)
                 sed -e '/m64=/s/lib64/lib/' \
                     -i.orig gcc/config/i386/t-linux64

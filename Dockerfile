@@ -1,6 +1,9 @@
 FROM docker.io/library/debian:sid-slim@sha256:7bee69f270ab968dbb059bd9b33100503b9c4f52e8d0da2c267d48e4b06bac3d
 
-RUN apt-get update \
+RUN ARCH=$(uname -m) \
+    && if [ "${ARCH}" = "aarch64" ]; then ARCH="arm64"; fi \
+    && echo "Current architecture: ${ARCH}" \
+    && apt-get update \
     && apt-get install --yes \
     bash \
     binutils \
@@ -16,7 +19,7 @@ RUN apt-get update \
     gcc \
     grep \
     gzip \
-    linux-headers-$(uname -r) \
+    linux-headers-$ARCH \
     m4 \
     make \
     patch \
