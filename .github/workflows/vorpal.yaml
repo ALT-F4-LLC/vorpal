@@ -75,8 +75,6 @@ jobs:
       - run: ./script/dev.sh # prebake
       - run: ./script/dev.sh make dist
 
-      # TODO: upload vorpal-config artifact
-
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -123,11 +121,11 @@ jobs:
       - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
 
       - run: |
-          sudo mkdir -p /var/lib/vorpal
-          sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
+          sudo mkdir -p /vorpal
+          sudo chown -R $(id -u):$(id -g) /vorpal
 
       - run: ./vorpal keys generate
-      - run: ./vorpal check
+      - run: ./vorpal config --file "./vorpal-config" --package "vorpal"
 
       - run: |
           ./vorpal worker start > worker_output.log 2>&1 &
@@ -135,13 +133,7 @@ jobs:
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
-      - run: ./vorpal build
-
-      - if: failure()
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
-          timeout-minutes: 10
+      - run: ./vorpal build --file "./vorpal-config" --package "vorpal"
 
       - if: always()
         run: |

@@ -2,7 +2,6 @@ ARCH := $(shell uname -m | tr '[:upper:]' '[:lower:]')
 DIST_DIR := ./dist
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 OS_TYPE ?= debian
-TARGET := ./target/release/vorpal
 VORPAL_DIR := /vorpal
 WORK_DIR := $(shell pwd)
 
@@ -34,8 +33,9 @@ list:
 
 dist: clean test-release
 	mkdir -p $(DIST_DIR)
-	cp $(TARGET) $(DIST_DIR)/vorpal
-	tar -czvf "vorpal-$(ARCH)-$(OS).tar.gz" -C $(DIST_DIR) vorpal
+	cp -v ./target/release/vorpal $(DIST_DIR)/vorpal
+	cp -v ./target/release/vorpal-config $(DIST_DIR)/vorpal-config
+	tar -czvf "vorpal-$(ARCH)-$(OS).tar.gz" -C $(DIST_DIR) vorpal vorpal-config
 
 test-release: build-release
 	cargo test --release
