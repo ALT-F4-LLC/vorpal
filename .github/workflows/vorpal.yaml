@@ -100,8 +100,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: ./script/dev.sh # prebake
-      - run: ./script/dev.sh make dist-rootfs
+      - run: make dist-rootfs
 
       - run: echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
