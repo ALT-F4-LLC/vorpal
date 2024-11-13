@@ -1,6 +1,8 @@
+*.tar.*
 .env
 .vagrant
 dist
 packer_*_*_*.box
+rootfs
 target
 vorpal-*-*

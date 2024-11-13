@@ -1,86 +1,75 @@
 ARCH := $(shell uname -m | tr '[:upper:]' '[:lower:]')
-DIST_DIR := ./dist
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 OS_TYPE ?= debian
-VORPAL_DIR := /vorpal
 WORK_DIR := $(shell pwd)
+DIST_DIR := $(WORK_DIR)/dist
+TARGET ?= debug
+VORPAL_DIR := /vorpal
+CARGO_FLAGS := $(if $(filter $(TARGET),release),--release,)
+
+.DEFAULT_GOAL := build
 
 # Development
 
-test: build
-	cargo test
+clean-cargo:
+	cargo clean
 
-build: check
-	cargo build
+clean-dist:
+	rm -rfv $(DIST_DIR)
 
-check: lint
-	cargo check
+clean-rootfs:
+	docker container rm --force vorpal-rootfs-export
+	rm -rfv $(WORK_DIR)/rootfs
 
-lint: format
-	cargo clippy -- -D warnings
+clean: clean-cargo clean-dist clean-rootfs
+
+check:
+	cargo check $(CARGO_FLAGS)
 
 format:
 	cargo fmt --check
 
-clean:
-	cargo clean
-	rm -rf $(DIST_DIR)
+lint:
+	cargo clippy -- -D warnings
 
-list:
-	@grep '^[^#[:space:]].*:' Makefile
+build:
+	cargo build $(CARGO_FLAGS)
 
-# Release
+build-rootfs:
+	mkdir -pv $(WORK_DIR)/rootfs
+	docker buildx build --load --progress=plain --tag 'altf4llc/vorpal-rootfs:latest' .
+	docker container create --name vorpal-rootfs-export 'altf4llc/vorpal-rootfs:latest'
+	docker export vorpal-rootfs-export | gzip -v > $(WORK_DIR)/rootfs/$(ARCH)-export.tar.gz
+	mkdir -pv $(WORK_DIR)/rootfs/$(ARCH)
+	tar -xvf $(WORK_DIR)/rootfs/$(ARCH)-export.tar.gz -C $(WORK_DIR)/rootfs/$(ARCH)
+	echo 'nameserver 1.1.1.1' > $(WORK_DIR)/rootfs/$(ARCH)/etc/resolv.conf
 
-dist: clean test-release
-	mkdir -p $(DIST_DIR)
-	cp -v ./target/release/vorpal $(DIST_DIR)/vorpal
-	cp -v ./target/release/vorpal-config $(DIST_DIR)/vorpal-config
-	tar -czvf "vorpal-$(ARCH)-$(OS).tar.gz" -C $(DIST_DIR) vorpal vorpal-config
+test:
+	cargo test $(CARGO_FLAGS)
 
-test-release: build-release
-	cargo test --release
-
-build-release: check-release
-	cargo build --release
-
-check-release: lint
-	cargo check --release
-
-# Sandbox rootfs
-
-build-docker:
-	docker buildx build --load --progress="plain" --tag "altf4llc/vorpal-rootfs:latest" .
-
-export-docker: build-docker
-	docker container create --name 'vorpal-rootfs' 'altf4llc/vorpal-rootfs:latest'
+dist: clean-cargo build
 	mkdir -pv $(DIST_DIR)
-	docker export 'vorpal-rootfs' | zstd -v > $(DIST_DIR)/vorpal-rootfs.tar.zst
-	docker container rm --force 'vorpal-rootfs'
-	rm -rf $(VORPAL_DIR)/sandbox-rootfs
-	mkdir -p $(VORPAL_DIR)/sandbox-rootfs
-	tar -xvf $(DIST_DIR)/vorpal-rootfs.tar.zst -C $(VORPAL_DIR)/sandbox-rootfs
-	echo 'nameserver 1.1.1.1' > $(VORPAL_DIR)/sandbox-rootfs/etc/resolv.conf
+	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
+		-C $(WORK_DIR)/target/$(TARGET) vorpal vorpal-config
 
-# Development virtual environments
+dist-rootfs: clean-rootfs build-rootfs
+	mkdir -pv $(DIST_DIR)
+	tar -czvf $(DIST_DIR)/vorpal-rootfs-$(ARCH).tar.gz \
+		-C $(WORK_DIR)/rootfs/$(ARCH) --strip-components=1 .
 
-build-packer: validate-packer
-	rm -rf $(WORK_DIR)/packer_$(OS_TYPE)_vmware_arm64.box
+# Development (virtual)
+
+vagrant-box:
+	packer validate \
+		-var-file=$(WORK_DIR)/.packer/pkrvars/$(OS_TYPE)/fusion-13.pkrvars.hcl \
+		$(WORK_DIR)/.packer
 	packer build \
 		-var-file=$(WORK_DIR)/.packer/pkrvars/$(OS_TYPE)/fusion-13.pkrvars.hcl \
 		$(WORK_DIR)/.packer
-
-load-vagrant: build-packer
-	vagrant box remove --force "altf4llc/debian-bookworm" || true
 	vagrant box add \
 		--name "altf4llc/debian-bookworm" \
 		--provider "vmware_desktop" \
 		$(WORK_DIR)/packer_debian_vmware_arm64.box
 
-test-vagrant:
-	vagrant destroy --force || true
+vagrant:
 	vagrant up --provider "vmware_desktop"
-
-validate-packer:
-	packer validate \
-		-var-file=$(WORK_DIR)/.packer/pkrvars/$(OS_TYPE)/fusion-13.pkrvars.hcl \
-		$(WORK_DIR)/.packer

@@ -82,16 +82,38 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vorpal-${{ env.ARCH }}-${{ env.OS }}
-          path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
+          path: dist/vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
 
       - uses: actions/cache/save@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
+  package-rootfs:
+    needs:
+      - code-quality
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: ./script/dev.sh # prebake
+      - run: ./script/dev.sh make dist-rootfs
+
+      - run: echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vorpal-rootfs-${{ env.ARCH }}
+          path: dist/vorpal-rootfs-${{ env.ARCH }}.tar.gz
+
   test:
     needs:
       - package
+      - package-rootfs
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -102,38 +124,40 @@ jobs:
       - uses: actions/checkout@v4
 
       - if: matrix.runner == 'ubuntu-latest'
-        run: |
-          ./script/dev/debian.sh
-          sudo chmod u+s $(which -a bwrap | head -n 1)
-          sudo aa-teardown || true
-          sudo systemctl stop apparmor
-          sudo systemctl disable apparmor
-          sudo rm -rf /etc/apparmor.d/*
+        run: ./script/dev/debian.sh
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
+      - run: mkdir -pv ./dist
+
       - uses: actions/download-artifact@v4
         with:
           name: vorpal-${{ env.ARCH }}-${{ env.OS }}
+          path: ./dist
 
-      - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
+      - uses: actions/download-artifact@v4
+        with:
+          name: vorpal-rootfs-${{ env.ARCH }}
+          path: ./dist
+
+      - run: tar -xzvf ./dist/vorpal-${ARCH}-${OS}.tar.gz -C ./dist
 
       - run: |
           sudo mkdir -p /vorpal
           sudo chown -R $(id -u):$(id -g) /vorpal
 
-      - run: ./vorpal keys generate
-      - run: ./vorpal config --file "./vorpal-config" --package "vorpal"
+      - run: ./dist/vorpal keys generate
+      - run: ./dist/vorpal config --file "./dist/vorpal-config" --package "vorpal"
 
       - run: |
-          ./vorpal worker start > worker_output.log 2>&1 &
+          ./dist/vorpal worker start > worker_output.log 2>&1 &
           WORKER_PID=$(echo $!)
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
-      - run: ./vorpal build --file "./vorpal-config" --package "vorpal"
+      - run: ./dist/vorpal build --file "./dist/vorpal-config" --package "vorpal"
 
       - if: always()
         run: |
