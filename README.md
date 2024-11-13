@@ -2,6 +2,8 @@
 
 Build and deliver software reliably with one magical tool.
 
+![vorpal-purpose](./vorpal-purpose.jpg)
+
 ## Overview
 
 Vorpal's goal is to package and distribute software reliably to local (development) and remote (cloud, self-hosted, etc) environments. It uses a `vorpal.ncl` file written in [Nickel](https://nickel-lang.org/) that allows you to "describe" every aspect of your software dependencies in a repeatable and reproducible way.
@@ -34,7 +36,7 @@ Below is the existing working diagram that illustrates the platform's design:
 > [!CAUTION]
 > This design is subject to change at ANY moment and is a work in progress.
 
-![vorpal](./vorpal.png)
+![vorpal-arch](./vorpal-arch.png)
 
 ## Development
 
