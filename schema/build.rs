@@ -1,7 +1,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .enum_attribute(
-            "vorpal.package.v0.PackageSystem",
+            "vorpal.artifact.v0.ArtifactSystem",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
@@ -9,35 +9,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.package.v0.PackageOutput",
+            "vorpal.artifact.v0.ArtifactId",
             "#[derive(Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.package.v0.PackageEnvironment",
+            "vorpal.artifact.v0.ArtifactEnvironment",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.package.v0.PackageSandbox",
+            "vorpal.artifact.v0.ArtifactSandbox",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.package.v0.PackageSandboxPath",
+            "vorpal.artifact.v0.ArtifactSandboxPath",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.package.v0.PackageSource",
+            "vorpal.artifact.v0.ArtifactSource",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.package.v0.Package",
+            "vorpal.artifact.v0.Artifact",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .compile_protos(
             &[
+                "v0/artifact/artifact.proto",
                 "v0/config/config.proto",
-                "v0/package/package.proto",
                 "v0/store/store.proto",
-                "v0/worker/worker.proto",
             ],
             &["api"],
         )?;

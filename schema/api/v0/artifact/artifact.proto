@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package vorpal.artifact.v0;
+
+enum ArtifactSystem {
+    UNKNOWN_SYSTEM = 0;
+    AARCH64_LINUX = 1;
+    AARCH64_MACOS = 2;
+    X86_64_LINUX = 3;
+    X86_64_MACOS = 4;
+}
+
+message ArtifactEnvironment {
+    string key = 1;
+    string value = 2;
+}
+
+message ArtifactSource {
+    optional string hash = 1;
+    repeated string excludes = 2;
+    repeated string includes = 3;
+    string name = 4;
+    string path = 5;
+}
+
+message ArtifactId {
+    string hash = 1;
+    string name = 2;
+}
+
+// TODO: explore making scripts "steps" repeated and run in multiple bubblewrap instances
+
+message Artifact {
+    optional ArtifactId sandbox = 1;
+    repeated ArtifactEnvironment environments = 2;
+    repeated ArtifactId packages = 3;
+    repeated ArtifactSource sources = 4;
+    repeated ArtifactSystem systems = 5;
+    string name = 6;
+    string script = 7;
+}
+
+message ArtifactBuildRequest {
+    ArtifactSystem target = 1;
+    optional ArtifactId sandbox = 2;
+    optional bytes source_data = 3;
+    optional bytes source_data_signature = 4;
+    repeated ArtifactEnvironment environments = 5;
+    repeated ArtifactId packages = 6;
+    string name = 7;
+    string script = 8;
+    string source_hash = 9;
+}
+
+message ArtifactBuildResponse {
+    string output = 1;
+}
+
+service ArtifactService {
+    rpc Build (stream ArtifactBuildRequest) returns (stream ArtifactBuildResponse);
+}
