@@ -33,7 +33,7 @@ message ArtifactId {
 message Artifact {
     optional ArtifactId sandbox = 1;
     repeated ArtifactEnvironment environments = 2;
-    repeated ArtifactId packages = 3;
+    repeated ArtifactId artifacts = 3;
     repeated ArtifactSource sources = 4;
     repeated ArtifactSystem systems = 5;
     string name = 6;
@@ -46,7 +46,7 @@ message ArtifactBuildRequest {
     optional bytes source_data = 3;
     optional bytes source_data_signature = 4;
     repeated ArtifactEnvironment environments = 5;
-    repeated ArtifactId packages = 6;
+    repeated ArtifactId artifacts = 6;
     string name = 7;
     string script = 8;
     string source_hash = 9;

@@ -1,20 +1,20 @@
-use crate::{package::build_package, ContextConfig};
+use crate::{artifact::build_artifact, ContextConfig};
 use anyhow::{bail, Result};
-use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource,
-    PackageSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
+use vorpal_schema::vorpal::artifact::v0::{
+    Artifact, ArtifactId,
+    ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
+pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
     let name = "rust-std";
 
-    let source_hash = match context.get_target() {
-        Aarch64Linux => "72d4917bb58b693b3f2c589746ed470645f96895ece3dd27f7055d3c3f7f7a79",
-        Aarch64Macos => "0689a9b2dec87c272954db9212a8f3d5243f55f777f90d84d2b3aeb2aa938ba5",
-        X8664Linux => "ad734eb9699b0a9dffdd35034776ccaa4d7b45e1898fc32748be93b60453550d",
-        X8664Macos => "",
-        UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
-    };
+    // let source_hash = match context.get_target() {
+    //     Aarch64Linux => "72d4917bb58b693b3f2c589746ed470645f96895ece3dd27f7055d3c3f7f7a79",
+    //     Aarch64Macos => "0689a9b2dec87c272954db9212a8f3d5243f55f777f90d84d2b3aeb2aa938ba5",
+    //     X8664Linux => "ad734eb9699b0a9dffdd35034776ccaa4d7b45e1898fc32748be93b60453550d",
+    //     X8664Macos => "",
+    //     UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
+    // };
 
     let source_target = match context.get_target() {
         Aarch64Linux => "aarch64-unknown-linux-gnu",
@@ -24,9 +24,9 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
         UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
     };
 
-    let source_version = "1.78.0";
+    // let source_version = "1.78.0";
 
-    // let source = PackageSource {
+    // let source = ArtifactSource {
     //     excludes: vec![],
     //     hash: Some(source_hash.to_string()),
     //     includes: vec![],
@@ -37,10 +37,10 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
     //     ),
     // };
 
-    let package = Package {
+    let artifact = Artifact {
         environments: vec![],
         name: name.to_string(),
-        packages: vec![],
+        artifacts: vec![],
         sandbox: None,
         script: format!(
             "cp -pr ./{}/{}-{}/* \"$output/.\"",
@@ -55,5 +55,5 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
         ],
     };
 
-    build_package(context, package)
+    build_artifact(context, artifact)
 }

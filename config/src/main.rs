@@ -1,16 +1,16 @@
 use crate::{
-    package::language::{build_rust_package, PackageRust},
+    artifact::language::{build_rust_artifact, ArtifactRust},
     service::ContextConfig,
 };
 use anyhow::Result;
 use vorpal_schema::vorpal::{
+    artifact::v0::ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
     config::v0::Config,
-    package::v0::PackageSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
+mod artifact;
 mod cli;
 mod cross_platform;
-mod package;
 mod sandbox;
 mod service;
 
@@ -18,7 +18,7 @@ mod service;
 fn build_config(context: &mut ContextConfig) -> Result<Config> {
     // TODO: add any custom logic you want here
 
-    let vorpal_config = PackageRust {
+    let vorpal_config = ArtifactRust {
         cargo_hash: "d64f6649f972632272a5cad4e24b1a3721c76de391dd7e6400b34b5d3050b52a",
         name: "vorpal",
         source: ".",
@@ -26,10 +26,10 @@ fn build_config(context: &mut ContextConfig) -> Result<Config> {
         systems: vec![Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos],
     };
 
-    let vorpal = build_rust_package(context, vorpal_config)?;
+    let vorpal = build_rust_artifact(context, vorpal_config)?;
 
     Ok(Config {
-        packages: vec![vorpal],
+        artifacts: vec![vorpal],
     })
 }
 

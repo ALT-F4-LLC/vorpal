@@ -3,53 +3,53 @@ use sha256::digest;
 use std::collections::HashMap;
 use tonic::transport::Server;
 use vorpal_schema::vorpal::{
+    artifact::v0::{Artifact, ArtifactId, ArtifactSystem},
     config::v0::{
         config_service_server::{ConfigService, ConfigServiceServer},
         Config, ConfigRequest,
     },
-    package::v0::{Package, PackageOutput, PackageSystem},
 };
 
 #[derive(Debug, Default)]
 pub struct ContextConfig {
-    package: HashMap<String, Package>,
-    target: PackageSystem,
+    artifact: HashMap<String, Artifact>,
+    target: ArtifactSystem,
 }
 
 impl ContextConfig {
-    pub fn new(target: PackageSystem) -> Self {
+    pub fn new(target: ArtifactSystem) -> Self {
         Self {
-            package: HashMap::new(),
+            artifact: HashMap::new(),
             target,
         }
     }
 
-    pub fn add_package(&mut self, package: Package) -> Result<PackageOutput> {
-        let package_json = serde_json::to_string(&package).map_err(|e| anyhow::anyhow!(e))?;
+    pub fn add_artifact(&mut self, artifact: Artifact) -> Result<ArtifactId> {
+        let artifact_json = serde_json::to_string(&artifact).map_err(|e| anyhow::anyhow!(e))?;
 
-        let package_hash = digest(package_json.as_bytes());
+        let artifact_hash = digest(artifact_json.as_bytes());
 
-        let package_key = format!("{}-{}", package.name, package_hash);
+        let artifact_key = format!("{}-{}", artifact.name, artifact_hash);
 
-        if !self.package.contains_key(&package_key) {
-            self.package.insert(package_key.clone(), package.clone());
+        if !self.artifact.contains_key(&artifact_key) {
+            self.artifact.insert(artifact_key.clone(), artifact.clone());
         }
 
-        let package_output = PackageOutput {
-            hash: package_hash,
-            name: package.name,
+        let artifact_output = ArtifactId {
+            hash: artifact_hash,
+            name: artifact.name,
         };
 
-        Ok(package_output)
+        Ok(artifact_output)
     }
 
-    pub fn get_package(&self, hash: &str, name: &str) -> Option<&Package> {
-        let package_key = format!("{}-{}", name, hash);
+    pub fn get_artifact(&self, hash: &str, name: &str) -> Option<&Artifact> {
+        let artifact_key = format!("{}-{}", name, hash);
 
-        self.package.get(&package_key)
+        self.artifact.get(&artifact_key)
     }
 
-    pub fn get_target(&self) -> PackageSystem {
+    pub fn get_target(&self) -> ArtifactSystem {
         self.target
     }
 }
@@ -75,21 +75,21 @@ impl ConfigService for ConfigServer {
         Ok(tonic::Response::new(self.config.clone()))
     }
 
-    async fn get_package(
+    async fn get_artifact(
         &self,
-        request: tonic::Request<PackageOutput>,
-    ) -> Result<tonic::Response<Package>, tonic::Status> {
+        request: tonic::Request<ArtifactId>,
+    ) -> Result<tonic::Response<Artifact>, tonic::Status> {
         let request = request.into_inner();
 
-        let package = self
+        let artifact = self
             .context
-            .get_package(request.hash.as_str(), request.name.as_str());
+            .get_artifact(request.hash.as_str(), request.name.as_str());
 
-        if package.is_none() {
-            return Err(tonic::Status::not_found("Package input not found"));
+        if artifact.is_none() {
+            return Err(tonic::Status::not_found("Artifact input not found"));
         }
 
-        Ok(tonic::Response::new(package.unwrap().clone()))
+        Ok(tonic::Response::new(artifact.unwrap().clone()))
     }
 }
 

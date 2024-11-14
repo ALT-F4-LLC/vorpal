@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use std::env::consts::{ARCH, OS};
 use tracing::Level;
 use vorpal_schema::{
-    get_package_system, vorpal::config::v0::Config, vorpal::package::v0::PackageSystem,
+    get_artifact_system, vorpal::artifact::v0::ArtifactSystem, vorpal::config::v0::Config,
 };
 
 #[derive(Parser)]
@@ -40,9 +40,9 @@ pub async fn execute(config: ConfigFunction) -> Result<()> {
 
     match args.command {
         Command::Start { port, target, .. } => {
-            let target = get_package_system::<PackageSystem>(&target);
+            let target = get_artifact_system::<ArtifactSystem>(&target);
 
-            if target == PackageSystem::UnknownSystem {
+            if target == ArtifactSystem::UnknownSystem {
                 return Err(anyhow::anyhow!("Invalid target system"));
             }
 

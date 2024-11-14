@@ -1,42 +1,43 @@
 use crate::{
-    package::{build_package, cargo, get_sed_cmd, protoc, rustc, zlib},
+    artifact::{build_artifact, cargo, get_sed_cmd, protoc, rustc, zlib},
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::vorpal::package::v0::{
-    Package, PackageEnvironment, PackageOutput, PackageSource, PackageSystem,
+use vorpal_schema::vorpal::artifact::v0::{
+    Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactSystem,
 };
 
-pub struct PackageRust<'a> {
+pub struct ArtifactRust<'a> {
     pub cargo_hash: &'a str,
     pub name: &'a str,
     pub source: &'a str,
     pub source_excludes: Vec<&'a str>,
-    pub systems: Vec<PackageSystem>,
+    pub systems: Vec<ArtifactSystem>,
 }
 
-pub fn build_rust_package(
+pub fn build_rust_artifact(
     context: &mut ContextConfig,
-    package: PackageRust,
-) -> Result<PackageOutput> {
-    let cargo = cargo::package(context)?;
-    let rustc = rustc::package(context)?;
-    let protoc = protoc::package(context)?;
-    let zlib = zlib::package(context)?;
+    artifact: ArtifactRust,
+) -> Result<ArtifactId> {
+    let cargo = cargo::artifact(context)?;
+    let rustc = rustc::artifact(context)?;
+    let protoc = protoc::artifact(context)?;
+    let zlib = zlib::artifact(context)?;
 
-    let systems = package
+    let systems = artifact
         .systems
         .iter()
         .map(|s| (*s).into())
         .collect::<Vec<i32>>();
 
-    let name_envkey = package.name.to_lowercase().replace("-", "_");
+    let name_envkey = artifact.name.to_lowercase().replace("-", "_");
 
-    let package_cache = build_package(
+    let artifact_cache = build_artifact(
         context,
-        Package {
-            environments: vec![PackageEnvironment {
+        Artifact {
+            artifacts: vec![cargo.clone(), rustc.clone()],
+            environments: vec![ArtifactEnvironment {
                 key: "PATH".to_string(),
                 value: format!(
                     "${cargo}/bin:${rustc}/bin",
@@ -44,8 +45,7 @@ pub fn build_rust_package(
                     rustc = rustc.name.to_lowercase().replace("-", "_")
                 ),
             }],
-            name: format!("cache-{}", package.name),
-            packages: vec![cargo.clone(), rustc.clone()],
+            name: format!("cache-{}", artifact.name),
             sandbox: None,
             script: formatdoc! {"
                 dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"store/src\" \"worker/src\")
@@ -72,11 +72,11 @@ pub fn build_rust_package(
                 {sed} \"s|$output|${envkey}|g\" \"$output/config.toml\"",
                 envkey = format!("cache_{}", name_envkey),
                 sed = get_sed_cmd(context.get_target())?,
-                source = package.name,
+                source = artifact.name,
             },
-            sources: vec![PackageSource {
+            sources: vec![ArtifactSource {
                 excludes: vec![],
-                hash: Some(package.cargo_hash.to_string()),
+                hash: Some(artifact.cargo_hash.to_string()),
                 includes: vec![
                     "Cargo.lock".to_string(),
                     "Cargo.toml".to_string(),
@@ -87,30 +87,37 @@ pub fn build_rust_package(
                     "store/Cargo.toml".to_string(),
                     "worker/Cargo.toml".to_string(),
                 ],
-                name: package.name.to_string(),
-                path: package.source.to_string(),
+                name: artifact.name.to_string(),
+                path: artifact.source.to_string(),
             }],
             systems: systems.clone(),
         },
     )?;
 
-    let mut package_excludes = vec![
+    let mut artifact_excludes = vec![
         ".git".to_string(),
         ".gitignore".to_string(),
         "target".to_string(),
     ];
 
-    package_excludes.extend(package.source_excludes.iter().map(|e| e.to_string()));
+    artifact_excludes.extend(artifact.source_excludes.iter().map(|e| e.to_string()));
 
-    let package = build_package(
+    let artifact = build_artifact(
         context,
-        Package {
+        Artifact {
+            artifacts: vec![
+                cargo.clone(),
+                rustc.clone(),
+                protoc.clone(),
+                zlib.clone(),
+                artifact_cache,
+            ],
             environments: vec![
-                PackageEnvironment {
+                ArtifactEnvironment {
                     key: "LD_LIBRARY_PATH".to_string(),
                     value: format!("${}/usr/lib", zlib.name.to_lowercase().replace("-", "_")),
                 },
-                PackageEnvironment {
+                ArtifactEnvironment {
                     key: "PATH".to_string(),
                     value: format!(
                         "${cargo}/bin:${rustc}/bin:${protoc}/bin",
@@ -120,8 +127,7 @@ pub fn build_rust_package(
                     ),
                 },
             ],
-            name: package.name.to_string(),
-            packages: vec![cargo, rustc, protoc, zlib, package_cache],
+            name: artifact.name.to_string(),
             sandbox: None,
             script: formatdoc! {"
                 cd {name}
@@ -136,19 +142,19 @@ pub fn build_rust_package(
                 mkdir -p \"$output/bin\"
 
                 cp -pr target/release/{name} $output/bin/{name}",
-                name = package.name,
+                name = artifact.name,
                 name_envkey = name_envkey,
             },
-            sources: vec![PackageSource {
-                excludes: package_excludes,
+            sources: vec![ArtifactSource {
+                excludes: artifact_excludes,
                 hash: None,
                 includes: vec![],
-                name: package.name.to_string(),
-                path: package.source.to_string(),
+                name: artifact.name.to_string(),
+                path: artifact.source.to_string(),
             }],
             systems,
         },
     )?;
 
-    Ok(package)
+    Ok(artifact)
 }

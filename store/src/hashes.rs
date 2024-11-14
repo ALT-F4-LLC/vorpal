@@ -2,7 +2,7 @@ use crate::paths::get_file_paths;
 use anyhow::{bail, Result};
 use sha256::{digest, try_digest};
 use std::path::{Path, PathBuf};
-use vorpal_schema::vorpal::package::v0::PackageSource;
+use vorpal_schema::vorpal::artifact::v0::ArtifactSource;
 
 pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String> {
     if !path.as_ref().is_file() {
@@ -44,7 +44,7 @@ pub async fn hash_files(paths: Vec<PathBuf>) -> Result<String> {
     Ok(paths_hashes_joined)
 }
 
-pub async fn get_package_hash(config_hash: &str, source: &[PackageSource]) -> Result<String> {
+pub async fn get_artifact_hash(config_hash: &str, source: &[ArtifactSource]) -> Result<String> {
     let mut source_hashes = vec![config_hash.to_string()];
 
     for source in source.iter() {
@@ -52,7 +52,7 @@ pub async fn get_package_hash(config_hash: &str, source: &[PackageSource]) -> Re
 
         if !path.exists() {
             bail!(
-                "Package `source.{}.path` not found: {:?}",
+                "Artifact `source.{}.path` not found: {:?}",
                 source.name,
                 path
             );
@@ -65,7 +65,7 @@ pub async fn get_package_hash(config_hash: &str, source: &[PackageSource]) -> Re
         if let Some(hash) = source.hash.clone() {
             if hash != source_hash {
                 bail!(
-                    "Package `source.{}.hash` mismatch: {} != {}",
+                    "Artifact `source.{}.hash` mismatch: {} != {}",
                     source.name,
                     hash,
                     source_hash
@@ -76,9 +76,9 @@ pub async fn get_package_hash(config_hash: &str, source: &[PackageSource]) -> Re
         source_hashes.push(source_hash);
     }
 
-    let package_hash = get_hashes_digest(source_hashes)?;
+    let artifact_hash = get_hashes_digest(source_hashes)?;
 
-    Ok(package_hash)
+    Ok(artifact_hash)
 }
 
 pub fn get_hash_digest(hash: &str) -> String {

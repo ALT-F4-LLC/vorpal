@@ -1,10 +1,7 @@
 use crate::vorpal::artifact::v0::{
-    ArtifactSourceKind,
-    ArtifactSourceKind::{Git, Http, Local, UnknownKind},
     ArtifactSystem,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
-use std::path::Path;
 
 pub mod vorpal {
     pub mod artifact {
@@ -44,13 +41,4 @@ impl ArtifactTarget for ArtifactSystem {
 
 pub fn get_artifact_system<T: ArtifactTarget>(target: &str) -> T {
     T::from_str(target)
-}
-
-pub fn get_source_type(source_uri: &str) -> ArtifactSourceKind {
-    match source_uri {
-        uri if Path::new(&uri).exists() => Local,
-        uri if uri.starts_with("git") => Git,
-        uri if uri.starts_with("http") => Http,
-        _ => UnknownKind,
-    }
 }

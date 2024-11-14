@@ -1,32 +1,22 @@
 use crate::ContextConfig;
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::vorpal::package::v0::{
-    Package, PackageEnvironment, PackageOutput, PackageSource,
-    PackageSystem::{Aarch64Linux, X8664Linux},
+use vorpal_schema::vorpal::artifact::v0::{
+    Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource,
+    ArtifactSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
+pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
     let name = "cross-toolchain-rootfs";
 
-    let package = Package {
-        environments: vec![PackageEnvironment {
+    let artifact = Artifact {
+        artifacts: vec![],
+        environments: vec![ArtifactEnvironment {
             key: "PATH".to_string(),
             value: "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string(),
         }],
         name: name.to_string(),
-        packages: vec![],
         sandbox: None,
-        sources: vec![PackageSource {
-            excludes: vec![],
-            hash: None,
-            includes: vec![
-                "Dockerfile".to_string(),
-                "script/version_check.sh".to_string(),
-            ],
-            name: "docker".to_string(),
-            path: ".".to_string(),
-        }],
         script: formatdoc! {"
             #!/bin/bash
             set -euo pipefail
@@ -53,8 +43,18 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
 
             echo \"nameserver 1.1.1.1\" > $output/etc/resolv.conf",
         },
+        sources: vec![ArtifactSource {
+            excludes: vec![],
+            hash: None,
+            includes: vec![
+                "Dockerfile".to_string(),
+                "script/version_check.sh".to_string(),
+            ],
+            name: "docker".to_string(),
+            path: ".".to_string(),
+        }],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 
-    context.add_package(package)
+    context.add_artifact(artifact)
 }
