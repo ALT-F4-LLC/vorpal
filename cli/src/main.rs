@@ -10,10 +10,10 @@ use tonic::transport::Channel;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
-    get_package_system,
+    get_artifact_system,
     vorpal::{
+        artifact::v0::{ArtifactId, ArtifactSystem, ArtifactSystem::UnknownSystem},
         config::v0::config_service_client::ConfigServiceClient,
-        package::v0::{PackageOutput, PackageSystem, PackageSystem::UnknownSystem},
     },
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
@@ -71,7 +71,7 @@ enum Command {
         file: String,
 
         #[arg(long, short)]
-        package: String,
+        artifact: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
@@ -85,7 +85,7 @@ enum Command {
         file: String,
 
         #[arg(long, short)]
-        package: String,
+        artifact: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
@@ -125,7 +125,7 @@ async fn main() -> Result<()> {
     match &cli.command {
         Command::Build {
             file,
-            package,
+            artifact,
             system,
             worker,
         } => {
@@ -133,13 +133,13 @@ async fn main() -> Result<()> {
                 bail!("{} no worker specified", connector_end());
             }
 
-            let package_system: PackageSystem = get_package_system(system);
+            let artifact_system: ArtifactSystem = get_artifact_system(system);
 
-            if package_system == UnknownSystem {
+            if artifact_system == UnknownSystem {
                 bail!(
                     "{} unknown target: {}",
                     connector_end(),
-                    package_system.as_str_name()
+                    artifact_system.as_str_name()
                 );
             }
 
@@ -156,42 +156,42 @@ async fn main() -> Result<()> {
 
             let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
 
-            let (packages_map, packages_order) =
-                build::load_config(package, &mut config_service).await?;
+            let (artifacts_map, artifacts_order) =
+                build::load_config(artifact, &mut config_service).await?;
 
-            let mut package_output = HashMap::<String, PackageOutput>::new();
+            let mut artifact_output = HashMap::<String, ArtifactId>::new();
 
-            for package in &packages_order {
-                match packages_map.get(package) {
-                    None => bail!("Build package not found: {}", package.name),
-                    Some(package) => {
-                        let mut package_packages = vec![];
-                        let mut package_sandbox = None;
+            for artifact in &artifacts_order {
+                match artifacts_map.get(artifact) {
+                    None => bail!("Build artifact not found: {}", artifact.name),
+                    Some(artifact) => {
+                        let mut artifact_artifacts = vec![];
+                        let mut artifact_sandbox = None;
 
-                        if let Some(sandbox) = &package.sandbox {
-                            package_sandbox = match package_output.get(&sandbox.name) {
-                                None => bail!("Package output not found: {}", sandbox.name),
-                                Some(package) => Some(package.clone()),
+                        if let Some(sandbox) = &artifact.sandbox {
+                            artifact_sandbox = match artifact_output.get(&sandbox.name) {
+                                None => bail!("Artifact output not found: {}", sandbox.name),
+                                Some(artifact) => Some(artifact.clone()),
                             }
                         }
 
-                        for p in &package.packages {
-                            match package_output.get(&p.name) {
-                                None => bail!("Package output not found: {}", p.name),
-                                Some(package) => package_packages.push(package.clone()),
+                        for p in &artifact.artifacts {
+                            match artifact_output.get(&p.name) {
+                                None => bail!("Artifact output not found: {}", p.name),
+                                Some(artifact) => artifact_artifacts.push(artifact.clone()),
                             }
                         }
 
                         let output = build(
-                            package,
-                            package_packages,
-                            package_sandbox,
-                            package_system,
+                            artifact,
+                            artifact_artifacts,
+                            artifact_sandbox,
+                            artifact_system,
                             worker,
                         )
                         .await?;
 
-                        package_output.insert(package.name.to_string(), output);
+                        artifact_output.insert(artifact.name.to_string(), output);
                     }
                 }
             }
@@ -204,22 +204,22 @@ async fn main() -> Result<()> {
 
         Command::Config {
             file,
-            package,
+            artifact,
             system,
         } => {
-            let package_system: PackageSystem = get_package_system(system);
+            let artifact_system: ArtifactSystem = get_artifact_system(system);
 
-            if package_system == UnknownSystem {
+            if artifact_system == UnknownSystem {
                 bail!(
                     "{} unknown target: {}",
                     connector_end(),
-                    package_system.as_str_name()
+                    artifact_system.as_str_name()
                 );
             }
 
             let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
 
-            let _ = build::load_config(package, &mut config_service).await?;
+            let _ = build::load_config(artifact, &mut config_service).await?;
 
             config_process
                 .kill()

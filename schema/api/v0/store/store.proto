@@ -8,9 +8,9 @@ service StoreService {
 }
 
 enum StoreKind {
-    UNKNOWN = 0;
-    PACKAGE = 2;
-    SOURCE = 3;
+    UNKNOWN_STORE_KIND = 0;
+    ARTIFACT = 1;
+    ARTIFACT_SOURCE = 2;
 }
 
 message StoreRequest {

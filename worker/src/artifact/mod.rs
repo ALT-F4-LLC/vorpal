@@ -4,8 +4,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use vorpal_schema::vorpal::{
-    package::v0::PackageSystem,
-    worker::v0::{worker_service_server::WorkerService, BuildRequest, BuildResponse},
+    artifact::v0::ArtifactSystem,
+    artifact::v0::{
+        artifact_service_server::ArtifactService, ArtifactBuildRequest, ArtifactBuildResponse,
+    },
 };
 use vorpal_store::temps::create_temp_dir;
 
@@ -15,23 +17,23 @@ mod linux;
 mod native;
 
 #[derive(Debug, Default)]
-pub struct WorkerServer {
-    pub system: PackageSystem,
+pub struct ArtifactServer {
+    pub system: ArtifactSystem,
 }
 
-impl WorkerServer {
-    pub fn new(system: PackageSystem) -> Self {
+impl ArtifactServer {
+    pub fn new(system: ArtifactSystem) -> Self {
         Self { system }
     }
 }
 
 #[tonic::async_trait]
-impl WorkerService for WorkerServer {
-    type BuildStream = ReceiverStream<Result<BuildResponse, Status>>;
+impl ArtifactService for ArtifactServer {
+    type BuildStream = ReceiverStream<Result<ArtifactBuildResponse, Status>>;
 
     async fn build(
         &self,
-        request: Request<Streaming<BuildRequest>>,
+        request: Request<Streaming<ArtifactBuildRequest>>,
     ) -> Result<Response<Self::BuildStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 

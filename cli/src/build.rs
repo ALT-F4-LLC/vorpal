@@ -1,51 +1,64 @@
-use crate::log::{print_build_order, print_packages};
+use crate::log::{print_artifacts, print_build_order};
 use anyhow::{bail, Result};
 use petgraph::algo::toposort;
 use petgraph::graphmap::DiGraphMap;
 use std::collections::HashMap;
 use tonic::transport::Channel;
 use vorpal_schema::vorpal::{
+    artifact::v0::{Artifact, ArtifactId},
     config::v0::{config_service_client::ConfigServiceClient, ConfigRequest},
-    package::v0::{Package, PackageOutput},
 };
 
-pub async fn load_packages(
-    map: &mut HashMap<PackageOutput, Package>,
-    packages: Vec<PackageOutput>,
+pub async fn load_artifacts(
+    map: &mut HashMap<ArtifactId, Artifact>,
+    artifacts: Vec<ArtifactId>,
     service: &mut ConfigServiceClient<Channel>,
 ) -> Result<()> {
-    for package_output in packages.iter() {
-        if map.contains_key(package_output) {
-            continue;
-        }
+    for artifact_output in artifacts.iter() {
+        if !map.contains_key(artifact_output) {
+            let artifact_request = tonic::Request::new(artifact_output.clone());
 
-        let package_request = tonic::Request::new(package_output.clone());
+            let artifact_response = match service.get_artifact(artifact_request).await {
+                Ok(res) => res,
+                Err(error) => {
+                    bail!("failed to evaluate config: {}", error);
+                }
+            };
 
-        let package_response = match service.get_package(package_request).await {
-            Ok(res) => res,
-            Err(error) => {
-                bail!("failed to evaluate config: {}", error);
+            let artifact = artifact_response.into_inner();
+
+            map.insert(artifact_output.clone(), artifact.clone());
+
+            if let Some(artifact_output) = &artifact.sandbox {
+                if !map.contains_key(artifact_output) {
+                    let artifact_request = tonic::Request::new(artifact_output.clone());
+
+                    let artifact_response = match service.get_artifact(artifact_request).await {
+                        Ok(res) => res,
+                        Err(error) => {
+                            bail!("failed to evaluate config: {}", error);
+                        }
+                    };
+
+                    let artifact = artifact_response.into_inner();
+
+                    map.insert(artifact_output.clone(), artifact.clone());
+                }
             }
-        };
 
-        let package = package_response.into_inner();
-
-        map.insert(package_output.clone(), package.clone());
-
-        if package.packages.is_empty() {
-            continue;
+            if !artifact.artifacts.is_empty() {
+                Box::pin(load_artifacts(map, artifact.artifacts, service)).await?
+            }
         }
-
-        Box::pin(load_packages(map, package.packages, service)).await?
     }
 
     Ok(())
 }
 
 pub async fn load_config<'a>(
-    package: &String,
+    artifact: &String,
     service: &mut ConfigServiceClient<Channel>,
-) -> Result<(HashMap<PackageOutput, Package>, Vec<PackageOutput>)> {
+) -> Result<(HashMap<ArtifactId, Artifact>, Vec<ArtifactId>)> {
     let response = match service.get_config(ConfigRequest {}).await {
         Ok(res) => res,
         Err(error) => {
@@ -55,59 +68,70 @@ pub async fn load_config<'a>(
 
     let config = response.into_inner();
 
-    if !config.packages.iter().any(|p| p.name == package.as_str()) {
-        bail!("Package not found: {}", package);
+    if !config.artifacts.iter().any(|p| p.name == artifact.as_str()) {
+        bail!("Artifact not found: {}", artifact);
     }
 
-    let mut packages_map = HashMap::<PackageOutput, Package>::new();
+    let mut artifacts_map = HashMap::<ArtifactId, Artifact>::new();
 
-    load_packages(&mut packages_map, config.packages.clone(), service).await?;
+    load_artifacts(&mut artifacts_map, config.artifacts.clone(), service).await?;
 
-    let mut packages_graph = DiGraphMap::<&PackageOutput, Package>::new();
+    let mut artifacts_graph = DiGraphMap::<&ArtifactId, Artifact>::new();
 
-    for (package_output, package) in packages_map.iter() {
-        packages_graph.add_node(package_output);
+    for (artifact_output, artifact) in artifacts_map.iter() {
+        artifacts_graph.add_node(artifact_output);
 
-        for output in package.packages.iter() {
-            packages_graph.add_edge(package_output, output, package.clone());
+        if let Some(sandbox) = &artifact.sandbox {
+            artifacts_graph.add_edge(artifact_output, sandbox, artifact.clone());
+        }
 
-            add_edges(&mut packages_graph, &packages_map, package, output, service).await?;
+        for output in artifact.artifacts.iter() {
+            artifacts_graph.add_edge(artifact_output, output, artifact.clone());
+
+            add_edges(
+                &mut artifacts_graph,
+                &artifacts_map,
+                artifact,
+                output,
+                service,
+            )
+            .await?;
         }
     }
 
-    let packages_order = match toposort(&packages_graph, None) {
+    let artifacts_order = match toposort(&artifacts_graph, None) {
         Err(err) => bail!("{:?}", err),
         Ok(order) => order,
     };
 
-    let mut packages_order: Vec<PackageOutput> = packages_order.into_iter().cloned().collect();
+    let mut artifacts_order: Vec<ArtifactId> = artifacts_order.into_iter().cloned().collect();
 
-    packages_order.reverse();
+    artifacts_order.reverse();
 
-    print_packages(&packages_order);
+    print_artifacts(&artifacts_order);
 
-    print_build_order(&packages_order);
+    print_build_order(&artifacts_order);
 
-    Ok((packages_map, packages_order))
+    Ok((artifacts_map, artifacts_order))
 }
 
 async fn add_edges<'a>(
-    graph: &mut DiGraphMap<&'a PackageOutput, Package>,
-    map: &HashMap<PackageOutput, Package>,
-    package: &'a Package,
-    package_output: &'a PackageOutput,
+    graph: &mut DiGraphMap<&'a ArtifactId, Artifact>,
+    map: &HashMap<ArtifactId, Artifact>,
+    artifact: &'a Artifact,
+    artifact_output: &'a ArtifactId,
     service: &mut ConfigServiceClient<Channel>,
 ) -> Result<()> {
-    if map.contains_key(package_output) {
+    if map.contains_key(artifact_output) {
         return Ok(());
     }
 
-    graph.add_node(package_output);
+    graph.add_node(artifact_output);
 
-    for output in package.packages.iter() {
-        graph.add_edge(package_output, output, package.clone());
+    for output in artifact.artifacts.iter() {
+        graph.add_edge(artifact_output, output, artifact.clone());
 
-        Box::pin(add_edges(graph, map, package, output, service)).await?;
+        Box::pin(add_edges(graph, map, artifact, output, service)).await?;
     }
 
     Ok(())

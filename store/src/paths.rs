@@ -52,24 +52,24 @@ pub fn get_input_archive_path(hash: &str, name: &str) -> PathBuf {
         .with_extension("input.tar.zst")
 }
 
-// Package paths - "/vorpal/store/{hash}.package"
+// Artifact paths - "/vorpal/store/{hash}.artifact"
 
-pub fn get_package_path(hash: &str, name: &str) -> PathBuf {
+pub fn get_artifact_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
         .join(get_store_dir_name(hash, name))
-        .with_extension("package")
+        .with_extension("artifact")
 }
 
-pub fn get_package_archive_path(hash: &str, name: &str) -> PathBuf {
+pub fn get_artifact_archive_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
         .join(get_store_dir_name(hash, name))
-        .with_extension("package.tar.zst")
+        .with_extension("artifact.tar.zst")
 }
 
-pub fn get_package_lock_path(hash: &str, name: &str) -> PathBuf {
+pub fn get_artifact_lock_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
         .join(get_store_dir_name(hash, name))
-        .with_extension("package.lock")
+        .with_extension("artifact.lock")
 }
 
 // Source paths - "/vorpal/store/{hash}.source"
@@ -190,9 +190,9 @@ pub async fn copy_files(
         }
     }
 
-    let package_paths = get_file_paths(&destination_path.to_path_buf(), vec![], vec![])?;
+    let artifact_paths = get_file_paths(&destination_path.to_path_buf(), vec![], vec![])?;
 
-    set_paths_timestamps(&package_paths).await?;
+    set_paths_timestamps(&artifact_paths).await?;
 
     Ok(())
 }

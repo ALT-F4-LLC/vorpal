@@ -1,6 +1,6 @@
 use console::style;
 use std::path::Path;
-use vorpal_schema::vorpal::package::v0::PackageOutput;
+use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
 pub static CONNECTOR_START: &str = "├─";
 
@@ -28,7 +28,7 @@ pub fn bold(text: &str) -> String {
     style(text).bold().to_string()
 }
 
-pub fn print_build_order(build_order: &[PackageOutput]) {
+pub fn print_build_order(build_order: &[ArtifactId]) {
     let build_order = build_order
         .iter()
         .map(|p| p.name.clone())
@@ -52,28 +52,28 @@ pub fn print_build_order(build_order: &[PackageOutput]) {
 //     );
 // }
 
-pub fn format_package_name(package_name: &str) -> String {
+pub fn format_artifact_name(artifact_name: &str) -> String {
     format!(
         "{}{} {} ➜",
         connector_start(),
         connector_half(),
-        style(package_name).bold().on_color256(238),
+        style(artifact_name).bold().on_color256(238),
     )
 }
 
-pub fn print_packages(build_order: &[PackageOutput]) {
+pub fn print_artifacts(build_order: &[ArtifactId]) {
     println!(
         "{} {} {} total",
         style(CONNECTOR_START).dim(),
-        style("Packages:").bold(),
+        style("Artifacts:").bold(),
         style(build_order.len()),
     );
 }
 
-pub fn print_source_cache(package_name: &str, source_cache: &str) {
+pub fn print_source_cache(artifact_name: &str, source_cache: &str) {
     println!(
         "{} Source cache: {} {}",
-        format_package_name(package_name),
+        format_artifact_name(artifact_name),
         style(source_cache).italic(),
         badge_success(),
     );
@@ -84,7 +84,7 @@ pub enum SourceStatus {
     Pending,
 }
 
-pub fn print_source_url(package_name: &str, status: SourceStatus, url: &str) {
+pub fn print_source_url(artifact_name: &str, status: SourceStatus, url: &str) {
     let badge = match status {
         SourceStatus::Complete => style("[✓]").green(),
         SourceStatus::Pending => style("[…]").color256(208),
@@ -92,7 +92,7 @@ pub fn print_source_url(package_name: &str, status: SourceStatus, url: &str) {
 
     println!(
         "{} Source: {} {}",
-        format_package_name(package_name),
+        format_artifact_name(artifact_name),
         style(url).italic(),
         badge,
     );
@@ -108,43 +108,43 @@ pub fn print_source_url(package_name: &str, status: SourceStatus, url: &str) {
 //     );
 // }
 
-pub fn print_packages_list(package_name: &str, packages: &[String]) {
+pub fn print_artifacts_list(artifact_name: &str, artifacts: &[String]) {
     println!(
-        "{} Packages: {}",
-        format_package_name(package_name),
-        style(packages.join(", ")).cyan()
+        "{} Artifacts: {}",
+        format_artifact_name(artifact_name),
+        style(artifacts.join(", ")).cyan()
     );
 }
 
-pub fn print_package_hash(package_name: &str, package_hash: &str) {
+pub fn print_artifact_hash(artifact_name: &str, artifact_hash: &str) {
     println!(
         "{} Hash: {} {}",
-        format_package_name(package_name),
-        style(package_hash).italic(),
+        format_artifact_name(artifact_name),
+        style(artifact_hash).italic(),
         badge_success(),
     );
 }
 
-pub fn print_package_archive(package_name: &str, package_archive: &Path) {
+pub fn print_artifact_archive(artifact_name: &str, artifact_archive: &Path) {
     println!(
         "{} Archive: {}",
-        format_package_name(package_name),
-        style(package_archive.display().to_string()).green()
+        format_artifact_name(artifact_name),
+        style(artifact_archive.display().to_string()).green()
     );
 }
 
-pub fn print_package_output(package_name: &str, package_output: &PackageOutput) {
+pub fn print_artifact_output(artifact_name: &str, artifact_output: &ArtifactId) {
     println!(
         "{} {}",
-        format_package_name(package_name),
-        style(package_output.hash.clone()).green()
+        format_artifact_name(artifact_name),
+        style(artifact_output.hash.clone()).green()
     );
 }
 
-pub fn print_package_log(package_name: &str, package_log: &String) {
+pub fn print_artifact_log(artifact_name: &str, artifact_log: &String) {
     println!(
         "{} {}",
-        format_package_name(package_name),
-        style(package_log)
+        format_artifact_name(artifact_name),
+        style(artifact_log)
     );
 }

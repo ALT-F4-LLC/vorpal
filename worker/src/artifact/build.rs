@@ -1,4 +1,4 @@
-use crate::worker::{darwin, darwin::profile, linux, native};
+use crate::artifact::{darwin, darwin::profile, linux, native};
 use anyhow::{anyhow, bail, Result};
 use rsa::{
     pss::{Signature, VerifyingKey},
@@ -24,27 +24,27 @@ use tonic::{Request, Status, Streaming};
 use tracing::debug;
 use vorpal_notary::get_public_key;
 use vorpal_schema::{
-    get_package_system,
+    get_artifact_system,
     vorpal::{
-        package::v0::PackageSystem,
-        package::v0::PackageSystem::{
+        artifact::v0::ArtifactSystem,
+        artifact::v0::ArtifactSystem::{
             Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos,
         },
-        worker::v0::{BuildRequest, BuildResponse},
+        artifact::v0::{ArtifactBuildRequest, ArtifactBuildResponse},
     },
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
-        copy_files, get_file_paths, get_package_archive_path, get_package_lock_path,
-        get_package_path, get_public_key_path, get_source_archive_path, get_source_path,
+        copy_files, get_artifact_archive_path, get_artifact_lock_path, get_artifact_path,
+        get_file_paths, get_public_key_path, get_source_archive_path, get_source_path,
     },
 };
 
-async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Result<()> {
+async fn send(tx: &Sender<Result<ArtifactBuildResponse, Status>>, output: String) -> Result<()> {
     debug!("{}", output);
 
-    tx.send(Ok(BuildResponse { output }))
+    tx.send(Ok(ArtifactBuildResponse { output }))
         .await
         .map_err(|err| anyhow!("failed to send response: {:?}", err))?;
 
@@ -53,19 +53,19 @@ async fn send(tx: &Sender<Result<BuildResponse, Status>>, output: String) -> Res
 
 pub async fn run(
     sandbox_path: &Path,
-    request: Request<Streaming<BuildRequest>>,
-    tx: &Sender<Result<BuildResponse, Status>>,
+    request: Request<Streaming<ArtifactBuildRequest>>,
+    tx: &Sender<Result<ArtifactBuildResponse, Status>>,
 ) -> Result<()> {
-    let mut package_environment = vec![];
-    let mut package_name = String::new();
-    let mut package_packages = vec![];
-    let mut package_sandbox = None;
-    let mut package_script = String::new();
-    let mut package_source_data: Vec<u8> = vec![];
-    let mut package_source_data_chunk = 0;
-    let mut package_source_data_signature = None;
-    let mut package_source_hash = String::new();
-    let mut package_target = UnknownSystem;
+    let mut artifact_environments = vec![];
+    let mut artifact_name = String::new();
+    let mut artifact_artifacts = vec![];
+    let mut artifact_sandbox = None;
+    let mut artifact_script = String::new();
+    let mut artifact_source_data: Vec<u8> = vec![];
+    let mut artifact_source_data_chunk = 0;
+    let mut artifact_source_data_signature = None;
+    let mut artifact_source_hash = String::new();
+    let mut artifact_target = UnknownSystem;
     let mut request_stream = request.into_inner();
 
     // Parse request stream
@@ -74,104 +74,104 @@ pub async fn run(
         let result = result.map_err(|err| anyhow!("failed to parse request: {:?}", err))?;
 
         if let Some(data) = result.source_data {
-            package_source_data_chunk += 1;
-            package_source_data.extend_from_slice(&data);
+            artifact_source_data_chunk += 1;
+            artifact_source_data.extend_from_slice(&data);
         }
 
-        package_environment = result.environment;
-        package_name = result.name;
-        package_packages = result.packages;
-        package_sandbox = result.sandbox;
-        package_script = result.script;
-        package_source_data_signature = result.source_data_signature;
-        package_source_hash = result.source_hash;
-        package_target = PackageSystem::try_from(result.target)
+        artifact_artifacts = result.artifacts;
+        artifact_environments = result.environments;
+        artifact_name = result.name;
+        artifact_sandbox = result.sandbox;
+        artifact_script = result.script;
+        artifact_source_data_signature = result.source_data_signature;
+        artifact_source_hash = result.source_hash;
+        artifact_target = ArtifactSystem::try_from(result.target)
             .map_err(|err| anyhow!("failed to parse target: {:?}", err))?;
     }
 
     // Check if required fields are present
 
-    if package_name.is_empty() {
+    if artifact_name.is_empty() {
         bail!("'name' missing in configuration")
     }
 
-    if package_script.is_empty() {
+    if artifact_script.is_empty() {
         bail!("'script' missing in configuration")
     }
 
-    if package_source_hash.is_empty() {
+    if artifact_source_hash.is_empty() {
         bail!("'source_hash' is missing in configuration")
     }
 
-    if package_target == UnknownSystem {
+    if artifact_target == UnknownSystem {
         bail!("'target' missing in configuration")
     }
 
-    // Check if worker target matches package target
+    // Check if worker target matches artifact target
 
     let worker_system = format!("{}-{}", ARCH, OS);
 
-    let worker_target = get_package_system::<PackageSystem>(worker_system.as_str());
+    let worker_target = get_artifact_system::<ArtifactSystem>(worker_system.as_str());
 
-    if package_target != worker_target {
+    if artifact_target != worker_target {
         bail!("'target' mismatch")
     }
 
-    // Check if package is locked
+    // Check if artifact is locked
 
-    let package_lock_path = get_package_lock_path(&package_source_hash, &package_name);
+    let artifact_lock_path = get_artifact_lock_path(&artifact_source_hash, &artifact_name);
 
-    if package_lock_path.exists() {
-        bail!("package is locked") // TODO: figure out better way to handle this (e.g. prompt, ui, etc)
+    if artifact_lock_path.exists() {
+        bail!("artifact is locked") // TODO: figure out better way to handle this (e.g. prompt, ui, etc)
     }
 
-    // If package exists, return
+    // If artifact exists, return
 
-    let package_path = get_package_path(&package_source_hash, &package_name);
+    let artifact_path = get_artifact_path(&artifact_source_hash, &artifact_name);
 
-    if package_path.exists() {
-        send(tx, package_path.display().to_string()).await?;
+    if artifact_path.exists() {
+        send(tx, artifact_path.display().to_string()).await?;
 
         return Ok(());
     }
 
-    // If package archive exists, unpack it to package path
+    // If artifact archive exists, unpack it to artifact path
 
-    let package_archive_path = get_package_archive_path(&package_source_hash, &package_name);
+    let artifact_archive_path = get_artifact_archive_path(&artifact_source_hash, &artifact_name);
 
-    if package_archive_path.exists() {
-        send(tx, package_archive_path.display().to_string()).await?;
+    if artifact_archive_path.exists() {
+        send(tx, artifact_archive_path.display().to_string()).await?;
 
-        create_dir_all(&package_path)
+        create_dir_all(&artifact_path)
             .await
-            .map_err(|err| anyhow!("failed to create package directory: {:?}", err))?;
+            .map_err(|err| anyhow!("failed to create artifact directory: {:?}", err))?;
 
-        if let Err(err) = unpack_zstd(&package_path, &package_archive_path).await {
-            bail!("failed to unpack package archive: {:?}", err)
+        if let Err(err) = unpack_zstd(&artifact_path, &artifact_archive_path).await {
+            bail!("failed to unpack artifact archive: {:?}", err)
         }
 
-        send(tx, package_path.display().to_string()).await?;
+        send(tx, artifact_path.display().to_string()).await?;
 
         return Ok(());
     }
 
-    // create package directory and lock file to prevent concurrent builds
+    // create artifact directory and lock file to prevent concurrent builds
 
-    create_dir_all(&package_path)
+    create_dir_all(&artifact_path)
         .await
-        .map_err(|err| anyhow!("failed to create package directory: {:?}", err))?;
+        .map_err(|err| anyhow!("failed to create artifact directory: {:?}", err))?;
 
     // TODO: add metadata to the lockfile to know how to clean up
 
-    write(&package_lock_path, "")
+    write(&artifact_lock_path, "")
         .await
-        .map_err(|err| anyhow!("failed to write package lock: {:?}", err))?;
+        .map_err(|err| anyhow!("failed to write artifact lock: {:?}", err))?;
 
     // Check if source archive is present
 
-    let source_archive_path = get_source_archive_path(&package_source_hash, &package_name);
+    let source_archive_path = get_source_archive_path(&artifact_source_hash, &artifact_name);
 
-    let source_path = get_source_path(&package_source_hash, &package_name);
+    let source_path = get_source_path(&artifact_source_hash, &artifact_name);
 
     if source_archive_path.exists() {
         create_dir_all(&source_path)
@@ -185,12 +185,12 @@ pub async fn run(
 
     // Check if source data is present and verify signature
 
-    if !source_path.exists() && !package_source_data.is_empty() {
-        send(tx, format!("Source chunks: {}", package_source_data_chunk)).await?;
+    if !source_path.exists() && !artifact_source_data.is_empty() {
+        send(tx, format!("Source chunks: {}", artifact_source_data_chunk)).await?;
 
         // Verify source data signature
 
-        match package_source_data_signature {
+        match artifact_source_data_signature {
             None => bail!("'source_signature' missing in configuration"),
             Some(signature) => {
                 if signature.is_empty() {
@@ -206,19 +206,19 @@ pub async fn run(
 
                 let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
-                if let Err(msg) = verifying_key.verify(&package_source_data, &signature) {
+                if let Err(msg) = verifying_key.verify(&artifact_source_data, &signature) {
                     bail!("failed to verify signature: {:?}", msg)
                 }
             }
         }
 
-        let source_archive_path = get_source_archive_path(&package_source_hash, &package_name);
+        let source_archive_path = get_source_archive_path(&artifact_source_hash, &artifact_name);
 
         if source_archive_path.exists() {
             bail!("source archive already exists")
         }
 
-        write(&source_archive_path, &package_source_data)
+        write(&source_archive_path, &artifact_source_data)
             .await
             .map_err(|err| anyhow!("failed to write source archive: {:?}", err))?;
 
@@ -247,29 +247,29 @@ pub async fn run(
 
     // Create sandbox environment
 
-    let mut packages_paths = vec![];
-    let mut package_env = HashMap::new();
+    let mut artifacts_paths = vec![];
+    let mut artifact_env = HashMap::new();
 
-    // Add package environment variables
+    // Add artifact environment variables
 
-    for env in package_environment.clone() {
-        package_env.insert(env.key, env.value);
+    for env in artifact_environments.clone() {
+        artifact_env.insert(env.key, env.value);
     }
 
-    // Add package environment variables and paths
+    // Add artifact environment variables and paths
 
-    for p in package_packages.iter() {
-        let path = get_package_path(&p.hash, &p.name);
+    for p in artifact_artifacts.iter() {
+        let path = get_artifact_path(&p.hash, &p.name);
 
         if !path.exists() {
-            let message = format!("package missing: {}", path.display());
+            let message = format!("artifact missing: {}", path.display());
 
             bail!(message)
         }
 
-        packages_paths.push(path.display().to_string());
+        artifacts_paths.push(path.display().to_string());
 
-        package_env.insert(
+        artifact_env.insert(
             p.name.to_lowercase().replace('-', "_"),
             path.display().to_string(),
         );
@@ -289,23 +289,29 @@ pub async fn run(
         copy_files(&source_path, source_files, &sandbox_source_path).await?;
     }
 
-    // Add package(s) environment variables
+    // Add artifact(s) environment variables
 
-    let package_env_name = package_name.to_lowercase().replace('-', "_");
+    let artifact_env_name = artifact_name.to_lowercase().replace('-', "_");
 
-    package_env.insert(package_env_name.clone(), package_path.display().to_string());
+    artifact_env.insert(
+        artifact_env_name.clone(),
+        artifact_path.display().to_string(),
+    );
 
-    package_env.insert("output".to_string(), package_path.display().to_string());
+    artifact_env.insert("output".to_string(), artifact_path.display().to_string());
 
-    package_env.insert("packages".to_string(), packages_paths.join(" ").to_string());
+    artifact_env.insert(
+        "artifacts".to_string(),
+        artifacts_paths.join(" ").to_string(),
+    );
 
-    // Write package script
+    // Write artifact script
 
-    let sandbox_script_path = sandbox_path.join("package.sh");
+    let sandbox_script_path = sandbox_path.join("artifact.sh");
 
-    write(&sandbox_script_path, package_script.clone())
+    write(&sandbox_script_path, artifact_script.clone())
         .await
-        .map_err(|err| anyhow!("failed to write package script: {:?}", err))?;
+        .map_err(|err| anyhow!("failed to write artifact script: {:?}", err))?;
 
     set_permissions(&sandbox_script_path, Permissions::from_mode(0o755))
         .await
@@ -313,19 +319,19 @@ pub async fn run(
 
     // Create sandbox command
 
-    let mut sandbox_command = match package_sandbox {
+    let mut sandbox_command = match artifact_sandbox {
         None => {
             native::build(
-                package_env,
+                artifact_env,
                 sandbox_script_path.as_path(),
                 sandbox_source_path.as_path(),
             )
             .await?
         }
 
-        Some(sandbox_package) => match worker_target {
+        Some(sandbox_artifact) => match worker_target {
             Aarch64Macos | X8664Macos => {
-                let profile_path = sandbox_path.join("package.sb");
+                let profile_path = sandbox_path.join("artifact.sb");
 
                 let mut tera = Tera::default();
 
@@ -341,7 +347,7 @@ pub async fn run(
                     .expect("failed to write sandbox profile");
 
                 darwin::build(
-                    package_env,
+                    artifact_env,
                     profile_path.as_path(),
                     sandbox_script_path.as_path(),
                     sandbox_source_path.as_path(),
@@ -350,8 +356,8 @@ pub async fn run(
             }
 
             Aarch64Linux | X8664Linux => {
-                let sandbox_package_path =
-                    get_package_path(&sandbox_package.hash, &sandbox_package.name);
+                let sandbox_artifact_path =
+                    get_artifact_path(&sandbox_artifact.hash, &sandbox_artifact.name);
 
                 let home_path = sandbox_path.join("home");
 
@@ -360,11 +366,11 @@ pub async fn run(
                     .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
 
                 linux::build(
-                    package_env,
+                    artifact_env,
                     home_path.as_path(),
-                    package_path.as_path(),
-                    packages_paths.clone(),
-                    sandbox_package_path.as_path(),
+                    artifact_path.as_path(),
+                    artifacts_paths.clone(),
+                    sandbox_artifact_path.as_path(),
                     sandbox_script_path.as_path(),
                     sandbox_source_path.as_path(),
                 )
@@ -404,40 +410,41 @@ pub async fn run(
         .map_err(|err| anyhow!("failed to wait for sandbox: {:?}", err))?;
 
     if !status.success() {
-        bail!("failed to build package")
+        bail!("failed to build artifact")
     }
 
     // Check for output files
 
-    let package_path_files = get_file_paths(&package_path, vec![], vec![])?;
+    let artifact_path_files = get_file_paths(&artifact_path, vec![], vec![])?;
 
-    if package_path_files.is_empty() || package_path_files.len() == 1 {
+    if artifact_path_files.is_empty() || artifact_path_files.len() == 1 {
         bail!("no build output files found")
     }
 
-    let message = format!("output files: {}", package_path_files.len());
+    let message = format!("output files: {}", artifact_path_files.len());
 
     send(tx, message).await?;
 
-    // Create package tar from build output files
+    // Create artifact tar from build output files
 
-    if let Err(err) = compress_zstd(&package_path, &package_path_files, &package_archive_path).await
+    if let Err(err) =
+        compress_zstd(&artifact_path, &artifact_path_files, &artifact_archive_path).await
     {
-        bail!("failed to compress package tar: {:?}", err)
+        bail!("failed to compress artifact tar: {:?}", err)
     }
 
     let message = format!(
-        "package archive created: {}",
-        package_archive_path.file_name().unwrap().to_str().unwrap()
+        "artifact archive created: {}",
+        artifact_archive_path.file_name().unwrap().to_str().unwrap()
     );
 
     send(tx, message).await?;
 
     // Remove lock file
 
-    remove_file(&package_lock_path)
+    remove_file(&artifact_lock_path)
         .await
-        .map_err(|err| anyhow!("failed to remove package lock: {:?}", err))?;
+        .map_err(|err| anyhow!("failed to remove artifact lock: {:?}", err))?;
 
     Ok(())
 }
