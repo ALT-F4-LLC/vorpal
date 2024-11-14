@@ -1,12 +1,11 @@
 use crate::{cross_platform::get_sed_cmd, ContextConfig};
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::vorpal::package::v0::{
-    Package, PackageEnvironment, PackageOutput, PackageSandbox, PackageSandboxPath,
-};
+use vorpal_schema::vorpal::package::v0::{Package, PackageEnvironment, PackageOutput};
 
 pub mod cargo;
 pub mod cross_toolchain;
+pub mod cross_toolchain_rootfs;
 pub mod language;
 pub mod protoc;
 pub mod rust_std;
@@ -14,7 +13,9 @@ pub mod rustc;
 pub mod zlib;
 
 pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<PackageOutput> {
-    let cross_toolchain = cross_toolchain::package(context)?;
+    let cross_toolchain_rootfs = cross_toolchain_rootfs::package(context)?;
+
+    let cross_toolchain = cross_toolchain::package(context, &cross_toolchain_rootfs)?;
     let cross_toolchain_envkey = cross_toolchain.name.to_lowercase().replace("-", "_");
 
     // TODO: build packages from toolchain instead of using toolchain
@@ -26,28 +27,28 @@ pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<Pa
         value: "/usr/bin:/usr/sbin".to_string(),
     };
 
-    let mut environment = vec![];
+    let mut environments = vec![];
 
-    for env in package.environment.clone().into_iter() {
+    for env in package.environments.clone().into_iter() {
         if env.key == path.key {
             continue;
         }
 
-        environment.push(env);
+        environments.push(env);
     }
 
     let path_prev = package
-        .environment
+        .environments
         .into_iter()
         .find(|env| env.key == path.key);
 
     if let Some(prev) = path_prev {
-        environment.push(PackageEnvironment {
+        environments.push(PackageEnvironment {
             key: path.key.clone(),
             value: format!("{}:{}", prev.value, path.value),
         });
     } else {
-        environment.push(path);
+        environments.push(path);
     }
 
     // Setup packages
@@ -61,45 +62,10 @@ pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<Pa
     }
 
     let package = Package {
-        environment,
+        environments,
         name: package.name,
         packages,
-        sandbox: Some(PackageSandbox {
-            paths: vec![
-                PackageSandboxPath {
-                    source: format!("${}/bin", cross_toolchain_envkey),
-                    target: "/bin".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("${}/etc", cross_toolchain_envkey),
-                    target: "/etc".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("${}/lib", cross_toolchain_envkey),
-                    target: "/lib".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("${}/lib64", cross_toolchain_envkey),
-                    target: "/lib64".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("${}/sbin", cross_toolchain_envkey),
-                    target: "/sbin".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("${}/share", cross_toolchain_envkey),
-                    target: "/share".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("${}/usr", cross_toolchain_envkey),
-                    target: "/usr".to_string(),
-                },
-                PackageSandboxPath {
-                    source: format!("${}/var", cross_toolchain_envkey),
-                    target: "/var".to_string(),
-                },
-            ],
-        }),
+        sandbox: package.sandbox,
         script: formatdoc! {"
             #!${cross_toolchain}/bin/bash
             set -euo pipefail
@@ -108,7 +74,7 @@ pub fn build_package(context: &mut ContextConfig, package: Package) -> Result<Pa
             cross_toolchain = cross_toolchain_envkey,
             script = package.script,
         },
-        source: package.source,
+        sources: package.sources,
         systems: package.systems,
     };
 

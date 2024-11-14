@@ -33,7 +33,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
     let version = "1.78.0";
 
     let package = Package {
-        environment: vec![],
+        environments: vec![],
         name: name.to_string(),
         packages: vec![rust_std],
         sandbox: None,
@@ -42,17 +42,18 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             cat \"$rust_std/manifest.in\" >> \"$output/manifest.in\"
             cp -pr \"$rust_std/lib\" \"$output\""
         },
-        source: vec![PackageSource {
-            excludes: vec![],
-            hash: Some(hash.to_string()),
-            includes: vec![],
-            name: name.to_string(),
-            strip_prefix: true,
-            uri: format!(
-                "https://static.rust-lang.org/dist/2024-05-02/rustc-{}-{}.tar.gz",
-                version, target
-            ),
-        }],
+        sources: vec![],
+        // source: vec![PackageSource {
+        //     excludes: vec![],
+        //     hash: Some(hash.to_string()),
+        //     includes: vec![],
+        //     name: name.to_string(),
+        //     strip_prefix: true,
+        //     uri: format!(
+        //         "https://static.rust-lang.org/dist/2024-05-02/rustc-{}-{}.tar.gz",
+        //         version, target
+        //     ),
+        // }],
         systems: vec![
             Aarch64Linux.into(),
             Aarch64Macos.into(),

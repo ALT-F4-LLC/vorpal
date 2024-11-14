@@ -2,10 +2,7 @@ use crate::paths::get_file_paths;
 use anyhow::{bail, Result};
 use sha256::{digest, try_digest};
 use std::path::{Path, PathBuf};
-use vorpal_schema::{
-    get_source_type,
-    vorpal::package::v0::{PackageSource, PackageSourceKind},
-};
+use vorpal_schema::vorpal::package::v0::PackageSource;
 
 pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String> {
     if !path.as_ref().is_file() {
@@ -51,37 +48,32 @@ pub async fn get_package_hash(config_hash: &str, source: &[PackageSource]) -> Re
     let mut source_hashes = vec![config_hash.to_string()];
 
     for source in source.iter() {
-        let source_type = get_source_type(&source.uri);
+        let path = Path::new(&source.path).to_path_buf();
 
-        if source_type != PackageSourceKind::Local && source.hash.is_none() {
-            bail!("Package `source.{}.hash` not found for remote", source.name);
+        if !path.exists() {
+            bail!(
+                "Package `source.{}.path` not found: {:?}",
+                source.name,
+                path
+            );
         }
 
-        if source_type == PackageSourceKind::Local {
-            let path = Path::new(&source.uri).to_path_buf();
+        let source_files = get_file_paths(&path, source.excludes.clone(), source.includes.clone())?;
 
-            if !path.exists() {
-                bail!("Package `source.{}.uri` not found: {:?}", source.name, path);
+        let source_hash = hash_files(source_files).await?;
+
+        if let Some(hash) = source.hash.clone() {
+            if hash != source_hash {
+                bail!(
+                    "Package `source.{}.hash` mismatch: {} != {}",
+                    source.name,
+                    hash,
+                    source_hash
+                );
             }
-
-            let source_files =
-                get_file_paths(&path, source.excludes.clone(), source.includes.clone())?;
-
-            let source_hash = hash_files(source_files).await?;
-
-            if let Some(hash) = source.hash.clone() {
-                if hash != source_hash {
-                    bail!(
-                        "Package `source.{}.hash` mismatch: {} != {}",
-                        source.name,
-                        hash,
-                        source_hash
-                    );
-                }
-            }
-
-            source_hashes.push(source_hash);
         }
+
+        source_hashes.push(source_hash);
     }
 
     let package_hash = get_hashes_digest(source_hashes)?;

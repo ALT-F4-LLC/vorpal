@@ -28,7 +28,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
     let version = "25.4";
 
     let package = Package {
-        environment: vec![],
+        environments: vec![],
         name: name.to_string(),
         packages: vec![],
         sandbox: None,
@@ -38,17 +38,18 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             chmod +x \"$output/bin/protoc\"",
             name = name,
         },
-        source: vec![PackageSource {
-            excludes: vec![],
-            hash: Some(hash.to_string()),
-            includes: vec![],
-            name: name.to_string(),
-            strip_prefix: false,
-            uri: format!(
-            "https://github.com/protocolbuffers/protobuf/releases/download/v{}/protoc-{}-{}.zip",
-            version, version, target
-        ),
-        }],
+        sources: vec![],
+        // source: vec![PackageSource {
+        //     excludes: vec![],
+        //     hash: Some(hash.to_string()),
+        //     includes: vec![],
+        //     name: name.to_string(),
+        //     strip_prefix: false,
+        //     uri: format!(
+        //     "https://github.com/protocolbuffers/protobuf/releases/download/v{}/protoc-{}-{}.zip",
+        //     version, version, target
+        // ),
+        // }],
         systems: vec![
             Aarch64Linux.into(),
             Aarch64Macos.into(),

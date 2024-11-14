@@ -1,7 +1,7 @@
 use crate::{package::build_package, ContextConfig};
 use anyhow::{bail, Result};
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageOutput, PackageSource,
+    Package, PackageOutput,
     PackageSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
@@ -27,22 +27,22 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
     let version = "1.78.0";
 
     let package = Package {
-        environment: vec![],
+        environments: vec![],
         name: name.to_string(),
         packages: vec![],
         sandbox: None,
         script: format!("cp -pr ./{}/{}/* \"$output/.\"", name, name),
-        source: vec![PackageSource {
-            excludes: vec![],
-            hash: Some(hash.to_string()),
-            includes: vec![],
-            name: name.to_string(),
-            strip_prefix: true,
-            uri: format!(
-                "https://static.rust-lang.org/dist/2024-05-02/cargo-{}-{}.tar.gz",
-                version, target
-            ),
-        }],
+        sources: vec![],
+        // sources: vec![PackageSource {
+        //     excludes: vec![],
+        //     hash: Some(hash.to_string()),
+        //     includes: vec![],
+        //     name: name.to_string(),
+        //     uri: format!(
+        //         "https://static.rust-lang.org/dist/2024-05-02/cargo-{}-{}.tar.gz",
+        //         version, target
+        //     ),
+        // }],
         systems: vec![
             Aarch64Linux.into(),
             Aarch64Macos.into(),

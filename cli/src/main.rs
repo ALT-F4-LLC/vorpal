@@ -165,16 +165,31 @@ async fn main() -> Result<()> {
                 match packages_map.get(package) {
                     None => bail!("Build package not found: {}", package.name),
                     Some(package) => {
-                        let mut packages = vec![];
+                        let mut package_packages = vec![];
+                        let mut package_sandbox = None;
+
+                        if let Some(sandbox) = &package.sandbox {
+                            package_sandbox = match package_output.get(&sandbox.name) {
+                                None => bail!("Package output not found: {}", sandbox.name),
+                                Some(package) => Some(package.clone()),
+                            }
+                        }
 
                         for p in &package.packages {
                             match package_output.get(&p.name) {
                                 None => bail!("Package output not found: {}", p.name),
-                                Some(package) => packages.push(package.clone()),
+                                Some(package) => package_packages.push(package.clone()),
                             }
                         }
 
-                        let output = build(package, packages, package_system, worker).await?;
+                        let output = build(
+                            package,
+                            package_packages,
+                            package_sandbox,
+                            package_system,
+                            worker,
+                        )
+                        .await?;
 
                         package_output.insert(package.name.to_string(), output);
                     }

@@ -4,7 +4,7 @@ OS_TYPE ?= debian
 WORK_DIR := $(shell pwd)
 DIST_DIR := $(WORK_DIR)/dist
 TARGET ?= debug
-VORPAL_DIR := /vorpal
+VORPAL_DIR := /var/lib/vorpal
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--release,)
 
 .DEFAULT_GOAL := build
@@ -21,7 +21,10 @@ clean-rootfs:
 	docker container rm --force vorpal-rootfs-export
 	rm -rfv $(WORK_DIR)/rootfs
 
-clean: clean-cargo clean-dist clean-rootfs
+clean-vagrant:
+	vagrant destroy --force
+
+clean: clean-cargo clean-dist clean-rootfs clean-vagrant
 
 check:
 	cargo check $(CARGO_FLAGS)

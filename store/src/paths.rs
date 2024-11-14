@@ -13,7 +13,7 @@ pub fn get_store_dir_name(hash: &str, name: &str) -> String {
 }
 
 pub fn get_root_dir_path() -> PathBuf {
-    Path::new("/vorpal").to_path_buf()
+    Path::new("/var/lib/vorpal").to_path_buf()
 }
 
 pub fn get_key_dir_path() -> PathBuf {

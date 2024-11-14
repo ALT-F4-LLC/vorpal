@@ -28,30 +28,20 @@ message PackageEnvironment {
 }
 
 message PackageSource {
-    bool strip_prefix = 1;
-    optional string hash = 2;
-    repeated string excludes = 3;
-    repeated string includes = 4;
-    string name = 5;
-    string uri = 6;
-}
-
-message PackageSandboxPath {
-    string source = 1;
-    string target = 2;
-}
-
-message PackageSandbox {
-    repeated PackageSandboxPath paths = 1;
+    optional string hash = 1;
+    repeated string excludes = 2;
+    repeated string includes = 3;
+    string name = 4;
+    string path = 5;
 }
 
 // TODO: explore making scripts "steps" repeated and run in multiple bubblewrap instances
 
 message Package {
-    PackageSandbox sandbox = 1;
-    repeated PackageEnvironment environment = 2;
+    optional PackageOutput sandbox = 1;
+    repeated PackageEnvironment environments = 2;
     repeated PackageOutput packages = 3;
-    repeated PackageSource source = 4;
+    repeated PackageSource sources = 4;
     repeated PackageSystem systems = 5;
     string name = 6;
     string script = 7;

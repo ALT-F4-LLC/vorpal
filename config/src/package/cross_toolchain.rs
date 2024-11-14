@@ -2,64 +2,27 @@ use crate::ContextConfig;
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::package::v0::{
-    Package, PackageEnvironment, PackageOutput, PackageSandbox, PackageSandboxPath, PackageSource,
+    Package, PackageEnvironment, PackageOutput,
     PackageSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
+pub fn package(
+    context: &mut ContextConfig,
+    cross_toolchain_rootfs: &PackageOutput,
+) -> Result<PackageOutput> {
     let name = "cross-toolchain";
 
-    let target = context.get_target();
-
-    // TODO: explore making exported image a source
-
-    let rootfs_path = "/vorpal/sandbox-rootfs";
-
-    let mut rootfs_path_dirs = vec![
-        PackageSandboxPath {
-            source: format!("{}/bin", rootfs_path),
-            target: "/bin".to_string(),
-        },
-        PackageSandboxPath {
-            source: format!("{}/etc", rootfs_path),
-            target: "/etc".to_string(),
-        },
-        PackageSandboxPath {
-            source: format!("{}/lib", rootfs_path),
-            target: "/lib".to_string(),
-        },
-        PackageSandboxPath {
-            source: format!("{}/sbin", rootfs_path),
-            target: "/sbin".to_string(),
-        },
-        PackageSandboxPath {
-            source: format!("{}/usr", rootfs_path),
-            target: "/usr".to_string(),
-        },
-        PackageSandboxPath {
-            source: format!("{}/var", rootfs_path),
-            target: "/var".to_string(),
-        },
-    ];
-
-    if target == X8664Linux {
-        rootfs_path_dirs.push(PackageSandboxPath {
-            source: format!("{}/usr/lib/x86_64-linux-gnu", rootfs_path),
-            target: "/lib64".to_string(),
-        });
-    }
+    // let target = context.get_target();
 
     let package = Package {
         // TODO: explore moving environment into sandbox
-        environment: vec![PackageEnvironment {
+        environments: vec![PackageEnvironment {
             key: "PATH".to_string(),
             value: "/usr/bin".to_string(),
         }],
         name: name.to_string(),
-        packages: vec![],
-        sandbox: Some(PackageSandbox {
-            paths: rootfs_path_dirs,
-        }),
+        packages: vec![cross_toolchain_rootfs.clone()],
+        sandbox: Some(cross_toolchain_rootfs.clone()),
         script: formatdoc! {"
             #!/bin/bash
             set -euo +h pipefail
@@ -924,280 +887,236 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
 
             rm -rf $output/tools",
         },
-        source: vec![
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "7dc29154d5344d3d4f943396de2a6c764c36b4729bd76363b9ccf8a5166c07d8".to_string(),
-                ),
-                includes: vec![],
-                name: "bash".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/bash/bash-5.2.37.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "c0d3e5ee772ee201eefe17544b2b2cc3a0a3d6833a21b9ea56371efaad0c5528".to_string(),
-                ),
-                includes: vec![],
-                name: "binutils".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/binutils/binutils-2.43.1.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "cb18c2c8562fc01bf3ae17ffe9cf8274e3dd49d39f89397c1a8bac7ee14ce85f".to_string(),
-                ),
-                includes: vec![],
-                name: "bison".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/bison/bison-3.8.2.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "af6d643afd6241ec35c7781b7f999b97a66c84bea4710ad2bb15e75a5caf11b4".to_string(),
-                ),
-                includes: vec![],
-                name: "coreutils".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/coreutils/coreutils-9.5.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "5045e29e7fa0ffe017f63da7741c800cbc0f89e04aebd78efcd661d6e5673326".to_string(),
-                ),
-                includes: vec![],
-                name: "diffutils".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/diffutils/diffutils-3.10.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "c118ab56efa05798022a5a488827594a82d844f65159e95b918d5501adf1e58f".to_string(),
-                ),
-                includes: vec![],
-                name: "file".to_string(),
-                strip_prefix: true,
-                uri: "https://astron.com/pub/file/file-5.45.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "242f804d87a5036bb0fab99966227dc61e853e5a67e1b10c3cc45681c792657e".to_string(),
-                ),
-                includes: vec![],
-                name: "findutils".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/findutils/findutils-4.10.0.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "f82947e3d4fed9bec5ec686b4a511d6720a23eb809f41b1dbcee30a347f9cb7b".to_string(),
-                ),
-                includes: vec![],
-                name: "gawk".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/gawk/gawk-5.3.1.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "cc20ef929f4a1c07594d606ca4f2ed091e69fac5c6779887927da82b0a62f583".to_string(),
-                ),
-                includes: vec![],
-                name: "gcc".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "6e3ef842d1006a6af7778a8549a8e8048fc3b923e5cf48eaa5b82b5d142220ae".to_string(),
-                ),
-                includes: vec![],
-                name: "gettext".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/gettext/gettext-0.22.5.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "da2594c64d61dacf80d85e568136bf31fba36c4ff1ececff59c6fb786a2a126b".to_string(),
-                ),
-                includes: vec![],
-                name: "glibc".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/glibc/glibc-2.40.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "69cf0653ad0a6a178366d291f30629d4e1cb633178aa4b8efbea0c851fb944ca".to_string(),
-                ),
-                includes: vec![],
-                name: "glibc-patch".to_string(),
-                strip_prefix: false,
-                uri: "https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-2.40-fhs-1.patch"
-                    .to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "1625eae01f6e4dbc41b58545aa2326c74791b2010434f8241d41903a4ea5ff70".to_string(),
-                ),
-                includes: vec![],
-                name: "grep".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/grep/grep-3.11.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "25e51d46402bab819045d452ded6c4558ef980f5249c470d9499e9eae34b59b1".to_string(),
-                ),
-                includes: vec![],
-                name: "gzip".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/gzip/gzip-1.13.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "0ad86940ddd48f6e8ebb9605c98e4072a127fabda72dc235ffe94fd984101d00".to_string(),
-                ),
-                includes: vec![],
-                name: "linux-headers".to_string(),
-                strip_prefix: true,
-                uri: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.11.6.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "fd793cdfc421fac76f4af23c7d960cbe4a29cbb18f5badf37b85e16a894b3b6d".to_string(),
-                ),
-                includes: vec![],
-                name: "m4".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/m4/m4-1.4.19.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "8dfe7b0e51b3e190cd75e046880855ac1be76cf36961e5cfcc82bfa91b2c3ba8".to_string(),
-                ),
-                includes: vec![],
-                name: "make".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/make/make-4.4.1.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "aab234a3b7a22e2632151fbe550cb36e371d3ee5318a633ee43af057f9f112fb".to_string(),
-                ),
-                includes: vec![],
-                name: "ncurses".to_string(),
-                strip_prefix: true,
-                uri: "https://invisible-mirror.net/archives/ncurses/ncurses-6.5.tar.gz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some("a278eec544da9f0a82ad7e07b3670cf0f4d85ee13286fa9ad4f4416b700ac19d".to_string()),
-                includes: vec![],
-                name: "patchelf".to_string(),
-                strip_prefix: true,
-                uri: "https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz"
-                    .to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "af8c281a05a6802075799c0c179e5fb3a218be6a21b726d8b672cd0f4c37eae9".to_string(),
-                ),
-                includes: vec![],
-                name: "patch".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/patch/patch-2.7.6.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "59b6437a3da1d9de0126135b31f1f16aee9c3b7a0f61f6364b2da3e8bb5f771f".to_string(),
-                ),
-                includes: vec![],
-                name: "perl".to_string(),
-                strip_prefix: true,
-                uri: "https://www.cpan.org/src/5.0/perl-5.40.0.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "3d42c796194dcd35b6e74770d5a85e24aad0c15135c559b4eadb171982a47eec".to_string(),
-                ),
-                includes: vec![],
-                name: "python".to_string(),
-                strip_prefix: true,
-                uri: "https://www.python.org/ftp/python/3.13.0/Python-3.13.0.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "434ff552af89340088e0d8cb206c251761297909bbee401176bc8f655e8e7cf2".to_string(),
-                ),
-                includes: vec![],
-                name: "sed".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/sed/sed-4.9.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "f9bb5f39ed45b1c6a324470515d2ef73e74422c5f345503106d861576d3f02f3".to_string(),
-                ),
-                includes: vec![],
-                name: "tar".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/tar/tar-1.35.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "6e34604552af91db0b4ccf0bcceba63dd3073da2a492ebcf33c6e188a64d2b63".to_string(),
-                ),
-                includes: vec![],
-                name: "texinfo".to_string(),
-                strip_prefix: true,
-                uri: "https://ftpmirror.gnu.org/gnu/texinfo/texinfo-7.1.1.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "7db19a1819ac5c743b52887a4571e42325b2bfded63d93b6a1797ae2b1f8019a".to_string(),
-                ),
-                includes: vec![],
-                name: "util-linux".to_string(),
-                strip_prefix: true,
-                uri: "https://www.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-2.40.2.tar.xz".to_string(),
-            },
-            PackageSource {
-                excludes: vec![],
-                hash: Some(
-                    "2c7a608231d70ba4d7c81fc70fd1eb81d93c424865eb255a8996f8e9ffcb55ee".to_string(),
-                ),
-                includes: vec![],
-                name: "xz".to_string(),
-                strip_prefix: true,
-                uri:
-                    "https://github.com/tukaani-project/xz/releases/download/v5.6.3/xz-5.6.3.tar.xz"
-                        .to_string(),
-            },
-        ],
+        sources: vec![],
+        // sources: vec![
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "7dc29154d5344d3d4f943396de2a6c764c36b4729bd76363b9ccf8a5166c07d8".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "bash".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/bash/bash-5.2.37.tar.gz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "c0d3e5ee772ee201eefe17544b2b2cc3a0a3d6833a21b9ea56371efaad0c5528".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "binutils".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/binutils/binutils-2.43.1.tar.gz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "cb18c2c8562fc01bf3ae17ffe9cf8274e3dd49d39f89397c1a8bac7ee14ce85f".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "bison".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/bison/bison-3.8.2.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "af6d643afd6241ec35c7781b7f999b97a66c84bea4710ad2bb15e75a5caf11b4".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "coreutils".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/coreutils/coreutils-9.5.tar.gz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "5045e29e7fa0ffe017f63da7741c800cbc0f89e04aebd78efcd661d6e5673326".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "diffutils".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/diffutils/diffutils-3.10.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "c118ab56efa05798022a5a488827594a82d844f65159e95b918d5501adf1e58f".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "file".to_string(),
+        //         uri: "https://astron.com/pub/file/file-5.45.tar.gz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "242f804d87a5036bb0fab99966227dc61e853e5a67e1b10c3cc45681c792657e".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "findutils".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/findutils/findutils-4.10.0.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "f82947e3d4fed9bec5ec686b4a511d6720a23eb809f41b1dbcee30a347f9cb7b".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "gawk".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/gawk/gawk-5.3.1.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "cc20ef929f4a1c07594d606ca4f2ed091e69fac5c6779887927da82b0a62f583".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "gcc".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.gz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "6e3ef842d1006a6af7778a8549a8e8048fc3b923e5cf48eaa5b82b5d142220ae".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "gettext".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/gettext/gettext-0.22.5.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "da2594c64d61dacf80d85e568136bf31fba36c4ff1ececff59c6fb786a2a126b".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "glibc".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/glibc/glibc-2.40.tar.gz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "69cf0653ad0a6a178366d291f30629d4e1cb633178aa4b8efbea0c851fb944ca".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "glibc-patch".to_string(),
+        //         uri: "https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-2.40-fhs-1.patch"
+        //             .to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "1625eae01f6e4dbc41b58545aa2326c74791b2010434f8241d41903a4ea5ff70".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "grep".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/grep/grep-3.11.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "25e51d46402bab819045d452ded6c4558ef980f5249c470d9499e9eae34b59b1".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "gzip".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/gzip/gzip-1.13.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "0ad86940ddd48f6e8ebb9605c98e4072a127fabda72dc235ffe94fd984101d00".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "linux-headers".to_string(),
+        //         uri: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.11.6.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "fd793cdfc421fac76f4af23c7d960cbe4a29cbb18f5badf37b85e16a894b3b6d".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "m4".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/make/make-4.4.1.tar.gz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "aab234a3b7a22e2632151fbe550cb36e371d3ee5318a633ee43af057f9f112fb".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "ncurses".to_string(),
+        //         uri: "https://invisible-mirror.net/archives/ncurses/ncurses-6.5.tar.gz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some("a278eec544da9f0a82ad7e07b3670cf0f4d85ee13286fa9ad4f4416b700ac19d".to_string()),
+        //         includes: vec![],
+        //         name: "patchelf".to_string(),
+        //         uri: "https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz"
+        //             .to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "af8c281a05a6802075799c0c179e5fb3a218be6a21b726d8b672cd0f4c37eae9".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "patch".to_string(),
+        //         uri: "https://www.cpan.org/src/5.0/perl-5.40.0.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "3d42c796194dcd35b6e74770d5a85e24aad0c15135c559b4eadb171982a47eec".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "python".to_string(),
+        //         uri: "https://www.python.org/ftp/python/3.13.0/Python-3.13.0.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "434ff552af89340088e0d8cb206c251761297909bbee401176bc8f655e8e7cf2".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "sed".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/sed/sed-4.9.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "f9bb5f39ed45b1c6a324470515d2ef73e74422c5f345503106d861576d3f02f3".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "tar".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/tar/tar-1.35.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "6e34604552af91db0b4ccf0bcceba63dd3073da2a492ebcf33c6e188a64d2b63".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "texinfo".to_string(),
+        //         uri: "https://ftpmirror.gnu.org/gnu/texinfo/texinfo-7.1.1.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "7db19a1819ac5c743b52887a4571e42325b2bfded63d93b6a1797ae2b1f8019a".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "util-linux".to_string(),
+        //         uri: "https://www.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-2.40.2.tar.xz".to_string(),
+        //     },
+        //     PackageSource {
+        //         excludes: vec![],
+        //         hash: Some(
+        //             "2c7a608231d70ba4d7c81fc70fd1eb81d93c424865eb255a8996f8e9ffcb55ee".to_string(),
+        //         ),
+        //         includes: vec![],
+        //         name: "xz".to_string(),
+        //         uri:
+        //             "https://github.com/tukaani-project/xz/releases/download/v5.6.3/xz-5.6.3.tar.xz"
+        //                 .to_string(),
+        //     },
+        // ],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     };
 

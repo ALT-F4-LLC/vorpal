@@ -26,20 +26,19 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
 
     let source_version = "1.78.0";
 
-    let source = PackageSource {
-        excludes: vec![],
-        hash: Some(source_hash.to_string()),
-        includes: vec![],
-        name: name.to_string(),
-        strip_prefix: true,
-        uri: format!(
-            "https://static.rust-lang.org/dist/2024-05-02/rust-std-{}-{}.tar.gz",
-            source_version, source_target
-        ),
-    };
+    // let source = PackageSource {
+    //     excludes: vec![],
+    //     hash: Some(source_hash.to_string()),
+    //     includes: vec![],
+    //     name: name.to_string(),
+    //     uri: format!(
+    //         "https://static.rust-lang.org/dist/2024-05-02/rust-std-{}-{}.tar.gz",
+    //         source_version, source_target
+    //     ),
+    // };
 
     let package = Package {
-        environment: vec![],
+        environments: vec![],
         name: name.to_string(),
         packages: vec![],
         sandbox: None,
@@ -47,7 +46,7 @@ pub fn package(context: &mut ContextConfig) -> Result<PackageOutput> {
             "cp -pr ./{}/{}-{}/* \"$output/.\"",
             name, name, source_target
         ),
-        source: vec![source],
+        sources: vec![],
         systems: vec![
             Aarch64Linux.into(),
             Aarch64Macos.into(),

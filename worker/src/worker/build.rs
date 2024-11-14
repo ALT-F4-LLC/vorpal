@@ -1,4 +1,4 @@
-use crate::worker::{darwin, darwin::profile, linux};
+use crate::worker::{darwin, darwin::profile, linux, native};
 use anyhow::{anyhow, bail, Result};
 use rsa::{
     pss::{Signature, VerifyingKey},
@@ -26,10 +26,10 @@ use vorpal_notary::get_public_key;
 use vorpal_schema::{
     get_package_system,
     vorpal::{
+        package::v0::PackageSystem,
         package::v0::PackageSystem::{
             Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos,
         },
-        package::v0::{PackageSandboxPath, PackageSystem},
         worker::v0::{BuildRequest, BuildResponse},
     },
 };
@@ -299,58 +299,6 @@ pub async fn run(
 
     package_env.insert("packages".to_string(), packages_paths.join(" ").to_string());
 
-    // Expand package references in environment variables
-
-    for (key, _) in package_env.clone().into_iter() {
-        for p in package_packages.iter() {
-            let p_key = p.name.to_lowercase().replace('-', "_");
-            let p_path = get_package_path(&p.hash, &p.name);
-            let p_envvar = format!("${}", p_key);
-
-            let value = package_env.get(&key).unwrap().clone();
-            let p_value = value.replace(&p_envvar, &p_path.display().to_string());
-
-            if p_value == value {
-                continue;
-            }
-
-            package_env.insert(key.clone(), p_value);
-        }
-
-        let value = package_env.get(&key).unwrap().clone();
-
-        let value = value.replace(
-            &format!("${}", package_name.to_lowercase().replace('-', "_")),
-            &package_path.display().to_string(),
-        );
-
-        package_env.insert(key.clone(), value.clone());
-    }
-
-    // Expand self '$<package>' references in script
-
-    package_script = package_script.replace(
-        format!(r"${}", package_env_name).as_str(),
-        &package_path.display().to_string(),
-    );
-
-    // Expand self '$output' references in script
-
-    package_script = package_script.replace(r"$output", &package_path.display().to_string());
-
-    // Expand other '$packages' references in script
-
-    package_script = package_script.replace(r"$packages", &packages_paths.join(" "));
-
-    // Expand other '$<package>' references in script
-
-    for package in package_packages.iter() {
-        let placeholder = format!(r"${}", package.name.replace('-', "_").to_lowercase());
-        let path = get_package_path(&package.hash, &package.name);
-
-        package_script = package_script.replace(&placeholder, &path.display().to_string());
-    }
-
     // Write package script
 
     let sandbox_script_path = sandbox_path.join("package.sh");
@@ -365,72 +313,69 @@ pub async fn run(
 
     // Create sandbox command
 
-    let mut package_sandbox_paths = vec![];
+    let mut sandbox_command = match package_sandbox {
+        None => {
+            native::build(
+                package_env,
+                sandbox_script_path.as_path(),
+                sandbox_source_path.as_path(),
+            )
+            .await?
+        }
 
-    if let Some(sandbox) = package_sandbox {
-        for sandbox_path in sandbox.paths {
-            let mut source = sandbox_path.source.clone();
-            let mut target = sandbox_path.target.clone();
+        Some(sandbox_package) => match worker_target {
+            Aarch64Macos | X8664Macos => {
+                let profile_path = sandbox_path.join("package.sb");
 
-            for package in package_packages.iter() {
-                let placeholder = format!(r"${}", package.name.replace('-', "_").to_lowercase());
-                let path = get_package_path(&package.hash, &package.name);
+                let mut tera = Tera::default();
 
-                source = source.replace(&placeholder, &path.display().to_string());
-                target = target.replace(&placeholder, &path.display().to_string());
+                tera.add_raw_template("build_default", profile::STDENV_DEFAULT)
+                    .unwrap();
+
+                let profile_context = tera::Context::new();
+
+                let profile_data = tera.render("build_default", &profile_context).unwrap();
+
+                write(&profile_path, profile_data)
+                    .await
+                    .expect("failed to write sandbox profile");
+
+                darwin::build(
+                    package_env,
+                    profile_path.as_path(),
+                    sandbox_script_path.as_path(),
+                    sandbox_source_path.as_path(),
+                )
+                .await?
             }
 
-            package_sandbox_paths.push(PackageSandboxPath { source, target });
-        }
-    }
+            Aarch64Linux | X8664Linux => {
+                let sandbox_package_path =
+                    get_package_path(&sandbox_package.hash, &sandbox_package.name);
 
-    let mut sandbox_command = match worker_target {
-        Aarch64Macos | X8664Macos => {
-            let profile_path = sandbox_path.join("package.sb");
+                let home_path = sandbox_path.join("home");
 
-            let mut tera = Tera::default();
+                create_dir_all(&home_path)
+                    .await
+                    .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
 
-            tera.add_raw_template("build_default", profile::STDENV_DEFAULT)
-                .unwrap();
+                linux::build(
+                    package_env,
+                    home_path.as_path(),
+                    package_path.as_path(),
+                    packages_paths.clone(),
+                    sandbox_package_path.as_path(),
+                    sandbox_script_path.as_path(),
+                    sandbox_source_path.as_path(),
+                )
+                .await?
+            }
 
-            let profile_context = tera::Context::new();
-
-            let profile_data = tera.render("build_default", &profile_context).unwrap();
-
-            write(&profile_path, profile_data)
-                .await
-                .expect("failed to write sandbox profile");
-
-            darwin::build(
-                package_env,
-                profile_path.as_path(),
-                sandbox_script_path.as_path(),
-                sandbox_source_path.as_path(),
-            )
-            .await?
-        }
-
-        Aarch64Linux | X8664Linux => {
-            let home_path = sandbox_path.join("home");
-
-            create_dir_all(&home_path)
-                .await
-                .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
-
-            linux::build(
-                package_env,
-                home_path.as_path(),
-                package_path.as_path(),
-                packages_paths.clone(),
-                package_sandbox_paths,
-                sandbox_script_path.as_path(),
-                sandbox_source_path.as_path(),
-            )
-            .await?
-        }
-
-        _ => bail!("unknown target"),
+            _ => bail!("unknown target"),
+        },
     };
+
+    println!("{:?}", sandbox_command);
 
     // Run sandbox command
 

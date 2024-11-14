@@ -36,7 +36,7 @@ pub fn build_rust_package(
     let package_cache = build_package(
         context,
         Package {
-            environment: vec![PackageEnvironment {
+            environments: vec![PackageEnvironment {
                 key: "PATH".to_string(),
                 value: format!(
                     "${cargo}/bin:${rustc}/bin",
@@ -74,7 +74,7 @@ pub fn build_rust_package(
                 sed = get_sed_cmd(context.get_target())?,
                 source = package.name,
             },
-            source: vec![PackageSource {
+            sources: vec![PackageSource {
                 excludes: vec![],
                 hash: Some(package.cargo_hash.to_string()),
                 includes: vec![
@@ -88,8 +88,7 @@ pub fn build_rust_package(
                     "worker/Cargo.toml".to_string(),
                 ],
                 name: package.name.to_string(),
-                strip_prefix: false,
-                uri: package.source.to_string(),
+                path: package.source.to_string(),
             }],
             systems: systems.clone(),
         },
@@ -106,7 +105,7 @@ pub fn build_rust_package(
     let package = build_package(
         context,
         Package {
-            environment: vec![
+            environments: vec![
                 PackageEnvironment {
                     key: "LD_LIBRARY_PATH".to_string(),
                     value: format!("${}/usr/lib", zlib.name.to_lowercase().replace("-", "_")),
@@ -140,13 +139,12 @@ pub fn build_rust_package(
                 name = package.name,
                 name_envkey = name_envkey,
             },
-            source: vec![PackageSource {
+            sources: vec![PackageSource {
                 excludes: package_excludes,
                 hash: None,
                 includes: vec![],
                 name: package.name.to_string(),
-                strip_prefix: false,
-                uri: package.source.to_string(),
+                path: package.source.to_string(),
             }],
             systems,
         },

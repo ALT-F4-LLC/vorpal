@@ -36,6 +36,8 @@ pub async fn compress_zstd(
 
     let mut builder = Builder::new(encoder);
 
+    builder.follow_symlinks(false);
+
     for path in source_files {
         let relative_path = path
             .strip_prefix(source_path)
