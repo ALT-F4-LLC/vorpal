@@ -10,25 +10,432 @@ pub fn artifact(
     context: &mut ContextConfig,
     cross_toolchain_rootfs: &ArtifactId,
 ) -> Result<ArtifactId> {
-    let name = "cross-toolchain";
+    let environments = vec![ArtifactEnvironment {
+        key: "PATH".to_string(),
+        value: "/usr/bin".to_string(),
+    }];
 
-    // let target = context.get_target();
+    let sandbox = Some(cross_toolchain_rootfs.clone());
 
-    let artifact = Artifact {
+    let systems = vec![Aarch64Linux.into(), X8664Linux.into()];
+
+    let bash = context.add_artifact(Artifact {
         artifacts: vec![],
-        // TODO: explore moving environment into sandbox
-        environments: vec![ArtifactEnvironment {
-            key: "PATH".to_string(),
-            value: "/usr/bin".to_string(),
-        }],
-        name: name.to_string(),
-        sandbox: Some(cross_toolchain_rootfs.clone()),
+        environments: environments.clone(),
+        name: "cross-toolchain-bash".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./bash-{version}.tar.gz https://ftpmirror.gnu.org/gnu/bash/bash-{version}.tar.gz
+            tar -xvf ./bash-{version}.tar.gz -C $output --strip-components=1",
+            version = "5.2.32",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let binutils = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-binutils".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./binutils-{version}.tar.xz https://ftpmirror.gnu.org/gnu/binutils/binutils-{version}.tar.xz
+            tar -xvf ./binutils-{version}.tar.xz -C $output --strip-components=1",
+            version = "2.43.1",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let bison = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-bison".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./bison-{version}.tar.xz https://ftpmirror.gnu.org/gnu/bison/bison-{version}.tar.xz
+            tar -xvf ./bison-{version}.tar.xz -C $output --strip-components=1",
+            version = "3.8.2",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let coreutils = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-coreutils".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./coreutils-{version}.tar.xz https://ftpmirror.gnu.org/gnu/coreutils/coreutils-{version}.tar.xz
+            tar -xvf ./coreutils-{version}.tar.xz -C $output --strip-components=1",
+            version = "9.5",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let diffutils = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-diffutils".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./diffutils-{version}.tar.xz https://ftpmirror.gnu.org/gnu/diffutils/diffutils-{version}.tar.xz
+            tar -xvf ./diffutils-{version}.tar.xz -C $output --strip-components=1",
+            version = "3.10",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let file = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-file".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./file-{version}.tar.gz https://astron.com/pub/file/file-{version}.tar.gz
+            tar -xvf ./file-{version}.tar.gz -C $output --strip-components=1",
+            version = "5.45",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let findutils = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-findutils".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./findutils-{version}.tar.xz https://ftpmirror.gnu.org/gnu/findutils/findutils-{version}.tar.xz
+            tar -xvf ./findutils-{version}.tar.xz -C $output --strip-components=1",
+            version = "4.10.0",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let gawk = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-gawk".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./gawk-{version}.tar.xz https://ftpmirror.gnu.org/gnu/gawk/gawk-{version}.tar.xz
+            tar -xvf ./gawk-{version}.tar.xz -C $output --strip-components=1",
+            version = "5.3.0",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let gcc = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-gcc".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./gcc-{version}.tar.xz https://ftpmirror.gnu.org/gnu/gcc/gcc-{version}/gcc-{version}.tar.xz
+            tar -xvf ./gcc-{version}.tar.xz -C $output --strip-components=1",
+            version = "14.2.0",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let gettext = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-gettext".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./gettext-{version}.tar.xz https://ftpmirror.gnu.org/gnu/gettext/gettext-{version}.tar.xz
+            tar -xvf ./gettext-{version}.tar.xz -C $output --strip-components=1",
+            version = "0.22.5",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let glibc = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-glibc".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./glibc-{version}.tar.xz https://ftpmirror.gnu.org/gnu/glibc/glibc-{version}.tar.xz
+            tar -xvf ./glibc-{version}.tar.xz -C $output --strip-components=1",
+            version = "2.40",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let glibc_patch = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-glibc-patch".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./glibc-patch-{version}.patch https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-{version}-fhs-1.patch
+            cp -v ./glibc-patch-{version}.patch $output",
+            version = "2.40",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let grep = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-grep".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./grep-{version}.tar.xz https://ftpmirror.gnu.org/gnu/grep/grep-{version}.tar.xz
+            tar -xvf ./grep-{version}.tar.xz -C $output --strip-components=1",
+            version = "3.11",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let gzip = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-gzip".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./gzip-{version}.tar.xz https://ftpmirror.gnu.org/gnu/gzip/gzip-{version}.tar.xz
+            tar -xvf ./gzip-{version}.tar.xz -C $output --strip-components=1",
+            version = "1.13",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let linux_headers = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-linux-headers".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./linux-headers-{version}.tar.xz https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz
+            tar -xvf ./linux-headers-{version}.tar.xz -C $output --strip-components=1",
+            version = "6.10.5",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let m4 = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-m4".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./m4-{version}.tar.xz https://ftpmirror.gnu.org/gnu/m4/m4-{version}.tar.xz
+            tar -xvf ./m4-{version}.tar.xz -C $output --strip-components=1",
+            version = "1.4.19",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let make = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-make".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./make-{version}.tar.gz https://ftpmirror.gnu.org/gnu/make/make-{version}.tar.gz
+            tar -xvf ./make-{version}.tar.gz -C $output --strip-components=1",
+            version = "4.4.1",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let ncurses = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-ncurses".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./ncurses-{version}.tar.gz https://invisible-mirror.net/archives/ncurses/ncurses-{version}.tar.gz
+            tar -xvf ./ncurses-{version}.tar.gz -C $output --strip-components=1",
+            version = "6.5",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let patchelf = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-patchelf".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./patchelf-{version}.tar.gz https://github.com/NixOS/patchelf/releases/download/{version}/patchelf-{version}.tar.gz
+            tar -xvf ./patchelf-{version}.tar.gz -C $output --strip-components=1",
+            version = "0.18.0",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let patch = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-patch".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./patch-{version}.tar.xz https://ftpmirror.gnu.org/gnu/patch/patch-{version}.tar.xz
+            tar -xvf ./patch-{version}.tar.xz -C $output --strip-components=1",
+            version = "2.7.6",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let perl = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-perl".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./perl-{version}.tar.gz https://www.cpan.org/src/5.0/perl-{version}.tar.xz
+            tar -xvf ./perl-{version}.tar.gz -C $output --strip-components=1",
+            version = "5.40.0",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let python = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-python".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./python-{version}.tar.xz https://www.python.org/ftp/python/{version}/Python-{version}.tar.xz
+            tar -xvf ./python-{version}.tar.xz -C $output --strip-components=1",
+            version = "3.12.5",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let sed = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-sed".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./sed-{version}.tar.xz https://ftpmirror.gnu.org/gnu/sed/sed-{version}.tar.xz
+            tar -xvf ./sed-{version}.tar.xz -C $output --strip-components=1",
+            version = "4.9",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let tar = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-tar".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./tar-{version}.tar.xz https://ftpmirror.gnu.org/gnu/tar/tar-{version}.tar.xz
+            tar -xvf ./tar-{version}.tar.xz -C $output --strip-components=1",
+            version = "1.35",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let texinfo = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-texinfo".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./texinfo-{version}.tar.xz https://ftpmirror.gnu.org/gnu/texinfo/texinfo-{version}.tar.xz
+            tar -xvf ./texinfo-{version}.tar.xz -C $output --strip-components=1",
+            version = "7.1.1",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let util_linux = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-util-linux".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./util-linux-{version}.tar.xz https://www.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-{version}.tar.xz
+            tar -xvf ./util-linux-{version}.tar.xz -C $output --strip-components=1",
+            version = "2.40.2",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    let xz = context.add_artifact(Artifact {
+        artifacts: vec![],
+        environments: environments.clone(),
+        name: "cross-toolchain-xz".to_string(),
+        sandbox: sandbox.clone(),
+        script: formatdoc! {"
+            curl -L -o ./xz-{version}.tar.xz https://github.com/tukaani-project/xz/releases/download/v{version}/xz-{version}.tar.xz
+            tar -xvf ./xz-{version}.tar.xz -C $output --strip-components=1",
+            version = "5.6.2",
+        },
+        sources: vec![],
+        systems: systems.clone(),
+    })?;
+
+    context.add_artifact(Artifact {
+        artifacts: vec![
+            bash,
+            binutils,
+            bison,
+            coreutils,
+            diffutils,
+            file,
+            findutils,
+            gawk,
+            gcc,
+            gettext,
+            glibc,
+            glibc_patch,
+            grep,
+            gzip,
+            linux_headers,
+            m4,
+            make,
+            ncurses,
+            patch,
+            patchelf,
+            perl,
+            python,
+            sed,
+            tar,
+            texinfo,
+            util_linux,
+            xz,
+        ],
+        environments: environments.clone(),
+        name: "cross-toolchain".to_string(),
+        sandbox: sandbox.clone(),
         script: formatdoc! {"
             #!/bin/bash
             set -euo +h pipefail
             umask 022
 
-            ## Setup paths
+            ### Setup paths
 
             mkdir -pv $output/{{etc,var}} $output/usr/{{bin,lib,sbin}}
 
@@ -51,38 +458,27 @@ pub fn artifact(
             export CONFIG_SITE=\"$output/usr/share/config.site\"
             export MAKEFLAGS=\"-j$(nproc)\"
 
-            ## Setup certificates
+            ### Setup certificates
 
             mkdir -pv $output/etc/ssl/certs
             mkdir -pv $output/usr/share/ca-certificates/mozilla
 
             rsync -av /etc/ssl/certs/ca-certificates.crt $output/etc/ssl/certs
             rsync -av /usr/share/ca-certificates/mozilla/* $output/usr/share/ca-certificates/mozilla
+
             cp -v /etc/ca-certificates.conf $output/etc
 
-            ## Setup resolv.conf
+            ### Setup resolv.conf
 
             echo 'nameserver 1.1.1.1' > $output/etc/resolv.conf
 
-            ### Setup duplicate sources
-
-            mkdir -pv libstdc++
-            mkdir -pv binutils-pass-02
-            mkdir -pv gcc-pass-02
-
-            rsync -av gcc/ libstdc++/
-            rsync -av binutils/ binutils-pass-02/
-            rsync -av gcc/ gcc-pass-02/
-
-            mv -v binutils binutils-pass-01
-            mv -v gcc gcc-pass-01
-
             ### Build binutils (pass 01)
 
+            mkdir -pv binutils-pass-01
+            rsync -av $cross_toolchain_binutils/ binutils-pass-01/
             pushd ./binutils-pass-01
 
             mkdir -pv ./build
-
             pushd ./build
 
             ../configure \
@@ -105,6 +501,8 @@ pub fn artifact(
 
             ### Build gcc (pass 01)
 
+            mkdir -pv gcc-pass-01
+            rsync -av $cross_toolchain_gcc/ gcc-pass-01/
             pushd ./gcc-pass-01
 
             ./contrib/download_prerequisites
@@ -121,7 +519,6 @@ pub fn artifact(
             esac
 
             mkdir -pv ./build
-
             pushd ./build
 
             ../configure \
@@ -166,6 +563,8 @@ pub fn artifact(
 
             ### Build linux headers
 
+            mkdir -pv linux-headers
+            rsync -av $cross_toolchain_linux_headers/ linux-headers/
             pushd ./linux-headers
 
             make mrproper
@@ -181,6 +580,10 @@ pub fn artifact(
 
             ### Build glibc
 
+            mkdir -pv glibc
+            mkdir -pv glibc-patch
+            rsync -av $cross_toolchain_glibc/ glibc/
+            rsync -av $cross_toolchain_glibc_patch/ glibc-patch/
             pushd ./glibc
 
             case $(uname -m) in
@@ -193,10 +596,9 @@ pub fn artifact(
                 ;;
             esac
 
-            patch -Np1 -i ../glibc-patch/glibc-2.40-fhs-1.patch
+            patch -Np1 -i ../glibc-patch/glibc-patch-2.40.patch
 
             mkdir -pv ./build
-
             pushd ./build
 
             echo \"rootsbindir=/usr/sbin\" > configparms
@@ -224,7 +626,6 @@ pub fn artifact(
             ## Test glibc
 
             echo 'Testing glibc'
-
             echo 'int main(){{}}' | $TARGET-gcc -xc -
 
             readelf -l a.out | grep ld-linux
@@ -233,10 +634,11 @@ pub fn artifact(
 
             ## Build libstdc++
 
+            mkdir -pv libstdc++
+            rsync -av $cross_toolchain_gcc/ libstdc++
             pushd ./libstdc++
 
             mkdir -pv ./build
-
             pushd ./build
 
             ../libstdc++-v3/configure \
@@ -260,6 +662,8 @@ pub fn artifact(
 
             ## Build m4
 
+            mkdir -pv m4
+            rsync -av $cross_toolchain_m4/ m4/
             pushd ./m4
 
             ./configure \
@@ -276,14 +680,18 @@ pub fn artifact(
 
             ## Build ncurses
 
+            mkdir -pv ncurses
+            rsync -av $cross_toolchain_ncurses/ ncurses/
             pushd ./ncurses
 
             mkdir -pv build
-
             pushd ./build
-              ../configure AWK=gawk
-              make -C include
-              make -C progs tic
+
+            ../configure AWK=gawk
+
+            make -C include
+            make -C progs tic
+
             popd
 
             ./configure \
@@ -314,6 +722,8 @@ pub fn artifact(
 
             ## Build bash
 
+            mkdir -pv bash
+            rsync -av $cross_toolchain_bash/ bash/
             pushd ./bash
 
             ./configure \
@@ -328,11 +738,12 @@ pub fn artifact(
             ln -sv bash $output/bin/sh
 
             popd
-
             rm -rf ./bash
 
             ## Build coreutils
 
+            mkdir -pv coreutils
+            rsync -av $cross_toolchain_coreutils/ coreutils/
             pushd ./coreutils
 
             ./configure \
@@ -361,6 +772,8 @@ pub fn artifact(
 
             ## Build diffutils
 
+            mkdir -pv diffutils
+            rsync -av $cross_toolchain_diffutils/ diffutils/
             pushd ./diffutils
 
             ./configure \
@@ -377,6 +790,8 @@ pub fn artifact(
 
             ## Build file
 
+            mkdir -pv file
+            rsync -av $cross_toolchain_file/ file/
             pushd ./file
 
             mkdir -pv ./build
@@ -409,6 +824,8 @@ pub fn artifact(
 
             ## Build findutils
 
+            mkdir -pv findutils
+            rsync -av $cross_toolchain_findutils/ findutils/
             pushd ./findutils
 
             ./configure \
@@ -426,6 +843,8 @@ pub fn artifact(
 
             ## Build gawk
 
+            mkdir -pv gawk
+            rsync -av $cross_toolchain_gawk/ gawk/
             pushd ./gawk
 
             sed -i 's/extras//' Makefile.in
@@ -444,6 +863,8 @@ pub fn artifact(
 
             ## Build grep
 
+            mkdir -pv grep
+            rsync -av $cross_toolchain_grep/ grep/
             pushd ./grep
 
             ./configure \
@@ -460,6 +881,8 @@ pub fn artifact(
 
             ## Build gzip
 
+            mkdir -pv gzip
+            rsync -av $cross_toolchain_gzip/ gzip/
             pushd ./gzip
 
             ./configure \
@@ -475,6 +898,8 @@ pub fn artifact(
 
             ## Build make
 
+            mkdir -pv make
+            rsync -av $cross_toolchain_make/ make/
             pushd ./make
 
             ./configure \
@@ -492,6 +917,8 @@ pub fn artifact(
 
             ## Build patch
 
+            mkdir -pv patch
+            rsync -av $cross_toolchain_patch/ patch/
             pushd ./patch
 
             ./configure \
@@ -508,6 +935,8 @@ pub fn artifact(
 
             ## Build sed
 
+            mkdir -pv sed
+            rsync -av $cross_toolchain_sed/ sed/
             pushd ./sed
 
             ./configure \
@@ -524,6 +953,8 @@ pub fn artifact(
 
             ## Build tar
 
+            mkdir -pv tar
+            rsync -av $cross_toolchain_tar/ tar/
             pushd ./tar
 
             ./configure \
@@ -540,6 +971,8 @@ pub fn artifact(
 
             ## Build xz
 
+            mkdir -pv xz
+            rsync -av $cross_toolchain_xz/ xz/
             pushd ./xz
 
             ./configure \
@@ -560,6 +993,8 @@ pub fn artifact(
 
             ## Build binutils (pass 02)
 
+            mkdir -pv binutils-pass-02
+            rsync -av $cross_toolchain_binutils/ binutils-pass-02/
             pushd ./binutils-pass-02
 
             sed '6009s/$add_dir//' -i ltmain.sh
@@ -592,6 +1027,8 @@ pub fn artifact(
 
             ## Build gcc (pass 02)
 
+            mkdir -pv gcc-pass-02
+            rsync -av $cross_toolchain_gcc/ gcc-pass-02/
             pushd ./gcc-pass-02
 
             ./contrib/download_prerequisites
@@ -646,15 +1083,22 @@ pub fn artifact(
             ### Setup sandbox in sandbox
 
             mkdir -pv sandbox/home
-            mkdir -pv sandbox/source
 
-            mv -v bison sandbox/source
-            mv -v gettext sandbox/source
-            mv -v patchelf sandbox/source
-            mv -v perl sandbox/source
-            mv -v python sandbox/source
-            mv -v texinfo sandbox/source
-            mv -v util-linux sandbox/source
+            mkdir -pv sandbox/source/bison
+            mkdir -pv sandbox/source/gettext
+            mkdir -pv sandbox/source/patchelf
+            mkdir -pv sandbox/source/perl
+            mkdir -pv sandbox/source/python
+            mkdir -pv sandbox/source/texinfo
+            mkdir -pv sandbox/source/util-linux
+
+            rsync -av $cross_toolchain_bison/ sandbox/source/bison/
+            rsync -av $cross_toolchain_gettext/ sandbox/source/gettext/
+            rsync -av $cross_toolchain_patchelf/ sandbox/source/patchelf/
+            rsync -av $cross_toolchain_perl/ sandbox/source/perl/
+            rsync -av $cross_toolchain_python/ sandbox/source/python/
+            rsync -av $cross_toolchain_texinfo/ sandbox/source/texinfo/
+            rsync -av $cross_toolchain_util_linux/ sandbox/source/util-linux/
 
             cat > $output/etc/hosts << EOF
             127.0.0.1  localhost
@@ -859,25 +1303,24 @@ pub fn artifact(
             ## Run sandbox
 
             bwrap \
-                --bind \"$PWD\" \"$PWD\" \
-                --bind \"$output\" \"$output\" \
-                --chdir \"$PWD/sandbox/source\" \
-                --clearenv \
-                --dev \"/dev\" \
-                --proc \"/proc\" \
-                --setenv \"HOME\" \"$PWD/sandbox/home\" \
-                --tmpfs \"/tmp\" \
                 --unshare-all \
                 --share-net \
+                --clearenv \
+                --chdir \"$PWD/sandbox/source\" \
+                --dev \"/dev\" \
+                --proc \"/proc\" \
+                --tmpfs \"/tmp\" \
                 --gid \"0\" \
                 --uid \"0\" \
+                --bind \"$PWD\" \"$PWD\" \
                 --bind \"$output/bin\" \"/bin\" \
                 --bind \"$output/etc\" \"/etc\" \
-                --bind \"$output/lib\" \"/lib\" \
                 --bind \"$output/lib64\" \"/lib64\" \
+                --bind \"$output/lib\" \"/lib\" \
                 --bind \"$output/sbin\" \"/sbin\" \
                 --bind \"$output/usr\" \"/usr\" \
-                --bind \"$output/var\" \"/var\" \
+                --bind \"$output\" \"$output\" \
+                --setenv \"HOME\" \"$PWD/sandbox/home\" \
                 --setenv \"MAKEFLAGS\" \"-j$(nproc)\" \
                 --setenv \"PATH\" \"/usr/bin:/usr/sbin\" \
                 --setenv \"PS1\" \"(sandbox) \\u:\\w\\$ \" \
@@ -888,237 +1331,6 @@ pub fn artifact(
             rm -rf $output/tools",
         },
         sources: vec![],
-        // sources: vec![
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "7dc29154d5344d3d4f943396de2a6c764c36b4729bd76363b9ccf8a5166c07d8".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "bash".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/bash/bash-5.2.37.tar.gz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "c0d3e5ee772ee201eefe17544b2b2cc3a0a3d6833a21b9ea56371efaad0c5528".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "binutils".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/binutils/binutils-2.43.1.tar.gz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "cb18c2c8562fc01bf3ae17ffe9cf8274e3dd49d39f89397c1a8bac7ee14ce85f".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "bison".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/bison/bison-3.8.2.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "af6d643afd6241ec35c7781b7f999b97a66c84bea4710ad2bb15e75a5caf11b4".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "coreutils".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/coreutils/coreutils-9.5.tar.gz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "5045e29e7fa0ffe017f63da7741c800cbc0f89e04aebd78efcd661d6e5673326".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "diffutils".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/diffutils/diffutils-3.10.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "c118ab56efa05798022a5a488827594a82d844f65159e95b918d5501adf1e58f".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "file".to_string(),
-        //         uri: "https://astron.com/pub/file/file-5.45.tar.gz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "242f804d87a5036bb0fab99966227dc61e853e5a67e1b10c3cc45681c792657e".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "findutils".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/findutils/findutils-4.10.0.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "f82947e3d4fed9bec5ec686b4a511d6720a23eb809f41b1dbcee30a347f9cb7b".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "gawk".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/gawk/gawk-5.3.1.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "cc20ef929f4a1c07594d606ca4f2ed091e69fac5c6779887927da82b0a62f583".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "gcc".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.gz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "6e3ef842d1006a6af7778a8549a8e8048fc3b923e5cf48eaa5b82b5d142220ae".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "gettext".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/gettext/gettext-0.22.5.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "da2594c64d61dacf80d85e568136bf31fba36c4ff1ececff59c6fb786a2a126b".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "glibc".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/glibc/glibc-2.40.tar.gz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "69cf0653ad0a6a178366d291f30629d4e1cb633178aa4b8efbea0c851fb944ca".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "glibc-patch".to_string(),
-        //         uri: "https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-2.40-fhs-1.patch"
-        //             .to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "1625eae01f6e4dbc41b58545aa2326c74791b2010434f8241d41903a4ea5ff70".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "grep".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/grep/grep-3.11.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "25e51d46402bab819045d452ded6c4558ef980f5249c470d9499e9eae34b59b1".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "gzip".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/gzip/gzip-1.13.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "0ad86940ddd48f6e8ebb9605c98e4072a127fabda72dc235ffe94fd984101d00".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "linux-headers".to_string(),
-        //         uri: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.11.6.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "fd793cdfc421fac76f4af23c7d960cbe4a29cbb18f5badf37b85e16a894b3b6d".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "m4".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/make/make-4.4.1.tar.gz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "aab234a3b7a22e2632151fbe550cb36e371d3ee5318a633ee43af057f9f112fb".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "ncurses".to_string(),
-        //         uri: "https://invisible-mirror.net/archives/ncurses/ncurses-6.5.tar.gz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some("a278eec544da9f0a82ad7e07b3670cf0f4d85ee13286fa9ad4f4416b700ac19d".to_string()),
-        //         includes: vec![],
-        //         name: "patchelf".to_string(),
-        //         uri: "https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz"
-        //             .to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "af8c281a05a6802075799c0c179e5fb3a218be6a21b726d8b672cd0f4c37eae9".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "patch".to_string(),
-        //         uri: "https://www.cpan.org/src/5.0/perl-5.40.0.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "3d42c796194dcd35b6e74770d5a85e24aad0c15135c559b4eadb171982a47eec".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "python".to_string(),
-        //         uri: "https://www.python.org/ftp/python/3.13.0/Python-3.13.0.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "434ff552af89340088e0d8cb206c251761297909bbee401176bc8f655e8e7cf2".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "sed".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/sed/sed-4.9.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "f9bb5f39ed45b1c6a324470515d2ef73e74422c5f345503106d861576d3f02f3".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "tar".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/tar/tar-1.35.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "6e34604552af91db0b4ccf0bcceba63dd3073da2a492ebcf33c6e188a64d2b63".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "texinfo".to_string(),
-        //         uri: "https://ftpmirror.gnu.org/gnu/texinfo/texinfo-7.1.1.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "7db19a1819ac5c743b52887a4571e42325b2bfded63d93b6a1797ae2b1f8019a".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "util-linux".to_string(),
-        //         uri: "https://www.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-2.40.2.tar.xz".to_string(),
-        //     },
-        //     ArtifactSource {
-        //         excludes: vec![],
-        //         hash: Some(
-        //             "2c7a608231d70ba4d7c81fc70fd1eb81d93c424865eb255a8996f8e9ffcb55ee".to_string(),
-        //         ),
-        //         includes: vec![],
-        //         name: "xz".to_string(),
-        //         uri:
-        //             "https://github.com/tukaani-project/xz/releases/download/v5.6.3/xz-5.6.3.tar.xz"
-        //                 .to_string(),
-        //     },
-        // ],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
-    };
-
-    context.add_artifact(artifact)
+    })
 }
