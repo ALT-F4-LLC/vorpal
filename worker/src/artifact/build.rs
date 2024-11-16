@@ -381,8 +381,6 @@ pub async fn run(
         },
     };
 
-    println!("{:?}", sandbox_command);
-
     // Run sandbox command
 
     let mut child = sandbox_command
