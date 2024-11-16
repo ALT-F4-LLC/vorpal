@@ -14,9 +14,9 @@ pub async fn load_artifacts(
     artifacts: Vec<ArtifactId>,
     service: &mut ConfigServiceClient<Channel>,
 ) -> Result<()> {
-    for artifact_output in artifacts.iter() {
-        if !map.contains_key(artifact_output) {
-            let artifact_request = tonic::Request::new(artifact_output.clone());
+    for artifact_id in artifacts.iter() {
+        if !map.contains_key(artifact_id) {
+            let artifact_request = tonic::Request::new(artifact_id.clone());
 
             let artifact_response = match service.get_artifact(artifact_request).await {
                 Ok(res) => res,
@@ -27,22 +27,26 @@ pub async fn load_artifacts(
 
             let artifact = artifact_response.into_inner();
 
-            map.insert(artifact_output.clone(), artifact.clone());
+            map.insert(artifact_id.clone(), artifact.clone());
 
-            if let Some(artifact_output) = &artifact.sandbox {
-                if !map.contains_key(artifact_output) {
-                    let artifact_request = tonic::Request::new(artifact_output.clone());
+            if let Some(sandbox_id) = &artifact.sandbox {
+                if !map.contains_key(sandbox_id) {
+                    let sandbox_request = tonic::Request::new(sandbox_id.clone());
 
-                    let artifact_response = match service.get_artifact(artifact_request).await {
+                    let sandbox_response = match service.get_artifact(sandbox_request).await {
                         Ok(res) => res,
                         Err(error) => {
                             bail!("failed to evaluate config: {}", error);
                         }
                     };
 
-                    let artifact = artifact_response.into_inner();
+                    let sandbox = sandbox_response.into_inner();
 
-                    map.insert(artifact_output.clone(), artifact.clone());
+                    map.insert(sandbox_id.clone(), sandbox.clone());
+
+                    if !sandbox.artifacts.is_empty() {
+                        Box::pin(load_artifacts(map, sandbox.artifacts, service)).await?
+                    }
                 }
             }
 

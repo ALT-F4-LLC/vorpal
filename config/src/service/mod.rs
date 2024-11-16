@@ -35,12 +35,12 @@ impl ContextConfig {
             self.artifact.insert(artifact_key.clone(), artifact.clone());
         }
 
-        let artifact_output = ArtifactId {
+        let artifact_id = ArtifactId {
             hash: artifact_hash,
             name: artifact.name,
         };
 
-        Ok(artifact_output)
+        Ok(artifact_id)
     }
 
     pub fn get_artifact(&self, hash: &str, name: &str) -> Option<&Artifact> {

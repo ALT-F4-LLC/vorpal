@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
-    Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactSystem,
+    ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactSystem,
 };
 
 pub struct ArtifactRust<'a> {
@@ -35,63 +35,60 @@ pub fn build_rust_artifact(
 
     let artifact_cache = build_artifact(
         context,
-        Artifact {
-            artifacts: vec![cargo.clone(), rustc.clone()],
-            environments: vec![ArtifactEnvironment {
-                key: "PATH".to_string(),
-                value: format!(
-                    "${cargo}/bin:${rustc}/bin",
-                    cargo = cargo.name.to_lowercase().replace("-", "_"),
-                    rustc = rustc.name.to_lowercase().replace("-", "_")
-                ),
-            }],
-            name: format!("cache-{}", artifact.name),
-            sandbox: None,
-            script: formatdoc! {"
-                dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"store/src\" \"worker/src\")
+        vec![cargo.clone(), rustc.clone()],
+        vec![ArtifactEnvironment {
+            key: "PATH".to_string(),
+            value: format!(
+                "${cargo}/bin:${rustc}/bin",
+                cargo = cargo.name.to_lowercase().replace("-", "_"),
+                rustc = rustc.name.to_lowercase().replace("-", "_")
+            ),
+        }],
+        format!("cache-{}", artifact.name),
+        formatdoc! {"
+            dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"store/src\" \"worker/src\")
 
-                cd {source}
+            cd {source}
 
-                for dir in \"${{dirs[@]}}\"; do
-                    mkdir -p \"$dir\"
-                done
+            for dir in \"${{dirs[@]}}\"; do
+                mkdir -p \"$dir\"
+            done
 
-                for dir in \"${{dirs[@]}}\"; do
-                    if [[ \"$dir\" == \"cli/src\" || \"$dir\" == \"config/src\" ]]; then
-                        touch \"$dir/main.rs\"
-                    else
-                        touch \"$dir/lib.rs\"
-                    fi
-                done
+            for dir in \"${{dirs[@]}}\"; do
+                if [[ \"$dir\" == \"cli/src\" || \"$dir\" == \"config/src\" ]]; then
+                    touch \"$dir/main.rs\"
+                else
+                    touch \"$dir/lib.rs\"
+                fi
+            done
 
-                mkdir -p \"$output/vendor\"
+            mkdir -p \"$output/vendor\"
 
-                export CARGO_VENDOR=$(cargo vendor --versioned-dirs $output/vendor)
-                echo \"$CARGO_VENDOR\" > \"$output/config.toml\"
+            export CARGO_VENDOR=$(cargo vendor --versioned-dirs $output/vendor)
+            echo \"$CARGO_VENDOR\" > \"$output/config.toml\"
 
-                {sed} \"s|$output|${envkey}|g\" \"$output/config.toml\"",
-                envkey = format!("cache_{}", name_envkey),
-                sed = get_sed_cmd(context.get_target())?,
-                source = artifact.name,
-            },
-            sources: vec![ArtifactSource {
-                excludes: vec![],
-                hash: Some(artifact.cargo_hash.to_string()),
-                includes: vec![
-                    "Cargo.lock".to_string(),
-                    "Cargo.toml".to_string(),
-                    "cli/Cargo.toml".to_string(),
-                    "config/Cargo.toml".to_string(),
-                    "notary/Cargo.toml".to_string(),
-                    "schema/Cargo.toml".to_string(),
-                    "store/Cargo.toml".to_string(),
-                    "worker/Cargo.toml".to_string(),
-                ],
-                name: artifact.name.to_string(),
-                path: artifact.source.to_string(),
-            }],
-            systems: systems.clone(),
+            {sed} \"s|$output|${envkey}|g\" \"$output/config.toml\"",
+            envkey = format!("cache_{}", name_envkey),
+            sed = get_sed_cmd(context.get_target())?,
+            source = artifact.name,
         },
+        vec![ArtifactSource {
+            excludes: vec![],
+            hash: Some(artifact.cargo_hash.to_string()),
+            includes: vec![
+                "Cargo.lock".to_string(),
+                "Cargo.toml".to_string(),
+                "cli/Cargo.toml".to_string(),
+                "config/Cargo.toml".to_string(),
+                "notary/Cargo.toml".to_string(),
+                "schema/Cargo.toml".to_string(),
+                "store/Cargo.toml".to_string(),
+                "worker/Cargo.toml".to_string(),
+            ],
+            name: artifact.name.to_string(),
+            path: artifact.source.to_string(),
+        }],
+        systems.clone(),
     )?;
 
     let mut artifact_excludes = vec![
@@ -102,59 +99,54 @@ pub fn build_rust_artifact(
 
     artifact_excludes.extend(artifact.source_excludes.iter().map(|e| e.to_string()));
 
-    let artifact = build_artifact(
+    build_artifact(
         context,
-        Artifact {
-            artifacts: vec![
-                cargo.clone(),
-                rustc.clone(),
-                protoc.clone(),
-                zlib.clone(),
-                artifact_cache,
-            ],
-            environments: vec![
-                ArtifactEnvironment {
-                    key: "LD_LIBRARY_PATH".to_string(),
-                    value: format!("${}/usr/lib", zlib.name.to_lowercase().replace("-", "_")),
-                },
-                ArtifactEnvironment {
-                    key: "PATH".to_string(),
-                    value: format!(
-                        "${cargo}/bin:${rustc}/bin:${protoc}/bin",
-                        cargo = cargo.name.to_lowercase().replace("-", "_"),
-                        protoc = protoc.name.to_lowercase().replace("-", "_"),
-                        rustc = rustc.name.to_lowercase().replace("-", "_")
-                    ),
-                },
-            ],
-            name: artifact.name.to_string(),
-            sandbox: None,
-            script: formatdoc! {"
-                cd {name}
-
-                mkdir -p .cargo
-
-                ln -sv \"$cache_{name_envkey}/config.toml\" .cargo/config.toml
-
-                cargo build --offline --release
-                cargo test --offline --release
-
-                mkdir -p \"$output/bin\"
-
-                cp -pr target/release/{name} $output/bin/{name}",
-                name = artifact.name,
-                name_envkey = name_envkey,
+        vec![
+            cargo.clone(),
+            rustc.clone(),
+            protoc.clone(),
+            zlib.clone(),
+            artifact_cache,
+        ],
+        vec![
+            ArtifactEnvironment {
+                key: "LD_LIBRARY_PATH".to_string(),
+                value: format!("${}/usr/lib", zlib.name.to_lowercase().replace("-", "_")),
             },
-            sources: vec![ArtifactSource {
-                excludes: artifact_excludes,
-                hash: None,
-                includes: vec![],
-                name: artifact.name.to_string(),
-                path: artifact.source.to_string(),
-            }],
-            systems,
-        },
-    )?;
+            ArtifactEnvironment {
+                key: "PATH".to_string(),
+                value: format!(
+                    "${cargo}/bin:${rustc}/bin:${protoc}/bin",
+                    cargo = cargo.name.to_lowercase().replace("-", "_"),
+                    protoc = protoc.name.to_lowercase().replace("-", "_"),
+                    rustc = rustc.name.to_lowercase().replace("-", "_")
+                ),
+            },
+        ],
+        artifact.name.to_string(),
+        formatdoc! {"
+            cd {name}
 
-    Ok(artifact)
+            mkdir -p .cargo
+
+            ln -sv \"$cache_{name_envkey}/config.toml\" .cargo/config.toml
+
+            cargo build --offline --release
+            cargo test --offline --release
+
+            mkdir -p \"$output/bin\"
+
+            cp -pr target/release/{name} $output/bin/{name}",
+            name = artifact.name,
+            name_envkey = name_envkey,
+        },
+        vec![ArtifactSource {
+            excludes: artifact_excludes,
+            hash: None,
+            includes: vec![],
+            name: artifact.name.to_string(),
+            path: artifact.source.to_string(),
+        }],
+        systems,
+    )
 }
