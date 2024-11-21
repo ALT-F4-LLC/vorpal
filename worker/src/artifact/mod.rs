@@ -12,9 +12,6 @@ use vorpal_schema::vorpal::{
 use vorpal_store::temps::create_temp_dir;
 
 mod build;
-mod darwin;
-mod linux;
-mod native;
 
 #[derive(Debug, Default)]
 pub struct ArtifactServer {

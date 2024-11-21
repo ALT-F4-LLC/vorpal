@@ -1,4 +1,3 @@
-use crate::artifact::{darwin, darwin::profile, linux, native};
 use anyhow::{anyhow, bail, Result};
 use rsa::{
     pss::{Signature, VerifyingKey},
@@ -6,14 +5,13 @@ use rsa::{
     signature::Verifier,
 };
 use std::{
-    collections::HashMap,
     env::consts::{ARCH, OS},
     fs::Permissions,
     os::unix::fs::PermissionsExt,
     path::Path,
     process::Stdio,
 };
-use tera::Tera;
+use tokio::process::Command;
 use tokio::{
     fs::{create_dir_all, remove_file, set_permissions, write},
     io::{AsyncBufReadExt, BufReader},
@@ -27,10 +25,10 @@ use vorpal_schema::{
     get_artifact_system,
     vorpal::{
         artifact::v0::ArtifactSystem,
-        artifact::v0::ArtifactSystem::{
-            Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos,
+        artifact::v0::ArtifactSystem::UnknownSystem,
+        artifact::v0::{
+            ArtifactBuildRequest, ArtifactBuildResponse, ArtifactEnvironment, ArtifactId,
         },
-        artifact::v0::{ArtifactBuildRequest, ArtifactBuildResponse},
     },
 };
 use vorpal_store::{
@@ -51,20 +49,177 @@ async fn send(tx: &Sender<Result<ArtifactBuildResponse, Status>>, output: String
     Ok(())
 }
 
+pub async fn run_step(
+    arguments: Vec<String>,
+    artifact_path: &Path,
+    artifacts: Vec<ArtifactId>,
+    entrypoint: String,
+    environments: Vec<ArtifactEnvironment>,
+    name: String,
+    script: Option<String>,
+    tx: &Sender<Result<ArtifactBuildResponse, Status>>,
+    workspace_path: &Path,
+) -> Result<()> {
+    let mut envs = vec![];
+
+    // Add all artifact environment variables
+
+    let mut paths = vec![];
+
+    for a in artifacts {
+        let path = get_artifact_path(&a.hash, &a.name);
+
+        if !path.exists() {
+            bail!(format!("artifact missing: {}", path.display()))
+        }
+
+        envs.push(ArtifactEnvironment {
+            key: format!(
+                "VORPAL_ARTIFACT_{}",
+                a.name.to_lowercase().replace('-', "_")
+            ),
+            value: path.display().to_string(),
+        });
+
+        paths.push(path.display().to_string());
+    }
+
+    // Add default environment variables
+
+    let name_envkey = name.to_lowercase().replace('-', "_");
+
+    envs.push(ArtifactEnvironment {
+        key: format!("VORPAL_ARTIFACT_{}", name_envkey.clone()),
+        value: artifact_path.display().to_string(),
+    });
+
+    envs.push(ArtifactEnvironment {
+        key: "VORPAL_ARTIFACTS".to_string(),
+        value: paths.join(" ").to_string(),
+    });
+
+    envs.push(ArtifactEnvironment {
+        key: "VORPAL_OUTPUT".to_string(),
+        value: artifact_path.display().to_string(),
+    });
+
+    envs.push(ArtifactEnvironment {
+        key: "VORPAL_WORKSPACE".to_string(),
+        value: workspace_path.display().to_string(),
+    });
+
+    // Add all custom environment variables
+
+    for e in environments.clone() {
+        envs.push(e);
+    }
+
+    // Sort environment variables by key length
+
+    let mut envs_sorted = envs.to_vec();
+
+    envs_sorted.sort_by(|a, b| b.key.len().cmp(&a.key.len()));
+
+    // Setup command
+
+    let mut command = Command::new(&entrypoint);
+
+    // Setup working directory
+
+    command.current_dir(workspace_path);
+
+    // Setup environment variables
+
+    for env in envs_sorted.clone() {
+        command.env(env.key, env.value);
+    }
+
+    // Setup arguments
+
+    for arg in arguments.into_iter() {
+        let mut arg = arg.clone();
+
+        for env in envs_sorted.clone() {
+            arg = arg.replace(&format!("${}", env.key), &env.value);
+        }
+
+        command.arg(arg);
+    }
+
+    // Setup script
+
+    let mut script_path = None;
+
+    if let Some(script) = script {
+        let mut script = script.clone();
+
+        for env in envs_sorted.clone() {
+            script = script.replace(&format!("${}", env.key), &env.value);
+        }
+
+        let path = workspace_path.join("script.sh");
+
+        write(&path, script.clone())
+            .await
+            .map_err(|err| anyhow!("failed to write script: {:?}", err))?;
+
+        set_permissions(&path, Permissions::from_mode(0o755))
+            .await
+            .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
+
+        script_path = Some(path);
+    }
+
+    if let Some(script_path) = script_path {
+        command.arg(script_path);
+    }
+
+    // Run command
+
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| anyhow!("failed to spawn sandbox command: {:?}", err))?;
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    let stdout = LinesStream::new(BufReader::new(stdout).lines());
+    let stderr = LinesStream::new(BufReader::new(stderr).lines());
+
+    let mut stdio_merged = StreamExt::merge(stdout, stderr);
+
+    while let Some(line) = stdio_merged.next().await {
+        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
+
+        send(tx, line.trim().to_string()).await?;
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|err| anyhow!("failed to wait for sandbox: {:?}", err))?;
+
+    if !status.success() {
+        bail!("failed to build artifact")
+    }
+
+    Ok(())
+}
+
 pub async fn run(
-    sandbox_path: &Path,
+    workspace_path: &Path,
     request: Request<Streaming<ArtifactBuildRequest>>,
     tx: &Sender<Result<ArtifactBuildResponse, Status>>,
 ) -> Result<()> {
-    let mut artifact_environments = vec![];
-    let mut artifact_name = String::new();
     let mut artifact_artifacts = vec![];
-    let mut artifact_sandbox = None;
-    let mut artifact_script = String::new();
+    let mut artifact_hash = String::new();
+    let mut artifact_name = String::new();
     let mut artifact_source_data: Vec<u8> = vec![];
     let mut artifact_source_data_chunk = 0;
     let mut artifact_source_data_signature = None;
-    let mut artifact_source_hash = String::new();
+    let mut artifact_steps = vec![];
     let mut artifact_target = UnknownSystem;
     let mut request_stream = request.into_inner();
 
@@ -79,12 +234,10 @@ pub async fn run(
         }
 
         artifact_artifacts = result.artifacts;
-        artifact_environments = result.environments;
+        artifact_hash = result.hash;
         artifact_name = result.name;
-        artifact_sandbox = result.sandbox;
-        artifact_script = result.script;
         artifact_source_data_signature = result.source_data_signature;
-        artifact_source_hash = result.source_hash;
+        artifact_steps = result.steps;
         artifact_target = ArtifactSystem::try_from(result.target)
             .map_err(|err| anyhow!("failed to parse target: {:?}", err))?;
     }
@@ -95,12 +248,12 @@ pub async fn run(
         bail!("'name' missing in configuration")
     }
 
-    if artifact_script.is_empty() {
-        bail!("'script' missing in configuration")
+    if artifact_hash.is_empty() {
+        bail!("'source_hash' is missing in configuration")
     }
 
-    if artifact_source_hash.is_empty() {
-        bail!("'source_hash' is missing in configuration")
+    if artifact_steps.is_empty() {
+        bail!("'steps' missing in configuration")
     }
 
     if artifact_target == UnknownSystem {
@@ -119,7 +272,7 @@ pub async fn run(
 
     // Check if artifact is locked
 
-    let artifact_lock_path = get_artifact_lock_path(&artifact_source_hash, &artifact_name);
+    let artifact_lock_path = get_artifact_lock_path(&artifact_hash, &artifact_name);
 
     if artifact_lock_path.exists() {
         bail!("artifact is locked") // TODO: figure out better way to handle this (e.g. prompt, ui, etc)
@@ -127,7 +280,7 @@ pub async fn run(
 
     // If artifact exists, return
 
-    let artifact_path = get_artifact_path(&artifact_source_hash, &artifact_name);
+    let artifact_path = get_artifact_path(&artifact_hash, &artifact_name);
 
     if artifact_path.exists() {
         send(tx, artifact_path.display().to_string()).await?;
@@ -137,7 +290,7 @@ pub async fn run(
 
     // If artifact archive exists, unpack it to artifact path
 
-    let artifact_archive_path = get_artifact_archive_path(&artifact_source_hash, &artifact_name);
+    let artifact_archive_path = get_artifact_archive_path(&artifact_hash, &artifact_name);
 
     if artifact_archive_path.exists() {
         send(tx, artifact_archive_path.display().to_string()).await?;
@@ -169,9 +322,9 @@ pub async fn run(
 
     // Check if source archive is present
 
-    let source_archive_path = get_source_archive_path(&artifact_source_hash, &artifact_name);
+    let source_archive_path = get_source_archive_path(&artifact_hash, &artifact_name);
 
-    let source_path = get_source_path(&artifact_source_hash, &artifact_name);
+    let source_path = get_source_path(&artifact_hash, &artifact_name);
 
     if source_archive_path.exists() {
         create_dir_all(&source_path)
@@ -212,7 +365,7 @@ pub async fn run(
             }
         }
 
-        let source_archive_path = get_source_archive_path(&artifact_source_hash, &artifact_name);
+        let source_archive_path = get_source_archive_path(&artifact_hash, &artifact_name);
 
         if source_archive_path.exists() {
             bail!("source archive already exists")
@@ -245,39 +398,9 @@ pub async fn run(
         send(tx, source_path.display().to_string()).await?;
     }
 
-    // Create sandbox environment
-
-    let mut artifacts_paths = vec![];
-    let mut artifact_env = HashMap::new();
-
-    // Add artifact environment variables
-
-    for env in artifact_environments.clone() {
-        artifact_env.insert(env.key, env.value);
-    }
-
-    // Add artifact environment variables and paths
-
-    for p in artifact_artifacts.iter() {
-        let path = get_artifact_path(&p.hash, &p.name);
-
-        if !path.exists() {
-            let message = format!("artifact missing: {}", path.display());
-
-            bail!(message)
-        }
-
-        artifacts_paths.push(path.display().to_string());
-
-        artifact_env.insert(
-            p.name.to_lowercase().replace('-', "_"),
-            path.display().to_string(),
-        );
-    }
-
     // Setup sandbox path source
 
-    let sandbox_source_path = sandbox_path.join("source");
+    let sandbox_source_path = workspace_path.join("source");
 
     create_dir_all(&sandbox_source_path)
         .await
@@ -289,126 +412,21 @@ pub async fn run(
         copy_files(&source_path, source_files, &sandbox_source_path).await?;
     }
 
-    // Add artifact(s) environment variables
+    // Run artifact steps
 
-    let artifact_env_name = artifact_name.to_lowercase().replace('-', "_");
-
-    artifact_env.insert(
-        artifact_env_name.clone(),
-        artifact_path.display().to_string(),
-    );
-
-    artifact_env.insert("output".to_string(), artifact_path.display().to_string());
-
-    artifact_env.insert(
-        "artifacts".to_string(),
-        artifacts_paths.join(" ").to_string(),
-    );
-
-    // Write artifact script
-
-    let sandbox_script_path = sandbox_path.join("artifact.sh");
-
-    write(&sandbox_script_path, artifact_script.clone())
-        .await
-        .map_err(|err| anyhow!("failed to write artifact script: {:?}", err))?;
-
-    set_permissions(&sandbox_script_path, Permissions::from_mode(0o755))
-        .await
-        .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
-
-    // Create sandbox command
-
-    let mut sandbox_command = match artifact_sandbox {
-        None => {
-            native::build(
-                artifact_env,
-                sandbox_script_path.as_path(),
-                sandbox_source_path.as_path(),
-            )
-            .await?
-        }
-
-        Some(sandbox_artifact) => match worker_target {
-            Aarch64Macos | X8664Macos => {
-                let profile_path = sandbox_path.join("artifact.sb");
-
-                let mut tera = Tera::default();
-
-                tera.add_raw_template("build_default", profile::STDENV_DEFAULT)
-                    .unwrap();
-
-                let profile_context = tera::Context::new();
-
-                let profile_data = tera.render("build_default", &profile_context).unwrap();
-
-                write(&profile_path, profile_data)
-                    .await
-                    .expect("failed to write sandbox profile");
-
-                darwin::build(
-                    artifact_env,
-                    profile_path.as_path(),
-                    sandbox_script_path.as_path(),
-                    sandbox_source_path.as_path(),
-                )
-                .await?
-            }
-
-            Aarch64Linux | X8664Linux => {
-                let sandbox_artifact_path =
-                    get_artifact_path(&sandbox_artifact.hash, &sandbox_artifact.name);
-
-                let home_path = sandbox_path.join("home");
-
-                create_dir_all(&home_path)
-                    .await
-                    .map_err(|err| anyhow!("failed to create home directory: {:?}", err))?;
-
-                linux::build(
-                    artifact_env,
-                    home_path.as_path(),
-                    artifact_path.as_path(),
-                    artifacts_paths.clone(),
-                    sandbox_artifact_path.as_path(),
-                    sandbox_script_path.as_path(),
-                    sandbox_source_path.as_path(),
-                )
-                .await?
-            }
-
-            _ => bail!("unknown target"),
-        },
-    };
-
-    // Run sandbox command
-
-    let mut child = sandbox_command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| anyhow!("failed to spawn sandbox command: {:?}", err))?;
-
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-
-    let stdout = LinesStream::new(BufReader::new(stdout).lines());
-    let stderr = LinesStream::new(BufReader::new(stderr).lines());
-
-    let mut stdio_merged = StreamExt::merge(stdout, stderr);
-
-    while let Some(line) = stdio_merged.next().await {
-        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
-        send(tx, line.trim().to_string()).await?;
-    }
-
-    let status = child
-        .wait()
-        .await
-        .map_err(|err| anyhow!("failed to wait for sandbox: {:?}", err))?;
-
-    if !status.success() {
-        bail!("failed to build artifact")
+    for step in artifact_steps.into_iter() {
+        run_step(
+            step.arguments.clone(),
+            &artifact_path,
+            artifact_artifacts.clone(),
+            step.entrypoint,
+            step.environments,
+            artifact_name.clone(),
+            step.script,
+            tx,
+            workspace_path,
+        )
+        .await?;
     }
 
     // Check for output files
