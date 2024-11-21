@@ -159,39 +159,23 @@ async fn main() -> Result<()> {
             let (artifacts_map, artifacts_order) =
                 build::load_config(artifact, &mut config_service).await?;
 
-            let mut artifact_output = HashMap::<String, ArtifactId>::new();
+            let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
 
-            for artifact in &artifacts_order {
-                match artifacts_map.get(artifact) {
-                    None => bail!("Build artifact not found: {}", artifact.name),
+            // let artifacts_pending = artifacts_order.clone();
+
+            for id in &artifacts_order {
+                match artifacts_map.get(id) {
+                    None => bail!("Build artifact not found: {}", id.name),
                     Some(artifact) => {
-                        let mut artifact_artifacts = vec![];
-                        let mut artifact_sandbox = None;
-
-                        if let Some(sandbox) = &artifact.sandbox {
-                            artifact_sandbox = match artifact_output.get(&sandbox.name) {
-                                None => bail!("Artifact output not found: {}", sandbox.name),
-                                Some(artifact) => Some(artifact.clone()),
+                        for a in &artifact.artifacts {
+                            if artifacts_ids.get(&a.name).is_none() {
+                                bail!("Artifact not found: {}", a.name);
                             }
                         }
 
-                        for p in &artifact.artifacts {
-                            match artifact_output.get(&p.name) {
-                                None => bail!("Artifact output not found: {}", p.name),
-                                Some(artifact) => artifact_artifacts.push(artifact.clone()),
-                            }
-                        }
+                        build(artifact, id, artifact_system, worker).await?;
 
-                        let output = build(
-                            artifact,
-                            artifact_artifacts,
-                            artifact_sandbox,
-                            artifact_system,
-                            worker,
-                        )
-                        .await?;
-
-                        artifact_output.insert(artifact.name.to_string(), output);
+                        artifacts_ids.insert(id.name.clone(), id.clone());
                     }
                 }
             }

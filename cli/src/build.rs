@@ -16,39 +16,18 @@ pub async fn load_artifacts(
 ) -> Result<()> {
     for artifact_id in artifacts.iter() {
         if !map.contains_key(artifact_id) {
-            let artifact_request = tonic::Request::new(artifact_id.clone());
+            let request = tonic::Request::new(artifact_id.clone());
 
-            let artifact_response = match service.get_artifact(artifact_request).await {
+            let response = match service.get_artifact(request).await {
                 Ok(res) => res,
                 Err(error) => {
                     bail!("failed to evaluate config: {}", error);
                 }
             };
 
-            let artifact = artifact_response.into_inner();
+            let artifact = response.into_inner();
 
             map.insert(artifact_id.clone(), artifact.clone());
-
-            if let Some(sandbox_id) = &artifact.sandbox {
-                if !map.contains_key(sandbox_id) {
-                    let sandbox_request = tonic::Request::new(sandbox_id.clone());
-
-                    let sandbox_response = match service.get_artifact(sandbox_request).await {
-                        Ok(res) => res,
-                        Err(error) => {
-                            bail!("failed to evaluate config: {}", error);
-                        }
-                    };
-
-                    let sandbox = sandbox_response.into_inner();
-
-                    map.insert(sandbox_id.clone(), sandbox.clone());
-
-                    if !sandbox.artifacts.is_empty() {
-                        Box::pin(load_artifacts(map, sandbox.artifacts, service)).await?
-                    }
-                }
-            }
 
             if !artifact.artifacts.is_empty() {
                 Box::pin(load_artifacts(map, artifact.artifacts, service)).await?
@@ -82,15 +61,11 @@ pub async fn load_config<'a>(
 
     let mut artifacts_graph = DiGraphMap::<&ArtifactId, Artifact>::new();
 
-    for (artifact_output, artifact) in artifacts_map.iter() {
-        artifacts_graph.add_node(artifact_output);
-
-        if let Some(sandbox) = &artifact.sandbox {
-            artifacts_graph.add_edge(artifact_output, sandbox, artifact.clone());
-        }
+    for (artifact_id, artifact) in artifacts_map.iter() {
+        artifacts_graph.add_node(artifact_id);
 
         for output in artifact.artifacts.iter() {
-            artifacts_graph.add_edge(artifact_output, output, artifact.clone());
+            artifacts_graph.add_edge(artifact_id, output, artifact.clone());
 
             add_edges(
                 &mut artifacts_graph,

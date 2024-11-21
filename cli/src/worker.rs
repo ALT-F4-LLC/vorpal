@@ -16,7 +16,6 @@ use vorpal_schema::vorpal::{
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
-    hashes::{get_artifact_hash, get_hash_digest, hash_files},
     paths::{
         copy_files, get_artifact_archive_path, get_artifact_path, get_file_paths,
         get_private_key_path, get_source_archive_path,
@@ -30,7 +29,7 @@ async fn fetch_source(
     sandbox_path: PathBuf,
     artifact_name: String,
     source: ArtifactSource,
-) -> Result<String> {
+) -> Result<()> {
     print_source_url(&artifact_name, SourceStatus::Pending, source.path.as_str());
 
     let sandbox_source_path = sandbox_path.join(source.name.clone());
@@ -65,58 +64,26 @@ async fn fetch_source(
         copy_files(&dir_path, dir_files, &sandbox_source_path).await?;
     }
 
-    let source_files = get_file_paths(
-        &sandbox_source_path,
-        source.excludes.clone(),
-        source.includes.clone(),
-    )?;
-
-    let source_hash = hash_files(source_files.clone()).await?;
-
-    if let Some(hash) = source.hash.clone() {
-        if hash != source_hash {
-            bail!("Source hash mismatch: {:?} != {:?}", hash, source_hash);
-        }
-    }
-
-    print_source_url(&artifact_name, SourceStatus::Complete, source.path.as_str());
-
-    Ok(source_hash)
+    Ok(())
 }
 
 pub async fn build(
     artifact: &Artifact,
-    artifact_outputs: Vec<ArtifactId>,
-    artifact_sandbox: Option<ArtifactId>,
+    artifact_id: &ArtifactId,
     target: ArtifactSystem,
     worker: &str,
-) -> Result<ArtifactId> {
-    let artifact_json = serde_json::to_value(artifact).expect("failed to serialize artifact");
-
-    let artifact_config = artifact_json.to_string();
-
-    let artifact_config_hash = get_hash_digest(&artifact_config);
-
-    let artifact_hash = get_artifact_hash(&artifact_config_hash, &artifact.sources).await?;
-
-    // Check if artifact exists
-
-    let artifact_path = get_artifact_path(&artifact_hash, &artifact.name);
+) -> Result<()> {
+    let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_path.exists() {
-        let output = ArtifactId {
-            hash: artifact_hash,
-            name: artifact.name.clone(),
-        };
+        print_artifact_output(&artifact_id.name, &artifact_id);
 
-        print_artifact_output(&artifact.name, &output);
-
-        return Ok(output);
+        return Ok(());
     }
 
     // Check if artifact archive exists
 
-    let artifact_archive_path = get_artifact_archive_path(&artifact_hash, &artifact.name);
+    let artifact_archive_path = get_artifact_archive_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_archive_path.exists() {
         create_dir_all(&artifact_path)
@@ -127,22 +94,17 @@ pub async fn build(
 
         print_artifact_archive(&artifact.name, &artifact_archive_path);
 
-        let output = ArtifactId {
-            hash: artifact_hash,
-            name: artifact.name.clone(),
-        };
+        print_artifact_output(&artifact.name, &artifact_id);
 
-        print_artifact_output(&artifact.name, &output);
-
-        return Ok(output);
+        return Ok(());
     }
 
     // Check if artifact exists in worker store
 
     let worker_artifact = StoreRequest {
+        hash: artifact_id.hash.clone(),
         kind: StoreKind::Artifact as i32,
-        name: artifact.name.clone(),
-        hash: artifact_hash.clone(),
+        name: artifact_id.name.clone(),
     };
 
     let mut worker_store = StoreServiceClient::connect(worker.to_owned())
@@ -153,9 +115,9 @@ pub async fn build(
         println!("=> cache: {:?}", worker_artifact);
 
         let worker_store_artifact = StoreRequest {
+            hash: artifact_id.hash.clone(),
             kind: StoreKind::Artifact as i32,
-            name: artifact.name.clone(),
-            hash: artifact_hash.clone(),
+            name: artifact_id.name.clone(),
         };
 
         let mut stream = worker_store
@@ -195,18 +157,16 @@ pub async fn build(
 
         unpack_zstd(&artifact_path, &artifact_archive_path).await?;
 
-        print_artifact_hash(&artifact.name, &artifact_hash);
+        print_artifact_hash(&artifact_id.name, &artifact_id.hash);
 
-        return Ok(ArtifactId {
-            hash: artifact_hash,
-            name: artifact.name.clone(),
-        });
+        return Ok(());
     }
 
     // Print artifact dependencies
 
-    if !artifact_outputs.is_empty() {
-        let artifact_list = artifact_outputs
+    if !artifact.artifacts.is_empty() {
+        let artifact_list = artifact
+            .artifacts
             .clone()
             .into_iter()
             .map(|p| p.name)
@@ -223,7 +183,7 @@ pub async fn build(
 
     // Check if artifact source exists in store
 
-    let source_archive_path = get_source_archive_path(&artifact_hash, &artifact.name);
+    let source_archive_path = get_source_archive_path(&artifact_id.hash, &artifact_id.name);
 
     if source_archive_path.exists() {
         request_source_data_path = Some(source_archive_path);
@@ -232,9 +192,9 @@ pub async fn build(
     // Check if artifact source exists in worker store
 
     let worker_store_source = StoreRequest {
-        hash: artifact_hash.clone(),
+        hash: artifact_id.hash.clone(),
         kind: StoreKind::ArtifactSource as i32,
-        name: artifact.name.clone(),
+        name: artifact_id.name.clone(),
     };
 
     if request_source_data_path.is_none() {
@@ -242,17 +202,18 @@ pub async fn build(
             Ok(_) => {
                 print_source_cache(
                     &artifact.name,
-                    format!("{} => {}-{}", worker, artifact.name, artifact_hash).as_str(),
+                    format!("{} => {}-{}", worker, artifact_id.name, artifact_id.hash).as_str(),
                 );
             }
+
             Err(status) => {
                 if status.code() == NotFound {
                     let source_archive_path =
-                        get_source_archive_path(&artifact_hash, &artifact.name);
+                        get_source_archive_path(&artifact_id.hash, &artifact_id.name);
 
                     if !source_archive_path.exists() {
                         let mut sandbox_fetches = vec![];
-                        let mut sandbox_source_hashes = vec![];
+                        // let mut sandbox_source_hashes = vec![];
 
                         let sandbox_path = create_temp_dir().await?;
 
@@ -273,9 +234,9 @@ pub async fn build(
                                         bail!("Task error: {:?}", result);
                                     }
 
-                                    if let Ok(result) = result {
-                                        sandbox_source_hashes.push(result);
-                                    }
+                                    // if let Ok(result) = result {
+                                    //     sandbox_source_hashes.push(result);
+                                    // }
                                 }
 
                                 Err(e) => eprintln!("Task failed: {}", e),
@@ -324,14 +285,12 @@ pub async fn build(
 
                     for chunk in source_data.chunks(DEFAULT_CHUNKS_SIZE) {
                         request_stream.push(ArtifactBuildRequest {
-                            artifacts: artifact_outputs.clone(),
-                            environments: artifact.environments.clone(),
-                            name: artifact.name.clone(),
-                            sandbox: artifact_sandbox.clone(),
-                            script: artifact.script.clone(),
+                            artifacts: artifact.artifacts.clone(),
+                            hash: artifact_id.hash.clone(),
+                            name: artifact_id.name.clone(),
                             source_data: Some(chunk.to_vec()),
                             source_data_signature: Some(source_signature.to_vec()),
-                            source_hash: artifact_hash.clone(),
+                            steps: artifact.steps.clone(),
                             target: target as i32,
                         });
                     }
@@ -344,14 +303,12 @@ pub async fn build(
 
     if request_stream.is_empty() {
         request_stream.push(ArtifactBuildRequest {
-            artifacts: artifact_outputs.clone(),
-            environments: artifact.environments.clone(),
-            name: artifact.name.clone(),
-            sandbox: artifact_sandbox,
-            script: artifact.script.clone(),
+            artifacts: artifact.artifacts.clone(),
+            hash: artifact_id.hash.clone(),
+            name: artifact_id.name.clone(),
             source_data: None,
             source_data_signature: None,
-            source_hash: artifact_hash.clone(),
+            steps: artifact.steps.clone(),
             target: target as i32,
         });
     }
@@ -375,8 +332,5 @@ pub async fn build(
         }
     }
 
-    Ok(ArtifactId {
-        hash: artifact_hash,
-        name: artifact.name.clone(),
-    })
+    Ok(())
 }

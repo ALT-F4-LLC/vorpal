@@ -44,6 +44,7 @@ pub fn build_rust_artifact(
                 rustc = rustc.name.to_lowercase().replace("-", "_")
             ),
         }],
+        Some(artifact.cargo_hash.to_string()),
         format!("cache-{}", artifact.name),
         formatdoc! {"
             dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"store/src\" \"worker/src\")
@@ -74,7 +75,6 @@ pub fn build_rust_artifact(
         },
         vec![ArtifactSource {
             excludes: vec![],
-            hash: Some(artifact.cargo_hash.to_string()),
             includes: vec![
                 "Cargo.lock".to_string(),
                 "Cargo.toml".to_string(),
@@ -123,6 +123,7 @@ pub fn build_rust_artifact(
                 ),
             },
         ],
+        None,
         artifact.name.to_string(),
         formatdoc! {"
             cd {name}
@@ -142,7 +143,6 @@ pub fn build_rust_artifact(
         },
         vec![ArtifactSource {
             excludes: artifact_excludes,
-            hash: None,
             includes: vec![],
             name: artifact.name.to_string(),
             path: artifact.source.to_string(),

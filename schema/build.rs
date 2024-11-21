@@ -9,23 +9,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.artifact.v0.ArtifactId",
-            "#[derive(Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]",
-        )
-        .message_attribute(
             "vorpal.artifact.v0.ArtifactEnvironment",
             "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
+            "vorpal.artifact.v0.ArtifactId",
+            "#[derive(Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
             "vorpal.artifact.v0.ArtifactSandbox",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.artifact.v0.ArtifactSandboxPath",
+            "vorpal.artifact.v0.ArtifactSource",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.artifact.v0.ArtifactSource",
+            "vorpal.artifact.v0.ArtifactStep",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
