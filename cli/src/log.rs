@@ -64,13 +64,13 @@ pub fn print_source_url(artifact_name: &str, status: SourceStatus, url: &str) {
 //     );
 // }
 
-pub fn print_artifacts_list(artifact_name: &str, artifacts: &[String]) {
-    println!(
-        "{} Artifacts: {}",
-        format_artifact_name(artifact_name),
-        style(artifacts.join(", ")).cyan()
-    );
-}
+// pub fn print_artifacts_list(artifact_name: &str, artifacts: &[String]) {
+//     println!(
+//         "{} Artifacts: {}",
+//         format_artifact_name(artifact_name),
+//         style(artifacts.join(", ")).cyan()
+//     );
+// }
 
 pub fn print_artifact_hash(artifact_name: &str, artifact_hash: &str) {
     println!(

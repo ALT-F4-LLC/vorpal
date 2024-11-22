@@ -1,9 +1,11 @@
-use crate::{cross_platform::get_sed_cmd, ContextConfig};
-use anyhow::Result;
+use crate::ContextConfig;
+use anyhow::{bail, Result};
 use indoc::formatdoc;
+use std::path::Path;
 use vorpal_schema::vorpal::artifact::v0::{
     Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactStep,
 };
+use vorpal_store::{hashes::hash_files, paths::get_file_paths};
 
 pub mod cargo;
 pub mod language;
@@ -13,6 +15,45 @@ pub mod protoc;
 pub mod rust_std;
 pub mod rustc;
 pub mod zlib;
+
+// TODO: implement cache for sources
+
+pub fn new_source(
+    excludes: Vec<String>,
+    hash: Option<String>,
+    includes: Vec<String>,
+    name: String,
+    path: String,
+) -> Result<ArtifactSource> {
+    let source_path = Path::new(&path).to_path_buf();
+
+    if !source_path.exists() {
+        bail!("Artifact `source.{}.path` not found: {:?}", name, path);
+    }
+
+    let source_files = get_file_paths(&source_path, excludes.clone(), includes.clone())?;
+
+    let source_hash = hash_files(source_files)?;
+
+    if let Some(hash) = hash.clone() {
+        if hash != source_hash {
+            bail!(
+                "Artifact `source.{}.hash` mismatch: {} != {}",
+                name,
+                hash,
+                source_hash
+            );
+        }
+    }
+
+    Ok(ArtifactSource {
+        excludes,
+        hash: Some(source_hash),
+        includes,
+        name,
+        path,
+    })
+}
 
 pub fn step_env_artifact(artifact: &ArtifactId) -> String {
     let artifact_key = artifact.name.to_lowercase().replace("-", "_");

@@ -21,10 +21,11 @@ message ArtifactId {
 }
 
 message ArtifactSource {
-    repeated string excludes = 1;
-    repeated string includes = 2;
-    string name = 3;
-    string path = 4;
+    optional string hash = 1;
+    repeated string excludes = 2;
+    repeated string includes = 3;
+    string name = 4;
+    string path = 5;
 }
 
 message ArtifactStep {
@@ -35,12 +36,11 @@ message ArtifactStep {
 }
 
 message Artifact {
-    // optional string hash = 1;
-    repeated ArtifactId artifacts = 2;
-    repeated ArtifactSource sources = 3;
-    repeated ArtifactStep steps = 4;
-    repeated ArtifactSystem systems = 5;
-    string name = 6;
+    repeated ArtifactId artifacts = 1;
+    repeated ArtifactSource sources = 2;
+    repeated ArtifactStep steps = 3;
+    repeated ArtifactSystem systems = 4;
+    string name = 5;
 }
 
 message ArtifactBuildRequest {

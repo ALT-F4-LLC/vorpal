@@ -1,11 +1,14 @@
 use crate::worker::build;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
+use console::style;
 use port_selector::random_free_port;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
-use tokio::process;
-use tokio::process::Child;
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{process, process::Child};
+use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tonic::transport::Channel;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -39,12 +42,32 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
     command.args(["start", "--port", &port.to_string()]);
 
     let mut process = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|_| anyhow!("failed to start config server"))?;
 
-    // TODO: wait for output then proceed instead of sleeping
+    let stdout = process.stdout.take().unwrap();
+    let stderr = process.stderr.take().unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+    let stdout = LinesStream::new(BufReader::new(stdout).lines());
+    let stderr = LinesStream::new(BufReader::new(stderr).lines());
+
+    let mut stdio_merged = StreamExt::merge(stdout, stderr);
+
+    while let Some(line) = stdio_merged.next().await {
+        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
+
+        if line.contains("Worker server listening on") {
+            println!(
+                "{} {}",
+                style("Config:").bold().green(),
+                format!("http://localhost:{}", port)
+            );
+
+            break;
+        }
+    }
 
     let host = format!("http://localhost:{:?}", port);
 

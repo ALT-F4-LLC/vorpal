@@ -98,6 +98,8 @@ pub async fn listen(context: ContextConfig, config: Config, port: u16) -> Result
 
     let config_service = ConfigServiceServer::new(ConfigServer::new(context, config));
 
+    println!("Worker server listening on {}", addr);
+
     Server::builder()
         .add_service(config_service)
         .serve(addr)

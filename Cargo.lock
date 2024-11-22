@@ -2840,6 +2840,7 @@ dependencies = [
  "tonic",
  "tracing",
  "vorpal-schema",
+ "vorpal-store",
 ]
 
 [[package]]

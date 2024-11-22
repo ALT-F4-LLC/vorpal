@@ -1,15 +1,13 @@
 use crate::{
-    artifact::{build_artifact, cargo, get_sed_cmd, protoc, rustc, zlib},
+    artifact::{build_artifact, cargo, new_source, protoc, rustc, step_env_artifact, zlib},
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactSystem,
-};
+use vorpal_schema::vorpal::artifact::v0::{ArtifactEnvironment, ArtifactId, ArtifactSystem};
 
 pub struct ArtifactRust<'a> {
-    // pub cargo_hash: &'a str,
+    pub cargo_hash: &'a str,
     pub name: &'a str,
     pub source: &'a str,
     pub source_excludes: Vec<&'a str>,
@@ -31,9 +29,24 @@ pub fn build_rust_artifact(
         .map(|s| (*s).into())
         .collect::<Vec<i32>>();
 
-    let name_envkey = artifact.name.to_lowercase().replace("-", "_");
+    let cargo_vendor_source = new_source(
+        vec![],
+        Some(artifact.cargo_hash.to_string()),
+        vec![
+            "Cargo.lock".to_string(),
+            "Cargo.toml".to_string(),
+            "cli/Cargo.toml".to_string(),
+            "config/Cargo.toml".to_string(),
+            "notary/Cargo.toml".to_string(),
+            "schema/Cargo.toml".to_string(),
+            "store/Cargo.toml".to_string(),
+            "worker/Cargo.toml".to_string(),
+        ],
+        artifact.name.to_string(),
+        artifact.source.to_string(),
+    )?;
 
-    let artifact_cache = build_artifact(
+    let cargo_vendor = build_artifact(
         context,
         vec![cargo.clone(), rustc.clone()],
         vec![ArtifactEnvironment {
@@ -44,8 +57,7 @@ pub fn build_rust_artifact(
                 rustc = rustc.name.to_lowercase().replace("-", "_")
             ),
         }],
-        // Some(artifact.cargo_hash.to_string()),
-        format!("cache-{}", artifact.name),
+        format!("{}-cargo-vendor", artifact.name),
         formatdoc! {"
             dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"store/src\" \"worker/src\")
 
@@ -63,31 +75,14 @@ pub fn build_rust_artifact(
                 fi
             done
 
-            mkdir -p \"$output/vendor\"
+            mkdir -p \"$VORPAL_OUTPUT/vendor\"
 
-            export CARGO_VENDOR=$(cargo vendor --versioned-dirs $output/vendor)
-            echo \"$CARGO_VENDOR\" > \"$output/config.toml\"
+            export CARGO_VENDOR=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
-            {sed} \"s|$output|${envkey}|g\" \"$output/config.toml\"",
-            envkey = format!("cache_{}", name_envkey),
-            sed = get_sed_cmd(context.get_target())?,
+            echo \"$CARGO_VENDOR\" > \"$VORPAL_OUTPUT/config.toml\"",
             source = artifact.name,
         },
-        vec![ArtifactSource {
-            excludes: vec![],
-            includes: vec![
-                "Cargo.lock".to_string(),
-                "Cargo.toml".to_string(),
-                "cli/Cargo.toml".to_string(),
-                "config/Cargo.toml".to_string(),
-                "notary/Cargo.toml".to_string(),
-                "schema/Cargo.toml".to_string(),
-                "store/Cargo.toml".to_string(),
-                "worker/Cargo.toml".to_string(),
-            ],
-            name: artifact.name.to_string(),
-            path: artifact.source.to_string(),
-        }],
+        vec![cargo_vendor_source],
         systems.clone(),
     )?;
 
@@ -99,14 +94,22 @@ pub fn build_rust_artifact(
 
     artifact_excludes.extend(artifact.source_excludes.iter().map(|e| e.to_string()));
 
+    let artifact_source = new_source(
+        artifact_excludes.clone(),
+        None,
+        vec![],
+        artifact.name.to_string(),
+        artifact.source.to_string(),
+    )?;
+
     build_artifact(
         context,
         vec![
             cargo.clone(),
-            rustc.clone(),
+            cargo_vendor.clone(),
             protoc.clone(),
+            rustc.clone(),
             zlib.clone(),
-            artifact_cache,
         ],
         vec![
             ArtifactEnvironment {
@@ -129,23 +132,19 @@ pub fn build_rust_artifact(
 
             mkdir -p .cargo
 
-            ln -sv \"$cache_{name_envkey}/config.toml\" .cargo/config.toml
+            ln -sv \"${vendor_cache}/config.toml\" .cargo/config.toml
 
             cargo build --offline --release
+
             cargo test --offline --release
 
-            mkdir -p \"$output/bin\"
+            mkdir -p \"$VORPAL_OUTPUT/bin\"
 
-            cp -pr target/release/{name} $output/bin/{name}",
+            cp -pr target/release/{name} $VORPAL_OUTPUT/bin/{name}",
             name = artifact.name,
-            name_envkey = name_envkey,
+            vendor_cache = step_env_artifact(&cargo_vendor),
         },
-        vec![ArtifactSource {
-            excludes: artifact_excludes,
-            includes: vec![],
-            name: artifact.name.to_string(),
-            path: artifact.source.to_string(),
-        }],
+        vec![artifact_source],
         systems,
     )
 }

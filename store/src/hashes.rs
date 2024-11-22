@@ -4,6 +4,8 @@ use sha256::{digest, try_digest};
 use std::path::{Path, PathBuf};
 use vorpal_schema::vorpal::artifact::v0::ArtifactSource;
 
+// TODO: move hashing logic to config module
+
 pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String> {
     if !path.as_ref().is_file() {
         return Err(anyhow::anyhow!("Path is not a file"));
@@ -32,7 +34,7 @@ pub fn get_hashes_digest(hashes: Vec<String>) -> Result<String> {
     Ok(digest(combined))
 }
 
-pub async fn hash_files(paths: Vec<PathBuf>) -> Result<String> {
+pub fn hash_files(paths: Vec<PathBuf>) -> Result<String> {
     if paths.is_empty() {
         anyhow::bail!("no source files found")
     }
@@ -60,7 +62,7 @@ pub async fn get_artifact_hash(config_hash: &str, source: &[ArtifactSource]) -> 
 
         let source_files = get_file_paths(&path, source.excludes.clone(), source.includes.clone())?;
 
-        let source_hash = hash_files(source_files).await?;
+        let source_hash = hash_files(source_files)?;
 
         // if let Some(hash) = source.hash.clone() {
         //     if hash != source_hash {
