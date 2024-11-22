@@ -2,17 +2,156 @@ use crate::{cross_platform::get_sed_cmd, ContextConfig};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
-    Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource,
+    Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactStep,
 };
 
 pub mod cargo;
-pub mod cross_toolchain;
-pub mod cross_toolchain_rootfs;
 pub mod language;
+pub mod linux_debian;
+pub mod linux_vorpal;
 pub mod protoc;
 pub mod rust_std;
 pub mod rustc;
 pub mod zlib;
+
+pub fn step_env_artifact(artifact: &ArtifactId) -> String {
+    let artifact_key = artifact.name.to_lowercase().replace("-", "_");
+    format!("$VORPAL_ARTIFACT_{}", artifact_key).to_string()
+}
+
+pub fn run_bash_step(environments: Vec<ArtifactEnvironment>, script: String) -> ArtifactStep {
+    ArtifactStep {
+        arguments: vec![],
+        entrypoint: "/bin/bash".to_string(),
+        environments,
+        script: Some(formatdoc! {"
+            #!/bin/bash
+            set -euo pipefail
+
+            {script}",
+            script = script,
+        }),
+    }
+}
+
+pub fn run_bwrap_step(
+    arguments: Vec<String>,
+    artifacts: Vec<ArtifactId>,
+    environments: Vec<ArtifactEnvironment>,
+    rootfs: Option<String>,
+    script: String,
+) -> ArtifactStep {
+    let mut args = vec![
+        "--unshare-all".to_string(),
+        "--share-net".to_string(),
+        "--clearenv".to_string(),
+        "--chdir".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        "--gid".to_string(),
+        "1000".to_string(),
+        "--uid".to_string(),
+        "1000".to_string(),
+        "--dev".to_string(),
+        "/dev".to_string(),
+        "--proc".to_string(),
+        "/proc".to_string(),
+        "--tmpfs".to_string(),
+        "/tmp".to_string(),
+        "--bind".to_string(),
+        "$VORPAL_OUTPUT".to_string(),
+        "$VORPAL_OUTPUT".to_string(),
+        "--bind".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        "--setenv".to_string(),
+        "VORPAL_OUTPUT".to_string(),
+        "$VORPAL_OUTPUT".to_string(),
+        "--setenv".to_string(),
+        "VORPAL_WORKSPACE".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+    ];
+
+    if let Some(rootfs) = rootfs {
+        args = [
+            args,
+            vec![
+                // mount bin
+                "--ro-bind".to_string(),
+                format!("{}/bin", rootfs),
+                "/bin".to_string(),
+                // mount etc
+                "--ro-bind".to_string(),
+                format!("{}/etc", rootfs),
+                "/etc".to_string(),
+                // mount lib
+                "--ro-bind".to_string(),
+                format!("{}/lib", rootfs),
+                "/lib".to_string(),
+                // mount lib64 (if exists)
+                "--ro-bind-try".to_string(),
+                format!("{}/lib64", rootfs),
+                "/lib64".to_string(),
+                // mount sbin
+                "--ro-bind".to_string(),
+                format!("{}/sbin", rootfs),
+                "/sbin".to_string(),
+                // mount usr
+                "--ro-bind".to_string(),
+                format!("{}/usr", rootfs),
+                "/usr".to_string(),
+            ],
+        ]
+        .concat();
+    }
+
+    for artifact in artifacts {
+        // add read-only mounts
+        args.push("--ro-bind".to_string());
+        args.push(step_env_artifact(&artifact));
+        args.push(step_env_artifact(&artifact));
+
+        // add environment variables
+        args.push("--setenv".to_string());
+        args.push(step_env_artifact(&artifact).replace("$", ""));
+        args.push(step_env_artifact(&artifact));
+    }
+
+    for env in environments.clone() {
+        args.push("--setenv".to_string());
+        args.push(env.key.clone());
+        args.push(env.value.clone());
+    }
+
+    for arg in arguments {
+        args.push(arg);
+    }
+
+    // TODO: use amber instead of bash as a proof of concept
+
+    run_bash_step(
+        environments,
+        formatdoc! {"
+            cat > $VORPAL_WORKSPACE/bwrap.sh << \"EOS\"
+            #!/bin/bash
+            set -euo pipefail
+            {script}
+            EOS
+
+            chmod +x $VORPAL_WORKSPACE/bwrap.sh
+
+            {entrypoint} {arguments} $VORPAL_WORKSPACE/bwrap.sh",
+            entrypoint = "/usr/bin/bwrap",
+            arguments = args.join(" "),
+        },
+    )
+}
+
+pub fn run_docker_step(arguments: Vec<String>) -> ArtifactStep {
+    run_bash_step(
+        vec![],
+        format!("{} {}", "/usr/bin/docker", arguments.join(" ")),
+    )
+}
 
 pub fn build_artifact(
     context: &mut ContextConfig,
@@ -23,17 +162,21 @@ pub fn build_artifact(
     sources: Vec<ArtifactSource>,
     systems: Vec<i32>,
 ) -> Result<ArtifactId> {
-    let artifact_sandbox_rootfs = cross_toolchain_rootfs::artifact(context)?;
-    let artifact_sandbox = cross_toolchain::artifact(context, &artifact_sandbox_rootfs)?;
+    // Setup artifacts
 
-    // TODO: build artifacts from toolchain instead of using toolchain
+    let linux_debian = linux_debian::artifact(context)?;
+    let linux_vorpal = linux_vorpal::artifact(context, &linux_debian)?;
 
-    // Setup PATH variable
+    // TODO: build store based environment for builds
+
+    // Setup PATH default
 
     let path = ArtifactEnvironment {
         key: "PATH".to_string(),
         value: "/usr/bin:/usr/sbin".to_string(),
     };
+
+    // Setup environments
 
     let mut artifact_environments = vec![];
 
@@ -45,7 +188,10 @@ pub fn build_artifact(
         artifact_environments.push(env);
     }
 
-    let path_prev = environments.into_iter().find(|env| env.key == path.key);
+    let path_prev = environments
+        .clone()
+        .into_iter()
+        .find(|env| env.key == path.key);
 
     if let Some(prev) = path_prev {
         artifact_environments.push(ArtifactEnvironment {
@@ -53,34 +199,30 @@ pub fn build_artifact(
             value: format!("{}:{}", prev.value, path.value),
         });
     } else {
-        artifact_environments.push(path);
+        artifact_environments.push(path.clone());
     }
 
     // Setup artifacts
 
     let mut artifact_artifacts = vec![];
 
-    artifact_artifacts.push(artifact_sandbox.clone());
+    artifact_artifacts.push(linux_vorpal.clone());
 
     for artifact in artifacts {
         artifact_artifacts.push(artifact);
     }
 
-    let artifact = Artifact {
-        environments: artifact_environments,
+    context.add_artifact(Artifact {
+        artifacts: artifact_artifacts.clone(),
         name,
-        artifacts: artifact_artifacts,
-        sandbox: Some(artifact_sandbox.clone()),
-        script: formatdoc! {"
-            #!/bin/bash
-            set -euo pipefail
-
-            {script}",
-            script = script,
-        },
         sources,
+        steps: vec![run_bwrap_step(
+            vec![],
+            artifact_artifacts,
+            artifact_environments.clone(),
+            Some(step_env_artifact(&linux_vorpal)),
+            script,
+        )],
         systems,
-    };
-
-    context.add_artifact(artifact)
+    })
 }

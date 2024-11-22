@@ -1,4 +1,4 @@
-use crate::{log::connector_end, worker::build};
+use crate::worker::build;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
@@ -32,8 +32,7 @@ pub struct Cli {
 }
 
 async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channel>)> {
-    let port = random_free_port()
-        .ok_or_else(|| anyhow!("{} failed to find free port", connector_end()))?;
+    let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
 
     let mut command = process::Command::new(file);
 
@@ -130,17 +129,13 @@ async fn main() -> Result<()> {
             worker,
         } => {
             if worker.is_empty() {
-                bail!("{} no worker specified", connector_end());
+                bail!("no worker specified");
             }
 
             let artifact_system: ArtifactSystem = get_artifact_system(system);
 
             if artifact_system == UnknownSystem {
-                bail!(
-                    "{} unknown target: {}",
-                    connector_end(),
-                    artifact_system.as_str_name()
-                );
+                bail!("unknown target: {}", artifact_system.as_str_name());
             }
 
             setup_paths().await?;
@@ -148,10 +143,7 @@ async fn main() -> Result<()> {
             let private_key_path = get_private_key_path();
 
             if !private_key_path.exists() {
-                bail!(
-                    "{} private key not found - run 'vorpal keys generate' or copy from worker",
-                    connector_end()
-                );
+                bail!("private key not found - run 'vorpal keys generate' or copy from worker",);
             }
 
             let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
@@ -194,11 +186,7 @@ async fn main() -> Result<()> {
             let artifact_system: ArtifactSystem = get_artifact_system(system);
 
             if artifact_system == UnknownSystem {
-                bail!(
-                    "{} unknown target: {}",
-                    connector_end(),
-                    artifact_system.as_str_name()
-                );
+                bail!("unknown target: {}", artifact_system.as_str_name());
             }
 
             let (mut config_process, mut config_service) = start_config(file.to_string()).await?;

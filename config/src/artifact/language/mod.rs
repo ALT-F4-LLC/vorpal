@@ -9,7 +9,7 @@ use vorpal_schema::vorpal::artifact::v0::{
 };
 
 pub struct ArtifactRust<'a> {
-    pub cargo_hash: &'a str,
+    // pub cargo_hash: &'a str,
     pub name: &'a str,
     pub source: &'a str,
     pub source_excludes: Vec<&'a str>,
@@ -44,7 +44,7 @@ pub fn build_rust_artifact(
                 rustc = rustc.name.to_lowercase().replace("-", "_")
             ),
         }],
-        Some(artifact.cargo_hash.to_string()),
+        // Some(artifact.cargo_hash.to_string()),
         format!("cache-{}", artifact.name),
         formatdoc! {"
             dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"store/src\" \"worker/src\")
@@ -123,7 +123,6 @@ pub fn build_rust_artifact(
                 ),
             },
         ],
-        None,
         artifact.name.to_string(),
         formatdoc! {"
             cd {name}

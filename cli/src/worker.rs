@@ -1,6 +1,6 @@
 use crate::log::{
     print_artifact_archive, print_artifact_hash, print_artifact_log, print_artifact_output,
-    print_artifacts_list, print_source_cache, print_source_url, SourceStatus,
+    print_artifacts, print_source_cache, print_source_url, SourceStatus,
 };
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
@@ -169,10 +169,9 @@ pub async fn build(
             .artifacts
             .clone()
             .into_iter()
-            .map(|p| p.name)
-            .collect::<Vec<String>>();
+            .collect::<Vec<ArtifactId>>();
 
-        print_artifacts_list(&artifact.name, &artifact_list);
+        print_artifacts(&artifact_list);
     }
 
     // Setup artifact build request

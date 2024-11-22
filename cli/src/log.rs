@@ -2,70 +2,26 @@ use console::style;
 use std::path::Path;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
-pub static CONNECTOR_START: &str = "├─";
-
-pub static CONNECTOR_HALF: &str = "──";
-
-pub static CONNECTOR_END: &str = "└─";
-
 pub fn badge_success() -> String {
     style("[✓]").green().to_string()
 }
 
-pub fn connector_end() -> String {
-    style(CONNECTOR_END).dim().to_string()
+pub fn print_artifacts(build_order: &[ArtifactId]) {
+    println!("{}", style("Artifacts:").bold().green(),);
+
+    for artifact in build_order {
+        println!("- {}-{}", artifact.name, artifact.hash);
+    }
 }
-
-pub fn connector_half() -> String {
-    style(CONNECTOR_HALF).dim().to_string()
-}
-
-pub fn connector_start() -> String {
-    style(CONNECTOR_START).dim().to_string()
-}
-
-pub fn bold(text: &str) -> String {
-    style(text).bold().to_string()
-}
-
-pub fn print_build_order(build_order: &[ArtifactId]) {
-    let build_order = build_order
-        .iter()
-        .map(|p| p.name.clone())
-        .collect::<Vec<String>>();
-
-    println!(
-        "{} {} {}",
-        connector_start(),
-        bold("Building:"),
-        build_order.join(", "),
-    );
-}
-
-// pub fn print_config(file_path: &Path) {
-//     println!(
-//         "{} {} {} {}",
-//         connector_start(),
-//         bold("Config:"),
-//         file_path.display(),
-//         badge_success(),
-//     );
-// }
 
 pub fn format_artifact_name(artifact_name: &str) -> String {
-    format!(
-        "{}{} {} ➜",
-        connector_start(),
-        connector_half(),
-        style(artifact_name).bold().on_color256(238),
-    )
+    format!("{} ➜", style(artifact_name).bold().on_color256(238),)
 }
 
-pub fn print_artifacts(build_order: &[ArtifactId]) {
+pub fn print_artifacts_total(build_order: &[ArtifactId]) {
     println!(
-        "{} {} {} total",
-        style(CONNECTOR_START).dim(),
-        style("Artifacts:").bold(),
+        "{} {} artifacts",
+        style("Total:").bold().green(),
         style(build_order.len()),
     );
 }

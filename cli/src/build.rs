@@ -1,4 +1,4 @@
-use crate::log::{print_artifacts, print_build_order};
+use crate::log::{print_artifacts, print_artifacts_total};
 use anyhow::{bail, Result};
 use petgraph::algo::toposort;
 use petgraph::graphmap::DiGraphMap;
@@ -88,8 +88,7 @@ pub async fn load_config<'a>(
     artifacts_order.reverse();
 
     print_artifacts(&artifacts_order);
-
-    print_build_order(&artifacts_order);
+    print_artifacts_total(&artifacts_order);
 
     Ok((artifacts_map, artifacts_order))
 }

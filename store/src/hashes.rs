@@ -62,16 +62,16 @@ pub async fn get_artifact_hash(config_hash: &str, source: &[ArtifactSource]) -> 
 
         let source_hash = hash_files(source_files).await?;
 
-        if let Some(hash) = source.hash.clone() {
-            if hash != source_hash {
-                bail!(
-                    "Artifact `source.{}.hash` mismatch: {} != {}",
-                    source.name,
-                    hash,
-                    source_hash
-                );
-            }
-        }
+        // if let Some(hash) = source.hash.clone() {
+        //     if hash != source_hash {
+        //         bail!(
+        //             "Artifact `source.{}.hash` mismatch: {} != {}",
+        //             source.name,
+        //             hash,
+        //             source_hash
+        //         );
+        //     }
+        // }
 
         source_hashes.push(source_hash);
     }

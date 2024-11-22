@@ -26,9 +26,7 @@ impl ContextConfig {
 
     pub fn add_artifact(&mut self, artifact: Artifact) -> Result<ArtifactId> {
         let artifact_json = serde_json::to_string(&artifact).map_err(|e| anyhow::anyhow!(e))?;
-
         let artifact_hash = digest(artifact_json.as_bytes());
-
         let artifact_key = format!("{}-{}", artifact.name, artifact_hash);
 
         if !self.artifact.contains_key(&artifact_key) {

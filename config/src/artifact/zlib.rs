@@ -1,4 +1,7 @@
-use crate::{artifact::build_artifact, ContextConfig};
+use crate::{
+    artifact::{build_artifact, step_env_artifact},
+    ContextConfig,
+};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
@@ -24,7 +27,6 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         formatdoc! {"
             curl -L -o ./zlib-{version}.tar.gz \
                 https://zlib.net/fossils/zlib-{version}.tar.gz
-
             tar -xvf ./zlib-{version}.tar.gz -C $output --strip-components=1",
             version = "1.3.1",
         },
@@ -34,13 +36,13 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
 
     build_artifact(
         context,
-        vec![source],
+        vec![source.clone()],
         vec![],
         name.to_string(),
         formatdoc! {"
             mkdir -p ./zlib
 
-            rsync -av --progress $zlib_source/ .
+            cp -prv {zlib}/. .
 
             ./configure \
                 --prefix=\"$output/usr\"
@@ -49,7 +51,8 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
             make check
             make install
 
-            rm -fv $output/usr/lib/libz.a"
+            rm -fv $output/usr/lib/libz.a",
+            zlib = step_env_artifact(&source),
         },
         vec![],
         systems,
