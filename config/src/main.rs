@@ -1,7 +1,4 @@
-use crate::{
-    artifact::language::{build_rust_artifact, ArtifactRust},
-    service::ContextConfig,
-};
+use crate::{artifact::language::rust::build_artifact, service::ContextConfig};
 use anyhow::Result;
 use vorpal_schema::vorpal::{
     artifact::v0::ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
@@ -18,16 +15,16 @@ mod service;
 fn build_config(context: &mut ContextConfig) -> Result<Config> {
     // TODO: add any custom logic you want here
 
-    let vorpal_config = ArtifactRust {
-        cargo_hash: "2cbb5d0bed24fed6ab9cbce9b6ae12d03e09c6f0ee365af2e757a72d48339adb",
-        name: "vorpal",
-        source: ".",
-        source_excludes: vec![".env", ".packer", ".vagrant", "script"],
-        systems: vec![Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos],
-    };
+    // Define the Rust artifact parameters
+    let cargo_hash = "2cbb5d0bed24fed6ab9cbce9b6ae12d03e09c6f0ee365af2e757a72d48339adb";
+    let excludes = vec![".env", ".packer", ".vagrant", "script"];
+    let name = "vorpal";
+    let systems = vec![Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos];
 
-    let vorpal = build_rust_artifact(context, vorpal_config)?;
+    // Build the Rust artifact
+    let vorpal = build_artifact(context, cargo_hash, excludes, name, systems)?;
 
+    // Return the Config struct
     Ok(Config {
         artifacts: vec![vorpal],
     })

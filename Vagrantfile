@@ -15,6 +15,7 @@ Vagrant.configure("2") do |config|
       mkdir -p $HOME/vorpal
 
       rsync -aPW \
+        --delete \
         --exclude=".env" \
         --exclude=".git" \
         --exclude=".packer" \

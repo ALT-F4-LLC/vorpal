@@ -18,13 +18,15 @@ pub mod zlib;
 
 // TODO: implement cache for sources
 
-pub fn new_source(
+pub fn new_artifact_source(
     excludes: Vec<String>,
     hash: Option<String>,
     includes: Vec<String>,
     name: String,
     path: String,
 ) -> Result<ArtifactSource> {
+    // TODO: add support for downloading sources
+
     let source_path = Path::new(&path).to_path_buf();
 
     if !source_path.exists() {
@@ -175,6 +177,7 @@ pub fn run_bwrap_step(
             cat > $VORPAL_WORKSPACE/bwrap.sh << \"EOS\"
             #!/bin/bash
             set -euo pipefail
+
             {script}
             EOS
 
@@ -198,7 +201,7 @@ pub fn build_artifact(
     context: &mut ContextConfig,
     artifacts: Vec<ArtifactId>,
     environments: Vec<ArtifactEnvironment>,
-    name: String,
+    name: &str,
     script: String,
     sources: Vec<ArtifactSource>,
     systems: Vec<i32>,
@@ -215,6 +218,11 @@ pub fn build_artifact(
     let path = ArtifactEnvironment {
         key: "PATH".to_string(),
         value: "/usr/bin:/usr/sbin".to_string(),
+    };
+
+    let ssl_cert_file = ArtifactEnvironment {
+        key: "SSL_CERT_FILE".to_string(),
+        value: "/etc/ssl/certs/ca-certificates.crt".to_string(),
     };
 
     // Setup environments
@@ -243,6 +251,8 @@ pub fn build_artifact(
         artifact_environments.push(path.clone());
     }
 
+    artifact_environments.push(ssl_cert_file.clone());
+
     // Setup artifacts
 
     let mut artifact_artifacts = vec![];
@@ -255,7 +265,7 @@ pub fn build_artifact(
 
     context.add_artifact(Artifact {
         artifacts: artifact_artifacts.clone(),
-        name,
+        name: name.to_string(),
         sources,
         steps: vec![run_bwrap_step(
             vec![],

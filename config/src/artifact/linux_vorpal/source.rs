@@ -13,7 +13,7 @@ fn new_source_name(name: &str) -> String {
     format!("linux-vorpal-{}-source", name)
 }
 
-fn new_source(
+fn new_artifact_source(
     artifacts: Vec<ArtifactId>,
     name: String,
     rootfs: &ArtifactId,
@@ -40,7 +40,7 @@ fn new_source(
 }
 
 pub fn bash(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("bash"),
         rootfs,
@@ -55,7 +55,7 @@ pub fn bash(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn binutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("binutils"),
         rootfs,
@@ -70,7 +70,7 @@ pub fn binutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Arti
 }
 
 pub fn bison(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("bison"),
         rootfs,
@@ -85,7 +85,7 @@ pub fn bison(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifac
 }
 
 pub fn coreutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("coreutils"),
         rootfs,
@@ -100,7 +100,7 @@ pub fn coreutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Art
 }
 
 pub fn curl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("curl"),
         rootfs,
@@ -114,8 +114,23 @@ pub fn curl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
+pub fn curl_cacert(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![],
+        new_source_name("openssl-cacert"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o ./cacert.pem https://curl.se/ca/cacert.pem
+
+            mkdir -pv $VORPAL_OUTPUT/etc/ssl/certs
+
+            cp -pv ./cacert.pem $VORPAL_OUTPUT/etc/ssl/certs/ca-certificates.crt",
+        },
+    ))
+}
+
 pub fn diffutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("diffutils"),
         rootfs,
@@ -130,7 +145,7 @@ pub fn diffutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Art
 }
 
 pub fn file(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("file"),
         rootfs,
@@ -145,7 +160,7 @@ pub fn file(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn findutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("findutils"),
         rootfs,
@@ -160,7 +175,7 @@ pub fn findutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Art
 }
 
 pub fn gawk(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("gawk"),
         rootfs,
@@ -177,7 +192,7 @@ pub fn gawk(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn gcc(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("gcc"),
         rootfs,
@@ -202,7 +217,7 @@ pub fn gcc(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactI
 }
 
 pub fn gettext(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("gettext"),
         rootfs,
@@ -217,7 +232,7 @@ pub fn gettext(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artif
 }
 
 pub fn glibc_patch(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("glibc-patch"),
         rootfs,
@@ -236,7 +251,7 @@ pub fn glibc(
     glibc_patch: &ArtifactId,
     rootfs: &ArtifactId,
 ) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![glibc_patch.clone()],
         new_source_name("glibc"),
         rootfs,
@@ -256,7 +271,7 @@ pub fn glibc(
 }
 
 pub fn grep(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("grep"),
         rootfs,
@@ -271,7 +286,7 @@ pub fn grep(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn gzip(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("gzip"),
         rootfs,
@@ -285,8 +300,53 @@ pub fn gzip(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
+pub fn libidn2(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![],
+        new_source_name("libidn2"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o ./libidn2-{version}.tar.gz \
+                https://ftp.gnu.org/gnu/libidn/libidn2-{version}.tar.gz
+
+            tar -xvf ./libidn2-{version}.tar.gz -C $VORPAL_OUTPUT --strip-components=1",
+            version = "2.3.7",
+        },
+    ))
+}
+
+pub fn libpsl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![],
+        new_source_name("libpsl"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o ./libpsl-{version}.tar.gz \
+                https://github.com/rockdaboot/libpsl/releases/download/{version}/libpsl-{version}.tar.gz
+
+            tar -xvf ./libpsl-{version}.tar.gz -C $VORPAL_OUTPUT --strip-components=1",
+            version = "0.21.5",
+        },
+    ))
+}
+
+pub fn libunistring(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![],
+        new_source_name("libunistring"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o ./libunistring-{version}.tar.gz \
+                https://ftp.gnu.org/gnu/libunistring/libunistring-{version}.tar.xz
+
+            tar -xvf ./libunistring-{version}.tar.gz -C $VORPAL_OUTPUT --strip-components=1",
+            version = "1.2",
+        },
+    ))
+}
+
 pub fn linux_headers(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("linux-headers"),
         rootfs,
@@ -301,7 +361,7 @@ pub fn linux_headers(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result
 }
 
 pub fn m4(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("m4"),
         rootfs,
@@ -316,7 +376,7 @@ pub fn m4(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId
 }
 
 pub fn make(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("make"),
         rootfs,
@@ -331,7 +391,7 @@ pub fn make(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn ncurses(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("ncurses"),
         rootfs,
@@ -345,8 +405,23 @@ pub fn ncurses(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artif
     ))
 }
 
+pub fn openssl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![],
+        new_source_name("openssl"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o ./openssl-{version}.tar.gz \
+                https://www.openssl.org/source/openssl-{version}.tar.gz
+
+            tar -xvf ./openssl-{version}.tar.gz -C $VORPAL_OUTPUT --strip-components=1",
+            version = "3.3.1",
+        },
+    ))
+}
+
 pub fn patch(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("patch"),
         rootfs,
@@ -361,7 +436,7 @@ pub fn patch(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifac
 }
 
 pub fn perl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("perl"),
         rootfs,
@@ -375,7 +450,7 @@ pub fn perl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn python(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("python"),
         rootfs,
@@ -390,7 +465,7 @@ pub fn python(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifa
 }
 
 pub fn sed(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("sed"),
         rootfs,
@@ -405,7 +480,7 @@ pub fn sed(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactI
 }
 
 pub fn tar(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("tar"),
         rootfs,
@@ -420,7 +495,7 @@ pub fn tar(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactI
 }
 
 pub fn texinfo(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("texinfo"),
         rootfs,
@@ -434,8 +509,62 @@ pub fn texinfo(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artif
     ))
 }
 
+pub fn unzip_patch_fixes(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![],
+        new_source_name("unzip-patch-fixes"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o $VORPAL_OUTPUT/unzip-{version}-consolidated_fixes-1.patch \
+                https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-consolidated_fixes-1.patch",
+            version = "6.0",
+        },
+    ))
+}
+
+pub fn unzip_patch_gcc14(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![],
+        new_source_name("unzip-patch-gcc14"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o $VORPAL_OUTPUT/unzip-{version}-gcc14-1.patch \
+                https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-gcc14-1.patch",
+            version = "6.0",
+        },
+    ))
+}
+
+pub fn unzip(
+    context: &mut ContextConfig,
+    rootfs: &ArtifactId,
+    patch_fixes: &ArtifactId,
+    patch_gcc14: &ArtifactId,
+) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![patch_fixes.clone(), patch_gcc14.clone()],
+        new_source_name("unzip"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o ./unzip-{version}.tar.gz \
+                https://downloads.sourceforge.net/infozip/unzip{version}.tar.gz
+
+            tar -xvf ./unzip-{version}.tar.gz -C $VORPAL_OUTPUT --strip-components=1
+
+            pushd $VORPAL_OUTPUT
+
+            patch -Np1 -i {patch_fixes}/unzip-{patch_version}-consolidated_fixes-1.patch
+            patch -Np1 -i {patch_gcc14}/unzip-{patch_version}-gcc14-1.patch",
+            patch_fixes = step_env_artifact(patch_fixes),
+            patch_gcc14 = step_env_artifact(patch_gcc14),
+            patch_version = "6.0",
+            version = "60",
+        },
+    ))
+}
+
 pub fn util_linux(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("util-linux"),
         rootfs,
@@ -450,7 +579,7 @@ pub fn util_linux(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Ar
 }
 
 pub fn xz(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_source(
+    context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("xz"),
         rootfs,
@@ -460,6 +589,21 @@ pub fn xz(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId
 
             tar -xvf ./xz-{version}.tar.xz -C $VORPAL_OUTPUT --strip-components=1",
             version = "5.6.2",
+        },
+    ))
+}
+
+pub fn zlib(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+    context.add_artifact(new_artifact_source(
+        vec![],
+        new_source_name("zlib"),
+        rootfs,
+        formatdoc! {"
+            curl -L -o ./zlib-{version}.tar.gz \
+                https://zlib.net/fossils/zlib-{version}.tar.gz
+
+            tar -xvf ./zlib-{version}.tar.gz -C $VORPAL_OUTPUT --strip-components=1",
+            version = "1.3.1",
         },
     ))
 }

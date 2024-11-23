@@ -601,14 +601,26 @@ pub fn generate(
 }
 
 pub fn generate_post(
-    bison_source: &ArtifactId,
-    gettext_source: &ArtifactId,
-    perl_source: &ArtifactId,
-    python_source: &ArtifactId,
-    texinfo_source: &ArtifactId,
-    util_linux_source: &ArtifactId,
+    bison: &ArtifactId,
+    curl: &ArtifactId,
+    curl_cacert: &ArtifactId,
+    gettext: &ArtifactId,
+    libidn2: &ArtifactId,
+    libpsl: &ArtifactId,
+    libunistring: &ArtifactId,
+    openssl: &ArtifactId,
+    perl: &ArtifactId,
+    python: &ArtifactId,
+    texinfo: &ArtifactId,
+    unzip: &ArtifactId,
+    util_linux: &ArtifactId,
+    zlib: &ArtifactId,
 ) -> String {
     formatdoc! {"
+        ## Setup environment
+
+        export MAKEFLAGS=\"-j$(nproc)\"
+
         ## Setup system directories
 
         mkdir -pv /{{boot,home,mnt,opt,srv}}
@@ -797,16 +809,150 @@ pub fn generate_post(
         popd
         rm -rf ./util-linux
 
+        ## Build zlib
+
+        mkdir -pv ./zlib
+        pushd ./zlib
+
+        {zlib}/configure \
+            --prefix=\"/usr\"
+
+        make
+        # make check
+        make install
+
+        rm -fv /usr/lib/libz.a
+
+        popd
+        rm -rf ./zlib
+
+        ## Build openssl
+
+        mkdir -pv ./openssl
+        pushd ./openssl
+
+        {openssl}/config \
+            --prefix=\"/usr\" \
+            --openssldir=\"/etc/ssl\" \
+            --libdir=\"lib\" \
+            shared \
+            zlib-dynamic
+
+        make
+
+        # HARNESS_JOBS=$(nproc) make test
+
+        sed -i '/INSTALL_LIBS/s/libcrypto.a libssl.a//' Makefile
+
+        make MANSUFFIX=ssl install
+
+        mv -v /usr/share/doc/openssl /usr/share/doc/openssl-3.3.1
+        cp -vfr doc/* /usr/share/doc/openssl-3.3.1
+
+        popd
+        rm -rf ./openssl
+
+        ## END OF STANDARD
+        ## START OF EXTRAS
+
+        ## Build libunistring
+
+        mkdir -pv ./libunistring
+        pushd ./libunistring
+
+        {libunistring}/configure \
+            --prefix=\"/usr\" \
+            --disable-static \
+            --docdir=\"/usr/share/doc/libunistring-1.2\"
+
+        make
+        make install
+
+        popd
+        rm -rf ./libunistring
+
+        ## Build libidn2
+
+        mkdir -pv ./libidn2
+        pushd ./libidn2
+
+        {libidn2}/configure \
+            --prefix=\"/usr\" \
+            --disable-static
+
+        make
+        make install
+
+        popd
+        rm -rf ./libidn2
+
+        ## Build libpsl
+
+        mkdir -pv ./libpsl
+        pushd ./libpsl
+
+        {libpsl}/configure --prefix=\"/usr\"
+
+        make
+        make install
+
+        popd
+        rm -rf ./libpsl
+
+        ## Build CA certificates
+
+        cp -pv {curl_cacert}/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+        ## Build curl
+
+        mkdir -pv ./curl
+        pushd ./curl
+
+        {curl}/configure \
+            --prefix=\"/usr\" \
+            --disable-static \
+            --with-openssl \
+            --enable-threaded-resolver \
+            --with-ca-path=\"/etc/ssl/certs\"
+
+        make
+        make install
+
+        popd
+        rm -rf ./curl
+
+        ## Build unzip
+
+        mkdir -pv ./unzip
+        cp -prv {unzip}/. unzip/
+        pushd ./unzip
+
+        make -f unix/Makefile generic
+
+        make prefix=/usr MANDIR=/usr/share/man/man1 \
+            -f unix/Makefile install
+
+        popd
+        rm -rf ./unzip
+
         ## Cleanup
 
         rm -rfv /usr/share/{{info,man,doc}}/*
 
         find /usr/{{lib,libexec}} -name \\*.la -delete",
-        bison = step_env_artifact(&bison_source),
-        gettext = step_env_artifact(&gettext_source),
-        perl = step_env_artifact(&perl_source),
-        python = step_env_artifact(&python_source),
-        texinfo = step_env_artifact(&texinfo_source),
-        util_linux = step_env_artifact(&util_linux_source),
+        bison = step_env_artifact(&bison),
+        curl = step_env_artifact(&curl),
+        curl_cacert = step_env_artifact(&curl_cacert),
+        gettext = step_env_artifact(&gettext),
+        libidn2 = step_env_artifact(&libidn2),
+        libpsl = step_env_artifact(&libpsl),
+        libunistring = step_env_artifact(&libunistring),
+        openssl = step_env_artifact(&openssl),
+        perl = step_env_artifact(&perl),
+        python = step_env_artifact(&python),
+        texinfo = step_env_artifact(&texinfo),
+        unzip = step_env_artifact(&unzip),
+        util_linux = step_env_artifact(&util_linux),
+        zlib = step_env_artifact(&zlib),
     }
 }

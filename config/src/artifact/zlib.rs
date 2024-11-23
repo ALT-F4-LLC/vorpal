@@ -23,11 +23,11 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         context,
         vec![],
         vec![],
-        format!("{}-source", name),
+        format!("{}-source", name).as_str(),
         formatdoc! {"
             curl -L -o ./zlib-{version}.tar.gz \
                 https://zlib.net/fossils/zlib-{version}.tar.gz
-            tar -xvf ./zlib-{version}.tar.gz -C $output --strip-components=1",
+            tar -xvf ./zlib-{version}.tar.gz -C $VORPAL_OUTPUT --strip-components=1",
             version = "1.3.1",
         },
         vec![],
@@ -38,20 +38,20 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         context,
         vec![source.clone()],
         vec![],
-        name.to_string(),
+        name,
         formatdoc! {"
             mkdir -p ./zlib
 
             cp -prv {zlib}/. .
 
             ./configure \
-                --prefix=\"$output/usr\"
+                --prefix=\"$VORPAL_OUTPUT/usr\"
 
             make
             make check
             make install
 
-            rm -fv $output/usr/lib/libz.a",
+            rm -fv $VORPAL_OUTPUT/usr/lib/libz.a",
             zlib = step_env_artifact(&source),
         },
         vec![],

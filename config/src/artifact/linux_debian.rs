@@ -1,5 +1,5 @@
 use crate::{
-    artifact::{new_source, run_bash_step, run_docker_step, step_env_artifact},
+    artifact::{new_artifact_source, run_bash_step, run_docker_step, step_env_artifact},
     ContextConfig,
 };
 use anyhow::Result;
@@ -17,7 +17,7 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
 
     let systems = vec![Aarch64Linux.into(), X8664Linux.into()];
 
-    let artifact_source = new_source(
+    let source = new_artifact_source(
         vec![],
         None,
         vec![
@@ -28,10 +28,10 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         ".".to_string(),
     )?;
 
-    let artifact_source = context.add_artifact(Artifact {
+    let source = context.add_artifact(Artifact {
         artifacts: vec![],
         name: "linux-debian-source".to_string(),
-        sources: vec![artifact_source.clone()],
+        sources: vec![source.clone()],
         steps: vec![run_bash_step(
             environments.clone(),
             "cp -prv $VORPAL_WORKSPACE/source/docker/. $VORPAL_OUTPUT/".to_string(),
@@ -39,8 +39,10 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         systems: systems.clone(),
     })?;
 
+    let image_tag = format!("altf4llc/debin:{}", source.hash);
+
     context.add_artifact(Artifact {
-        artifacts: vec![artifact_source.clone()],
+        artifacts: vec![source.clone()],
         name: "linux-debian".to_string(),
         sources: vec![],
         steps: vec![
@@ -48,22 +50,22 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
                 "buildx".to_string(),
                 "build".to_string(),
                 "--progress=plain".to_string(),
-                "--tag=altf4llc/debian:latest".to_string(),
-                step_env_artifact(&artifact_source),
+                format!("--tag={}", image_tag),
+                step_env_artifact(&source),
             ]),
             run_docker_step(vec![
                 "container".to_string(),
                 "create".to_string(),
                 "--name".to_string(),
-                artifact_source.clone().hash.to_string(),
-                "altf4llc/debian:latest".to_string(),
+                source.clone().hash.to_string(),
+                image_tag.clone(),
             ]),
             run_docker_step(vec![
                 "container".to_string(),
                 "export".to_string(),
                 "--output".to_string(),
                 "$VORPAL_WORKSPACE/debian.tar".to_string(),
-                artifact_source.hash.to_string(),
+                source.hash.to_string(),
             ]),
             run_bash_step(
                 environments.clone(),
@@ -76,13 +78,13 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
                 "container".to_string(),
                 "rm".to_string(),
                 "--force".to_string(),
-                artifact_source.hash.to_string(),
+                source.hash.to_string(),
             ]),
             run_docker_step(vec![
                 "image".to_string(),
                 "rm".to_string(),
                 "--force".to_string(),
-                "altf4llc/debian:latest".to_string(),
+                image_tag,
             ]),
         ],
         systems,
