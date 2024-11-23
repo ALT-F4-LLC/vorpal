@@ -82,7 +82,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
-          path: dist/
+          path: dist
 
       - uses: actions/cache/save@v4
         with:
@@ -92,7 +92,6 @@ jobs:
   test:
     needs:
       - package
-      - package-rootfs
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
