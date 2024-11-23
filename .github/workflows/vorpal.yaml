@@ -108,13 +108,16 @@ jobs:
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
+      - run: mkdir -pv ./dist
+
       - uses: actions/download-artifact@v4
         with:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
+          path: dist
 
       - run: |
           ls -alh
-          mkdir -pv ./dist
+          ls -alh ./dist
           tar -xzvf ./vorpal-dist-${ARCH}-${OS}.tar.gz -C ./dist
 
       - run: |

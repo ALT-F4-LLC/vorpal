@@ -17,14 +17,10 @@ clean-cargo:
 clean-dist:
 	rm -rfv $(DIST_DIR)
 
-clean-rootfs:
-	docker container rm --force vorpal-rootfs-export
-	rm -rfv $(WORK_DIR)/rootfs
-
 clean-vagrant:
 	vagrant destroy --force
 
-clean: clean-cargo clean-dist clean-rootfs clean-vagrant
+clean: clean-cargo clean-dist clean-vagrant
 
 check:
 	cargo check $(CARGO_FLAGS)
@@ -38,27 +34,13 @@ lint:
 build:
 	cargo build $(CARGO_FLAGS)
 
-build-rootfs:
-	mkdir -pv $(WORK_DIR)/rootfs
-	docker buildx build --load --progress=plain --tag 'altf4llc/vorpal-rootfs:latest' .
-	docker container create --name vorpal-rootfs-export 'altf4llc/vorpal-rootfs:latest'
-	docker export vorpal-rootfs-export | gzip -v > $(WORK_DIR)/rootfs/$(ARCH)-export.tar.gz
-	mkdir -pv $(WORK_DIR)/rootfs/$(ARCH)
-	tar -xvf $(WORK_DIR)/rootfs/$(ARCH)-export.tar.gz -C $(WORK_DIR)/rootfs/$(ARCH)
-	echo 'nameserver 1.1.1.1' > $(WORK_DIR)/rootfs/$(ARCH)/etc/resolv.conf
-
 test:
 	cargo test $(CARGO_FLAGS)
 
-dist: clean-cargo build
+dist: build
 	mkdir -pv $(DIST_DIR)
 	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
 		-C $(WORK_DIR)/target/$(TARGET) vorpal vorpal-config
-
-dist-rootfs: clean-rootfs build-rootfs
-	mkdir -pv $(DIST_DIR)
-	tar -czvf $(DIST_DIR)/vorpal-rootfs-$(ARCH).tar.gz \
-		-C $(WORK_DIR)/rootfs/$(ARCH) --strip-components=1 .
 
 # Development (virtual)
 
