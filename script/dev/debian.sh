@@ -9,10 +9,14 @@ sudo apt-get install --yes \
     curl \
     unzip
 
-curl -fsSL https://get.docker.com -o ./get-docker.sh
+if ! command -v docker &> /dev/null; then
+    echo "Docker not found. Installing Docker..."
 
-sudo sh ./get-docker.sh
+    curl -fsSL https://get.docker.com -o ./get-docker.sh
 
-rm ./get-docker.sh
+    sudo sh ./get-docker.sh
 
-sudo usermod -aG docker "${USER}"
+    rm ./get-docker.sh
+
+    sudo usermod -aG docker "${USER}"
+fi

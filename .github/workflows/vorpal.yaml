@@ -81,33 +81,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
-          path: dist/vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
+          name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
+          path: dist/
 
       - uses: actions/cache/save@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
-
-  package-rootfs:
-    needs:
-      - code-quality
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        runner:
-          - ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: make dist-rootfs
-
-      - run: echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: vorpal-rootfs-${{ env.ARCH }}
-          path: dist/vorpal-rootfs-${{ env.ARCH }}.tar.gz
 
   test:
     needs:
@@ -129,26 +109,20 @@ jobs:
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - run: mkdir -pv ./dist
-
       - uses: actions/download-artifact@v4
         with:
-          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
-          path: ./dist
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: vorpal-rootfs-${{ env.ARCH }}
-          path: ./dist
-
-      - run: tar -xzvf ./dist/vorpal-${ARCH}-${OS}.tar.gz -C ./dist
+          name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
 
       - run: |
-          sudo mkdir -p /vorpal
-          sudo chown -R $(id -u):$(id -g) /vorpal
+          mkdir -pv ./dist
+          tar -xzvf ./vorpal-dist-${ARCH}-${OS}.tar.gz -C ./dist
+
+      - run: |
+          sudo mkdir -p /var/lib/vorpal
+          sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
 
       - run: ./dist/vorpal keys generate
-      - run: ./dist/vorpal config --file "./dist/vorpal-config" --package "vorpal"
+      - run: ./dist/vorpal config --artifact "vorpal" --file "./dist/vorpal-config"
 
       - run: |
           ./dist/vorpal worker start > worker_output.log 2>&1 &
@@ -156,7 +130,7 @@ jobs:
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
-      - run: ./dist/vorpal build --file "./dist/vorpal-config" --package "vorpal"
+      - run: ./dist/vorpal build --artifact "vorpal" --file "./dist/vorpal-config"
 
       - if: always()
         run: |
