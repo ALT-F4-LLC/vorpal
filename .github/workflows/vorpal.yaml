@@ -113,6 +113,7 @@ jobs:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
 
       - run: |
+          ls -alh
           mkdir -pv ./dist
           tar -xzvf ./vorpal-dist-${ARCH}-${OS}.tar.gz -C ./dist
 
@@ -133,8 +134,8 @@ jobs:
 
       - if: always()
         run: |
-          cat worker_output.log
-          kill $WORKER_PID
+          cat worker_output.log || true
+          kill $WORKER_PID || true
 
   # release:
   #   needs:
