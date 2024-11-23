@@ -49,6 +49,7 @@ async fn send(tx: &Sender<Result<ArtifactBuildResponse, Status>>, output: String
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_step(
     arguments: Vec<String>,
     artifact_path: &Path,

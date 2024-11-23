@@ -14,7 +14,6 @@ pub mod linux_vorpal;
 pub mod protoc;
 pub mod rust_std;
 pub mod rustc;
-pub mod zlib;
 
 // TODO: implement cache for sources
 

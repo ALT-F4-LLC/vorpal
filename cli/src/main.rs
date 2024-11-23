@@ -55,21 +55,16 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
 
     let mut stdio_merged = StreamExt::merge(stdout, stderr);
 
+    let host = format!("http://localhost:{:?}", port);
+
     while let Some(line) = stdio_merged.next().await {
         let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
 
         if line.contains("Worker server listening on") {
-            println!(
-                "{} {}",
-                style("Config:").bold().green(),
-                format!("http://localhost:{}", port)
-            );
-
+            println!("{} {}", style("Config:").bold().green(), host);
             break;
         }
     }
-
-    let host = format!("http://localhost:{:?}", port);
 
     let service = match ConfigServiceClient::connect(host).await {
         Ok(srv) => srv,
@@ -183,7 +178,7 @@ async fn main() -> Result<()> {
                     None => bail!("Build artifact not found: {}", id.name),
                     Some(artifact) => {
                         for a in &artifact.artifacts {
-                            if artifacts_ids.get(&a.name).is_none() {
+                            if !artifacts_ids.contains_key(&a.name) {
                                 bail!("Artifact not found: {}", a.name);
                             }
                         }

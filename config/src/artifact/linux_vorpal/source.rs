@@ -19,7 +19,7 @@ fn new_artifact_source(
     rootfs: &ArtifactId,
     script: String,
 ) -> Artifact {
-    let artifacts = vec![artifacts.clone(), vec![rootfs.clone()]].concat();
+    let artifacts = [artifacts.clone(), vec![rootfs.clone()]].concat();
 
     Artifact {
         artifacts: artifacts.clone(),

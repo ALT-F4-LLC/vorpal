@@ -36,13 +36,13 @@ pub fn print_source_cache(artifact_name: &str, source_cache: &str) {
 }
 
 pub enum SourceStatus {
-    Complete,
+    // Complete,
     Pending,
 }
 
 pub fn print_source_url(artifact_name: &str, status: SourceStatus, url: &str) {
     let badge = match status {
-        SourceStatus::Complete => style("[✓]").green(),
+        // SourceStatus::Complete => style("[✓]").green(),
         SourceStatus::Pending => style("[…]").color256(208),
     };
 

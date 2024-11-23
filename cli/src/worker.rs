@@ -76,7 +76,7 @@ pub async fn build(
     let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_path.exists() {
-        print_artifact_output(&artifact_id.name, &artifact_id);
+        print_artifact_output(&artifact_id.name, artifact_id);
 
         return Ok(());
     }
@@ -94,7 +94,7 @@ pub async fn build(
 
         print_artifact_archive(&artifact.name, &artifact_archive_path);
 
-        print_artifact_output(&artifact.name, &artifact_id);
+        print_artifact_output(&artifact.name, artifact_id);
 
         return Ok(());
     }
