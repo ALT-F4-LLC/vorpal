@@ -2,6 +2,7 @@ FROM docker.io/library/debian:sid-slim@sha256:7bee69f270ab968dbb059bd9b33100503b
 
 RUN ARCH=$(uname -m) \
     && if [ "${ARCH}" = "aarch64" ]; then ARCH="arm64"; fi \
+    && if [ "${ARCH}" = "x86_64" ]; then ARCH="amd64"; fi \
     && echo "Current architecture: ${ARCH}" \
     && apt-get update \
     && apt-get install --yes \
