@@ -1,8 +1,7 @@
-use anyhow::Result;
+use anyhow::{bail, Error, Result};
+use filetime::{set_file_times, FileTime};
 use std::path::{Path, PathBuf};
-use tokio::fs::{copy, create_dir_all};
-use tokio::fs::{write, File};
-use tokio::io::AsyncReadExt;
+use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use tracing::info;
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -39,7 +38,7 @@ pub fn get_public_key_path() -> PathBuf {
     get_key_dir_path().join("public").with_extension("pem")
 }
 
-// Input paths - "/var/lib/vorpal/store/{hash}.input"
+// Input paths - "/vorpal/store/{hash}.input"
 
 pub fn get_input_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
@@ -53,21 +52,27 @@ pub fn get_input_archive_path(hash: &str, name: &str) -> PathBuf {
         .with_extension("input.tar.zst")
 }
 
-// Package paths - "/var/lib/vorpal/store/{hash}.package"
+// Artifact paths - "/vorpal/store/{hash}.artifact"
 
-pub fn get_package_path(hash: &str, name: &str) -> PathBuf {
+pub fn get_artifact_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
         .join(get_store_dir_name(hash, name))
-        .with_extension("package")
+        .with_extension("artifact")
 }
 
-pub fn get_package_archive_path(hash: &str, name: &str) -> PathBuf {
+pub fn get_artifact_archive_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
         .join(get_store_dir_name(hash, name))
-        .with_extension("package.tar.zst")
+        .with_extension("artifact.tar.zst")
 }
 
-// Source paths - "/var/lib/vorpal/store/{hash}.source"
+pub fn get_artifact_lock_path(hash: &str, name: &str) -> PathBuf {
+    get_store_dir_path()
+        .join(get_store_dir_name(hash, name))
+        .with_extension("artifact.lock")
+}
+
+// Source paths - "/vorpal/store/{hash}.source"
 
 pub fn get_source_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
@@ -130,90 +135,95 @@ pub fn get_file_paths(
     files.sort();
 
     if files.is_empty() {
-        return Err(anyhow::anyhow!("no files found"));
+        bail!("no files found");
     }
 
     Ok(files)
+}
+
+pub async fn set_paths_timestamps(target_files: &[PathBuf]) -> Result<(), Error> {
+    for path in target_files {
+        let epoc = FileTime::from_unix_time(0, 0);
+        set_file_times(path, epoc, epoc).expect("Failed to set file times");
+    }
+
+    Ok(())
 }
 
 pub async fn copy_files(
     source_path: &PathBuf,
     source_path_files: Vec<PathBuf>,
     destination_path: &Path,
-) -> Result<(), anyhow::Error> {
+) -> Result<()> {
     if source_path_files.is_empty() {
-        return Err(anyhow::anyhow!("no source files found"));
+        bail!("no source files found");
     }
 
     for src in &source_path_files {
-        if src.is_dir() {
-            let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
-            create_dir_all(dest).await?;
-            continue;
+        if src.display().to_string().ends_with(".tar.zst") {
+            bail!("source file is a tar.zst archive");
         }
 
-        if src.display().to_string().ends_with(".tar.zst") {
-            anyhow::bail!("source file is a tar.zst archive");
+        if !src.exists() {
+            bail!("source file not found: {:?}", src);
         }
+
+        let metadata = metadata(src).await.expect("failed to read metadata");
 
         let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
 
-        copy(src, dest).await?;
+        if metadata.is_dir() {
+            create_dir_all(dest).await.expect("create directory fail");
+        } else if metadata.is_file() {
+            let parent = dest.parent().expect("failed to get parent directory");
+            if !parent.exists() {
+                create_dir_all(parent)
+                    .await
+                    .expect("create parent directory fail");
+            }
+
+            copy(src, dest).await.expect("copy file fail");
+        } else if metadata.is_symlink() {
+            symlink(src, dest).await.expect("symlink file fail");
+        } else {
+            bail!("source file is not a file or directory: {:?}", src);
+        }
     }
+
+    let artifact_paths = get_file_paths(&destination_path.to_path_buf(), vec![], vec![])?;
+
+    set_paths_timestamps(&artifact_paths).await?;
 
     Ok(())
 }
 
-pub async fn setup_paths() -> Result<(), anyhow::Error> {
+pub async fn setup_paths() -> Result<()> {
     let key_path = get_key_dir_path();
     if !key_path.exists() {
-        create_dir_all(&key_path).await?;
+        create_dir_all(&key_path)
+            .await
+            .expect("failed to create key directory");
     }
 
     info!("keys path: {:?}", key_path);
 
     let sandbox_path = get_sandbox_dir_path();
     if !sandbox_path.exists() {
-        create_dir_all(&sandbox_path).await?;
+        create_dir_all(&sandbox_path)
+            .await
+            .expect("failed to create sandbox directory");
     }
 
     info!("sandbox path: {:?}", sandbox_path);
 
     let store_path = get_store_dir_path();
     if !store_path.exists() {
-        create_dir_all(&store_path).await?;
+        create_dir_all(&store_path)
+            .await
+            .expect("failed to create store directory");
     }
 
     info!("store path: {:?}", store_path);
-
-    Ok(())
-}
-
-pub async fn replace_path_in_files(from_path: &Path, to_path: &Path) -> Result<()> {
-    let from = from_path.display().to_string();
-    let to = to_path.display().to_string();
-
-    for entry in WalkDir::new(from_path) {
-        let entry = entry?;
-
-        if entry.file_type().is_file() {
-            let path = entry.path();
-            let mut file = File::open(path).await?;
-            let mut content = Vec::new();
-
-            file.read_to_end(&mut content).await?;
-
-            if let Ok(prev) = String::from_utf8(content) {
-                let next = prev.replace(&from, &to);
-
-                if next != prev {
-                    write(path, next).await?;
-                }
-            } else {
-                continue;
-            }
-        }
-    }
 
     Ok(())
 }

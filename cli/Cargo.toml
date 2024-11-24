@@ -13,6 +13,8 @@ async-compression = { default-features = false, version = "0" }
 clap = { default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], version = "4" }
 console = { default-features = false, version = "0" }
 infer = { default-features = false, version = "0" }
+petgraph = { default-features = false, features = ["graphmap"], version = "0" }
+port-selector = { version = "0" }
 reqwest = { default-features = false, features = ["json", "rustls-tls"], version = "0" }
 serde_json = { default-features = false, version = "1" }
 sha256 = { default-features = false, version = "1" }

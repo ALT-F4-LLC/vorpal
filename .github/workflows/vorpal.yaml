@@ -6,55 +6,49 @@ on:
     branches:
       - main
 
-env:
-  RUST_VERSION: 1.80.1
-
 jobs:
-  cache-dev:
+  dev:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         runner:
           - macos-latest
           - ubuntu-latest
-          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh which nickel
-      - run: ./dev.sh which protoc
+      - run: ./script/dev.sh
 
       - uses: actions/cache/save@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
   code-quality:
     needs:
-      - cache-dev
+      - dev
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
       - uses: actions/cache/restore@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh make format
-      - run: ./dev.sh make lint
+      - run: ./script/dev.sh # prebake
+      - run: ./script/dev.sh make format
+      - run: ./script/dev.sh make lint
 
   package:
     needs:
@@ -65,22 +59,21 @@ jobs:
         runner:
           - macos-latest
           - ubuntu-latest
-          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
+          key: dev-env-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('script/dev.sh', 'script/dev/**') }}
+          path: .env
 
       - uses: actions/cache/restore@v4
         with:
           key: package-target-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
-      - run: ./dev.sh # prebake
-      - run: ./dev.sh make dist
+      - run: ./script/dev.sh # prebake
+      - run: ./script/dev.sh make dist
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -88,8 +81,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
-          path: vorpal-${{ env.ARCH }}-${{ env.OS }}.tar.gz
+          name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
+          path: dist
 
       - uses: actions/cache/save@v4
         with:
@@ -104,19 +97,12 @@ jobs:
       matrix:
         runner:
           - macos-latest
-          # - ubuntu-latest
-          # - ubuntu-latest-arm64
+          - ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/cache/restore@v4
-        with:
-          key: cache-dev-deps-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('dev.sh') }}
-          path: deps
-
-      - run: echo "$PWD/deps/nickel/bin" >> $GITHUB_PATH
-
-      - run: which nickel
+      - if: matrix.runner == 'ubuntu-latest'
+        run: ./script/dev/debian.sh
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -124,30 +110,31 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: vorpal-${{ env.ARCH }}-${{ env.OS }}
+          name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
 
-      - run: tar -xzf "vorpal-${ARCH}-${OS}.tar.gz"
+      - run: |
+          mkdir -pv ./dist
+          tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
 
       - run: |
           sudo mkdir -p /var/lib/vorpal
           sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
 
-      - run: ./vorpal keys generate
-
-      - run: ./vorpal validate
+      - run: ./dist/vorpal keys generate
+      - run: ./dist/vorpal config --artifact "vorpal" --file "./dist/vorpal-config"
 
       - run: |
-          ./vorpal worker start > worker_output.log 2>&1 &
+          ./dist/vorpal worker start > worker_output.log 2>&1 &
           WORKER_PID=$(echo $!)
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
-      - run: ./vorpal build
+      - run: ./dist/vorpal build --artifact "vorpal" --file "./dist/vorpal-config"
 
       - if: always()
         run: |
-          cat worker_output.log
-          kill $WORKER_PID
+          cat worker_output.log || true
+          kill $WORKER_PID || true
 
   # release:
   #   needs:

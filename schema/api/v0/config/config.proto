@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package vorpal.config.v0;
+
+import "v0/artifact/artifact.proto";
+
+service ConfigService {
+    rpc GetConfig(ConfigRequest) returns (Config);
+    rpc GetArtifact(vorpal.artifact.v0.ArtifactId) returns (vorpal.artifact.v0.Artifact);
+}
+
+message ConfigRequest {}
+
+message Config {
+    repeated vorpal.artifact.v0.ArtifactId artifacts = 1;
+}

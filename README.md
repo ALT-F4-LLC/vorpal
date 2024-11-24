@@ -2,6 +2,8 @@
 
 Build and deliver software reliably with one magical tool.
 
+![vorpal-purpose](./vorpal-purpose.jpg)
+
 ## Overview
 
 Vorpal's goal is to package and distribute software reliably to local (development) and remote (cloud, self-hosted, etc) environments. It uses a `vorpal.ncl` file written in [Nickel](https://nickel-lang.org/) that allows you to "describe" every aspect of your software dependencies in a repeatable and reproducible way.
@@ -34,42 +36,67 @@ Below is the existing working diagram that illustrates the platform's design:
 > [!CAUTION]
 > This design is subject to change at ANY moment and is a work in progress.
 
-![vorpal](./vorpal.png)
+![vorpal-arch](./vorpal-arch.png)
 
 ## Development
 
 ### Requirements
 
-The following tools are required to develop:
+The following requirements are necessary to develop source code and dependant on the operating system.
 
-- [`curl`](https://curl.se) (http client)
-- [`direnv`](https://direnv.net) (environment variables)
-- [`rustup`](https://rustup.rs) (language toolchains)
+#### macOS
+
+On macOS, install native tools with Xcode:
+
+```bash
+xcode-select --install
+```
+
+#### Linux
+
+On Linux, install native tools with the distro's package manger (apt, yum, etc):
+
+> [!NOTE]
+> Most tools below are used to compile packages for the sandbox environment.
+
+- `autoconf`
+- `automake`
+- `bison`
+- `curl`
+- `flex`
+- `g++`
+- `gcc`
+- `libc6-dev`
+- `m4`
+- `make`
+- `perl`
+- `tar`
+- `texinfo`
+- `unzip`
 
 ### Steps
 
-The following steps guide how to setup and run commands in the development environment.
+These steps guide how to compile from source code and test Vorpal by building it with itself.
 
 > [!IMPORTANT]
 > Steps must be run in the root of the cloned repository.
 
-- Run `dev.sh` script to bootstrap dependencies:
-
 ```bash
-./dev.sh
+./script/dev.sh make dist
 ```
 
-- Run to enter development environment:
-
 ```bash
-direnv allow
+./dist/vorpal keys generate
 ```
 
-- Build the source code with:
-
-> [!IMPORTANT]
-> Review the `makefile` for all development commands.
+```bash
+./dist/vorpal worker start
+```
 
 ```bash
-make
+./dist/vorpal check
+```
+
+```bash
+./dist/vorpal build
 ```

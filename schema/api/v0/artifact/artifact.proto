@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package vorpal.artifact.v0;
+
+enum ArtifactSystem {
+    UNKNOWN_SYSTEM = 0;
+    AARCH64_LINUX = 1;
+    AARCH64_MACOS = 2;
+    X86_64_LINUX = 3;
+    X86_64_MACOS = 4;
+}
+
+message ArtifactEnvironment {
+    string key = 1;
+    string value = 2;
+}
+
+message ArtifactId {
+    string hash = 1;
+    string name = 2;
+}
+
+message ArtifactSource {
+    optional string hash = 1;
+    repeated string excludes = 2;
+    repeated string includes = 3;
+    string name = 4;
+    string path = 5;
+}
+
+message ArtifactStep {
+    optional string entrypoint = 1;
+    optional string script = 2;
+    repeated ArtifactEnvironment environments = 3;
+    repeated string arguments = 4;
+}
+
+message Artifact {
+    repeated ArtifactId artifacts = 1;
+    repeated ArtifactSource sources = 2;
+    repeated ArtifactStep steps = 3;
+    repeated ArtifactSystem systems = 4;
+    string name = 5;
+}
+
+message ArtifactBuildRequest {
+    ArtifactSystem target = 1;
+    optional bytes source_data = 2;
+    optional bytes source_data_signature = 3;
+    repeated ArtifactId artifacts = 4;
+    repeated ArtifactStep steps = 5;
+    string hash = 6;
+    string name = 7;
+}
+
+message ArtifactBuildResponse {
+    string output = 1;
+}
+
+service ArtifactService {
+    rpc Build (stream ArtifactBuildRequest) returns (stream ArtifactBuildResponse);
+}

@@ -2,7 +2,7 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use vorpal_schema::api::store::{
+use vorpal_schema::vorpal::store::v0::{
     store_service_server::StoreService, StoreExistsResponse, StorePullResponse, StoreRequest,
 };
 

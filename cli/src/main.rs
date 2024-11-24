@@ -1,19 +1,29 @@
 use crate::worker::build;
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
+use console::style;
+use port_selector::random_free_port;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{process, process::Child};
+use tokio_stream::{wrappers::LinesStream, StreamExt};
+use tonic::transport::Channel;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use vorpal_schema::{
-    api::package::{PackageOutput, PackageSystem, PackageSystem::Unknown},
-    get_package_system,
+    get_artifact_system,
+    vorpal::{
+        artifact::v0::{ArtifactId, ArtifactSystem, ArtifactSystem::UnknownSystem},
+        config::v0::config_service_client::ConfigServiceClient,
+    },
 };
 use vorpal_store::paths::{get_private_key_path, setup_paths};
 use vorpal_worker::service;
 
-mod config;
-mod nickel;
+mod build;
+mod log;
 mod worker;
 
 #[derive(Parser)]
@@ -24,11 +34,63 @@ pub struct Cli {
     command: Command,
 }
 
+async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channel>)> {
+    let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
+
+    let mut command = process::Command::new(file);
+
+    command.args(["start", "--port", &port.to_string()]);
+
+    let mut process = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| anyhow!("failed to start config server"))?;
+
+    let stdout = process.stdout.take().unwrap();
+    let stderr = process.stderr.take().unwrap();
+
+    let stdout = LinesStream::new(BufReader::new(stdout).lines());
+    let stderr = LinesStream::new(BufReader::new(stderr).lines());
+
+    let mut stdio_merged = StreamExt::merge(stdout, stderr);
+
+    let host = format!("http://localhost:{:?}", port);
+
+    while let Some(line) = stdio_merged.next().await {
+        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
+
+        println!("Config: {}", line);
+
+        if line.contains("Config server listening on") {
+            println!("{} {}", style("Config:").bold().green(), host);
+            break;
+        }
+    }
+
+    let service = match ConfigServiceClient::connect(host).await {
+        Ok(srv) => srv,
+        Err(e) => {
+            let _ = process
+                .kill()
+                .await
+                .map_err(|_| anyhow!("failed to kill config server"));
+
+            bail!("failed to connect to config server: {}", e);
+        }
+    };
+
+    Ok((process, service))
+}
+
 #[derive(Subcommand)]
 enum Command {
     Build {
-        #[arg(default_value = "vorpal.ncl", long, short)]
+        #[arg(long, short)]
         file: String,
+
+        #[arg(long, short)]
+        artifact: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
@@ -37,16 +99,19 @@ enum Command {
         worker: String,
     },
 
-    #[clap(subcommand)]
-    Keys(CommandKeys),
-
-    Validate {
-        #[arg(default_value = "vorpal.ncl", long, short)]
+    Config {
+        #[arg(long, short)]
         file: String,
+
+        #[arg(long, short)]
+        artifact: String,
 
         #[arg(default_value_t = get_default_system(), long, short)]
         system: String,
     },
+
+    #[clap(subcommand)]
+    Keys(CommandKeys),
 
     #[clap(subcommand)]
     Worker(CommandWorker),
@@ -73,23 +138,24 @@ fn get_default_system() -> String {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
         Command::Build {
             file,
+            artifact,
             system,
             worker,
         } => {
             if worker.is_empty() {
-                anyhow::bail!("no worker specified");
+                bail!("no worker specified");
             }
 
-            let package_system: PackageSystem = get_package_system(system);
+            let artifact_system: ArtifactSystem = get_artifact_system(system);
 
-            if package_system == Unknown {
-                anyhow::bail!("unknown target: {}", package_system.as_str_name());
+            if artifact_system == UnknownSystem {
+                bail!("unknown target: {}", artifact_system.as_str_name());
             }
 
             setup_paths().await?;
@@ -97,43 +163,60 @@ async fn main() -> Result<(), anyhow::Error> {
             let private_key_path = get_private_key_path();
 
             if !private_key_path.exists() {
-                anyhow::bail!(
-                    "private key not found - run 'vorpal keys generate' or copy from worker"
-                );
+                bail!("private key not found - run 'vorpal keys generate' or copy from worker",);
             }
 
-            println!("=> Building: {} ({})", file, system);
+            let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
 
-            let (config, config_hash) = nickel::load_config(file, package_system).await?;
+            let (artifacts_map, artifacts_order) =
+                build::load_config(artifact, &mut config_service).await?;
 
-            let config_structures = config::build_structures(&config);
+            let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
 
-            let config_build_order = config::get_build_order(&config_structures.graph)?;
+            // let artifacts_pending = artifacts_order.clone();
 
-            let mut package_finished = HashMap::<String, PackageOutput>::new();
-
-            for package_name in config_build_order {
-                match config_structures.map.get(&package_name) {
-                    None => anyhow::bail!("Package not found: {}", package_name),
-                    Some(package) => {
-                        let mut packages = vec![];
-
-                        for p in &package.packages {
-                            match package_finished.get(&p.name) {
-                                None => eprintln!("Package not found: {}", p.name),
-                                Some(package) => packages.push(package.clone()),
+            for id in &artifacts_order {
+                match artifacts_map.get(id) {
+                    None => bail!("Build artifact not found: {}", id.name),
+                    Some(artifact) => {
+                        for a in &artifact.artifacts {
+                            if !artifacts_ids.contains_key(&a.name) {
+                                bail!("Artifact not found: {}", a.name);
                             }
                         }
 
-                        let output =
-                            build(&config_hash, package, packages, package_system, worker).await?;
+                        build(artifact, id, artifact_system, worker).await?;
 
-                        package_finished.insert(package_name, output);
+                        artifacts_ids.insert(id.name.clone(), id.clone());
                     }
                 }
             }
 
-            Ok(())
+            config_process
+                .kill()
+                .await
+                .map_err(|_| anyhow!("failed to kill config server"))
+        }
+
+        Command::Config {
+            file,
+            artifact,
+            system,
+        } => {
+            let artifact_system: ArtifactSystem = get_artifact_system(system);
+
+            if artifact_system == UnknownSystem {
+                bail!("unknown target: {}", artifact_system.as_str_name());
+            }
+
+            let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
+
+            let _ = build::load_config(artifact, &mut config_service).await?;
+
+            config_process
+                .kill()
+                .await
+                .map_err(|_| anyhow!("failed to kill config server"))
         }
 
         Command::Keys(keys) => match keys {
@@ -148,11 +231,11 @@ async fn main() -> Result<(), anyhow::Error> {
                 }
 
                 if private_key_path.exists() && !public_key_path.exists() {
-                    anyhow::bail!("private key exists but public key is missing");
+                    bail!("private key exists but public key is missing");
                 }
 
                 if !private_key_path.exists() && public_key_path.exists() {
-                    anyhow::bail!("public key exists but private key is missing");
+                    bail!("public key exists but private key is missing");
                 }
 
                 vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)
@@ -161,22 +244,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 Ok(())
             }
         },
-
-        Command::Validate { file, system } => {
-            let package_system: PackageSystem = get_package_system(system);
-
-            if package_system == Unknown {
-                anyhow::bail!("unknown target: {}", system);
-            }
-
-            println!("=> Validate: {} ({})", file, system);
-
-            let (config, _) = nickel::load_config(file, package_system).await?;
-
-            println!("{}", serde_json::to_string_pretty(&config)?);
-
-            Ok(())
-        }
 
         Command::Worker(worker) => match worker {
             CommandWorker::Start { level, port } => {
@@ -191,7 +258,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber");
 
-                service::start(*port).await?;
+                service::listen(*port).await?;
 
                 Ok(())
             }

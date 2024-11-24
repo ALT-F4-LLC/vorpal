@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-prost = { default-features = false, features = ["derive", "std"], version = "0" }
-serde = { default-features = false, version = "1" }
-tonic = { default-features = false, features = ["codegen", "prost", "transport"], version = "0" }
+prost = "0"
+serde = { features = ["serde_derive"], version = "1" }
+tonic = "0"
 
 [build-dependencies]
-tonic-build = { default-features = false, features = ["prost", "transport"], version = "0" }
+tonic-build = "0"
