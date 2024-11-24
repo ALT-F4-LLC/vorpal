@@ -16,7 +16,7 @@ fn build_config(context: &mut ContextConfig) -> Result<Config> {
     // TODO: add any custom logic you want here
 
     // Define the Rust artifact parameters
-    let cargo_hash = "2cbb5d0bed24fed6ab9cbce9b6ae12d03e09c6f0ee365af2e757a72d48339adb";
+    let cargo_hash = "59324cc6fb0c81f0ab5ae77c235b3a0060eadaa7e9b0277aa74fbdcc9b839463";
     let excludes = vec![".env", ".packer", ".vagrant", "script"];
     let name = "vorpal";
     let systems = vec![Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos];
