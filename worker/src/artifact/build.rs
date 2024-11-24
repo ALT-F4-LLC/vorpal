@@ -132,6 +132,12 @@ pub async fn run_step(
     // Setup environment variables
 
     for env in envs_sorted.clone() {
+        let mut value = env.value.clone();
+
+        for e in envs_sorted.clone() {
+            value = value.replace(&format!("${}", e.key), &e.value);
+        }
+
         command.env(env.key, env.value);
     }
 

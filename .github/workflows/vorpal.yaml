@@ -96,7 +96,7 @@ jobs:
     strategy:
       matrix:
         runner:
-          # - macos-latest
+          - macos-latest
           - ubuntu-latest
     steps:
       - uses: actions/checkout@v4

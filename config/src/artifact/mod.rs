@@ -4,6 +4,7 @@ use indoc::formatdoc;
 use std::path::Path;
 use vorpal_schema::vorpal::artifact::v0::{
     Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactStep,
+    ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 use vorpal_store::{hashes::hash_files, paths::get_file_paths};
 
@@ -69,6 +70,8 @@ pub fn run_bash_step(environments: Vec<ArtifactEnvironment>, script: String) -> 
         script: Some(formatdoc! {"
             #!/bin/bash
             set -euo pipefail
+
+            export PATH=\"$PATH\"
 
             {script}",
             script = script,
@@ -205,74 +208,104 @@ pub fn build_artifact(
     sources: Vec<ArtifactSource>,
     systems: Vec<i32>,
 ) -> Result<ArtifactId> {
-    // Setup artifacts
-
-    let linux_debian = linux_debian::artifact(context)?;
-    let linux_vorpal = linux_vorpal::artifact(context, &linux_debian)?;
-
-    // TODO: build store based environment for builds
-
-    // Setup PATH default
-
-    let path = ArtifactEnvironment {
-        key: "PATH".to_string(),
-        value: "/usr/bin:/usr/sbin".to_string(),
-    };
-
-    let ssl_cert_file = ArtifactEnvironment {
-        key: "SSL_CERT_FILE".to_string(),
-        value: "/etc/ssl/certs/ca-certificates.crt".to_string(),
-    };
+    let build_target = context.get_target();
 
     // Setup environments
 
-    let mut artifact_environments = vec![];
+    let mut build_environments = vec![];
+
+    if build_target == Aarch64Linux || build_target == X8664Linux {
+        let path = ArtifactEnvironment {
+            key: "PATH".to_string(),
+            value: "/usr/bin:/usr/sbin".to_string(),
+        };
+
+        let ssl_cert_file = ArtifactEnvironment {
+            key: "SSL_CERT_FILE".to_string(),
+            value: "/etc/ssl/certs/ca-certificates.crt".to_string(),
+        };
+
+        let path_prev = environments
+            .clone()
+            .into_iter()
+            .find(|env| env.key == "PATH");
+
+        if let Some(prev) = path_prev {
+            build_environments.push(ArtifactEnvironment {
+                key: "PATH".to_string(),
+                value: format!("{}:{}", prev.value, path.value),
+            });
+        } else {
+            build_environments.push(path.clone());
+        }
+
+        build_environments.push(ssl_cert_file.clone());
+    }
+
+    if build_target == Aarch64Macos || build_target == X8664Macos {
+        let path = ArtifactEnvironment {
+            key: "PATH".to_string(),
+            value: "/usr/local/bin:/usr/bin:/usr/sbin:/bin".to_string(),
+        };
+
+        let path_prev = environments
+            .clone()
+            .into_iter()
+            .find(|env| env.key == "PATH");
+
+        if let Some(prev) = path_prev {
+            build_environments.push(ArtifactEnvironment {
+                key: "PATH".to_string(),
+                value: format!("{}:{}", prev.value, path.value),
+            });
+        } else {
+            build_environments.push(path.clone());
+        }
+    }
 
     for env in environments.clone().into_iter() {
-        if env.key == path.key {
+        if env.key == "PATH" {
             continue;
         }
 
-        artifact_environments.push(env);
+        build_environments.push(env);
     }
 
-    let path_prev = environments
-        .clone()
-        .into_iter()
-        .find(|env| env.key == path.key);
+    let mut build_artifacts = vec![];
+    let mut build_steps = vec![];
 
-    if let Some(prev) = path_prev {
-        artifact_environments.push(ArtifactEnvironment {
-            key: path.key.clone(),
-            value: format!("{}:{}", prev.value, path.value),
-        });
-    } else {
-        artifact_environments.push(path.clone());
+    // Setup artifacts & steps
+
+    if build_target == Aarch64Linux || build_target == X8664Linux {
+        let linux_debian = linux_debian::artifact(context)?;
+        let linux_vorpal = linux_vorpal::artifact(context, &linux_debian)?;
+
+        build_artifacts.push(linux_vorpal.clone());
+
+        build_steps.push(run_bwrap_step(
+            vec![],
+            build_artifacts.clone(),
+            build_environments.clone(),
+            Some(step_env_artifact(&linux_vorpal)),
+            script.clone(),
+        ));
     }
 
-    artifact_environments.push(ssl_cert_file.clone());
+    if build_target == Aarch64Macos || build_target == X8664Macos {
+        build_steps.push(run_bash_step(build_environments.clone(), script));
+    }
+
+    for artifact in artifacts {
+        build_artifacts.push(artifact);
+    }
 
     // Setup artifacts
 
-    let mut artifact_artifacts = vec![];
-
-    artifact_artifacts.push(linux_vorpal.clone());
-
-    for artifact in artifacts {
-        artifact_artifacts.push(artifact);
-    }
-
     context.add_artifact(Artifact {
-        artifacts: artifact_artifacts.clone(),
+        artifacts: build_artifacts.clone(),
         name: name.to_string(),
         sources,
-        steps: vec![run_bwrap_step(
-            vec![],
-            artifact_artifacts,
-            artifact_environments.clone(),
-            Some(step_env_artifact(&linux_vorpal)),
-            script,
-        )],
+        steps: build_steps,
         systems,
     })
 }
