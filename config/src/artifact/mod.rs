@@ -4,7 +4,7 @@ use indoc::formatdoc;
 use std::path::Path;
 use vorpal_schema::vorpal::artifact::v0::{
     Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactStep,
-    ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
+    ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 use vorpal_store::{hashes::hash_files, paths::get_file_paths};
 
