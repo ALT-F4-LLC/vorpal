@@ -272,7 +272,13 @@ pub fn build_artifact(
     let mut build_artifacts = vec![];
     let mut build_steps = vec![];
 
-    // Setup artifacts & steps
+    // Setup artifacts
+
+    for artifact in artifacts {
+        build_artifacts.push(artifact);
+    }
+
+    // Setup steps
 
     if build_target == Aarch64Linux || build_target == X8664Linux {
         let linux_debian = linux_debian::artifact(context)?;
@@ -291,10 +297,6 @@ pub fn build_artifact(
 
     if build_target == Aarch64Macos || build_target == X8664Macos {
         build_steps.push(run_bash_step(build_environments.clone(), script));
-    }
-
-    for artifact in artifacts {
-        build_artifacts.push(artifact);
     }
 
     // Setup artifacts

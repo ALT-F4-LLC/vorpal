@@ -50,7 +50,7 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         vec![],
         name,
         format!(
-            "cp -prv {}/rust-std-{target}/. \"$VORPAL_OUTPUT\"",
+            "cp -prv {}/rust-std-{target}/. \"$VORPAL_OUTPUT/\"",
             step_env_artifact(&source)
         ),
         vec![],

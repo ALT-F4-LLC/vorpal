@@ -48,7 +48,7 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         vec![],
         name,
         format!(
-            "cp -prv {}/cargo/. \"$VORPAL_OUTPUT\"",
+            "cp -prv {}/cargo/. \"$VORPAL_OUTPUT\"/",
             step_env_artifact(&source)
         ),
         vec![],
