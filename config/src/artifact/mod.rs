@@ -65,13 +65,11 @@ pub fn step_env_artifact(artifact: &ArtifactId) -> String {
 pub fn run_bash_step(environments: Vec<ArtifactEnvironment>, script: String) -> ArtifactStep {
     ArtifactStep {
         arguments: vec![],
-        entrypoint: "/bin/bash".to_string(),
+        entrypoint: None,
         environments,
         script: Some(formatdoc! {"
             #!/bin/bash
             set -euo pipefail
-
-            export PATH=\"$PATH\"
 
             {script}",
             script = script,

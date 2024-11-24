@@ -54,113 +54,81 @@ pub async fn run_step(
     arguments: Vec<String>,
     artifact_path: &Path,
     artifacts: Vec<ArtifactId>,
-    entrypoint: String,
+    entrypoint: Option<String>,
     environments: Vec<ArtifactEnvironment>,
     name: String,
     script: Option<String>,
     tx: &Sender<Result<ArtifactBuildResponse, Status>>,
     workspace_path: &Path,
 ) -> Result<()> {
-    let mut envs = vec![];
+    let mut build_environments = vec![];
 
     // Add all artifact environment variables
 
-    let mut paths = vec![];
+    let mut build_paths = vec![];
 
-    for a in artifacts {
-        let path = get_artifact_path(&a.hash, &a.name);
+    for artifact in artifacts {
+        let path = get_artifact_path(&artifact.hash, &artifact.name);
 
         if !path.exists() {
             bail!(format!("artifact missing: {}", path.display()))
         }
 
-        envs.push(ArtifactEnvironment {
+        build_environments.push(ArtifactEnvironment {
             key: format!(
                 "VORPAL_ARTIFACT_{}",
-                a.name.to_lowercase().replace('-', "_")
+                artifact.name.to_lowercase().replace('-', "_")
             ),
             value: path.display().to_string(),
         });
 
-        paths.push(path.display().to_string());
+        build_paths.push(path.display().to_string());
     }
 
     // Add default environment variables
 
-    let name_envkey = name.to_lowercase().replace('-', "_");
+    let build_name_envkey = name.to_lowercase().replace('-', "_");
 
-    envs.push(ArtifactEnvironment {
-        key: format!("VORPAL_ARTIFACT_{}", name_envkey.clone()),
+    build_environments.push(ArtifactEnvironment {
+        key: format!("VORPAL_ARTIFACT_{}", build_name_envkey.clone()),
         value: artifact_path.display().to_string(),
     });
 
-    envs.push(ArtifactEnvironment {
+    build_environments.push(ArtifactEnvironment {
         key: "VORPAL_ARTIFACTS".to_string(),
-        value: paths.join(" ").to_string(),
+        value: build_paths.join(" ").to_string(),
     });
 
-    envs.push(ArtifactEnvironment {
+    build_environments.push(ArtifactEnvironment {
         key: "VORPAL_OUTPUT".to_string(),
         value: artifact_path.display().to_string(),
     });
 
-    envs.push(ArtifactEnvironment {
+    build_environments.push(ArtifactEnvironment {
         key: "VORPAL_WORKSPACE".to_string(),
         value: workspace_path.display().to_string(),
     });
 
     // Add all custom environment variables
 
-    for e in environments.clone() {
-        envs.push(e);
+    for environment in environments.clone() {
+        build_environments.push(environment);
     }
 
     // Sort environment variables by key length
 
-    let mut envs_sorted = envs.to_vec();
+    let mut build_environments_sorted = build_environments.to_vec();
 
-    envs_sorted.sort_by(|a, b| b.key.len().cmp(&a.key.len()));
-
-    // Setup command
-
-    let mut command = Command::new(&entrypoint);
-
-    // Setup working directory
-
-    command.current_dir(workspace_path);
-
-    // Setup environment variables
-
-    for env in envs_sorted.clone() {
-        let mut value = env.value.clone();
-
-        for e in envs_sorted.clone() {
-            value = value.replace(&format!("${}", e.key), &e.value);
-        }
-
-        command.env(env.key, env.value);
-    }
-
-    // Setup arguments
-
-    for arg in arguments.into_iter() {
-        let mut arg = arg.clone();
-
-        for env in envs_sorted.clone() {
-            arg = arg.replace(&format!("${}", env.key), &env.value);
-        }
-
-        command.arg(arg);
-    }
+    build_environments_sorted.sort_by(|a, b| b.key.len().cmp(&a.key.len()));
 
     // Setup script
 
-    let mut script_path = None;
+    let mut build_script_path = None;
 
     if let Some(script) = script {
         let mut script = script.clone();
 
-        for env in envs_sorted.clone() {
+        for env in build_environments_sorted.clone() {
             script = script.replace(&format!("${}", env.key), &env.value);
         }
 
@@ -174,11 +142,55 @@ pub async fn run_step(
             .await
             .map_err(|err| anyhow!("failed to set permissions: {:?}", err))?;
 
-        script_path = Some(path);
+        build_script_path = Some(path);
     }
 
-    if let Some(script_path) = script_path {
-        command.arg(script_path);
+    // Setup entrypoint
+
+    let build_entrypoint = match entrypoint {
+        Some(entrypoint) => entrypoint,
+        None => match build_script_path {
+            Some(ref path) => path.display().to_string(),
+            None => bail!("'entrypoint' or 'script' missing in configuration"),
+        },
+    };
+
+    // Setup command
+
+    let mut command = Command::new(&build_entrypoint);
+
+    // Setup working directory
+
+    command.current_dir(workspace_path);
+
+    // Setup environment variables
+
+    for env in build_environments_sorted.clone() {
+        let mut value = env.value.clone();
+
+        for e in build_environments_sorted.clone() {
+            value = value.replace(&format!("${}", e.key), &e.value);
+        }
+
+        command.env(env.key, value);
+    }
+
+    // Setup arguments
+
+    if !build_entrypoint.is_empty() {
+        for arg in arguments.into_iter() {
+            let mut arg = arg.clone();
+
+            for env in build_environments_sorted.clone() {
+                arg = arg.replace(&format!("${}", env.key), &env.value);
+            }
+
+            command.arg(arg);
+        }
+
+        if let Some(script_path) = build_script_path {
+            command.arg(script_path);
+        }
     }
 
     // Run command

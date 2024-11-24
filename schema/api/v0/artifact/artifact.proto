@@ -29,10 +29,10 @@ message ArtifactSource {
 }
 
 message ArtifactStep {
-    optional string script = 1;
-    repeated ArtifactEnvironment environments = 2;
-    repeated string arguments = 3;
-    string entrypoint = 4;
+    optional string entrypoint = 1;
+    optional string script = 2;
+    repeated ArtifactEnvironment environments = 3;
+    repeated string arguments = 4;
 }
 
 message Artifact {
