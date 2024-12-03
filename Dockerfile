@@ -1,4 +1,4 @@
-FROM docker.io/library/debian:sid-slim@sha256:377cd68c1412de57c47aa95c1535caf04982dd67431983e19fa68abfff9504c5
+FROM docker.io/library/debian:sid-slim@sha256:2eac978892d960f967fdad9a5387eb0bf5addfa3fab7f6fa09a00e0adff7975d
 
 RUN ARCH=$(uname -m) \
     && if [ "${ARCH}" = "aarch64" ]; then ARCH="arm64"; fi \
