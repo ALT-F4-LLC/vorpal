@@ -1,56 +1,13 @@
+use crate::config::ContextConfig;
 use anyhow::Result;
-use sha256::digest;
-use std::collections::HashMap;
 use tonic::transport::Server;
 use vorpal_schema::vorpal::{
-    artifact::v0::{Artifact, ArtifactId, ArtifactSystem},
+    artifact::v0::{Artifact, ArtifactId},
     config::v0::{
         config_service_server::{ConfigService, ConfigServiceServer},
         Config, ConfigRequest,
     },
 };
-
-#[derive(Debug, Default)]
-pub struct ContextConfig {
-    artifact: HashMap<String, Artifact>,
-    target: ArtifactSystem,
-}
-
-impl ContextConfig {
-    pub fn new(target: ArtifactSystem) -> Self {
-        Self {
-            artifact: HashMap::new(),
-            target,
-        }
-    }
-
-    pub fn add_artifact(&mut self, artifact: Artifact) -> Result<ArtifactId> {
-        let artifact_json = serde_json::to_string(&artifact).map_err(|e| anyhow::anyhow!(e))?;
-        let artifact_hash = digest(artifact_json.as_bytes());
-        let artifact_key = format!("{}-{}", artifact.name, artifact_hash);
-
-        if !self.artifact.contains_key(&artifact_key) {
-            self.artifact.insert(artifact_key.clone(), artifact.clone());
-        }
-
-        let artifact_id = ArtifactId {
-            hash: artifact_hash,
-            name: artifact.name,
-        };
-
-        Ok(artifact_id)
-    }
-
-    pub fn get_artifact(&self, hash: &str, name: &str) -> Option<&Artifact> {
-        let artifact_key = format!("{}-{}", name, hash);
-
-        self.artifact.get(&artifact_key)
-    }
-
-    pub fn get_target(&self) -> ArtifactSystem {
-        self.target
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct ConfigServer {

@@ -9,13 +9,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { default-features = false, version = "1" }
-clap = { default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], version = "4" }
-indoc = { default-features = false, version = "2" }
-serde = { features = ["serde_derive"], version = "1" }
-serde_json = { default-features = false, features = ["std"], version = "1" }
-sha256 = { default-features = false, version = "1" }
-tokio = { default-features = false, features = ["rt-multi-thread"], version = "1" }
-tonic = { default-features = false, version = "0" }
-tracing = { default-features = false, version = "0" }
-vorpal-schema = { default-features = false, path = "../schema" }
-vorpal-store = { default-features = false, path = "../store" }
+tokio = { default-features = false, version = "1" }
+vorpal-schema = { path = "../schema" }
+vorpal-sdk = { path = "../sdk" }

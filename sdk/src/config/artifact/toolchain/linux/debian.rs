@@ -1,5 +1,8 @@
-use crate::{
-    artifact::{new_artifact_source, run_bash_step, run_docker_step, step_env_artifact},
+use crate::config::{
+    artifact::{
+        add_artifact_source, get_artifact_envkey,
+        steps::{bash, docker},
+    },
     ContextConfig,
 };
 use anyhow::Result;
@@ -17,7 +20,7 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
 
     let systems = vec![Aarch64Linux.into(), X8664Linux.into()];
 
-    let source = new_artifact_source(
+    let source = add_artifact_source(
         vec![],
         None,
         vec![
@@ -32,7 +35,7 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         artifacts: vec![],
         name: "linux-debian-source".to_string(),
         sources: vec![source.clone()],
-        steps: vec![run_bash_step(
+        steps: vec![bash(
             environments.clone(),
             "cp -prv $VORPAL_WORKSPACE/source/docker/. $VORPAL_OUTPUT/".to_string(),
         )],
@@ -46,41 +49,41 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         name: "linux-debian".to_string(),
         sources: vec![],
         steps: vec![
-            run_docker_step(vec![
+            docker(vec![
                 "buildx".to_string(),
                 "build".to_string(),
                 "--progress=plain".to_string(),
                 format!("--tag={}", image_tag),
-                step_env_artifact(&source),
+                get_artifact_envkey(&source),
             ]),
-            run_docker_step(vec![
+            docker(vec![
                 "container".to_string(),
                 "create".to_string(),
                 "--name".to_string(),
                 source.clone().hash.to_string(),
                 image_tag.clone(),
             ]),
-            run_docker_step(vec![
+            docker(vec![
                 "container".to_string(),
                 "export".to_string(),
                 "--output".to_string(),
                 "$VORPAL_WORKSPACE/debian.tar".to_string(),
                 source.hash.to_string(),
             ]),
-            run_bash_step(
+            bash(
                 environments.clone(),
                 formatdoc! {"
                     tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
                     echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
                 "},
             ),
-            run_docker_step(vec![
+            docker(vec![
                 "container".to_string(),
                 "rm".to_string(),
                 "--force".to_string(),
                 source.hash.to_string(),
             ]),
-            run_docker_step(vec![
+            docker(vec![
                 "image".to_string(),
                 "rm".to_string(),
                 "--force".to_string(),

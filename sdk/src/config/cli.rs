@@ -1,4 +1,4 @@
-use crate::{service, ContextConfig};
+use crate::{config::ContextConfig, service};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::env::consts::{ARCH, OS};

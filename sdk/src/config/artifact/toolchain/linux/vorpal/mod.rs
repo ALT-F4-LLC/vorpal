@@ -1,7 +1,4 @@
-use crate::{
-    artifact::{run_bwrap_step, step_env_artifact},
-    ContextConfig,
-};
+use crate::config::artifact::{get_artifact_envkey, steps, ContextConfig};
 use anyhow::Result;
 use vorpal_schema::vorpal::artifact::v0::{
     Artifact, ArtifactEnvironment, ArtifactId,
@@ -100,14 +97,14 @@ pub fn artifact(context: &mut ContextConfig, linux_debian: &ArtifactId) -> Resul
         name: "linux-vorpal".to_string(),
         sources: vec![],
         steps: vec![
-            run_bwrap_step(
+            steps::bwrap(
                 vec![],
                 artifacts,
                 vec![ArtifactEnvironment {
                     key: "PATH".to_string(),
                     value: "/usr/bin:/usr/sbin".to_string(),
                 }],
-                Some(step_env_artifact(linux_debian)),
+                Some(get_artifact_envkey(linux_debian)),
                 script::generate(
                     &bash,
                     &binutils,
@@ -130,7 +127,7 @@ pub fn artifact(context: &mut ContextConfig, linux_debian: &ArtifactId) -> Resul
                     &xz,
                 ),
             ),
-            run_bwrap_step(
+            steps::bwrap(
                 vec![
                     // mount bin
                     "--bind".to_string(),

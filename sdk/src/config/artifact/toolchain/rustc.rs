@@ -1,5 +1,5 @@
-use crate::{
-    artifact::{build_artifact, rust_std, step_env_artifact},
+use crate::config::{
+    artifact::{add_artifact, get_artifact_envkey, toolchain::rust_std},
     ContextConfig,
 };
 use anyhow::{bail, Result};
@@ -31,7 +31,7 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
 
     let version = "1.78.0";
 
-    let source = build_artifact(
+    let source = add_artifact(
         context,
         vec![],
         vec![],
@@ -46,7 +46,7 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         systems.clone(),
     )?;
 
-    build_artifact(
+    add_artifact(
         context,
         vec![rust_std.clone(), source.clone()],
         vec![],
@@ -57,8 +57,8 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
             cat \"{rust_std}/manifest.in\" >> \"$VORPAL_OUTPUT/manifest.in\"
 
             cp -prv \"{rust_std}/lib\" \"$VORPAL_OUTPUT\"",
-            rust_std = step_env_artifact(&rust_std),
-            rustc_source = step_env_artifact(&source),
+            rust_std = get_artifact_envkey(&rust_std),
+            rustc_source = get_artifact_envkey(&source),
         },
         vec![],
         systems,
