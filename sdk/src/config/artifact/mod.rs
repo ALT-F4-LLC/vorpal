@@ -27,10 +27,10 @@ pub fn add_systems(systems: Vec<&str>) -> Result<Vec<ArtifactSystem>> {
 
     for system in systems {
         match system {
-            "aarch64-linux" => build_systems.push(Aarch64Linux.into()),
-            "aarch64-macos" => build_systems.push(Aarch64Macos.into()),
-            "x86_64-linux" => build_systems.push(X8664Linux.into()),
-            "x86_64-macos" => build_systems.push(X8664Macos.into()),
+            "aarch64-linux" => build_systems.push(Aarch64Linux),
+            "aarch64-macos" => build_systems.push(Aarch64Macos),
+            "x86_64-linux" => build_systems.push(X8664Linux),
+            "x86_64-macos" => build_systems.push(X8664Macos),
             _ => bail!("Unsupported system: {}", system),
         }
     }
