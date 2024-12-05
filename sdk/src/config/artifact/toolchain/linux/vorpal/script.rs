@@ -1,4 +1,4 @@
-use crate::artifact::step_env_artifact;
+use crate::config::artifact::get_artifact_envkey;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
@@ -579,25 +579,25 @@ pub fn generate(
 
         rm -rfv $VORPAL_OUTPUT/tools
         rm -rfv $VORPAL_OUTPUT/var",
-        bash = step_env_artifact(bash),
-        binutils = step_env_artifact(binutils),
-        coreutils = step_env_artifact(coreutils),
-        diffutils = step_env_artifact(diffutils),
-        file = step_env_artifact(file),
-        findutils = step_env_artifact(findutils),
-        gawk = step_env_artifact(gawk),
-        gcc = step_env_artifact(gcc),
-        glibc = step_env_artifact(glibc),
-        grep = step_env_artifact(grep),
-        gzip = step_env_artifact(gzip),
-        linux_headers = step_env_artifact(linux_headers),
-        m4 = step_env_artifact(m4),
-        make = step_env_artifact(make),
-        ncurses = step_env_artifact(ncurses),
-        patch = step_env_artifact(patch),
-        sed = step_env_artifact(sed),
-        tar = step_env_artifact(tar),
-        xz = step_env_artifact(xz),
+        bash = get_artifact_envkey(bash),
+        binutils = get_artifact_envkey(binutils),
+        coreutils = get_artifact_envkey(coreutils),
+        diffutils = get_artifact_envkey(diffutils),
+        file = get_artifact_envkey(file),
+        findutils = get_artifact_envkey(findutils),
+        gawk = get_artifact_envkey(gawk),
+        gcc = get_artifact_envkey(gcc),
+        glibc = get_artifact_envkey(glibc),
+        grep = get_artifact_envkey(grep),
+        gzip = get_artifact_envkey(gzip),
+        linux_headers = get_artifact_envkey(linux_headers),
+        m4 = get_artifact_envkey(m4),
+        make = get_artifact_envkey(make),
+        ncurses = get_artifact_envkey(ncurses),
+        patch = get_artifact_envkey(patch),
+        sed = get_artifact_envkey(sed),
+        tar = get_artifact_envkey(tar),
+        xz = get_artifact_envkey(xz),
     }
 }
 
@@ -942,19 +942,19 @@ pub fn generate_post(
         rm -rfv /usr/share/{{info,man,doc}}/*
 
         find /usr/{{lib,libexec}} -name \\*.la -delete",
-        bison = step_env_artifact(bison),
-        curl = step_env_artifact(curl),
-        curl_cacert = step_env_artifact(curl_cacert),
-        gettext = step_env_artifact(gettext),
-        libidn2 = step_env_artifact(libidn2),
-        libpsl = step_env_artifact(libpsl),
-        libunistring = step_env_artifact(libunistring),
-        openssl = step_env_artifact(openssl),
-        perl = step_env_artifact(perl),
-        python = step_env_artifact(python),
-        texinfo = step_env_artifact(texinfo),
-        unzip = step_env_artifact(unzip),
-        util_linux = step_env_artifact(util_linux),
-        zlib = step_env_artifact(zlib),
+        bison = get_artifact_envkey(bison),
+        curl = get_artifact_envkey(curl),
+        curl_cacert = get_artifact_envkey(curl_cacert),
+        gettext = get_artifact_envkey(gettext),
+        libidn2 = get_artifact_envkey(libidn2),
+        libpsl = get_artifact_envkey(libpsl),
+        libunistring = get_artifact_envkey(libunistring),
+        openssl = get_artifact_envkey(openssl),
+        perl = get_artifact_envkey(perl),
+        python = get_artifact_envkey(python),
+        texinfo = get_artifact_envkey(texinfo),
+        unzip = get_artifact_envkey(unzip),
+        util_linux = get_artifact_envkey(util_linux),
+        zlib = get_artifact_envkey(zlib),
     }
 }

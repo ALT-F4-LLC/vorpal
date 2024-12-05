@@ -1,5 +1,5 @@
-use crate::{
-    artifact::{build_artifact, step_env_artifact},
+use crate::config::{
+    artifact::{add_artifact, get_artifact_envkey},
     ContextConfig,
 };
 use anyhow::{bail, Result};
@@ -29,7 +29,7 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
 
     let version = "1.78.0";
 
-    let source = build_artifact(
+    let source = add_artifact(
         context,
         vec![],
         vec![],
@@ -44,14 +44,14 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         systems.clone(),
     )?;
 
-    build_artifact(
+    add_artifact(
         context,
         vec![source.clone()],
         vec![],
         name,
         format!(
             "cp -prv {}/rust-std-{target}/. \"$VORPAL_OUTPUT/\"",
-            step_env_artifact(&source)
+            get_artifact_envkey(&source)
         ),
         vec![],
         systems,

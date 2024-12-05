@@ -1,7 +1,4 @@
-use crate::{
-    artifact::{run_bwrap_step, step_env_artifact},
-    ContextConfig,
-};
+use crate::config::artifact::{get_artifact_envkey, steps::bwrap, ContextConfig};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
@@ -25,14 +22,14 @@ fn new_artifact_source(
         artifacts: artifacts.clone(),
         name,
         sources: vec![],
-        steps: vec![run_bwrap_step(
+        steps: vec![bwrap(
             vec![],
             artifacts,
             vec![ArtifactEnvironment {
                 key: "PATH".to_string(),
                 value: "/usr/bin:/usr/sbin".to_string(),
             }],
-            Some(step_env_artifact(rootfs)),
+            Some(get_artifact_envkey(rootfs)),
             script,
         )],
         systems: vec![Aarch64Linux.into(), X8664Linux.into()],
@@ -264,7 +261,7 @@ pub fn glibc(
             pushd $VORPAL_OUTPUT
 
             patch -Np1 -i {glibc_patch}/glibc-patch-2.40.patch",
-            glibc_patch = step_env_artifact(glibc_patch),
+            glibc_patch = get_artifact_envkey(glibc_patch),
             version = "2.40",
         },
     ))
@@ -555,8 +552,8 @@ pub fn unzip(
 
             patch -Np1 -i {patch_fixes}/unzip-{patch_version}-consolidated_fixes-1.patch
             patch -Np1 -i {patch_gcc14}/unzip-{patch_version}-gcc14-1.patch",
-            patch_fixes = step_env_artifact(patch_fixes),
-            patch_gcc14 = step_env_artifact(patch_gcc14),
+            patch_fixes = get_artifact_envkey(patch_fixes),
+            patch_gcc14 = get_artifact_envkey(patch_gcc14),
             patch_version = "6.0",
             version = "60",
         },

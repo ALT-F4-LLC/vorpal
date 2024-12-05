@@ -1,15 +1,16 @@
-use crate::{
-    artifact,
-    artifact::{cargo, new_artifact_source, protoc, rustc, step_env_artifact},
+use crate::config::{
+    artifact::{
+        add_artifact, add_artifact_source, get_artifact_envkey,
+        toolchain::{cargo, protoc, rustc},
+    },
     ContextConfig,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{ArtifactEnvironment, ArtifactId, ArtifactSystem};
 
-pub fn build_artifact<'a>(
+pub fn artifact<'a>(
     context: &mut ContextConfig,
-    cargo_hash: &'a str,
     excludes: Vec<&'a str>,
     name: &'a str,
     systems: Vec<ArtifactSystem>,
@@ -20,11 +21,11 @@ pub fn build_artifact<'a>(
 
     let path = ".";
 
-    let systems = systems.iter().map(|s| (*s).into()).collect::<Vec<i32>>();
+    let targets = systems.iter().map(|s| (*s).into()).collect::<Vec<i32>>();
 
-    let cargo_vendor_source = new_artifact_source(
+    let vendors_source = add_artifact_source(
         vec![],
-        Some(cargo_hash.to_string()),
+        None,
         vec![
             "Cargo.lock".to_string(),
             "Cargo.toml".to_string(),
@@ -32,6 +33,7 @@ pub fn build_artifact<'a>(
             "config/Cargo.toml".to_string(),
             "notary/Cargo.toml".to_string(),
             "schema/Cargo.toml".to_string(),
+            "sdk/Cargo.toml".to_string(),
             "store/Cargo.toml".to_string(),
             "worker/Cargo.toml".to_string(),
         ],
@@ -39,7 +41,7 @@ pub fn build_artifact<'a>(
         path.to_string(),
     )?;
 
-    let cargo_vendor = artifact::build_artifact(
+    let vendors = add_artifact(
         context,
         vec![cargo.clone(), rustc.clone()],
         vec![
@@ -51,8 +53,8 @@ pub fn build_artifact<'a>(
                 key: "PATH".to_string(),
                 value: format!(
                     "{cargo}/bin:{rustc}/bin",
-                    cargo = step_env_artifact(&cargo),
-                    rustc = step_env_artifact(&rustc)
+                    cargo = get_artifact_envkey(&cargo),
+                    rustc = get_artifact_envkey(&rustc)
                 ),
             },
         ],
@@ -60,7 +62,7 @@ pub fn build_artifact<'a>(
         formatdoc! {"
             mkdir -pv $HOME
 
-            dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"store/src\" \"worker/src\")
+            dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"sdk/src\" \"store/src\" \"worker/src\")
 
             pushd ./source/{source}
 
@@ -83,8 +85,8 @@ pub fn build_artifact<'a>(
             echo \"$CARGO_VENDOR\" > \"$VORPAL_OUTPUT/config.toml\"",
             source = name,
         },
-        vec![cargo_vendor_source],
-        systems.clone(),
+        vec![vendors_source],
+        targets.clone(),
     )?;
 
     // TODO: implement artifact for 'check` to pre-bake the vendor cache
@@ -97,7 +99,7 @@ pub fn build_artifact<'a>(
 
     artifact_excludes.extend(excludes.iter().map(|e| e.to_string()));
 
-    let artifact_source = new_artifact_source(
+    let artifact_source = add_artifact_source(
         artifact_excludes.clone(),
         None,
         vec![],
@@ -105,13 +107,13 @@ pub fn build_artifact<'a>(
         path.to_string(),
     )?;
 
-    artifact::build_artifact(
+    add_artifact(
         context,
         vec![
             cargo.clone(),
-            cargo_vendor.clone(),
             protoc.clone(),
             rustc.clone(),
+            vendors.clone(),
         ],
         vec![
             ArtifactEnvironment {
@@ -122,9 +124,9 @@ pub fn build_artifact<'a>(
                 key: "PATH".to_string(),
                 value: format!(
                     "{cargo}/bin:{rustc}/bin:{protoc}/bin",
-                    cargo = step_env_artifact(&cargo),
-                    rustc = step_env_artifact(&rustc),
-                    protoc = step_env_artifact(&protoc),
+                    cargo = get_artifact_envkey(&cargo),
+                    rustc = get_artifact_envkey(&rustc),
+                    protoc = get_artifact_envkey(&protoc),
                 ),
             },
         ],
@@ -139,14 +141,15 @@ pub fn build_artifact<'a>(
             ln -sv \"{vendor_cache}/config.toml\" .cargo/config.toml
 
             cargo build --offline --release
+
             cargo test --offline --release
 
             mkdir -p \"$VORPAL_OUTPUT/bin\"
 
             cp -pr ./target/release/. $VORPAL_OUTPUT/.",
-            vendor_cache = step_env_artifact(&cargo_vendor),
+            vendor_cache = get_artifact_envkey(&vendors),
         },
         vec![artifact_source],
-        systems,
+        targets,
     )
 }

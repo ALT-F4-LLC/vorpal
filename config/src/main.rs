@@ -1,36 +1,31 @@
-use crate::{artifact::language::rust::build_artifact, service::ContextConfig};
 use anyhow::Result;
-use vorpal_schema::vorpal::{
-    artifact::v0::ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
-    config::v0::Config,
+use vorpal_schema::vorpal::config::v0::Config;
+use vorpal_sdk::config::{
+    artifact::{add_systems, language::rust},
+    cli::execute,
+    ContextConfig,
 };
 
-mod artifact;
-mod cli;
-mod cross_platform;
-mod sandbox;
-mod service;
+// 1. Create a function that returns a populated configuration
+fn config(context: &mut ContextConfig) -> Result<Config> {
+    // NOTE: custom logic can be added anywhere in this function
 
-// Configuration function that returns a Config struct
-fn build_config(context: &mut ContextConfig) -> Result<Config> {
-    // TODO: add any custom logic you want here
+    // 2. Define artifact parameters
+    let artifact_excludes = vec![".env", ".packer", ".vagrant", "script"];
+    let artifact_name = "vorpal";
+    let artifact_systems = add_systems(vec!["aarch64-linux", "aarch64-macos"])?;
 
-    // Define the Rust artifact parameters
-    let cargo_hash = "59324cc6fb0c81f0ab5ae77c235b3a0060eadaa7e9b0277aa74fbdcc9b839463";
-    let excludes = vec![".env", ".packer", ".vagrant", "script"];
-    let name = "vorpal";
-    let systems = vec![Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos];
+    // 3. Create artifact (rust)
+    let artifact = rust::artifact(context, artifact_excludes, artifact_name, artifact_systems)?;
 
-    // Build the Rust artifact
-    let vorpal = build_artifact(context, cargo_hash, excludes, name, systems)?;
-
-    // Return the Config struct
+    // 4. Return config with artifact
     Ok(Config {
-        artifacts: vec![vorpal],
+        artifacts: vec![artifact],
     })
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    cli::execute(build_config).await
+    // 5. Execute the configuration
+    execute(config).await
 }
