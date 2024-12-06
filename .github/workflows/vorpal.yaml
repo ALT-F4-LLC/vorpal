@@ -102,7 +102,22 @@ jobs:
       - uses: actions/checkout@v4
 
       - if: matrix.runner == 'ubuntu-latest'
-        run: ./script/dev/debian.sh
+        run: |
+          ./script/dev/debian.sh
+
+          cat > /etc/apparmor.d/bwrap << EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+
+            # Site-specific additions and overrides. See local/README for details.
+            include if exists <local/bwrap>
+          }
+          EOF
+
+          sudo systemctl restart apparmor.service
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
