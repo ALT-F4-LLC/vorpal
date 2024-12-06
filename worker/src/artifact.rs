@@ -63,6 +63,7 @@ async fn run_step(
     artifact_path: &Path,
     step_arguments: Vec<String>,
     step_entrypoint: Option<String>,
+    step_environments: Vec<ArtifactEnvironment>,
     step_script: Option<String>,
     tx: &Sender<Result<ArtifactBuildResponse, Status>>,
     workspace_path: &Path,
@@ -117,7 +118,7 @@ async fn run_step(
 
     // Add all custom environment variables
 
-    for environment in environments.clone() {
+    for environment in step_environments.clone() {
         environments.push(environment);
     }
 
@@ -155,9 +156,9 @@ async fn run_step(
 
     // Setup entrypoint
 
-    let entrypoint = match &step_entrypoint {
+    let entrypoint = match step_entrypoint.clone() {
         Some(entrypoint) => entrypoint,
-        None => &match script_path {
+        None => match script_path {
             Some(ref path) => path.display().to_string(),
             None => return Err(Status::invalid_argument("entrypoint is missing")),
         },
@@ -165,7 +166,7 @@ async fn run_step(
 
     // Setup command
 
-    let mut command = Command::new(entrypoint);
+    let mut command = Command::new(entrypoint.clone());
 
     // Setup working directory
 
@@ -622,6 +623,7 @@ impl ArtifactService for ArtifactServer {
                     &artifact_path,
                     step.arguments.clone(),
                     step.entrypoint.clone(),
+                    step.environments.clone(),
                     step.script.clone(),
                     &tx,
                     &workspace_path_canonical,
