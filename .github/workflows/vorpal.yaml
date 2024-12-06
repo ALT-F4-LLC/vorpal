@@ -105,7 +105,7 @@ jobs:
         run: |
           ./script/dev/debian.sh
 
-          sudo cat > /etc/apparmor.d/bwrap << EOF
+          cat > bwrap << EOF
           abi <abi/4.0>,
           include <tunables/global>
 
@@ -116,6 +116,8 @@ jobs:
             include if exists <local/bwrap>
           }
           EOF
+
+          sudo mv bwrap /etc/apparmor.d/bwrap
 
           sudo systemctl restart apparmor.service
 
