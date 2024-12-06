@@ -1,10 +1,10 @@
 use console::style;
-use std::path::Path;
+// use std::path::Path;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
-pub fn badge_success() -> String {
-    style("[✓]").green().to_string()
-}
+// pub fn badge_success() -> String {
+//     style("[✓]").green().to_string()
+// }
 
 pub fn print_artifacts(build_order: &[ArtifactId]) {
     println!("{}", style("Artifacts:").bold().green(),);
@@ -26,14 +26,14 @@ pub fn print_artifacts_total(build_order: &[ArtifactId]) {
     );
 }
 
-pub fn print_source_cache(artifact_name: &str, source_cache: &str) {
-    println!(
-        "{} Source cache: {} {}",
-        format_artifact_name(artifact_name),
-        style(source_cache).italic(),
-        badge_success(),
-    );
-}
+// pub fn print_source_cache(artifact_name: &str, source_cache: &str) {
+//     println!(
+//         "{} Source cache: {} {}",
+//         format_artifact_name(artifact_name),
+//         style(source_cache).italic(),
+//         badge_success(),
+//     );
+// }
 
 pub enum SourceStatus {
     // Complete,
@@ -72,22 +72,22 @@ pub fn print_source_url(artifact_name: &str, status: SourceStatus, url: &str) {
 //     );
 // }
 
-pub fn print_artifact_hash(artifact_name: &str, artifact_hash: &str) {
-    println!(
-        "{} Hash: {} {}",
-        format_artifact_name(artifact_name),
-        style(artifact_hash).italic(),
-        badge_success(),
-    );
-}
+// pub fn print_artifact_hash(artifact_name: &str, artifact_hash: &str) {
+//     println!(
+//         "{} Hash: {} {}",
+//         format_artifact_name(artifact_name),
+//         style(artifact_hash).italic(),
+//         badge_success(),
+//     );
+// }
 
-pub fn print_artifact_archive(artifact_name: &str, artifact_archive: &Path) {
-    println!(
-        "{} Archive: {}",
-        format_artifact_name(artifact_name),
-        style(artifact_archive.display().to_string()).green()
-    );
-}
+// pub fn print_artifact_archive(artifact_name: &str, artifact_archive: &Path) {
+//     println!(
+//         "{} Archive: {}",
+//         format_artifact_name(artifact_name),
+//         style(artifact_archive.display().to_string()).green()
+//     );
+// }
 
 pub fn print_artifact_output(artifact_name: &str, artifact_output: &ArtifactId) {
     println!(

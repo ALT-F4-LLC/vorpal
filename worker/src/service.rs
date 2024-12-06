@@ -1,18 +1,14 @@
-use crate::{artifact::ArtifactServer, store::StoreServer};
+use crate::artifact::ArtifactServer;
 use anyhow::Result;
 use std::env::consts::{ARCH, OS};
 use tonic::transport::Server;
 use tracing::info;
 use vorpal_schema::{
-    get_artifact_system,
-    vorpal::{
-        artifact::v0::artifact_service_server::ArtifactServiceServer,
-        store::v0::store_service_server::StoreServiceServer,
-    },
+    get_artifact_system, vorpal::artifact::v0::artifact_service_server::ArtifactServiceServer,
 };
 use vorpal_store::paths::{get_public_key_path, setup_paths};
 
-pub async fn listen(port: u16) -> Result<()> {
+pub async fn listen(registry: &str, port: u16) -> Result<()> {
     setup_paths().await?;
 
     let public_key_path = get_public_key_path();
@@ -33,12 +29,11 @@ pub async fn listen(port: u16) -> Result<()> {
 
     info!("worker address: {}", addr);
 
-    let artifact_service = ArtifactServiceServer::new(ArtifactServer::new(system));
-    let store_service = StoreServiceServer::new(StoreServer::default());
+    let artifact_service =
+        ArtifactServiceServer::new(ArtifactServer::new(registry.to_string(), system));
 
     Server::builder()
         .add_service(artifact_service)
-        .add_service(store_service)
         .serve(addr)
         .await
         .expect("failed to start worker server");

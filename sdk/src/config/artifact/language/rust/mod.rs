@@ -32,6 +32,7 @@ pub fn artifact<'a>(
             "cli/Cargo.toml".to_string(),
             "config/Cargo.toml".to_string(),
             "notary/Cargo.toml".to_string(),
+            "registry/Cargo.toml".to_string(),
             "schema/Cargo.toml".to_string(),
             "sdk/Cargo.toml".to_string(),
             "store/Cargo.toml".to_string(),
@@ -62,7 +63,7 @@ pub fn artifact<'a>(
         formatdoc! {"
             mkdir -pv $HOME
 
-            dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"schema/src\" \"sdk/src\" \"store/src\" \"worker/src\")
+            dirs=(\"cli/src\" \"config/src\" \"notary/src\" \"registry/src\" \"schema/src\" \"sdk/src\" \"store/src\" \"worker/src\")
 
             pushd ./source/{source}
 

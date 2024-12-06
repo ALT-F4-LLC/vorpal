@@ -124,7 +124,7 @@ jobs:
       - run: ./dist/vorpal config --artifact "vorpal" --file "./dist/vorpal-config"
 
       - run: |
-          ./dist/vorpal worker start > worker_output.log 2>&1 &
+          ./dist/vorpal start > worker_output.log 2>&1 &
           WORKER_PID=$(echo $!)
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
