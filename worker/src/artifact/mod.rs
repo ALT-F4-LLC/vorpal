@@ -58,6 +58,7 @@ impl ArtifactServer {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_step(
     artifact_artifacts: Vec<ArtifactId>,
     artifact_name: String,
@@ -166,7 +167,7 @@ async fn run_step(
 
     // Setup command
 
-    let mut command = Command::new(&entrypoint);
+    let mut command = Command::new(entrypoint);
 
     // Setup working directory
 
@@ -472,7 +473,7 @@ impl ArtifactService for ArtifactServer {
                         let mut response_data = Vec::new();
 
                         while let Ok(message) = response.message().await {
-                            if let None = message {
+                            if message.is_none() {
                                 break;
                             }
 
@@ -816,8 +817,6 @@ impl ArtifactService for ArtifactServer {
                 {
                     error!("failed to send error: {:?}", err);
                 }
-
-                return;
             }
         });
 

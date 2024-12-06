@@ -103,7 +103,7 @@ pub async fn build(
             let mut response_data = Vec::new();
 
             while let Ok(message) = response.message().await {
-                if let None = message {
+                if message.is_none() {
                     break;
                 }
 
@@ -266,7 +266,7 @@ pub async fn build(
     let mut stream = response.into_inner();
 
     while let Ok(message) = stream.message().await {
-        if let None = message {
+        if message.is_none() {
             break;
         }
 
