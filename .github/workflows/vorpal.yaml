@@ -105,7 +105,7 @@ jobs:
         run: |
           ./script/dev/debian.sh
 
-          cat > /etc/apparmor.d/bwrap << EOF
+          sudo cat > /etc/apparmor.d/bwrap << EOF
           abi <abi/4.0>,
           include <tunables/global>
 
