@@ -42,8 +42,6 @@ use vorpal_store::{
     },
 };
 
-mod build;
-
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 #[derive(Debug, Default)]
