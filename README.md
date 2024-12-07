@@ -1,32 +1,118 @@
 # vorpal
 
-Build and deliver software reliably with one magical tool.
+Build and ship software reliably with one powerful tool.
 
 ![vorpal-purpose](./vorpal-purpose.jpg)
 
 ## Overview
 
-Vorpal's goal is to package and distribute software reliably to local (development) and remote (cloud, self-hosted, etc) environments. It uses a `vorpal.ncl` file written in [Nickel](https://nickel-lang.org/) that allows you to "describe" every aspect of your software dependencies in a repeatable and reproducible way.
+Vorpal distributively builds and ships software reliably using BYOL (bring-you-own-language) programmable configurations. This allows developers to manage software dependencies and deployments in a repeatable and reproducible way.
 
-```nickel
-# Built-in validation contracts
-let { Config, .. } = import "schema.ncl" in
+Below are examples of building a Rust application with different configuration languages:
 
-# Built-in language functions
-let { RustPackage, .. } = import "language.ncl" in
+### Go
 
-# Project configuration (with `--system "<system>"` value)
-fun system => {
-  packages = {
-    default = RustPackage {
-      cargo_hash = "<hash>",
-      name = "vorpal",
-      source = ".",
-      systems = ["aarch64-linux", "x86_64-linux"],
-      target = system
+```go
+package main
+
+import (
+    "context"
+    "github.com/vorpal_schema/vorpal/config/v0"
+    "github.com/vorpal_sdk/config/artifact"
+    "github.com/vorpal_sdk/config/cli"
+)
+
+// 1. Create a function that returns a populated configuration
+func config(ctx *cli.ContextConfig) (*config.Config, error) {
+    // NOTE: custom logic can be added anywhere in this function
+
+    // 2. Define artifact parameters
+    artifactExcludes := []string{".env", ".packer", ".vagrant", "script"}
+    artifactName := "vorpal"
+    artifactSystems := artifact.AddSystems([]string{"aarch64-linux", "aarch64-macos"})
+
+    // 3. Create artifact (rust)
+    artifact, err := artifact.RustArtifact(ctx, artifactExcludes, artifactName, artifactSystems)
+    if err != nil {
+        return nil, err
     }
-  }
-} | Config
+
+    // 4. Return config with artifact
+    return &config.Config{
+        Artifacts: []config.Artifact{artifact},
+    }, nil
+}
+
+func main() {
+    ctx := context.Background()
+    if err := cli.Execute(ctx, config); err != nil {
+        panic(err)
+    }
+}
+```
+
+### Rust
+
+```rust
+use anyhow::Result;
+use vorpal_schema::vorpal::config::v0::Config;
+use vorpal_sdk::config::{
+    artifact::{add_systems, language::rust},
+    cli::execute,
+    ContextConfig,
+};
+
+// 1. Create a function that returns a populated configuration
+fn config(context: &mut ContextConfig) -> Result<Config> {
+    // NOTE: custom logic can be added anywhere in this function
+
+    // 2. Define artifact parameters
+    let artifact_excludes = vec![".env", ".packer", ".vagrant", "script"];
+    let artifact_name = "vorpal";
+    let artifact_systems = add_systems(vec!["aarch64-linux", "aarch64-macos"])?;
+
+    // 3. Create artifact (rust)
+    let artifact = rust::artifact(context, artifact_excludes, artifact_name, artifact_systems)?;
+
+    // 4. Return config with artifact
+    Ok(Config {
+        artifacts: vec![artifact],
+    })
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // 5. Execute the configuration
+    execute(config).await
+}
+```
+
+### TypeScript
+
+```typescript
+import { ContextConfig, execute, addSystems, rust } from '@vorpal/config';
+import { Config } from '@vorpal/schema';
+
+// 1. Create a function that returns a populated configuration
+function config(context: ContextConfig): Config {
+    // NOTE: custom logic can be added anywhere in this function
+
+    // 2. Define artifact parameters
+    const artifactExcludes = ['.env', '.packer', '.vagrant', 'script'];
+    const artifactName = 'vorpal';
+    const artifactSystems = addSystems(['aarch64-linux', 'aarch64-macos']);
+
+    // 3. Create artifact (rust)
+    const artifact = rust.artifact(context, artifactExcludes, artifactName, artifactSystems);
+
+    // 4. Return config with artifact
+    return {
+        artifacts: [artifact],
+    };
+}
+
+// 5. Execute the configuration
+await execute(config);
 ```
 
 ## Design
@@ -59,20 +145,16 @@ On Linux, install native tools with the distro's package manger (apt, yum, etc):
 > [!NOTE]
 > Most tools below are used to compile packages for the sandbox environment.
 
-- `autoconf`
-- `automake`
-- `bison`
+- `bubblewrap`
 - `curl`
-- `flex`
-- `g++`
-- `gcc`
-- `libc6-dev`
-- `m4`
-- `make`
-- `perl`
-- `tar`
-- `texinfo`
+- `docker`
+- `protoc`
+- `rustup`
 - `unzip`
+
+### Direnv
+
+You can use `direnv` to load environment variables, `rustup` and `protoc`.
 
 ### Steps
 
@@ -81,22 +163,78 @@ These steps guide how to compile from source code and test Vorpal by building it
 > [!IMPORTANT]
 > Steps must be run in the root of the cloned repository.
 
+1. Compile binaries:
+
 ```bash
 ./script/dev.sh make dist
 ```
+
+2. Generate keys:
 
 ```bash
 ./dist/vorpal keys generate
 ```
 
-```bash
-./dist/vorpal worker start
-```
+3. Start services:
 
 ```bash
-./dist/vorpal check
+./dist/vorpal start
 ```
 
+4. Check configuration:
+
+```bash
+./dist/vorpal config
+```
+
+5. Build artifacts:
 ```bash
 ./dist/vorpal build
 ```
+
+## Sandboxes
+
+Offical sandboxes maintained by the Vorpal development team that provide reproducibile environments.
+
+### Linux
+
+- `bash`
+- `binutils`
+- `bison`
+- `coreutils`
+- `curl`
+- `diffutils`
+- `file`
+- `findutils`
+- `gawk`
+- `gcc`
+- `gettext`
+- `glibc`
+- `grep`
+- `gzip`
+- `libidn2`
+- `libpsl`
+- `libunistring`
+- `linux-headers`
+- `m4`
+- `make`
+- `ncurses`
+- `openssl`
+- `patch`
+- `perl`
+- `python`
+- `sed`
+- `tar`
+- `texinfo`
+- `unzip`
+- `util-linux`
+- `xz`
+- `zlib`
+
+### macOS
+
+Coming soon.
+
+### Windows
+
+Coming soon.
