@@ -140,7 +140,11 @@ jobs:
       - run: ./dist/vorpal keys generate
       - run: ./dist/vorpal config --artifact "vorpal" --file "./dist/vorpal-config"
 
-      - run: |
+      - env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
           ./dist/vorpal start \
             --registry-backend "s3" \
             --registry-backend-s3-bucket "altf4llc-vorpal-registry" \
