@@ -314,10 +314,8 @@ async fn main() -> Result<()> {
                     bail!("unknown registry backend: {}", registry_backend);
                 }
 
-                if backend == RegistryServerBackend::S3 {
-                    if registry_backend_s3_bucket.is_none() {
-                        bail!("s3 backend requires '--registry-backend-s3-bucket' parameter");
-                    }
+                if backend == RegistryServerBackend::S3 && registry_backend_s3_bucket.is_none() {
+                    bail!("s3 backend requires '--registry-backend-s3-bucket' parameter");
                 }
 
                 let service = RegistryServiceServer::new(RegistryServer::new(

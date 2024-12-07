@@ -66,7 +66,7 @@ impl RegistryService for RegistryServer {
             return Err(Status::invalid_argument("missing s3 bucket"));
         }
 
-        let client_bucket_name = backend_s3_bucket.unwrap_or_else(|| "".to_string());
+        let client_bucket_name = backend_s3_bucket.unwrap_or_default();
 
         tokio::spawn(async move {
             let request = request.into_inner();
