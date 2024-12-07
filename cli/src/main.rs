@@ -12,7 +12,7 @@ use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tonic::transport::{Channel, Server};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
-use vorpal_registry::service::RegistryServer;
+use vorpal_registry::service::{RegistryServer, RegistryServerBackend};
 use vorpal_schema::{
     get_artifact_system,
     vorpal::{
@@ -65,17 +65,23 @@ enum Command {
     Keys(CommandKeys),
 
     Start {
-        #[clap(default_value = "http://localhost:23151", long, short)]
+        #[clap(default_value = "http://localhost:23151", long)]
         artifact_registry: String,
 
         #[arg(default_value_t = Level::INFO, global = true, long)]
         level: Level,
 
-        #[clap(default_value = "23151", long, short)]
+        #[clap(default_value = "23151", long)]
         port: u16,
 
-        #[arg(default_value = "artifact,registry", long, short)]
+        #[arg(default_value = "artifact,registry", long)]
         services: String,
+
+        #[arg(default_value = "local", long)]
+        registry_backend: String,
+
+        #[arg(long)]
+        registry_backend_s3_bucket: Option<String>,
     },
 }
 
@@ -256,6 +262,8 @@ async fn main() -> Result<()> {
             artifact_registry,
             level,
             port,
+            registry_backend,
+            registry_backend_s3_bucket,
             services,
         } => {
             let mut subscriber = FmtSubscriber::builder().with_max_level(*level);
@@ -296,7 +304,26 @@ async fn main() -> Result<()> {
             }
 
             if services.contains("registry") {
-                let service = RegistryServiceServer::new(RegistryServer::default());
+                let backend = match registry_backend.as_str() {
+                    "local" => RegistryServerBackend::Local,
+                    "s3" => RegistryServerBackend::S3,
+                    _ => RegistryServerBackend::Unknown,
+                };
+
+                if backend == RegistryServerBackend::Unknown {
+                    bail!("unknown registry backend: {}", registry_backend);
+                }
+
+                if backend == RegistryServerBackend::S3 {
+                    if registry_backend_s3_bucket.is_none() {
+                        bail!("s3 backend requires '--registry-backend-s3-bucket' parameter");
+                    }
+                }
+
+                let service = RegistryServiceServer::new(RegistryServer::new(
+                    backend,
+                    registry_backend_s3_bucket.clone(),
+                ));
 
                 info!("registry service: [::]:{}", port);
 

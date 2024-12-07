@@ -141,12 +141,18 @@ jobs:
       - run: ./dist/vorpal config --artifact "vorpal" --file "./dist/vorpal-config"
 
       - run: |
-          ./dist/vorpal start > worker_output.log 2>&1 &
+          ./dist/vorpal start \
+            --registry-backend "s3" \
+            --registry-backend-s3-bucket "altf4llc-vorpal-registry" \
+            > worker_output.log 2>&1 &
           WORKER_PID=$(echo $!)
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
-      - run: ./dist/vorpal build --artifact "vorpal" --file "./dist/vorpal-config"
+      - run: |
+          ./dist/vorpal build \
+            --artifact "vorpal" \
+            --file "./dist/vorpal-config"
 
       - if: always()
         run: |

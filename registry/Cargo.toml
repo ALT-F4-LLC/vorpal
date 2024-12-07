@@ -5,6 +5,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = { default-features = false, version = "1" }
+aws-config = { version = "1.1.7", features = ["behavior-version-latest"] }
+aws-sdk-config = "1.53.0"
+aws-sdk-s3 = "1.65.0"
 futures-util = { default-features = false, version = "0" }
 rsa = { default-features = false, version = "0" }
 tokio = { default-features = false, features = ["process", "rt-multi-thread"], version = "1" }

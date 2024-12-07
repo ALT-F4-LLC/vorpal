@@ -2,7 +2,7 @@ use crate::log::{print_artifact_log, print_artifact_output, print_source_url, So
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use tokio::{
-    fs::{create_dir_all, read, remove_dir_all, File},
+    fs::{create_dir_all, read, remove_dir_all, remove_file, File},
     io::AsyncWriteExt,
 };
 use tonic::Code::NotFound;
@@ -132,6 +132,10 @@ pub async fn build(
                     .expect("failed to create artifact path");
 
                 unpack_zstd(&artifact_path, &artifact_archive_path).await?;
+
+                remove_file(&artifact_archive_path)
+                    .await
+                    .expect("failed to remove");
 
                 print_artifact_output(&artifact_id.name, artifact_id);
             }

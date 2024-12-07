@@ -545,19 +545,19 @@ impl ArtifactService for ArtifactServer {
                                 return;
                             }
 
-                            // if let Err(err) = remove_file(&source_archive_path).await {
-                            //     if let Err(err) = tx
-                            //         .send(Err(Status::internal(format!(
-                            //             "failed to remove source archive: {:?}",
-                            //             err
-                            //         ))))
-                            //         .await
-                            //     {
-                            //         error!("failed to send error: {:?}", err);
-                            //     }
-                            //
-                            //     return;
-                            // }
+                            if let Err(err) = remove_file(&source_archive_path).await {
+                                if let Err(err) = tx
+                                    .send(Err(Status::internal(format!(
+                                        "failed to remove source archive: {:?}",
+                                        err
+                                    ))))
+                                    .await
+                                {
+                                    error!("failed to send error: {:?}", err);
+                                }
+
+                                return;
+                            }
                         }
                     }
 
@@ -777,19 +777,19 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
-            // if let Err(err) = remove_file(&artifact_archive_path).await {
-            //     if let Err(err) = tx
-            //         .send(Err(Status::internal(format!(
-            //             "failed to remove artifact archive: {:?}",
-            //             err
-            //         ))))
-            //         .await
-            //     {
-            //         error!("failed to send error: {:?}", err);
-            //     }
-            //
-            //     return;
-            // }
+            if let Err(err) = remove_file(&artifact_archive_path).await {
+                if let Err(err) = tx
+                    .send(Err(Status::internal(format!(
+                        "failed to remove artifact archive: {:?}",
+                        err
+                    ))))
+                    .await
+                {
+                    error!("failed to send error: {:?}", err);
+                }
+
+                return;
+            }
 
             // Remove lock file
 
