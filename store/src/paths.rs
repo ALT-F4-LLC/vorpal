@@ -143,8 +143,10 @@ pub fn get_file_paths(
 
 pub async fn set_paths_timestamps(target_files: &[PathBuf]) -> Result<(), Error> {
     for path in target_files {
-        let epoc = FileTime::from_unix_time(0, 0);
-        set_file_times(path, epoc, epoc).expect("Failed to set file times");
+        if !path.is_symlink() {
+            let epoc = FileTime::from_unix_time(0, 0);
+            set_file_times(path, epoc, epoc).expect("Failed to set file times");
+        }
     }
 
     Ok(())
