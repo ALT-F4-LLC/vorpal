@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package vorpal.registry.v0;
+
+import "v0/artifact/artifact.proto";
+
+service RegistryService {
+    rpc Push(stream RegistryPushRequest) returns (RegistryPushResponse);
+    rpc Pull(RegistryPullRequest) returns (stream RegistryPullResponse);
+}
+
+enum RegistryStoreKind {
+    UNKNOWN_STORE_KIND = 0;
+    ARTIFACT = 1;
+    ARTIFACT_SOURCE = 2;
+}
+
+message RegistryPushRequest {
+    RegistryStoreKind kind = 1;
+    bytes data = 2;
+    bytes data_signature = 3;
+    vorpal.artifact.v0.ArtifactId artifact_id = 4;
+}
+
+message RegistryPushResponse {
+    bool success = 1;
+}
+
+message RegistryPullRequest {
+    RegistryStoreKind kind = 1;
+    vorpal.artifact.v0.ArtifactId artifact_id = 2;
+}
+
+message RegistryPullResponse {
+    bytes data = 1;
+}

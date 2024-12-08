@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package vorpal.artifact.v0;
 
+service ArtifactService {
+    rpc Build (ArtifactBuildRequest) returns (stream ArtifactBuildResponse);
+}
+
 enum ArtifactSystem {
     UNKNOWN_SYSTEM = 0;
     AARCH64_LINUX = 1;
@@ -45,18 +49,12 @@ message Artifact {
 
 message ArtifactBuildRequest {
     ArtifactSystem target = 1;
-    optional bytes source_data = 2;
-    optional bytes source_data_signature = 3;
-    repeated ArtifactId artifacts = 4;
-    repeated ArtifactStep steps = 5;
-    string hash = 6;
-    string name = 7;
+    repeated ArtifactId artifacts = 2;
+    repeated ArtifactStep steps = 3;
+    string hash = 4;
+    string name = 5;
 }
 
 message ArtifactBuildResponse {
     string output = 1;
-}
-
-service ArtifactService {
-    rpc Build (stream ArtifactBuildRequest) returns (stream ArtifactBuildResponse);
 }

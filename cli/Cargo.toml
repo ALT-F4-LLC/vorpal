@@ -22,11 +22,13 @@ tokio = { default-features = false, version = "1" }
 tokio-stream = { default-features = false, version = "0" }
 tokio-tar = { default-features = false, version = "0" }
 tonic = { default-features = false, version = "0" }
+tonic-health = "0.12.3"
 tracing = { default-features = false, version = "0" }
 tracing-subscriber = { default-features = false, features = ["ansi", "fmt", "registry", "std"], version = "0" }
 url = { default-features = false, version = "2" }
 uuid = { default-features = false, features = ["v7"], version = "1" }
 vorpal-notary = { default-features = false, path = "../notary" }
+vorpal-registry = { default-features = false, path = "../registry" }
 vorpal-schema = { default-features = false, path = "../schema" }
 vorpal-store = { default-features = false, path = "../store" }
 vorpal-worker = { default-features = false, path = "../worker" }

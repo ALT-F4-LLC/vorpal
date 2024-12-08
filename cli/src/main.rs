@@ -9,22 +9,86 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::{process, process::Child};
 use tokio_stream::{wrappers::LinesStream, StreamExt};
-use tonic::transport::Channel;
-use tracing::Level;
+use tonic::transport::{Channel, Server};
+use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
+use vorpal_registry::service::{RegistryServer, RegistryServerBackend};
 use vorpal_schema::{
     get_artifact_system,
     vorpal::{
-        artifact::v0::{ArtifactId, ArtifactSystem, ArtifactSystem::UnknownSystem},
+        artifact::v0::{
+            artifact_service_server::ArtifactServiceServer, ArtifactId, ArtifactSystem,
+            ArtifactSystem::UnknownSystem,
+        },
         config::v0::config_service_client::ConfigServiceClient,
+        registry::v0::registry_service_server::RegistryServiceServer,
     },
 };
-use vorpal_store::paths::{get_private_key_path, setup_paths};
-use vorpal_worker::service;
+use vorpal_store::paths::{get_private_key_path, get_public_key_path, setup_paths};
+use vorpal_worker::artifact::ArtifactServer;
 
 mod build;
 mod log;
 mod worker;
+
+#[derive(Subcommand)]
+enum Command {
+    Build {
+        #[arg(long, short)]
+        artifact: String,
+
+        #[arg(long, short)]
+        file: String,
+
+        #[clap(default_value = "http://localhost:23151", long, short)]
+        registry: String,
+
+        #[arg(default_value_t = get_default_system(), long, short)]
+        system: String,
+
+        #[clap(default_value = "http://localhost:23151", long, short)]
+        worker: String,
+    },
+
+    Config {
+        #[arg(long, short)]
+        file: String,
+
+        #[arg(long, short)]
+        artifact: String,
+
+        #[arg(default_value_t = get_default_system(), long, short)]
+        system: String,
+    },
+
+    #[clap(subcommand)]
+    Keys(CommandKeys),
+
+    Start {
+        #[clap(default_value = "http://localhost:23151", long)]
+        artifact_registry: String,
+
+        #[arg(default_value_t = Level::INFO, global = true, long)]
+        level: Level,
+
+        #[clap(default_value = "23151", long)]
+        port: u16,
+
+        #[arg(default_value = "artifact,registry", long)]
+        services: String,
+
+        #[arg(default_value = "local", long)]
+        registry_backend: String,
+
+        #[arg(long)]
+        registry_backend_s3_bucket: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CommandKeys {
+    Generate {},
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -32,6 +96,10 @@ mod worker;
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+fn get_default_system() -> String {
+    format!("{}-{}", ARCH, OS)
 }
 
 async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channel>)> {
@@ -83,68 +151,15 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
     Ok((process, service))
 }
 
-#[derive(Subcommand)]
-enum Command {
-    Build {
-        #[arg(long, short)]
-        file: String,
-
-        #[arg(long, short)]
-        artifact: String,
-
-        #[arg(default_value_t = get_default_system(), long, short)]
-        system: String,
-
-        #[clap(default_value = "http://localhost:23151", long, short)]
-        worker: String,
-    },
-
-    Config {
-        #[arg(long, short)]
-        file: String,
-
-        #[arg(long, short)]
-        artifact: String,
-
-        #[arg(default_value_t = get_default_system(), long, short)]
-        system: String,
-    },
-
-    #[clap(subcommand)]
-    Keys(CommandKeys),
-
-    #[clap(subcommand)]
-    Worker(CommandWorker),
-}
-
-#[derive(Subcommand)]
-pub enum CommandKeys {
-    Generate {},
-}
-
-#[derive(Subcommand)]
-pub enum CommandWorker {
-    Start {
-        #[clap(default_value_t = Level::INFO, global = true, long)]
-        level: Level,
-
-        #[clap(default_value = "23151", long, short)]
-        port: u16,
-    },
-}
-
-fn get_default_system() -> String {
-    format!("{}-{}", ARCH, OS)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
         Command::Build {
-            file,
             artifact,
+            file,
+            registry,
             system,
             worker,
         } => {
@@ -173,11 +188,9 @@ async fn main() -> Result<()> {
 
             let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
 
-            // let artifacts_pending = artifacts_order.clone();
-
-            for id in &artifacts_order {
-                match artifacts_map.get(id) {
-                    None => bail!("Build artifact not found: {}", id.name),
+            for artifact_id in &artifacts_order {
+                match artifacts_map.get(artifact_id) {
+                    None => bail!("Build artifact not found: {}", artifact_id.name),
                     Some(artifact) => {
                         for a in &artifact.artifacts {
                             if !artifacts_ids.contains_key(&a.name) {
@@ -185,9 +198,9 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        build(artifact, id, artifact_system, worker).await?;
+                        build(artifact, artifact_id, artifact_system, registry, worker).await?;
 
-                        artifacts_ids.insert(id.name.clone(), id.clone());
+                        artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
                     }
                 }
             }
@@ -245,23 +258,86 @@ async fn main() -> Result<()> {
             }
         },
 
-        Command::Worker(worker) => match worker {
-            CommandWorker::Start { level, port } => {
-                let mut subscriber = FmtSubscriber::builder().with_max_level(*level);
+        Command::Start {
+            artifact_registry,
+            level,
+            port,
+            registry_backend,
+            registry_backend_s3_bucket,
+            services,
+        } => {
+            let mut subscriber = FmtSubscriber::builder().with_max_level(*level);
 
-                if [Level::DEBUG, Level::TRACE].contains(level) {
-                    subscriber = subscriber.with_file(true).with_line_number(true);
+            if [Level::DEBUG, Level::TRACE].contains(level) {
+                subscriber = subscriber.with_file(true).with_line_number(true);
+            }
+
+            let subscriber = subscriber.finish();
+
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("setting default subscriber");
+
+            setup_paths().await?;
+
+            let public_key_path = get_public_key_path();
+
+            if !public_key_path.exists() {
+                return Err(anyhow::anyhow!(
+                    "public key not found - run 'vorpal keys generate' or copy from agent"
+                ));
+            }
+
+            let (_, health_service) = tonic_health::server::health_reporter();
+
+            let mut router = Server::builder().add_service(health_service);
+
+            if services.contains("artifact") {
+                let system = get_artifact_system(format!("{}-{}", ARCH, OS).as_str());
+                let service = ArtifactServiceServer::new(ArtifactServer::new(
+                    artifact_registry.to_string(),
+                    system,
+                ));
+
+                info!("artifact service: [::]:{}", port);
+
+                router = router.add_service(service);
+            }
+
+            if services.contains("registry") {
+                let backend = match registry_backend.as_str() {
+                    "local" => RegistryServerBackend::Local,
+                    "s3" => RegistryServerBackend::S3,
+                    _ => RegistryServerBackend::Unknown,
+                };
+
+                if backend == RegistryServerBackend::Unknown {
+                    bail!("unknown registry backend: {}", registry_backend);
                 }
 
-                let subscriber = subscriber.finish();
+                if backend == RegistryServerBackend::S3 && registry_backend_s3_bucket.is_none() {
+                    bail!("s3 backend requires '--registry-backend-s3-bucket' parameter");
+                }
 
-                tracing::subscriber::set_global_default(subscriber)
-                    .expect("setting default subscriber");
+                let service = RegistryServiceServer::new(RegistryServer::new(
+                    backend,
+                    registry_backend_s3_bucket.clone(),
+                ));
 
-                service::listen(*port).await?;
+                info!("registry service: [::]:{}", port);
 
-                Ok(())
+                router = router.add_service(service);
             }
-        },
+
+            let address = format!("[::]:{}", port)
+                .parse()
+                .expect("failed to parse address");
+
+            router
+                .serve(address)
+                .await
+                .expect("failed to start worker server");
+
+            Ok(())
+        }
     }
 }

@@ -24,15 +24,11 @@ pub async fn stream(
         anyhow::bail!("store path not found");
     }
 
-    info!("serving store path: {}", store_path.display());
+    info!("serving: {}", store_path.display());
 
     let data = read(&store_path)
         .await
         .expect("failed to read store path data");
-
-    let data_size = data.len();
-
-    info!("serving store size: {}", data_size);
 
     for artifact_chunk in data.chunks(artifact_chunks_size) {
         tx.send(Ok(StorePullResponse {
@@ -41,6 +37,10 @@ pub async fn stream(
         .await
         .expect("failed to send store chunk");
     }
+
+    let data_size = data.len();
+
+    info!("served: {}", data_size);
 
     Ok(())
 }

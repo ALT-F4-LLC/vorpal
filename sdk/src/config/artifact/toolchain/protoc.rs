@@ -1,7 +1,4 @@
-use crate::config::{
-    artifact::{add_artifact, get_artifact_envkey},
-    ContextConfig,
-};
+use crate::config::{artifact::add_artifact, ContextConfig};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
@@ -19,16 +16,18 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         X8664Macos.into(),
     ];
 
-    let source = add_artifact(
+    add_artifact(
         context,
         vec![],
         vec![],
-        format!("{}-source", name).as_str(),
+        name,
         formatdoc! {"
             curl -L -o ./protoc-{version}-{target}.zip \
                 https://github.com/protocolbuffers/protobuf/releases/download/v{version}/protoc-{version}-{target}.zip
 
-            unzip ./protoc-{version}-{target}.zip -d $VORPAL_OUTPUT",
+            unzip ./protoc-{version}-{target}.zip -d $VORPAL_OUTPUT
+
+            chmod +x \"$VORPAL_OUTPUT/bin/protoc\"",
             target = match context.get_target() {
                 Aarch64Linux => "linux-aarch_64",
                 Aarch64Macos => "osx-aarch_64",
@@ -37,22 +36,6 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
                 UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
             },
             version = "25.4",
-        },
-        vec![],
-        systems.clone(),
-    )?;
-
-    add_artifact(
-        context,
-        vec![source.clone()],
-        vec![],
-        name,
-        formatdoc! {"
-            cp -r {source}/bin \"$VORPAL_OUTPUT/bin\"
-            cp -r {source}/include \"$VORPAL_OUTPUT/include\"
-
-            chmod +x \"$VORPAL_OUTPUT/bin/protoc\"",
-            source = get_artifact_envkey(&source),
         },
         vec![],
         systems,

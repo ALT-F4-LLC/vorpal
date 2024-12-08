@@ -1,6 +1,7 @@
 use crate::service;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
@@ -19,28 +20,42 @@ pub mod cli;
 #[derive(Debug, Default)]
 pub struct ContextConfig {
     artifact: HashMap<String, Artifact>,
-    target: ArtifactSystem,
+    system: ArtifactSystem,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArtifactMetadata {
+    pub system: ArtifactSystem,
 }
 
 impl ContextConfig {
-    pub fn new(target: ArtifactSystem) -> Self {
+    pub fn new(system: ArtifactSystem) -> Self {
         Self {
             artifact: HashMap::new(),
-            target,
+            system,
         }
     }
 
     pub fn add_artifact(&mut self, artifact: Artifact) -> Result<ArtifactId> {
         let artifact_json = serde_json::to_string(&artifact).map_err(|e| anyhow::anyhow!(e))?;
-        let artifact_hash = digest(artifact_json.as_bytes());
-        let artifact_key = format!("{}-{}", artifact.name, artifact_hash);
+
+        let artifact_metadata = ArtifactMetadata {
+            system: self.system,
+        };
+        let artifact_metadata_json =
+            serde_json::to_string(&artifact_metadata).map_err(|e| anyhow::anyhow!(e))?;
+
+        let artifact_manifest = format!("{}:{}", artifact_json, artifact_metadata_json);
+        let artifact_manifest_hash = digest(artifact_manifest.as_bytes());
+
+        let artifact_key = format!("{}-{}", artifact.name, artifact_manifest_hash);
 
         if !self.artifact.contains_key(&artifact_key) {
             self.artifact.insert(artifact_key.clone(), artifact.clone());
         }
 
         let artifact_id = ArtifactId {
-            hash: artifact_hash,
+            hash: artifact_manifest_hash,
             name: artifact.name,
         };
 
@@ -54,7 +69,7 @@ impl ContextConfig {
     }
 
     pub fn get_target(&self) -> ArtifactSystem {
-        self.target
+        self.system
     }
 }
 
