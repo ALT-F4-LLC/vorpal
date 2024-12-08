@@ -16,9 +16,9 @@ pub mod vorpal {
         }
     }
 
-    pub mod store {
+    pub mod registry {
         pub mod v0 {
-            tonic::include_proto!("vorpal.store.v0");
+            tonic::include_proto!("vorpal.registry.v0");
         }
     }
 }

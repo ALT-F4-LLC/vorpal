@@ -1,18 +1,20 @@
-use crate::log::{
-    print_artifact_archive, print_artifact_hash, print_artifact_log, print_artifact_output,
-    print_artifacts, print_source_cache, print_source_url, SourceStatus,
-};
+use crate::log::{print_artifact_log, print_artifact_output, print_source_url, SourceStatus};
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
-use tokio::fs::{create_dir_all, read, remove_dir_all, File};
-use tokio::io::AsyncWriteExt;
+use tokio::{
+    fs::{create_dir_all, read, remove_dir_all, remove_file, File},
+    io::AsyncWriteExt,
+};
 use tonic::Code::NotFound;
 use vorpal_schema::vorpal::{
     artifact::v0::{
         artifact_service_client::ArtifactServiceClient, Artifact, ArtifactBuildRequest, ArtifactId,
         ArtifactSource, ArtifactSystem,
     },
-    store::v0::{store_service_client::StoreServiceClient, StoreKind, StoreRequest},
+    registry::v0::{
+        registry_service_client::RegistryServiceClient, RegistryPullRequest, RegistryPushRequest,
+        RegistryStoreKind,
+    },
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
@@ -70,9 +72,12 @@ async fn fetch_source(
 pub async fn build(
     artifact: &Artifact,
     artifact_id: &ArtifactId,
-    target: ArtifactSystem,
-    worker: &str,
+    artifact_target: ArtifactSystem,
+    registry_host: &str,
+    worker_host: &str,
 ) -> Result<()> {
+    // Check if artifact exists (local)
+
     let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_path.exists() {
@@ -81,197 +86,128 @@ pub async fn build(
         return Ok(());
     }
 
-    // Check if artifact archive exists
+    // Check if artifact exists (registry)
 
-    let artifact_archive_path = get_artifact_archive_path(&artifact_id.hash, &artifact_id.name);
-
-    if artifact_archive_path.exists() {
-        create_dir_all(&artifact_path)
-            .await
-            .expect("failed to create artifact path");
-
-        unpack_zstd(&artifact_path, &artifact_archive_path).await?;
-
-        print_artifact_archive(&artifact.name, &artifact_archive_path);
-
-        print_artifact_output(&artifact.name, artifact_id);
-
-        return Ok(());
-    }
-
-    // Check if artifact exists in worker store
-
-    let worker_artifact = StoreRequest {
-        hash: artifact_id.hash.clone(),
-        kind: StoreKind::Artifact as i32,
-        name: artifact_id.name.clone(),
+    let registry_pull = RegistryPullRequest {
+        artifact_id: Some(artifact_id.clone()),
+        kind: RegistryStoreKind::Artifact as i32,
     };
 
-    let mut worker_store = StoreServiceClient::connect(worker.to_owned())
+    let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
         .await
         .expect("failed to connect to store");
 
-    if (worker_store.exists(worker_artifact.clone()).await).is_ok() {
-        println!("=> cache: {:?}", worker_artifact);
+    match registry.pull(registry_pull.clone()).await {
+        Ok(response) => {
+            let mut response = response.into_inner();
+            let mut response_data = Vec::new();
 
-        let worker_store_artifact = StoreRequest {
-            hash: artifact_id.hash.clone(),
-            kind: StoreKind::Artifact as i32,
-            name: artifact_id.name.clone(),
-        };
+            while let Ok(message) = response.message().await {
+                if message.is_none() {
+                    break;
+                }
 
-        let mut stream = worker_store
-            .pull(worker_store_artifact.clone())
-            .await
-            .expect("failed to pull artifact")
-            .into_inner();
-
-        let mut stream_data = Vec::new();
-
-        while let Some(chunk) = stream.message().await.expect("failed to get message") {
-            if !chunk.data.is_empty() {
-                stream_data.extend_from_slice(&chunk.data);
-            }
-        }
-
-        if stream_data.is_empty() {
-            bail!("Artifact stream data empty");
-        }
-
-        let stream_data_size = stream_data.len();
-
-        println!("=> fetched: {} bytes", stream_data_size);
-
-        let mut artifact_archive = File::create(&artifact_archive_path)
-            .await
-            .expect("failed to create artifact archive");
-
-        artifact_archive
-            .write_all(&stream_data)
-            .await
-            .expect("failed to write artifact archive");
-
-        create_dir_all(&artifact_path)
-            .await
-            .expect("failed to create artifact path");
-
-        unpack_zstd(&artifact_path, &artifact_archive_path).await?;
-
-        print_artifact_hash(&artifact_id.name, &artifact_id.hash);
-
-        return Ok(());
-    }
-
-    // Print artifact dependencies
-
-    if !artifact.artifacts.is_empty() {
-        let artifact_list = artifact
-            .artifacts
-            .clone()
-            .into_iter()
-            .collect::<Vec<ArtifactId>>();
-
-        print_artifacts(&artifact_list);
-    }
-
-    // Setup artifact build request
-
-    let mut request_stream: Vec<ArtifactBuildRequest> = vec![];
-
-    let mut request_source_data_path = None;
-
-    // Check if artifact source exists in store
-
-    let source_archive_path = get_source_archive_path(&artifact_id.hash, &artifact_id.name);
-
-    if source_archive_path.exists() {
-        request_source_data_path = Some(source_archive_path);
-    }
-
-    // Check if artifact source exists in worker store
-
-    let worker_store_source = StoreRequest {
-        hash: artifact_id.hash.clone(),
-        kind: StoreKind::ArtifactSource as i32,
-        name: artifact_id.name.clone(),
-    };
-
-    if request_source_data_path.is_none() {
-        match worker_store.exists(worker_store_source.clone()).await {
-            Ok(_) => {
-                print_source_cache(
-                    &artifact.name,
-                    format!("{} => {}-{}", worker, artifact_id.name, artifact_id.hash).as_str(),
-                );
-            }
-
-            Err(status) => {
-                if status.code() == NotFound {
-                    let source_archive_path =
-                        get_source_archive_path(&artifact_id.hash, &artifact_id.name);
-
-                    if !source_archive_path.exists() {
-                        let mut sandbox_fetches = vec![];
-                        // let mut sandbox_source_hashes = vec![];
-
-                        let sandbox_path = create_temp_dir().await?;
-
-                        for artifact_source in &artifact.sources {
-                            let handle = tokio::spawn(fetch_source(
-                                sandbox_path.clone(),
-                                artifact.name.clone(),
-                                artifact_source.clone(),
-                            ));
-
-                            sandbox_fetches.push(handle);
-                        }
-
-                        for handle in sandbox_fetches {
-                            match handle.await {
-                                Ok(result) => {
-                                    if result.is_err() {
-                                        bail!("Task error: {:?}", result);
-                                    }
-
-                                    // if let Ok(result) = result {
-                                    //     sandbox_source_hashes.push(result);
-                                    // }
-                                }
-
-                                Err(e) => eprintln!("Task failed: {}", e),
-                            }
-                        }
-
-                        // TODO: instead of compiling one source, compile sources for hashes
-
-                        let sandbox_path_files = get_file_paths(&sandbox_path, vec![], vec![])?;
-
-                        compress_zstd(&sandbox_path, &sandbox_path_files, &source_archive_path)
-                            .await?;
-
-                        remove_dir_all(&sandbox_path)
-                            .await
-                            .expect("failed to remove");
+                if let Some(res) = message {
+                    if !res.data.is_empty() {
+                        response_data.extend_from_slice(&res.data);
                     }
-
-                    request_source_data_path = Some(source_archive_path);
                 }
             }
-        }
-    }
 
-    // Check if artifact source exists in worker store for same-host.
-    // If not found for same-host, then chunks need to be added to request.
+            if !response_data.is_empty() {
+                let artifact_archive_path =
+                    get_artifact_archive_path(&artifact_id.hash, &artifact_id.name);
 
-    match worker_store.exists(worker_store_source.clone()).await {
-        Ok(_) => {
-            print_source_cache(&artifact.name, worker);
+                let mut artifact_archive = File::create(&artifact_archive_path)
+                    .await
+                    .expect("failed to create artifact archive");
+
+                artifact_archive
+                    .write_all(&response_data)
+                    .await
+                    .expect("failed to write artifact archive");
+
+                create_dir_all(&artifact_path)
+                    .await
+                    .expect("failed to create artifact path");
+
+                unpack_zstd(&artifact_path, &artifact_archive_path).await?;
+
+                remove_file(&artifact_archive_path)
+                    .await
+                    .expect("failed to remove");
+
+                print_artifact_output(&artifact_id.name, artifact_id);
+            }
         }
 
         Err(status) => {
-            if status.code() == NotFound {
-                if let Some(source_archive_path) = request_source_data_path {
-                    let source_data = read(&source_archive_path).await.expect("failed to read");
+            if status.code() != NotFound {
+                bail!("Registry pull error: {:?}", status);
+            }
+        }
+    }
+
+    // Check if artifact source exists (registry)
+
+    if !artifact.sources.is_empty() {
+        let registry_pull = RegistryPullRequest {
+            artifact_id: Some(artifact_id.clone()),
+            kind: RegistryStoreKind::ArtifactSource as i32,
+        };
+
+        match registry.pull(registry_pull.clone()).await {
+            Ok(response) => {
+                let mut response = response.into_inner();
+
+                // If source doesnt exist, fetch and upload
+
+                if let Err(status) = response.message().await {
+                    if status.code() != NotFound {
+                        bail!("Registry pull error: {:?}", status);
+                    }
+
+                    let mut sandbox_fetches = vec![];
+                    let sandbox_path = create_temp_dir().await?;
+
+                    for artifact_source in &artifact.sources {
+                        let handle = tokio::spawn(fetch_source(
+                            sandbox_path.clone(),
+                            artifact.name.clone(),
+                            artifact_source.clone(),
+                        ));
+
+                        sandbox_fetches.push(handle);
+                    }
+
+                    for handle in sandbox_fetches {
+                        match handle.await {
+                            Ok(result) => {
+                                if result.is_err() {
+                                    bail!("Task error: {:?}", result);
+                                }
+                            }
+                            Err(e) => eprintln!("Task failed: {}", e),
+                        }
+                    }
+
+                    // TODO: instead of compiling one source, compile sources for hashes
+
+                    let sandbox_path_files = get_file_paths(&sandbox_path, vec![], vec![])?;
+
+                    let source_archive_path =
+                        get_source_archive_path(&artifact_id.hash, &artifact_id.name);
+
+                    compress_zstd(&sandbox_path, &sandbox_path_files, &source_archive_path).await?;
+
+                    remove_dir_all(&sandbox_path)
+                        .await
+                        .expect("failed to remove");
+
+                    // TODO: upload artifact source archive to registry
+
+                    let source_archive_data =
+                        read(&source_archive_path).await.expect("failed to read");
 
                     let private_key_path = get_private_key_path();
 
@@ -280,54 +216,68 @@ pub async fn build(
                     }
 
                     let source_signature =
-                        vorpal_notary::sign(private_key_path, &source_data).await?;
+                        vorpal_notary::sign(private_key_path, &source_archive_data).await?;
 
-                    for chunk in source_data.chunks(DEFAULT_CHUNKS_SIZE) {
-                        request_stream.push(ArtifactBuildRequest {
-                            artifacts: artifact.artifacts.clone(),
-                            hash: artifact_id.hash.clone(),
-                            name: artifact_id.name.clone(),
-                            source_data: Some(chunk.to_vec()),
-                            source_data_signature: Some(source_signature.to_vec()),
-                            steps: artifact.steps.clone(),
-                            target: target as i32,
+                    let mut request_stream = vec![];
+
+                    for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
+                        request_stream.push(RegistryPushRequest {
+                            artifact_id: Some(artifact_id.clone()),
+                            data: chunk.to_vec(),
+                            data_signature: source_signature.clone().to_vec(),
+                            kind: RegistryStoreKind::ArtifactSource as i32,
                         });
+                    }
+
+                    let response = registry
+                        .push(tokio_stream::iter(request_stream))
+                        .await
+                        .expect("failed to push");
+
+                    let response = response.into_inner();
+
+                    if !response.success {
+                        bail!("Registry push failed");
                     }
                 }
             }
+
+            Err(status) => {
+                if status.code() != NotFound {
+                    bail!("Registry pull error: {:?}", status);
+                }
+            }
         }
-    };
-
-    // Add artifact build request if no source data chunks
-
-    if request_stream.is_empty() {
-        request_stream.push(ArtifactBuildRequest {
-            artifacts: artifact.artifacts.clone(),
-            hash: artifact_id.hash.clone(),
-            name: artifact_id.name.clone(),
-            source_data: None,
-            source_data_signature: None,
-            steps: artifact.steps.clone(),
-            target: target as i32,
-        });
     }
 
     // Build artifact
 
-    let mut service = ArtifactServiceClient::connect(worker.to_owned())
+    let mut worker = ArtifactServiceClient::connect(worker_host.to_owned())
         .await
         .expect("failed to connect to artifact");
 
-    let response = service
-        .build(tokio_stream::iter(request_stream))
+    let response = worker
+        .build(ArtifactBuildRequest {
+            artifacts: artifact.artifacts.clone(),
+            hash: artifact_id.hash.clone(),
+            name: artifact_id.name.clone(),
+            steps: artifact.steps.clone(),
+            target: artifact_target as i32,
+        })
         .await
         .expect("failed to build");
 
     let mut stream = response.into_inner();
 
-    while let Some(res) = stream.message().await.expect("failed to get message") {
-        if !res.output.is_empty() {
-            print_artifact_log(&artifact.name, &res.output);
+    while let Ok(message) = stream.message().await {
+        if message.is_none() {
+            break;
+        }
+
+        if let Some(res) = message {
+            if !res.output.is_empty() {
+                print_artifact_log(&artifact.name, &res.output);
+            }
         }
     }
 

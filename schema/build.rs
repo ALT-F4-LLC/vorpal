@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[
                 "v0/artifact/artifact.proto",
                 "v0/config/config.proto",
-                "v0/store/store.proto",
+                "v0/registry/registry.proto",
             ],
             &["api"],
         )?;
