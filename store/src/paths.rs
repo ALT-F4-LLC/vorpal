@@ -1,5 +1,5 @@
 use anyhow::{bail, Error, Result};
-use filetime::{set_file_times, FileTime};
+use filetime::{set_file_times, set_symlink_file_times, FileTime};
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use tracing::info;
@@ -141,11 +141,16 @@ pub fn get_file_paths(
     Ok(files)
 }
 
-pub async fn set_paths_timestamps(target_files: &[PathBuf]) -> Result<(), Error> {
-    for path in target_files {
+pub async fn set_paths_timestamps(paths: &[PathBuf]) -> Result<(), Error> {
+    let epoc = FileTime::from_unix_time(0, 0);
+
+    for path in paths {
         if !path.is_symlink() {
-            let epoc = FileTime::from_unix_time(0, 0);
             set_file_times(path, epoc, epoc).expect("Failed to set file times");
+        }
+
+        if path.is_symlink() {
+            set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
         }
     }
 
