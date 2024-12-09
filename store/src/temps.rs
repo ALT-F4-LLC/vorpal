@@ -3,7 +3,7 @@ use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 use tokio::fs::{create_dir_all, File};
 
-pub async fn create_temp_dir() -> Result<PathBuf> {
+pub async fn create_sandbox_dir() -> Result<PathBuf> {
     let dir_path = paths::get_temp_path();
 
     create_dir_all(&dir_path)
@@ -13,7 +13,7 @@ pub async fn create_temp_dir() -> Result<PathBuf> {
     Ok(dir_path)
 }
 
-pub async fn create_temp_file(extension: Option<&str>) -> Result<PathBuf> {
+pub async fn create_sandbox_file(extension: Option<&str>) -> Result<PathBuf> {
     let mut file_path = paths::get_temp_path();
 
     if let Some(extension) = extension {

@@ -1,6 +1,6 @@
 use crate::{
     paths::{get_file_paths, set_paths_timestamps},
-    temps::create_temp_file,
+    temps::create_sandbox_file,
 };
 use anyhow::{Error, Result};
 use async_compression::tokio::{
@@ -24,7 +24,7 @@ pub async fn compress_zstd(
     source_files: &[PathBuf],
     output_path: &PathBuf,
 ) -> Result<File, Error> {
-    let temp_file = create_temp_file(Some("tar.zst"))
+    let temp_file = create_sandbox_file(Some("tar.zst"))
         .await
         .expect("Failed to create temp file");
 

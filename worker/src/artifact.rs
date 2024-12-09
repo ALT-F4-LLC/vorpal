@@ -33,7 +33,7 @@ use vorpal_schema::{
         },
     },
 };
-use vorpal_store::temps::create_temp_dir;
+use vorpal_store::temps::create_sandbox_dir;
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
@@ -380,7 +380,7 @@ impl ArtifactService for ArtifactServer {
 
             // Create workspace
 
-            let workspace_path = match create_temp_dir().await {
+            let workspace_path = match create_sandbox_dir().await {
                 Ok(path) => path,
                 Err(err) => {
                     if let Err(err) = tx

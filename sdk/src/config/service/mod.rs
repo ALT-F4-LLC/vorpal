@@ -1,22 +1,18 @@
-use crate::config::ContextConfig;
+use crate::config::ConfigContext;
 use anyhow::Result;
-use tonic::transport::Server;
 use vorpal_schema::vorpal::{
     artifact::v0::{Artifact, ArtifactId},
-    config::v0::{
-        config_service_server::{ConfigService, ConfigServiceServer},
-        Config, ConfigRequest,
-    },
+    config::v0::{config_service_server::ConfigService, Config, ConfigRequest},
 };
 
 #[derive(Debug, Default)]
 pub struct ConfigServer {
-    pub context: ContextConfig,
+    pub context: ConfigContext,
     pub config: Config,
 }
 
 impl ConfigServer {
-    pub fn new(context: ContextConfig, config: Config) -> Self {
+    pub fn new(context: ConfigContext, config: Config) -> Self {
         Self { context, config }
     }
 }
@@ -46,22 +42,4 @@ impl ConfigService for ConfigServer {
 
         Ok(tonic::Response::new(artifact.unwrap().clone()))
     }
-}
-
-pub async fn listen(context: ContextConfig, config: Config, port: u16) -> Result<()> {
-    let addr = format!("[::]:{}", port)
-        .parse()
-        .expect("failed to parse address");
-
-    let config_service = ConfigServiceServer::new(ConfigServer::new(context, config));
-
-    println!("Config server listening on {}", addr);
-
-    Server::builder()
-        .add_service(config_service)
-        .serve(addr)
-        .await
-        .expect("failed to start worker server");
-
-    Ok(())
 }

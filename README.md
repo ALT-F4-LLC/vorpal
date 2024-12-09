@@ -10,6 +10,27 @@ Vorpal distributively builds and ships software reliably using BYOL (bring-you-o
 
 Below are examples of building a Rust application with different configuration languages:
 
+### Rust
+
+```rust
+use anyhow::Result;
+use vorpal_schema::vorpal::config::v0::Config;
+use vorpal_sdk::config::{artifact::language::rust::rust_artifact, get_context};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let context = &mut get_context().await?;
+
+    let artifact = rust_artifact(context, "vorpal").await?;
+
+    context
+        .run(Config {
+            artifacts: vec![artifact],
+        })
+        .await
+}
+```
+
 ### Go
 
 ```go
@@ -17,102 +38,50 @@ package main
 
 import (
     "context"
-    "github.com/vorpal_schema/vorpal/config/v0"
-    "github.com/vorpal_sdk/config/artifact"
-    "github.com/vorpal_sdk/config/cli"
+    "log"
+
+    "github.com/vorpal-sdk/vorpal"
+    "github.com/vorpal-sdk/vorpal/config"
+    "github.com/vorpal-sdk/vorpal/config/artifact/language/rust"
 )
 
-// 1. Create a function that returns a populated configuration
-func config(ctx *cli.ContextConfig) (*config.Config, error) {
-    // NOTE: custom logic can be added anywhere in this function
-
-    // 2. Define artifact parameters
-    artifactExcludes := []string{".env", ".packer", ".vagrant", "script"}
-    artifactName := "vorpal"
-    artifactSystems := artifact.AddSystems([]string{"aarch64-linux", "aarch64-macos"})
-
-    // 3. Create artifact (rust)
-    artifact, err := artifact.RustArtifact(ctx, artifactExcludes, artifactName, artifactSystems)
-    if err != nil {
-        return nil, err
-    }
-
-    // 4. Return config with artifact
-    return &config.Config{
-        Artifacts: []config.Artifact{artifact},
-    }, nil
-}
-
 func main() {
-    ctx := context.Background()
-    if err := cli.Execute(ctx, config); err != nil {
-        panic(err)
+    context, err := config.GetContext(context.Background())
+    if err != nil {
+        log.Fatal(err)
     }
-}
-```
 
-### Rust
+    artifact, err := rust.Artifact(context, "vorpal")
+    if err != nil {
+        log.Fatal(err)
+    }
 
-```rust
-use anyhow::Result;
-use vorpal_schema::vorpal::config::v0::Config;
-use vorpal_sdk::config::{
-    artifact::{add_systems, language::rust},
-    cli::execute,
-    ContextConfig,
-};
-
-// 1. Create a function that returns a populated configuration
-fn config(context: &mut ContextConfig) -> Result<Config> {
-    // NOTE: custom logic can be added anywhere in this function
-
-    // 2. Define artifact parameters
-    let artifact_excludes = vec![".env", ".packer", ".vagrant", "script"];
-    let artifact_name = "vorpal";
-    let artifact_systems = add_systems(vec!["aarch64-linux", "aarch64-macos"])?;
-
-    // 3. Create artifact (rust)
-    let artifact = rust::artifact(context, artifact_excludes, artifact_name, artifact_systems)?;
-
-    // 4. Return config with artifact
-    Ok(Config {
-        artifacts: vec![artifact],
+    err = context.Run(config.Config{
+        Artifacts: []config.Artifact{artifact},
     })
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    // 5. Execute the configuration
-    execute(config).await
+    if err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
 ### TypeScript
 
 ```typescript
-import { ContextConfig, execute, addSystems, rust } from '@vorpal/config';
-import { Config } from '@vorpal/schema';
+import { getContext } from '@vorpal/sdk';
+import { rustArtifact } from '@vorpal/sdk/config/artifact/language/rust';
 
-// 1. Create a function that returns a populated configuration
-function config(context: ContextConfig): Config {
-    // NOTE: custom logic can be added anywhere in this function
+async function main() {
+    const context = await getContext();
 
-    // 2. Define artifact parameters
-    const artifactExcludes = ['.env', '.packer', '.vagrant', 'script'];
-    const artifactName = 'vorpal';
-    const artifactSystems = addSystems(['aarch64-linux', 'aarch64-macos']);
+    const artifact = await rustArtifact(context, 'vorpal');
 
-    // 3. Create artifact (rust)
-    const artifact = rust.artifact(context, artifactExcludes, artifactName, artifactSystems);
-
-    // 4. Return config with artifact
-    return {
+    await context.run({
         artifacts: [artifact],
-    };
+    }));
 }
 
-// 5. Execute the configuration
-await execute(config);
+main().catch(console.error);
 ```
 
 ## Design
@@ -184,19 +153,70 @@ These steps guide how to compile from source code and test Vorpal by building it
 4. Check configuration:
 
 ```bash
-./dist/vorpal config
+./dist/vorpal config --artifact "<name>"
 ```
 
 5. Build artifacts:
 ```bash
-./dist/vorpal build
+./dist/vorpal build --artifact "<name>"
 ```
 
-## Sandboxes
+## Artifacts
 
-Offical sandboxes maintained by the Vorpal development team that provide reproducibile environments.
+Vorpal uses `artifacts` to describe every aspect of your software in the language of your choice:
 
-### Linux
+```rust
+Artifact {
+    // name of artifact
+    name: "example".to_string(),
+
+    // artifacts for this artifact
+    artifacts: vec![],
+
+    // source paths for artifact
+    sources: vec![
+        ArtifactSource {
+            excludes: vec![], // optional, to remove files
+            hash: None, // optional, to track changes
+            includes: vec![], // optional, to only use files
+            name: "example", // required, unique per source
+            path: ".", // required, relative location to context
+        }
+    ],
+
+    // steps of artifact (in order)
+    steps: vec![
+        ArtifactStep {
+            entrypoint: Some("/bin/bash"), // required, host path for command (can be artifact)
+            arguments: vec![], // optional, arguements for entrypoint
+            environments: vec![], // optional, environment variables for step
+            script: Some("echo \"hello, world!\" > $VORPAL_OUTPUT/hello_world.txt"), // optional, script passed to executor
+        },
+    ],
+
+    // systems for artifact
+    systems: vec!["aarch64-linux", "aarch64-macos"],
+};
+```
+
+Artifacts can be wrapped in language functions and/or modules to be shared within projects or organizations providing centrally managed and reusable configurations with domain-specific overrides (see examples in overview).
+
+### Sources
+
+Coming soon.
+
+### Steps
+
+Steps provided by the SDKs are maintained to provide reproducibile cross-platform environments for them. These environments include strictly maintained low-level dependencies that are used as a wrapper for each step.
+
+> [!NOTE]
+> Vorpal enables developers to create their own build steps instead of using the SDKs which are provided to handle "common" scenarios.
+
+#### Linux
+
+On Linux, developers can run steps in a community maintained sandbox which is isolated similiar to containers.
+
+The following are included in the sandbox:
 
 - `bash`
 - `binutils`
@@ -231,10 +251,14 @@ Offical sandboxes maintained by the Vorpal development team that provide reprodu
 - `xz`
 - `zlib`
 
-### macOS
+#### macOS
 
 Coming soon.
 
-### Windows
+#### Windows
+
+Coming soon.
+
+### Systems
 
 Coming soon.
