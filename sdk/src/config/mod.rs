@@ -58,7 +58,7 @@ pub async fn get_context() -> Result<ConfigContext> {
                 return Err(anyhow::anyhow!("Invalid target system"));
             }
 
-            return Ok(ConfigContext::new(port, target));
+            Ok(ConfigContext::new(port, target))
         }
     }
 }

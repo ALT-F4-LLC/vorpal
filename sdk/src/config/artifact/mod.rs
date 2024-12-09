@@ -100,6 +100,8 @@ pub fn add_artifact_systems(systems: Vec<&str>) -> Result<Vec<ArtifactSystem>> {
     Ok(build_systems)
 }
 
+// cross-platform sandboxed artifact
+
 pub async fn add_artifact(
     context: &mut ConfigContext,
     artifacts: Vec<ArtifactId>,
