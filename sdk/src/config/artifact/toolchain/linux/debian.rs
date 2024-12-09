@@ -3,16 +3,16 @@ use crate::config::{
         add_artifact_source, get_artifact_envkey,
         steps::{bash, docker},
     },
-    ContextConfig,
+    ConfigContext,
 };
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
-    Artifact, ArtifactEnvironment, ArtifactId,
+    Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource,
     ArtifactSystem::{Aarch64Linux, X8664Linux},
 };
 
-pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
+pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
     let environments = vec![ArtifactEnvironment {
         key: "PATH".to_string(),
         value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
@@ -21,15 +21,19 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
     let systems = vec![Aarch64Linux.into(), X8664Linux.into()];
 
     let source = add_artifact_source(
-        vec![],
-        None,
-        vec![
-            "Dockerfile".to_string(),
-            "script/version_check.sh".to_string(),
-        ],
-        "docker".to_string(),
-        ".".to_string(),
-    )?;
+        context,
+        ArtifactSource {
+            excludes: vec![],
+            hash: None,
+            includes: vec![
+                "Dockerfile".to_string(),
+                "script/version_check.sh".to_string(),
+            ],
+            name: "docker".to_string(),
+            path: ".".to_string(),
+        },
+    )
+    .await?;
 
     let source = context.add_artifact(Artifact {
         artifacts: vec![],

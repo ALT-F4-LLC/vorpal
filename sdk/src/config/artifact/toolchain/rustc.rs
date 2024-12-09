@@ -1,6 +1,6 @@
 use crate::config::{
     artifact::{add_artifact, get_artifact_envkey, toolchain::rust_std},
-    ContextConfig,
+    ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
@@ -9,16 +9,16 @@ use vorpal_schema::vorpal::artifact::v0::{
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
-    let rust_std = rust_std::artifact(context)?;
+pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
+    let rust_std = rust_std::artifact(context).await?;
 
     let name = "rustc";
 
     let systems = vec![
-        Aarch64Linux.into(),
-        Aarch64Macos.into(),
-        X8664Linux.into(),
-        X8664Macos.into(),
+        "aarch64-linux",
+        "aarch64-macos",
+        "x86_64-linux",
+        "x86_64-macos",
     ];
 
     let target = match context.get_target() {
@@ -44,7 +44,8 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         },
         vec![],
         systems.clone(),
-    )?;
+    )
+    .await?;
 
     add_artifact(
         context,
@@ -63,4 +64,5 @@ pub fn artifact(context: &mut ContextConfig) -> Result<ArtifactId> {
         vec![],
         systems,
     )
+    .await
 }

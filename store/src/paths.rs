@@ -1,10 +1,10 @@
 use anyhow::{bail, Error, Result};
 use filetime::{set_file_times, set_symlink_file_times, FileTime};
+use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use tracing::info;
 use uuid::Uuid;
-use walkdir::WalkDir;
 
 // Store paths
 
@@ -97,12 +97,27 @@ pub fn get_file_paths(
     excludes: Vec<String>,
     includes: Vec<String>,
 ) -> Result<Vec<PathBuf>> {
-    let excludes_paths = excludes
+    let mut excludes_paths = excludes
         .into_iter()
         .map(|i| Path::new(&i).to_path_buf())
         .collect::<Vec<PathBuf>>();
 
-    let mut files: Vec<PathBuf> = WalkDir::new(source_path)
+    // Exclude git directory
+
+    excludes_paths.push(Path::new(".git").to_path_buf());
+
+    let walker = WalkBuilder::new(source_path)
+        .standard_filters(false) // Don't use default filters
+        .git_exclude(true)
+        .git_global(true)
+        .git_ignore(true)
+        .hidden(false)
+        .ignore(false)
+        .parents(true)
+        .require_git(false)
+        .build();
+
+    let mut files: Vec<PathBuf> = walker
         .into_iter()
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -160,8 +175,8 @@ pub async fn set_paths_timestamps(paths: &[PathBuf]) -> Result<(), Error> {
 pub async fn copy_files(
     source_path: &PathBuf,
     source_path_files: Vec<PathBuf>,
-    destination_path: &Path,
-) -> Result<()> {
+    target_path: &Path,
+) -> Result<Vec<PathBuf>> {
     if source_path_files.is_empty() {
         bail!("no source files found");
     }
@@ -177,7 +192,7 @@ pub async fn copy_files(
 
         let metadata = metadata(src).await.expect("failed to read metadata");
 
-        let dest = destination_path.join(src.strip_prefix(source_path).unwrap());
+        let dest = target_path.join(src.strip_prefix(source_path).unwrap());
 
         if metadata.is_dir() {
             create_dir_all(dest).await.expect("create directory fail");
@@ -197,11 +212,11 @@ pub async fn copy_files(
         }
     }
 
-    let artifact_paths = get_file_paths(&destination_path.to_path_buf(), vec![], vec![])?;
+    let target_path_files = get_file_paths(&target_path.to_path_buf(), vec![], vec![])?;
 
-    set_paths_timestamps(&artifact_paths).await?;
+    set_paths_timestamps(&target_path_files).await?;
 
-    Ok(())
+    Ok(target_path_files)
 }
 
 pub async fn setup_paths() -> Result<()> {

@@ -22,7 +22,7 @@ use vorpal_store::{
         copy_files, get_artifact_archive_path, get_artifact_path, get_file_paths,
         get_private_key_path, get_source_archive_path,
     },
-    temps::create_temp_dir,
+    temps::create_sandbox_dir,
 };
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
@@ -168,7 +168,7 @@ pub async fn build(
                     }
 
                     let mut sandbox_fetches = vec![];
-                    let sandbox_path = create_temp_dir().await?;
+                    let sandbox_path = create_sandbox_dir().await?;
 
                     for artifact_source in &artifact.sources {
                         let handle = tokio::spawn(fetch_source(

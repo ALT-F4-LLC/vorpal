@@ -1,4 +1,4 @@
-use crate::config::artifact::{get_artifact_envkey, steps::bwrap, ContextConfig};
+use crate::config::artifact::{get_artifact_envkey, steps::bwrap, ConfigContext};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
@@ -36,7 +36,7 @@ fn new_artifact_source(
     }
 }
 
-pub fn bash(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn bash(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("bash"),
@@ -51,7 +51,7 @@ pub fn bash(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
-pub fn binutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn binutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("binutils"),
@@ -66,7 +66,7 @@ pub fn binutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Arti
     ))
 }
 
-pub fn bison(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn bison(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("bison"),
@@ -81,7 +81,7 @@ pub fn bison(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifac
     ))
 }
 
-pub fn coreutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn coreutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("coreutils"),
@@ -96,7 +96,7 @@ pub fn coreutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Art
     ))
 }
 
-pub fn curl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn curl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("curl"),
@@ -111,7 +111,7 @@ pub fn curl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
-pub fn curl_cacert(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn curl_cacert(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("openssl-cacert"),
@@ -126,7 +126,7 @@ pub fn curl_cacert(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<A
     ))
 }
 
-pub fn diffutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn diffutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("diffutils"),
@@ -141,7 +141,7 @@ pub fn diffutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Art
     ))
 }
 
-pub fn file(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn file(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("file"),
@@ -156,7 +156,7 @@ pub fn file(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
-pub fn findutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn findutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("findutils"),
@@ -171,7 +171,7 @@ pub fn findutils(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Art
     ))
 }
 
-pub fn gawk(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn gawk(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("gawk"),
@@ -188,7 +188,7 @@ pub fn gawk(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
-pub fn gcc(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn gcc(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("gcc"),
@@ -213,7 +213,7 @@ pub fn gcc(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactI
     ))
 }
 
-pub fn gettext(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn gettext(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("gettext"),
@@ -228,7 +228,7 @@ pub fn gettext(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artif
     ))
 }
 
-pub fn glibc_patch(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn glibc_patch(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("glibc-patch"),
@@ -244,7 +244,7 @@ pub fn glibc_patch(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<A
 }
 
 pub fn glibc(
-    context: &mut ContextConfig,
+    context: &mut ConfigContext,
     glibc_patch: &ArtifactId,
     rootfs: &ArtifactId,
 ) -> Result<ArtifactId> {
@@ -267,7 +267,7 @@ pub fn glibc(
     ))
 }
 
-pub fn grep(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn grep(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("grep"),
@@ -282,7 +282,7 @@ pub fn grep(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
-pub fn gzip(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn gzip(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("gzip"),
@@ -297,7 +297,7 @@ pub fn gzip(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
-pub fn libidn2(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn libidn2(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("libidn2"),
@@ -312,7 +312,7 @@ pub fn libidn2(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artif
     ))
 }
 
-pub fn libpsl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn libpsl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("libpsl"),
@@ -327,7 +327,7 @@ pub fn libpsl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifa
     ))
 }
 
-pub fn libunistring(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn libunistring(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("libunistring"),
@@ -342,7 +342,7 @@ pub fn libunistring(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<
     ))
 }
 
-pub fn linux_headers(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn linux_headers(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("linux-headers"),
@@ -357,7 +357,7 @@ pub fn linux_headers(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result
     ))
 }
 
-pub fn m4(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn m4(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("m4"),
@@ -372,7 +372,7 @@ pub fn m4(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId
     ))
 }
 
-pub fn make(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn make(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("make"),
@@ -387,7 +387,7 @@ pub fn make(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
-pub fn ncurses(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn ncurses(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("ncurses"),
@@ -402,7 +402,7 @@ pub fn ncurses(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artif
     ))
 }
 
-pub fn openssl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn openssl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("openssl"),
@@ -417,7 +417,7 @@ pub fn openssl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artif
     ))
 }
 
-pub fn patch(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn patch(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("patch"),
@@ -432,7 +432,7 @@ pub fn patch(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifac
     ))
 }
 
-pub fn perl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn perl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("perl"),
@@ -446,7 +446,7 @@ pub fn perl(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifact
     ))
 }
 
-pub fn python(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn python(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("python"),
@@ -461,7 +461,7 @@ pub fn python(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artifa
     ))
 }
 
-pub fn sed(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn sed(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("sed"),
@@ -476,7 +476,7 @@ pub fn sed(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactI
     ))
 }
 
-pub fn tar(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn tar(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("tar"),
@@ -491,7 +491,7 @@ pub fn tar(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactI
     ))
 }
 
-pub fn texinfo(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn texinfo(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("texinfo"),
@@ -506,7 +506,7 @@ pub fn texinfo(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Artif
     ))
 }
 
-pub fn unzip_patch_fixes(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn unzip_patch_fixes(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("unzip-patch-fixes"),
@@ -519,7 +519,7 @@ pub fn unzip_patch_fixes(context: &mut ContextConfig, rootfs: &ArtifactId) -> Re
     ))
 }
 
-pub fn unzip_patch_gcc14(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn unzip_patch_gcc14(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("unzip-patch-gcc14"),
@@ -533,7 +533,7 @@ pub fn unzip_patch_gcc14(context: &mut ContextConfig, rootfs: &ArtifactId) -> Re
 }
 
 pub fn unzip(
-    context: &mut ContextConfig,
+    context: &mut ConfigContext,
     rootfs: &ArtifactId,
     patch_fixes: &ArtifactId,
     patch_gcc14: &ArtifactId,
@@ -560,7 +560,7 @@ pub fn unzip(
     ))
 }
 
-pub fn util_linux(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn util_linux(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("util-linux"),
@@ -575,7 +575,7 @@ pub fn util_linux(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<Ar
     ))
 }
 
-pub fn xz(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn xz(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("xz"),
@@ -590,7 +590,7 @@ pub fn xz(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId
     ))
 }
 
-pub fn zlib(context: &mut ContextConfig, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn zlib(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact_source(
         vec![],
         new_source_name("zlib"),

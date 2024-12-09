@@ -3,7 +3,7 @@ use crate::config::{
         steps::{bash, bwrap},
         toolchain::linux::{debian, vorpal},
     },
-    ContextConfig,
+    ConfigContext,
 };
 use anyhow::{bail, Result};
 use std::path::Path;
@@ -11,18 +11,80 @@ use vorpal_schema::vorpal::artifact::v0::{
     Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactSystem,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
-use vorpal_store::{hashes::hash_files, paths::get_file_paths};
+use vorpal_store::paths::get_file_paths;
 
 pub mod language;
 pub mod steps;
 pub mod toolchain;
 
 pub fn get_artifact_envkey(artifact: &ArtifactId) -> String {
-    let artifact_key = artifact.name.to_lowercase().replace("-", "_");
-    format!("$VORPAL_ARTIFACT_{}", artifact_key).to_string()
+    format!(
+        "$VORPAL_ARTIFACT_{}",
+        artifact.name.to_lowercase().replace("-", "_")
+    )
+    .to_string()
 }
 
-pub fn add_systems(systems: Vec<&str>) -> Result<Vec<ArtifactSystem>> {
+pub async fn add_artifact_source(
+    context: &mut ConfigContext,
+    source: ArtifactSource,
+) -> Result<ArtifactSource> {
+    // TODO: add support for 'remote' sources
+
+    let source_path = Path::new(&source.path).to_path_buf();
+
+    if !source_path.exists() {
+        bail!(
+            "Artifact `source.{}.path` not found: {:?}",
+            source.name,
+            source.path
+        );
+    }
+
+    let source_files = get_file_paths(
+        &source_path,
+        source.excludes.clone(),
+        source.includes.clone(),
+    )?;
+
+    let source_hash = match context.get_source_hash(
+        source_files.clone(),
+        source.name.clone(),
+        source_path.clone(),
+    ) {
+        Some(hash) => hash.clone(),
+        None => {
+            context
+                .add_source_hash(
+                    source_files.clone(),
+                    source.name.clone(),
+                    source_path.clone(),
+                )
+                .await?
+        }
+    };
+
+    if let Some(hash) = source.hash.clone() {
+        if hash != source_hash {
+            bail!(
+                "Artifact `source.{}.hash` mismatch: {} != {}",
+                source.name,
+                hash,
+                source_hash
+            );
+        }
+    }
+
+    Ok(ArtifactSource {
+        excludes: source.excludes,
+        hash: Some(source_hash),
+        includes: source.includes,
+        name: source.name,
+        path: source.path,
+    })
+}
+
+pub fn add_artifact_systems(systems: Vec<&str>) -> Result<Vec<ArtifactSystem>> {
     let mut build_systems = vec![];
 
     for system in systems {
@@ -38,57 +100,28 @@ pub fn add_systems(systems: Vec<&str>) -> Result<Vec<ArtifactSystem>> {
     Ok(build_systems)
 }
 
-pub fn add_artifact_source(
-    excludes: Vec<String>,
-    hash: Option<String>,
-    includes: Vec<String>,
-    name: String,
-    path: String,
-) -> Result<ArtifactSource> {
-    // TODO: add support for downloading sources
+// cross-platform sandboxed artifact
 
-    let source_path = Path::new(&path).to_path_buf();
-
-    if !source_path.exists() {
-        bail!("Artifact `source.{}.path` not found: {:?}", name, path);
-    }
-
-    let source_files = get_file_paths(&source_path, excludes.clone(), includes.clone())?;
-
-    let source_hash = hash_files(source_files)?;
-
-    if let Some(hash) = hash.clone() {
-        if hash != source_hash {
-            bail!(
-                "Artifact `source.{}.hash` mismatch: {} != {}",
-                name,
-                hash,
-                source_hash
-            );
-        }
-    }
-
-    Ok(ArtifactSource {
-        excludes,
-        hash: Some(source_hash),
-        includes,
-        name,
-        path,
-    })
-}
-
-pub fn add_artifact(
-    context: &mut ContextConfig,
+pub async fn add_artifact(
+    context: &mut ConfigContext,
     artifacts: Vec<ArtifactId>,
     environments: Vec<ArtifactEnvironment>,
     name: &str,
     script: String,
     sources: Vec<ArtifactSource>,
-    systems: Vec<i32>,
+    systems: Vec<&str>,
 ) -> Result<ArtifactId> {
-    let build_target = context.get_target();
+    // Setup artifacts
+
+    let mut build_artifacts = vec![];
+
+    for artifact in artifacts {
+        build_artifacts.push(artifact);
+    }
 
     // Setup environments
+
+    let build_target = context.get_target();
 
     let mut build_environments = vec![];
 
@@ -149,19 +182,22 @@ pub fn add_artifact(
         build_environments.push(env);
     }
 
-    let mut build_artifacts = vec![];
-    let mut build_steps = vec![];
+    // Setup sources
 
-    // Setup artifacts
+    let mut build_sources = vec![];
 
-    for artifact in artifacts {
-        build_artifacts.push(artifact);
+    for source in sources.clone().into_iter() {
+        let source = add_artifact_source(context, source).await?;
+
+        build_sources.push(source);
     }
 
     // Setup steps
 
+    let mut build_steps = vec![];
+
     if build_target == Aarch64Linux || build_target == X8664Linux {
-        let linux_debian = debian::artifact(context)?;
+        let linux_debian = debian::artifact(context).await?;
         let linux_vorpal = vorpal::artifact(context, &linux_debian)?;
 
         build_artifacts.push(linux_vorpal.clone());
@@ -179,12 +215,17 @@ pub fn add_artifact(
         build_steps.push(bash(build_environments.clone(), script));
     }
 
-    // Setup artifacts
+    // Setup systems
+
+    let systems = add_artifact_systems(systems)?;
+    let systems = systems.iter().map(|s| (*s).into()).collect::<Vec<i32>>();
+
+    // Add artifact to context
 
     context.add_artifact(Artifact {
         artifacts: build_artifacts.clone(),
         name: name.to_string(),
-        sources,
+        sources: build_sources,
         steps: build_steps,
         systems,
     })

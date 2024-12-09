@@ -10,6 +10,8 @@ indoc = { default-features = false, version = "2" }
 serde = { features = ["serde_derive"], version = "1" }
 serde_json = { default-features = false, features = ["std"], version = "1" }
 sha256 = { default-features = false, version = "1" }
+tokio = { default-features = false, version = "1" }
+toml = "0.8.19"
 tonic = { default-features = false, version = "0" }
 tracing = { default-features = false, version = "0" }
 vorpal-schema = { default-features = false, path = "../schema" }

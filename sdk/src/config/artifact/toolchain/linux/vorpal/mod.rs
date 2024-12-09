@@ -1,4 +1,4 @@
-use crate::config::artifact::{get_artifact_envkey, steps, ContextConfig};
+use crate::config::artifact::{get_artifact_envkey, steps, ConfigContext};
 use anyhow::Result;
 use vorpal_schema::vorpal::artifact::v0::{
     Artifact, ArtifactEnvironment, ArtifactId,
@@ -8,7 +8,7 @@ use vorpal_schema::vorpal::artifact::v0::{
 mod script;
 mod source;
 
-pub fn artifact(context: &mut ContextConfig, linux_debian: &ArtifactId) -> Result<ArtifactId> {
+pub fn artifact(context: &mut ConfigContext, linux_debian: &ArtifactId) -> Result<ArtifactId> {
     let bash = source::bash(context, linux_debian)?;
     let binutils = source::binutils(context, linux_debian)?;
     let bison = source::bison(context, linux_debian)?;
