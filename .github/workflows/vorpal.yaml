@@ -11,11 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - shell: $GITHUB_WORKSPACE/script/dev.sh
-        run: |
-          make format
-          make lint
+      - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make format
+      - run: ./script/dev.sh make lint
 
   package:
     needs:
@@ -29,8 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - shell: $GITHUB_WORKSPACE/script/dev.sh
-        run: make dist
+      - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make dist
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
