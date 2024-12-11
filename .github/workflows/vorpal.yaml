@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - shell: ./script/dev.sh
+      - shell: ${{ github.workspace }}/script/dev.sh
         run: |
           make format
           make lint
@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - shell: ./script/dev.sh
+      - shell: ${{ github.workspace }}/script/dev.sh
         run: make dist
 
       - run: |
