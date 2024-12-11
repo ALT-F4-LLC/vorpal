@@ -15,7 +15,7 @@ pub async fn shell_artifact<'a>(
     let mut env_paths = vec![];
 
     for artifact in artifacts.iter() {
-        env_paths.push(format!("{}/bin", get_artifact_envkey(&artifact)));
+        env_paths.push(format!("{}/bin", get_artifact_envkey(artifact)));
     }
 
     let mut backups = vec![

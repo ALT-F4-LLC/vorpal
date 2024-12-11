@@ -69,15 +69,15 @@ pub async fn rust_toolchain(context: &mut ConfigContext, version: &str) -> Resul
             for component in ${{components[@]}}; do
                 echo \"Adding component manifest: $component\"
                 cat \"${{component}}/manifest.in\" >> \"$VORPAL_OUTPUT\"/manifest.in
-            done
-        ",
-        component_paths = vec![
-            get_artifact_envkey(&cargo),
-            get_artifact_envkey(&rust_analyzer),
-            get_artifact_envkey(&rust_src),
-            get_artifact_envkey(&rust_std),
-            get_artifact_envkey(&rustc),
-        ].join(" "),},
+            done",
+            component_paths = [
+                get_artifact_envkey(&cargo),
+                get_artifact_envkey(&rust_analyzer),
+                get_artifact_envkey(&rust_src),
+                get_artifact_envkey(&rust_std),
+                get_artifact_envkey(&rustc),
+            ].join(" "),
+        },
         vec![],
         vec![
             "aarch64-linux",
