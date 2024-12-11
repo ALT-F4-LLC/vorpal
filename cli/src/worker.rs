@@ -1,4 +1,3 @@
-use crate::log::{print_artifact_log, print_artifact_output, print_source_url, SourceStatus};
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use tokio::{
@@ -6,6 +5,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 use tonic::Code::NotFound;
+use tracing::{error, info};
 use vorpal_schema::vorpal::{
     artifact::v0::{
         artifact_service_client::ArtifactServiceClient, Artifact, ArtifactBuildRequest, ArtifactId,
@@ -27,12 +27,8 @@ use vorpal_store::{
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
-async fn fetch_source(
-    sandbox_path: PathBuf,
-    artifact_name: String,
-    source: ArtifactSource,
-) -> Result<()> {
-    print_source_url(&artifact_name, SourceStatus::Pending, source.path.as_str());
+async fn fetch_source(sandbox_path: PathBuf, source: ArtifactSource) -> Result<()> {
+    info!("Fetching source: {}", source.path);
 
     let sandbox_source_path = sandbox_path.join(source.name.clone());
 
@@ -81,7 +77,7 @@ pub async fn build(
     let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_path.exists() {
-        print_artifact_output(&artifact_id.name, artifact_id);
+        info!("{}-{}", artifact_id.name, artifact_id.hash);
 
         return Ok(());
     }
@@ -137,7 +133,7 @@ pub async fn build(
                     .await
                     .expect("failed to remove");
 
-                print_artifact_output(&artifact_id.name, artifact_id);
+                info!("artifact fetched: {}", artifact_path.display());
             }
         }
 
@@ -173,7 +169,6 @@ pub async fn build(
                     for artifact_source in &artifact.sources {
                         let handle = tokio::spawn(fetch_source(
                             sandbox_path.clone(),
-                            artifact.name.clone(),
                             artifact_source.clone(),
                         ));
 
@@ -187,7 +182,7 @@ pub async fn build(
                                     bail!("Task error: {:?}", result);
                                 }
                             }
-                            Err(e) => eprintln!("Task failed: {}", e),
+                            Err(e) => error!("Task failed: {}", e),
                         }
                     }
 
@@ -276,7 +271,7 @@ pub async fn build(
 
         if let Some(res) = message {
             if !res.output.is_empty() {
-                print_artifact_log(&artifact.name, &res.output);
+                info!("{}", res.output);
             }
         }
     }

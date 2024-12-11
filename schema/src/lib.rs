@@ -21,6 +21,12 @@ pub mod vorpal {
             tonic::include_proto!("vorpal.registry.v0");
         }
     }
+
+    pub mod shell {
+        pub mod v0 {
+            tonic::include_proto!("vorpal.shell.v0");
+        }
+    }
 }
 
 pub trait ArtifactTarget {

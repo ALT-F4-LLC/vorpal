@@ -32,11 +32,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "vorpal.artifact.v0.Artifact",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
+        .message_attribute(
+            "vorpal.shell.v0.Shell",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
         .compile_protos(
             &[
                 "v0/artifact/artifact.proto",
                 "v0/config/config.proto",
                 "v0/registry/registry.proto",
+                "v0/shell/shell.proto",
             ],
             &["api"],
         )?;

@@ -11,7 +11,7 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::fs::create_dir_all;
-use tracing::info;
+use tracing::{info, warn};
 
 const BITS: usize = 2048;
 
@@ -21,12 +21,14 @@ pub async fn generate_keys(
     public_key_path: PathBuf,
 ) -> Result<()> {
     if private_key_path.exists() {
-        info!("skipping - private key already exists");
+        warn!("skipping - private key already exists");
+
         return Ok(());
     }
 
     if public_key_path.exists() {
-        info!("skipping - public key already exists");
+        warn!("skipping - public key already exists");
+
         return Ok(());
     }
 

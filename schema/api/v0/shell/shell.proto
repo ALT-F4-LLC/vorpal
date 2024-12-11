@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package vorpal.shell.v0;
+
+import "v0/artifact/artifact.proto";
+
+message Shell {
+    repeated string arguments = 1;
+    string entrypoint = 2;
+    string name = 3;
+}

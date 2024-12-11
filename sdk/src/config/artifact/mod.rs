@@ -14,6 +14,7 @@ use vorpal_schema::vorpal::artifact::v0::{
 use vorpal_store::paths::get_file_paths;
 
 pub mod language;
+pub mod shell;
 pub mod steps;
 pub mod toolchain;
 

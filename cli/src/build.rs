@@ -1,15 +1,15 @@
-use crate::log::{print_artifacts, print_artifacts_total};
 use anyhow::{bail, Result};
 use petgraph::algo::toposort;
 use petgraph::graphmap::DiGraphMap;
 use std::collections::HashMap;
 use tonic::transport::Channel;
+use tracing::info;
 use vorpal_schema::vorpal::{
     artifact::v0::{Artifact, ArtifactId},
-    config::v0::{config_service_client::ConfigServiceClient, ConfigRequest},
+    config::v0::config_service_client::ConfigServiceClient,
 };
 
-pub async fn load_artifacts(
+pub async fn fetch_artifacts(
     map: &mut HashMap<ArtifactId, Artifact>,
     artifacts: Vec<ArtifactId>,
     service: &mut ConfigServiceClient<Channel>,
@@ -30,7 +30,7 @@ pub async fn load_artifacts(
             map.insert(artifact_id.clone(), artifact.clone());
 
             if !artifact.artifacts.is_empty() {
-                Box::pin(load_artifacts(map, artifact.artifacts, service)).await?
+                Box::pin(fetch_artifacts(map, artifact.artifacts, service)).await?
             }
         }
     }
@@ -38,26 +38,13 @@ pub async fn load_artifacts(
     Ok(())
 }
 
-pub async fn load_config<'a>(
-    artifact: &String,
+pub async fn load_artifacts<'a>(
+    artifacts: Vec<ArtifactId>,
     service: &mut ConfigServiceClient<Channel>,
 ) -> Result<(HashMap<ArtifactId, Artifact>, Vec<ArtifactId>)> {
-    let response = match service.get_config(ConfigRequest {}).await {
-        Ok(res) => res,
-        Err(error) => {
-            bail!("failed to evaluate config: {}", error);
-        }
-    };
-
-    let config = response.into_inner();
-
-    if !config.artifacts.iter().any(|p| p.name == artifact.as_str()) {
-        bail!("Artifact not found: {}", artifact);
-    }
-
     let mut artifacts_map = HashMap::<ArtifactId, Artifact>::new();
 
-    load_artifacts(&mut artifacts_map, config.artifacts.clone(), service).await?;
+    fetch_artifacts(&mut artifacts_map, artifacts.clone(), service).await?;
 
     let mut artifacts_graph = DiGraphMap::<&ArtifactId, Artifact>::new();
 
@@ -87,8 +74,14 @@ pub async fn load_config<'a>(
 
     artifacts_order.reverse();
 
-    print_artifacts(&artifacts_order);
-    print_artifacts_total(&artifacts_order);
+    info!(
+        "{}",
+        artifacts_order
+            .iter()
+            .map(|a| a.name.clone())
+            .collect::<Vec<String>>()
+            .join(", ")
+    );
 
     Ok((artifacts_map, artifacts_order))
 }

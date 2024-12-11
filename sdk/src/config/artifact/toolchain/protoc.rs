@@ -7,20 +7,11 @@ use vorpal_schema::vorpal::artifact::v0::{
 };
 
 pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let name = "protoc";
-
-    let systems = vec![
-        "aarch64-linux",
-        "aarch64-macos",
-        "x86_64-linux",
-        "x86_64-macos",
-    ];
-
     add_artifact(
         context,
         vec![],
         vec![],
-        name,
+        "protoc",
         formatdoc! {"
             curl -L -o ./protoc-{version}-{target}.zip \
                 https://github.com/protocolbuffers/protobuf/releases/download/v{version}/protoc-{version}-{target}.zip
@@ -33,11 +24,16 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
                 Aarch64Macos => "osx-aarch_64",
                 X8664Linux => "linux-x86_64",
                 X8664Macos => "osx-x86_64",
-                UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
+                UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
             },
             version = "25.4",
         },
         vec![],
-        systems,
+        vec![
+            "aarch64-linux",
+            "aarch64-macos",
+            "x86_64-linux",
+            "x86_64-macos",
+        ]
     ).await
 }

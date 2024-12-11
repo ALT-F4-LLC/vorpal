@@ -1,7 +1,4 @@
-use crate::config::{
-    artifact::{add_artifact, get_artifact_envkey, toolchain::rust_std},
-    ConfigContext,
-};
+use crate::config::{artifact::add_artifact, ConfigContext};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
@@ -9,17 +6,11 @@ use vorpal_schema::vorpal::artifact::v0::{
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let rust_std = rust_std::artifact(context).await?;
-
+pub async fn artifact(
+    context: &mut ConfigContext,
+    override_version: Option<String>,
+) -> Result<ArtifactId> {
     let name = "rustc";
-
-    let systems = vec![
-        "aarch64-linux",
-        "aarch64-macos",
-        "x86_64-linux",
-        "x86_64-macos",
-    ];
 
     let target = match context.get_target() {
         Aarch64Linux => "aarch64-unknown-linux-gnu",
@@ -29,40 +20,32 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
         UnknownSystem => bail!("Unsupported rustc target: {:?}", context.get_target()),
     };
 
-    let version = "1.78.0";
+    let mut version = "1.80.1".to_string();
 
-    let source = add_artifact(
-        context,
-        vec![],
-        vec![],
-        format!("{}-source", name).as_str(),
-        formatdoc! {"
-            curl -L -o ./rustc-{version}-{target}.tar.gz \
-                https://static.rust-lang.org/dist/rustc-{version}-{target}.tar.gz
-
-            tar -xvf ./rustc-{version}-{target}.tar.gz -C $VORPAL_OUTPUT --strip-components=1",
-        },
-        vec![],
-        systems.clone(),
-    )
-    .await?;
+    if let Some(v) = override_version {
+        version = v;
+    }
 
     add_artifact(
         context,
-        vec![rust_std.clone(), source.clone()],
+        vec![],
         vec![],
         name,
         formatdoc! {"
-            cp -prv {rustc_source}/rustc/. \"$VORPAL_OUTPUT\"
+            curl -L -o ./{name}-{version}-{target}.tar.gz \
+                https://static.rust-lang.org/dist/{name}-{version}-{target}.tar.gz
 
-            cat \"{rust_std}/manifest.in\" >> \"$VORPAL_OUTPUT/manifest.in\"
+            tar -xvf ./{name}-{version}-{target}.tar.gz -C source --strip-components=1
 
-            cp -prv \"{rust_std}/lib\" \"$VORPAL_OUTPUT\"",
-            rust_std = get_artifact_envkey(&rust_std),
-            rustc_source = get_artifact_envkey(&source),
+            cp -prv \"./source/{name}/.\" \"$VORPAL_OUTPUT\"",
         },
         vec![],
-        systems,
+        vec![
+            "aarch64-linux",
+            "aarch64-macos",
+            "x86_64-linux",
+            "x86_64-macos",
+        ],
     )
     .await
 }

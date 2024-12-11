@@ -135,8 +135,10 @@ async fn run_step(
     if let Some(script) = &step_script {
         let mut script = script.clone();
 
-        for env in environments_sorted.clone() {
-            script = script.replace(&format!("${}", env.key), &env.value);
+        for e in environments_sorted.clone() {
+            if e.key.starts_with("VORPAL_") {
+                script = script.replace(&format!("${}", e.key), &e.value);
+            }
         }
 
         let path = workspace_path.join("script.sh");
@@ -175,13 +177,15 @@ async fn run_step(
     // Setup environment variables
 
     for env in environments_sorted.clone() {
-        let mut value = env.value.clone();
+        let mut env_value = env.value.clone();
 
         for e in environments_sorted.clone() {
-            value = value.replace(&format!("${}", e.key), &e.value);
+            if e.key.starts_with("VORPAL_") {
+                env_value = env_value.replace(&format!("${}", e.key), &e.value);
+            }
         }
 
-        command.env(env.key, value);
+        command.env(env.key, env_value);
     }
 
     // Setup arguments
@@ -190,8 +194,10 @@ async fn run_step(
         for arg in step_arguments.iter() {
             let mut arg = arg.clone();
 
-            for env in environments_sorted.clone() {
-                arg = arg.replace(&format!("${}", env.key), &env.value);
+            for e in environments_sorted.clone() {
+                if e.key.starts_with("VORPAL_") {
+                    arg = arg.replace(&format!("${}", e.key), &e.value);
+                }
             }
 
             command.arg(arg);

@@ -65,7 +65,7 @@ pub async fn get_context() -> Result<ConfigContext> {
 
 #[derive(Clone, Debug, Default)]
 pub struct ConfigContext {
-    artifact: HashMap<String, Artifact>,
+    artifact_id: HashMap<String, Artifact>,
     pub port: u16,
     source_hash: HashMap<String, String>,
     system: ArtifactSystem,
@@ -95,7 +95,7 @@ fn get_source_key_digest(path: PathBuf, files: Vec<PathBuf>) -> Result<String> {
 impl ConfigContext {
     pub fn new(port: u16, system: ArtifactSystem) -> Self {
         Self {
-            artifact: HashMap::new(),
+            artifact_id: HashMap::new(),
             port,
             source_hash: HashMap::new(),
             system,
@@ -104,20 +104,18 @@ impl ConfigContext {
 
     pub fn add_artifact(&mut self, artifact: Artifact) -> Result<ArtifactId> {
         let artifact_json = serde_json::to_string(&artifact).map_err(|e| anyhow::anyhow!(e))?;
-
         let artifact_metadata = ArtifactMetadata {
             system: self.system,
         };
         let artifact_metadata_json =
             serde_json::to_string(&artifact_metadata).map_err(|e| anyhow::anyhow!(e))?;
-
         let artifact_manifest = format!("{}:{}", artifact_json, artifact_metadata_json);
         let artifact_manifest_hash = digest(artifact_manifest.as_bytes());
-
         let artifact_key = format!("{}-{}", artifact.name, artifact_manifest_hash);
 
-        if !self.artifact.contains_key(&artifact_key) {
-            self.artifact.insert(artifact_key.clone(), artifact.clone());
+        if !self.artifact_id.contains_key(&artifact_key) {
+            self.artifact_id
+                .insert(artifact_key.clone(), artifact.clone());
         }
 
         let artifact_id = ArtifactId {
@@ -130,7 +128,7 @@ impl ConfigContext {
 
     pub fn get_artifact(&self, hash: &str, name: &str) -> Option<&Artifact> {
         let artifact_key = format!("{}-{}", name, hash);
-        self.artifact.get(&artifact_key)
+        self.artifact_id.get(&artifact_key)
     }
 
     pub async fn add_source_hash(
@@ -193,7 +191,7 @@ impl ConfigContext {
 
         let config_service = ConfigServiceServer::new(ConfigServer::new(context, config));
 
-        println!("Config server listening on {}", addr);
+        println!("Config listening: {}", addr);
 
         Server::builder()
             .add_service(config_service)
