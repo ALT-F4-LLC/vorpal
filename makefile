@@ -13,7 +13,7 @@ endif
 
 .DEFAULT_GOAL := build
 
-# Development
+# Development (without Vorpal)
 
 clean-cargo:
 	cargo clean
@@ -46,13 +46,21 @@ dist: build
 	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
 		-C $(WORK_DIR)/target/$(TARGET) vorpal vorpal-config
 
-# Development
+# Development (with Vorpal)
 
-shell:
-	./script/dev.sh cargo build --bin 'vorpal-config' && ./script/dev.sh cargo run --bin 'vorpal' -- artifact --file 'target/debug/vorpal-config' --name 'vorpal-shell'
+vorpal-config:
+	./script/dev.sh cargo build --bin 'vorpal-config'
 
-start:
+vorpal-shell: vorpal-config
+	./script/dev.sh cargo run --bin 'vorpal' -- artifact --file 'target/debug/vorpal-config' --name 'vorpal-shell'
+
+vorpal: vorpal-config
+	./script/dev.sh cargo run --bin 'vorpal' -- artifact --file 'target/debug/vorpal-config' --name 'vorpal'
+
+vorpal-start:
 	./script/dev.sh cargo run --bin 'vorpal' -- start
+
+# Vagrant environment
 
 vagrant-box:
 	packer validate \
