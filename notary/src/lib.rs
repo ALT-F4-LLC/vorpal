@@ -11,7 +11,7 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::fs::create_dir_all;
-use tracing::info;
+use tracing::warn;
 
 const BITS: usize = 2048;
 
@@ -21,20 +21,20 @@ pub async fn generate_keys(
     public_key_path: PathBuf,
 ) -> Result<()> {
     if private_key_path.exists() {
-        info!("skipping - private key already exists");
+        warn!("skipping - private key already exists");
+
         return Ok(());
     }
 
     if public_key_path.exists() {
-        info!("skipping - public key already exists");
+        warn!("skipping - public key already exists");
+
         return Ok(());
     }
 
     create_dir_all(key_path.clone())
         .await
         .expect("failed to create key directory");
-
-    info!("key directory: {:?}", key_path);
 
     let mut rng = rand::thread_rng();
 
@@ -48,15 +48,11 @@ pub async fn generate_keys(
         .write_pem_file(&private_key_path, "PRIVATE KEY", LineEnding::LF)
         .expect("failed to write private key to file");
 
-    info!("private key generated: {:?}", private_key_path);
-
     let public_key = private_key.to_public_key();
 
     public_key
         .write_public_key_pem_file(&public_key_path, LineEnding::LF)
         .expect("failed to write public key to file");
-
-    info!("public key generated: {:?}", public_key_path);
 
     Ok(())
 }

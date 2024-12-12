@@ -133,8 +133,5 @@ pub fn bwrap(
 }
 
 pub fn docker(arguments: Vec<String>) -> ArtifactStep {
-    bash(
-        vec![],
-        format!("{} {}", "/usr/bin/docker", arguments.join(" ")),
-    )
+    bash(vec![], format!("/usr/bin/docker {}", arguments.join(" ")))
 }

@@ -1,7 +1,6 @@
-use crate::worker::build;
+use crate::artifact::build;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
-use console::style;
 use port_selector::random_free_port;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
@@ -10,9 +9,10 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::{process, process::Child};
 use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tonic::transport::{Channel, Server};
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::FmtSubscriber;
-use vorpal_registry::service::{RegistryServer, RegistryServerBackend};
+use vorpal_registry::{RegistryServer, RegistryServerBackend};
 use vorpal_schema::{
     get_artifact_system,
     vorpal::{
@@ -20,25 +20,28 @@ use vorpal_schema::{
             artifact_service_server::ArtifactServiceServer, ArtifactId, ArtifactSystem,
             ArtifactSystem::UnknownSystem,
         },
-        config::v0::config_service_client::ConfigServiceClient,
+        config::v0::{config_service_client::ConfigServiceClient, ConfigRequest},
         registry::v0::registry_service_server::RegistryServiceServer,
     },
 };
-use vorpal_store::paths::{get_private_key_path, get_public_key_path, setup_paths};
+use vorpal_store::paths::{get_artifact_path, get_public_key_path, setup_paths};
+
 use vorpal_worker::artifact::ArtifactServer;
 
+mod artifact;
 mod build;
-mod log;
-mod worker;
 
 #[derive(Subcommand)]
 enum Command {
-    Build {
-        #[arg(long, short)]
-        artifact: String,
-
+    Artifact {
         #[arg(long, short)]
         file: String,
+
+        #[arg(default_value_t = Level::INFO, global = true, long)]
+        level: Level,
+
+        #[arg(long, short)]
+        name: String,
 
         #[clap(default_value = "http://localhost:23151", long, short)]
         registry: String,
@@ -48,17 +51,6 @@ enum Command {
 
         #[clap(default_value = "http://localhost:23151", long, short)]
         worker: String,
-    },
-
-    Config {
-        #[arg(long, short)]
-        file: String,
-
-        #[arg(long, short)]
-        artifact: String,
-
-        #[arg(default_value_t = get_default_system(), long, short)]
-        system: String,
     },
 
     #[clap(subcommand)]
@@ -128,10 +120,11 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
     while let Some(line) = stdio_merged.next().await {
         let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
 
-        println!("Config: {}", line);
+        if !line.contains("Config listening") {
+            info!("{}", line);
+        }
 
-        if line.contains("Config server listening on") {
-            println!("{} {}", style("Config:").bold().green(), host);
+        if line.contains("Config listening") {
             break;
         }
     }
@@ -156,13 +149,31 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Command::Build {
-            artifact,
+        Command::Artifact {
+            name,
             file,
+            level,
             registry,
             system,
             worker,
         } => {
+            let stderr_writer = std::io::stderr.with_max_level(*level);
+
+            let mut subscriber = FmtSubscriber::builder()
+                .with_max_level(*level)
+                .with_target(false)
+                .with_writer(stderr_writer)
+                .without_time();
+
+            if [Level::DEBUG, Level::TRACE].contains(level) {
+                subscriber = subscriber.with_file(true).with_line_number(true);
+            }
+
+            let subscriber = subscriber.finish();
+
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("setting default subscriber");
+
             if worker.is_empty() {
                 bail!("no worker specified");
             }
@@ -173,23 +184,30 @@ async fn main() -> Result<()> {
                 bail!("unknown target: {}", artifact_system.as_str_name());
             }
 
-            setup_paths().await?;
-
-            let private_key_path = get_private_key_path();
-
-            if !private_key_path.exists() {
-                bail!("private key not found - run 'vorpal keys generate' or copy from worker",);
-            }
-
             let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
 
-            let (artifacts_map, artifacts_order) =
-                build::load_config(artifact, &mut config_service).await?;
+            let config_response = match config_service.get_config(ConfigRequest {}).await {
+                Ok(res) => res,
+                Err(error) => {
+                    bail!("failed to evaluate config: {}", error);
+                }
+            };
+
+            let config = config_response.into_inner();
+
+            let config_artifact = config
+                .artifacts
+                .into_iter()
+                .find(|a| a.name == *name)
+                .ok_or_else(|| anyhow!("artifact not found: {}", name))?;
+
+            let (build_map, build_order) =
+                build::load_artifact(&config_artifact, &mut config_service).await?;
 
             let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
 
-            for artifact_id in &artifacts_order {
-                match artifacts_map.get(artifact_id) {
+            for artifact_id in &build_order {
+                match build_map.get(artifact_id) {
                     None => bail!("Build artifact not found: {}", artifact_id.name),
                     Some(artifact) => {
                         for a in &artifact.artifacts {
@@ -201,30 +219,16 @@ async fn main() -> Result<()> {
                         build(artifact, artifact_id, artifact_system, registry, worker).await?;
 
                         artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
+
+                        if artifact_id.name == *name {
+                            println!(
+                                "{}",
+                                get_artifact_path(&artifact_id.hash, &artifact_id.name).display()
+                            );
+                        }
                     }
                 }
             }
-
-            config_process
-                .kill()
-                .await
-                .map_err(|_| anyhow!("failed to kill config server"))
-        }
-
-        Command::Config {
-            file,
-            artifact,
-            system,
-        } => {
-            let artifact_system: ArtifactSystem = get_artifact_system(system);
-
-            if artifact_system == UnknownSystem {
-                bail!("unknown target: {}", artifact_system.as_str_name());
-            }
-
-            let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
-
-            let _ = build::load_config(artifact, &mut config_service).await?;
 
             config_process
                 .kill()
@@ -239,7 +243,8 @@ async fn main() -> Result<()> {
                 let public_key_path = vorpal_store::paths::get_public_key_path();
 
                 if private_key_path.exists() && public_key_path.exists() {
-                    println!("=> Keys already exist: {}", key_dir_path.display());
+                    warn!("Keys already exist: {}", key_dir_path.display());
+
                     return Ok(());
                 }
 
@@ -266,7 +271,10 @@ async fn main() -> Result<()> {
             registry_backend_s3_bucket,
             services,
         } => {
-            let mut subscriber = FmtSubscriber::builder().with_max_level(*level);
+            let mut subscriber = FmtSubscriber::builder()
+                .with_target(false)
+                .without_time()
+                .with_max_level(*level);
 
             if [Level::DEBUG, Level::TRACE].contains(level) {
                 subscriber = subscriber.with_file(true).with_line_number(true);

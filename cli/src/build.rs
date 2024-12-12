@@ -1,4 +1,3 @@
-use crate::log::{print_artifacts, print_artifacts_total};
 use anyhow::{bail, Result};
 use petgraph::algo::toposort;
 use petgraph::graphmap::DiGraphMap;
@@ -6,111 +5,79 @@ use std::collections::HashMap;
 use tonic::transport::Channel;
 use vorpal_schema::vorpal::{
     artifact::v0::{Artifact, ArtifactId},
-    config::v0::{config_service_client::ConfigServiceClient, ConfigRequest},
+    config::v0::config_service_client::ConfigServiceClient,
 };
 
-pub async fn load_artifacts(
-    map: &mut HashMap<ArtifactId, Artifact>,
-    artifacts: Vec<ArtifactId>,
-    service: &mut ConfigServiceClient<Channel>,
+pub async fn get_artifacts(
+    artifact: &Artifact,
+    artifact_map: &mut HashMap<ArtifactId, Artifact>,
+    config_service: &mut ConfigServiceClient<Channel>,
 ) -> Result<()> {
-    for artifact_id in artifacts.iter() {
-        if !map.contains_key(artifact_id) {
-            let request = tonic::Request::new(artifact_id.clone());
+    for output in artifact.artifacts.iter() {
+        let request = tonic::Request::new(output.clone());
 
-            let response = match service.get_artifact(request).await {
-                Ok(res) => res,
-                Err(error) => {
-                    bail!("failed to evaluate config: {}", error);
-                }
-            };
-
-            let artifact = response.into_inner();
-
-            map.insert(artifact_id.clone(), artifact.clone());
-
-            if !artifact.artifacts.is_empty() {
-                Box::pin(load_artifacts(map, artifact.artifacts, service)).await?
+        let response = match config_service.get_artifact(request).await {
+            Ok(res) => res,
+            Err(error) => {
+                bail!("failed to evaluate config: {}", error);
             }
-        }
+        };
+
+        let artifact = response.into_inner();
+
+        artifact_map.insert(output.clone(), artifact.clone());
+
+        Box::pin(get_artifacts(&artifact, artifact_map, config_service)).await?;
     }
 
     Ok(())
 }
 
-pub async fn load_config<'a>(
-    artifact: &String,
+pub async fn load_artifact<'a>(
+    artifact_id: &'a ArtifactId,
     service: &mut ConfigServiceClient<Channel>,
 ) -> Result<(HashMap<ArtifactId, Artifact>, Vec<ArtifactId>)> {
-    let response = match service.get_config(ConfigRequest {}).await {
+    // Create the artifact graph and map
+
+    let mut artifact_map = HashMap::<ArtifactId, Artifact>::new();
+
+    // Get the artifact
+
+    let request = tonic::Request::new(artifact_id.clone());
+
+    let response = match service.get_artifact(request).await {
         Ok(res) => res,
         Err(error) => {
-            bail!("failed to evaluate config: {}", error);
+            bail!("failed to evaluate artifact: {}", error);
         }
     };
 
-    let config = response.into_inner();
+    let artifact = response.into_inner();
 
-    if !config.artifacts.iter().any(|p| p.name == artifact.as_str()) {
-        bail!("Artifact not found: {}", artifact);
-    }
+    artifact_map.insert(artifact_id.clone(), artifact.clone());
 
-    let mut artifacts_map = HashMap::<ArtifactId, Artifact>::new();
+    get_artifacts(&artifact, &mut artifact_map, service).await?;
 
-    load_artifacts(&mut artifacts_map, config.artifacts.clone(), service).await?;
+    // Populate the build graph
 
-    let mut artifacts_graph = DiGraphMap::<&ArtifactId, Artifact>::new();
+    let mut artifact_graph = DiGraphMap::<&ArtifactId, Artifact>::new();
 
-    for (artifact_id, artifact) in artifacts_map.iter() {
-        artifacts_graph.add_node(artifact_id);
+    for (artifact_id, artifact) in artifact_map.iter() {
+        artifact_graph.add_node(artifact_id);
 
         for output in artifact.artifacts.iter() {
-            artifacts_graph.add_edge(artifact_id, output, artifact.clone());
-
-            add_edges(
-                &mut artifacts_graph,
-                &artifacts_map,
-                artifact,
-                output,
-                service,
-            )
-            .await?;
+            artifact_graph.add_edge(artifact_id, output, artifact.clone());
         }
     }
 
-    let artifacts_order = match toposort(&artifacts_graph, None) {
+    let build_order = match toposort(&artifact_graph, None) {
         Err(err) => bail!("{:?}", err),
         Ok(order) => order,
     };
 
-    let mut artifacts_order: Vec<ArtifactId> = artifacts_order.into_iter().cloned().collect();
+    let mut build_order: Vec<ArtifactId> = build_order.into_iter().cloned().collect();
 
-    artifacts_order.reverse();
+    build_order.reverse();
 
-    print_artifacts(&artifacts_order);
-    print_artifacts_total(&artifacts_order);
-
-    Ok((artifacts_map, artifacts_order))
-}
-
-async fn add_edges<'a>(
-    graph: &mut DiGraphMap<&'a ArtifactId, Artifact>,
-    map: &HashMap<ArtifactId, Artifact>,
-    artifact: &'a Artifact,
-    artifact_output: &'a ArtifactId,
-    service: &mut ConfigServiceClient<Channel>,
-) -> Result<()> {
-    if map.contains_key(artifact_output) {
-        return Ok(());
-    }
-
-    graph.add_node(artifact_output);
-
-    for output in artifact.artifacts.iter() {
-        graph.add_edge(artifact_output, output, artifact.clone());
-
-        Box::pin(add_edges(graph, map, artifact, output, service)).await?;
-    }
-
-    Ok(())
+    Ok((artifact_map, build_order))
 }

@@ -77,7 +77,10 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
             bash(
                 environments.clone(),
                 formatdoc! {"
+                    ## extract files
                     tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
+
+                    ## patch files
                     echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
                 "},
             ),

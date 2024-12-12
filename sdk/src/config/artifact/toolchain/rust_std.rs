@@ -1,7 +1,4 @@
-use crate::config::{
-    artifact::{add_artifact, get_artifact_envkey},
-    ConfigContext,
-};
+use crate::config::{artifact::add_artifact, ConfigContext};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::{
@@ -9,7 +6,10 @@ use vorpal_schema::vorpal::artifact::v0::{
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
+pub async fn artifact(
+    context: &mut ConfigContext,
+    override_version: Option<String>,
+) -> Result<ArtifactId> {
     let name = "rust-std";
 
     let target = match context.get_target() {
@@ -20,42 +20,32 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
         UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
     };
 
-    let systems = vec![
-        "aarch64-linux",
-        "aarch64-macos",
-        "x86_64-linux",
-        "x86_64-macos",
-    ];
+    let mut version = "1.80.1".to_string();
 
-    let version = "1.78.0";
+    if let Some(v) = override_version {
+        version = v;
+    }
 
-    let source = add_artifact(
+    add_artifact(
         context,
         vec![],
         vec![],
-        format!("{}-source", name).as_str(),
+        name,
         formatdoc! {"
             curl -L -o ./rust-std-{version}-{target}.tar.gz \
                 https://static.rust-lang.org/dist/rust-std-{version}-{target}.tar.gz
 
-            tar -xvf ./rust-std-{version}-{target}.tar.gz -C $VORPAL_OUTPUT --strip-components=1",
-        },
-        vec![],
-        systems.clone(),
-    )
-    .await?;
+            tar -xvf ./rust-std-{version}-{target}.tar.gz -C source --strip-components=1
 
-    add_artifact(
-        context,
-        vec![source.clone()],
+            cp -prv \"./source/rust-std-{target}/.\" \"$VORPAL_OUTPUT\"
+        "},
         vec![],
-        name,
-        format!(
-            "cp -prv {}/rust-std-{target}/. \"$VORPAL_OUTPUT/\"",
-            get_artifact_envkey(&source)
-        ),
-        vec![],
-        systems,
+        vec![
+            "aarch64-linux",
+            "aarch64-macos",
+            "x86_64-linux",
+            "x86_64-macos",
+        ],
     )
     .await
 }

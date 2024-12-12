@@ -15,7 +15,7 @@ pub fn generate(
     glibc: &ArtifactId,
     grep: &ArtifactId,
     gzip: &ArtifactId,
-    linux_headers: &ArtifactId,
+    linux: &ArtifactId,
     m4: &ArtifactId,
     make: &ArtifactId,
     ncurses: &ArtifactId,
@@ -120,9 +120,9 @@ pub fn generate(
 
         ### Build linux headers
 
-        mkdir -pv ./linux-headers
-        cp -prv {linux_headers}/. linux-headers/
-        pushd ./linux-headers
+        mkdir -pv ./linux
+        cp -prv {linux}/. linux/
+        pushd ./linux
 
         make mrproper
         make headers
@@ -131,7 +131,7 @@ pub fn generate(
         cp -prv usr/include \"$VORPAL_OUTPUT/usr\"
 
         popd
-        rm -rf ./linux-headers
+        rm -rf ./linux
 
         ### Build glibc
 
@@ -590,7 +590,7 @@ pub fn generate(
         glibc = get_artifact_envkey(glibc),
         grep = get_artifact_envkey(grep),
         gzip = get_artifact_envkey(gzip),
-        linux_headers = get_artifact_envkey(linux_headers),
+        linux = get_artifact_envkey(linux),
         m4 = get_artifact_envkey(m4),
         make = get_artifact_envkey(make),
         ncurses = get_artifact_envkey(ncurses),
@@ -849,7 +849,7 @@ pub fn generate_post(
         make MANSUFFIX=ssl install
 
         mv -v /usr/share/doc/openssl /usr/share/doc/openssl-3.3.1
-        cp -vfr doc/* /usr/share/doc/openssl-3.3.1
+        cp -pfrv doc/* /usr/share/doc/openssl-3.3.1
 
         popd
         rm -rf ./openssl

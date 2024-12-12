@@ -7,5 +7,3 @@ if [[ ! -d "$HOME/.rustup" ]]; then
 fi
 
 PATH="$HOME/.cargo/bin:$PATH"
-
-rustup show active-toolchain

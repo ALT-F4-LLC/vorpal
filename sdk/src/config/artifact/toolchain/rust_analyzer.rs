@@ -10,14 +10,14 @@ pub async fn artifact(
     context: &mut ConfigContext,
     override_version: Option<String>,
 ) -> Result<ArtifactId> {
-    let name = "rustc";
+    let name = "rust-analyzer";
 
     let target = match context.get_target() {
         Aarch64Linux => "aarch64-unknown-linux-gnu",
         Aarch64Macos => "aarch64-apple-darwin",
         X8664Linux => "x86_64-unknown-linux-gnu",
         X8664Macos => "x86_64-apple-darwin",
-        UnknownSystem => bail!("Unsupported rustc target: {:?}", context.get_target()),
+        UnknownSystem => bail!("Invalid rust-analyzer target: {:?}", context.get_target()),
     };
 
     let mut version = "1.80.1".to_string();
@@ -35,10 +35,9 @@ pub async fn artifact(
             curl -L -o ./{name}-{version}-{target}.tar.gz \
                 https://static.rust-lang.org/dist/{name}-{version}-{target}.tar.gz
 
-            tar -xvf ./{name}-{version}-{target}.tar.gz \
-                -C source --strip-components=1
+            tar -xvf ./{name}-{version}-{target}.tar.gz -C source --strip-components=1
 
-            cp -prv \"./source/{name}/.\" \"$VORPAL_OUTPUT\"",
+            cp -prv source/{name}-preview/. \"$VORPAL_OUTPUT\"",
         },
         vec![],
         vec![
