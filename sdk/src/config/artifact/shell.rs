@@ -54,11 +54,11 @@ pub async fn shell_artifact<'a>(
         context,
         artifacts,
         vec![],
-        format!("{}-shell", name).as_str(),
+        name,
         formatdoc! {"
-            mkdir -pv $VORPAL_OUTPUT/bin
+            mkdir -pv $VORPAL_WORKSPACE/bin
 
-            cat > $VORPAL_OUTPUT/bin/deactivate << 'EOF'
+            cat > bin/deactivate << 'EOF'
             #!/bin/bash
             # Set restore variables
             {restores}
@@ -67,7 +67,7 @@ pub async fn shell_artifact<'a>(
             {unsets}
             EOF
 
-            cat > $VORPAL_OUTPUT/bin/activate << 'EOF'
+            cat > bin/activate << 'EOF'
             #!/bin/bash
 
             # Set backup variables
@@ -83,8 +83,13 @@ pub async fn shell_artifact<'a>(
             exec \"$@\"
             EOF
 
-            chmod +x $VORPAL_OUTPUT/bin/activate
-            chmod +x $VORPAL_OUTPUT/bin/deactivate",
+            chmod +x \
+                $VORPAL_WORKSPACE/bin/activate \
+                $VORPAL_WORKSPACE/bin/deactivate
+
+            mkdir -pv $VORPAL_OUTPUT/bin
+
+            cp -prv bin \"$VORPAL_OUTPUT\"",
             backups = backups.join("\n"),
             exports = exports.join("\n"),
             restores = restores.join("\n"),

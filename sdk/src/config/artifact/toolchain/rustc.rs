@@ -35,7 +35,8 @@ pub async fn artifact(
             curl -L -o ./{name}-{version}-{target}.tar.gz \
                 https://static.rust-lang.org/dist/{name}-{version}-{target}.tar.gz
 
-            tar -xvf ./{name}-{version}-{target}.tar.gz -C source --strip-components=1
+            tar -xvf ./{name}-{version}-{target}.tar.gz \
+                -C source --strip-components=1
 
             cp -prv \"./source/{name}/.\" \"$VORPAL_OUTPUT\"",
         },

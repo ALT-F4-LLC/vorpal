@@ -11,7 +11,7 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::fs::create_dir_all;
-use tracing::{info, warn};
+use tracing::warn;
 
 const BITS: usize = 2048;
 
@@ -36,8 +36,6 @@ pub async fn generate_keys(
         .await
         .expect("failed to create key directory");
 
-    info!("key directory: {:?}", key_path);
-
     let mut rng = rand::thread_rng();
 
     let private_key = RsaPrivateKey::new(&mut rng, BITS).expect("failed to generate private key");
@@ -50,15 +48,11 @@ pub async fn generate_keys(
         .write_pem_file(&private_key_path, "PRIVATE KEY", LineEnding::LF)
         .expect("failed to write private key to file");
 
-    info!("private key generated: {:?}", private_key_path);
-
     let public_key = private_key.to_public_key();
 
     public_key
         .write_public_key_pem_file(&public_key_path, LineEnding::LF)
         .expect("failed to write public key to file");
-
-    info!("public key generated: {:?}", public_key_path);
 
     Ok(())
 }

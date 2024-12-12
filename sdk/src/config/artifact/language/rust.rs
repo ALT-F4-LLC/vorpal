@@ -59,7 +59,6 @@ pub async fn rust_toolchain(context: &mut ConfigContext, version: &str) -> Resul
             components=({component_paths})
 
             for component in ${{components[@]}}; do
-                echo \"Installing component files: $component\"
                 cp -prv \"${{component}}/.\" \"$VORPAL_OUTPUT\"
             done
 
@@ -67,7 +66,6 @@ pub async fn rust_toolchain(context: &mut ConfigContext, version: &str) -> Resul
             touch \"$VORPAL_OUTPUT/manifest.in\"
 
             for component in ${{components[@]}}; do
-                echo \"Adding component manifest: $component\"
                 cat \"${{component}}/manifest.in\" >> \"$VORPAL_OUTPUT\"/manifest.in
             done",
             component_paths = [
@@ -205,7 +203,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
                 touch \"${{target_path}}\"
             done
 
-            mkdir -p \"$VORPAL_OUTPUT/vendor\"
+            mkdir -pv \"$VORPAL_OUTPUT/vendor\"
 
             cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
@@ -250,19 +248,19 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
 
             pushd ./source/{name}
 
-            mkdir -p .cargo
+            mkdir -pv .cargo
 
             ln -sv \"{vendor_envkey}/config.toml\" .cargo/config.toml
 
             cargo build --offline --release
             cargo test --offline --release
 
-            mkdir -p \"$VORPAL_OUTPUT/bin\"
+            mkdir -pv \"$VORPAL_OUTPUT/bin\"
 
             bin_names=({bin_names})
 
             for bin_name in ${{bin_names[@]}}; do
-                cp -v \"target/release/${{bin_name}}\" \"$VORPAL_OUTPUT/bin/\"
+                cp -pv \"target/release/${{bin_name}}\" \"$VORPAL_OUTPUT/bin/\"
             done",
             bin_names = workspaces_bin_names.join(" "),
             vendor_envkey = get_artifact_envkey(&vendor),

@@ -11,7 +11,7 @@ use tokio::{
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
-use tracing::{error, info};
+use tracing::error;
 use vorpal_notary::get_public_key;
 use vorpal_schema::vorpal::registry::v0::{
     registry_service_server::{RegistryService, RegistryServiceServer},
@@ -114,8 +114,6 @@ impl RegistryService for RegistryServer {
 
                         return;
                     }
-
-                    info!("serving path: {}", path.display());
 
                     let data = match read(&path).await {
                         Ok(data) => data,
@@ -314,8 +312,6 @@ impl RegistryService for RegistryServer {
             write(&path, &data).await.map_err(|err| {
                 Status::internal(format!("failed to write store path: {:?}", err))
             })?;
-
-            info!("stored path: {}", path.display());
         }
 
         if backend == RegistryServerBackend::S3 {
@@ -364,8 +360,6 @@ pub async fn listen(port: u16) -> Result<()> {
     let addr = format!("[::]:{}", port)
         .parse()
         .map_err(|err| anyhow::anyhow!("failed to parse address: {:?}", err))?;
-
-    info!("worker address: {}", addr);
 
     let registry_service = RegistryServiceServer::new(RegistryServer::default());
 

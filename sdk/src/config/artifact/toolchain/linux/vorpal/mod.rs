@@ -9,85 +9,85 @@ mod script;
 mod source;
 
 pub fn artifact(context: &mut ConfigContext, linux_debian: &ArtifactId) -> Result<ArtifactId> {
-    let bash = source::bash(context, linux_debian)?;
-    let binutils = source::binutils(context, linux_debian)?;
-    let bison = source::bison(context, linux_debian)?;
-    let coreutils = source::coreutils(context, linux_debian)?;
-    let curl = source::curl(context, linux_debian)?;
-    let curl_cacert = source::curl_cacert(context, linux_debian)?;
-    let diffutils = source::diffutils(context, linux_debian)?;
-    let file = source::file(context, linux_debian)?;
-    let findutils = source::findutils(context, linux_debian)?;
-    let gawk = source::gawk(context, linux_debian)?;
-    let gcc = source::gcc(context, linux_debian)?;
-    let gettext = source::gettext(context, linux_debian)?;
-    let glibc_patch = source::glibc_patch(context, linux_debian)?;
-    let glibc = source::glibc(context, &glibc_patch, linux_debian)?;
-    let grep = source::grep(context, linux_debian)?;
-    let gzip = source::gzip(context, linux_debian)?;
-    let libidn2 = source::libidn2(context, linux_debian)?;
-    let libpsl = source::libpsl(context, linux_debian)?;
-    let libunistring = source::libunistring(context, linux_debian)?;
-    let linux_headers = source::linux_headers(context, linux_debian)?;
-    let m4 = source::m4(context, linux_debian)?;
-    let make = source::make(context, linux_debian)?;
-    let ncurses = source::ncurses(context, linux_debian)?;
-    let openssl = source::openssl(context, linux_debian)?;
-    let patch = source::patch(context, linux_debian)?;
-    let perl = source::perl(context, linux_debian)?;
-    let python = source::python(context, linux_debian)?;
-    let sed = source::sed(context, linux_debian)?;
-    let tar = source::tar(context, linux_debian)?;
-    let texinfo = source::texinfo(context, linux_debian)?;
-    let unzip_patch_fixes = source::unzip_patch_fixes(context, linux_debian)?;
-    let unzip_patch_gcc14 = source::unzip_patch_gcc14(context, linux_debian)?;
-    let unzip = source::unzip(
+    let bash_source = source::bash(context, linux_debian)?;
+    let binutils_source = source::binutils(context, linux_debian)?;
+    let bison_source = source::bison(context, linux_debian)?;
+    let coreutils_source = source::coreutils(context, linux_debian)?;
+    let curl_source = source::curl(context, linux_debian)?;
+    let curl_cacert_source = source::curl_cacert(context, linux_debian)?;
+    let diffutils_source = source::diffutils(context, linux_debian)?;
+    let file_source = source::file(context, linux_debian)?;
+    let findutils_source = source::findutils(context, linux_debian)?;
+    let gawk_source = source::gawk(context, linux_debian)?;
+    let gcc_source = source::gcc(context, linux_debian)?;
+    let gettext_source = source::gettext(context, linux_debian)?;
+    let glibc_patch_source = source::glibc_patch(context, linux_debian)?;
+    let glibc_source = source::glibc(context, &glibc_patch_source, linux_debian)?;
+    let grep_source = source::grep(context, linux_debian)?;
+    let gzip_source = source::gzip(context, linux_debian)?;
+    let libidn2_source = source::libidn2(context, linux_debian)?;
+    let libpsl_source = source::libpsl(context, linux_debian)?;
+    let libunistring_source = source::libunistring(context, linux_debian)?;
+    let linux_headers_source = source::linux_headers(context, linux_debian)?;
+    let m4_source = source::m4(context, linux_debian)?;
+    let make_source = source::make(context, linux_debian)?;
+    let ncurses_source = source::ncurses(context, linux_debian)?;
+    let openssl_source = source::openssl(context, linux_debian)?;
+    let patch_source = source::patch(context, linux_debian)?;
+    let perl_source = source::perl(context, linux_debian)?;
+    let python_source = source::python(context, linux_debian)?;
+    let sed_source = source::sed(context, linux_debian)?;
+    let tar_source = source::tar(context, linux_debian)?;
+    let texinfo_source = source::texinfo(context, linux_debian)?;
+    let unzip_patch_fixes_source = source::unzip_patch_fixes(context, linux_debian)?;
+    let unzip_patch_gcc14_source = source::unzip_patch_gcc14(context, linux_debian)?;
+    let unzip_source = source::unzip(
         context,
         linux_debian,
-        &unzip_patch_fixes,
-        &unzip_patch_gcc14,
+        &unzip_patch_fixes_source,
+        &unzip_patch_gcc14_source,
     )?;
-    let util_linux = source::util_linux(context, linux_debian)?;
-    let xz = source::xz(context, linux_debian)?;
-    let zlib = source::zlib(context, linux_debian)?;
+    let util_linux_source = source::util_linux(context, linux_debian)?;
+    let xz_source = source::xz(context, linux_debian)?;
+    let zlib_source = source::zlib(context, linux_debian)?;
 
     // TODO: implement "expect_hash" for artifactIds
 
     let artifacts = vec![
-        bash.clone(),
-        binutils.clone(),
-        bison.clone(),
-        coreutils.clone(),
-        curl.clone(),
-        curl_cacert.clone(),
-        diffutils.clone(),
-        file.clone(),
-        findutils.clone(),
-        gawk.clone(),
-        gcc.clone(),
-        gettext.clone(),
-        glibc.clone(),
-        grep.clone(),
-        gzip.clone(),
-        libidn2.clone(),
-        libpsl.clone(),
-        libunistring.clone(),
+        bash_source.clone(),
+        binutils_source.clone(),
+        bison_source.clone(),
+        coreutils_source.clone(),
+        curl_source.clone(),
+        curl_cacert_source.clone(),
+        diffutils_source.clone(),
+        file_source.clone(),
+        findutils_source.clone(),
+        gawk_source.clone(),
+        gcc_source.clone(),
+        gettext_source.clone(),
+        glibc_source.clone(),
+        grep_source.clone(),
+        gzip_source.clone(),
+        libidn2_source.clone(),
+        libpsl_source.clone(),
+        libunistring_source.clone(),
         linux_debian.clone(),
-        linux_headers.clone(),
-        m4.clone(),
-        make.clone(),
-        ncurses.clone(),
-        openssl.clone(),
-        patch.clone(),
-        perl.clone(),
-        python.clone(),
-        sed.clone(),
-        tar.clone(),
-        texinfo.clone(),
-        unzip.clone(),
-        util_linux.clone(),
-        xz.clone(),
-        zlib.clone(),
+        linux_headers_source.clone(),
+        m4_source.clone(),
+        make_source.clone(),
+        ncurses_source.clone(),
+        openssl_source.clone(),
+        patch_source.clone(),
+        perl_source.clone(),
+        python_source.clone(),
+        sed_source.clone(),
+        tar_source.clone(),
+        texinfo_source.clone(),
+        unzip_source.clone(),
+        util_linux_source.clone(),
+        xz_source.clone(),
+        zlib_source.clone(),
     ];
 
     // Setup environment
@@ -106,25 +106,25 @@ pub fn artifact(context: &mut ConfigContext, linux_debian: &ArtifactId) -> Resul
                 }],
                 Some(get_artifact_envkey(linux_debian)),
                 script::generate(
-                    &bash,
-                    &binutils,
-                    &coreutils,
-                    &diffutils,
-                    &file,
-                    &findutils,
-                    &gawk,
-                    &gcc,
-                    &glibc,
-                    &grep,
-                    &gzip,
-                    &linux_headers,
-                    &m4,
-                    &make,
-                    &ncurses,
-                    &patch,
-                    &sed,
-                    &tar,
-                    &xz,
+                    &bash_source,
+                    &binutils_source,
+                    &coreutils_source,
+                    &diffutils_source,
+                    &file_source,
+                    &findutils_source,
+                    &gawk_source,
+                    &gcc_source,
+                    &glibc_source,
+                    &grep_source,
+                    &gzip_source,
+                    &linux_headers_source,
+                    &m4_source,
+                    &make_source,
+                    &ncurses_source,
+                    &patch_source,
+                    &sed_source,
+                    &tar_source,
+                    &xz_source,
                 ),
             ),
             steps::bwrap(
@@ -161,20 +161,20 @@ pub fn artifact(context: &mut ConfigContext, linux_debian: &ArtifactId) -> Resul
                     "0".to_string(),
                 ],
                 vec![
-                    bison.clone(),
-                    curl.clone(),
-                    curl_cacert.clone(),
-                    gettext.clone(),
-                    libidn2.clone(),
-                    libpsl.clone(),
-                    libunistring.clone(),
-                    openssl.clone(),
-                    perl.clone(),
-                    python.clone(),
-                    texinfo.clone(),
-                    unzip.clone(),
-                    util_linux.clone(),
-                    zlib.clone(),
+                    bison_source.clone(),
+                    curl_source.clone(),
+                    curl_cacert_source.clone(),
+                    gettext_source.clone(),
+                    libidn2_source.clone(),
+                    libpsl_source.clone(),
+                    libunistring_source.clone(),
+                    openssl_source.clone(),
+                    perl_source.clone(),
+                    python_source.clone(),
+                    texinfo_source.clone(),
+                    unzip_source.clone(),
+                    util_linux_source.clone(),
+                    zlib_source.clone(),
                 ],
                 vec![ArtifactEnvironment {
                     key: "PATH".to_string(),
@@ -182,20 +182,20 @@ pub fn artifact(context: &mut ConfigContext, linux_debian: &ArtifactId) -> Resul
                 }],
                 None,
                 script::generate_post(
-                    &bison,
-                    &curl,
-                    &curl_cacert,
-                    &gettext,
-                    &libidn2,
-                    &libpsl,
-                    &libunistring,
-                    &openssl,
-                    &perl,
-                    &python,
-                    &texinfo,
-                    &unzip,
-                    &util_linux,
-                    &zlib,
+                    &bison_source,
+                    &curl_source,
+                    &curl_cacert_source,
+                    &gettext_source,
+                    &libidn2_source,
+                    &libpsl_source,
+                    &libunistring_source,
+                    &openssl_source,
+                    &perl_source,
+                    &python_source,
+                    &texinfo_source,
+                    &unzip_source,
+                    &util_linux_source,
+                    &zlib_source,
                 ),
             ),
         ],

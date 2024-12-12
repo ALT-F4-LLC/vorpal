@@ -6,11 +6,11 @@ use vorpal_schema::vorpal::artifact::v0::{
     ArtifactSystem::{Aarch64Linux, X8664Linux},
 };
 
-fn new_source_name(name: &str) -> String {
-    format!("linux-vorpal-{}-source", name)
+fn new_artifact_name(name: &str) -> String {
+    format!("{}-source", name)
 }
 
-fn new_artifact_source(
+fn new_artifact(
     artifacts: Vec<ArtifactId>,
     name: String,
     rootfs: &ArtifactId,
@@ -37,9 +37,9 @@ fn new_artifact_source(
 }
 
 pub fn bash(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("bash"),
+        new_artifact_name("bash"),
         rootfs,
         formatdoc! {"
             curl -L -o ./bash-{version}.tar.gz \
@@ -52,9 +52,9 @@ pub fn bash(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn binutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("binutils"),
+        new_artifact_name("binutils"),
         rootfs,
         formatdoc! {"
             curl -L -o ./binutils-{version}.tar.xz \
@@ -67,9 +67,9 @@ pub fn binutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Arti
 }
 
 pub fn bison(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("bison"),
+        new_artifact_name("bison"),
         rootfs,
         formatdoc! {"
             curl -L -o ./bison-{version}.tar.xz \
@@ -82,9 +82,9 @@ pub fn bison(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifac
 }
 
 pub fn coreutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("coreutils"),
+        new_artifact_name("coreutils"),
         rootfs,
         formatdoc! {"
             curl -L -o ./coreutils-{version}.tar.xz \
@@ -97,9 +97,9 @@ pub fn coreutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Art
 }
 
 pub fn curl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("curl"),
+        new_artifact_name("curl"),
         rootfs,
         formatdoc! {"
             curl -L -o ./curl-{version}.tar.xz \
@@ -112,9 +112,9 @@ pub fn curl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn curl_cacert(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("openssl-cacert"),
+        new_artifact_name("openssl-cacert"),
         rootfs,
         formatdoc! {"
             curl -L -o ./cacert.pem https://curl.se/ca/cacert.pem
@@ -127,9 +127,9 @@ pub fn curl_cacert(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<A
 }
 
 pub fn diffutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("diffutils"),
+        new_artifact_name("diffutils"),
         rootfs,
         formatdoc! {"
             curl -L -o ./diffutils-{version}.tar.xz \
@@ -142,9 +142,9 @@ pub fn diffutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Art
 }
 
 pub fn file(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("file"),
+        new_artifact_name("file"),
         rootfs,
         formatdoc! {"
             curl -L -o ./file-{version}.tar.gz \
@@ -157,9 +157,9 @@ pub fn file(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn findutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("findutils"),
+        new_artifact_name("findutils"),
         rootfs,
         formatdoc! {"
             curl -L -o ./findutils-{version}.tar.xz \
@@ -172,9 +172,9 @@ pub fn findutils(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Art
 }
 
 pub fn gawk(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("gawk"),
+        new_artifact_name("gawk"),
         rootfs,
         formatdoc! {"
             curl -L -o ./gawk-{version}.tar.xz \
@@ -189,9 +189,9 @@ pub fn gawk(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn gcc(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("gcc"),
+        new_artifact_name("gcc"),
         rootfs,
         formatdoc! {"
             curl -L -o ./gcc-{version}.tar.xz \
@@ -214,9 +214,9 @@ pub fn gcc(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactI
 }
 
 pub fn gettext(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("gettext"),
+        new_artifact_name("gettext"),
         rootfs,
         formatdoc! {"
             curl -L -o ./gettext-{version}.tar.xz \
@@ -229,15 +229,15 @@ pub fn gettext(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artif
 }
 
 pub fn glibc_patch(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("glibc-patch"),
+        new_artifact_name("glibc-patch"),
         rootfs,
         formatdoc! {"
             curl -L -o ./glibc-patch-{version}.patch \
                 https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-{version}-fhs-1.patch
 
-            cp -v ./glibc-patch-{version}.patch $VORPAL_OUTPUT",
+            cp -pv ./glibc-patch-{version}.patch $VORPAL_OUTPUT",
             version = "2.40",
         },
     ))
@@ -248,9 +248,9 @@ pub fn glibc(
     glibc_patch: &ArtifactId,
     rootfs: &ArtifactId,
 ) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![glibc_patch.clone()],
-        new_source_name("glibc"),
+        new_artifact_name("glibc"),
         rootfs,
         formatdoc! {"
             curl -L -o ./glibc-{version}.tar.xz \
@@ -268,9 +268,9 @@ pub fn glibc(
 }
 
 pub fn grep(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("grep"),
+        new_artifact_name("grep"),
         rootfs,
         formatdoc! {"
             curl -L -o ./grep-{version}.tar.xz \
@@ -283,9 +283,9 @@ pub fn grep(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn gzip(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("gzip"),
+        new_artifact_name("gzip"),
         rootfs,
         formatdoc! {"
             curl -L -o ./gzip-{version}.tar.xz \
@@ -298,9 +298,9 @@ pub fn gzip(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn libidn2(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("libidn2"),
+        new_artifact_name("libidn2"),
         rootfs,
         formatdoc! {"
             curl -L -o ./libidn2-{version}.tar.gz \
@@ -313,9 +313,9 @@ pub fn libidn2(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artif
 }
 
 pub fn libpsl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("libpsl"),
+        new_artifact_name("libpsl"),
         rootfs,
         formatdoc! {"
             curl -L -o ./libpsl-{version}.tar.gz \
@@ -328,9 +328,9 @@ pub fn libpsl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifa
 }
 
 pub fn libunistring(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("libunistring"),
+        new_artifact_name("libunistring"),
         rootfs,
         formatdoc! {"
             curl -L -o ./libunistring-{version}.tar.gz \
@@ -343,9 +343,9 @@ pub fn libunistring(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<
 }
 
 pub fn linux_headers(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("linux-headers"),
+        new_artifact_name("linux-headers"),
         rootfs,
         formatdoc! {"
             curl -L -o ./linux-headers-{version}.tar.xz \
@@ -358,9 +358,9 @@ pub fn linux_headers(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result
 }
 
 pub fn m4(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("m4"),
+        new_artifact_name("m4"),
         rootfs,
         formatdoc! {"
             curl -L -o ./m4-{version}.tar.xz \
@@ -373,9 +373,9 @@ pub fn m4(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId
 }
 
 pub fn make(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("make"),
+        new_artifact_name("make"),
         rootfs,
         formatdoc! {"
             curl -L -o ./make-{version}.tar.gz \
@@ -388,9 +388,9 @@ pub fn make(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn ncurses(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("ncurses"),
+        new_artifact_name("ncurses"),
         rootfs,
         formatdoc! {"
             curl -L -o ./ncurses-{version}.tar.gz \
@@ -403,9 +403,9 @@ pub fn ncurses(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artif
 }
 
 pub fn openssl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("openssl"),
+        new_artifact_name("openssl"),
         rootfs,
         formatdoc! {"
             curl -L -o ./openssl-{version}.tar.gz \
@@ -418,9 +418,9 @@ pub fn openssl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artif
 }
 
 pub fn patch(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("patch"),
+        new_artifact_name("patch"),
         rootfs,
         formatdoc! {"
             curl -L -o ./patch-{version}.tar.xz \
@@ -433,9 +433,9 @@ pub fn patch(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifac
 }
 
 pub fn perl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("perl"),
+        new_artifact_name("perl"),
         rootfs,
         formatdoc! {"
             curl -L -o ./perl-{version}.tar.gz https://www.cpan.org/src/5.0/perl-{version}.tar.xz
@@ -447,9 +447,9 @@ pub fn perl(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifact
 }
 
 pub fn python(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("python"),
+        new_artifact_name("python"),
         rootfs,
         formatdoc! {"
             curl -L -o ./python-{version}.tar.xz \
@@ -462,9 +462,9 @@ pub fn python(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artifa
 }
 
 pub fn sed(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("sed"),
+        new_artifact_name("sed"),
         rootfs,
         formatdoc! {"
             curl -L -o ./sed-{version}.tar.xz \
@@ -477,9 +477,9 @@ pub fn sed(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactI
 }
 
 pub fn tar(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("tar"),
+        new_artifact_name("tar"),
         rootfs,
         formatdoc! {"
             curl -L -o ./tar-{version}.tar.xz \
@@ -492,9 +492,9 @@ pub fn tar(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactI
 }
 
 pub fn texinfo(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("texinfo"),
+        new_artifact_name("texinfo"),
         rootfs,
         formatdoc! {"
             curl -L -o ./texinfo-{version}.tar.xz \
@@ -507,9 +507,9 @@ pub fn texinfo(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Artif
 }
 
 pub fn unzip_patch_fixes(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("unzip-patch-fixes"),
+        new_artifact_name("unzip-patch-fixes"),
         rootfs,
         formatdoc! {"
             curl -L -o $VORPAL_OUTPUT/unzip-{version}-consolidated_fixes-1.patch \
@@ -520,9 +520,9 @@ pub fn unzip_patch_fixes(context: &mut ConfigContext, rootfs: &ArtifactId) -> Re
 }
 
 pub fn unzip_patch_gcc14(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("unzip-patch-gcc14"),
+        new_artifact_name("unzip-patch-gcc14"),
         rootfs,
         formatdoc! {"
             curl -L -o $VORPAL_OUTPUT/unzip-{version}-gcc14-1.patch \
@@ -538,9 +538,9 @@ pub fn unzip(
     patch_fixes: &ArtifactId,
     patch_gcc14: &ArtifactId,
 ) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![patch_fixes.clone(), patch_gcc14.clone()],
-        new_source_name("unzip"),
+        new_artifact_name("unzip"),
         rootfs,
         formatdoc! {"
             curl -L -o ./unzip-{version}.tar.gz \
@@ -561,9 +561,9 @@ pub fn unzip(
 }
 
 pub fn util_linux(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("util-linux"),
+        new_artifact_name("util-linux"),
         rootfs,
         formatdoc! {"
             curl -L -o ./util-linux-{version}.tar.xz \
@@ -576,9 +576,9 @@ pub fn util_linux(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<Ar
 }
 
 pub fn xz(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("xz"),
+        new_artifact_name("xz"),
         rootfs,
         formatdoc! {"
             curl -L -o ./xz-{version}.tar.xz \
@@ -591,9 +591,9 @@ pub fn xz(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId
 }
 
 pub fn zlib(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
-    context.add_artifact(new_artifact_source(
+    context.add_artifact(new_artifact(
         vec![],
-        new_source_name("zlib"),
+        new_artifact_name("zlib"),
         rootfs,
         formatdoc! {"
             curl -L -o ./zlib-{version}.tar.gz \

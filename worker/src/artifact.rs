@@ -33,12 +33,12 @@ use vorpal_schema::{
         },
     },
 };
-use vorpal_store::temps::create_sandbox_dir;
+use vorpal_store::temps::{create_sandbox_dir, create_sandbox_file};
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
-        copy_files, get_artifact_archive_path, get_artifact_lock_path, get_artifact_path,
-        get_file_paths, get_private_key_path, get_source_archive_path, get_source_path,
+        copy_files, get_artifact_lock_path, get_artifact_path, get_file_paths,
+        get_private_key_path, get_source_archive_path, get_source_path,
     },
 };
 
@@ -650,8 +650,6 @@ impl ArtifactService for ArtifactServer {
                 }
             }
 
-            // Check for output files
-
             let artifact_path_files = match get_file_paths(&artifact_path, vec![], vec![]) {
                 Ok(files) => files,
                 Err(err) => {
@@ -682,7 +680,31 @@ impl ArtifactService for ArtifactServer {
 
             // Create artifact tar from build output files
 
-            let artifact_archive_path = get_artifact_archive_path(&request.hash, &request.name);
+            if let Err(err) = tx
+                .send(Ok(ArtifactBuildResponse {
+                    output: format!("packing artifact..."),
+                }))
+                .await
+            {
+                error!("failed to send error: {:?}", err);
+            }
+
+            let artifact_archive_path = match create_sandbox_file(Some("tar.zst")).await {
+                Ok(path) => path,
+                Err(err) => {
+                    if let Err(err) = tx
+                        .send(Err(Status::internal(format!(
+                            "failed to create artifact archive: {:?}",
+                            err
+                        ))))
+                        .await
+                    {
+                        error!("failed to send error: {:?}", err);
+                    }
+
+                    return;
+                }
+            };
 
             if let Err(err) =
                 compress_zstd(&artifact_path, &artifact_path_files, &artifact_archive_path).await
@@ -701,6 +723,15 @@ impl ArtifactService for ArtifactServer {
             }
 
             // uplaod artifact to registry
+
+            if let Err(err) = tx
+                .send(Ok(ArtifactBuildResponse {
+                    output: format!("uploading artifact..."),
+                }))
+                .await
+            {
+                error!("failed to send error: {:?}", err);
+            }
 
             let artifact_data = match read(&artifact_archive_path).await {
                 Ok(data) => data,
@@ -783,6 +814,8 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
+            // Remove artifact archive
+
             if let Err(err) = remove_file(&artifact_archive_path).await {
                 if let Err(err) = tx
                     .send(Err(Status::internal(format!(
@@ -812,6 +845,8 @@ impl ArtifactService for ArtifactServer {
 
                 return;
             }
+
+            // Remove workspace
 
             if let Err(err) = remove_dir_all(workspace_path).await {
                 if let Err(err) = tx

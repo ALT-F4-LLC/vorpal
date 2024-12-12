@@ -1,4 +1,4 @@
-use crate::worker::build;
+use crate::artifact::build;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
@@ -24,14 +24,12 @@ use vorpal_schema::{
         registry::v0::registry_service_server::RegistryServiceServer,
     },
 };
-use vorpal_store::paths::{
-    get_artifact_path, get_private_key_path, get_public_key_path, setup_paths,
-};
+use vorpal_store::paths::{get_artifact_path, get_public_key_path, setup_paths};
 
 use vorpal_worker::artifact::ArtifactServer;
 
+mod artifact;
 mod build;
-mod worker;
 
 #[derive(Subcommand)]
 enum Command {
@@ -43,7 +41,7 @@ enum Command {
         level: Level,
 
         #[arg(long, short)]
-        name: Option<String>,
+        name: String,
 
         #[clap(default_value = "http://localhost:23151", long, short)]
         registry: String,
@@ -122,11 +120,9 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
     while let Some(line) = stdio_merged.next().await {
         let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
 
-        info!("{}", line);
+        if !line.contains("Config listening") {}
 
         if line.contains("Config listening") {
-            info!("Config started: {}", host);
-
             break;
         }
     }
@@ -146,62 +142,6 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
     Ok((process, service))
 }
 
-pub async fn build_artifacts(
-    artifact_ids: Vec<ArtifactId>,
-    artifact_registry: &str,
-    artifact_selected: Option<String>,
-    artifact_service: &str,
-    artifact_system: ArtifactSystem,
-    mut config_service: ConfigServiceClient<Channel>,
-) -> Result<HashMap<String, ArtifactId>> {
-    let mut artifacts = artifact_ids.clone();
-
-    if let Some(artifact) = artifact_selected {
-        let artifact = artifact_ids
-            .iter()
-            .find(|p| p.name == *artifact)
-            .ok_or_else(|| anyhow!("Artifact not found: {}", artifact))?;
-
-        artifacts = vec![artifact.clone()];
-    }
-
-    let (artifacts_map, artifacts_order) =
-        build::load_artifacts(artifacts, &mut config_service).await?;
-
-    let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
-
-    for artifact_id in &artifacts_order {
-        match artifacts_map.get(artifact_id) {
-            None => bail!("Build artifact not found: {}", artifact_id.name),
-            Some(artifact) => {
-                for a in &artifact.artifacts {
-                    if !artifacts_ids.contains_key(&a.name) {
-                        bail!("Artifact not found: {}", a.name);
-                    }
-                }
-
-                build(
-                    artifact,
-                    artifact_id,
-                    artifact_system,
-                    artifact_registry,
-                    artifact_service,
-                )
-                .await?;
-
-                artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
-
-                println!(
-                    "{}",
-                    get_artifact_path(&artifact_id.hash, &artifact_id.name).display()
-                );
-            }
-        }
-    }
-
-    Ok(artifacts_ids)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -215,11 +155,13 @@ async fn main() -> Result<()> {
             system,
             worker,
         } => {
-            let stderr_writer = std::io::stderr.with_min_level(*level);
+            let stderr_writer = std::io::stderr.with_max_level(*level);
 
             let mut subscriber = FmtSubscriber::builder()
                 .with_max_level(*level)
-                .with_writer(stderr_writer);
+                .with_target(false)
+                .with_writer(stderr_writer)
+                .without_time();
 
             if [Level::DEBUG, Level::TRACE].contains(level) {
                 subscriber = subscriber.with_file(true).with_line_number(true);
@@ -240,34 +182,51 @@ async fn main() -> Result<()> {
                 bail!("unknown target: {}", artifact_system.as_str_name());
             }
 
-            setup_paths().await?;
-
-            let private_key_path = get_private_key_path();
-
-            if !private_key_path.exists() {
-                bail!("private key not found - run 'vorpal keys generate' or copy from worker",);
-            }
-
             let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
 
-            let response = match config_service.get_config(ConfigRequest {}).await {
+            let config_response = match config_service.get_config(ConfigRequest {}).await {
                 Ok(res) => res,
                 Err(error) => {
                     bail!("failed to evaluate config: {}", error);
                 }
             };
 
-            let config = response.into_inner();
+            let config = config_response.into_inner();
 
-            build_artifacts(
-                config.artifacts,
-                registry,
-                name.clone(),
-                worker,
-                artifact_system,
-                config_service,
-            )
-            .await?;
+            let config_artifact = config
+                .artifacts
+                .into_iter()
+                .find(|a| a.name == *name)
+                .ok_or_else(|| anyhow!("artifact not found: {}", name))?;
+
+            let (build_map, build_order) =
+                build::load_artifact(&config_artifact, &mut config_service).await?;
+
+            let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
+
+            for artifact_id in &build_order {
+                match build_map.get(artifact_id) {
+                    None => bail!("Build artifact not found: {}", artifact_id.name),
+                    Some(artifact) => {
+                        for a in &artifact.artifacts {
+                            if !artifacts_ids.contains_key(&a.name) {
+                                bail!("Artifact not found: {}", a.name);
+                            }
+                        }
+
+                        build(artifact, artifact_id, artifact_system, registry, worker).await?;
+
+                        artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
+
+                        if artifact_id.name == *name {
+                            println!(
+                                "{}",
+                                get_artifact_path(&artifact_id.hash, &artifact_id.name).display()
+                            );
+                        }
+                    }
+                }
+            }
 
             config_process
                 .kill()
@@ -310,7 +269,10 @@ async fn main() -> Result<()> {
             registry_backend_s3_bucket,
             services,
         } => {
-            let mut subscriber = FmtSubscriber::builder().with_max_level(*level);
+            let mut subscriber = FmtSubscriber::builder()
+                .with_target(false)
+                .without_time()
+                .with_max_level(*level);
 
             if [Level::DEBUG, Level::TRACE].contains(level) {
                 subscriber = subscriber.with_file(true).with_line_number(true);

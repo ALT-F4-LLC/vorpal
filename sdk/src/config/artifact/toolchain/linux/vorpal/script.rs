@@ -849,7 +849,7 @@ pub fn generate_post(
         make MANSUFFIX=ssl install
 
         mv -v /usr/share/doc/openssl /usr/share/doc/openssl-3.3.1
-        cp -vfr doc/* /usr/share/doc/openssl-3.3.1
+        cp -pfrv doc/* /usr/share/doc/openssl-3.3.1
 
         popd
         rm -rf ./openssl

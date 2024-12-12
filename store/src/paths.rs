@@ -3,7 +3,6 @@ use filetime::{set_file_times, set_symlink_file_times, FileTime};
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all, metadata, symlink};
-use tracing::info;
 use uuid::Uuid;
 
 // Store paths
@@ -227,8 +226,6 @@ pub async fn setup_paths() -> Result<()> {
             .expect("failed to create key directory");
     }
 
-    info!("keys path: {:?}", key_path);
-
     let sandbox_path = get_sandbox_dir_path();
     if !sandbox_path.exists() {
         create_dir_all(&sandbox_path)
@@ -236,16 +233,12 @@ pub async fn setup_paths() -> Result<()> {
             .expect("failed to create sandbox directory");
     }
 
-    info!("sandbox path: {:?}", sandbox_path);
-
     let store_path = get_store_dir_path();
     if !store_path.exists() {
         create_dir_all(&store_path)
             .await
             .expect("failed to create store directory");
     }
-
-    info!("store path: {:?}", store_path);
 
     Ok(())
 }

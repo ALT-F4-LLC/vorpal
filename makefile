@@ -49,7 +49,7 @@ dist: build
 # Development
 
 shell:
-	./script/dev.sh cargo build --bin 'vorpal-config' && ./script/dev.sh cargo run --bin 'vorpal' -- artifact --file 'target/debug/vorpal-config' --name 'vorpal-shell' | tail -n 1
+	./script/dev.sh cargo build --bin 'vorpal-config' && ./script/dev.sh cargo run --bin 'vorpal' -- artifact --file 'target/debug/vorpal-config' --name 'vorpal-shell'
 
 start:
 	./script/dev.sh cargo run --bin 'vorpal' -- start
