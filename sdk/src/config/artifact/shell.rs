@@ -58,16 +58,7 @@ pub async fn shell_artifact<'a>(
         formatdoc! {"
             mkdir -pv $VORPAL_WORKSPACE/bin
 
-            cat > bin/deactivate << 'EOF'
-            #!/bin/bash
-            # Set restore variables
-            {restores}
-
-            # Set unset variables
-            {unsets}
-            EOF
-
-            cat > bin/activate << 'EOF'
+            cat > bin/activate << \"EOF\"
             #!/bin/bash
 
             # Set backup variables
@@ -77,15 +68,19 @@ pub async fn shell_artifact<'a>(
             {exports}
 
             # Restore old variables
-            alias exit-shell='source $VORPAL_OUTPUT/bin/deactivate'
+            exit-shell(){{
+            # Set restore variables
+            {restores}
+
+            # Set unset variables
+            {unsets}
+            }}
 
             # Run the command
             exec \"$@\"
             EOF
 
-            chmod +x \
-                $VORPAL_WORKSPACE/bin/activate \
-                $VORPAL_WORKSPACE/bin/deactivate
+            chmod +x $VORPAL_WORKSPACE/bin/activate
 
             mkdir -pv $VORPAL_OUTPUT/bin
 
