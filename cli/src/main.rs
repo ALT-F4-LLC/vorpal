@@ -120,7 +120,9 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
     while let Some(line) = stdio_merged.next().await {
         let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
 
-        if !line.contains("Config listening") {}
+        if !line.contains("Config listening") {
+            info!("{}", line);
+        }
 
         if line.contains("Config listening") {
             break;

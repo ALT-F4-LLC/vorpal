@@ -682,7 +682,7 @@ impl ArtifactService for ArtifactServer {
 
             if let Err(err) = tx
                 .send(Ok(ArtifactBuildResponse {
-                    output: format!("packing artifact..."),
+                    output: "packing artifact...".to_string(),
                 }))
                 .await
             {
@@ -726,7 +726,7 @@ impl ArtifactService for ArtifactServer {
 
             if let Err(err) = tx
                 .send(Ok(ArtifactBuildResponse {
-                    output: format!("uploading artifact..."),
+                    output: "uploading artifact...".to_string(),
                 }))
                 .await
             {
