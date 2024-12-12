@@ -12,7 +12,7 @@ use tonic::transport::{Channel, Server};
 use tracing::{info, warn, Level};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::FmtSubscriber;
-use vorpal_registry::service::{RegistryServer, RegistryServerBackend};
+use vorpal_registry::{RegistryServer, RegistryServerBackend};
 use vorpal_schema::{
     get_artifact_system,
     vorpal::{
