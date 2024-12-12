@@ -1,14 +1,14 @@
 # vorpal
 
-Build and ship software reliably with one powerful tool.
+Build and ship software with one powerful tool.
 
 ![vorpal-purpose](./vorpal-purpose.jpg)
 
 ## Overview
 
-Vorpal distributively builds and ships software reliably using BYOL (bring-you-own-language) programmable configurations. This allows developers to manage software dependencies and deployments in a repeatable and reproducible way.
+Vorpal builds and ships software distributively using BYOL (bring-you-own-language) configurations. This allows developers to manage dependencies to deployments in a reproducible and repeatable way using the language and existing tooling of their choice.
 
-Below are examples of building a Rust application with different configuration languages:
+Below are examples of a Rust application in Vorpal configured in different languages:
 
 ### Rust
 
@@ -21,7 +21,7 @@ use vorpal_sdk::config::{artifact::language::rust::rust_artifact, get_context};
 async fn main() -> Result<()> {
     let context = &mut get_context().await?;
 
-    let artifact = rust_artifact(context, "vorpal").await?;
+    let artifact = rust_artifact(context, "example-app").await?;
 
     context
         .run(Config {
@@ -51,7 +51,7 @@ func main() {
         log.Fatal(err)
     }
 
-    artifact, err := rust.Artifact(context, "vorpal")
+    artifact, err := rust.Artifact(context, "example-app")
     if err != nil {
         log.Fatal(err)
     }
@@ -74,7 +74,7 @@ import { rustArtifact } from '@vorpal/sdk/config/artifact/language/rust';
 async function main() {
     const context = await getContext();
 
-    const artifact = await rustArtifact(context, 'vorpal');
+    const artifact = await rustArtifact(context, 'example-app');
 
     await context.run({
         artifacts: [artifact],
