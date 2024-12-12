@@ -75,7 +75,7 @@ pub async fn build(
 
     if artifact_path.exists() {
         info!(
-            "{} => build cache ({}...)",
+            "[{}] build cache ({}...)",
             artifact_id.name, artifact_hash_short
         );
         return Ok(());
@@ -83,7 +83,7 @@ pub async fn build(
 
     // Check if artifact exists (registry)
 
-    info!("{} => pulling...", artifact_id.name);
+    info!("[{}] pulling...", artifact_id.name);
 
     let registry_pull = RegistryPullRequest {
         artifact_id: Some(artifact_id.clone()),
@@ -113,7 +113,7 @@ pub async fn build(
 
             if response_data.is_empty() {
                 warn!(
-                    "{} => pull failed (missing {}...)",
+                    "[{}] pull failed (missing {}...)",
                     artifact_id.name, artifact_hash_short
                 )
             }
@@ -130,7 +130,7 @@ pub async fn build(
                     .await
                     .expect("failed to write artifact archive");
 
-                info!("{} => unpacking...", artifact_id.name);
+                info!("[{}] unpacking...", artifact_id.name);
 
                 create_dir_all(&artifact_path)
                     .await
@@ -149,7 +149,7 @@ pub async fn build(
     let mut artifact_source_path = None;
 
     if !artifact.sources.is_empty() {
-        info!("{} => pulling source...", artifact_id.name);
+        info!("[{}] pulling source...", artifact_id.name);
 
         let registry_pull = RegistryPullRequest {
             artifact_id: Some(artifact_id.clone()),
@@ -189,7 +189,7 @@ pub async fn build(
                         .await
                         .expect("failed to write artifact archive");
 
-                    info!("{} => unpacking source...", artifact_id.name);
+                    info!("[{}] unpacking source...", artifact_id.name);
 
                     let source_path = get_source_path(&artifact_id.hash, &artifact_id.name);
 
@@ -203,7 +203,7 @@ pub async fn build(
                         .await
                         .expect("failed to remove");
 
-                    info!("{} => unpacked source", artifact_id.name);
+                    info!("[{}] unpacked source", artifact_id.name);
 
                     artifact_source_path = Some(source_path);
                 }
@@ -216,7 +216,7 @@ pub async fn build(
 
             for artifact_source in &artifact.sources {
                 info!(
-                    "{} => preparing source... ({})",
+                    "[{}] preparing source... ({})",
                     artifact_id.name, artifact_source.name
                 );
 
@@ -235,7 +235,7 @@ pub async fn build(
 
                         let source = result.unwrap();
 
-                        info!("{} => prepared source ({})", artifact_id.name, source.name);
+                        info!("[{}] prepared source ({})", artifact_id.name, source.name);
                     }
                     Err(e) => error!("Task failed: {}", e),
                 }
@@ -244,7 +244,7 @@ pub async fn build(
             // TODO: instead of compiling one source, compile sources for hashes
 
             info!(
-                "{} => packing source... ({})",
+                "[{}] packing source... ({})",
                 artifact_id.name, artifact_id.hash
             );
 
@@ -259,7 +259,7 @@ pub async fn build(
                 .expect("failed to remove");
 
             info!(
-                "{} => packed source ({})",
+                "[{}] packed source ({})",
                 artifact_id.name, artifact_id.hash
             );
 
@@ -286,7 +286,7 @@ pub async fn build(
             }
 
             info!(
-                "{} => pushing source... ({})",
+                "[{}] pushing source... ({})",
                 artifact_id.name, artifact_id.hash
             );
 
@@ -306,7 +306,7 @@ pub async fn build(
                 .expect("failed to remove");
 
             info!(
-                "{} => pushed source ({})",
+                "[{}] pushed source ({})",
                 artifact_id.name, artifact_id.hash
             );
         }
@@ -314,7 +314,7 @@ pub async fn build(
 
     // Build artifact
 
-    info!("{} => building...", artifact_id.name);
+    info!("[{}] building...", artifact_id.name);
 
     let mut worker = ArtifactServiceClient::connect(worker_host.to_owned())
         .await
@@ -340,7 +340,7 @@ pub async fn build(
 
         if let Some(res) = message {
             if !res.output.is_empty() {
-                info!("{} => {}", artifact_id.name, res.output);
+                info!("[{}] {}", artifact_id.name, res.output);
             }
         }
     }
