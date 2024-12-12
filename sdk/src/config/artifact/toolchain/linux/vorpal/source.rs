@@ -342,16 +342,16 @@ pub fn libunistring(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<
     ))
 }
 
-pub fn linux_headers(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
+pub fn linux(context: &mut ConfigContext, rootfs: &ArtifactId) -> Result<ArtifactId> {
     context.add_artifact(new_artifact(
         vec![],
-        new_artifact_name("linux-headers"),
+        new_artifact_name("linux"),
         rootfs,
         formatdoc! {"
-            curl -L -o ./linux-headers-{version}.tar.xz \
+            curl -L -o ./linux-{version}.tar.xz \
                 https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz
 
-            tar -xvf ./linux-headers-{version}.tar.xz -C $VORPAL_OUTPUT --strip-components=1",
+            tar -xvf ./linux-{version}.tar.xz -C $VORPAL_OUTPUT --strip-components=1",
             version = "6.10.5",
         },
     ))

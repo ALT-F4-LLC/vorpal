@@ -28,7 +28,7 @@ pub fn artifact(context: &mut ConfigContext, linux_debian: &ArtifactId) -> Resul
     let libidn2_source = source::libidn2(context, linux_debian)?;
     let libpsl_source = source::libpsl(context, linux_debian)?;
     let libunistring_source = source::libunistring(context, linux_debian)?;
-    let linux_headers_source = source::linux_headers(context, linux_debian)?;
+    let linux_source = source::linux(context, linux_debian)?;
     let m4_source = source::m4(context, linux_debian)?;
     let make_source = source::make(context, linux_debian)?;
     let ncurses_source = source::ncurses(context, linux_debian)?;
@@ -73,7 +73,7 @@ pub fn artifact(context: &mut ConfigContext, linux_debian: &ArtifactId) -> Resul
         libpsl_source.clone(),
         libunistring_source.clone(),
         linux_debian.clone(),
-        linux_headers_source.clone(),
+        linux_source.clone(),
         m4_source.clone(),
         make_source.clone(),
         ncurses_source.clone(),
@@ -117,7 +117,7 @@ pub fn artifact(context: &mut ConfigContext, linux_debian: &ArtifactId) -> Resul
                     &glibc_source,
                     &grep_source,
                     &gzip_source,
-                    &linux_headers_source,
+                    &linux_source,
                     &m4_source,
                     &make_source,
                     &ncurses_source,
