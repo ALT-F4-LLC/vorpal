@@ -65,7 +65,7 @@ pub async fn get_context() -> Result<ConfigContext> {
 
 #[derive(Clone, Debug, Default)]
 pub struct ConfigContext {
-    artifact_id: HashMap<String, Artifact>,
+    pub artifact_id: HashMap<String, Artifact>,
     pub port: u16,
     source_hash: HashMap<String, String>,
     system: ArtifactSystem,

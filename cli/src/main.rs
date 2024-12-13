@@ -2,10 +2,12 @@ use crate::artifact::build;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
-use std::collections::HashMap;
-use std::env::consts::{ARCH, OS};
-use std::path::Path;
-use std::process::Stdio;
+use std::{
+    collections::HashMap,
+    env::consts::{ARCH, OS},
+    path::Path,
+    process::Stdio,
+};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::{process, process::Child};
 use tokio_stream::{wrappers::LinesStream, StreamExt};
@@ -24,6 +26,13 @@ use vorpal_schema::{
         config::v0::{config_service_client::ConfigServiceClient, ConfigRequest},
         registry::v0::registry_service_server::RegistryServiceServer,
     },
+};
+use vorpal_sdk::config::{
+    artifact::{
+        language::rust,
+        toolchain::{cargo, rust_src, rust_std, rustc},
+    },
+    ConfigContext,
 };
 use vorpal_store::paths::{get_artifact_path, get_public_key_path, setup_paths};
 
@@ -199,6 +208,14 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber");
 
+            // Load the system
+
+            let artifact_system: ArtifactSystem = get_artifact_system(system);
+
+            if artifact_system == UnknownSystem {
+                bail!("unknown target: {}", artifact_system.as_str_name());
+            }
+
             // Build the configuration
 
             let config_file = match language.as_str() {
@@ -211,19 +228,94 @@ async fn main() -> Result<()> {
                         bail!("no `--rust-path` specified");
                     }
 
-                    info!(
-                        "building configuration... (cargo build --bin {} --release)",
-                        rust_bin.as_ref().unwrap()
+                    // Build rust toolchain, if not installed
+
+                    info!("building configuration toolchain... (rust)");
+
+                    let mut context = ConfigContext::new(0, artifact_system);
+
+                    // Get toolchain name and version
+                    let toolchain_name = "vorpal-config";
+                    let toolchain_version = "1.80.1";
+
+                    // Get toolchain artifacts
+                    let cargo = cargo::artifact(&mut context, toolchain_version).await?;
+                    let rust_src = rust_src::artifact(&mut context, toolchain_version).await?;
+                    let rust_std = rust_std::artifact(&mut context, toolchain_version).await?;
+                    let rustc = rustc::artifact(&mut context, toolchain_version).await?;
+
+                    // Get toolchain
+                    let rust_toolchain = rust::rust_toolchain(
+                        &mut context,
+                        toolchain_name,
+                        &cargo,
+                        None,
+                        &rust_src,
+                        &rust_std,
+                        &rustc,
+                    )
+                    .await?;
+
+                    // Manually set toolchain build order
+                    let build_order = vec![
+                        cargo.clone(),
+                        rust_src,
+                        rust_std,
+                        rustc,
+                        rust_toolchain.clone(),
+                    ];
+
+                    let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
+
+                    for artifact_id in &build_order {
+                        let artifact = context
+                            .get_artifact(&artifact_id.hash, &artifact_id.name)
+                            .ok_or_else(|| {
+                            anyhow!("artifact not found: {}", artifact_id.name)
+                        })?;
+
+                        for a in &artifact.artifacts {
+                            if !artifacts_ids.contains_key(&a.name) {
+                                bail!("Artifact not found: {}", a.name);
+                            }
+                        }
+
+                        build(artifact, &artifact_id, artifact_system, &registry, &service).await?;
+
+                        artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
+                    }
+
+                    let toolchain_path =
+                        get_artifact_path(&rust_toolchain.hash, &rust_toolchain.name);
+
+                    if !toolchain_path.exists() {
+                        bail!("rust-toolchain not found: {}", toolchain_path.display());
+                    }
+
+                    let cargo_path =
+                        Path::new(&format!("{}/bin/cargo", toolchain_path.display())).to_path_buf();
+
+                    if !cargo_path.exists() {
+                        bail!("cargo not found: {}", cargo_path.display());
+                    }
+
+                    let mut command = process::Command::new(cargo_path);
+
+                    let current_path = std::env::var("PATH").unwrap_or_default();
+
+                    command.env(
+                        "PATH",
+                        format!("{}/bin:{}", toolchain_path.display(), current_path).as_str(),
                     );
-
-                    let cargo_bin =
-                        which::which("cargo").map_err(|_| anyhow!("cargo not found in $PATH"))?;
-
-                    let mut command = process::Command::new(cargo_bin);
 
                     let config_bin = rust_bin.as_ref().unwrap();
 
                     command.args(["build", "--bin", &config_bin, "--release"]);
+
+                    info!(
+                        "building configuration... (cargo build --bin {} --release)",
+                        rust_bin.as_ref().unwrap()
+                    );
 
                     let mut process = command
                         .stdout(Stdio::piped())
@@ -242,13 +334,7 @@ async fn main() -> Result<()> {
                     while let Some(line) = stdio_merged.next().await {
                         let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
 
-                        if !line.contains("Config listening") {
-                            info!("{}", line);
-                        }
-
-                        if line.contains("Config listening") {
-                            break;
-                        }
+                        info!("{}", line);
                     }
 
                     info!("build complete");
@@ -271,12 +357,6 @@ async fn main() -> Result<()> {
 
             if service.is_empty() {
                 bail!("no `--artifact-service` specified");
-            }
-
-            let artifact_system: ArtifactSystem = get_artifact_system(system);
-
-            if artifact_system == UnknownSystem {
-                bail!("unknown target: {}", artifact_system.as_str_name());
             }
 
             let (mut config_process, mut config_service) =
@@ -328,18 +408,10 @@ async fn main() -> Result<()> {
                 }
             }
 
-            info!("build complete");
-
-            info!("shutting down config server...");
-
-            let _ = config_process
+            config_process
                 .kill()
                 .await
-                .map_err(|_| anyhow!("failed to kill config server"));
-
-            info!("config server shut down");
-
-            Ok(())
+                .map_err(|_| anyhow!("failed to kill config server"))
         }
 
         Command::Keys(keys) => match keys {

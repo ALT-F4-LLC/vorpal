@@ -6,10 +6,7 @@ use vorpal_schema::vorpal::artifact::v0::{
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub async fn artifact(
-    context: &mut ConfigContext,
-    override_version: Option<String>,
-) -> Result<ArtifactId> {
+pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
     let name = "rust-std";
 
     let target = match context.get_target() {
@@ -19,12 +16,6 @@ pub async fn artifact(
         X8664Macos => "x86_64-apple-darwin",
         UnknownSystem => bail!("Unsupported system: {:?}", context.get_target()),
     };
-
-    let mut version = "1.80.1".to_string();
-
-    if let Some(v) = override_version {
-        version = v;
-    }
 
     add_artifact(
         context,

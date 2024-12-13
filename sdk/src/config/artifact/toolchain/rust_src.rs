@@ -3,17 +3,8 @@ use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
-pub async fn artifact(
-    context: &mut ConfigContext,
-    override_version: Option<String>,
-) -> Result<ArtifactId> {
+pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
     let name = "rust-src";
-
-    let mut version = "1.80.1".to_string();
-
-    if let Some(v) = override_version {
-        version = v;
-    }
 
     add_artifact(
         context,

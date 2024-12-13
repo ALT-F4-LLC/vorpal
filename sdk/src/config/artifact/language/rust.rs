@@ -31,30 +31,44 @@ struct RustArtifactCargoTomlWorkspace {
     members: Option<Vec<String>>,
 }
 
+const TOOLCHAIN_VERSION: &str = "1.80.1";
+
 fn read_cargo_toml(path: &str) -> Result<RustArtifactCargoToml> {
     let contents = fs::read_to_string(path).expect("Failed to read Cargo.toml");
     Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
 
-pub async fn rust_toolchain(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
-    // Get toolchain artifacts
-    let cargo = cargo::artifact(context, Some(version.to_string())).await?;
-    let rust_analyzer = rust_analyzer::artifact(context, Some(version.to_string())).await?;
-    let rust_src = rust_src::artifact(context, Some(version.to_string())).await?;
-    let rust_std = rust_std::artifact(context, Some(version.to_string())).await?;
-    let rustc = rustc::artifact(context, Some(version.to_string())).await?;
+pub async fn rust_toolchain(
+    context: &mut ConfigContext,
+    name: &str,
+    cargo: &ArtifactId,
+    rust_analyzer: Option<ArtifactId>,
+    rust_src: &ArtifactId,
+    rust_std: &ArtifactId,
+    rustc: &ArtifactId,
+) -> Result<ArtifactId> {
+    let mut artifacts = vec![
+        cargo.clone(),
+        rust_src.clone(),
+        rust_std.clone(),
+        rustc.clone(),
+    ];
+
+    if let Some(rust_analyzer) = rust_analyzer {
+        artifacts.push(rust_analyzer);
+    }
+
+    let mut component_paths = vec![];
+
+    for component in &artifacts {
+        component_paths.push(get_artifact_envkey(component));
+    }
 
     add_artifact(
         context,
-        vec![
-            cargo.clone(),
-            rust_analyzer.clone(),
-            rust_src.clone(),
-            rust_std.clone(),
-            rustc.clone(),
-        ],
+        artifacts,
         vec![],
-        "rust-toolchain",
+        format!("{}-rust-toolchain", name).as_str(),
         formatdoc! {"
             components=({component_paths})
 
@@ -68,13 +82,7 @@ pub async fn rust_toolchain(context: &mut ConfigContext, version: &str) -> Resul
             for component in ${{components[@]}}; do
                 cat \"${{component}}/manifest.in\" >> \"$VORPAL_OUTPUT\"/manifest.in
             done",
-            component_paths = [
-                get_artifact_envkey(&cargo),
-                get_artifact_envkey(&rust_analyzer),
-                get_artifact_envkey(&rust_src),
-                get_artifact_envkey(&rust_std),
-                get_artifact_envkey(&rustc),
-            ].join(" "),
+            component_paths = component_paths.join(" "),
         },
         vec![],
         vec![
@@ -91,17 +99,40 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
     let protoc = protoc::artifact(context).await?;
 
     // Get toolchain artifacts
-    let rust_toolchain = rust_toolchain(context, "1.80.1").await?;
+    let cargo = cargo::artifact(context, TOOLCHAIN_VERSION).await?;
+    let rust_analyzer = rust_analyzer::artifact(context, TOOLCHAIN_VERSION).await?;
+    let rust_src = rust_src::artifact(context, TOOLCHAIN_VERSION).await?;
+    let rust_std = rust_std::artifact(context, TOOLCHAIN_VERSION).await?;
+    let rustc = rustc::artifact(context, TOOLCHAIN_VERSION).await?;
+
+    // Get toolchain artifacts
+    let toolchain = rust_toolchain(
+        context,
+        name,
+        &cargo,
+        Some(rust_analyzer),
+        &rust_src,
+        &rust_std,
+        &rustc,
+    )
+    .await?;
 
     // Create shell artifact
-    shell_artifact(context, vec![protoc, rust_toolchain], vec![], name).await
+    shell_artifact(context, vec![protoc, toolchain], vec![], name).await
 }
 
 pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Result<ArtifactId> {
     let protoc = protoc::artifact(context).await?;
 
+    // Get toolchain artifacts
+    let cargo = cargo::artifact(context, TOOLCHAIN_VERSION).await?;
+    let rust_src = rust_src::artifact(context, TOOLCHAIN_VERSION).await?;
+    let rust_std = rust_std::artifact(context, TOOLCHAIN_VERSION).await?;
+    let rustc = rustc::artifact(context, TOOLCHAIN_VERSION).await?;
+
     // Get toolchain
-    let rust_toolchain = rust_toolchain(context, "1.80.1").await?;
+    let rust_toolchain =
+        rust_toolchain(context, name, &cargo, None, &rust_src, &rust_std, &rustc).await?;
 
     // Get the source path
     let source = ".";

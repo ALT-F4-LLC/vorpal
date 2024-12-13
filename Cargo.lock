@@ -2675,6 +2675,7 @@ dependencies = [
  "vorpal-notary",
  "vorpal-registry",
  "vorpal-schema",
+ "vorpal-sdk",
  "vorpal-store",
  "vorpal-worker",
  "which",
