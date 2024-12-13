@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
+use std::path::Path;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::{process, process::Child};
@@ -34,35 +35,20 @@ mod build;
 #[derive(Subcommand)]
 enum Command {
     Artifact {
-        #[arg(long, short)]
-        file: String,
-
-        #[arg(default_value_t = Level::INFO, global = true, long)]
-        level: Level,
-
-        #[arg(long, short)]
+        #[arg(long)]
         name: String,
 
-        #[clap(default_value = "http://localhost:23151", long, short)]
-        registry: String,
+        #[clap(default_value = "http://localhost:23151", long)]
+        service: String,
 
-        #[arg(default_value_t = get_default_system(), long, short)]
+        #[arg(default_value_t = get_default_system(), long)]
         system: String,
-
-        #[clap(default_value = "http://localhost:23151", long, short)]
-        worker: String,
     },
 
     #[clap(subcommand)]
     Keys(CommandKeys),
 
     Start {
-        #[clap(default_value = "http://localhost:23151", long)]
-        artifact_registry: String,
-
-        #[arg(default_value_t = Level::INFO, global = true, long)]
-        level: Level,
-
         #[clap(default_value = "23151", long)]
         port: u16,
 
@@ -88,6 +74,24 @@ pub enum CommandKeys {
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
+
+    #[arg(default_value = "Vorpal.toml", long, short)]
+    config: String,
+
+    #[arg(default_value = "rust", long)]
+    language: String,
+
+    #[arg(default_value_t = Level::INFO, global = true, long)]
+    level: Level,
+
+    #[clap(default_value = "http://localhost:23151", long, short)]
+    registry: String,
+
+    #[arg(default_value = "vorpal-config", long)]
+    rust_bin: Option<String>,
+
+    #[arg(default_value = ".", long)]
+    rust_path: Option<String>,
 }
 
 fn get_default_system() -> String {
@@ -144,28 +148,49 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
     Ok((process, service))
 }
 
+pub struct VorpalTomlLanguage {
+    pub name: String,
+}
+
+pub struct VorpalTomlRust {
+    pub bin: String,
+    pub path: String,
+}
+
+pub struct VorpalToml {
+    pub language: VorpalTomlLanguage,
+    pub rust: VorpalTomlRust,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match &cli.command {
+    let Cli {
+        command,
+        config: _,
+        language,
+        level,
+        registry,
+        rust_bin,
+        rust_path,
+    } = cli;
+
+    match &command {
         Command::Artifact {
             name,
-            file,
-            level,
-            registry,
+            service,
             system,
-            worker,
         } => {
-            let stderr_writer = std::io::stderr.with_max_level(*level);
+            let stderr_writer = std::io::stderr.with_max_level(level);
 
             let mut subscriber = FmtSubscriber::builder()
-                .with_max_level(*level)
+                .with_max_level(level)
                 .with_target(false)
                 .with_writer(stderr_writer)
                 .without_time();
 
-            if [Level::DEBUG, Level::TRACE].contains(level) {
+            if [Level::DEBUG, Level::TRACE].contains(&level) {
                 subscriber = subscriber.with_file(true).with_line_number(true);
             }
 
@@ -174,8 +199,78 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber");
 
-            if worker.is_empty() {
-                bail!("no worker specified");
+            // Build the configuration
+
+            let config_file = match language.as_str() {
+                "rust" => {
+                    if rust_bin.is_none() {
+                        bail!("no `--rust-bin` specified");
+                    }
+
+                    if rust_path.is_none() {
+                        bail!("no `--rust-path` specified");
+                    }
+
+                    info!(
+                        "building configuration... (cargo build --bin {} --release)",
+                        rust_bin.as_ref().unwrap()
+                    );
+
+                    let cargo_bin =
+                        which::which("cargo").map_err(|_| anyhow!("cargo not found in $PATH"))?;
+
+                    let mut command = process::Command::new(cargo_bin);
+
+                    let config_bin = rust_bin.as_ref().unwrap();
+
+                    command.args(["build", "--bin", &config_bin, "--release"]);
+
+                    let mut process = command
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                        .map_err(|_| anyhow!("failed to start config server"))?;
+
+                    let stdout = process.stdout.take().unwrap();
+                    let stderr = process.stderr.take().unwrap();
+
+                    let stdout = LinesStream::new(BufReader::new(stdout).lines());
+                    let stderr = LinesStream::new(BufReader::new(stderr).lines());
+
+                    let mut stdio_merged = StreamExt::merge(stdout, stderr);
+
+                    while let Some(line) = stdio_merged.next().await {
+                        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
+
+                        if !line.contains("Config listening") {
+                            info!("{}", line);
+                        }
+
+                        if line.contains("Config listening") {
+                            break;
+                        }
+                    }
+
+                    info!("build complete");
+
+                    let target_path = format!(
+                        "{}/target/release/{}",
+                        rust_path.as_ref().unwrap(),
+                        config_bin
+                    );
+
+                    Path::new(&target_path).to_path_buf()
+                }
+
+                _ => bail!("unsupported language: {}", language),
+            };
+
+            if !config_file.exists() {
+                bail!("config file not found: {}", config_file.display());
+            }
+
+            if service.is_empty() {
+                bail!("no `--artifact-service` specified");
             }
 
             let artifact_system: ArtifactSystem = get_artifact_system(system);
@@ -184,7 +279,8 @@ async fn main() -> Result<()> {
                 bail!("unknown target: {}", artifact_system.as_str_name());
             }
 
-            let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
+            let (mut config_process, mut config_service) =
+                start_config(config_file.display().to_string()).await?;
 
             let config_response = match config_service.get_config(ConfigRequest {}).await {
                 Ok(res) => res,
@@ -206,6 +302,8 @@ async fn main() -> Result<()> {
 
             let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
 
+            info!("building artifact... ({})", name);
+
             for artifact_id in &build_order {
                 match build_map.get(artifact_id) {
                     None => bail!("Build artifact not found: {}", artifact_id.name),
@@ -216,7 +314,7 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        build(artifact, artifact_id, artifact_system, registry, worker).await?;
+                        build(artifact, artifact_id, artifact_system, &registry, &service).await?;
 
                         artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
 
@@ -230,10 +328,18 @@ async fn main() -> Result<()> {
                 }
             }
 
-            config_process
+            info!("build complete");
+
+            info!("shutting down config server...");
+
+            let _ = config_process
                 .kill()
                 .await
-                .map_err(|_| anyhow!("failed to kill config server"))
+                .map_err(|_| anyhow!("failed to kill config server"));
+
+            info!("config server shut down");
+
+            Ok(())
         }
 
         Command::Keys(keys) => match keys {
@@ -264,8 +370,6 @@ async fn main() -> Result<()> {
         },
 
         Command::Start {
-            artifact_registry,
-            level,
             port,
             registry_backend,
             registry_backend_s3_bucket,
@@ -274,9 +378,9 @@ async fn main() -> Result<()> {
             let mut subscriber = FmtSubscriber::builder()
                 .with_target(false)
                 .without_time()
-                .with_max_level(*level);
+                .with_max_level(level);
 
-            if [Level::DEBUG, Level::TRACE].contains(level) {
+            if [Level::DEBUG, Level::TRACE].contains(&level) {
                 subscriber = subscriber.with_file(true).with_line_number(true);
             }
 
@@ -301,10 +405,7 @@ async fn main() -> Result<()> {
 
             if services.contains("artifact") {
                 let system = get_artifact_system(format!("{}-{}", ARCH, OS).as_str());
-                let service = ArtifactServiceServer::new(ArtifactServer::new(
-                    artifact_registry.to_string(),
-                    system,
-                ));
+                let service = ArtifactServiceServer::new(ArtifactServer::new(registry, system));
 
                 info!("artifact service: [::]:{}", port);
 

@@ -64,8 +64,8 @@ pub async fn build(
     artifact: &Artifact,
     artifact_id: &ArtifactId,
     artifact_target: ArtifactSystem,
-    registry_host: &str,
-    worker_host: &str,
+    registry: &str,
+    service: &str,
 ) -> Result<()> {
     // Check if artifact exists (local)
 
@@ -90,7 +90,7 @@ pub async fn build(
         kind: RegistryStoreKind::Artifact as i32,
     };
 
-    let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
+    let mut registry = RegistryServiceClient::connect(registry.to_owned())
         .await
         .expect("failed to connect to store");
 
@@ -155,10 +155,6 @@ pub async fn build(
             artifact_id: Some(artifact_id.clone()),
             kind: RegistryStoreKind::ArtifactSource as i32,
         };
-
-        let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
-            .await
-            .expect("failed to connect to store");
 
         match registry.pull(registry_pull.clone()).await {
             Err(status) => {
@@ -316,7 +312,7 @@ pub async fn build(
 
     info!("[{}] building...", artifact_id.name);
 
-    let mut worker = ArtifactServiceClient::connect(worker_host.to_owned())
+    let mut worker = ArtifactServiceClient::connect(service.to_owned())
         .await
         .expect("failed to connect to artifact");
 

@@ -9,26 +9,18 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { default-features = false, version = "1" }
-async-compression = { default-features = false, version = "0" }
 clap = { default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], version = "4" }
-console = { default-features = false, version = "0" }
-infer = { default-features = false, version = "0" }
 petgraph = { default-features = false, features = ["graphmap"], version = "0" }
-port-selector = { version = "0" }
-reqwest = { default-features = false, features = ["json", "rustls-tls"], version = "0" }
-serde_json = { default-features = false, version = "1" }
-sha256 = { default-features = false, version = "1" }
+port-selector = { default-features = false, version = "0" }
 tokio = { default-features = false, version = "1" }
 tokio-stream = { default-features = false, version = "0" }
-tokio-tar = { default-features = false, version = "0" }
 tonic = { default-features = false, version = "0" }
-tonic-health = "0.12.3"
+tonic-health = { default-features = false, version = "0" }
 tracing = { default-features = false, version = "0" }
 tracing-subscriber = { default-features = false, features = ["ansi", "fmt", "registry", "std"], version = "0" }
-url = { default-features = false, version = "2" }
-uuid = { default-features = false, features = ["v7"], version = "1" }
 vorpal-notary = { default-features = false, path = "../notary" }
 vorpal-registry = { default-features = false, path = "../registry" }
 vorpal-schema = { default-features = false, path = "../schema" }
 vorpal-store = { default-features = false, path = "../store" }
 vorpal-worker = { default-features = false, path = "../worker" }
+which = { version = "7" }
