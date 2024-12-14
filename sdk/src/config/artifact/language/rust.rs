@@ -113,7 +113,7 @@ pub async fn rust_toolchain(context: &mut ConfigContext, name: &str) -> Result<A
                 done
             done
 
-            mkdir -pv \"$VORPAL_OUTPUT/update-hash\"
+            mkdir -pv \"$VORPAL_OUTPUT/update-hashes\"
 
             cat > \"$VORPAL_OUTPUT/settings.toml\" << \"EOF\"
             profile = \"minimal\"
