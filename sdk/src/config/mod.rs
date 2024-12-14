@@ -182,10 +182,12 @@ impl ConfigContext {
         self.system
     }
 
-    pub async fn run(&self, config: Config) -> Result<()> {
+    pub async fn run(&self, artifacts: Vec<ArtifactId>) -> Result<()> {
         let addr = format!("[::]:{}", self.port)
             .parse()
             .expect("failed to parse address");
+
+        let config = Config { artifacts };
 
         let context = self.clone();
 

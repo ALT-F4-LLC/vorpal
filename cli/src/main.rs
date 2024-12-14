@@ -1,10 +1,16 @@
-use crate::artifact::build;
+use crate::{
+    artifact::build,
+    rust::{get_toolchain_version, toolchain},
+};
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
 use std::{
     collections::HashMap,
-    env::consts::{ARCH, OS},
+    env::{
+        consts::{ARCH, OS},
+        var,
+    },
     path::Path,
     process::Stdio,
 };
@@ -30,7 +36,7 @@ use vorpal_schema::{
 use vorpal_sdk::config::{
     artifact::{
         language::rust,
-        toolchain::{cargo, rust_src, rust_std, rustc},
+        toolchain::{cargo, protoc, rust_src, rust_std, rustc},
     },
     ConfigContext,
 };
@@ -236,33 +242,39 @@ async fn main() -> Result<()> {
 
                     // Get toolchain name and version
                     let toolchain_name = "vorpal-config";
-                    let toolchain_version = "1.80.1";
+                    let toolchain_version = get_toolchain_version();
 
                     // Get toolchain artifacts
-                    let cargo = cargo::artifact(&mut context, toolchain_version).await?;
-                    let rust_src = rust_src::artifact(&mut context, toolchain_version).await?;
-                    let rust_std = rust_std::artifact(&mut context, toolchain_version).await?;
-                    let rustc = rustc::artifact(&mut context, toolchain_version).await?;
+                    let cargo = cargo::artifact(&mut context, &toolchain_version).await?;
+                    let rust_src = rust_src::artifact(&mut context, &toolchain_version).await?;
+                    let rust_std = rust_std::artifact(&mut context, &toolchain_version).await?;
+                    let rustc = rustc::artifact(&mut context, &toolchain_version).await?;
 
                     // Get toolchain
-                    let rust_toolchain = rust::rust_toolchain(
+                    let toolchain = toolchain(
                         &mut context,
                         toolchain_name,
                         &cargo,
                         None,
+                        None,
                         &rust_src,
                         &rust_std,
                         &rustc,
+                        None,
                     )
                     .await?;
 
-                    // Manually set toolchain build order
+                    // Get protoc artifact
+                    let protoc = protoc::artifact(&mut context).await?;
+
+                    // Manually set build order
                     let build_order = vec![
                         cargo.clone(),
+                        protoc.clone(),
                         rust_src,
                         rust_std,
                         rustc,
-                        rust_toolchain.clone(),
+                        toolchain.clone(), // toolchain must be last
                     ];
 
                     let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
@@ -280,37 +292,70 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        build(artifact, &artifact_id, artifact_system, &registry, &service).await?;
+                        build(artifact, artifact_id, artifact_system, &registry, service).await?;
 
                         artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
                     }
 
-                    let toolchain_path =
-                        get_artifact_path(&rust_toolchain.hash, &rust_toolchain.name);
+                    let toolchain_path = get_artifact_path(&toolchain.hash, &toolchain.name);
 
                     if !toolchain_path.exists() {
-                        bail!("rust-toolchain not found: {}", toolchain_path.display());
+                        bail!("config toolchain not found: {}", toolchain_path.display());
                     }
 
-                    let cargo_path =
-                        Path::new(&format!("{}/bin/cargo", toolchain_path.display())).to_path_buf();
+                    let toolchain_target = rust::get_toolchain_target(artifact_system)?;
+                    let toolchain_version = get_toolchain_version();
 
-                    if !cargo_path.exists() {
-                        bail!("cargo not found: {}", cargo_path.display());
+                    let toolchain_bin_path = Path::new(&format!(
+                        "{}/toolchains/{}-{}/bin",
+                        toolchain_path.display(),
+                        toolchain_version,
+                        toolchain_target
+                    ))
+                    .to_path_buf();
+
+                    let toolchain_cargo_path =
+                        Path::new(&format!("{}/cargo", toolchain_bin_path.display())).to_path_buf();
+
+                    if !toolchain_cargo_path.exists() {
+                        bail!("cargo not found: {}", toolchain_cargo_path.display());
                     }
 
-                    let mut command = process::Command::new(cargo_path);
+                    let mut command = process::Command::new(toolchain_cargo_path);
 
-                    let current_path = std::env::var("PATH").unwrap_or_default();
+                    let current_path = var("PATH").unwrap_or_default();
+
+                    let protoc_path = Path::new(&format!(
+                        "{}/bin/protoc",
+                        get_artifact_path(&protoc.hash, &protoc.name).display()
+                    ))
+                    .to_path_buf();
+
+                    if !protoc_path.exists() {
+                        bail!("protoc not found: {}", protoc_path.display());
+                    }
 
                     command.env(
                         "PATH",
-                        format!("{}/bin:{}", toolchain_path.display(), current_path).as_str(),
+                        format!(
+                            "{}:{}/bin:{}",
+                            toolchain_bin_path.display(),
+                            get_artifact_path(&protoc.hash, &protoc.name).display(),
+                            current_path
+                        )
+                        .as_str(),
+                    );
+
+                    command.env("RUSTUP_HOME", toolchain_path.display().to_string());
+
+                    command.env(
+                        "RUSTUP_TOOLCHAIN",
+                        format!("{}-{}", toolchain_version, toolchain_target),
                     );
 
                     let config_bin = rust_bin.as_ref().unwrap();
 
-                    command.args(["build", "--bin", &config_bin, "--release"]);
+                    command.args(["build", "--bin", config_bin, "--release"]);
 
                     info!(
                         "building configuration... (cargo build --bin {} --release)",
@@ -394,7 +439,7 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        build(artifact, artifact_id, artifact_system, &registry, &service).await?;
+                        build(artifact, artifact_id, artifact_system, &registry, service).await?;
 
                         artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
 

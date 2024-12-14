@@ -51,6 +51,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+        # TODO: install protoc
+
       - if: matrix.runner == 'ubuntu-latest'
         run: |
           ./script/dev/debian.sh
@@ -99,7 +101,8 @@ jobs:
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
-      - run: ./dist/vorpal artifact --file "./dist/vorpal-config" --name "vorpal"
+      - run: ./dist/vorpal artifact --name "vorpal-shell"
+      - run: ./dist/vorpal artifact --name "vorpal"
 
       - if: always()
         run: |

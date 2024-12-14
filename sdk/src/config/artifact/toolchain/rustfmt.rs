@@ -4,7 +4,7 @@ use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
 pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
-    let name = "rustc";
+    let name = "rustfmt";
 
     let target = get_toolchain_target(context.get_target())?;
 
@@ -17,10 +17,9 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
             curl -L -o ./{name}-{version}-{target}.tar.gz \
                 https://static.rust-lang.org/dist/{name}-{version}-{target}.tar.gz
 
-            tar -xvf ./{name}-{version}-{target}.tar.gz \
-                -C source --strip-components=1
+            tar -xvf ./{name}-{version}-{target}.tar.gz -C source --strip-components=1
 
-            cp -prv \"./source/{name}/.\" \"$VORPAL_OUTPUT\"",
+            cp -prv source/{name}-preview/. \"$VORPAL_OUTPUT\"",
         },
         vec![],
         vec![

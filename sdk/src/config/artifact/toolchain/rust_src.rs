@@ -1,4 +1,4 @@
-use crate::config::{artifact::add_artifact, ConfigContext};
+use crate::config::artifact::{add_artifact, ConfigContext};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;

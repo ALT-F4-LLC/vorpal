@@ -1,7 +1,4 @@
-use crate::config::{
-    artifact::{add_artifact, get_artifact_envkey},
-    ConfigContext,
-};
+use crate::config::{artifact::add_artifact, ConfigContext};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
@@ -9,15 +6,9 @@ use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 pub async fn shell_artifact<'a>(
     context: &mut ConfigContext,
     artifacts: Vec<ArtifactId>,
-    environments: Vec<&'a str>,
+    environments: Vec<String>,
     name: &'a str,
 ) -> Result<ArtifactId> {
-    let mut env_paths = vec![];
-
-    for artifact in artifacts.iter() {
-        env_paths.push(format!("{}/bin", get_artifact_envkey(artifact)));
-    }
-
     let mut backups = vec![
         "export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"".to_string(),
         "export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"".to_string(),
@@ -25,7 +16,6 @@ pub async fn shell_artifact<'a>(
     ];
 
     let mut exports = vec![
-        format!("export PATH=\"{}:$PATH\"", env_paths.join(":")),
         format!("export PS1=\"({}) $PS1\"", name),
         "export VORPAL_SHELL=\"1\"".to_string(),
     ];
