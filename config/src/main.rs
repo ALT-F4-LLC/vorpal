@@ -12,7 +12,7 @@ async fn main() -> Result<()> {
     // Populate desired artifacts
     let artifacts = vec![
         rust_package(context, "vorpal").await?,
-        rust_shell(context, "vorpal-shell").await?,
+        rust_shell(context, "vorpal-dev").await?,
     ];
 
     // Run the context

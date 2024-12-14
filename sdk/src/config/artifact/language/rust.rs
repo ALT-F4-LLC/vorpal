@@ -347,7 +347,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
 
     let artifacts = vec![protoc.clone(), toolchain.clone(), vendor.clone()];
 
-    let artifact_bin_paths = vec![
+    let artifact_bin_paths = [
         format!("{}/bin", get_artifact_envkey(&protoc)),
         format!(
             "{}/toolchains/{}-{}/bin",

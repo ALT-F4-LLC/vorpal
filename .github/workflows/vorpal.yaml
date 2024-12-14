@@ -51,8 +51,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-        # TODO: install protoc
-
       - if: matrix.runner == 'ubuntu-latest'
         run: |
           ./script/dev/debian.sh
