@@ -33,9 +33,7 @@ pub async fn get_artifacts(
     Ok(())
 }
 
-pub async fn get_order<'a>(
-    build_artifact: &'a HashMap<ArtifactId, Artifact>,
-) -> Result<Vec<ArtifactId>> {
+pub async fn get_order(build_artifact: &HashMap<ArtifactId, Artifact>) -> Result<Vec<ArtifactId>> {
     // Populate the build graph
 
     let mut artifact_graph = DiGraphMap::<&ArtifactId, Artifact>::new();
