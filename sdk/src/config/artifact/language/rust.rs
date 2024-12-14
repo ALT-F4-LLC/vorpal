@@ -113,11 +113,8 @@ pub async fn rust_toolchain(context: &mut ConfigContext, name: &str) -> Result<A
                 done
             done
 
-            mkdir -pv \"$VORPAL_OUTPUT/update-hashes\"
-
-            ln -sv \"/tmp\" \"$VORPAL_OUTPUT/tmp\"
-
             cat > \"$VORPAL_OUTPUT/settings.toml\" << \"EOF\"
+            auto_self_update = \"disable\"
             profile = \"minimal\"
             version = \"12\"
 
