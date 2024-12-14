@@ -291,7 +291,6 @@ async fn main() -> Result<()> {
 
                     // Get protoc
 
-
                     let protoc_path = Path::new(&format!(
                         "{}/bin/protoc",
                         get_artifact_path(&protoc.hash, &protoc.name).display()

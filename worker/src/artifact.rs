@@ -846,6 +846,8 @@ impl ArtifactService for ArtifactServer {
                 {
                     error!("failed to send error: {:?}", err);
                 }
+
+                return;
             }
 
             // Remove lock file
@@ -860,8 +862,6 @@ impl ArtifactService for ArtifactServer {
                 {
                     error!("failed to send error: {:?}", err);
                 }
-
-                return;
             }
         });
 
