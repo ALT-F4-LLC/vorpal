@@ -1,7 +1,4 @@
-use crate::{
-    paths::{get_file_paths, set_paths_timestamps},
-    temps::create_sandbox_file,
-};
+use crate::temps::create_sandbox_file;
 use anyhow::{Error, Result};
 use async_compression::tokio::{
     bufread::{GzipDecoder, ZstdDecoder},
@@ -81,10 +78,6 @@ pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(),
 
     archive.unpack(target_dir).await.expect("Failed to unpack");
 
-    let package_paths = get_file_paths(target_dir, vec![], vec![])?;
-
-    set_paths_timestamps(&package_paths).await?;
-
     Ok(())
 }
 
@@ -142,10 +135,6 @@ pub async fn unpack_gzip(target_dir: &PathBuf, source_tar: &Path) -> Result<(), 
     let mut archive = archive_builder.build();
 
     archive.unpack(target_dir).await.expect("Failed to unpack");
-
-    let package_paths = get_file_paths(target_dir, vec![], vec![])?;
-
-    set_paths_timestamps(&package_paths).await?;
 
     Ok(())
 }
@@ -219,10 +208,6 @@ pub async fn unpack_zip(source_path: &PathBuf, target_dir: &Path) -> Result<(), 
             // Closes the file and manipulates its metadata here if you wish to preserve its metadata from the archive.
         }
     }
-
-    let package_paths = get_file_paths(&target_dir.to_path_buf(), vec![], vec![])?;
-
-    set_paths_timestamps(&package_paths).await?;
 
     Ok(())
 }

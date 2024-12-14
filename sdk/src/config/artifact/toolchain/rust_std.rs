@@ -17,6 +17,8 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
             curl -L -o ./rust-std-{version}-{target}.tar.gz \
                 https://static.rust-lang.org/dist/rust-std-{version}-{target}.tar.gz
 
+            mkdir -pv source
+
             tar -xvf ./rust-std-{version}-{target}.tar.gz -C source --strip-components=1
 
             cp -prv \"./source/rust-std-{target}/.\" \"$VORPAL_OUTPUT\"

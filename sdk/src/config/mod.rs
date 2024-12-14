@@ -6,7 +6,7 @@ use sha256::digest;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
 use std::path::PathBuf;
-use tokio::fs::{create_dir_all, remove_dir_all};
+use tokio::fs::remove_dir_all;
 use tonic::transport::Server;
 use tracing::Level;
 use vorpal_schema::{
@@ -16,7 +16,11 @@ use vorpal_schema::{
         config::v0::{config_service_server::ConfigServiceServer, Config},
     },
 };
-use vorpal_store::{hashes::hash_files, paths::copy_files, temps::create_sandbox_dir};
+use vorpal_store::{
+    hashes::hash_files,
+    paths::{copy_files, sanitize_paths},
+    temps::create_sandbox_dir,
+};
 
 pub mod artifact;
 pub mod service;
@@ -143,11 +147,9 @@ impl ConfigContext {
         if !self.source_hash.contains_key(&source_key) {
             let sandbox_path = create_sandbox_dir().await?;
 
-            create_dir_all(&sandbox_path)
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-
             let sandbox_files = copy_files(&path, files.clone(), &sandbox_path).await?;
+
+            sanitize_paths(&sandbox_files, false, true).await?;
 
             let source_hash = hash_files(sandbox_files.clone())?;
 

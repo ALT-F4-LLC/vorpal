@@ -21,7 +21,7 @@ use vorpal_schema::vorpal::registry::v0::{
 };
 use vorpal_store::paths::{
     get_artifact_archive_path, get_public_key_path, get_source_archive_path, get_store_dir_name,
-    setup_paths,
+    sanitize_path, setup_paths,
 };
 
 const DEFAULT_CHUNK_SIZE: usize = 8192;
@@ -312,6 +312,10 @@ impl RegistryService for RegistryServer {
             write(&path, &data).await.map_err(|err| {
                 Status::internal(format!("failed to write store path: {:?}", err))
             })?;
+
+            sanitize_path(&path, true, true)
+                .await
+                .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
         }
 
         if backend == RegistryServerBackend::S3 {

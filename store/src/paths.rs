@@ -1,8 +1,11 @@
 use anyhow::{bail, Error, Result};
 use filetime::{set_file_times, set_symlink_file_times, FileTime};
 use ignore::WalkBuilder;
-use std::path::{Path, PathBuf};
-use tokio::fs::{copy, create_dir_all, metadata, symlink};
+use std::{
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
+use tokio::fs::{copy, create_dir_all, metadata, set_permissions, symlink};
 use uuid::Uuid;
 
 // Store paths
@@ -155,10 +158,10 @@ pub fn get_file_paths(
     Ok(files)
 }
 
-pub async fn set_paths_timestamps(paths: &[PathBuf]) -> Result<(), Error> {
-    let epoc = FileTime::from_unix_time(0, 0);
+pub async fn sanitize_path(path: &PathBuf, readonly: bool, timestamps: bool) -> Result<(), Error> {
+    if timestamps {
+        let epoc = FileTime::from_unix_time(0, 0);
 
-    for path in paths {
         if !path.is_symlink() {
             set_file_times(path, epoc, epoc).expect("Failed to set file times");
         }
@@ -166,6 +169,32 @@ pub async fn set_paths_timestamps(paths: &[PathBuf]) -> Result<(), Error> {
         if path.is_symlink() {
             set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
         }
+    }
+
+    let metadata = metadata(path).await.expect("Failed to read metadata");
+    let mut permissions = metadata.permissions();
+    let mode = permissions.mode();
+
+    if readonly {
+        permissions.set_mode(mode & !0o222)
+    } else {
+        permissions.set_mode(mode | 0o222)
+    };
+
+    set_permissions(path, permissions)
+        .await
+        .expect("Failed to set permissions");
+
+    Ok(())
+}
+
+pub async fn sanitize_paths(
+    paths: &[PathBuf],
+    readonly: bool,
+    timestamps: bool,
+) -> Result<(), Error> {
+    for path in paths {
+        sanitize_path(path, readonly, timestamps).await?;
     }
 
     Ok(())
@@ -212,8 +241,6 @@ pub async fn copy_files(
     }
 
     let target_path_files = get_file_paths(&target_path.to_path_buf(), vec![], vec![])?;
-
-    set_paths_timestamps(&target_path_files).await?;
 
     Ok(target_path_files)
 }

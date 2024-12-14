@@ -107,15 +107,23 @@ pub async fn toolchain(
 
             mkdir -pv \"$toolchain_dir\"
 
-            # TODO: build out structure for both dirs
-
             components=({component_paths})
 
-            for component in ${{components[@]}}; do
-                cp -prv \"${{component}}/.\" \"$toolchain_dir\"
-            done
+            for component in \"${{components[@]}}\"; do
+                find \"$component\" | while read -r file; do
+                    relative_path=$(echo \"$file\" | sed -e \"s|$component/||\")
 
-            rm -rf \"$toolchain_dir/manifest.in\"
+                    if [[ \"$relative_path\" == \"manifest.in\" ]]; then
+                        continue
+                    fi
+
+                    if [ -d \"$file\" ]; then
+                        mkdir -pv \"$toolchain_dir/$relative_path\"
+                    else
+                        cp -pv \"$file\" \"$toolchain_dir/$relative_path\"
+                    fi
+                done
+            done
 
             cat > \"$VORPAL_OUTPUT/settings.toml\" << \"EOF\"
             profile = \"minimal\"
