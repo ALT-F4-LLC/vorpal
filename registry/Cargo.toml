@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { default-features = false, version = "1" }
-aws-config = { default-features = false, features = ["behavior-version-latest"], version = "1" }
+aws-config = { default-features = false, features = ["behavior-version-latest", "rt-tokio", "rustls", "sso"], version = "1" }
 aws-sdk-s3 = { default-features = false, version = "1" }
 rsa = { default-features = false, version = "0" }
 tokio = { default-features = false, features = ["process", "rt-multi-thread"], version = "1" }
