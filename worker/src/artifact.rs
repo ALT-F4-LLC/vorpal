@@ -708,22 +708,6 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
-            // sanitize output files
-
-            if let Err(err) = sanitize_paths(&artifact_path_files, true, true).await {
-                if let Err(err) = tx
-                    .send(Err(Status::internal(format!(
-                        "failed to sanitize output files: {:?}",
-                        err
-                    ))))
-                    .await
-                {
-                    error!("failed to send error: {:?}", err);
-                }
-
-                return;
-            }
-
             // upload artifact to registry
 
             if let Err(err) = tx
@@ -808,6 +792,22 @@ impl ArtifactService for ArtifactServer {
                 if let Err(err) = tx
                     .send(Err(Status::internal(format!(
                         "failed to push artifact: {:?}",
+                        err
+                    ))))
+                    .await
+                {
+                    error!("failed to send error: {:?}", err);
+                }
+
+                return;
+            }
+
+            // sanitize output files
+
+            if let Err(err) = sanitize_paths(&artifact_path_files, true, true).await {
+                if let Err(err) = tx
+                    .send(Err(Status::internal(format!(
+                        "failed to sanitize output files: {:?}",
                         err
                     ))))
                     .await
