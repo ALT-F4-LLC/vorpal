@@ -44,7 +44,7 @@ pub async fn shell_artifact<'a>(
         context,
         artifacts,
         vec![],
-        name,
+        format!("{}-shell", name).as_str(),
         formatdoc! {"
             mkdir -pv $VORPAL_WORKSPACE/bin
 

@@ -9,10 +9,10 @@ async fn main() -> Result<()> {
     // Get the context
     let context = &mut get_context().await?;
 
-    // Populate desired artifacts
+    // Create artifacts
     let artifacts = vec![
         rust_package(context, "vorpal").await?,
-        rust_shell(context, "vorpal-dev").await?,
+        rust_shell(context, "vorpal").await?,
     ];
 
     // Run the context

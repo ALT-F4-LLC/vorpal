@@ -33,36 +33,14 @@ pub async fn get_artifacts(
     Ok(())
 }
 
-pub async fn load_artifact<'a>(
-    artifact_id: &'a ArtifactId,
-    service: &mut ConfigServiceClient<Channel>,
-) -> Result<(HashMap<ArtifactId, Artifact>, Vec<ArtifactId>)> {
-    // Create the artifact graph and map
-
-    let mut artifact_map = HashMap::<ArtifactId, Artifact>::new();
-
-    // Get the artifact
-
-    let request = tonic::Request::new(artifact_id.clone());
-
-    let response = match service.get_artifact(request).await {
-        Ok(res) => res,
-        Err(error) => {
-            bail!("failed to evaluate artifact: {}", error);
-        }
-    };
-
-    let artifact = response.into_inner();
-
-    artifact_map.insert(artifact_id.clone(), artifact.clone());
-
-    get_artifacts(&artifact, &mut artifact_map, service).await?;
-
+pub async fn get_order<'a>(
+    build_artifact: &'a HashMap<ArtifactId, Artifact>,
+) -> Result<Vec<ArtifactId>> {
     // Populate the build graph
 
     let mut artifact_graph = DiGraphMap::<&ArtifactId, Artifact>::new();
 
-    for (artifact_id, artifact) in artifact_map.iter() {
+    for (artifact_id, artifact) in build_artifact.iter() {
         artifact_graph.add_node(artifact_id);
 
         for output in artifact.artifacts.iter() {
@@ -79,5 +57,5 @@ pub async fn load_artifact<'a>(
 
     build_order.reverse();
 
-    Ok((artifact_map, build_order))
+    Ok(build_order)
 }

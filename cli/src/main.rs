@@ -1,6 +1,6 @@
 use crate::{
     artifact::build,
-    rust::{get_toolchain_version, toolchain},
+    rust::{get_rust_toolchain_version, rust_toolchain},
 };
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
@@ -26,7 +26,7 @@ use vorpal_schema::{
     get_artifact_system,
     vorpal::{
         artifact::v0::{
-            artifact_service_server::ArtifactServiceServer, ArtifactId, ArtifactSystem,
+            artifact_service_server::ArtifactServiceServer, Artifact, ArtifactId, ArtifactSystem,
             ArtifactSystem::UnknownSystem,
         },
         config::v0::{config_service_client::ConfigServiceClient, ConfigRequest},
@@ -34,10 +34,7 @@ use vorpal_schema::{
     },
 };
 use vorpal_sdk::config::{
-    artifact::{
-        language::rust,
-        toolchain::{cargo, protoc, rust_src, rust_std, rustc},
-    },
+    artifact::{language::rust, toolchain::protoc},
     ConfigContext,
 };
 use vorpal_store::paths::{get_artifact_path, get_public_key_path, setup_paths};
@@ -236,65 +233,36 @@ async fn main() -> Result<()> {
 
                     // Build rust toolchain, if not installed
 
-                    info!("building configuration toolchain... (rust)");
+                    info!("-> building configuration toolchain...");
 
-                    let mut context = ConfigContext::new(0, artifact_system);
+                    // Setup context
+                    let mut build_context = ConfigContext::new(0, artifact_system);
 
-                    // Get toolchain name and version
-                    let toolchain_name = "vorpal-config";
-                    let toolchain_version = get_toolchain_version();
+                    // Setup toolchain
+                    let toolchain_name = "vorpal";
+                    let toolchain = rust_toolchain(&mut build_context, toolchain_name).await?;
 
-                    // Get toolchain artifacts
-                    let cargo = cargo::artifact(&mut context, &toolchain_version).await?;
-                    let rust_src = rust_src::artifact(&mut context, &toolchain_version).await?;
-                    let rust_std = rust_std::artifact(&mut context, &toolchain_version).await?;
-                    let rustc = rustc::artifact(&mut context, &toolchain_version).await?;
+                    // Setup build
+                    let build_order = build::get_order(&build_context.artifact_id).await?;
 
-                    // Get toolchain
-                    let toolchain = toolchain(
-                        &mut context,
-                        toolchain_name,
-                        &cargo,
-                        None,
-                        None,
-                        &rust_src,
-                        &rust_std,
-                        &rustc,
-                        None,
-                    )
-                    .await?;
-
-                    // Get protoc artifact
-                    let protoc = protoc::artifact(&mut context).await?;
-
-                    // Manually set build order
-                    let build_order = vec![
-                        cargo.clone(),
-                        protoc.clone(),
-                        rust_src,
-                        rust_std,
-                        rustc,
-                        toolchain.clone(), // toolchain must be last
-                    ];
-
-                    let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
+                    let mut ready_artifacts = vec![];
 
                     for artifact_id in &build_order {
-                        let artifact = context
-                            .get_artifact(&artifact_id.hash, &artifact_id.name)
-                            .ok_or_else(|| {
-                            anyhow!("artifact not found: {}", artifact_id.name)
-                        })?;
+                        match build_context.artifact_id.get(artifact_id) {
+                            None => bail!("build artifact not found: {}", artifact_id.name),
+                            Some(artifact) => {
+                                for artifact in &artifact.artifacts {
+                                    if !ready_artifacts.contains(&artifact) {
+                                        bail!("Artifact not found: {}", artifact.name);
+                                    }
+                                }
 
-                        for a in &artifact.artifacts {
-                            if !artifacts_ids.contains_key(&a.name) {
-                                bail!("Artifact not found: {}", a.name);
+                                build(artifact, artifact_id, artifact_system, &registry, service)
+                                    .await?;
+
+                                ready_artifacts.push(artifact_id);
                             }
                         }
-
-                        build(artifact, artifact_id, artifact_system, &registry, service).await?;
-
-                        artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
                     }
 
                     let toolchain_path = get_artifact_path(&toolchain.hash, &toolchain.name);
@@ -304,7 +272,7 @@ async fn main() -> Result<()> {
                     }
 
                     let toolchain_target = rust::get_toolchain_target(artifact_system)?;
-                    let toolchain_version = get_toolchain_version();
+                    let toolchain_version = get_rust_toolchain_version();
 
                     let toolchain_bin_path = Path::new(&format!(
                         "{}/toolchains/{}-{}/bin",
@@ -321,9 +289,9 @@ async fn main() -> Result<()> {
                         bail!("cargo not found: {}", toolchain_cargo_path.display());
                     }
 
-                    let mut command = process::Command::new(toolchain_cargo_path);
+                    // Get protoc
 
-                    let current_path = var("PATH").unwrap_or_default();
+                    let protoc = protoc::artifact(&mut build_context).await?;
 
                     let protoc_path = Path::new(&format!(
                         "{}/bin/protoc",
@@ -335,13 +303,17 @@ async fn main() -> Result<()> {
                         bail!("protoc not found: {}", protoc_path.display());
                     }
 
+                    // Build the configuration
+
+                    let mut command = process::Command::new(toolchain_cargo_path);
+
                     command.env(
                         "PATH",
                         format!(
                             "{}:{}/bin:{}",
                             toolchain_bin_path.display(),
                             get_artifact_path(&protoc.hash, &protoc.name).display(),
-                            current_path
+                            var("PATH").unwrap_or_default()
                         )
                         .as_str(),
                     );
@@ -357,10 +329,7 @@ async fn main() -> Result<()> {
 
                     command.args(["build", "--bin", config_bin, "--release"]);
 
-                    info!(
-                        "building configuration... (cargo build --bin {} --release)",
-                        rust_bin.as_ref().unwrap()
-                    );
+                    info!("-> building configuration...");
 
                     let mut process = command
                         .stdout(Stdio::piped())
@@ -381,8 +350,6 @@ async fn main() -> Result<()> {
 
                         info!("{}", line);
                     }
-
-                    info!("build complete");
 
                     let target_path = format!(
                         "{}/target/release/{}",
@@ -416,32 +383,54 @@ async fn main() -> Result<()> {
 
             let config = config_response.into_inner();
 
-            let config_artifact = config
+            let config_artifact_id = config
                 .artifacts
                 .into_iter()
                 .find(|a| a.name == *name)
                 .ok_or_else(|| anyhow!("artifact not found: {}", name))?;
 
-            let (build_map, build_order) =
-                build::load_artifact(&config_artifact, &mut config_service).await?;
+            // Create the artifact graph and map
 
-            let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
+            let mut build_artifact = HashMap::<ArtifactId, Artifact>::new();
 
-            info!("building artifact... ({})", name);
+            // Get the artifact
+
+            let config_artifact_request = tonic::Request::new(config_artifact_id.clone());
+
+            let config_artifact_response =
+                match config_service.get_artifact(config_artifact_request).await {
+                    Ok(res) => res,
+                    Err(error) => {
+                        bail!("failed to evaluate artifact: {}", error);
+                    }
+                };
+
+            let config_artifact = config_artifact_response.into_inner();
+
+            build_artifact.insert(config_artifact_id.clone(), config_artifact.clone());
+
+            build::get_artifacts(&config_artifact, &mut build_artifact, &mut config_service)
+                .await?;
+
+            let build_order = build::get_order(&build_artifact).await?;
+
+            let mut ready_artifacts = vec![];
+
+            info!("-> building artifacts...");
 
             for artifact_id in &build_order {
-                match build_map.get(artifact_id) {
+                match build_artifact.get(artifact_id) {
                     None => bail!("Build artifact not found: {}", artifact_id.name),
                     Some(artifact) => {
-                        for a in &artifact.artifacts {
-                            if !artifacts_ids.contains_key(&a.name) {
-                                bail!("Artifact not found: {}", a.name);
+                        for artifact in &artifact.artifacts {
+                            if !ready_artifacts.contains(&artifact) {
+                                bail!("Artifact not found: {}", artifact.name);
                             }
                         }
 
                         build(artifact, artifact_id, artifact_system, &registry, service).await?;
 
-                        artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
+                        ready_artifacts.push(artifact_id);
 
                         if artifact_id.name == *name {
                             println!(

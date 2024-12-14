@@ -46,7 +46,7 @@ pub fn get_toolchain_target(target: ArtifactSystem) -> Result<String> {
     Ok(target.to_string())
 }
 
-pub fn get_toolchain_version() -> String {
+pub fn get_rust_toolchain_version() -> String {
     "1.80.1".to_string()
 }
 
@@ -57,45 +57,33 @@ fn read_cargo_toml(path: &str) -> Result<RustArtifactCargoToml> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn toolchain(
-    context: &mut ConfigContext,
-    name: &str,
-    cargo: &ArtifactId,
-    clippy: Option<ArtifactId>,
-    rust_analyzer: Option<ArtifactId>,
-    rust_src: &ArtifactId,
-    rust_std: &ArtifactId,
-    rustc: &ArtifactId,
-    rustfmt: Option<&ArtifactId>,
-) -> Result<ArtifactId> {
-    let mut artifacts = vec![
+pub async fn rust_toolchain(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
+    let version = get_rust_toolchain_version();
+    let target = get_toolchain_target(context.get_target())?;
+
+    let cargo = cargo::artifact(context, &version).await?;
+    let clippy = clippy::artifact(context, &version).await?;
+    let rust_analyzer = rust_analyzer::artifact(context, &version).await?;
+    let rust_src = rust_src::artifact(context, &version).await?;
+    let rust_std = rust_std::artifact(context, &version).await?;
+    let rustc = rustc::artifact(context, &version).await?;
+    let rustfmt = rustfmt::artifact(context, &version).await?;
+
+    let artifacts = vec![
         cargo.clone(),
+        clippy.clone(),
+        rust_analyzer.clone(),
         rust_src.clone(),
         rust_std.clone(),
         rustc.clone(),
+        rustfmt.clone(),
     ];
-
-    if let Some(clippy) = clippy {
-        artifacts.push(clippy);
-    }
-
-    if let Some(rust_analyzer) = rust_analyzer {
-        artifacts.push(rust_analyzer);
-    }
-
-    if let Some(rustfmt) = rustfmt {
-        artifacts.push(rustfmt.clone());
-    }
 
     let mut component_paths = vec![];
 
     for component in &artifacts {
         component_paths.push(get_artifact_envkey(component));
     }
-
-    let target = get_toolchain_target(context.get_target())?;
-
-    let version = get_toolchain_version();
 
     add_artifact(
         context,
@@ -125,6 +113,8 @@ pub async fn toolchain(
                 done
             done
 
+            mkdir -pv \"$VORPAL_OUTPUT/update-hash\"
+
             cat > \"$VORPAL_OUTPUT/settings.toml\" << \"EOF\"
             profile = \"minimal\"
             version = \"12\"
@@ -145,32 +135,8 @@ pub async fn toolchain(
 }
 
 pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
-    let version = get_toolchain_version();
+    let toolchain = rust_toolchain(context, name).await?;
 
-    // Get toolchain artifacts
-    let cargo = cargo::artifact(context, &version).await?;
-    let clippy = clippy::artifact(context, &version).await?;
-    let rust_analyzer = rust_analyzer::artifact(context, &version).await?;
-    let rust_src = rust_src::artifact(context, &version).await?;
-    let rust_std = rust_std::artifact(context, &version).await?;
-    let rustc = rustc::artifact(context, &version).await?;
-    let rustfmt = rustfmt::artifact(context, &version).await?;
-
-    // Get toolchain artifacts
-    let toolchain = toolchain(
-        context,
-        name,
-        &cargo,
-        Some(clippy),
-        Some(rust_analyzer),
-        &rust_src,
-        &rust_std,
-        &rustc,
-        Some(&rustfmt),
-    )
-    .await?;
-
-    // Get protoc artifact
     let protoc = protoc::artifact(context).await?;
 
     let artifacts = vec![protoc.clone(), toolchain.clone()];
@@ -182,13 +148,13 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
             "PATH={}/bin:{}/toolchains/{}-{}/bin:$PATH",
             get_artifact_envkey(&protoc),
             get_artifact_envkey(&toolchain),
-            get_toolchain_version(),
+            get_rust_toolchain_version(),
             toolchain_target
         ),
         format!("RUSTUP_HOME={}", get_artifact_envkey(&toolchain)),
         format!(
             "RUSTUP_TOOLCHAIN={}-{}",
-            get_toolchain_version(),
+            get_rust_toolchain_version(),
             toolchain_target
         ),
     ];
@@ -198,23 +164,9 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
 }
 
 pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Result<ArtifactId> {
-    // 1. SETUP RUST TOOLCHAIN
+    let toolchain = rust_toolchain(context, name).await?;
 
-    // Get toolchain components
-    let version = get_toolchain_version();
-    let cargo = cargo::artifact(context, &version).await?;
-    let rust_src = rust_src::artifact(context, &version).await?;
-    let rust_std = rust_std::artifact(context, &version).await?;
-    let rustc = rustc::artifact(context, &version).await?;
-
-    // Get toolchain
-    let toolchain = toolchain(
-        context, name, &cargo, None, None, &rust_src, &rust_std, &rustc, None,
-    )
-    .await?;
-
-    // Get protoc artifact
-    let protoc = protoc::artifact(context).await?;
+    // 1. READ CARGO.TOML FILES
 
     // Get the source path
     let source = ".";
@@ -223,8 +175,6 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
     if !source_path.exists() {
         bail!("Artifact `source.{}.path` not found: {:?}", name, source);
     }
-
-    // 2. READ CARGO.TOML FILES
 
     // Load root cargo.toml
     let cargo_toml_path = source_path.join("Cargo.toml");
@@ -276,7 +226,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
         }
     }
 
-    // 3. CREATE ARTIFACTS
+    // 2. CREATE ARTIFACTS
 
     // Set default systems
     let systems = vec![
@@ -286,6 +236,9 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
         "x86_64-macos",
     ];
 
+    // Get protoc artifact
+    let protoc = protoc::artifact(context).await?;
+
     // Create vendor artifact
     let mut cargo_tomls = vec!["Cargo.toml".to_string(), "Cargo.lock".to_string()];
 
@@ -294,6 +247,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
     }
 
     let toolchain_target = get_toolchain_target(context.get_target())?;
+    let toolchain_version = get_rust_toolchain_version();
 
     let vendor = add_artifact(
         context,
@@ -306,7 +260,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
             ArtifactEnvironment {
                 key: "PATH".to_string(),
                 value: format!(
-                    "{toolchain}/toolchains/{version}-{toolchain_target}/bin:$PATH",
+                    "{toolchain}/toolchains/{toolchain_version}-{toolchain_target}/bin:$PATH",
                     toolchain = get_artifact_envkey(&toolchain),
                 ),
             },
@@ -316,7 +270,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
             },
             ArtifactEnvironment {
                 key: "RUSTUP_TOOLCHAIN".to_string(),
-                value: format!("{}-{}", get_toolchain_version(), toolchain_target),
+                value: format!("{}-{}", toolchain_version, toolchain_target),
             },
         ],
         format!("{}-vendor", name).as_str(),
@@ -360,7 +314,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
         format!(
             "{}/toolchains/{}-{}/bin",
             get_artifact_envkey(&toolchain),
-            get_toolchain_version(),
+            get_rust_toolchain_version(),
             toolchain_target
         ),
     ];
@@ -384,7 +338,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
             },
             ArtifactEnvironment {
                 key: "RUSTUP_TOOLCHAIN".to_string(),
-                value: format!("{}-{}", get_toolchain_version(), toolchain_target),
+                value: format!("{}-{}", get_rust_toolchain_version(), toolchain_target),
             },
         ],
         name,
