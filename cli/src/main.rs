@@ -239,8 +239,8 @@ async fn main() -> Result<()> {
                     let mut build_context = ConfigContext::new(0, artifact_system);
 
                     // Setup toolchain
-                    let toolchain_name = "vorpal";
-                    let toolchain = rust_toolchain(&mut build_context, toolchain_name).await?;
+                    let protoc = protoc::artifact(&mut build_context).await?;
+                    let toolchain = rust_toolchain(&mut build_context, "vorpal").await?;
 
                     // Setup build
                     let build_order = build::get_order(&build_context.artifact_id).await?;
@@ -291,7 +291,6 @@ async fn main() -> Result<()> {
 
                     // Get protoc
 
-                    let protoc = protoc::artifact(&mut build_context).await?;
 
                     let protoc_path = Path::new(&format!(
                         "{}/bin/protoc",

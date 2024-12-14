@@ -662,20 +662,6 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
-            if let Err(err) = sanitize_paths(&artifact_path_files, true, true).await {
-                if let Err(err) = tx
-                    .send(Err(Status::internal(format!(
-                        "failed to sanitize output files: {:?}",
-                        err
-                    ))))
-                    .await
-                {
-                    error!("failed to send error: {:?}", err);
-                }
-
-                return;
-            }
-
             // Create artifact tar from build output files
 
             if let Err(err) = tx
@@ -722,7 +708,23 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
-            // uplaod artifact to registry
+            // sanitize output files
+
+            if let Err(err) = sanitize_paths(&artifact_path_files, true, true).await {
+                if let Err(err) = tx
+                    .send(Err(Status::internal(format!(
+                        "failed to sanitize output files: {:?}",
+                        err
+                    ))))
+                    .await
+                {
+                    error!("failed to send error: {:?}", err);
+                }
+
+                return;
+            }
+
+            // upload artifact to registry
 
             if let Err(err) = tx
                 .send(Ok(ArtifactBuildResponse {
@@ -832,6 +834,20 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
+            // Remove workspace
+
+            if let Err(err) = remove_dir_all(workspace_path).await {
+                if let Err(err) = tx
+                    .send(Err(Status::internal(format!(
+                        "failed to remove workspace: {:?}",
+                        err
+                    ))))
+                    .await
+                {
+                    error!("failed to send error: {:?}", err);
+                }
+            }
+
             // Remove lock file
 
             if let Err(err) = remove_file(&artifact_lock_path).await {
@@ -846,20 +862,6 @@ impl ArtifactService for ArtifactServer {
                 }
 
                 return;
-            }
-
-            // Remove workspace
-
-            if let Err(err) = remove_dir_all(workspace_path).await {
-                if let Err(err) = tx
-                    .send(Err(Status::internal(format!(
-                        "failed to remove workspace: {:?}",
-                        err
-                    ))))
-                    .await
-                {
-                    error!("failed to send error: {:?}", err);
-                }
             }
         });
 

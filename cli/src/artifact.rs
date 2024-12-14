@@ -18,7 +18,10 @@ use vorpal_schema::vorpal::{
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
-    paths::{copy_files, get_artifact_path, get_file_paths, get_private_key_path, get_source_path},
+    paths::{
+        copy_files, get_artifact_path, get_file_paths, get_private_key_path, get_source_path,
+        sanitize_paths,
+    },
     temps::{create_sandbox_dir, create_sandbox_file},
 };
 
@@ -137,6 +140,14 @@ pub async fn build(
                     .expect("failed to create artifact path");
 
                 unpack_zstd(&artifact_path, &archive_path).await?;
+
+                let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
+
+                if artifact_files.is_empty() {
+                    bail!("Artifact files not found: {:?}", artifact_path);
+                }
+
+                sanitize_paths(&artifact_files, true, true).await?;
 
                 remove_file(&archive_path).await.expect("failed to remove");
 
