@@ -20,7 +20,7 @@ use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
         copy_files, get_artifact_path, get_file_paths, get_private_key_path, get_source_path,
-        sanitize_paths,
+        set_timestamps,
     },
     temps::{create_sandbox_dir, create_sandbox_file},
 };
@@ -72,15 +72,10 @@ pub async fn build(
 ) -> Result<()> {
     // Check if artifact exists (local)
 
-    let artifact_hash_short = &artifact_id.hash[..8];
-
     let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_path.exists() {
-        info!(
-            "[{}] build cache ({}...)",
-            artifact_id.name, artifact_hash_short
-        );
+        info!("[{}] build cache ({})", artifact_id.name, artifact_id.hash);
         return Ok(());
     }
 
@@ -117,7 +112,7 @@ pub async fn build(
             if response_data.is_empty() {
                 warn!(
                     "[{}] pull failed (missing {}...)",
-                    artifact_id.name, artifact_hash_short
+                    artifact_id.name, artifact_id.hash
                 )
             }
 
@@ -147,7 +142,9 @@ pub async fn build(
                     bail!("Artifact files not found: {:?}", artifact_path);
                 }
 
-                sanitize_paths(&artifact_files, true, true).await?;
+                for artifact_files in &artifact_files {
+                    set_timestamps(&artifact_files).await?;
+                }
 
                 remove_file(&archive_path).await.expect("failed to remove");
 
@@ -340,16 +337,26 @@ pub async fn build(
 
     let mut stream = response.into_inner();
 
-    while let Ok(message) = stream.message().await {
-        if message.is_none() {
-            break;
-        }
+    loop {
+        match stream.message().await {
+            Ok(res) => match res {
+                Some(response) => {
+                    if !response.output.is_empty() {
+                        info!("[{}] {}", artifact_id.name, response.output);
+                    }
+                }
 
-        if let Some(res) = message {
-            if !res.output.is_empty() {
-                info!("[{}] {}", artifact_id.name, res.output);
+                None => {
+                    info!("[{}] build success", artifact_id.name);
+
+                    break;
+                }
+            },
+
+            Err(err) => {
+                bail!("Stream error: {:?}", err);
             }
-        }
+        };
     }
 
     Ok(())

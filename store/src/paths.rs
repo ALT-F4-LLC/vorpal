@@ -1,11 +1,8 @@
 use anyhow::{bail, Error, Result};
 use filetime::{set_file_times, set_symlink_file_times, FileTime};
 use ignore::WalkBuilder;
-use std::{
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-};
-use tokio::fs::{copy, create_dir_all, metadata, set_permissions, symlink};
+use std::path::{Path, PathBuf};
+use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use uuid::Uuid;
 
 // Store paths
@@ -158,43 +155,15 @@ pub fn get_file_paths(
     Ok(files)
 }
 
-pub async fn sanitize_path(path: &PathBuf, readonly: bool, timestamps: bool) -> Result<(), Error> {
-    if timestamps {
-        let epoc = FileTime::from_unix_time(0, 0);
+pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
+    let epoc = FileTime::from_unix_time(0, 0);
 
-        if !path.is_symlink() {
-            set_file_times(path, epoc, epoc).expect("Failed to set file times");
-        }
-
-        if path.is_symlink() {
-            set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
-        }
+    if !path.is_symlink() {
+        set_file_times(path, epoc, epoc).expect("Failed to set file times");
     }
 
-    let metadata = metadata(path).await.expect("Failed to read metadata");
-    let mut permissions = metadata.permissions();
-    let mode = permissions.mode();
-
-    if readonly {
-        permissions.set_mode(mode & !0o222)
-    } else {
-        permissions.set_mode(mode | 0o222)
-    };
-
-    set_permissions(path, permissions)
-        .await
-        .expect("Failed to set permissions");
-
-    Ok(())
-}
-
-pub async fn sanitize_paths(
-    paths: &[PathBuf],
-    readonly: bool,
-    timestamps: bool,
-) -> Result<(), Error> {
-    for path in paths {
-        sanitize_path(path, readonly, timestamps).await?;
+    if path.is_symlink() {
+        set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
     }
 
     Ok(())

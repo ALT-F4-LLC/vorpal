@@ -1,6 +1,6 @@
 use crate::config::{
     artifact::{
-        add_artifact_source, get_artifact_envkey,
+        add_artifact_source,
         steps::{bash, docker},
     },
     ConfigContext,
@@ -13,18 +13,13 @@ use vorpal_schema::vorpal::artifact::v0::{
 };
 
 pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let environments = vec![ArtifactEnvironment {
-        key: "PATH".to_string(),
-        value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
-    }];
-
-    let systems = vec![Aarch64Linux.into(), X8664Linux.into()];
+    let hash = "465cebbdf76af0825c160bdad35db506955c47d149972c30ae7a0629c252439f";
 
     let source = add_artifact_source(
         context,
         ArtifactSource {
             excludes: vec![],
-            hash: None,
+            hash: Some(hash.to_string()),
             includes: vec![
                 "Dockerfile".to_string(),
                 "script/version_check.sh".to_string(),
@@ -35,36 +30,25 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
     )
     .await?;
 
-    let source = context.add_artifact(Artifact {
-        artifacts: vec![],
-        name: "linux-debian-source".to_string(),
-        sources: vec![source.clone()],
-        steps: vec![bash(
-            environments.clone(),
-            "cp -prv $VORPAL_WORKSPACE/source/docker/. $VORPAL_OUTPUT/".to_string(),
-        )],
-        systems: systems.clone(),
-    })?;
-
-    let image_tag = format!("altf4llc/debin:{}", source.hash);
+    let image_tag = format!("altf4llc/debin:{}", hash);
 
     context.add_artifact(Artifact {
-        artifacts: vec![source.clone()],
+        artifacts: vec![],
         name: "linux-debian".to_string(),
-        sources: vec![],
+        sources: vec![source],
         steps: vec![
             docker(vec![
                 "buildx".to_string(),
                 "build".to_string(),
                 "--progress=plain".to_string(),
                 format!("--tag={}", image_tag),
-                get_artifact_envkey(&source),
+                "$VORPAL_WORKSPACE/source/docker".to_string(),
             ]),
             docker(vec![
                 "container".to_string(),
                 "create".to_string(),
                 "--name".to_string(),
-                source.clone().hash.to_string(),
+                hash.to_string(),
                 image_tag.clone(),
             ]),
             docker(vec![
@@ -72,10 +56,13 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
                 "export".to_string(),
                 "--output".to_string(),
                 "$VORPAL_WORKSPACE/debian.tar".to_string(),
-                source.hash.to_string(),
+                hash.to_string(),
             ]),
             bash(
-                environments.clone(),
+                vec![ArtifactEnvironment {
+                    key: "PATH".to_string(),
+                    value: "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+                }],
                 formatdoc! {"
                     ## extract files
                     tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
@@ -88,7 +75,7 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
                 "container".to_string(),
                 "rm".to_string(),
                 "--force".to_string(),
-                source.hash.to_string(),
+                hash.to_string(),
             ]),
             docker(vec![
                 "image".to_string(),
@@ -97,6 +84,6 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
                 image_tag,
             ]),
         ],
-        systems,
+        systems: vec![Aarch64Linux.into(), X8664Linux.into()],
     })
 }

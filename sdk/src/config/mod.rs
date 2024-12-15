@@ -18,7 +18,7 @@ use vorpal_schema::{
 };
 use vorpal_store::{
     hashes::hash_files,
-    paths::{copy_files, sanitize_paths},
+    paths::{copy_files, set_timestamps},
     temps::create_sandbox_dir,
 };
 
@@ -156,7 +156,9 @@ impl ConfigContext {
 
             let sandbox_files = copy_files(&path, files.clone(), &sandbox_path).await?;
 
-            sanitize_paths(&sandbox_files, false, true).await?;
+            for path in sandbox_files.clone().into_iter() {
+                set_timestamps(&path).await?;
+            }
 
             let source_hash = hash_files(sandbox_files.clone())?;
 

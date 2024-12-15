@@ -99,16 +99,18 @@ pub async fn rust_toolchain(context: &mut ConfigContext, name: &str) -> Result<A
 
             for component in \"${{components[@]}}\"; do
                 find \"$component\" | while read -r file; do
-                    relative_path=$(echo \"$file\" | sed -e \"s|$component/||\")
+                    relative_path=$(echo \"$file\" | sed -e \"s|$component||\")
 
-                    if [[ \"$relative_path\" == \"manifest.in\" ]]; then
+                    echo \"Copying $file to $toolchain_dir$relative_path\"
+
+                    if [[ \"$relative_path\" == \"/manifest.in\" ]]; then
                         continue
                     fi
 
                     if [ -d \"$file\" ]; then
-                        mkdir -pv \"$toolchain_dir/$relative_path\"
+                        mkdir -pv \"$toolchain_dir$relative_path\"
                     else
-                        cp -pv \"$file\" \"$toolchain_dir/$relative_path\"
+                        cp -pv \"$file\" \"$toolchain_dir$relative_path\"
                     fi
                 done
             done

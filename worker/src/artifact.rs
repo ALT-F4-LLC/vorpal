@@ -38,7 +38,7 @@ use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
         get_artifact_lock_path, get_artifact_path, get_file_paths, get_private_key_path,
-        sanitize_paths,
+        set_timestamps,
     },
 };
 
@@ -804,18 +804,20 @@ impl ArtifactService for ArtifactServer {
 
             // sanitize output files
 
-            if let Err(err) = sanitize_paths(&artifact_path_files, true, true).await {
-                if let Err(err) = tx
-                    .send(Err(Status::internal(format!(
-                        "failed to sanitize output files: {:?}",
-                        err
-                    ))))
-                    .await
-                {
-                    error!("failed to send error: {:?}", err);
-                }
+            for path in artifact_path_files.iter() {
+                if let Err(err) = set_timestamps(path).await {
+                    if let Err(err) = tx
+                        .send(Err(Status::internal(format!(
+                            "failed to sanitize output files: {:?}",
+                            err
+                        ))))
+                        .await
+                    {
+                        error!("failed to send error: {:?}", err);
+                    }
 
-                return;
+                    return;
+                }
             }
 
             // Remove artifact archive

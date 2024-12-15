@@ -44,6 +44,20 @@ use vorpal_worker::artifact::ArtifactServer;
 mod artifact;
 mod build;
 
+pub struct VorpalTomlLanguage {
+    pub name: String,
+}
+
+pub struct VorpalTomlRust {
+    pub bin: String,
+    pub path: String,
+}
+
+pub struct VorpalToml {
+    pub language: VorpalTomlLanguage,
+    pub rust: VorpalTomlRust,
+}
+
 #[derive(Subcommand)]
 enum Command {
     Artifact {
@@ -160,20 +174,6 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
     Ok((process, service))
 }
 
-pub struct VorpalTomlLanguage {
-    pub name: String,
-}
-
-pub struct VorpalTomlRust {
-    pub bin: String,
-    pub path: String,
-}
-
-pub struct VorpalToml {
-    pub language: VorpalTomlLanguage,
-    pub rust: VorpalTomlRust,
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -233,7 +233,7 @@ async fn main() -> Result<()> {
 
                     // Build rust toolchain, if not installed
 
-                    info!("-> building configuration toolchain...");
+                    info!("-> building configuration toolchain artifacts...");
 
                     // Setup context
                     let mut build_context = ConfigContext::new(0, artifact_system);
@@ -246,6 +246,8 @@ async fn main() -> Result<()> {
                     let build_order = build::get_order(&build_context.artifact_id).await?;
 
                     let mut ready_artifacts = vec![];
+
+                    info!("-> building configuration toolchain...");
 
                     for artifact_id in &build_order {
                         match build_context.artifact_id.get(artifact_id) {
