@@ -143,7 +143,7 @@ pub async fn build(
                 }
 
                 for artifact_files in &artifact_files {
-                    set_timestamps(&artifact_files).await?;
+                    set_timestamps(artifact_files).await?;
                 }
 
                 remove_file(&archive_path).await.expect("failed to remove");
