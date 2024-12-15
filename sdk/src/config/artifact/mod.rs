@@ -6,12 +6,18 @@ use crate::config::{
     ConfigContext,
 };
 use anyhow::{bail, Result};
+use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
+use sha256::digest;
 use std::path::Path;
+use tokio::fs::{create_dir_all, remove_file, write};
+use tokio_tar::Archive;
+use tracing::info;
+use url::Url;
 use vorpal_schema::vorpal::artifact::v0::{
     Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactSystem,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
-use vorpal_store::paths::get_file_paths;
+use vorpal_store::{archives::unpack_zip, paths::get_file_paths, temps::create_sandbox_file};
 
 pub mod language;
 pub mod shell;
@@ -26,13 +32,194 @@ pub fn get_artifact_envkey(artifact: &ArtifactId) -> String {
     .to_string()
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ArtifactSourceKind {
+    UnknownSourceKind,
+    Git,
+    Http,
+    Local,
+}
+
 pub async fn add_artifact_source(
     context: &mut ConfigContext,
     source: ArtifactSource,
 ) -> Result<ArtifactSource> {
-    // TODO: add support for 'remote' sources
+    let mut source_path = None;
 
-    let source_path = Path::new(&source.path).to_path_buf();
+    let source_path_kind = match &source.path {
+        s if Path::new(s).exists() => ArtifactSourceKind::Local,
+        s if s.starts_with("git") => ArtifactSourceKind::Git,
+        s if s.starts_with("http") => ArtifactSourceKind::Http,
+        _ => ArtifactSourceKind::UnknownSourceKind,
+    };
+
+    if source_path_kind == ArtifactSourceKind::UnknownSourceKind {
+        bail!(
+            "`source.{}.path` unknown source kind: {:?}",
+            source.name,
+            source.path
+        );
+    }
+
+    if source_path_kind == ArtifactSourceKind::Git {
+        bail!(
+            "`source.{}.path` git source kind not supported",
+            source.name
+        );
+    }
+
+    if source_path_kind == ArtifactSourceKind::Http {
+        if source.hash.is_none() {
+            bail!(
+                "`source.{}.hash` required for HTTP sources: {:?}",
+                source.name,
+                source.path
+            );
+        }
+
+        if source.hash.is_some() && source.hash.clone().unwrap() == "" {
+            bail!(
+                "`source.{}.hash` empty for HTTP sources: {:?}",
+                source.name,
+                source.path
+            );
+        }
+
+        // TODO: support sources being stored in registry
+
+        let source_cache_hash = digest(source.path.as_bytes());
+        let source_cache_path = format!("/tmp/vorpal-source-{}", source_cache_hash);
+        let source_cache_path = Path::new(&source_cache_path).to_path_buf();
+
+        if !source_cache_path.exists() {
+            let source_uri = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
+
+            if source_uri.scheme() != "http" && source_uri.scheme() != "https" {
+                anyhow::bail!("source URL scheme not supported: {:?}", source_uri.scheme());
+            }
+
+            info!(
+                "[{}] fetching source... ({})",
+                source.name,
+                source_uri.as_str()
+            );
+
+            let source_response = reqwest::get(source_uri.as_str())
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+            if !source_response.status().is_success() {
+                anyhow::bail!("source URL not failed: {:?}", source_response.status());
+            }
+
+            let source_response_bytes = source_response
+                .bytes()
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+            let source_response_bytes = source_response_bytes.as_ref();
+
+            create_dir_all(&source_cache_path)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+            if let Some(kind) = infer::get(source_response_bytes) {
+                match kind.mime_type() {
+                    "application/gzip" => {
+                        let decoder = GzipDecoder::new(source_response_bytes);
+                        let mut archive = Archive::new(decoder);
+
+                        info!(
+                            "[{}] unpacking gzip... ({})",
+                            source.name,
+                            source_cache_path.display(),
+                        );
+
+                        archive
+                            .unpack(&source_cache_path)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                    }
+
+                    "application/x-bzip2" => {
+                        let decoder = BzDecoder::new(source_response_bytes);
+                        let mut archive = Archive::new(decoder);
+
+                        info!(
+                            "[{}] unpacking bzip2... ({})",
+                            source.name,
+                            source_cache_path.display(),
+                        );
+
+                        archive
+                            .unpack(&source_cache_path)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                    }
+
+                    "application/x-xz" => {
+                        let decoder = XzDecoder::new(source_response_bytes);
+                        let mut archive = Archive::new(decoder);
+
+                        info!(
+                            "[{}] unpacking xz... ({})",
+                            source.name,
+                            source_cache_path.display(),
+                        );
+
+                        archive
+                            .unpack(&source_cache_path)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                    }
+
+                    "application/zip" => {
+                        let sandbox_file_path = create_sandbox_file(Some("zip")).await?;
+
+                        write(&sandbox_file_path, source_response_bytes)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+
+                        info!(
+                            "[{}] unpacking zip... ({})",
+                            source.name,
+                            source_cache_path.display(),
+                        );
+
+                        unpack_zip(&sandbox_file_path, &source_cache_path).await?;
+
+                        remove_file(&sandbox_file_path)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                    }
+
+                    _ => {
+                        bail!(
+                            "`source.{}.path` unsupported mime-type detected: {:?}",
+                            source.name,
+                            source.path
+                        );
+                    }
+                }
+            }
+        }
+
+        source_path = Some(source_cache_path);
+    }
+
+    if source_path_kind == ArtifactSourceKind::Local {
+        source_path = Some(Path::new(&source.path).to_path_buf());
+    }
+
+    if source_path.is_none() {
+        bail!(
+            "`source.{}.path` failed to resolve: {:?}",
+            source.name,
+            source.path
+        );
+    }
+
+    let source_path = source_path.unwrap();
 
     if !source_path.exists() {
         bail!(
@@ -42,11 +229,27 @@ pub async fn add_artifact_source(
         );
     }
 
+    let mut source_hash_log = "untracked".to_string();
+
+    if let Some(hash) = source.hash.clone() {
+        source_hash_log = hash;
+    }
+
+    info!("[{}] checking source... ({})", source.name, source_hash_log);
+
     let source_files = get_file_paths(
         &source_path,
         source.excludes.clone(),
         source.includes.clone(),
     )?;
+
+    if source_files.is_empty() {
+        bail!(
+            "Artifact `source.{}.path` no files found: {:?}",
+            source.name,
+            source.path
+        );
+    }
 
     let source_hash = match context.get_source_hash(
         source_files.clone(),
@@ -68,10 +271,10 @@ pub async fn add_artifact_source(
     if let Some(hash) = source.hash.clone() {
         if hash != source_hash {
             bail!(
-                "Artifact `source.{}.hash` mismatch: {} != {}",
+                "`source.{}.hash` mismatch: {} != {}",
                 source.name,
+                source_hash,
                 hash,
-                source_hash
             );
         }
     }
@@ -81,7 +284,7 @@ pub async fn add_artifact_source(
         hash: Some(source_hash),
         includes: source.includes,
         name: source.name,
-        path: source.path,
+        path: source_path.to_string_lossy().to_string(),
     })
 }
 

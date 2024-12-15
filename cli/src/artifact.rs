@@ -18,7 +18,10 @@ use vorpal_schema::vorpal::{
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
-    paths::{copy_files, get_artifact_path, get_file_paths, get_private_key_path, get_source_path},
+    paths::{
+        copy_files, get_artifact_path, get_file_paths, get_private_key_path, get_source_path,
+        set_timestamps,
+    },
     temps::{create_sandbox_dir, create_sandbox_file},
 };
 
@@ -64,20 +67,15 @@ pub async fn build(
     artifact: &Artifact,
     artifact_id: &ArtifactId,
     artifact_target: ArtifactSystem,
-    registry_host: &str,
-    worker_host: &str,
+    registry: &str,
+    service: &str,
 ) -> Result<()> {
     // Check if artifact exists (local)
-
-    let artifact_hash_short = &artifact_id.hash[..8];
 
     let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_path.exists() {
-        info!(
-            "[{}] build cache ({}...)",
-            artifact_id.name, artifact_hash_short
-        );
+        info!("[{}] build cache ({})", artifact_id.name, artifact_id.hash);
         return Ok(());
     }
 
@@ -90,7 +88,7 @@ pub async fn build(
         kind: RegistryStoreKind::Artifact as i32,
     };
 
-    let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
+    let mut registry = RegistryServiceClient::connect(registry.to_owned())
         .await
         .expect("failed to connect to store");
 
@@ -114,7 +112,7 @@ pub async fn build(
             if response_data.is_empty() {
                 warn!(
                     "[{}] pull failed (missing {}...)",
-                    artifact_id.name, artifact_hash_short
+                    artifact_id.name, artifact_id.hash
                 )
             }
 
@@ -138,6 +136,16 @@ pub async fn build(
 
                 unpack_zstd(&artifact_path, &archive_path).await?;
 
+                let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
+
+                if artifact_files.is_empty() {
+                    bail!("Artifact files not found: {:?}", artifact_path);
+                }
+
+                for artifact_files in &artifact_files {
+                    set_timestamps(artifact_files).await?;
+                }
+
                 remove_file(&archive_path).await.expect("failed to remove");
 
                 return Ok(());
@@ -155,10 +163,6 @@ pub async fn build(
             artifact_id: Some(artifact_id.clone()),
             kind: RegistryStoreKind::ArtifactSource as i32,
         };
-
-        let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
-            .await
-            .expect("failed to connect to store");
 
         match registry.pull(registry_pull.clone()).await {
             Err(status) => {
@@ -316,7 +320,7 @@ pub async fn build(
 
     info!("[{}] building...", artifact_id.name);
 
-    let mut worker = ArtifactServiceClient::connect(worker_host.to_owned())
+    let mut worker = ArtifactServiceClient::connect(service.to_owned())
         .await
         .expect("failed to connect to artifact");
 
@@ -333,16 +337,26 @@ pub async fn build(
 
     let mut stream = response.into_inner();
 
-    while let Ok(message) = stream.message().await {
-        if message.is_none() {
-            break;
-        }
+    loop {
+        match stream.message().await {
+            Ok(res) => match res {
+                Some(response) => {
+                    if !response.output.is_empty() {
+                        info!("[{}] {}", artifact_id.name, response.output);
+                    }
+                }
 
-        if let Some(res) = message {
-            if !res.output.is_empty() {
-                info!("[{}] {}", artifact_id.name, res.output);
+                None => {
+                    info!("[{}] build success", artifact_id.name);
+
+                    break;
+                }
+            },
+
+            Err(err) => {
+                bail!("Stream error: {:?}", err);
             }
-        }
+        };
     }
 
     Ok(())

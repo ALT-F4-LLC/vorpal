@@ -37,8 +37,8 @@ use vorpal_store::temps::{create_sandbox_dir, create_sandbox_file};
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
-        copy_files, get_artifact_lock_path, get_artifact_path, get_file_paths,
-        get_private_key_path, get_source_archive_path, get_source_path,
+        get_artifact_lock_path, get_artifact_path, get_file_paths, get_private_key_path,
+        set_timestamps,
     },
 };
 
@@ -420,22 +420,6 @@ impl ArtifactService for ArtifactServer {
                 }
             };
 
-            let workspace_source_path = workspace_path_canonical.join("source");
-
-            if let Err(err) = create_dir_all(&workspace_source_path).await {
-                if let Err(err) = tx
-                    .send(Err(Status::internal(format!(
-                        "failed to create workspace source path: {:?}",
-                        err
-                    ))))
-                    .await
-                {
-                    error!("failed to send error: {:?}", err);
-                }
-
-                return;
-            }
-
             // Connect to registry
 
             let mut registry_client = match RegistryServiceClient::connect(registry).await {
@@ -457,122 +441,141 @@ impl ArtifactService for ArtifactServer {
 
             // Create new artifact id
 
-            let id = ArtifactId {
+            let artifact_id = ArtifactId {
                 hash: request.hash.clone(),
                 name: request.name.clone(),
             };
 
+            if let Err(err) = tx
+                .send(Ok(ArtifactBuildResponse {
+                    output: "pulling source...".to_string(),
+                }))
+                .await
+            {
+                error!("failed to send error: {:?}", err);
+
+                return;
+            }
+
             // determine if we need to download source archive
 
-            let source_path = get_source_path(&request.hash, &request.name);
+            let pull_request = RegistryPullRequest {
+                artifact_id: Some(artifact_id.clone()),
+                kind: RegistryStoreKind::ArtifactSource as i32,
+            };
 
-            if !source_path.exists() {
-                let pull_request = RegistryPullRequest {
-                    artifact_id: Some(id.clone()),
-                    kind: RegistryStoreKind::ArtifactSource as i32,
-                };
+            match registry_client.pull(pull_request.clone()).await {
+                Ok(response) => {
+                    let mut response = response.into_inner();
+                    let mut response_data = Vec::new();
 
-                match registry_client.pull(pull_request.clone()).await {
-                    Ok(response) => {
-                        let mut response = response.into_inner();
-                        let mut response_data = Vec::new();
-
-                        while let Ok(message) = response.message().await {
-                            if message.is_none() {
-                                break;
-                            }
-
-                            if let Some(res) = message {
-                                if !res.data.is_empty() {
-                                    response_data.extend_from_slice(&res.data);
-                                }
-                            }
+                    while let Ok(message) = response.message().await {
+                        if message.is_none() {
+                            break;
                         }
 
-                        if !response_data.is_empty() {
-                            let source_archive_path = get_source_archive_path(&id.hash, &id.name);
-
-                            let mut source_archive = match File::create(&source_archive_path).await
-                            {
-                                Ok(file) => file,
-                                Err(err) => {
-                                    if let Err(err) = tx
-                                        .send(Err(Status::internal(format!(
-                                            "failed to create source archive: {:?}",
-                                            err
-                                        ))))
-                                        .await
-                                    {
-                                        error!("failed to send error: {:?}", err);
-                                    }
-
-                                    return;
-                                }
-                            };
-
-                            if let Err(err) = source_archive.write_all(&response_data).await {
-                                if let Err(err) = tx
-                                    .send(Err(Status::internal(format!(
-                                        "failed to write source archive: {:?}",
-                                        err
-                                    ))))
-                                    .await
-                                {
-                                    error!("failed to send error: {:?}", err);
-                                }
-                            }
-
-                            if let Err(err) = create_dir_all(&source_path).await {
-                                if let Err(err) = tx
-                                    .send(Err(Status::internal(format!(
-                                        "failed to create source path: {:?}",
-                                        err
-                                    ))))
-                                    .await
-                                {
-                                    error!("failed to send error: {:?}", err);
-                                }
-
-                                return;
-                            }
-
-                            if let Err(err) = unpack_zstd(&source_path, &source_archive_path).await
-                            {
-                                if let Err(err) = tx
-                                    .send(Err(Status::internal(format!(
-                                        "failed to unpack source archive: {:?}",
-                                        err
-                                    ))))
-                                    .await
-                                {
-                                    error!("failed to send error: {:?}", err);
-                                }
-
-                                return;
-                            }
-
-                            if let Err(err) = remove_file(&source_archive_path).await {
-                                if let Err(err) = tx
-                                    .send(Err(Status::internal(format!(
-                                        "failed to remove source archive: {:?}",
-                                        err
-                                    ))))
-                                    .await
-                                {
-                                    error!("failed to send error: {:?}", err);
-                                }
-
-                                return;
+                        if let Some(res) = message {
+                            if !res.data.is_empty() {
+                                response_data.extend_from_slice(&res.data);
                             }
                         }
                     }
 
-                    Err(status) => {
-                        if status.code() != NotFound {
+                    if !response_data.is_empty() {
+                        let source_archive_path = match create_sandbox_file(Some("tar.zst")).await {
+                            Ok(path) => path,
+                            Err(err) => {
+                                if let Err(err) = tx
+                                    .send(Err(Status::internal(format!(
+                                        "failed to create source archive: {:?}",
+                                        err
+                                    ))))
+                                    .await
+                                {
+                                    error!("failed to send error: {:?}", err);
+                                }
+
+                                return;
+                            }
+                        };
+
+                        let mut source_archive = match File::create(&source_archive_path).await {
+                            Ok(file) => file,
+                            Err(err) => {
+                                if let Err(err) = tx
+                                    .send(Err(Status::internal(format!(
+                                        "failed to create source archive: {:?}",
+                                        err
+                                    ))))
+                                    .await
+                                {
+                                    error!("failed to send error: {:?}", err);
+                                }
+
+                                return;
+                            }
+                        };
+
+                        if let Err(err) = source_archive.write_all(&response_data).await {
                             if let Err(err) = tx
                                 .send(Err(Status::internal(format!(
-                                    "failed to pull source archive: {:?}",
-                                    status
+                                    "failed to write source archive: {:?}",
+                                    err
+                                ))))
+                                .await
+                            {
+                                error!("failed to send error: {:?}", err);
+                            }
+                        }
+
+                        let workspace_source_path = workspace_path_canonical.join("source");
+
+                        if let Err(err) = create_dir_all(&workspace_source_path).await {
+                            if let Err(err) = tx
+                                .send(Err(Status::internal(format!(
+                                    "failed to create source path: {:?}",
+                                    err
+                                ))))
+                                .await
+                            {
+                                error!("failed to send error: {:?}", err);
+                            }
+
+                            return;
+                        }
+
+                        if let Err(err) = tx
+                            .send(Ok(ArtifactBuildResponse {
+                                output: "unpacking source...".to_string(),
+                            }))
+                            .await
+                        {
+                            error!("failed to send error: {:?}", err);
+
+                            return;
+                        }
+
+                        if let Err(err) =
+                            unpack_zstd(&workspace_source_path, &source_archive_path).await
+                        {
+                            if let Err(err) = tx
+                                .send(Err(Status::internal(format!(
+                                    "failed to unpack source archive: {:?}",
+                                    err
+                                ))))
+                                .await
+                            {
+                                error!("failed to send error: {:?}", err);
+                            }
+
+                            return;
+                        }
+
+                        if let Err(err) = remove_file(&source_archive_path).await {
+                            if let Err(err) = tx
+                                .send(Err(Status::internal(format!(
+                                    "failed to remove source archive: {:?}",
+                                    err
                                 ))))
                                 .await
                             {
@@ -583,16 +586,13 @@ impl ArtifactService for ArtifactServer {
                         }
                     }
                 }
-            }
 
-            if source_path.exists() {
-                let source_files = match get_file_paths(&source_path, vec![], vec![]) {
-                    Ok(files) => files,
-                    Err(err) => {
+                Err(status) => {
+                    if status.code() != NotFound {
                         if let Err(err) = tx
                             .send(Err(Status::internal(format!(
-                                "failed to get source files: {:?}",
-                                err
+                                "failed to pull source archive: {:?}",
+                                status
                             ))))
                             .await
                         {
@@ -601,22 +601,6 @@ impl ArtifactService for ArtifactServer {
 
                         return;
                     }
-                };
-
-                if let Err(err) =
-                    copy_files(&source_path, source_files, &workspace_source_path).await
-                {
-                    if let Err(err) = tx
-                        .send(Err(Status::internal(format!(
-                            "failed to copy source files: {:?}",
-                            err
-                        ))))
-                        .await
-                    {
-                        error!("failed to send error: {:?}", err);
-                    }
-
-                    return;
                 }
             }
 
@@ -687,6 +671,8 @@ impl ArtifactService for ArtifactServer {
                 .await
             {
                 error!("failed to send error: {:?}", err);
+
+                return;
             }
 
             let artifact_archive_path = match create_sandbox_file(Some("tar.zst")).await {
@@ -722,7 +708,7 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
-            // uplaod artifact to registry
+            // upload artifact to registry
 
             if let Err(err) = tx
                 .send(Ok(ArtifactBuildResponse {
@@ -731,6 +717,8 @@ impl ArtifactService for ArtifactServer {
                 .await
             {
                 error!("failed to send error: {:?}", err);
+
+                return;
             }
 
             let artifact_data = match read(&artifact_archive_path).await {
@@ -814,6 +802,24 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
+            // sanitize output files
+
+            for path in artifact_path_files.iter() {
+                if let Err(err) = set_timestamps(path).await {
+                    if let Err(err) = tx
+                        .send(Err(Status::internal(format!(
+                            "failed to sanitize output files: {:?}",
+                            err
+                        ))))
+                        .await
+                    {
+                        error!("failed to send error: {:?}", err);
+                    }
+
+                    return;
+                }
+            }
+
             // Remove artifact archive
 
             if let Err(err) = remove_file(&artifact_archive_path).await {
@@ -830,12 +836,12 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
-            // Remove lock file
+            // Remove workspace
 
-            if let Err(err) = remove_file(&artifact_lock_path).await {
+            if let Err(err) = remove_dir_all(workspace_path).await {
                 if let Err(err) = tx
                     .send(Err(Status::internal(format!(
-                        "failed to remove lock file: {:?}",
+                        "failed to remove workspace: {:?}",
                         err
                     ))))
                     .await
@@ -846,12 +852,12 @@ impl ArtifactService for ArtifactServer {
                 return;
             }
 
-            // Remove workspace
+            // Remove lock file
 
-            if let Err(err) = remove_dir_all(workspace_path).await {
+            if let Err(err) = remove_file(&artifact_lock_path).await {
                 if let Err(err) = tx
                     .send(Err(Status::internal(format!(
-                        "failed to remove workspace: {:?}",
+                        "failed to remove lock file: {:?}",
                         err
                     ))))
                     .await

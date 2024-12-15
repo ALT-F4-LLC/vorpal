@@ -6,7 +6,7 @@ use sha256::digest;
 use std::collections::HashMap;
 use std::env::consts::{ARCH, OS};
 use std::path::PathBuf;
-use tokio::fs::{create_dir_all, remove_dir_all};
+use tokio::fs::remove_dir_all;
 use tonic::transport::Server;
 use tracing::Level;
 use vorpal_schema::{
@@ -16,7 +16,11 @@ use vorpal_schema::{
         config::v0::{config_service_server::ConfigServiceServer, Config},
     },
 };
-use vorpal_store::{hashes::hash_files, paths::copy_files, temps::create_sandbox_dir};
+use vorpal_store::{
+    hashes::hash_files,
+    paths::{copy_files, set_timestamps},
+    temps::create_sandbox_dir,
+};
 
 pub mod artifact;
 pub mod service;
@@ -65,7 +69,7 @@ pub async fn get_context() -> Result<ConfigContext> {
 
 #[derive(Clone, Debug, Default)]
 pub struct ConfigContext {
-    artifact_id: HashMap<String, Artifact>,
+    pub artifact_id: HashMap<ArtifactId, Artifact>,
     pub port: u16,
     source_hash: HashMap<String, String>,
     system: ArtifactSystem,
@@ -104,31 +108,38 @@ impl ConfigContext {
 
     pub fn add_artifact(&mut self, artifact: Artifact) -> Result<ArtifactId> {
         let artifact_json = serde_json::to_string(&artifact).map_err(|e| anyhow::anyhow!(e))?;
+
         let artifact_metadata = ArtifactMetadata {
             system: self.system,
         };
+
         let artifact_metadata_json =
             serde_json::to_string(&artifact_metadata).map_err(|e| anyhow::anyhow!(e))?;
-        let artifact_manifest = format!("{}:{}", artifact_json, artifact_metadata_json);
-        let artifact_manifest_hash = digest(artifact_manifest.as_bytes());
-        let artifact_key = format!("{}-{}", artifact.name, artifact_manifest_hash);
 
-        if !self.artifact_id.contains_key(&artifact_key) {
-            self.artifact_id
-                .insert(artifact_key.clone(), artifact.clone());
-        }
+        let artifact_manifest = format!("{}:{}", artifact_json, artifact_metadata_json);
+
+        let artifact_hash = digest(artifact_manifest.as_bytes());
 
         let artifact_id = ArtifactId {
-            hash: artifact_manifest_hash,
-            name: artifact.name,
+            hash: artifact_hash,
+            name: artifact.name.clone(),
         };
+
+        if !self.artifact_id.contains_key(&artifact_id) {
+            self.artifact_id
+                .insert(artifact_id.clone(), artifact.clone());
+        }
 
         Ok(artifact_id)
     }
 
     pub fn get_artifact(&self, hash: &str, name: &str) -> Option<&Artifact> {
-        let artifact_key = format!("{}-{}", name, hash);
-        self.artifact_id.get(&artifact_key)
+        let artifact_id = ArtifactId {
+            hash: hash.to_string(),
+            name: name.to_string(),
+        };
+
+        self.artifact_id.get(&artifact_id)
     }
 
     pub async fn add_source_hash(
@@ -143,11 +154,11 @@ impl ConfigContext {
         if !self.source_hash.contains_key(&source_key) {
             let sandbox_path = create_sandbox_dir().await?;
 
-            create_dir_all(&sandbox_path)
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-
             let sandbox_files = copy_files(&path, files.clone(), &sandbox_path).await?;
+
+            for path in sandbox_files.clone().into_iter() {
+                set_timestamps(&path).await?;
+            }
 
             let source_hash = hash_files(sandbox_files.clone())?;
 
@@ -182,10 +193,12 @@ impl ConfigContext {
         self.system
     }
 
-    pub async fn run(&self, config: Config) -> Result<()> {
+    pub async fn run(&self, artifacts: Vec<ArtifactId>) -> Result<()> {
         let addr = format!("[::]:{}", self.port)
             .parse()
             .expect("failed to parse address");
+
+        let config = Config { artifacts };
 
         let context = self.clone();
 

@@ -1,34 +1,25 @@
-use crate::config::{artifact::add_artifact, ConfigContext};
+use crate::config::artifact::{add_artifact, ConfigContext};
 use anyhow::Result;
-use indoc::formatdoc;
-use vorpal_schema::vorpal::artifact::v0::ArtifactId;
+use vorpal_schema::vorpal::artifact::v0::{ArtifactId, ArtifactSource};
 
-pub async fn artifact(
-    context: &mut ConfigContext,
-    override_version: Option<String>,
-) -> Result<ArtifactId> {
+pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
+    let hash = "e23cc249a095345e3ba2bb05decd593e96d0024e8dad25e320cb91dfd44119af";
+
     let name = "rust-src";
-
-    let mut version = "1.80.1".to_string();
-
-    if let Some(v) = override_version {
-        version = v;
-    }
 
     add_artifact(
         context,
         vec![],
         vec![],
         name,
-        formatdoc! {"
-            curl -L -o ./{name}-{version}.tar.gz \
-                https://static.rust-lang.org/dist/{name}-{version}.tar.gz
-
-            tar -xvf ./{name}-{version}.tar.gz -C source --strip-components=1
-
-            cp -prv \"./source/{name}/.\" \"$VORPAL_OUTPUT\"
-        "},
-        vec![],
+        format!("cp -prv \"./source/{name}/{name}-{version}/{name}/.\" \"$VORPAL_OUTPUT\""),
+        vec![ArtifactSource {
+            excludes: vec![],
+            hash: Some(hash.to_string()),
+            includes: vec![],
+            name: name.to_string(),
+            path: format!("https://static.rust-lang.org/dist/{name}-{version}.tar.gz"),
+        }],
         vec![
             "aarch64-linux",
             "aarch64-macos",

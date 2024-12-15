@@ -7,14 +7,14 @@ use vorpal_schema::vorpal::artifact::v0::{
 
 pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
     let hash = match context.get_target() {
-        Aarch64Linux => "2104734509330997f1c21fb8e1f8430e24f38f1a856e116c3f4fc7b54c6201fb",
-        Aarch64Macos => "d29a89d06ac9acdae514dddf8b9168a8fd4d2be3434b8f20e9fe22091e86e30f",
-        X8664Linux => "686ed59c5df4cf2785f8e8c50665ac1949e4084283854a00cef47ca633501351",
+        Aarch64Linux => "a4c911c6e4da46c65ebfc61166201e7a2abbc36966ee3ae4942173c9eece15ae",
+        Aarch64Macos => "53a9074aaa83ab133797df6336b32d23b7de876d0483394a96a00b39bb536a1a",
+        X8664Linux => "72c08b50155a0647643126a16a15672ce0856773ba19e60726abe8913d90be19",
         X8664Macos => "1234567890",
         UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
 
-    let name = "rust-analyzer";
+    let name = "clippy";
 
     let target = get_toolchain_target(context.get_target())?;
 

@@ -155,17 +155,15 @@ pub fn get_file_paths(
     Ok(files)
 }
 
-pub async fn set_paths_timestamps(paths: &[PathBuf]) -> Result<(), Error> {
+pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
     let epoc = FileTime::from_unix_time(0, 0);
 
-    for path in paths {
-        if !path.is_symlink() {
-            set_file_times(path, epoc, epoc).expect("Failed to set file times");
-        }
+    if !path.is_symlink() {
+        set_file_times(path, epoc, epoc).expect("Failed to set file times");
+    }
 
-        if path.is_symlink() {
-            set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
-        }
+    if path.is_symlink() {
+        set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
     }
 
     Ok(())
@@ -212,8 +210,6 @@ pub async fn copy_files(
     }
 
     let target_path_files = get_file_paths(&target_path.to_path_buf(), vec![], vec![])?;
-
-    set_paths_timestamps(&target_path_files).await?;
 
     Ok(target_path_files)
 }
