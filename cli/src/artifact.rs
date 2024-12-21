@@ -38,17 +38,10 @@ pub async fn build(
     let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_path.exists() {
-        info!(
-            "[{}] pulled artifact -> {}",
-            artifact_id.name, artifact_id.hash
-        );
-
         return Ok(());
     }
 
     // 2. Check if artifact exists (registry)
-
-    info!("[{}] pull -> {}", artifact_id.name, artifact_id.hash);
 
     let pull_request = RegistryRequest {
         hash: artifact_id.hash.clone(),
@@ -103,7 +96,7 @@ pub async fn build(
                         .await
                         .expect("failed to write artifact archive");
 
-                    info!("[{}] unpacking...", artifact_id.name);
+                    info!("[{}] unpacking -> {}", artifact_id.name, artifact_id.hash);
 
                     create_dir_all(&artifact_path)
                         .await
@@ -130,11 +123,6 @@ pub async fn build(
     }
 
     // 3. Push artifact source(s) to registry (registry)
-
-    info!(
-        "[{}] preparing sources -> {}",
-        artifact_id.name, artifact_id.hash
-    );
 
     let private_key_path = get_private_key_path();
 

@@ -153,8 +153,6 @@ impl ConfigContext {
                 }
 
                 Ok(_) => {
-                    info!("[{}] pushed source -> {}", name, hash);
-
                     return Ok(ArtifactSourceId {
                         hash,
                         name: name.to_string(),
@@ -166,8 +164,6 @@ impl ConfigContext {
             let cache_archive_path = get_cache_archive_path(&hash, name);
 
             if cache_archive_path.exists() {
-                info!("[{}] cached source -> {}", name, hash);
-
                 return Ok(ArtifactSourceId {
                     hash,
                     name: name.to_string(),
@@ -222,7 +218,7 @@ impl ConfigContext {
                 );
             }
 
-            info!("[{}] fetching source... ({})", name, remote_path.as_str());
+            info!("[{}] fetching source -> ({})", name, remote_path.as_str());
 
             let remote_response = reqwest::get(remote_path.as_str())
                 .await
@@ -264,7 +260,7 @@ impl ConfigContext {
                         let mut archive = Archive::new(decoder);
 
                         info!(
-                            "[{}] unpacking gzip... ({})",
+                            "[{}] unpacking gzip -> {}",
                             name,
                             source_sandbox_path.display(),
                         );
@@ -282,7 +278,7 @@ impl ConfigContext {
                         let mut archive = Archive::new(decoder);
 
                         info!(
-                            "[{}] unpacking bzip2... ({})",
+                            "[{}] unpacking bzip2 -> {}",
                             name,
                             source_sandbox_path.display(),
                         );
@@ -298,7 +294,7 @@ impl ConfigContext {
                         let mut archive = Archive::new(decoder);
 
                         info!(
-                            "[{}] unpacking xz... ({})",
+                            "[{}] unpacking xz -> {}",
                             name,
                             source_sandbox_path.display(),
                         );
@@ -317,7 +313,7 @@ impl ConfigContext {
                             .map_err(|e| anyhow::anyhow!(e))?;
 
                         info!(
-                            "[{}] unpacking zip... ({})",
+                            "[{}] unpacking zip -> {}",
                             name,
                             source_sandbox_path.display(),
                         );
@@ -385,7 +381,7 @@ impl ConfigContext {
             source_hash_default = hash;
         }
 
-        info!("[{}] hashing source... ({})", name, source_hash_default);
+        info!("[{}] hashing source -> {}", name, source_hash_default);
 
         let source_hash = hash_files(source_sandbox_files.clone())?;
 
@@ -400,7 +396,7 @@ impl ConfigContext {
             }
         }
 
-        info!("[{}] caching source... ({})", name, source_hash);
+        info!("[{}] caching source -> {}", name, source_hash);
 
         let cache_archive_path = get_cache_archive_path(&source_hash, name);
 
