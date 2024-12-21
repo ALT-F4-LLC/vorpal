@@ -210,6 +210,13 @@ pub async fn copy_files(
 }
 
 pub async fn setup_paths() -> Result<()> {
+    let cache_path = get_cache_dir_path();
+    if !cache_path.exists() {
+        create_dir_all(&cache_path)
+            .await
+            .expect("failed to create cache directory");
+    }
+
     let key_path = get_key_dir_path();
     if !key_path.exists() {
         create_dir_all(&key_path)
