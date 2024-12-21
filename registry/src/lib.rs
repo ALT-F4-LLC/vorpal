@@ -15,9 +15,10 @@ use tracing::error;
 use vorpal_notary::get_public_key;
 use vorpal_schema::vorpal::registry::v0::{
     registry_service_server::{RegistryService, RegistryServiceServer},
-    RegistryPullRequest, RegistryPullResponse, RegistryPushRequest, RegistryPushResponse,
-    RegistryStoreKind,
-    RegistryStoreKind::{Artifact, ArtifactSource, UnknownStoreKind},
+    RegistryKind,
+    RegistryKind::{Artifact, ArtifactSource, UnknownStoreKind},
+    RegistryPullRequest, RegistryPullResponse, RegistryPushRequest, RegistryRequest,
+    RegistryResponse,
 };
 use vorpal_store::paths::{
     get_artifact_archive_path, get_public_key_path, get_source_archive_path, get_store_dir_name,
@@ -53,6 +54,13 @@ impl RegistryServer {
 impl RegistryService for RegistryServer {
     type PullStream = ReceiverStream<Result<RegistryPullResponse, Status>>;
 
+    async fn exists(
+        &self,
+        request: Request<RegistryRequest>,
+    ) -> Result<Response<RegistryResponse>, Status> {
+        Ok(Response::new(RegistryResponse { success: true }))
+    }
+
     async fn pull(
         &self,
         request: Request<RegistryPullRequest>,
@@ -70,9 +78,8 @@ impl RegistryService for RegistryServer {
 
         tokio::spawn(async move {
             let request = request.into_inner();
-            let request_artifact_id = request.artifact_id.clone();
 
-            if request_artifact_id.is_none() {
+            if request.hash.is_empty() {
                 if let Err(err) = tx
                     .send(Err(Status::invalid_argument("missing artifact id")))
                     .await
@@ -83,30 +90,13 @@ impl RegistryService for RegistryServer {
                 return;
             }
 
-            if let Some(artifact_id) = request_artifact_id {
-                if backend == RegistryServerBackend::Local {
-                    let path = match request.kind() {
-                        Artifact => get_artifact_archive_path(&artifact_id.hash, &artifact_id.name),
-
-                        ArtifactSource => {
-                            get_source_archive_path(&artifact_id.hash, &artifact_id.name)
-                        }
-
-                        _ => {
-                            if let Err(err) = tx
-                                .send(Err(Status::invalid_argument("unsupported store kind")))
-                                .await
-                            {
-                                error!("failed to send store error: {:?}", err);
-                            }
-
-                            return;
-                        }
-                    };
-
-                    if !path.exists() {
+            if backend == RegistryServerBackend::Local {
+                let path = match request.kind() {
+                    Artifact => get_artifact_archive_path(&request.hash, &request.name),
+                    ArtifactSource => get_source_archive_path(&request.hash, &request.name),
+                    _ => {
                         if let Err(err) = tx
-                            .send(Err(Status::not_found("store path not found")))
+                            .send(Err(Status::invalid_argument("unsupported store kind")))
                             .await
                         {
                             error!("failed to send store error: {:?}", err);
@@ -114,117 +104,125 @@ impl RegistryService for RegistryServer {
 
                         return;
                     }
+                };
 
-                    let data = match read(&path).await {
-                        Ok(data) => data,
-                        Err(err) => {
-                            if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await
-                            {
-                                error!("failed to send store error: {:?}", err);
-                            }
-
-                            return;
-                        }
-                    };
-
-                    for chunk in data.chunks(DEFAULT_CHUNK_SIZE) {
-                        if let Err(err) = tx
-                            .send(Ok(RegistryPullResponse {
-                                data: chunk.to_vec(),
-                            }))
-                            .await
-                        {
-                            error!("failed to send store chunk: {:?}", err);
-
-                            break;
-                        }
+                if !path.exists() {
+                    if let Err(err) = tx
+                        .send(Err(Status::not_found("store path not found")))
+                        .await
+                    {
+                        error!("failed to send store error: {:?}", err);
                     }
+
+                    return;
                 }
 
-                if backend == RegistryServerBackend::S3 {
-                    let artifact_key = match request.kind() {
-                        Artifact => format!(
-                            "store/{}.artifact",
-                            get_store_dir_name(&artifact_id.hash, &artifact_id.name)
-                        ),
-
-                        ArtifactSource => {
-                            format!(
-                                "store/{}.source",
-                                get_store_dir_name(&artifact_id.hash, &artifact_id.name)
-                            )
+                let data = match read(&path).await {
+                    Ok(data) => data,
+                    Err(err) => {
+                        if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await {
+                            error!("failed to send store error: {:?}", err);
                         }
 
-                        _ => {
+                        return;
+                    }
+                };
+
+                for chunk in data.chunks(DEFAULT_CHUNK_SIZE) {
+                    if let Err(err) = tx
+                        .send(Ok(RegistryPullResponse {
+                            data: chunk.to_vec(),
+                        }))
+                        .await
+                    {
+                        error!("failed to send store chunk: {:?}", err);
+
+                        break;
+                    }
+                }
+            }
+
+            if backend == RegistryServerBackend::S3 {
+                let artifact_key = match request.kind() {
+                    Artifact => format!(
+                        "store/{}.artifact",
+                        get_store_dir_name(&request.hash, &request.name)
+                    ),
+
+                    ArtifactSource => {
+                        format!(
+                            "store/{}.source",
+                            get_store_dir_name(&request.hash, &request.name)
+                        )
+                    }
+
+                    _ => {
+                        if let Err(err) = tx
+                            .send(Err(Status::invalid_argument("unsupported store kind")))
+                            .await
+                        {
+                            error!("failed to send store error: {:?}", err);
+                        }
+
+                        return;
+                    }
+                };
+
+                let client_config = aws_config::load_from_env().await;
+                let client = Client::new(&client_config);
+
+                let _ = match client
+                    .head_object()
+                    .bucket(client_bucket_name.clone())
+                    .key(artifact_key.clone())
+                    .send()
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(err) => {
+                        if let Err(err) = tx.send(Err(Status::not_found(err.to_string()))).await {
+                            error!("failed to send store error: {:?}", err);
+                        }
+
+                        return;
+                    }
+                };
+
+                let mut stream = match client
+                    .get_object()
+                    .bucket(client_bucket_name)
+                    .key(artifact_key)
+                    .send()
+                    .await
+                {
+                    Ok(output) => output.body,
+                    Err(err) => {
+                        if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await {
+                            error!("failed to send store error: {:?}", err);
+                        }
+
+                        return;
+                    }
+                };
+
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(chunk) => {
                             if let Err(err) = tx
-                                .send(Err(Status::invalid_argument("unsupported store kind")))
+                                .send(Ok(RegistryPullResponse {
+                                    data: chunk.to_vec(),
+                                }))
                                 .await
                             {
-                                error!("failed to send store error: {:?}", err);
-                            }
-
-                            return;
-                        }
-                    };
-
-                    let client_config = aws_config::load_from_env().await;
-                    let client = Client::new(&client_config);
-
-                    let _ = match client
-                        .head_object()
-                        .bucket(client_bucket_name.clone())
-                        .key(artifact_key.clone())
-                        .send()
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(err) => {
-                            if let Err(err) = tx.send(Err(Status::not_found(err.to_string()))).await
-                            {
-                                error!("failed to send store error: {:?}", err);
-                            }
-
-                            return;
-                        }
-                    };
-
-                    let mut stream = match client
-                        .get_object()
-                        .bucket(client_bucket_name)
-                        .key(artifact_key)
-                        .send()
-                        .await
-                    {
-                        Ok(output) => output.body,
-                        Err(err) => {
-                            if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await
-                            {
-                                error!("failed to send store error: {:?}", err);
-                            }
-
-                            return;
-                        }
-                    };
-
-                    while let Some(chunk_result) = stream.next().await {
-                        match chunk_result {
-                            Ok(chunk) => {
-                                if let Err(err) = tx
-                                    .send(Ok(RegistryPullResponse {
-                                        data: chunk.to_vec(),
-                                    }))
-                                    .await
-                                {
-                                    error!("failed to send store chunk: {:?}", err.to_string());
-
-                                    break;
-                                }
-                            }
-                            Err(err) => {
-                                let _ = tx.send(Err(Status::internal(err.to_string()))).await;
+                                error!("failed to send store chunk: {:?}", err.to_string());
 
                                 break;
                             }
+                        }
+                        Err(err) => {
+                            let _ = tx.send(Err(Status::internal(err.to_string()))).await;
+
+                            break;
                         }
                     }
                 }
@@ -237,16 +235,17 @@ impl RegistryService for RegistryServer {
     async fn push(
         &self,
         request: Request<Streaming<RegistryPushRequest>>,
-    ) -> Result<Response<RegistryPushResponse>, Status> {
+    ) -> Result<Response<RegistryResponse>, Status> {
         let backend = self.backend.clone();
 
         if backend == RegistryServerBackend::S3 && self.backend_s3_bucket.is_none() {
-            return Err(Status::invalid_argument("missing s3 bucket"));
+            return Err(Status::invalid_argument("missing `s3` bucket argument"));
         }
 
         let mut data: Vec<u8> = vec![];
-        let mut data_artifact_id = None;
+        let mut data_hash = None;
         let mut data_kind = UnknownStoreKind;
+        let mut data_name = None;
         let mut data_signature = vec![];
         let mut stream = request.into_inner();
 
@@ -255,25 +254,26 @@ impl RegistryService for RegistryServer {
 
             data.extend_from_slice(&result.data);
 
-            data_artifact_id = result.artifact_id;
-            data_kind = RegistryStoreKind::try_from(result.kind).unwrap_or(UnknownStoreKind);
+            data_hash = Some(result.hash);
+            data_kind = RegistryKind::try_from(result.kind).unwrap_or(UnknownStoreKind);
+            data_name = Some(result.name);
             data_signature = result.data_signature;
         }
 
         if data.is_empty() {
-            return Err(Status::invalid_argument("missing data"));
+            return Err(Status::invalid_argument("missing `data` field"));
         }
 
-        if data_artifact_id.is_none() {
-            return Err(Status::invalid_argument("missing artifact id"));
+        if data_hash.is_none() {
+            return Err(Status::invalid_argument("missing `hash` field"));
         }
 
         if data_kind == UnknownStoreKind {
-            return Err(Status::invalid_argument("missing store kind"));
+            return Err(Status::invalid_argument("missing `kind` field"));
         }
 
         if data_signature.is_empty() {
-            return Err(Status::invalid_argument("missing data signature"));
+            return Err(Status::invalid_argument("missing `data_signature` field"));
         }
 
         let public_key_path = get_public_key_path();
@@ -294,19 +294,19 @@ impl RegistryService for RegistryServer {
             )));
         }
 
-        let artifact_id = data_artifact_id.unwrap();
-
         let backend = self.backend.clone();
+        let hash = data_hash.unwrap();
+        let name = data_name.unwrap();
 
         if backend == RegistryServerBackend::Local {
             let path = match data_kind {
-                Artifact => get_artifact_archive_path(&artifact_id.hash, &artifact_id.name),
-                ArtifactSource => get_source_archive_path(&artifact_id.hash, &artifact_id.name),
+                Artifact => get_artifact_archive_path(&hash, &name),
+                ArtifactSource => get_source_archive_path(&hash, &name),
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
             if path.exists() {
-                return Ok(Response::new(RegistryPushResponse { success: true }));
+                return Ok(Response::new(RegistryResponse { success: true }));
             }
 
             write(&path, &data).await.map_err(|err| {
@@ -320,19 +320,24 @@ impl RegistryService for RegistryServer {
 
         if backend == RegistryServerBackend::S3 {
             let artifact_key = match data_kind {
-                Artifact => format!(
-                    "store/{}.artifact",
-                    get_store_dir_name(&artifact_id.hash, &artifact_id.name)
-                ),
-                ArtifactSource => format!(
-                    "store/{}.source",
-                    get_store_dir_name(&artifact_id.hash, &artifact_id.name)
-                ),
+                Artifact => format!("store/{}.artifact", get_store_dir_name(&hash, &name)),
+                ArtifactSource => format!("store/{}.source", get_store_dir_name(&hash, &name)),
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
             let client_config = aws_config::load_from_env().await;
             let client = Client::new(&client_config);
+
+            let head_result = client
+                .head_object()
+                .bucket(self.backend_s3_bucket.clone().unwrap())
+                .key(&artifact_key)
+                .send()
+                .await;
+
+            if head_result.is_ok() {
+                return Ok(Response::new(RegistryResponse { success: true }));
+            }
 
             let _ = client
                 .put_object()
@@ -346,7 +351,7 @@ impl RegistryService for RegistryServer {
                 })?;
         }
 
-        Ok(Response::new(RegistryPushResponse { success: true }))
+        Ok(Response::new(RegistryResponse { success: true }))
     }
 }
 

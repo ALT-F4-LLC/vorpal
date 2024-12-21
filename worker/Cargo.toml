@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = { default-features = false, version = "1" }
+serde_json = { default-features = false, features = ["std"], version = "1" }
+sha256 = { default-features = false, version = "1" }
 tokio = { default-features = false, features = ["process", "rt-multi-thread"], version = "1" }
 tokio-stream = { default-features = false, features = ["io-util"], version = "0" }
 tonic = { default-features = false, version = "0" }

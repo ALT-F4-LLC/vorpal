@@ -9,19 +9,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.artifact.v0.ArtifactEnvironment",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
-        )
-        .message_attribute(
             "vorpal.artifact.v0.ArtifactId",
             "#[derive(Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.artifact.v0.ArtifactSandbox",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
+            "vorpal.artifact.v0.ArtifactSourceId",
+            "#[derive(Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
             "vorpal.artifact.v0.ArtifactSource",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
+            "vorpal.artifact.v0.ArtifactStepEnvironment",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
@@ -30,6 +30,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .message_attribute(
             "vorpal.artifact.v0.Artifact",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
+            "vorpal.artifact.v0.ArtifactBuildRequest",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .compile_protos(

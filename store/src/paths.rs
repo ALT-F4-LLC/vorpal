@@ -1,9 +1,9 @@
 use anyhow::{bail, Error, Result};
 use filetime::{set_file_times, set_symlink_file_times, FileTime};
-use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use uuid::Uuid;
+use walkdir::WalkDir;
 
 // Store paths
 
@@ -13,6 +13,10 @@ pub fn get_store_dir_name(hash: &str, name: &str) -> String {
 
 pub fn get_root_dir_path() -> PathBuf {
     Path::new("/var/lib/vorpal").to_path_buf()
+}
+
+pub fn get_cache_dir_path() -> PathBuf {
+    get_root_dir_path().join("cache")
 }
 
 pub fn get_key_dir_path() -> PathBuf {
@@ -27,6 +31,18 @@ pub fn get_store_dir_path() -> PathBuf {
     get_root_dir_path().join("store")
 }
 
+// Cache paths
+
+pub fn get_cache_path(hash: &str, name: &str) -> PathBuf {
+    get_cache_dir_path().join(get_store_dir_name(hash, name))
+}
+
+pub fn get_cache_archive_path(hash: &str, name: &str) -> PathBuf {
+    get_cache_dir_path()
+        .join(get_store_dir_name(hash, name))
+        .with_extension("tar.zst")
+}
+
 // Key paths
 
 pub fn get_private_key_path() -> PathBuf {
@@ -35,20 +51,6 @@ pub fn get_private_key_path() -> PathBuf {
 
 pub fn get_public_key_path() -> PathBuf {
     get_key_dir_path().join("public").with_extension("pem")
-}
-
-// Input paths - "/vorpal/store/{hash}.input"
-
-pub fn get_input_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("input")
-}
-
-pub fn get_input_archive_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("input.tar.zst")
 }
 
 // Artifact paths - "/vorpal/store/{hash}.artifact"
@@ -105,16 +107,9 @@ pub fn get_file_paths(
 
     excludes_paths.push(Path::new(".git").to_path_buf());
 
-    let walker = WalkBuilder::new(source_path)
-        .standard_filters(false) // Don't use default filters
-        .git_exclude(true)
-        .git_global(true)
-        .git_ignore(true)
-        .hidden(false)
-        .ignore(false)
-        .parents(true)
-        .require_git(false)
-        .build();
+    // Resolve full path
+
+    let walker = WalkDir::new(source_path);
 
     let mut files: Vec<PathBuf> = walker
         .into_iter()

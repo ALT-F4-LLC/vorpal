@@ -1,25 +1,32 @@
 use crate::config::service::ConfigServer;
-use anyhow::Result;
+use anyhow::{bail, Result};
+use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use sha256::digest;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env::consts::{ARCH, OS};
-use std::path::PathBuf;
-use tokio::fs::remove_dir_all;
+use std::path::Path;
+use tokio::fs::{remove_dir_all, remove_file, write};
+use tokio_tar::Archive;
 use tonic::transport::Server;
-use tracing::Level;
+use tracing::{info, Level};
+use url::Url;
 use vorpal_schema::{
     get_artifact_system,
     vorpal::{
-        artifact::v0::{Artifact, ArtifactId, ArtifactSystem},
+        artifact::v0::{
+            Artifact, ArtifactBuildRequest, ArtifactId, ArtifactSourceId, ArtifactStep,
+            ArtifactSystem,
+        },
         config::v0::{config_service_server::ConfigServiceServer, Config},
     },
 };
 use vorpal_store::{
+    archives::{compress_zstd, unpack_zip},
     hashes::hash_files,
-    paths::{copy_files, set_timestamps},
-    temps::create_sandbox_dir,
+    paths::{copy_files, get_cache_archive_path, get_file_paths, set_timestamps},
+    temps::{create_sandbox_dir, create_sandbox_file},
 };
 
 pub mod artifact;
@@ -31,6 +38,26 @@ pub mod service;
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ConfigContext {
+    pub artifact_id: HashMap<ArtifactId, Artifact>,
+    pub port: u16,
+    system: ArtifactSystem,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArtifactMetadata {
+    pub system: ArtifactSystem,
+}
+
+#[derive(Clone, Debug)]
+pub struct ArtifactSource {
+    pub excludes: Vec<String>,
+    pub hash: Option<String>,
+    pub includes: Vec<String>,
+    pub path: String,
 }
 
 fn get_default_system() -> String {
@@ -51,6 +78,14 @@ enum Command {
     },
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ArtifactSourceKind {
+    UnknownSourceKind,
+    Git,
+    Http,
+    Local,
+}
+
 pub async fn get_context() -> Result<ConfigContext> {
     let args = Cli::parse();
 
@@ -67,61 +102,335 @@ pub async fn get_context() -> Result<ConfigContext> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct ConfigContext {
-    pub artifact_id: HashMap<ArtifactId, Artifact>,
-    pub port: u16,
-    source_hash: HashMap<String, String>,
-    system: ArtifactSystem,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ArtifactMetadata {
-    pub system: ArtifactSystem,
-}
-
-fn get_source_key_digest(path: PathBuf, files: Vec<PathBuf>) -> Result<String> {
-    let mut relative_paths = vec![];
-
-    for file in files {
-        let relative_path = file.strip_prefix(&path).map_err(|e| anyhow::anyhow!(e))?;
-
-        relative_paths.push(relative_path.display().to_string());
-    }
-
-    let relative_paths = relative_paths.join("\n");
-
-    let source_hash = digest(relative_paths.as_bytes());
-
-    Ok(source_hash)
-}
-
 impl ConfigContext {
     pub fn new(port: u16, system: ArtifactSystem) -> Self {
         Self {
             artifact_id: HashMap::new(),
             port,
-            source_hash: HashMap::new(),
             system,
         }
     }
 
-    pub fn add_artifact(&mut self, artifact: Artifact) -> Result<ArtifactId> {
-        let artifact_json = serde_json::to_string(&artifact).map_err(|e| anyhow::anyhow!(e))?;
+    async fn add_artifact_source(
+        &mut self,
+        name: &str,
+        source: ArtifactSource,
+    ) -> Result<ArtifactSourceId> {
+        // 1. If source is cached using 'hash', return the source id
 
-        let artifact_metadata = ArtifactMetadata {
-            system: self.system,
+        if let Some(hash) = source.hash.clone() {
+            let cache_archive_path = get_cache_archive_path(&hash, name);
+
+            if cache_archive_path.exists() {
+                return Ok(ArtifactSourceId {
+                    hash,
+                    name: name.to_string(),
+                });
+            }
+        }
+
+        // 2. If source is not cached, prepare it and cache it
+
+        let source_path_kind = match &source.path {
+            s if Path::new(s).exists() => ArtifactSourceKind::Local,
+            s if s.starts_with("git") => ArtifactSourceKind::Git,
+            s if s.starts_with("http") => ArtifactSourceKind::Http,
+            _ => ArtifactSourceKind::UnknownSourceKind,
         };
 
-        let artifact_metadata_json =
-            serde_json::to_string(&artifact_metadata).map_err(|e| anyhow::anyhow!(e))?;
+        if source_path_kind == ArtifactSourceKind::UnknownSourceKind {
+            bail!("`source.{}.path` unknown kind: {:?}", name, source.path);
+        }
 
-        let artifact_manifest = format!("{}:{}", artifact_json, artifact_metadata_json);
+        let source_sandbox_path = create_sandbox_dir().await?;
 
-        let artifact_hash = digest(artifact_manifest.as_bytes());
+        if source_path_kind == ArtifactSourceKind::Git {
+            bail!("`source.{}.path` git not supported", name);
+        }
+
+        if source_path_kind == ArtifactSourceKind::Http {
+            if source.hash.is_none() {
+                bail!(
+                    "`source.{}.hash` required for remote sources: {:?}",
+                    name,
+                    source.path
+                );
+            }
+
+            if source.hash.is_some() && source.hash.clone().unwrap() == "" {
+                bail!(
+                    "`source.{}.hash` empty for remote sources: {:?}",
+                    name,
+                    source.path
+                );
+            }
+
+            // Fetch source data from remote path
+
+            let remote_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
+
+            if remote_path.scheme() != "http" && remote_path.scheme() != "https" {
+                bail!(
+                    "source remote scheme not supported: {:?}",
+                    remote_path.scheme()
+                );
+            }
+
+            info!("[{}] fetching source... ({})", name, remote_path.as_str());
+
+            let remote_response = reqwest::get(remote_path.as_str())
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+            if !remote_response.status().is_success() {
+                anyhow::bail!("source URL not failed: {:?}", remote_response.status());
+            }
+
+            let remote_response_bytes = remote_response
+                .bytes()
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+            let remote_response_bytes = remote_response_bytes.as_ref();
+
+            let kind = infer::get(remote_response_bytes);
+
+            if kind.is_none() {
+                let source_file_name = remote_path
+                    .path_segments()
+                    .and_then(|segments| segments.last())
+                    .and_then(|name| if name.is_empty() { None } else { Some(name) })
+                    .unwrap_or(name);
+
+                let source_file_path = source_sandbox_path.join(source_file_name);
+
+                write(&source_file_path, remote_response_bytes)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+            }
+
+            // Unpack source data
+
+            if let Some(kind) = kind {
+                match kind.mime_type() {
+                    "application/gzip" => {
+                        let decoder = GzipDecoder::new(remote_response_bytes);
+                        let mut archive = Archive::new(decoder);
+
+                        info!(
+                            "[{}] unpacking gzip... ({})",
+                            name,
+                            source_sandbox_path.display(),
+                        );
+
+                        archive
+                            .unpack(&source_sandbox_path)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+
+                        // let source_cache_path = source_cache_path.join("...");
+                    }
+
+                    "application/x-bzip2" => {
+                        let decoder = BzDecoder::new(remote_response_bytes);
+                        let mut archive = Archive::new(decoder);
+
+                        info!(
+                            "[{}] unpacking bzip2... ({})",
+                            name,
+                            source_sandbox_path.display(),
+                        );
+
+                        archive
+                            .unpack(&source_sandbox_path)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                    }
+
+                    "application/x-xz" => {
+                        let decoder = XzDecoder::new(remote_response_bytes);
+                        let mut archive = Archive::new(decoder);
+
+                        info!(
+                            "[{}] unpacking xz... ({})",
+                            name,
+                            source_sandbox_path.display(),
+                        );
+
+                        archive
+                            .unpack(&source_sandbox_path)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                    }
+
+                    "application/zip" => {
+                        let archive_sandbox_path = create_sandbox_file(Some("zip")).await?;
+
+                        write(&archive_sandbox_path, remote_response_bytes)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+
+                        info!(
+                            "[{}] unpacking zip... ({})",
+                            name,
+                            source_sandbox_path.display(),
+                        );
+
+                        unpack_zip(&archive_sandbox_path, &source_sandbox_path).await?;
+
+                        remove_file(&archive_sandbox_path)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e))?;
+                    }
+
+                    _ => {
+                        bail!(
+                            "`source.{}.path` unsupported mime-type detected: {:?}",
+                            name,
+                            source.path
+                        );
+                    }
+                }
+            }
+        }
+
+        if source_path_kind == ArtifactSourceKind::Local {
+            let local_path = Path::new(&source.path).to_path_buf();
+
+            if !local_path.exists() {
+                bail!("`source.{}.path` not found: {:?}", name, source.path);
+            }
+
+            let local_source_files = get_file_paths(
+                &local_path,
+                source.excludes.clone(),
+                source.includes.clone(),
+            )?;
+
+            copy_files(
+                &local_path,
+                local_source_files.clone(),
+                &source_sandbox_path,
+            )
+            .await?;
+        }
+
+        let source_sandbox_files = get_file_paths(
+            &source_sandbox_path,
+            source.excludes.clone(),
+            source.includes.clone(),
+        )?;
+
+        if source_sandbox_files.is_empty() {
+            bail!(
+                "Artifact `source.{}.path` no files found: {:?}",
+                name,
+                source.path
+            );
+        }
+
+        for file_path in source_sandbox_files.clone().into_iter() {
+            set_timestamps(&file_path).await?;
+        }
+
+        let mut source_hash_default = "untracked".to_string();
+
+        if let Some(hash) = source.hash.clone() {
+            source_hash_default = hash;
+        }
+
+        info!("[{}] hashing source... ({})", name, source_hash_default);
+
+        let source_hash = hash_files(source_sandbox_files.clone())?;
+
+        if let Some(hash) = source.hash.clone() {
+            if hash != source_hash {
+                bail!(
+                    "`source.{}.hash` mismatch: {} != {}",
+                    name,
+                    source_hash,
+                    hash
+                );
+            }
+        }
+
+        info!("[{}] caching source... ({})", name, source_hash);
+
+        let cache_archive_path = get_cache_archive_path(&source_hash, name);
+
+        if !cache_archive_path.exists() {
+            compress_zstd(
+                &source_sandbox_path,
+                &source_sandbox_files,
+                &cache_archive_path,
+            )
+            .await?;
+        }
+
+        remove_dir_all(&source_sandbox_path)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(ArtifactSourceId {
+            hash: source_hash,
+            name: name.to_string(),
+        })
+    }
+
+    pub async fn add_artifact(
+        &mut self,
+        name: &str,
+        artifacts: Vec<ArtifactId>,
+        source: BTreeMap<&str, ArtifactSource>,
+        steps: Vec<ArtifactStep>,
+        systems: Vec<&str>,
+    ) -> Result<ArtifactId> {
+        // 1. Setup sources
+
+        let mut sources = vec![];
+
+        for (source_name, source_args) in source.into_iter() {
+            let source = self.add_artifact_source(source_name, source_args).await?;
+
+            sources.push(source);
+        }
+
+        // 2. Setup systems
+
+        let mut systems_int = vec![];
+
+        for system in systems {
+            let system = get_artifact_system::<ArtifactSystem>(system);
+
+            if system == ArtifactSystem::UnknownSystem {
+                bail!("Unsupported system: {}", system.as_str_name());
+            }
+
+            systems_int.push(system.into());
+        }
+
+        // 3. Setup artifact id
+
+        let artifact = Artifact {
+            artifacts,
+            name: name.to_string(),
+            sources,
+            steps,
+            systems: systems_int,
+        };
+
+        let artifact_manifest = ArtifactBuildRequest {
+            artifact: Some(artifact.clone()),
+            system: self.system.into(),
+        };
+
+        let artifact_manifest_json =
+            serde_json::to_string(&artifact_manifest).map_err(|e| anyhow::anyhow!(e))?;
+
+        let artifact_manifest_hash = digest(artifact_manifest_json.as_bytes());
 
         let artifact_id = ArtifactId {
-            hash: artifact_hash,
+            hash: artifact_manifest_hash,
             name: artifact.name.clone(),
         };
 
@@ -140,53 +449,6 @@ impl ConfigContext {
         };
 
         self.artifact_id.get(&artifact_id)
-    }
-
-    pub async fn add_source_hash(
-        &mut self,
-        files: Vec<PathBuf>,
-        name: String,
-        path: PathBuf,
-    ) -> Result<String> {
-        let source_key_digest = get_source_key_digest(path.clone(), files.clone())?;
-        let source_key = format!("{}-{}", name, source_key_digest);
-
-        if !self.source_hash.contains_key(&source_key) {
-            let sandbox_path = create_sandbox_dir().await?;
-
-            let sandbox_files = copy_files(&path, files.clone(), &sandbox_path).await?;
-
-            for path in sandbox_files.clone().into_iter() {
-                set_timestamps(&path).await?;
-            }
-
-            let source_hash = hash_files(sandbox_files.clone())?;
-
-            self.source_hash
-                .insert(source_key.clone(), source_hash.clone());
-
-            remove_dir_all(&sandbox_path)
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-
-            return Ok(source_hash);
-        }
-
-        let source_hash = self.source_hash.get(&source_key).unwrap();
-
-        Ok(source_hash.clone())
-    }
-
-    pub fn get_source_hash(
-        &self,
-        files: Vec<PathBuf>,
-        name: String,
-        path: PathBuf,
-    ) -> Option<&String> {
-        let source_key_digest = get_source_key_digest(path, files).ok()?;
-        let source_key = format!("{}-{}", name, source_key_digest);
-
-        self.source_hash.get(&source_key)
     }
 
     pub fn get_target(&self) -> ArtifactSystem {

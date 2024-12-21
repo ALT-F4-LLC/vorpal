@@ -9,7 +9,6 @@ async-compression = { default-features = false, features = ["bzip2", "gzip", "to
 async_zip = { default-features = false, features = ["deflate", "tokio"], version = "0" }
 filetime = { default-features = false, version = "0" }
 futures-lite = { default-features = false, version = "2" }
-ignore = { default-features = false, version = "0" }
 sanitize-filename = { default-features = false, version = "0" }
 sha256 = { default-features = false, version = "1" }
 tokio = { default-features = false, version = "1" }
@@ -18,3 +17,4 @@ tokio-util = { default-features = false, features = ["compat"], version = "0" }
 tracing = { default-features = false, version = "0" }
 uuid = { default-features = false, features = ["std", "v7"], version = "1" }
 vorpal-schema = { default-features = false, path = "../schema" }
+walkdir = { version = "2" }

@@ -1,6 +1,7 @@
 use crate::config::{artifact::add_artifact, ConfigContext};
 use anyhow::Result;
 use indoc::formatdoc;
+use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
 pub async fn shell_artifact<'a>(
@@ -43,7 +44,7 @@ pub async fn shell_artifact<'a>(
     add_artifact(
         context,
         artifacts,
-        vec![],
+        BTreeMap::new(),
         format!("{}-shell", name).as_str(),
         formatdoc! {"
             mkdir -pv $VORPAL_WORKSPACE/bin
@@ -80,7 +81,7 @@ pub async fn shell_artifact<'a>(
             restores = restores.join("\n"),
             unsets = unsets.join("\n"),
         },
-        vec![],
+        BTreeMap::new(),
         vec![
             "aarch64-linux",
             "aarch64-macos",

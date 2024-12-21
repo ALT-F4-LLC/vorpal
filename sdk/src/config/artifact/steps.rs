@@ -1,16 +1,43 @@
 use crate::config::artifact::get_artifact_envkey;
 use indoc::formatdoc;
-use vorpal_schema::vorpal::artifact::v0::{ArtifactEnvironment, ArtifactId, ArtifactStep};
+use std::collections::BTreeMap;
+use std::env::var;
+use vorpal_schema::vorpal::artifact::v0::{ArtifactId, ArtifactStep, ArtifactStepEnvironment};
 
 // TODO: implement cache for sources
 
-pub fn bash(environments: Vec<ArtifactEnvironment>, script: String) -> ArtifactStep {
+// TODO: implement amber step
+
+pub fn bash(environment: BTreeMap<&str, String>, script: String) -> ArtifactStep {
+    let mut environment = environment.clone();
+
+    let path_defined_default = "".to_string();
+    let path_defined = environment.get("PATH").unwrap_or(&path_defined_default);
+
+    let path_default = "/usr/bin:/usr/sbin".to_string();
+    let mut path = var("PATH").unwrap_or_else(|_| path_default);
+
+    if !path_defined.is_empty() {
+        path = format!("{}:{}", path_defined, path);
+    }
+
+    environment.insert("PATH", path);
+
+    let mut environments = vec![];
+
+    for (key, value) in environment {
+        environments.push(ArtifactStepEnvironment {
+            key: key.to_string(),
+            value,
+        });
+    }
+
     ArtifactStep {
         arguments: vec![],
-        entrypoint: None,
+        entrypoint: Some("bash".to_string()),
         environments,
         script: Some(formatdoc! {"
-            #!/bin/bash
+            #!/bin/sh
             set -euo pipefail
 
             {script}",
@@ -22,8 +49,8 @@ pub fn bash(environments: Vec<ArtifactEnvironment>, script: String) -> ArtifactS
 pub fn bwrap(
     arguments: Vec<String>,
     artifacts: Vec<ArtifactId>,
-    environments: Vec<ArtifactEnvironment>,
-    rootfs: Option<String>,
+    environment: BTreeMap<&str, String>,
+    rootfs: Option<ArtifactId>,
     script: String,
 ) -> ArtifactStep {
     let mut args = vec![
@@ -57,6 +84,8 @@ pub fn bwrap(
     ];
 
     if let Some(rootfs) = rootfs {
+        let rootfs = get_artifact_envkey(&rootfs);
+
         args = [
             args,
             vec![
@@ -101,37 +130,35 @@ pub fn bwrap(
         args.push(get_artifact_envkey(&artifact));
     }
 
-    for env in environments.clone() {
+    for (key, value) in environment.clone() {
         args.push("--setenv".to_string());
-        args.push(env.key.clone());
-        args.push(env.value.clone());
+        args.push(key.to_string());
+        args.push(value.to_string());
     }
 
     for arg in arguments {
         args.push(arg);
     }
 
-    // TODO: use amber instead of bash as a proof of concept
-
-    bash(
-        environments,
-        formatdoc! {"
-            cat > $VORPAL_WORKSPACE/bwrap.sh << \"EOS\"
-            #!/bin/bash
-            set -euo pipefail
-
-            {script}
-            EOS
-
-            chmod +x $VORPAL_WORKSPACE/bwrap.sh
-
-            {entrypoint} {arguments} $VORPAL_WORKSPACE/bwrap.sh",
-            entrypoint = "/usr/bin/bwrap",
-            arguments = args.join(" "),
-        },
-    )
+    ArtifactStep {
+        arguments: args,
+        entrypoint: Some("bwrap".to_string()),
+        environments: vec![ArtifactStepEnvironment {
+            key: "PATH".to_string(),
+            value: var("PATH").unwrap_or_else(|_| "/usr/bin:/usr/sbin".to_string()),
+        }],
+        script: Some(script),
+    }
 }
 
 pub fn docker(arguments: Vec<String>) -> ArtifactStep {
-    bash(vec![], format!("/usr/bin/docker {}", arguments.join(" ")))
+    ArtifactStep {
+        arguments,
+        entrypoint: Some("docker".to_string()),
+        environments: vec![ArtifactStepEnvironment {
+            key: "PATH".to_string(),
+            value: var("PATH").unwrap_or_else(|_| "/usr/bin:/usr/sbin".to_string()),
+        }],
+        script: None,
+    }
 }

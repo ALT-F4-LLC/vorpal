@@ -1,7 +1,8 @@
-use crate::config::artifact::{add_artifact, language::rust::get_toolchain_target, ConfigContext};
+use crate::config::{ArtifactSource, artifact::{add_artifact, language::rust::get_toolchain_target, ConfigContext}};
+use std::collections::BTreeMap;
 use anyhow::{bail, Result};
 use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId, ArtifactSource,
+    ArtifactId,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
@@ -21,16 +22,18 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
     add_artifact(
         context,
         vec![],
-        vec![],
+        BTreeMap::new(),
         name,
         format!("cp -prv \"./source/{name}/{name}-{version}-{target}/{name}-preview/.\" \"$VORPAL_OUTPUT\""),
-        vec![ArtifactSource {
-            excludes: vec![],
-            hash: Some(hash.to_string()),
-            includes: vec![],
-            name: name.to_string(),
-            path: format!("https://static.rust-lang.org/dist/{name}-{version}-{target}.tar.gz"),
-        }],
+        BTreeMap::from([(
+            name, 
+            ArtifactSource {
+                excludes: vec![],
+                hash: Some(hash.to_string()),
+                includes: vec![],
+                path: format!("https://static.rust-lang.org/dist/{name}-{version}-{target}.tar.gz"),
+            }
+        )]),
         vec![
             "aarch64-linux",
             "aarch64-macos",

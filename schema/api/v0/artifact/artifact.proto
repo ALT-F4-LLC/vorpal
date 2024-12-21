@@ -14,45 +14,39 @@ enum ArtifactSystem {
     X86_64_MACOS = 4;
 }
 
-message ArtifactEnvironment {
-    string key = 1;
-    string value = 2;
-}
-
 message ArtifactId {
     string hash = 1;
     string name = 2;
 }
 
-message ArtifactSource {
-    optional string hash = 1;
-    repeated string excludes = 2;
-    repeated string includes = 3;
-    string name = 4;
-    string path = 5;
+message ArtifactSourceId {
+    string hash = 1;
+    string name = 2;
+}
+
+message ArtifactStepEnvironment {
+    string key = 1;
+    string value = 2;
 }
 
 message ArtifactStep {
     optional string entrypoint = 1;
     optional string script = 2;
-    repeated ArtifactEnvironment environments = 3;
+    repeated ArtifactStepEnvironment environments = 3;
     repeated string arguments = 4;
 }
 
 message Artifact {
     repeated ArtifactId artifacts = 1;
-    repeated ArtifactSource sources = 2;
+    repeated ArtifactSourceId sources = 2;
     repeated ArtifactStep steps = 3;
     repeated ArtifactSystem systems = 4;
     string name = 5;
 }
 
 message ArtifactBuildRequest {
-    ArtifactSystem target = 1;
-    repeated ArtifactId artifacts = 2;
-    repeated ArtifactStep steps = 3;
-    string hash = 4;
-    string name = 5;
+    Artifact artifact = 1;
+    ArtifactSystem system = 2;
 }
 
 message ArtifactBuildResponse {

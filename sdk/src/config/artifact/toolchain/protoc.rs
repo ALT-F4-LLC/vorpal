@@ -1,8 +1,9 @@
-use crate::config::{artifact::add_artifact, ConfigContext};
+use crate::config::{artifact::add_artifact, ArtifactSource, ConfigContext};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
+use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId, ArtifactSource,
+    ArtifactId,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
@@ -30,7 +31,7 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
     add_artifact(
         context,
         vec![],
-        vec![],
+        BTreeMap::new(),
         name,
         formatdoc! {"
             mkdir -pv \"$VORPAL_OUTPUT/bin\"
@@ -39,13 +40,15 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
 
             chmod +x \"$VORPAL_OUTPUT/bin/protoc\"",
         },
-        vec![ArtifactSource {
-            excludes: vec![],
-            hash: Some(hash.to_string()),
-            includes: vec![],
-            name: name.to_string(),
-            path: format!("https://github.com/protocolbuffers/protobuf/releases/download/v{version}/{name}-{version}-{target}.zip"),
-        }],
+        BTreeMap::from([(
+            name,
+            ArtifactSource {
+                excludes: vec![],
+                hash: Some(hash.to_string()),
+                includes: vec![],
+                path: format!("https://github.com/protocolbuffers/protobuf/releases/download/v{version}/{name}-{version}-{target}.zip"),
+            }
+        )]),
         vec![
             "aarch64-linux",
             "aarch64-macos",
