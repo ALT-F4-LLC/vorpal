@@ -9,7 +9,7 @@ use std::env::consts::{ARCH, OS};
 use std::path::Path;
 use tokio::fs::{remove_dir_all, remove_file, write};
 use tokio_tar::Archive;
-use tonic::transport::Server;
+use tonic::{transport::Server, Code::NotFound};
 use tracing::{info, Level};
 use url::Url;
 use vorpal_schema::{
@@ -20,6 +20,9 @@ use vorpal_schema::{
             ArtifactSystem,
         },
         config::v0::{config_service_server::ConfigServiceServer, Config},
+        registry::v0::{
+            registry_service_client::RegistryServiceClient, RegistryKind, RegistryRequest,
+        },
     },
 };
 use vorpal_store::{
@@ -40,10 +43,32 @@ pub struct Cli {
     command: Command,
 }
 
+fn get_default_system() -> String {
+    format!("{}-{}", ARCH, OS)
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Start {
+        #[clap(default_value_t = Level::INFO, global = true, long)]
+        level: Level,
+
+        #[clap(long, short)]
+        port: u16,
+
+        #[clap(default_value = "http://localhost:23151", long, short)]
+        registry: String,
+
+        #[arg(default_value_t = get_default_system(), long, short)]
+        target: String,
+    },
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ConfigContext {
     pub artifact_id: HashMap<ArtifactId, Artifact>,
-    pub port: u16,
+    port: u16,
+    registry: String,
     system: ArtifactSystem,
 }
 
@@ -60,24 +85,6 @@ pub struct ArtifactSource {
     pub path: String,
 }
 
-fn get_default_system() -> String {
-    format!("{}-{}", ARCH, OS)
-}
-
-#[derive(Subcommand)]
-enum Command {
-    Start {
-        #[clap(default_value_t = Level::INFO, global = true, long)]
-        level: Level,
-
-        #[clap(long, short)]
-        port: u16,
-
-        #[arg(default_value_t = get_default_system(), long, short)]
-        target: String,
-    },
-}
-
 #[derive(Debug, PartialEq)]
 pub enum ArtifactSourceKind {
     UnknownSourceKind,
@@ -90,23 +97,29 @@ pub async fn get_context() -> Result<ConfigContext> {
     let args = Cli::parse();
 
     match args.command {
-        Command::Start { port, target, .. } => {
+        Command::Start {
+            port,
+            registry,
+            target,
+            ..
+        } => {
             let target = get_artifact_system::<ArtifactSystem>(&target);
 
             if target == ArtifactSystem::UnknownSystem {
                 return Err(anyhow::anyhow!("Invalid target system"));
             }
 
-            Ok(ConfigContext::new(port, target))
+            Ok(ConfigContext::new(port, registry, target))
         }
     }
 }
 
 impl ConfigContext {
-    pub fn new(port: u16, system: ArtifactSystem) -> Self {
+    pub fn new(port: u16, registry: String, system: ArtifactSystem) -> Self {
         Self {
             artifact_id: HashMap::new(),
             port,
+            registry,
             system,
         }
     }
@@ -119,9 +132,42 @@ impl ConfigContext {
         // 1. If source is cached using 'hash', return the source id
 
         if let Some(hash) = source.hash.clone() {
+            // Check if source exists in the registry
+            let source_request = RegistryRequest {
+                hash: hash.clone(),
+                kind: RegistryKind::ArtifactSource as i32,
+                name: name.to_string(),
+            };
+
+            let registry_host = self.registry.clone();
+
+            let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
+                .await
+                .expect("failed to connect to registry");
+
+            match registry.exists(source_request.clone()).await {
+                Err(status) => {
+                    if status.code() != NotFound {
+                        bail!("Registry pull error: {:?}", status);
+                    }
+                }
+
+                Ok(_) => {
+                    info!("[{}] pushed source -> {}", name, hash);
+
+                    return Ok(ArtifactSourceId {
+                        hash,
+                        name: name.to_string(),
+                    });
+                }
+            }
+
+            // Check if source exists in the cache
             let cache_archive_path = get_cache_archive_path(&hash, name);
 
             if cache_archive_path.exists() {
+                info!("[{}] cached source -> {}", name, hash);
+
                 return Ok(ArtifactSourceId {
                     hash,
                     name: name.to_string(),

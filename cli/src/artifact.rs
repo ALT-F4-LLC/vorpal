@@ -38,14 +38,17 @@ pub async fn build(
     let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
 
     if artifact_path.exists() {
-        info!("[{}] pulled -> {}", artifact_id.name, artifact_id.hash);
+        info!(
+            "[{}] pulled artifact -> {}",
+            artifact_id.name, artifact_id.hash
+        );
 
         return Ok(());
     }
 
     // 2. Check if artifact exists (registry)
 
-    info!("[{}] pulling -> {}", artifact_id.name, artifact_id.hash);
+    info!("[{}] pull -> {}", artifact_id.name, artifact_id.hash);
 
     let pull_request = RegistryRequest {
         hash: artifact_id.hash.clone(),
@@ -140,13 +143,13 @@ pub async fn build(
     }
 
     for source in artifact.sources.clone() {
-        let push_request = RegistryRequest {
-            hash: artifact_id.hash.clone(),
-            kind: RegistryKind::Artifact as i32,
-            name: artifact_id.name.clone(),
+        let exists_request = RegistryRequest {
+            hash: source.hash.clone(),
+            kind: RegistryKind::ArtifactSource as i32,
+            name: source.name.clone(),
         };
 
-        match registry.exists(push_request.clone()).await {
+        match registry.exists(exists_request.clone()).await {
             Ok(_) => {}
 
             Err(status) => {
@@ -157,7 +160,7 @@ pub async fn build(
                 let cache_archive_path = get_cache_archive_path(&source.hash, &source.name);
 
                 if !cache_archive_path.exists() {
-                    bail!("source archive not found: {:?}", cache_archive_path);
+                    bail!("cache archive not found: {:?}", cache_archive_path);
                 }
 
                 let cache_archive_data = read(&cache_archive_path).await.expect("failed to read");

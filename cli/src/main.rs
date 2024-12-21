@@ -124,12 +124,21 @@ fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
 }
 
-async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channel>)> {
+async fn start_config(
+    file: String,
+    registry: String,
+) -> Result<(Child, ConfigServiceClient<Channel>)> {
     let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
 
     let mut command = process::Command::new(file);
 
-    command.args(["start", "--port", &port.to_string()]);
+    command.args([
+        "start",
+        "--port",
+        &port.to_string(),
+        "--registry",
+        &registry,
+    ]);
 
     let mut process = command
         .stdout(Stdio::piped())
@@ -236,7 +245,8 @@ async fn main() -> Result<()> {
                     info!("-> building configuration toolchain artifacts...");
 
                     // Setup context
-                    let mut build_context = ConfigContext::new(0, artifact_system);
+                    let mut build_context =
+                        ConfigContext::new(0, registry.clone(), artifact_system);
 
                     // Setup toolchain
                     let protoc = protoc::artifact(&mut build_context).await?;
@@ -372,7 +382,7 @@ async fn main() -> Result<()> {
             }
 
             let (mut config_process, mut config_service) =
-                start_config(config_file.display().to_string()).await?;
+                start_config(config_file.display().to_string(), registry.clone()).await?;
 
             let config_response = match config_service.get_config(ConfigRequest {}).await {
                 Ok(res) => res,

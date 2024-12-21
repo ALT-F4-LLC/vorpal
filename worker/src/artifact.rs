@@ -696,7 +696,7 @@ impl ArtifactService for ArtifactServer {
 
                 if let Err(err) = tx
                     .send(Ok(ArtifactBuildResponse {
-                        output: format!("pulling '{}' source -> {}", source.name, source.hash),
+                        output: format!("pull '{}' source -> {}", source.name, source.hash),
                     }))
                     .await
                 {
