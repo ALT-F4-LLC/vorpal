@@ -1,9 +1,9 @@
 use anyhow::{bail, Error, Result};
 use filetime::{set_file_times, set_symlink_file_times, FileTime};
-use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use uuid::Uuid;
+use walkdir::WalkDir;
 
 // Store paths
 
@@ -13,6 +13,10 @@ pub fn get_store_dir_name(hash: &str, name: &str) -> String {
 
 pub fn get_root_dir_path() -> PathBuf {
     Path::new("/var/lib/vorpal").to_path_buf()
+}
+
+pub fn get_cache_dir_path() -> PathBuf {
+    get_root_dir_path().join("cache")
 }
 
 pub fn get_key_dir_path() -> PathBuf {
@@ -27,6 +31,18 @@ pub fn get_store_dir_path() -> PathBuf {
     get_root_dir_path().join("store")
 }
 
+// Cache paths
+
+pub fn get_cache_path(hash: &str, name: &str) -> PathBuf {
+    get_cache_dir_path().join(get_store_dir_name(hash, name))
+}
+
+pub fn get_cache_archive_path(hash: &str, name: &str) -> PathBuf {
+    get_cache_dir_path()
+        .join(get_store_dir_name(hash, name))
+        .with_extension("tar.zst")
+}
+
 // Key paths
 
 pub fn get_private_key_path() -> PathBuf {
@@ -35,20 +51,6 @@ pub fn get_private_key_path() -> PathBuf {
 
 pub fn get_public_key_path() -> PathBuf {
     get_key_dir_path().join("public").with_extension("pem")
-}
-
-// Input paths - "/vorpal/store/{hash}.input"
-
-pub fn get_input_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("input")
-}
-
-pub fn get_input_archive_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("input.tar.zst")
 }
 
 // Artifact paths - "/vorpal/store/{hash}.artifact"
@@ -105,16 +107,9 @@ pub fn get_file_paths(
 
     excludes_paths.push(Path::new(".git").to_path_buf());
 
-    let walker = WalkBuilder::new(source_path)
-        .standard_filters(false) // Don't use default filters
-        .git_exclude(true)
-        .git_global(true)
-        .git_ignore(true)
-        .hidden(false)
-        .ignore(false)
-        .parents(true)
-        .require_git(false)
-        .build();
+    // Resolve full path
+
+    let walker = WalkDir::new(source_path);
 
     let mut files: Vec<PathBuf> = walker
         .into_iter()
@@ -155,17 +150,15 @@ pub fn get_file_paths(
     Ok(files)
 }
 
-pub async fn set_paths_timestamps(paths: &[PathBuf]) -> Result<(), Error> {
+pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
     let epoc = FileTime::from_unix_time(0, 0);
 
-    for path in paths {
-        if !path.is_symlink() {
-            set_file_times(path, epoc, epoc).expect("Failed to set file times");
-        }
+    if !path.is_symlink() {
+        set_file_times(path, epoc, epoc).expect("Failed to set file times");
+    }
 
-        if path.is_symlink() {
-            set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
-        }
+    if path.is_symlink() {
+        set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
     }
 
     Ok(())
@@ -213,12 +206,17 @@ pub async fn copy_files(
 
     let target_path_files = get_file_paths(&target_path.to_path_buf(), vec![], vec![])?;
 
-    set_paths_timestamps(&target_path_files).await?;
-
     Ok(target_path_files)
 }
 
 pub async fn setup_paths() -> Result<()> {
+    let cache_path = get_cache_dir_path();
+    if !cache_path.exists() {
+        create_dir_all(&cache_path)
+            .await
+            .expect("failed to create cache directory");
+    }
+
     let key_path = get_key_dir_path();
     if !key_path.exists() {
         create_dir_all(&key_path)

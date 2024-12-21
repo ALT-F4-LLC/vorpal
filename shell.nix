@@ -5,7 +5,28 @@
       # load external libraries that you need in your rust project here
     ];
 in
-  pkgs.mkShell {
+  pkgs.mkShell rec {
+    buildInputs = with pkgs; [
+      protobuf
+      bubblewrap
+
+      clang
+      # Replace llvmPackages with llvmPackages_X, where X is the latest LLVM version (at the time of writing, 16)
+      llvmPackages.bintools
+      rustup
+    ];
+    RUSTC_VERSION = overrides.toolchain.channel;
+    # https://github.com/rust-lang/rust-bindgen#environment-variables
+    LIBCLANG_PATH = pkgs.lib.makeLibraryPath [pkgs.llvmPackages_latest.libclang.lib];
+    shellHook = ''
+      export PATH=$PATH:''${CARGO_HOME:-~/.cargo}/bin
+      export PATH=$PATH:''${RUSTUP_HOME:-~/.rustup}/toolchains/$RUSTC_VERSION-x86_64-unknown-linux-gnu/bin/
+    '';
+    # Add precompiled library to rustc search path
+    RUSTFLAGS = builtins.map (a: ''-L ${a}/lib'') [
+      # add libraries here (e.g. pkgs.libvmi)
+    ];
+    LD_LIBRARY_PATH = libPath;
     # Add glibc, clang, glib, and other headers to bindgen search path
     BINDGEN_EXTRA_CLANG_ARGS =
       # Includes normal include path
@@ -19,35 +40,4 @@ in
         ''-I"${pkgs.glib.dev}/include/glib-2.0"''
         ''-I${pkgs.glib.out}/lib/glib-2.0/include/''
       ];
-
-    # https://github.com/rust-lang/rust-bindgen#environment-variables
-    LIBCLANG_PATH = pkgs.lib.makeLibraryPath [pkgs.llvmPackages_latest.libclang.lib];
-
-    RUSTC_VERSION = overrides.toolchain.channel;
-
-    # Add precompiled library to rustc search path
-    RUSTFLAGS = builtins.map (a: ''-L ${a}/lib'') [
-      # add libraries here (e.g. pkgs.libvmi)
-    ];
-
-    buildInputs = with pkgs; [
-      bubblewrap
-      protobuf
-
-      clang
-      # Replace llvmPackages with llvmPackages_X, where X is the latest LLVM version (at the time of writing, 16)
-      llvmPackages.bintools
-      gnumake
-      rustup
-      unzip
-    ];
-
-    hardeningDisable = ["all"];
-
-    shellHook = ''
-      export PATH=$PATH:''${CARGO_HOME:-~/.cargo}/bin
-      export PATH=$PATH:''${RUSTUP_HOME:-~/.rustup}/toolchains/$RUSTC_VERSION-x86_64-unknown-linux-gnu/bin/
-      export PATH=$PATH:$PWD/.env/bin
-      export NICKEL_IMPORT_PATH="$PWD/.vorpal/packages:$PWD"
-    '';
   }

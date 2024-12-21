@@ -3,15 +3,14 @@ use crate::config::{
         steps::{bash, bwrap},
         toolchain::linux::{debian, vorpal},
     },
-    ConfigContext,
+    ArtifactSource, ConfigContext,
 };
 use anyhow::{bail, Result};
-use std::path::Path;
+use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
-    Artifact, ArtifactEnvironment, ArtifactId, ArtifactSource, ArtifactSystem,
+    ArtifactId, ArtifactStepEnvironment, ArtifactSystem,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
-use vorpal_store::paths::get_file_paths;
 
 pub mod language;
 pub mod shell;
@@ -24,65 +23,6 @@ pub fn get_artifact_envkey(artifact: &ArtifactId) -> String {
         artifact.name.to_lowercase().replace("-", "_")
     )
     .to_string()
-}
-
-pub async fn add_artifact_source(
-    context: &mut ConfigContext,
-    source: ArtifactSource,
-) -> Result<ArtifactSource> {
-    // TODO: add support for 'remote' sources
-
-    let source_path = Path::new(&source.path).to_path_buf();
-
-    if !source_path.exists() {
-        bail!(
-            "Artifact `source.{}.path` not found: {:?}",
-            source.name,
-            source.path
-        );
-    }
-
-    let source_files = get_file_paths(
-        &source_path,
-        source.excludes.clone(),
-        source.includes.clone(),
-    )?;
-
-    let source_hash = match context.get_source_hash(
-        source_files.clone(),
-        source.name.clone(),
-        source_path.clone(),
-    ) {
-        Some(hash) => hash.clone(),
-        None => {
-            context
-                .add_source_hash(
-                    source_files.clone(),
-                    source.name.clone(),
-                    source_path.clone(),
-                )
-                .await?
-        }
-    };
-
-    if let Some(hash) = source.hash.clone() {
-        if hash != source_hash {
-            bail!(
-                "Artifact `source.{}.hash` mismatch: {} != {}",
-                source.name,
-                hash,
-                source_hash
-            );
-        }
-    }
-
-    Ok(ArtifactSource {
-        excludes: source.excludes,
-        hash: Some(source_hash),
-        includes: source.includes,
-        name: source.name,
-        path: source.path,
-    })
 }
 
 pub fn add_artifact_systems(systems: Vec<&str>) -> Result<Vec<ArtifactSystem>> {
@@ -106,128 +46,101 @@ pub fn add_artifact_systems(systems: Vec<&str>) -> Result<Vec<ArtifactSystem>> {
 pub async fn add_artifact(
     context: &mut ConfigContext,
     artifacts: Vec<ArtifactId>,
-    environments: Vec<ArtifactEnvironment>,
+    environment: BTreeMap<&str, String>,
     name: &str,
     script: String,
-    sources: Vec<ArtifactSource>,
+    source: BTreeMap<&str, ArtifactSource>,
     systems: Vec<&str>,
 ) -> Result<ArtifactId> {
+    // Setup target
+
+    let target = context.get_target();
+
     // Setup artifacts
 
-    let mut build_artifacts = vec![];
+    let mut artifacts = artifacts.clone();
 
-    for artifact in artifacts {
-        build_artifacts.push(artifact);
+    if target == Aarch64Linux || target == X8664Linux {
+        let linux_debian = debian::artifact(context).await?;
+        let linux_vorpal = vorpal::artifact(context, &linux_debian).await?;
+
+        artifacts.push(linux_vorpal.clone());
     }
 
     // Setup environments
 
-    let build_target = context.get_target();
+    let mut env = BTreeMap::new();
 
-    let mut build_environments = vec![];
-
-    if build_target == Aarch64Linux || build_target == X8664Linux {
-        let path = ArtifactEnvironment {
+    if target == Aarch64Linux || target == X8664Linux {
+        let env_path = ArtifactStepEnvironment {
             key: "PATH".to_string(),
             value: "/usr/bin:/usr/sbin".to_string(),
         };
 
-        let ssl_cert_file = ArtifactEnvironment {
+        let env_ssl_cert_file = ArtifactStepEnvironment {
             key: "SSL_CERT_FILE".to_string(),
             value: "/etc/ssl/certs/ca-certificates.crt".to_string(),
         };
 
-        let path_prev = environments
-            .clone()
-            .into_iter()
-            .find(|env| env.key == "PATH");
-
-        if let Some(prev) = path_prev {
-            build_environments.push(ArtifactEnvironment {
-                key: "PATH".to_string(),
-                value: format!("{}:{}", prev.value, path.value),
-            });
-        } else {
-            build_environments.push(path.clone());
-        }
-
-        build_environments.push(ssl_cert_file.clone());
+        env.insert("PATH", env_path.value);
+        env.insert("SSL_CERT_FILE", env_ssl_cert_file.value);
     }
 
-    if build_target == Aarch64Macos || build_target == X8664Macos {
-        let path = ArtifactEnvironment {
+    if target == Aarch64Macos || target == X8664Macos {
+        let env_path = ArtifactStepEnvironment {
             key: "PATH".to_string(),
             value: "/usr/local/bin:/usr/bin:/usr/sbin:/bin".to_string(),
         };
 
-        let path_prev = environments
-            .clone()
-            .into_iter()
-            .find(|env| env.key == "PATH");
+        env.insert("PATH", env_path.value);
+    }
 
-        if let Some(prev) = path_prev {
-            build_environments.push(ArtifactEnvironment {
-                key: "PATH".to_string(),
-                value: format!("{}:{}", prev.value, path.value),
-            });
-        } else {
-            build_environments.push(path.clone());
+    // Add environment path if defined
+
+    if let Some(new_path) = environment.get("PATH") {
+        if !new_path.is_empty() {
+            if let Some(old_path) = env.get("PATH") {
+                env.insert("PATH", format!("{}:{}", new_path, old_path));
+            }
         }
     }
 
-    for env in environments.clone().into_iter() {
-        if env.key == "PATH" {
+    // Add environment variables
+
+    for (key, value) in environment.clone() {
+        if key == "PATH" {
             continue;
         }
 
-        build_environments.push(env);
-    }
-
-    // Setup sources
-
-    let mut build_sources = vec![];
-
-    for source in sources.clone().into_iter() {
-        let source = add_artifact_source(context, source).await?;
-
-        build_sources.push(source);
+        env.insert(key, value);
     }
 
     // Setup steps
 
-    let mut build_steps = vec![];
+    let mut steps = vec![];
 
-    if build_target == Aarch64Linux || build_target == X8664Linux {
-        let linux_debian = debian::artifact(context).await?;
-        let linux_vorpal = vorpal::artifact(context, &linux_debian)?;
+    if target == Aarch64Linux || target == X8664Linux {
+        let linux_vorpal = artifacts
+            .iter()
+            .find(|a| a.name == "linux-vorpal")
+            .expect("linux-vorpal artifact not found");
 
-        build_artifacts.push(linux_vorpal.clone());
-
-        build_steps.push(bwrap(
+        steps.push(bwrap(
             vec![],
-            build_artifacts.clone(),
-            build_environments.clone(),
-            Some(get_artifact_envkey(&linux_vorpal)),
-            script.clone(),
+            artifacts.clone(),
+            env.clone(),
+            Some(linux_vorpal.clone()),
+            script.to_string(),
         ));
     }
 
-    if build_target == Aarch64Macos || build_target == X8664Macos {
-        build_steps.push(bash(build_environments.clone(), script));
+    if target == Aarch64Macos || target == X8664Macos {
+        steps.push(bash(env.clone(), script.to_string()));
     }
-
-    // Setup systems
-
-    let systems = add_artifact_systems(systems)?;
-    let systems = systems.iter().map(|s| (*s).into()).collect::<Vec<i32>>();
 
     // Add artifact to context
 
-    context.add_artifact(Artifact {
-        artifacts: build_artifacts.clone(),
-        name: name.to_string(),
-        sources: build_sources,
-        steps: build_steps,
-        systems,
-    })
+    context
+        .add_artifact(name, artifacts, source, steps, systems)
+        .await
 }
