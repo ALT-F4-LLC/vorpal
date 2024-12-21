@@ -91,7 +91,7 @@ Below is the existing working diagram that illustrates the platform's design:
 > [!CAUTION]
 > This design is subject to change at ANY moment and is a work in progress.
 
-![vorpal-domains](./vorpal-arch.svg)
+![vorpal-domains](./vorpal-domains.svg)
 
 ## Artifacts
 
