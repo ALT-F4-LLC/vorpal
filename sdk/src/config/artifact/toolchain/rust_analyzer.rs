@@ -1,6 +1,9 @@
-use crate::config::{ArtifactSource, artifact::{add_artifact, language::rust::get_toolchain_target, ConfigContext}};
-use std::collections::BTreeMap;
+use crate::config::{
+    artifact::{add_artifact, language::rust::get_toolchain_target, ConfigContext},
+    ArtifactSource,
+};
 use anyhow::{bail, Result};
+use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
     ArtifactId,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
@@ -26,7 +29,7 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
         name,
         format!("cp -prv \"./source/{name}/{name}-{version}-{target}/{name}-preview/.\" \"$VORPAL_OUTPUT\""),
         BTreeMap::from([(
-            name, 
+            name,
             ArtifactSource {
                 excludes: vec![],
                 hash: Some(hash.to_string()),
