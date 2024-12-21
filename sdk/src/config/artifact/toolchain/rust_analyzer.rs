@@ -13,7 +13,7 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
     let hash = match context.get_target() {
         Aarch64Linux => "79fbf7077b846a4b28935fa6a22259d589baed2197c08bfc5c362f1e3f54db44",
         Aarch64Macos => "ba92aa08cdada8fad8d772623b0522cb3d6e659a8edb9e037453fab998772a19",
-        X8664Linux => "686ed59c5df4cf2785f8e8c50665ac1949e4084283854a00cef47ca633501351",
+        X8664Linux => "b3d88f0ed6f77562f8376756d1b09fc7f5604aedcfac0ded2dd424c069e34ebe",
         X8664Macos => "1234567890",
         UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
