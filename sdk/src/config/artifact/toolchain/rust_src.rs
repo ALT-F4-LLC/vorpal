@@ -1,34 +1,31 @@
-use crate::config::{artifact::add_artifact, ConfigContext};
+use crate::config::{
+    artifact::{add_artifact, ConfigContext},
+    ArtifactSource,
+};
 use anyhow::Result;
-use indoc::formatdoc;
+use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
-pub async fn artifact(
-    context: &mut ConfigContext,
-    override_version: Option<String>,
-) -> Result<ArtifactId> {
+pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
+    let hash = "5f0adbae49a5442bf3389f7798cbacba92a94b7fefe7810ce00d1356a861d305";
+
     let name = "rust-src";
-
-    let mut version = "1.80.1".to_string();
-
-    if let Some(v) = override_version {
-        version = v;
-    }
 
     add_artifact(
         context,
         vec![],
-        vec![],
+        BTreeMap::new(),
         name,
-        formatdoc! {"
-            curl -L -o ./{name}-{version}.tar.gz \
-                https://static.rust-lang.org/dist/{name}-{version}.tar.gz
-
-            tar -xvf ./{name}-{version}.tar.gz -C source --strip-components=1
-
-            cp -prv \"./source/{name}/.\" \"$VORPAL_OUTPUT\"
-        "},
-        vec![],
+        format!("cp -prv \"./source/{name}/{name}-{version}/{name}/.\" \"$VORPAL_OUTPUT\""),
+        BTreeMap::from([(
+            name,
+            ArtifactSource {
+                excludes: vec![],
+                hash: Some(hash.to_string()),
+                includes: vec![],
+                path: format!("https://static.rust-lang.org/dist/{name}-{version}.tar.gz"),
+            },
+        )]),
         vec![
             "aarch64-linux",
             "aarch64-macos",

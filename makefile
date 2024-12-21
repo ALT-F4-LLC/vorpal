@@ -44,7 +44,7 @@ test:
 dist: build
 	mkdir -pv $(DIST_DIR)
 	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
-		-C $(WORK_DIR)/target/$(TARGET) vorpal vorpal-config
+		-C $(WORK_DIR)/target/$(TARGET) vorpal
 
 # Development (with Vorpal)
 

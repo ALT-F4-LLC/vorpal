@@ -11,14 +11,14 @@ use vorpal_schema::vorpal::artifact::v0::{
 
 pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
     let hash = match context.get_target() {
-        Aarch64Linux => "d560efe018be876f2d5a9106f4b37222f0d315f52aeb12ffb0bfbfc8071fc5b1",
-        Aarch64Macos => "6d636e93ec5f9a2e8a7c5bae381dc9a89808087b2eec1f987f8ed5a797fef556",
-        X8664Linux => "4ae19ae088abd72073dbf6dfbe9c68f8c70a4c2aa77c018c63b099d8732464c3",
+        Aarch64Linux => "8a51bcfb496489a5fd6f2042617e84a35301d69325ce558e23589371729c75b2",
+        Aarch64Macos => "4feacdd0fe93196c893a48458f4c3b78bf50a515b2a37a8dd03ce8ba0ef3e065",
+        X8664Linux => "a2a4d35eeb4acb7baddb3b3974d1d08d600b135e2a67c291d585d6707f63279a",
         X8664Macos => "1234567890",
         UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
 
-    let name = "rust-std";
+    let name = "rustfmt";
 
     let target = get_toolchain_target(context.get_target())?;
 
@@ -27,7 +27,7 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
         vec![],
         BTreeMap::new(),
         name,
-        format!("cp -prv \"./source/{name}/{name}-{version}-{target}/{name}-{target}/.\" \"$VORPAL_OUTPUT\""),
+        format!("cp -prv \"./source/{name}/{name}-{version}-{target}/{name}-preview/.\" \"$VORPAL_OUTPUT\""),
         BTreeMap::from([(
             name,
             ArtifactSource {
@@ -35,7 +35,7 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
                 hash: Some(hash.to_string()),
                 includes: vec![],
                 path: format!("https://static.rust-lang.org/dist/{name}-{version}-{target}.tar.gz"),
-            },
+            }
         )]),
         vec![
             "aarch64-linux",

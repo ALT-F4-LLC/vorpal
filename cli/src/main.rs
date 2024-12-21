@@ -1,10 +1,19 @@
-use crate::artifact::build;
+use crate::{
+    artifact::build,
+    rust::{get_rust_toolchain_version, rust_toolchain},
+};
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
-use std::collections::HashMap;
-use std::env::consts::{ARCH, OS};
-use std::process::Stdio;
+use std::{
+    collections::HashMap,
+    env::{
+        consts::{ARCH, OS},
+        var,
+    },
+    path::Path,
+    process::Stdio,
+};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::{process, process::Child};
 use tokio_stream::{wrappers::LinesStream, StreamExt};
@@ -17,12 +26,16 @@ use vorpal_schema::{
     get_artifact_system,
     vorpal::{
         artifact::v0::{
-            artifact_service_server::ArtifactServiceServer, ArtifactId, ArtifactSystem,
+            artifact_service_server::ArtifactServiceServer, Artifact, ArtifactId, ArtifactSystem,
             ArtifactSystem::UnknownSystem,
         },
         config::v0::{config_service_client::ConfigServiceClient, ConfigRequest},
         registry::v0::registry_service_server::RegistryServiceServer,
     },
+};
+use vorpal_sdk::config::{
+    artifact::{language::rust, toolchain::protoc},
+    ConfigContext,
 };
 use vorpal_store::paths::{get_artifact_path, get_public_key_path, setup_paths};
 
@@ -31,38 +44,37 @@ use vorpal_worker::artifact::ArtifactServer;
 mod artifact;
 mod build;
 
+pub struct VorpalTomlLanguage {
+    pub name: String,
+}
+
+pub struct VorpalTomlRust {
+    pub bin: String,
+    pub path: String,
+}
+
+pub struct VorpalToml {
+    pub language: VorpalTomlLanguage,
+    pub rust: VorpalTomlRust,
+}
+
 #[derive(Subcommand)]
 enum Command {
     Artifact {
-        #[arg(long, short)]
-        file: String,
-
-        #[arg(default_value_t = Level::INFO, global = true, long)]
-        level: Level,
-
-        #[arg(long, short)]
+        #[arg(long)]
         name: String,
 
-        #[clap(default_value = "http://localhost:23151", long, short)]
-        registry: String,
+        #[clap(default_value = "http://localhost:23151", long)]
+        service: String,
 
-        #[arg(default_value_t = get_default_system(), long, short)]
+        #[arg(default_value_t = get_default_system(), long)]
         system: String,
-
-        #[clap(default_value = "http://localhost:23151", long, short)]
-        worker: String,
     },
 
     #[clap(subcommand)]
     Keys(CommandKeys),
 
     Start {
-        #[clap(default_value = "http://localhost:23151", long)]
-        artifact_registry: String,
-
-        #[arg(default_value_t = Level::INFO, global = true, long)]
-        level: Level,
-
         #[clap(default_value = "23151", long)]
         port: u16,
 
@@ -88,18 +100,45 @@ pub enum CommandKeys {
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
+
+    #[arg(default_value = "Vorpal.toml", long, short)]
+    config: String,
+
+    #[arg(default_value = "rust", long)]
+    language: String,
+
+    #[arg(default_value_t = Level::INFO, global = true, long)]
+    level: Level,
+
+    #[clap(default_value = "http://localhost:23151", long, short)]
+    registry: String,
+
+    #[arg(default_value = "vorpal-config", long)]
+    rust_bin: Option<String>,
+
+    #[arg(default_value = ".", long)]
+    rust_path: Option<String>,
 }
 
 fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
 }
 
-async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channel>)> {
+async fn start_config(
+    file: String,
+    registry: String,
+) -> Result<(Child, ConfigServiceClient<Channel>)> {
     let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
 
     let mut command = process::Command::new(file);
 
-    command.args(["start", "--port", &port.to_string()]);
+    command.args([
+        "start",
+        "--port",
+        &port.to_string(),
+        "--registry",
+        &registry,
+    ]);
 
     let mut process = command
         .stdout(Stdio::piped())
@@ -148,24 +187,31 @@ async fn start_config(file: String) -> Result<(Child, ConfigServiceClient<Channe
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match &cli.command {
+    let Cli {
+        command,
+        config: _,
+        language,
+        level,
+        registry,
+        rust_bin,
+        rust_path,
+    } = cli;
+
+    match &command {
         Command::Artifact {
             name,
-            file,
-            level,
-            registry,
+            service,
             system,
-            worker,
         } => {
-            let stderr_writer = std::io::stderr.with_max_level(*level);
+            let stderr_writer = std::io::stderr.with_max_level(level);
 
             let mut subscriber = FmtSubscriber::builder()
-                .with_max_level(*level)
+                .with_max_level(level)
                 .with_target(false)
                 .with_writer(stderr_writer)
                 .without_time();
 
-            if [Level::DEBUG, Level::TRACE].contains(level) {
+            if [Level::DEBUG, Level::TRACE].contains(&level) {
                 subscriber = subscriber.with_file(true).with_line_number(true);
             }
 
@@ -174,9 +220,7 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber");
 
-            if worker.is_empty() {
-                bail!("no worker specified");
-            }
+            // Load the system
 
             let artifact_system: ArtifactSystem = get_artifact_system(system);
 
@@ -184,7 +228,161 @@ async fn main() -> Result<()> {
                 bail!("unknown target: {}", artifact_system.as_str_name());
             }
 
-            let (mut config_process, mut config_service) = start_config(file.to_string()).await?;
+            // Build the configuration
+
+            let config_file = match language.as_str() {
+                "rust" => {
+                    if rust_bin.is_none() {
+                        bail!("no `--rust-bin` specified");
+                    }
+
+                    if rust_path.is_none() {
+                        bail!("no `--rust-path` specified");
+                    }
+
+                    // Build rust toolchain, if not installed
+
+                    info!("-> building configuration toolchain artifacts...");
+
+                    // Setup context
+                    let mut build_context =
+                        ConfigContext::new(0, registry.clone(), artifact_system);
+
+                    // Setup toolchain
+                    let protoc = protoc::artifact(&mut build_context).await?;
+                    let toolchain = rust_toolchain(&mut build_context, "vorpal").await?;
+
+                    // Setup build
+                    let build_order = build::get_order(&build_context.artifact_id).await?;
+
+                    let mut ready_artifacts = vec![];
+
+                    info!("-> building configuration toolchain...");
+
+                    for artifact_id in &build_order {
+                        match build_context.artifact_id.get(artifact_id) {
+                            None => bail!("build artifact not found: {}", artifact_id.name),
+                            Some(artifact) => {
+                                for artifact in &artifact.artifacts {
+                                    if !ready_artifacts.contains(&artifact) {
+                                        bail!("Artifact not found: {}", artifact.name);
+                                    }
+                                }
+
+                                build(artifact, artifact_id, artifact_system, &registry, service)
+                                    .await?;
+
+                                ready_artifacts.push(artifact_id);
+                            }
+                        }
+                    }
+
+                    let toolchain_path = get_artifact_path(&toolchain.hash, &toolchain.name);
+
+                    if !toolchain_path.exists() {
+                        bail!("config toolchain not found: {}", toolchain_path.display());
+                    }
+
+                    let toolchain_target = rust::get_toolchain_target(artifact_system)?;
+                    let toolchain_version = get_rust_toolchain_version();
+
+                    let toolchain_bin_path = Path::new(&format!(
+                        "{}/toolchains/{}-{}/bin",
+                        toolchain_path.display(),
+                        toolchain_version,
+                        toolchain_target
+                    ))
+                    .to_path_buf();
+
+                    let toolchain_cargo_path =
+                        Path::new(&format!("{}/cargo", toolchain_bin_path.display())).to_path_buf();
+
+                    if !toolchain_cargo_path.exists() {
+                        bail!("cargo not found: {}", toolchain_cargo_path.display());
+                    }
+
+                    // Get protoc
+
+                    let protoc_path = Path::new(&format!(
+                        "{}/bin/protoc",
+                        get_artifact_path(&protoc.hash, &protoc.name).display()
+                    ))
+                    .to_path_buf();
+
+                    if !protoc_path.exists() {
+                        bail!("protoc not found: {}", protoc_path.display());
+                    }
+
+                    // Build the configuration
+
+                    let mut command = process::Command::new(toolchain_cargo_path);
+
+                    command.env(
+                        "PATH",
+                        format!(
+                            "{}:{}/bin:{}",
+                            toolchain_bin_path.display(),
+                            get_artifact_path(&protoc.hash, &protoc.name).display(),
+                            var("PATH").unwrap_or_default()
+                        )
+                        .as_str(),
+                    );
+
+                    command.env("RUSTUP_HOME", toolchain_path.display().to_string());
+
+                    command.env(
+                        "RUSTUP_TOOLCHAIN",
+                        format!("{}-{}", toolchain_version, toolchain_target),
+                    );
+
+                    let config_bin = rust_bin.as_ref().unwrap();
+
+                    command.args(["build", "--bin", config_bin, "--release"]);
+
+                    info!("-> building configuration...");
+
+                    let mut process = command
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                        .map_err(|_| anyhow!("failed to start config server"))?;
+
+                    let stdout = process.stdout.take().unwrap();
+                    let stderr = process.stderr.take().unwrap();
+
+                    let stdout = LinesStream::new(BufReader::new(stdout).lines());
+                    let stderr = LinesStream::new(BufReader::new(stderr).lines());
+
+                    let mut stdio_merged = StreamExt::merge(stdout, stderr);
+
+                    while let Some(line) = stdio_merged.next().await {
+                        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
+
+                        info!("{}", line);
+                    }
+
+                    let target_path = format!(
+                        "{}/target/release/{}",
+                        rust_path.as_ref().unwrap(),
+                        config_bin
+                    );
+
+                    Path::new(&target_path).to_path_buf()
+                }
+
+                _ => bail!("unsupported language: {}", language),
+            };
+
+            if !config_file.exists() {
+                bail!("config file not found: {}", config_file.display());
+            }
+
+            if service.is_empty() {
+                bail!("no `--artifact-service` specified");
+            }
+
+            let (mut config_process, mut config_service) =
+                start_config(config_file.display().to_string(), registry.clone()).await?;
 
             let config_response = match config_service.get_config(ConfigRequest {}).await {
                 Ok(res) => res,
@@ -195,30 +393,54 @@ async fn main() -> Result<()> {
 
             let config = config_response.into_inner();
 
-            let config_artifact = config
+            let config_artifact_id = config
                 .artifacts
                 .into_iter()
                 .find(|a| a.name == *name)
                 .ok_or_else(|| anyhow!("artifact not found: {}", name))?;
 
-            let (build_map, build_order) =
-                build::load_artifact(&config_artifact, &mut config_service).await?;
+            // Create the artifact graph and map
 
-            let mut artifacts_ids = HashMap::<String, ArtifactId>::new();
+            let mut build_artifact = HashMap::<ArtifactId, Artifact>::new();
+
+            // Get the artifact
+
+            let config_artifact_request = tonic::Request::new(config_artifact_id.clone());
+
+            let config_artifact_response =
+                match config_service.get_artifact(config_artifact_request).await {
+                    Ok(res) => res,
+                    Err(error) => {
+                        bail!("failed to evaluate artifact: {}", error);
+                    }
+                };
+
+            let config_artifact = config_artifact_response.into_inner();
+
+            build_artifact.insert(config_artifact_id.clone(), config_artifact.clone());
+
+            build::get_artifacts(&config_artifact, &mut build_artifact, &mut config_service)
+                .await?;
+
+            let build_order = build::get_order(&build_artifact).await?;
+
+            let mut ready_artifacts = vec![];
+
+            info!("-> building artifacts...");
 
             for artifact_id in &build_order {
-                match build_map.get(artifact_id) {
+                match build_artifact.get(artifact_id) {
                     None => bail!("Build artifact not found: {}", artifact_id.name),
                     Some(artifact) => {
-                        for a in &artifact.artifacts {
-                            if !artifacts_ids.contains_key(&a.name) {
-                                bail!("Artifact not found: {}", a.name);
+                        for artifact in &artifact.artifacts {
+                            if !ready_artifacts.contains(&artifact) {
+                                bail!("Artifact not found: {}", artifact.name);
                             }
                         }
 
-                        build(artifact, artifact_id, artifact_system, registry, worker).await?;
+                        build(artifact, artifact_id, artifact_system, &registry, service).await?;
 
-                        artifacts_ids.insert(artifact_id.name.clone(), artifact_id.clone());
+                        ready_artifacts.push(artifact_id);
 
                         if artifact_id.name == *name {
                             println!(
@@ -264,8 +486,6 @@ async fn main() -> Result<()> {
         },
 
         Command::Start {
-            artifact_registry,
-            level,
             port,
             registry_backend,
             registry_backend_s3_bucket,
@@ -274,9 +494,9 @@ async fn main() -> Result<()> {
             let mut subscriber = FmtSubscriber::builder()
                 .with_target(false)
                 .without_time()
-                .with_max_level(*level);
+                .with_max_level(level);
 
-            if [Level::DEBUG, Level::TRACE].contains(level) {
+            if [Level::DEBUG, Level::TRACE].contains(&level) {
                 subscriber = subscriber.with_file(true).with_line_number(true);
             }
 
@@ -301,10 +521,7 @@ async fn main() -> Result<()> {
 
             if services.contains("artifact") {
                 let system = get_artifact_system(format!("{}-{}", ARCH, OS).as_str());
-                let service = ArtifactServiceServer::new(ArtifactServer::new(
-                    artifact_registry.to_string(),
-                    system,
-                ));
+                let service = ArtifactServiceServer::new(ArtifactServer::new(registry, system));
 
                 info!("artifact service: [::]:{}", port);
 

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use vorpal_schema::vorpal::config::v0::Config;
 use vorpal_sdk::config::{
     artifact::language::rust::{rust_package, rust_shell},
     get_context,
@@ -7,14 +6,15 @@ use vorpal_sdk::config::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Get the context
     let context = &mut get_context().await?;
 
-    let vorpal = rust_package(context, "vorpal").await?;
-    let vorpal_shell = rust_shell(context, "vorpal-shell").await?;
+    // Create artifacts
+    let artifacts = vec![
+        rust_package(context, "vorpal").await?,
+        rust_shell(context, "vorpal").await?,
+    ];
 
-    context
-        .run(Config {
-            artifacts: vec![vorpal, vorpal_shell],
-        })
-        .await
+    // Run the context
+    context.run(artifacts).await
 }

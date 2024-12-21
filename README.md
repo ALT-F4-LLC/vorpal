@@ -84,14 +84,14 @@ async function main() {
 main().catch(console.error);
 ```
 
-## Design
+## Infrastructure
 
 Below is the existing working diagram that illustrates the platform's design:
 
 > [!CAUTION]
 > This design is subject to change at ANY moment and is a work in progress.
 
-![vorpal-arch](./vorpal-arch.png)
+![vorpal-domains](./vorpal-domains.svg)
 
 ## Artifacts
 
