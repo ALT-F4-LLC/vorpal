@@ -98,7 +98,7 @@ pub async fn add_artifact(
     // Add environment path if defined
 
     if let Some(new_path) = environment.get("PATH") {
-        if new_path != "" {
+        if !new_path.is_empty() {
             if let Some(old_path) = env.get("PATH") {
                 env.insert("PATH", format!("{}:{}", new_path, old_path));
             }

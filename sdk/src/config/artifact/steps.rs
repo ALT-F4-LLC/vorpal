@@ -15,7 +15,7 @@ pub fn bash(environment: BTreeMap<&str, String>, script: String) -> ArtifactStep
     let path_defined = environment.get("PATH").unwrap_or(&path_defined_default);
 
     let path_default = "/usr/bin:/usr/sbin".to_string();
-    let mut path = var("PATH").unwrap_or_else(|_| path_default);
+    let mut path = var("PATH").unwrap_or(path_default);
 
     if !path_defined.is_empty() {
         path = format!("{}:{}", path_defined, path);

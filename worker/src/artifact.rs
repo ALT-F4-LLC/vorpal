@@ -29,8 +29,8 @@ use vorpal_schema::{
     vorpal::{
         artifact::v0::ArtifactSystem::UnknownSystem,
         registry::v0::{
-            registry_service_client::RegistryServiceClient, RegistryKind, RegistryPullRequest,
-            RegistryPushRequest,
+            registry_service_client::RegistryServiceClient, RegistryKind, RegistryPushRequest,
+            RegistryRequest,
         },
     },
 };
@@ -705,7 +705,7 @@ impl ArtifactService for ArtifactServer {
                     return;
                 }
 
-                let pull_request = RegistryPullRequest {
+                let pull_request = RegistryRequest {
                     hash: source.hash.clone(),
                     name: source.name.clone(),
                     kind: RegistryKind::ArtifactSource as i32,

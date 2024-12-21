@@ -14,7 +14,7 @@ pub fn curl_cacert(hash: &str) -> ArtifactSource {
         excludes: vec![],
         hash: Some(hash.to_string()),
         includes: vec![],
-        path: format!("https://curl.se/ca/cacert.pem"),
+        path: "https://curl.se/ca/cacert.pem".to_string(),
     }
 }
 

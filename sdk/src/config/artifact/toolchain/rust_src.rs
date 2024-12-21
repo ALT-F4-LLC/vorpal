@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
 pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
-    let hash = "e23cc249a095345e3ba2bb05decd593e96d0024e8dad25e320cb91dfd44119af";
+    let hash = "5f0adbae49a5442bf3389f7798cbacba92a94b7fefe7810ce00d1356a861d305";
 
     let name = "rust-src";
 

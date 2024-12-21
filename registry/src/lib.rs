@@ -17,8 +17,7 @@ use vorpal_schema::vorpal::registry::v0::{
     registry_service_server::{RegistryService, RegistryServiceServer},
     RegistryKind,
     RegistryKind::{Artifact, ArtifactSource, UnknownStoreKind},
-    RegistryPullRequest, RegistryPullResponse, RegistryPushRequest, RegistryRequest,
-    RegistryResponse,
+    RegistryPullResponse, RegistryPushRequest, RegistryRequest, RegistryResponse,
 };
 use vorpal_store::paths::{
     get_artifact_archive_path, get_public_key_path, get_source_archive_path, get_store_dir_name,
@@ -58,12 +57,68 @@ impl RegistryService for RegistryServer {
         &self,
         request: Request<RegistryRequest>,
     ) -> Result<Response<RegistryResponse>, Status> {
+        let request = request.into_inner();
+
+        if request.hash.is_empty() {
+            return Err(Status::invalid_argument("missing store id"));
+        }
+
+        if request.name.is_empty() {
+            return Err(Status::invalid_argument("missing store name"));
+        }
+
+        let backend = self.backend.clone();
+
+        if backend == RegistryServerBackend::Local {
+            let path = match request.kind() {
+                Artifact => get_artifact_archive_path(&request.hash, &request.name),
+                ArtifactSource => get_source_archive_path(&request.hash, &request.name),
+                _ => return Err(Status::invalid_argument("unsupported store kind")),
+            };
+
+            if !path.exists() {
+                return Err(Status::not_found("store path not found"));
+            }
+        }
+
+        if backend == RegistryServerBackend::S3 && self.backend_s3_bucket.is_none() {
+            return Err(Status::invalid_argument("missing s3 bucket"));
+        }
+
+        if backend == RegistryServerBackend::S3 {
+            let artifact_key = match request.kind() {
+                Artifact => format!(
+                    "store/{}.artifact",
+                    get_store_dir_name(&request.hash, &request.name)
+                ),
+                ArtifactSource => format!(
+                    "store/{}.source",
+                    get_store_dir_name(&request.hash, &request.name)
+                ),
+                _ => return Err(Status::invalid_argument("unsupported store kind")),
+            };
+
+            let client_config = aws_config::load_from_env().await;
+            let client = Client::new(&client_config);
+
+            let head_result = client
+                .head_object()
+                .bucket(self.backend_s3_bucket.clone().unwrap())
+                .key(&artifact_key)
+                .send()
+                .await;
+
+            if head_result.is_err() {
+                return Err(Status::not_found("store path not found"));
+            }
+        }
+
         Ok(Response::new(RegistryResponse { success: true }))
     }
 
     async fn pull(
         &self,
-        request: Request<RegistryPullRequest>,
+        request: Request<RegistryRequest>,
     ) -> Result<Response<Self::PullStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 

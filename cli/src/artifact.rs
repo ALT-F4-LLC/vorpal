@@ -11,8 +11,8 @@ use vorpal_schema::vorpal::{
         ArtifactSystem,
     },
     registry::v0::{
-        registry_service_client::RegistryServiceClient, RegistryKind, RegistryPullRequest,
-        RegistryPushRequest,
+        registry_service_client::RegistryServiceClient, RegistryKind, RegistryPushRequest,
+        RegistryRequest,
     },
 };
 use vorpal_store::{
@@ -47,7 +47,7 @@ pub async fn build(
 
     info!("[{}] pulling -> {}", artifact_id.name, artifact_id.hash);
 
-    let registry_pull = RegistryPullRequest {
+    let pull_request = RegistryRequest {
         hash: artifact_id.hash.clone(),
         kind: RegistryKind::Artifact as i32,
         name: artifact_id.name.clone(),
@@ -57,65 +57,73 @@ pub async fn build(
         .await
         .expect("failed to connect to store");
 
-    match registry.pull(registry_pull.clone()).await {
+    match registry.exists(pull_request.clone()).await {
         Err(status) => {
             if status.code() != NotFound {
                 bail!("Registry pull error: {:?}", status);
             }
         }
 
-        Ok(response) => {
-            let mut response = response.into_inner();
-            let mut response_data = Vec::new();
-
-            while let Ok(Some(res)) = response.message().await {
-                if !res.data.is_empty() {
-                    response_data.extend_from_slice(&res.data);
+        Ok(_) => match registry.pull(pull_request.clone()).await {
+            Err(status) => {
+                if status.code() != NotFound {
+                    bail!("Registry pull error: {:?}", status);
                 }
             }
 
-            if response_data.is_empty() {
-                warn!(
-                    "[{}] pull missing -> {}",
-                    artifact_id.name, artifact_id.hash
-                )
-            }
+            Ok(response) => {
+                let mut response = response.into_inner();
+                let mut response_data = Vec::new();
 
-            if !response_data.is_empty() {
-                let archive_path = create_sandbox_file(Some("tar.zst")).await?;
-
-                let mut archive = File::create(&archive_path)
-                    .await
-                    .expect("failed to create artifact archive");
-
-                archive
-                    .write_all(&response_data)
-                    .await
-                    .expect("failed to write artifact archive");
-
-                info!("[{}] unpacking...", artifact_id.name);
-
-                create_dir_all(&artifact_path)
-                    .await
-                    .expect("failed to create artifact path");
-
-                unpack_zstd(&artifact_path, &archive_path).await?;
-
-                let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
-
-                if artifact_files.is_empty() {
-                    bail!("Artifact files not found: {:?}", artifact_path);
+                while let Ok(Some(res)) = response.message().await {
+                    if !res.data.is_empty() {
+                        response_data.extend_from_slice(&res.data);
+                    }
                 }
 
-                for artifact_files in &artifact_files {
-                    set_timestamps(artifact_files).await?;
+                if response_data.is_empty() {
+                    warn!(
+                        "[{}] pull missing -> {}",
+                        artifact_id.name, artifact_id.hash
+                    )
                 }
 
-                remove_file(&archive_path).await.expect("failed to remove");
+                if !response_data.is_empty() {
+                    let archive_path = create_sandbox_file(Some("tar.zst")).await?;
 
-                return Ok(());
+                    let mut archive = File::create(&archive_path)
+                        .await
+                        .expect("failed to create artifact archive");
+
+                    archive
+                        .write_all(&response_data)
+                        .await
+                        .expect("failed to write artifact archive");
+
+                    info!("[{}] unpacking...", artifact_id.name);
+
+                    create_dir_all(&artifact_path)
+                        .await
+                        .expect("failed to create artifact path");
+
+                    unpack_zstd(&artifact_path, &archive_path).await?;
+
+                    let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
+
+                    if artifact_files.is_empty() {
+                        bail!("Artifact files not found: {:?}", artifact_path);
+                    }
+
+                    for artifact_files in &artifact_files {
+                        set_timestamps(artifact_files).await?;
+                    }
+
+                    remove_file(&archive_path).await.expect("failed to remove");
+
+                    return Ok(());
+                }
             }
-        }
+        },
     }
 
     // 3. Push artifact source(s) to registry (registry)

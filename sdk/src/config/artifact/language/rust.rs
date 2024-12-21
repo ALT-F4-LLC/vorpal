@@ -49,7 +49,7 @@ pub fn get_toolchain_target(target: ArtifactSystem) -> Result<String> {
 }
 
 pub fn get_rust_toolchain_version() -> String {
-    "1.80.1".to_string()
+    "1.83.0".to_string()
 }
 
 fn read_cargo_toml(path: &str) -> Result<RustArtifactCargoToml> {
@@ -356,7 +356,22 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
         BTreeMap::from([(
             name,
             ArtifactSource {
-                excludes: vec![],
+                excludes: vec![
+                    ".env".to_string(),
+                    ".envrc".to_string(),
+                    ".github".to_string(),
+                    ".gitignore".to_string(),
+                    ".packer".to_string(),
+                    ".vagrant".to_string(),
+                    "Dockerfile".to_string(),
+                    "Vagrantfile".to_string(),
+                    "makefile".to_string(),
+                    "script".to_string(),
+                    "shell.nix".to_string(),
+                    "target".to_string(),
+                    "vorpal-arch.png".to_string(),
+                    "vorpal-purpose.jpg".to_string(),
+                ],
                 hash: None,
                 includes: vec![],
                 path: source_path.display().to_string(),

@@ -7,7 +7,7 @@ import "v0/artifact/artifact.proto";
 service RegistryService {
     rpc Exists(RegistryRequest) returns (RegistryResponse);
     rpc Push(stream RegistryPushRequest) returns (RegistryResponse);
-    rpc Pull(RegistryPullRequest) returns (stream RegistryPullResponse);
+    rpc Pull(RegistryRequest) returns (stream RegistryPullResponse);
 }
 
 enum RegistryKind {
@@ -32,12 +32,6 @@ message RegistryPushRequest {
     bytes data_signature = 3;
     string hash = 4;
     string name = 5;
-}
-
-message RegistryPullRequest {
-    RegistryKind kind = 1;
-    string hash = 2;
-    string name = 3;
 }
 
 message RegistryPullResponse {

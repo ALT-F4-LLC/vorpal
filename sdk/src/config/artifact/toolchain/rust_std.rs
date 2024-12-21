@@ -11,8 +11,8 @@ use vorpal_schema::vorpal::artifact::v0::{
 
 pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
     let hash = match context.get_target() {
-        Aarch64Linux => "c1063ff1fec97a9121131cd689862a306a31442e44515ef4f91e0bcf98c09d37",
-        Aarch64Macos => "41515e591226b934986311b1209e7f92c98089825fbb78ae78d84d1589ba4b9b",
+        Aarch64Linux => "d560efe018be876f2d5a9106f4b37222f0d315f52aeb12ffb0bfbfc8071fc5b1",
+        Aarch64Macos => "6d636e93ec5f9a2e8a7c5bae381dc9a89808087b2eec1f987f8ed5a797fef556",
         X8664Linux => "dd8e481e6315b2098af520f2199cea1f9338ba13b4ace7163974b5613e17c520",
         X8664Macos => "1234567890",
         UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
