@@ -4,8 +4,6 @@ use std::collections::BTreeMap;
 use std::env::var;
 use vorpal_schema::vorpal::artifact::v0::{ArtifactId, ArtifactStep, ArtifactStepEnvironment};
 
-// TODO: implement cache for sources
-
 // TODO: implement amber step
 
 pub fn bash(environment: BTreeMap<&str, String>, script: String) -> ArtifactStep {

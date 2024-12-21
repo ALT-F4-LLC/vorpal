@@ -140,45 +140,59 @@ pub async fn build(
     }
 
     for source in artifact.sources.clone() {
-        // TODO: check in registry before pushing to save time and bandwidth
+        let push_request = RegistryRequest {
+            hash: artifact_id.hash.clone(),
+            kind: RegistryKind::Artifact as i32,
+            name: artifact_id.name.clone(),
+        };
 
-        let cache_archive_path = get_cache_archive_path(&source.hash, &source.name);
+        match registry.exists(push_request.clone()).await {
+            Ok(_) => {}
 
-        if !cache_archive_path.exists() {
-            bail!("source archive not found: {:?}", cache_archive_path);
-        }
+            Err(status) => {
+                if status.code() != NotFound {
+                    bail!("Registry pull error: {:?}", status);
+                }
 
-        let source_archive_data = read(&cache_archive_path).await.expect("failed to read");
+                let cache_archive_path = get_cache_archive_path(&source.hash, &source.name);
 
-        let source_signature =
-            vorpal_notary::sign(private_key_path.clone(), &source_archive_data).await?;
+                if !cache_archive_path.exists() {
+                    bail!("source archive not found: {:?}", cache_archive_path);
+                }
 
-        let mut push_stream = vec![];
+                let cache_archive_data = read(&cache_archive_path).await.expect("failed to read");
 
-        for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
-            push_stream.push(RegistryPushRequest {
-                data: chunk.to_vec(),
-                data_signature: source_signature.clone().to_vec(),
-                hash: source.hash.clone(),
-                kind: RegistryKind::ArtifactSource as i32,
-                name: source.name.clone(),
-            });
-        }
+                let cache_signature =
+                    vorpal_notary::sign(private_key_path.clone(), &cache_archive_data).await?;
 
-        info!(
-            "[{}] pushing '{}' source -> {}",
-            artifact.name, source.name, source.hash
-        );
+                let mut push_stream = vec![];
 
-        let response = registry
-            .push(tokio_stream::iter(push_stream))
-            .await
-            .expect("failed to push");
+                for chunk in cache_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
+                    push_stream.push(RegistryPushRequest {
+                        data: chunk.to_vec(),
+                        data_signature: cache_signature.clone().to_vec(),
+                        hash: source.hash.clone(),
+                        kind: RegistryKind::ArtifactSource as i32,
+                        name: source.name.clone(),
+                    });
+                }
 
-        let response = response.into_inner();
+                info!(
+                    "[{}] pushing '{}' source -> {}",
+                    artifact.name, source.name, source.hash
+                );
 
-        if !response.success {
-            bail!("Registry push failed");
+                let response = registry
+                    .push(tokio_stream::iter(push_stream))
+                    .await
+                    .expect("failed to push");
+
+                let response = response.into_inner();
+
+                if !response.success {
+                    bail!("Registry push failed");
+                }
+            }
         }
     }
 

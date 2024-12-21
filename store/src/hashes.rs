@@ -2,8 +2,6 @@ use anyhow::Result;
 use sha256::{digest, try_digest};
 use std::path::{Path, PathBuf};
 
-// TODO: move hashing logic to config module
-
 pub fn get_file_hash<P: AsRef<Path> + Send>(path: P) -> Result<String> {
     if !path.as_ref().is_file() {
         return Err(anyhow::anyhow!("Path is not a file"));

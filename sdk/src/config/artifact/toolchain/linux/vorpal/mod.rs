@@ -244,8 +244,6 @@ pub async fn artifact(
         "3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683",
     );
 
-    // TODO: validate all patches are being done in the right places
-
     let sources = BTreeMap::from([
         ("bash", bash),
         ("binutils", binutils),

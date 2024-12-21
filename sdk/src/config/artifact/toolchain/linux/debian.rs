@@ -12,8 +12,6 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
 
     let image_tag = format!("altf4llc/debin:{}", source_hash);
 
-    // TODO: remove this before merging
-
     context
         .add_artifact(
             "linux-debian",
