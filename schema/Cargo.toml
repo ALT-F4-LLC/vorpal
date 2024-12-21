@@ -10,3 +10,6 @@ tonic = { default-features = false, features = ["codegen", "prost", "transport"]
 
 [build-dependencies]
 tonic-build = { default-features = false, features = ["transport", "prost"], version = "0" }
+
+[package.metadata.cargo-machete]
+ignored = ["prost", "serde", "tonic-build"]

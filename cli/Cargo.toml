@@ -24,4 +24,3 @@ vorpal-schema = { default-features = false, path = "../schema" }
 vorpal-sdk = { default-features = false, path = "../sdk" }
 vorpal-store = { default-features = false, path = "../store" }
 vorpal-worker = { default-features = false, path = "../worker" }
-which = { version = "7" }
