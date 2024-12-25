@@ -211,6 +211,9 @@ xcode-select --install
 
 On Linux, install dependencies with the distro's package manger (apt, yum, etc):
 
+> [!IMPORTANT]
+> If you are using NixOS, there is a `shell.nix` configuration included for the development environment.
+
 - `bubblewrap` (sandboxing)
 - `curl` (downloading)
 - `docker` (sandboxing)
@@ -269,7 +272,7 @@ These steps guide how to compile from source and also test compiling Vorpal with
 
 4. Build with Vorpal:
 ```bash
-./dist/vorpal artifact --file "dist/vorpal-config" --name "vorpal"
+./dist/vorpal artifact --name "vorpal"
 ```
 
 The entire stack of has now been tested by building itself.

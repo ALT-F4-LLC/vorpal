@@ -21,7 +21,7 @@ use vorpal_schema::vorpal::registry::v0::{
 };
 use vorpal_store::paths::{
     get_artifact_archive_path, get_public_key_path, get_source_archive_path, get_store_dir_name,
-    set_timestamps, setup_paths,
+    set_timestamps,
 };
 
 const DEFAULT_CHUNK_SIZE: usize = 8192;
@@ -411,8 +411,6 @@ impl RegistryService for RegistryServer {
 }
 
 pub async fn listen(port: u16) -> Result<()> {
-    setup_paths().await?;
-
     let public_key_path = get_public_key_path();
 
     if !public_key_path.exists() {

@@ -54,6 +54,7 @@ jobs:
       - if: matrix.runner == 'ubuntu-latest'
         run: |
           ./script/dev/debian.sh
+          ./script/install.sh
 
           cat > bwrap << EOF
           abi <abi/4.0>,
@@ -81,8 +82,6 @@ jobs:
       - run: |
           mkdir -pv ./dist
           tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
-          sudo mkdir -p /var/lib/vorpal
-          sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
 
       - run: ./dist/vorpal keys generate
 
