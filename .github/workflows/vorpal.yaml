@@ -54,7 +54,6 @@ jobs:
       - if: matrix.runner == 'ubuntu-latest'
         run: |
           ./script/dev/debian.sh
-          ./script/install.sh
 
           cat > bwrap << EOF
           abi <abi/4.0>,
@@ -70,6 +69,8 @@ jobs:
 
           sudo mv bwrap /etc/apparmor.d/bwrap
           sudo systemctl restart apparmor.service
+
+      - run: ./script/install.sh
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
