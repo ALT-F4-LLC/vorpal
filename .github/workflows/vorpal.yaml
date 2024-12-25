@@ -84,20 +84,24 @@ jobs:
           sudo mkdir -p /var/lib/vorpal
           sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
 
+      - name: Cache vorpal store
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/lib/vorpal/store/*.artifact
+            /var/lib/vorpal/store/*.source
+          key: vorpal-store-cache-${{ github.run_id }}
+          restore-keys: |
+            vorpal-store-cache-
+
       - run: ./dist/vorpal keys generate
 
-      - env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: |
-          ./dist/vorpal start \
-            --registry-backend "s3" \
-            --registry-backend-s3-bucket "altf4llc-vorpal-registry" \
-            > worker_output.log 2>&1 &
-          WORKER_PID=$(echo $!)
-          echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
-          echo "Worker pid: $WORKER_PID"
+      run: |
+        ./dist/vorpal start \
+          > worker_output.log 2>&1 &
+        WORKER_PID=$(echo $!)
+        echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
+        echo "Worker pid: $WORKER_PID"
 
       - run: ./dist/vorpal artifact --name "vorpal-shell"
       - run: ./dist/vorpal artifact --name "vorpal"
