@@ -19,8 +19,11 @@ const API_VERSION: &str = "6.0-preview.1";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArtifactCacheEntry {
+    #[serde(rename = "archiveLocation")]
     pub archive_location: String,
+    #[serde(rename = "cacheKey")]
     pub cache_key: String,
+    #[serde(rename = "cacheVersion")]
     pub cache_version: String,
     pub scope: String,
 }
@@ -29,12 +32,13 @@ pub struct ArtifactCacheEntry {
 pub struct ReserveCacheRequest {
     pub key: String,
     pub version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "cacheSize")]
     pub cache_size: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReserveCacheResponse {
+    #[serde(rename = "cacheId")]
     pub cache_id: u64,
 }
 
@@ -53,21 +57,24 @@ impl CacheClient {
     pub fn new() -> Result<Self> {
         let token = std::env::var("ACTIONS_RUNTIME_TOKEN")
             .context("ACTIONS_RUNTIME_TOKEN environment variable not found")?;
+
         let base_url = std::env::var("ACTIONS_CACHE_URL")
             .context("ACTIONS_CACHE_URL environment variable not found")?;
 
         let mut headers = HeaderMap::new();
+
         headers.insert(
             ACCEPT,
             HeaderValue::from_str(&format!("application/json;api-version={API_VERSION}"))?,
         );
+
         headers.insert(
             "Authorization",
             HeaderValue::from_str(&format!("Bearer {token}"))?,
         );
 
         let client = Client::builder()
-            .user_agent("rust/github-actions-cache")
+            .user_agent("vorpal/github-actions-cache")
             .default_headers(headers)
             .build()?;
 
@@ -117,15 +124,21 @@ impl CacheClient {
             version,
         };
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?
-            .error_for_status()?;
+        let request = self.client.post(&url).json(&request);
 
-        Ok(response.json().await?)
+        let response = request.send().await?;
+
+        if response.status() != 204 {
+            return Err(anyhow!("Unexpected status code: {}", response.status()));
+        }
+
+        let response_text = response.text().await?;
+
+        info!("Response text: {}", response_text);
+
+        let response = serde_json::from_str(&response_text)?;
+
+        Ok(response)
     }
 
     pub async fn save_cache(

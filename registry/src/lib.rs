@@ -511,7 +511,7 @@ impl RegistryService for RegistryServer {
                 })?;
 
             if reserve_response.cache_id == 0 {
-                return Err(Status::internal("failed to reserve cache"));
+                return Err(Status::internal("failed to reserve cache returned 0"));
             }
 
             let archive_path = path.clone();
