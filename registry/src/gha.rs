@@ -95,6 +95,8 @@ impl CacheClient {
             self.base_url, keys_str, version
         );
 
+        info!("Getting cache entry from: {}", url);
+
         let response = self.client.get(&url).send().await?;
 
         match response.status() {

@@ -90,6 +90,8 @@ impl RegistryService for RegistryServer {
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
+            info!("get cache entry: {} -> {}", key, path.to_string_lossy());
+
             let cache_entry = gha
                 .get_cache_entry(&[key], &[path.to_string_lossy().to_string()], None, false)
                 .await
@@ -97,11 +99,11 @@ impl RegistryService for RegistryServer {
                     Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
                 })?;
 
+            info!("cache entry: {:?}", cache_entry);
+
             if cache_entry.is_none() {
                 return Err(Status::not_found("store path not found"));
             }
-
-            info!("cache entry: {:?}", cache_entry);
 
             return Ok(Response::new(RegistryResponse { success: true }));
         }
