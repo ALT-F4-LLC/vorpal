@@ -175,6 +175,7 @@ impl CacheClient {
 
                 let mut buffer = vec![0; (chunk_end - chunk_start + 1) as usize];
                 file.read_exact(&mut buffer)?;
+                drop(file);
 
                 let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, file_size);
                 let response = client

@@ -530,7 +530,12 @@ impl RegistryService for RegistryServer {
                 .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
 
             let _ = gha
-                .save_cache(reserve_response.cache_id, &archive_path, 1, 2048)
+                .save_cache(
+                    reserve_response.cache_id,
+                    &archive_path,
+                    5,
+                    DEFAULT_CHUNK_SIZE,
+                )
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to save cache: {:?}", e.to_string()))
