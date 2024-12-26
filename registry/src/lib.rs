@@ -1,34 +1,36 @@
 use anyhow::Result;
-use aws_sdk_s3::Client;
 use rsa::{
     pss::{Signature, VerifyingKey},
     sha2::Sha256,
     signature::Verifier,
 };
-use std::path::Path;
-use tokio::{
-    fs::{read, write},
-    sync::mpsc,
-};
+use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
-use tracing::{error, info};
+use tracing::error;
 use vorpal_notary::get_public_key;
 use vorpal_schema::vorpal::registry::v0::{
     registry_service_server::{RegistryService, RegistryServiceServer},
-    RegistryKind,
-    RegistryKind::{Artifact, ArtifactSource, UnknownStoreKind},
+    RegistryKind::{self, UnknownStoreKind},
     RegistryPullResponse, RegistryPushRequest, RegistryRequest, RegistryResponse,
 };
-use vorpal_store::paths::{
-    get_artifact_archive_path, get_public_key_path, get_source_archive_path, get_store_dir_name,
-    set_timestamps,
-};
+use vorpal_store::paths::get_public_key_path;
 
-mod gha;
+pub mod local;
+pub mod s3;
+pub mod gha;
+pub use local::LocalRegistryBackend;
+pub use s3::S3RegistryBackend;
+pub use gha::GhaRegistryBackend;
 
-const DEFAULT_GHA_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32MB
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
+
+pub struct PushMetadata {
+    data_kind: RegistryKind,
+    hash: String,
+    name: String,
+    data: Vec<u8>,
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum RegistryServerBackend {
@@ -39,29 +41,33 @@ pub enum RegistryServerBackend {
     S3,
 }
 
-#[derive(Debug, Default)]
-pub struct RegistryServer {
-    pub backend: RegistryServerBackend,
-    pub backend_s3_bucket: Option<String>,
+#[tonic::async_trait]
+pub trait RegistryBackend: Send + Sync + 'static {
+    async fn exists(&self, request: &RegistryRequest) -> Result<(), Status>;
+    async fn pull(
+        &self,
+        request: &RegistryRequest,
+        tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
+    ) -> Result<(), Status>;
+    async fn push(&self, metadata: PushMetadata) -> Result<(), Status>;
+
+    /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
+    fn box_clone(&self) -> Box<dyn RegistryBackend>;
 }
 
-impl RegistryServer {
-    pub fn new(backend: RegistryServerBackend, backend_s3_bucket: Option<String>) -> Self {
-        Self {
-            backend,
-            backend_s3_bucket,
-        }
+impl Clone for Box<dyn RegistryBackend> {
+    fn clone(&self) -> Self {
+        self.box_clone()
     }
 }
 
-fn get_cache_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
-    let prefix = "vorpal-registry";
-    let affix = format!("{}-{}", name, hash);
+pub struct RegistryServer {
+    pub backend: Box<dyn RegistryBackend>,
+}
 
-    match kind {
-        Artifact => Ok(format!("{}-{}-artifact", prefix, affix)),
-        ArtifactSource => Ok(format!("{}-{}-source", prefix, affix)),
-        _ => Err(anyhow::anyhow!("unsupported store kind")),
+impl RegistryServer {
+    pub fn new(backend: Box<dyn RegistryBackend>) -> Self {
+        Self { backend }
     }
 }
 
@@ -83,83 +89,7 @@ impl RegistryService for RegistryServer {
             return Err(Status::invalid_argument("missing store name"));
         }
 
-        let backend = self.backend.clone();
-
-        if backend == RegistryServerBackend::GHA {
-            let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
-                .expect("failed to get cache key");
-            let cache_key_file = format!("/tmp/{}", cache_key);
-            let cache_key_file_path = Path::new(&cache_key_file);
-
-            if cache_key_file_path.exists() {
-                return Ok(Response::new(RegistryResponse { success: true }));
-            }
-
-            let cache_client = gha::CacheClient::new().map_err(|err| {
-                Status::internal(format!("failed to create GHA cache client: {:?}", err))
-            })?;
-
-            info!("get cache entry -> {}", cache_key);
-
-            let cache_entry = cache_client
-                .get_cache_entry(&cache_key, &request.hash)
-                .await
-                .map_err(|e| {
-                    Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
-                })?;
-
-            info!("get cache entry response -> {:?}", cache_entry);
-
-            if cache_entry.is_none() {
-                return Err(Status::not_found("store path not found"));
-            }
-
-            return Ok(Response::new(RegistryResponse { success: true }));
-        }
-
-        if backend == RegistryServerBackend::Local {
-            let path = match request.kind() {
-                Artifact => get_artifact_archive_path(&request.hash, &request.name),
-                ArtifactSource => get_source_archive_path(&request.hash, &request.name),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
-
-            if !path.exists() {
-                return Err(Status::not_found("store path not found"));
-            }
-        }
-
-        if backend == RegistryServerBackend::S3 && self.backend_s3_bucket.is_none() {
-            return Err(Status::invalid_argument("missing s3 bucket"));
-        }
-
-        if backend == RegistryServerBackend::S3 {
-            let artifact_key = match request.kind() {
-                Artifact => format!(
-                    "store/{}.artifact",
-                    get_store_dir_name(&request.hash, &request.name)
-                ),
-                ArtifactSource => format!(
-                    "store/{}.source",
-                    get_store_dir_name(&request.hash, &request.name)
-                ),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
-
-            let client_config = aws_config::load_from_env().await;
-            let client = Client::new(&client_config);
-
-            let head_result = client
-                .head_object()
-                .bucket(self.backend_s3_bucket.clone().unwrap())
-                .key(&artifact_key)
-                .send()
-                .await;
-
-            if head_result.is_err() {
-                return Err(Status::not_found("store path not found"));
-            }
-        }
+        self.backend.exists(&request).await?;
 
         Ok(Response::new(RegistryResponse { success: true }))
     }
@@ -171,13 +101,6 @@ impl RegistryService for RegistryServer {
         let (tx, rx) = mpsc::channel(100);
 
         let backend = self.backend.clone();
-        let backend_s3_bucket = self.backend_s3_bucket.clone();
-
-        if backend == RegistryServerBackend::S3 && backend_s3_bucket.is_none() {
-            return Err(Status::invalid_argument("missing s3 bucket"));
-        }
-
-        let client_bucket_name = backend_s3_bucket.unwrap_or_default();
 
         tokio::spawn(async move {
             let request = request.into_inner();
@@ -193,224 +116,9 @@ impl RegistryService for RegistryServer {
                 return;
             }
 
-            if backend == RegistryServerBackend::GHA {
-                let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
-                    .expect("failed to get cache key");
-                let cache_key_file = format!("/tmp/{}", cache_key);
-                let cache_key_file_path = Path::new(&cache_key_file);
-
-                if cache_key_file_path.exists() {
-                    let data = match read(&cache_key_file_path).await {
-                        Ok(data) => data,
-                        Err(err) => {
-                            if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await
-                            {
-                                error!("failed to send store error: {:?}", err);
-                            }
-
-                            return;
-                        }
-                    };
-
-                    for chunk in data.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
-                        if let Err(err) = tx
-                            .send(Ok(RegistryPullResponse {
-                                data: chunk.to_vec(),
-                            }))
-                            .await
-                        {
-                            error!("failed to send store chunk: {:?}", err);
-
-                            break;
-                        }
-                    }
-
-                    return;
-                }
-
-                let cache_client =
-                    gha::CacheClient::new().expect("failed to create GHA cache client");
-
-                let cache_entry = cache_client
-                    .get_cache_entry(&cache_key, &request.hash)
-                    .await
-                    .expect("failed to get cache entry");
-
-                if cache_entry.is_none() {
-                    if let Err(err) = tx
-                        .send(Err(Status::not_found("store path not found")))
-                        .await
-                    {
-                        error!("failed to send store error: {:?}", err);
-                    }
-
-                    return;
-                }
-
-                let cache_entry = cache_entry.unwrap();
-
-                info!(
-                    "cache entry archive location -> {:?}",
-                    cache_entry.archive_location
-                );
-
-                let response = reqwest::get(&cache_entry.archive_location)
-                    .await
-                    .expect("failed to get");
-
-                let response_bytes = response.bytes().await.expect("failed to read response");
-
-                for chunk in response_bytes.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
-                    if let Err(err) = tx
-                        .send(Ok(RegistryPullResponse {
-                            data: chunk.to_vec(),
-                        }))
-                        .await
-                    {
-                        error!("failed to send store chunk: {:?}", err);
-
-                        break;
-                    }
-                }
-
-                let _ = write(&cache_key_file_path, &response_bytes).await;
-            }
-
-            if backend == RegistryServerBackend::Local {
-                let path = match request.kind() {
-                    Artifact => get_artifact_archive_path(&request.hash, &request.name),
-                    ArtifactSource => get_source_archive_path(&request.hash, &request.name),
-                    _ => {
-                        if let Err(err) = tx
-                            .send(Err(Status::invalid_argument("unsupported store kind")))
-                            .await
-                        {
-                            error!("failed to send store error: {:?}", err);
-                        }
-
-                        return;
-                    }
-                };
-
-                if !path.exists() {
-                    if let Err(err) = tx
-                        .send(Err(Status::not_found("store path not found")))
-                        .await
-                    {
-                        error!("failed to send store error: {:?}", err);
-                    }
-
-                    return;
-                }
-
-                let data = match read(&path).await {
-                    Ok(data) => data,
-                    Err(err) => {
-                        if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await {
-                            error!("failed to send store error: {:?}", err);
-                        }
-
-                        return;
-                    }
-                };
-
-                for chunk in data.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
-                    if let Err(err) = tx
-                        .send(Ok(RegistryPullResponse {
-                            data: chunk.to_vec(),
-                        }))
-                        .await
-                    {
-                        error!("failed to send store chunk: {:?}", err);
-
-                        break;
-                    }
-                }
-            }
-
-            if backend == RegistryServerBackend::S3 {
-                let artifact_key = match request.kind() {
-                    Artifact => format!(
-                        "store/{}.artifact",
-                        get_store_dir_name(&request.hash, &request.name)
-                    ),
-
-                    ArtifactSource => {
-                        format!(
-                            "store/{}.source",
-                            get_store_dir_name(&request.hash, &request.name)
-                        )
-                    }
-
-                    _ => {
-                        if let Err(err) = tx
-                            .send(Err(Status::invalid_argument("unsupported store kind")))
-                            .await
-                        {
-                            error!("failed to send store error: {:?}", err);
-                        }
-
-                        return;
-                    }
-                };
-
-                let client_config = aws_config::load_from_env().await;
-                let client = Client::new(&client_config);
-
-                let _ = match client
-                    .head_object()
-                    .bucket(client_bucket_name.clone())
-                    .key(artifact_key.clone())
-                    .send()
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(err) => {
-                        if let Err(err) = tx.send(Err(Status::not_found(err.to_string()))).await {
-                            error!("failed to send store error: {:?}", err);
-                        }
-
-                        return;
-                    }
-                };
-
-                let mut stream = match client
-                    .get_object()
-                    .bucket(client_bucket_name)
-                    .key(artifact_key)
-                    .send()
-                    .await
-                {
-                    Ok(output) => output.body,
-                    Err(err) => {
-                        if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await {
-                            error!("failed to send store error: {:?}", err);
-                        }
-
-                        return;
-                    }
-                };
-
-                while let Some(chunk_result) = stream.next().await {
-                    match chunk_result {
-                        Ok(chunk) => {
-                            if let Err(err) = tx
-                                .send(Ok(RegistryPullResponse {
-                                    data: chunk.to_vec(),
-                                }))
-                                .await
-                            {
-                                error!("failed to send store chunk: {:?}", err.to_string());
-
-                                break;
-                            }
-                        }
-                        Err(err) => {
-                            let _ = tx.send(Err(Status::internal(err.to_string()))).await;
-
-                            break;
-                        }
-                    }
+            if let Err(err) = backend.pull(&request, tx.clone()).await {
+                if let Err(err) = tx.send(Err(err)).await {
+                    error!("failed to send store error: {:?}", err);
                 }
             }
         });
@@ -422,12 +130,6 @@ impl RegistryService for RegistryServer {
         &self,
         request: Request<Streaming<RegistryPushRequest>>,
     ) -> Result<Response<RegistryResponse>, Status> {
-        let backend = self.backend.clone();
-
-        if backend == RegistryServerBackend::S3 && self.backend_s3_bucket.is_none() {
-            return Err(Status::invalid_argument("missing `s3` bucket argument"));
-        }
-
         let mut data: Vec<u8> = vec![];
         let mut data_hash = None;
         let mut data_kind = UnknownStoreKind;
@@ -450,9 +152,13 @@ impl RegistryService for RegistryServer {
             return Err(Status::invalid_argument("missing `data` field"));
         }
 
-        if data_hash.is_none() {
+        let Some(data_hash) = data_hash else {
             return Err(Status::invalid_argument("missing `hash` field"));
-        }
+        };
+
+        let Some(data_name) = data_name else {
+            return Err(Status::invalid_argument("missing `name` field"));
+        };
 
         if data_kind == UnknownStoreKind {
             return Err(Status::invalid_argument("missing `kind` field"));
@@ -480,91 +186,17 @@ impl RegistryService for RegistryServer {
             )));
         }
 
-        let backend = self.backend.clone();
-        let hash = data_hash.unwrap();
-        let name = data_name.unwrap();
+        let hash = data_hash;
+        let name = data_name;
 
-        if backend == RegistryServerBackend::GHA {
-            let cache_client = gha::CacheClient::new().map_err(|err| {
-                Status::internal(format!("failed to create GHA cache client: {:?}", err))
-            })?;
-
-            let cache_key = get_cache_key(&name, &hash, data_kind)
-                .map_err(|err| Status::internal(format!("failed to get cache key: {:?}", err)))?;
-
-            let cache_size = data.len() as u64;
-
-            let cache_reserve = cache_client
-                .reserve_cache(cache_key, hash.clone(), Some(cache_size))
-                .await
-                .map_err(|e| {
-                    Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
-                })?;
-
-            if cache_reserve.cache_id == 0 {
-                return Err(Status::internal("failed to reserve cache returned 0"));
-            }
-
-            let _ = cache_client
-                .save_cache(cache_reserve.cache_id, &data, DEFAULT_GHA_CHUNK_SIZE)
-                .await
-                .map_err(|e| {
-                    Status::internal(format!("failed to save cache: {:?}", e.to_string()))
-                })?;
-        }
-
-        if backend == RegistryServerBackend::Local {
-            let path = match data_kind {
-                Artifact => get_artifact_archive_path(&hash, &name),
-                ArtifactSource => get_source_archive_path(&hash, &name),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
-
-            if path.exists() {
-                return Ok(Response::new(RegistryResponse { success: true }));
-            }
-
-            write(&path, &data).await.map_err(|err| {
-                Status::internal(format!("failed to write store path: {:?}", err))
-            })?;
-
-            set_timestamps(&path)
-                .await
-                .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
-        }
-
-        if backend == RegistryServerBackend::S3 {
-            let artifact_key = match data_kind {
-                Artifact => format!("store/{}.artifact", get_store_dir_name(&hash, &name)),
-                ArtifactSource => format!("store/{}.source", get_store_dir_name(&hash, &name)),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
-
-            let client_config = aws_config::load_from_env().await;
-            let client = Client::new(&client_config);
-
-            let head_result = client
-                .head_object()
-                .bucket(self.backend_s3_bucket.clone().unwrap())
-                .key(&artifact_key)
-                .send()
-                .await;
-
-            if head_result.is_ok() {
-                return Ok(Response::new(RegistryResponse { success: true }));
-            }
-
-            let _ = client
-                .put_object()
-                .bucket(self.backend_s3_bucket.clone().unwrap())
-                .key(artifact_key)
-                .body(data.into())
-                .send()
-                .await
-                .map_err(|err| {
-                    Status::internal(format!("failed to write store path: {:?}", err))
-                })?;
-        }
+        self.backend
+            .push(PushMetadata {
+                data_kind,
+                hash,
+                name,
+                data,
+            })
+            .await?;
 
         Ok(Response::new(RegistryResponse { success: true }))
     }
@@ -583,7 +215,8 @@ pub async fn listen(port: u16) -> Result<()> {
         .parse()
         .map_err(|err| anyhow::anyhow!("failed to parse address: {:?}", err))?;
 
-    let registry_service = RegistryServiceServer::new(RegistryServer::default());
+    let registry_service =
+        RegistryServiceServer::new(RegistryServer::new(Box::new(LocalRegistryBackend)));
 
     Server::builder()
         .add_service(registry_service)

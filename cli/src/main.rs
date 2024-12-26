@@ -18,7 +18,7 @@ use tonic::transport::{Channel, Server};
 use tracing::{info, warn, Level};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::FmtSubscriber;
-use vorpal_registry::{RegistryServer, RegistryServerBackend};
+use vorpal_registry::{RegistryBackend, RegistryServer, RegistryServerBackend};
 use vorpal_schema::{
     get_artifact_system,
     vorpal::{
@@ -555,10 +555,16 @@ async fn main() -> Result<()> {
                     bail!("s3 backend requires '--registry-backend-s3-bucket' parameter");
                 }
 
-                let service = RegistryServiceServer::new(RegistryServer::new(
-                    backend,
-                    registry_backend_s3_bucket.clone(),
-                ));
+                let backend: Box<dyn RegistryBackend> = match backend {
+                    RegistryServerBackend::Local => Box::new(vorpal_registry::LocalRegistryBackend),
+                    RegistryServerBackend::S3 => Box::new(vorpal_registry::S3RegistryBackend {
+                        bucket: registry_backend_s3_bucket.clone(),
+                    }),
+                    RegistryServerBackend::GHA => Box::new(vorpal_registry::GhaRegistryBackend),
+                    RegistryServerBackend::Unknown => unreachable!(),
+                };
+
+                let service = RegistryServiceServer::new(RegistryServer::new(backend));
 
                 info!("registry service: [::]:{}", port);
 
