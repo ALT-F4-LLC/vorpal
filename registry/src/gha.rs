@@ -128,7 +128,7 @@ impl CacheClient {
 
         let response = request.send().await?;
 
-        if response.status() != 204 {
+        if response.status() != StatusCode::CREATED {
             return Err(anyhow!("Unexpected status code: {}", response.status()));
         }
 
