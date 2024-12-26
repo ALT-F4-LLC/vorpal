@@ -528,6 +528,7 @@ async fn main() -> Result<()> {
 
             if services.contains("registry") {
                 let backend = match registry_backend.as_str() {
+                    "gha" => RegistryServerBackend::GHA,
                     "local" => RegistryServerBackend::Local,
                     "s3" => RegistryServerBackend::S3,
                     _ => RegistryServerBackend::Unknown,
