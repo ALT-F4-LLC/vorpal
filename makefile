@@ -49,16 +49,16 @@ dist: build
 # Development (with Vorpal)
 
 vorpal-config:
-	./script/dev.sh cargo build --bin 'vorpal-config'
+	cargo build --bin 'vorpal-config'
 
 vorpal-shell: vorpal-config
-	./script/dev.sh cargo run --bin 'vorpal' -- artifact --file 'target/debug/vorpal-config' --name 'vorpal-shell'
+	cargo run --bin 'vorpal' -- artifact --name 'vorpal-shell'
 
 vorpal: vorpal-config
-	./script/dev.sh cargo run --bin 'vorpal' -- artifact --file 'target/debug/vorpal-config' --name 'vorpal'
+	cargo run --bin 'vorpal' -- artifact --name 'vorpal'
 
 vorpal-start:
-	./script/dev.sh cargo run --bin 'vorpal' -- start
+	cargo run --bin 'vorpal' -- start
 
 # Vagrant environment
 

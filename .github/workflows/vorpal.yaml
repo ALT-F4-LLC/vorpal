@@ -70,6 +70,8 @@ jobs:
           sudo mv bwrap /etc/apparmor.d/bwrap
           sudo systemctl restart apparmor.service
 
+      - run: ./script/install.sh
+
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
@@ -81,8 +83,6 @@ jobs:
       - run: |
           mkdir -pv ./dist
           tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
-          sudo mkdir -p /var/lib/vorpal
-          sudo chown -R $(id -u):$(id -g) /var/lib/vorpal
 
       - run: ./dist/vorpal keys generate
 

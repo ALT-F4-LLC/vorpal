@@ -5,11 +5,9 @@ use tonic::transport::Server;
 use vorpal_schema::{
     get_artifact_system, vorpal::artifact::v0::artifact_service_server::ArtifactServiceServer,
 };
-use vorpal_store::paths::{get_public_key_path, setup_paths};
+use vorpal_store::paths::get_public_key_path;
 
 pub async fn listen(registry: &str, port: u16) -> Result<()> {
-    setup_paths().await?;
-
     let public_key_path = get_public_key_path();
 
     if !public_key_path.exists() {

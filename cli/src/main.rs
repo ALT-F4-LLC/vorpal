@@ -37,7 +37,7 @@ use vorpal_sdk::config::{
     artifact::{language::rust, toolchain::protoc},
     ConfigContext,
 };
-use vorpal_store::paths::{get_artifact_path, get_public_key_path, setup_paths};
+use vorpal_store::paths::{get_artifact_path, get_public_key_path};
 
 use vorpal_worker::artifact::ArtifactServer;
 
@@ -504,8 +504,6 @@ async fn main() -> Result<()> {
 
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber");
-
-            setup_paths().await?;
 
             let public_key_path = get_public_key_path();
 

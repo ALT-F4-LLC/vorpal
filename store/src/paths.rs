@@ -208,35 +208,3 @@ pub async fn copy_files(
 
     Ok(target_path_files)
 }
-
-pub async fn setup_paths() -> Result<()> {
-    let cache_path = get_cache_dir_path();
-    if !cache_path.exists() {
-        create_dir_all(&cache_path)
-            .await
-            .expect("failed to create cache directory");
-    }
-
-    let key_path = get_key_dir_path();
-    if !key_path.exists() {
-        create_dir_all(&key_path)
-            .await
-            .expect("failed to create key directory");
-    }
-
-    let sandbox_path = get_sandbox_dir_path();
-    if !sandbox_path.exists() {
-        create_dir_all(&sandbox_path)
-            .await
-            .expect("failed to create sandbox directory");
-    }
-
-    let store_path = get_store_dir_path();
-    if !store_path.exists() {
-        create_dir_all(&store_path)
-            .await
-            .expect("failed to create store directory");
-    }
-
-    Ok(())
-}

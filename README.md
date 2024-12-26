@@ -211,6 +211,9 @@ xcode-select --install
 
 On Linux, install dependencies with the distro's package manger (apt, yum, etc):
 
+> [!IMPORTANT]
+> If you are using NixOS, there is a `shell.nix` configuration included for the development environment.
+
 - `bubblewrap` (sandboxing)
 - `curl` (downloading)
 - `docker` (sandboxing)
@@ -223,14 +226,16 @@ The helpful `./script/debian.sh` used for setting up systems in continuous integ
 
 The helpful `./script/dev.sh` used to run development commands in an isolated way without having to update your environment. 
 
-The following installs missing dependencies then runs `cargo build` inside the development environment:
+> [!IMPORTANT]
+> If you are using NixOS, there is a `shell.nix` configuration included for the development environment.
 
-> [!NOTE]
-> The `dev.sh` script doesn't require root permissions and installs by default in the `.env` directory in the repository root or `$HOME` directory (rustup, etc) depending on the tool.
+The following installs missing dependencies then runs `cargo build` inside the development environment:
 
 ```bash
 $ ./script/dev.sh cargo build
 ```
+
+#### Direnv
 
 To develop inside the environment the supported solution is to use `direnv` which manages all of this for you. Direnv will automatically run "./script/dev.sh" under the hood and export environment variables to your shell when you enter the directory.
 
@@ -240,19 +245,16 @@ Once you've installed `direnv` on your system navigate to Vorpal's source code a
 $ direnv allow
 ```
 
-### Commands
+### Testing
 
 At this point, you should be able to run `cargo build` successfully in the repository. If that doesn't work, go back to "Setup" and verify you have done all the required steps.
 
 These steps guide how to compile from source and also test compiling Vorpal with Vorpal.
 
-> [!IMPORTANT]
-> Steps must be run in the root of the cloned repository.
-
 1. Build without Vorpal:
 
 ```bash
-./script/dev.sh make dist
+make dist
 ```
 
 2. Generate keys for Vorpal:
@@ -269,7 +271,19 @@ These steps guide how to compile from source and also test compiling Vorpal with
 
 4. Build with Vorpal:
 ```bash
-./dist/vorpal artifact --file "dist/vorpal-config" --name "vorpal"
+./dist/vorpal artifact --name "vorpal"
 ```
 
 The entire stack of has now been tested by building itself.
+
+### Makefile
+
+There is makefile which can be used as a reference for common commands used when developing.
+
+Here are some frequently used:
+
+- `make` (default build)
+- `make lint` (before pushing)
+- `make dist` (package in `./dist` path)
+- `make vorpal-start` (runs services with `cargo`)
+- `make vorpal` (builds vorpal-in-vorpal with `cargo`)
