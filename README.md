@@ -254,36 +254,33 @@ These steps guide how to compile from source and also test compiling Vorpal with
 1. Build without Vorpal:
 
 ```bash
-make dist
+make build
 ```
 
-2. Extract the tarball `make dist` generated:
+There should now be a `target/debug/vorpal` binary present in the working directory.
 
-```bash
-tar -xf dist/vorpal-*.tar.gz -C dist
-```
-
-3. Run the initial install script, which will create all relevant directories and permissions needed to run the next steps.
+2. Run the initial install script, which will create all relevant directories and permissions needed to run the next steps.
 
 ```bash
 bash ./script/install.sh
 ```
 
-4. Generate keys for Vorpal:
+3. Generate keys for Vorpal:
 
 ```bash
-./dist/vorpal keys generate
+./target/debug/vorpal keys generate
 ```
 
-5. Start services for Vorpal:
+4. Start services for Vorpal:
 
 ```bash
-./dist/vorpal start
+./target/debug/vorpal start
 ```
 
-6. Build with Vorpal:
+5. Build with Vorpal:
+
 ```bash
-./dist/vorpal artifact --name "vorpal"
+./target/debug/vorpal artifact --name "vorpal"
 ```
 
 The entire stack of has now been tested by building itself.
