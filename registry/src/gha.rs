@@ -91,11 +91,11 @@ impl CacheClient {
         let version = get_cache_version(paths, compression_method, enable_cross_os_archive)?;
         let keys_str = keys.join(",");
         let url = format!(
-            "{}/_apis/artifactcache/cache?keys={}&version={}",
+            "{}_apis/artifactcache/cache?keys={}&version={}",
             self.base_url, keys_str, version
         );
 
-        info!("Getting cache entry from: {}", url);
+        info!("get cache entry url -> {}", url);
 
         let response = self.client.get(&url).send().await?;
 
@@ -136,7 +136,7 @@ impl CacheClient {
 
         let response_text = response.text().await?;
 
-        info!("Response text: {}", response_text);
+        info!("reserve cache response -> {}", response_text);
 
         let response = serde_json::from_str(&response_text)?;
 

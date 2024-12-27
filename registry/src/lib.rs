@@ -27,7 +27,7 @@ use vorpal_store::paths::{
 
 mod gha;
 
-const DEFAULT_CHUNK_SIZE: usize = 8192;
+const DEFAULT_CHUNK_SIZE: usize = 2048 * 1000; // 2MB
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum RegistryServerBackend {
@@ -90,7 +90,7 @@ impl RegistryService for RegistryServer {
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
-            info!("get cache entry: {} -> {}", key, path.to_string_lossy());
+            info!("get cache entry -> {} -> {}", key, path.to_string_lossy());
 
             let cache_entry = gha
                 .get_cache_entry(&[key], &[path.to_string_lossy().to_string()], None, false)
@@ -99,7 +99,7 @@ impl RegistryService for RegistryServer {
                     Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
                 })?;
 
-            info!("cache entry: {:?}", cache_entry);
+            info!("cache entry response -> {:?}", cache_entry);
 
             if cache_entry.is_none() {
                 return Err(Status::not_found("store path not found"));
@@ -533,7 +533,7 @@ impl RegistryService for RegistryServer {
                 .save_cache(
                     reserve_response.cache_id,
                     &archive_path,
-                    5,
+                    1,
                     DEFAULT_CHUNK_SIZE,
                 )
                 .await
