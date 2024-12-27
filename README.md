@@ -257,19 +257,31 @@ These steps guide how to compile from source and also test compiling Vorpal with
 make dist
 ```
 
-2. Generate keys for Vorpal:
+2. Extract the tarball `make dist` generated:
+
+```bash
+tar -xf dist/vorpal-*.tar.gz -C dist
+```
+
+3. Run the initial install script, which will create all relevant directories and permissions needed to run the next steps.
+
+```bash
+bash ./script/install.sh
+```
+
+4. Generate keys for Vorpal:
 
 ```bash
 ./dist/vorpal keys generate
 ```
 
-3. Start services for Vorpal:
+5. Start services for Vorpal:
 
 ```bash
 ./dist/vorpal start
 ```
 
-4. Build with Vorpal:
+6. Build with Vorpal:
 ```bash
 ./dist/vorpal artifact --name "vorpal"
 ```
