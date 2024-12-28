@@ -114,7 +114,7 @@ impl CacheClient {
     }
 
     pub async fn download_cache(&self, archive_url: &str) -> Result<()> {
-        let response = self.client.get(archive_url).send().await?;
+        let response = reqwest::get(archive_url).await?;
 
         if response.status() != StatusCode::OK {
             return Err(anyhow!("Unexpected status code: {}", response.status()));
