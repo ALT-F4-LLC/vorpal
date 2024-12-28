@@ -11,7 +11,7 @@ use tokio::{
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use vorpal_notary::get_public_key;
 use vorpal_schema::vorpal::registry::v0::{
     registry_service_server::{RegistryService, RegistryServiceServer},
@@ -20,8 +20,8 @@ use vorpal_schema::vorpal::registry::v0::{
     RegistryPullResponse, RegistryPushRequest, RegistryRequest, RegistryResponse,
 };
 use vorpal_store::paths::{
-    get_artifact_archive_path, get_public_key_path, get_source_archive_path, get_store_dir_name,
-    set_timestamps,
+    get_artifact_archive_path, get_public_key_path, get_sandbox_path, get_source_archive_path,
+    get_store_dir_name, set_timestamps,
 };
 
 mod gha;
@@ -212,42 +212,13 @@ impl RegistryService for RegistryServer {
                     cache_entry.archive_location
                 );
 
-                let store_archive_path = match request.kind() {
-                    Artifact => get_artifact_archive_path(&request.hash, &request.name),
-                    ArtifactSource => get_source_archive_path(&request.hash, &request.name),
-                    _ => {
-                        if let Err(err) = tx
-                            .send(Err(Status::invalid_argument("unsupported store kind")))
-                            .await
-                        {
-                            error!("failed to send store error: {:?}", err);
-                        }
+                let sandbox_file_path = get_sandbox_path();
 
-                        return;
-                    }
-                };
-
-                gha.download_cache(&cache_entry.archive_location, &store_archive_path)
+                gha.download_cache(&cache_entry.archive_location, &sandbox_file_path)
                     .await
                     .expect("failed to download cache");
 
-                if !store_archive_path.exists() {
-                    if let Err(err) = tx
-                        .send(Err(Status::not_found("store path not found")))
-                        .await
-                    {
-                        error!("failed to send store error: {:?}", err);
-                    }
-
-                    warn!(
-                        "store path '{}' not found after GHA download",
-                        store_archive_path.to_string_lossy()
-                    );
-
-                    return;
-                }
-
-                let data = match read(&store_archive_path).await {
+                let data = match read(&sandbox_file_path).await {
                     Ok(data) => data,
                     Err(err) => {
                         if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await {
@@ -257,6 +228,8 @@ impl RegistryService for RegistryServer {
                         return;
                     }
                 };
+
+                info!("downloaded cache with size: {} bytes", data.len());
 
                 for chunk in data.chunks(DEFAULT_CHUNK_SIZE) {
                     if let Err(err) = tx
