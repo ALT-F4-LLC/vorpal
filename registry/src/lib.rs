@@ -77,22 +77,26 @@ impl RegistryService for RegistryServer {
                 Status::internal(format!("failed to create GHA cache client: {:?}", err))
             })?;
 
-            let key = match request.kind() {
-                Artifact => format!("{}-artifact", request.name),
-                ArtifactSource => format!("{}-source", request.name),
+            let cache_key = match request.kind() {
+                Artifact => format!("{}-{}-artifact", request.name, request.hash),
+                ArtifactSource => format!("{}-{}-source", request.name, request.hash),
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
-            let path = match request.kind() {
+            let cache_path = match request.kind() {
                 Artifact => get_artifact_archive_path(&request.hash, &request.name),
                 ArtifactSource => get_source_archive_path(&request.hash, &request.name),
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
-            info!("get cache entry -> {} -> {}", key, path.to_string_lossy());
+            info!(
+                "get cache entry -> {} -> {}",
+                cache_key,
+                cache_path.to_string_lossy()
+            );
 
             let cache_entry = gha
-                .get_cache_entry(&key, &request.hash)
+                .get_cache_entry(&cache_key, &request.hash)
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
@@ -187,8 +191,8 @@ impl RegistryService for RegistryServer {
                 let gha = gha::CacheClient::new().expect("failed to create GHA cache client");
 
                 let cache_key = match request.kind() {
-                    Artifact => format!("{}-artifact", request.name),
-                    ArtifactSource => format!("{}-source", request.name),
+                    Artifact => format!("{}-{}-artifact", request.name, request.hash),
+                    ArtifactSource => format!("{}-{}-source", request.name, request.hash),
                     _ => {
                         if let Err(err) = tx
                             .send(Err(Status::invalid_argument("unsupported store kind")))
