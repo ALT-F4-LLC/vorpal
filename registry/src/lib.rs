@@ -78,8 +78,8 @@ impl RegistryService for RegistryServer {
             })?;
 
             let key = match request.kind() {
-                Artifact => format!("{}-{}-artifact", request.name, request.hash),
-                ArtifactSource => format!("{}-{}-source", request.name, request.hash),
+                Artifact => format!("{}-artifact", request.name),
+                ArtifactSource => format!("{}-source", request.name),
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
@@ -92,7 +92,7 @@ impl RegistryService for RegistryServer {
             info!("get cache entry -> {} -> {}", key, path.to_string_lossy());
 
             let cache_entry = gha
-                .get_cache_entry(&[key], &[path.to_string_lossy().to_string()], None, false)
+                .get_cache_entry(&key, &request.hash)
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
@@ -186,24 +186,9 @@ impl RegistryService for RegistryServer {
             if backend == RegistryServerBackend::GHA {
                 let gha = gha::CacheClient::new().expect("failed to create GHA cache client");
 
-                let key = match request.kind() {
-                    Artifact => format!("{}-{}-artifact", request.name, request.hash),
-                    ArtifactSource => format!("{}-{}-source", request.name, request.hash),
-                    _ => {
-                        if let Err(err) = tx
-                            .send(Err(Status::invalid_argument("unsupported store kind")))
-                            .await
-                        {
-                            error!("failed to send store error: {:?}", err);
-                        }
-
-                        return;
-                    }
-                };
-
-                let store_archive_path = match request.kind() {
-                    Artifact => get_artifact_archive_path(&request.hash, &request.name),
-                    ArtifactSource => get_source_archive_path(&request.hash, &request.name),
+                let cache_key = match request.kind() {
+                    Artifact => format!("{}-artifact", request.name),
+                    ArtifactSource => format!("{}-source", request.name),
                     _ => {
                         if let Err(err) = tx
                             .send(Err(Status::invalid_argument("unsupported store kind")))
@@ -217,12 +202,7 @@ impl RegistryService for RegistryServer {
                 };
 
                 let cache_entry = gha
-                    .get_cache_entry(
-                        &[key],
-                        &[store_archive_path.to_string_lossy().to_string()],
-                        None,
-                        false,
-                    )
+                    .get_cache_entry(&cache_key, &request.hash)
                     .await
                     .expect("failed to get cache entry");
 
@@ -243,6 +223,21 @@ impl RegistryService for RegistryServer {
                     "cache entry archive location -> {:?}",
                     cache_entry.archive_location
                 );
+
+                let store_archive_path = match request.kind() {
+                    Artifact => get_artifact_archive_path(&request.hash, &request.name),
+                    ArtifactSource => get_source_archive_path(&request.hash, &request.name),
+                    _ => {
+                        if let Err(err) = tx
+                            .send(Err(Status::invalid_argument("unsupported store kind")))
+                            .await
+                        {
+                            error!("failed to send store error: {:?}", err);
+                        }
+
+                        return;
+                    }
+                };
 
                 gha.download_cache(&cache_entry.archive_location, &store_archive_path)
                     .await
@@ -502,28 +497,16 @@ impl RegistryService for RegistryServer {
                 Status::internal(format!("failed to create GHA cache client: {:?}", err))
             })?;
 
-            let key = match data_kind {
-                Artifact => format!("{}-{}-artifact", name, hash),
-                ArtifactSource => format!("{}-{}-source", name, hash),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
-
-            let path = match data_kind {
-                Artifact => get_artifact_archive_path(&hash, &name),
-                ArtifactSource => get_source_archive_path(&hash, &name),
+            let cache_key = match data_kind {
+                Artifact => format!("{}-artifact", name),
+                ArtifactSource => format!("{}-source", name),
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
             let cache_size = data.len() as u64;
 
             let reserve_response = gha
-                .reserve_cache(
-                    &key,
-                    &[path.to_string_lossy().to_string()],
-                    None,
-                    false,
-                    Some(cache_size),
-                )
+                .reserve_cache(cache_key, hash.clone(), Some(cache_size))
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
@@ -533,23 +516,27 @@ impl RegistryService for RegistryServer {
                 return Err(Status::internal("failed to reserve cache returned 0"));
             }
 
-            let archive_path = path.clone();
+            let store_archive_path = match data_kind {
+                Artifact => get_artifact_archive_path(&hash, &name),
+                ArtifactSource => get_source_archive_path(&hash, &name),
+                _ => return Err(Status::invalid_argument("unsupported store kind")),
+            };
 
-            if let Err(err) = write(&archive_path, &data).await {
+            if let Err(err) = write(&store_archive_path, &data).await {
                 return Err(Status::internal(format!(
                     "failed to write store path: {:?}",
                     err
                 )));
             }
 
-            set_timestamps(&archive_path)
+            set_timestamps(&store_archive_path)
                 .await
                 .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
 
             let _ = gha
                 .save_cache(
                     reserve_response.cache_id,
-                    &archive_path,
+                    &store_archive_path,
                     1,
                     DEFAULT_CHUNK_SIZE,
                 )

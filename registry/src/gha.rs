@@ -4,7 +4,6 @@ use reqwest::{
     Client, StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::{path::Path, sync::Arc};
 use tokio::{
@@ -15,7 +14,6 @@ use tokio::{
 use tracing::info;
 use vorpal_store::paths::set_timestamps;
 
-const VERSION_SALT: &str = "1.0";
 const API_VERSION: &str = "6.0-preview.1";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -84,16 +82,12 @@ impl CacheClient {
 
     pub async fn get_cache_entry(
         &self,
-        keys: &[String],
-        paths: &[String],
-        compression_method: Option<String>,
-        enable_cross_os_archive: bool,
+        key: &str,
+        version: &str,
     ) -> Result<Option<ArtifactCacheEntry>> {
-        let version = get_cache_version(paths, compression_method, enable_cross_os_archive)?;
-        let keys_str = keys.join(",");
         let url = format!(
             "{}_apis/artifactcache/cache?keys={}&version={}",
-            self.base_url, keys_str, version
+            self.base_url, key, version
         );
 
         info!("get cache entry url -> {}", url);
@@ -132,18 +126,15 @@ impl CacheClient {
 
     pub async fn reserve_cache(
         &self,
-        key: &str,
-        paths: &[String],
-        compression_method: Option<String>,
-        enable_cross_os_archive: bool,
+        key: String,
+        version: String,
         cache_size: Option<u64>,
     ) -> Result<ReserveCacheResponse> {
-        let version = get_cache_version(paths, compression_method, enable_cross_os_archive)?;
         let url = format!("{}/_apis/artifactcache/caches", self.base_url);
 
         let request = ReserveCacheRequest {
             cache_size,
-            key: key.to_string(),
+            key,
             version,
         };
 
@@ -234,26 +225,4 @@ impl CacheClient {
         info!("Cache saved successfully");
         Ok(())
     }
-}
-
-fn get_cache_version(
-    paths: &[String],
-    compression_method: Option<String>,
-    enable_cross_os_archive: bool,
-) -> Result<String> {
-    let mut components = paths.to_vec();
-
-    if let Some(method) = compression_method {
-        components.push(method);
-    }
-
-    if cfg!(windows) && !enable_cross_os_archive {
-        components.push("windows-only".to_string());
-    }
-
-    components.push(VERSION_SALT.to_string());
-
-    let mut hasher = Sha256::new();
-    hasher.update(components.join("|"));
-    Ok(format!("{:x}", hasher.finalize()))
 }
