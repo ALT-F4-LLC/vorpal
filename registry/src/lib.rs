@@ -55,7 +55,7 @@ impl RegistryServer {
 }
 
 fn get_cache_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
-    let prefix = format!("vorpal-registry-{}-{}", name, hash);
+    let prefix = format!("vorpal-{}-{}", name, hash);
 
     match kind {
         Artifact => Ok(format!("{}-artifact", prefix)),

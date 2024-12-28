@@ -149,7 +149,7 @@ impl CacheClient {
         let buffer = Arc::new(buffer.to_vec());
 
         for chunk_start in (0..buffer_size).step_by(chunk_size) {
-            let chunk_end = (chunk_start + chunk_size as u64 - 1).min(buffer_size - 1);
+            let chunk_end = (chunk_start + chunk_size as u64).min(buffer_size) - 1;
             let permit = semaphore.clone().acquire_owned().await?;
             let client = self.client.clone();
             let url = url.clone();
