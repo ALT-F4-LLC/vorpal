@@ -5,14 +5,13 @@ use rsa::{
     sha2::Sha256,
     signature::Verifier,
 };
-use std::path::Path;
 use tokio::{
     fs::{read, write},
     sync::mpsc,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use vorpal_notary::get_public_key;
 use vorpal_schema::vorpal::registry::v0::{
     registry_service_server::{RegistryService, RegistryServiceServer},
@@ -202,7 +201,7 @@ impl RegistryService for RegistryServer {
                     }
                 };
 
-                let path = match request.kind() {
+                let store_archive_path = match request.kind() {
                     Artifact => get_artifact_archive_path(&request.hash, &request.name),
                     ArtifactSource => get_source_archive_path(&request.hash, &request.name),
                     _ => {
@@ -218,7 +217,12 @@ impl RegistryService for RegistryServer {
                 };
 
                 let cache_entry = gha
-                    .get_cache_entry(&[key], &[path.to_string_lossy().to_string()], None, false)
+                    .get_cache_entry(
+                        &[key],
+                        &[store_archive_path.to_string_lossy().to_string()],
+                        None,
+                        false,
+                    )
                     .await
                     .expect("failed to get cache entry");
 
@@ -234,9 +238,17 @@ impl RegistryService for RegistryServer {
                 }
 
                 let cache_entry = cache_entry.unwrap();
-                let cache_entry_archive_path = Path::new(&cache_entry.archive_location);
 
-                if !cache_entry_archive_path.exists() {
+                info!(
+                    "cache entry archive location -> {:?}",
+                    cache_entry.archive_location
+                );
+
+                gha.download_cache(&cache_entry.archive_location)
+                    .await
+                    .expect("failed to download cache");
+
+                if !store_archive_path.exists() {
                     if let Err(err) = tx
                         .send(Err(Status::not_found("store path not found")))
                         .await
@@ -244,10 +256,15 @@ impl RegistryService for RegistryServer {
                         error!("failed to send store error: {:?}", err);
                     }
 
+                    warn!(
+                        "store path '{}' not found after GHA download",
+                        store_archive_path.to_string_lossy()
+                    );
+
                     return;
                 }
 
-                let data = match read(&cache_entry_archive_path).await {
+                let data = match read(&store_archive_path).await {
                     Ok(data) => data,
                     Err(err) => {
                         if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await {

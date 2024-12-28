@@ -5,14 +5,18 @@ use reqwest::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom},
-    path::Path,
-    sync::Arc,
+use std::{path::Path, sync::Arc};
+use tokio::{
+    fs::{copy, write, File},
+    io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
+    sync::Semaphore,
 };
-use tokio::sync::Semaphore;
 use tracing::info;
+use vorpal_store::{
+    archives::unpack_gzip,
+    paths::{get_file_paths, get_store_dir_path},
+    temps::{create_sandbox_dir, create_sandbox_file},
+};
 
 const VERSION_SALT: &str = "1.0";
 const API_VERSION: &str = "6.0-preview.1";
@@ -109,6 +113,46 @@ impl CacheClient {
         }
     }
 
+    pub async fn download_cache(&self, archive_url: &str) -> Result<()> {
+        let response = self.client.get(archive_url).send().await?;
+
+        if response.status() != StatusCode::OK {
+            return Err(anyhow!("Unexpected status code: {}", response.status()));
+        }
+
+        let response_bytes = response.bytes().await.context("Failed to read response")?;
+
+        let sandbox_archive_path = create_sandbox_file(Some("tar.gz")).await?;
+
+        info!("Writing cache archive to {:?}", sandbox_archive_path);
+
+        write(&sandbox_archive_path, response_bytes)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        let sandbox_cache_dir = create_sandbox_dir().await?;
+
+        info!("Unpacking cache archive to {:?}", sandbox_cache_dir);
+
+        unpack_gzip(&sandbox_cache_dir, &sandbox_archive_path).await?;
+
+        let sandbox_cache_dir_files = get_file_paths(&sandbox_cache_dir, vec![], vec![])?;
+
+        info!("Found cache files: {:?}", sandbox_cache_dir_files);
+
+        let store_dir_path = get_store_dir_path();
+
+        for file in sandbox_cache_dir_files {
+            let target_path = store_dir_path.join(file.strip_prefix(&sandbox_cache_dir)?);
+
+            info!("Copying {:?} to {:?}", file, target_path);
+
+            copy(&file, &target_path).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn reserve_cache(
         &self,
         key: &str,
@@ -150,8 +194,8 @@ impl CacheClient {
         concurrency: usize,
         chunk_size: usize,
     ) -> Result<()> {
-        let file = File::open(archive_path)?;
-        let file_size = file.metadata()?.len();
+        let file = File::open(archive_path).await?;
+        let file_size = file.metadata().await?.len();
         let url = format!("{}/_apis/artifactcache/caches/{}", self.base_url, cache_id);
 
         info!("Uploading cache file with size: {} bytes", file_size);
@@ -171,10 +215,10 @@ impl CacheClient {
             let task = tokio::spawn(async move {
                 let _permit = permit; // Keep permit alive for the duration of the upload
                 let mut file = file.lock().await;
-                file.seek(SeekFrom::Start(chunk_start))?;
+                file.seek(SeekFrom::Start(chunk_start)).await?;
 
                 let mut buffer = vec![0; (chunk_end - chunk_start + 1) as usize];
-                file.read_exact(&mut buffer)?;
+                file.read_exact(&mut buffer).await?;
                 drop(file);
 
                 let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, file_size);
