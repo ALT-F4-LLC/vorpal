@@ -7,14 +7,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{path::Path, sync::Arc};
 use tokio::{
-    fs::{copy, write, File},
+    fs::{write, File},
     io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
     sync::Semaphore,
 };
 use tracing::info;
 use vorpal_store::{
-    archives::unpack_gzip,
-    paths::{get_file_paths, get_store_dir_path},
+    archives::unpack_zstd,
+    paths::get_file_paths,
     temps::{create_sandbox_dir, create_sandbox_file},
 };
 
@@ -149,23 +149,13 @@ impl CacheClient {
 
         info!("Unpacking cache archive to {:?}", sandbox_cache_dir);
 
-        unpack_gzip(&sandbox_cache_dir, &sandbox_archive_path).await?;
+        unpack_zstd(&sandbox_cache_dir, &sandbox_archive_path).await?;
 
         let sandbox_cache_dir_files = get_file_paths(&sandbox_cache_dir, vec![], vec![])?;
 
         info!("Found cache files: {:?}", sandbox_cache_dir_files);
 
-        let store_dir_path = get_store_dir_path();
-
-        for file in sandbox_cache_dir_files {
-            let target_path = store_dir_path.join(file.strip_prefix(&sandbox_cache_dir)?);
-
-            info!("Copying {:?} to {:?}", file, target_path);
-
-            copy(&file, &target_path).await?;
-        }
-
-        Ok(())
+        Err(anyhow!("Not implemented"))
     }
 
     pub async fn reserve_cache(
