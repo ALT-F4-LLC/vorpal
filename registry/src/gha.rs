@@ -112,6 +112,8 @@ impl CacheClient {
             version,
         };
 
+        info!("reserve cache request -> {:?}", request);
+
         let request = self.client.post(&url).json(&request);
 
         let response = request.send().await?;
@@ -136,18 +138,18 @@ impl CacheClient {
         concurrency: usize,
         chunk_size: usize,
     ) -> Result<()> {
-        let file_size = buffer.len() as u64;
+        let buffer_size = buffer.len() as u64;
         let url = format!("{}_apis/artifactcache/caches/{}", self.base_url, cache_id);
 
-        info!("Uploading cache buffer with size: {} bytes", file_size);
+        info!("Uploading cache buffer with size: {} bytes", buffer_size);
 
         // Create a semaphore to limit concurrent uploads
         let semaphore = Arc::new(Semaphore::new(concurrency));
         let mut tasks = Vec::new();
         let buffer = Arc::new(buffer.to_vec());
 
-        for chunk_start in (0..file_size).step_by(chunk_size) {
-            let chunk_end = (chunk_start + chunk_size as u64 - 1).min(file_size - 1);
+        for chunk_start in (0..buffer_size).step_by(chunk_size) {
+            let chunk_end = (chunk_start + chunk_size as u64 - 1).min(buffer_size - 1);
             let permit = semaphore.clone().acquire_owned().await?;
             let client = self.client.clone();
             let url = url.clone();
@@ -157,7 +159,7 @@ impl CacheClient {
                 let _permit = permit; // Keep permit alive for the duration of the upload
                 let chunk = &buffer[chunk_start as usize..=chunk_end as usize];
 
-                let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, file_size);
+                let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, buffer_size);
                 let response = client
                     .patch(&url)
                     .header(CONTENT_TYPE, "application/octet-stream")
@@ -167,7 +169,11 @@ impl CacheClient {
                     .await?
                     .error_for_status()?;
 
-                info!("Uploaded chunk response: {}", response.status());
+                info!(
+                    "Uploaded chunk '{}' response -> '{}'",
+                    range,
+                    response.status()
+                );
 
                 Result::<()>::Ok(())
             });
