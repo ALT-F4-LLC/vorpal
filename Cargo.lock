@@ -3197,6 +3197,7 @@ dependencies = [
  "anyhow",
  "aws-config",
  "aws-sdk-s3",
+ "infer",
  "reqwest",
  "rsa",
  "serde",

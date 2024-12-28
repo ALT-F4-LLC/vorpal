@@ -122,7 +122,22 @@ impl CacheClient {
 
         let response_bytes = response.bytes().await.context("Failed to read response")?;
 
-        let sandbox_archive_path = create_sandbox_file(Some("tar.gz")).await?;
+        info!(
+            "Downloaded cache archive with size: {} bytes",
+            response_bytes.len()
+        );
+
+        let response_bytes_kind = infer::get(&response_bytes);
+
+        if response_bytes_kind.is_none() {
+            return Err(anyhow!("Unexpected cache archive content type"));
+        }
+
+        let response_bytes_kind = response_bytes_kind.unwrap();
+
+        info!("Cache archive content type: {:?}", response_bytes_kind);
+
+        let sandbox_archive_path = create_sandbox_file(None).await?;
 
         info!("Writing cache archive to {:?}", sandbox_archive_path);
 
