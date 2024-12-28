@@ -26,7 +26,8 @@ use vorpal_store::paths::{
 
 mod gha;
 
-const DEFAULT_CHUNK_SIZE: usize = 2048 * 1000; // 2MB
+const DEFAULT_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32MB
+const DEFAULT_PARLLALELISM: usize = 4;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum RegistryServerBackend {
@@ -49,6 +50,14 @@ impl RegistryServer {
             backend,
             backend_s3_bucket,
         }
+    }
+}
+
+fn get_cache_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
+    match kind {
+        Artifact => Ok(format!("{}-{}-artifact", name, hash)),
+        ArtifactSource => Ok(format!("{}-{}-source", name, hash)),
+        _ => Err(anyhow::anyhow!("unsupported store kind")),
     }
 }
 
@@ -77,23 +86,10 @@ impl RegistryService for RegistryServer {
                 Status::internal(format!("failed to create GHA cache client: {:?}", err))
             })?;
 
-            let cache_key = match request.kind() {
-                Artifact => format!("{}-{}-artifact", request.name, request.hash),
-                ArtifactSource => format!("{}-{}-source", request.name, request.hash),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
+            let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
+                .map_err(|err| Status::internal(format!("failed to get cache key: {:?}", err)))?;
 
-            let cache_path = match request.kind() {
-                Artifact => get_artifact_archive_path(&request.hash, &request.name),
-                ArtifactSource => get_source_archive_path(&request.hash, &request.name),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
-
-            info!(
-                "get cache entry -> {} -> {}",
-                cache_key,
-                cache_path.to_string_lossy()
-            );
+            info!("get cache entry -> {}", cache_key);
 
             let cache_entry = gha
                 .get_cache_entry(&cache_key, &request.hash)
@@ -102,7 +98,7 @@ impl RegistryService for RegistryServer {
                     Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
                 })?;
 
-            info!("cache entry response -> {:?}", cache_entry);
+            info!("get cache entry response -> {:?}", cache_entry);
 
             if cache_entry.is_none() {
                 return Err(Status::not_found("store path not found"));
@@ -190,20 +186,8 @@ impl RegistryService for RegistryServer {
             if backend == RegistryServerBackend::GHA {
                 let gha = gha::CacheClient::new().expect("failed to create GHA cache client");
 
-                let cache_key = match request.kind() {
-                    Artifact => format!("{}-{}-artifact", request.name, request.hash),
-                    ArtifactSource => format!("{}-{}-source", request.name, request.hash),
-                    _ => {
-                        if let Err(err) = tx
-                            .send(Err(Status::invalid_argument("unsupported store kind")))
-                            .await
-                        {
-                            error!("failed to send store error: {:?}", err);
-                        }
-
-                        return;
-                    }
-                };
+                let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
+                    .expect("failed to get cache key");
 
                 let cache_entry = gha
                     .get_cache_entry(&cache_key, &request.hash)
@@ -501,11 +485,8 @@ impl RegistryService for RegistryServer {
                 Status::internal(format!("failed to create GHA cache client: {:?}", err))
             })?;
 
-            let cache_key = match data_kind {
-                Artifact => format!("{}-{}-artifact", name, hash),
-                ArtifactSource => format!("{}-{}-source", name, hash),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
+            let cache_key = get_cache_key(&name, &hash, data_kind)
+                .map_err(|err| Status::internal(format!("failed to get cache key: {:?}", err)))?;
 
             let cache_size = data.len() as u64;
 
@@ -541,7 +522,7 @@ impl RegistryService for RegistryServer {
                 .save_cache(
                     reserve_response.cache_id,
                     &store_archive_path,
-                    1,
+                    DEFAULT_PARLLALELISM,
                     DEFAULT_CHUNK_SIZE,
                 )
                 .await

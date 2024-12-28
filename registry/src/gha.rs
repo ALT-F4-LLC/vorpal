@@ -48,8 +48,8 @@ pub struct CommitCacheRequest {
 
 #[derive(Debug)]
 pub struct CacheClient {
-    client: Client,
     base_url: String,
+    client: Client,
 }
 
 impl CacheClient {
@@ -130,7 +130,7 @@ impl CacheClient {
         version: String,
         cache_size: Option<u64>,
     ) -> Result<ReserveCacheResponse> {
-        let url = format!("{}/_apis/artifactcache/caches", self.base_url);
+        let url = format!("{}_apis/artifactcache/caches", self.base_url);
 
         let request = ReserveCacheRequest {
             cache_size,
