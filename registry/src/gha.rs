@@ -5,6 +5,7 @@ use reqwest::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::path::PathBuf;
 use std::{path::Path, sync::Arc};
 use tokio::{
     fs::{write, File},
@@ -12,11 +13,7 @@ use tokio::{
     sync::Semaphore,
 };
 use tracing::info;
-use vorpal_store::{
-    archives::unpack_zstd,
-    paths::get_file_paths,
-    temps::{create_sandbox_dir, create_sandbox_file},
-};
+use vorpal_store::paths::set_timestamps;
 
 const VERSION_SALT: &str = "1.0";
 const API_VERSION: &str = "6.0-preview.1";
@@ -113,7 +110,7 @@ impl CacheClient {
         }
     }
 
-    pub async fn download_cache(&self, archive_url: &str) -> Result<()> {
+    pub async fn download_cache(&self, archive_url: &str, archive_path: &PathBuf) -> Result<()> {
         let response = reqwest::get(archive_url).await?;
 
         if response.status() != StatusCode::OK {
@@ -122,40 +119,15 @@ impl CacheClient {
 
         let response_bytes = response.bytes().await.context("Failed to read response")?;
 
-        info!(
-            "Downloaded cache archive with size: {} bytes",
-            response_bytes.len()
-        );
+        info!("Downloaded cache with size: {} bytes", response_bytes.len());
 
-        let response_bytes_kind = infer::get(&response_bytes);
-
-        if response_bytes_kind.is_none() {
-            return Err(anyhow!("Unexpected cache archive content type"));
-        }
-
-        let response_bytes_kind = response_bytes_kind.unwrap();
-
-        info!("Cache archive content type: {:?}", response_bytes_kind);
-
-        let sandbox_archive_path = create_sandbox_file(None).await?;
-
-        info!("Writing cache archive to {:?}", sandbox_archive_path);
-
-        write(&sandbox_archive_path, response_bytes)
+        write(&archive_path, response_bytes)
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        let sandbox_cache_dir = create_sandbox_dir().await?;
+        set_timestamps(&archive_path).await?;
 
-        info!("Unpacking cache archive to {:?}", sandbox_cache_dir);
-
-        unpack_zstd(&sandbox_cache_dir, &sandbox_archive_path).await?;
-
-        let sandbox_cache_dir_files = get_file_paths(&sandbox_cache_dir, vec![], vec![])?;
-
-        info!("Found cache files: {:?}", sandbox_cache_dir_files);
-
-        Err(anyhow!("Not implemented"))
+        Ok(())
     }
 
     pub async fn reserve_cache(

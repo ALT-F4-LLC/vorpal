@@ -244,7 +244,7 @@ impl RegistryService for RegistryServer {
                     cache_entry.archive_location
                 );
 
-                gha.download_cache(&cache_entry.archive_location)
+                gha.download_cache(&cache_entry.archive_location, &store_archive_path)
                     .await
                     .expect("failed to download cache");
 
