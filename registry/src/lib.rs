@@ -502,8 +502,8 @@ impl RegistryService for RegistryServer {
             })?;
 
             let cache_key = match data_kind {
-                Artifact => format!("{}-artifact", name),
-                ArtifactSource => format!("{}-source", name),
+                Artifact => format!("{}-{}-artifact", name, hash),
+                ArtifactSource => format!("{}-{}-source", name, hash),
                 _ => return Err(Status::invalid_argument("unsupported store kind")),
             };
 
