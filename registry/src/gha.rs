@@ -164,7 +164,7 @@ impl CacheClient {
     ) -> Result<()> {
         let file = File::open(archive_path).await?;
         let file_size = file.metadata().await?.len();
-        let url = format!("{}/_apis/artifactcache/caches/{}", self.base_url, cache_id);
+        let url = format!("{}_apis/artifactcache/caches/{}", self.base_url, cache_id);
 
         info!("Uploading cache file with size: {} bytes", file_size);
 
