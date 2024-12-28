@@ -125,7 +125,7 @@ impl CacheClient {
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        set_timestamps(&archive_path).await?;
+        set_timestamps(archive_path).await?;
 
         Ok(())
     }
