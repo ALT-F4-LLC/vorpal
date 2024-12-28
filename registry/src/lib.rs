@@ -20,14 +20,15 @@ use vorpal_schema::vorpal::registry::v0::{
     RegistryPullResponse, RegistryPushRequest, RegistryRequest, RegistryResponse,
 };
 use vorpal_store::paths::{
-    get_artifact_archive_path, get_public_key_path, get_sandbox_path, get_source_archive_path,
-    get_store_dir_name, set_timestamps,
+    get_artifact_archive_path, get_public_key_path, get_source_archive_path, get_store_dir_name,
+    set_timestamps,
 };
 
 mod gha;
 
-const DEFAULT_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32MB
-const DEFAULT_PARLLALELISM: usize = 4;
+const DEFAULT_GHA_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32MB
+const DEFAULT_GHA_PARLLALELISM: usize = 4;
+const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum RegistryServerBackend {
@@ -212,26 +213,13 @@ impl RegistryService for RegistryServer {
                     cache_entry.archive_location
                 );
 
-                let sandbox_file_path = get_sandbox_path();
-
-                gha.download_cache(&cache_entry.archive_location, &sandbox_file_path)
+                let response = reqwest::get(&cache_entry.archive_location)
                     .await
-                    .expect("failed to download cache");
+                    .expect("failed to get");
 
-                let data = match read(&sandbox_file_path).await {
-                    Ok(data) => data,
-                    Err(err) => {
-                        if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await {
-                            error!("failed to send store error: {:?}", err);
-                        }
+                let response_bytes = response.bytes().await.expect("failed to read response");
 
-                        return;
-                    }
-                };
-
-                info!("downloaded cache with size: {} bytes", data.len());
-
-                for chunk in data.chunks(DEFAULT_CHUNK_SIZE) {
+                for chunk in response_bytes.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
                     if let Err(err) = tx
                         .send(Ok(RegistryPullResponse {
                             data: chunk.to_vec(),
@@ -283,7 +271,7 @@ impl RegistryService for RegistryServer {
                     }
                 };
 
-                for chunk in data.chunks(DEFAULT_CHUNK_SIZE) {
+                for chunk in data.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
                     if let Err(err) = tx
                         .send(Ok(RegistryPullResponse {
                             data: chunk.to_vec(),
@@ -474,29 +462,12 @@ impl RegistryService for RegistryServer {
                 return Err(Status::internal("failed to reserve cache returned 0"));
             }
 
-            let store_archive_path = match data_kind {
-                Artifact => get_artifact_archive_path(&hash, &name),
-                ArtifactSource => get_source_archive_path(&hash, &name),
-                _ => return Err(Status::invalid_argument("unsupported store kind")),
-            };
-
-            if let Err(err) = write(&store_archive_path, &data).await {
-                return Err(Status::internal(format!(
-                    "failed to write store path: {:?}",
-                    err
-                )));
-            }
-
-            set_timestamps(&store_archive_path)
-                .await
-                .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
-
             let _ = gha
                 .save_cache(
                     reserve_response.cache_id,
-                    &store_archive_path,
-                    DEFAULT_PARLLALELISM,
-                    DEFAULT_CHUNK_SIZE,
+                    &data,
+                    DEFAULT_GHA_PARLLALELISM,
+                    DEFAULT_GHA_CHUNK_SIZE,
                 )
                 .await
                 .map_err(|e| {

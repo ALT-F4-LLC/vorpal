@@ -4,7 +4,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 use tonic::Code::NotFound;
-use tracing::{info, warn};
+use tracing::info;
 use vorpal_schema::vorpal::{
     artifact::v0::{
         artifact_service_client::ArtifactServiceClient, Artifact, ArtifactBuildRequest, ArtifactId,
@@ -71,53 +71,67 @@ pub async fn build(
                 let mut response = response.into_inner();
                 let mut response_data = Vec::new();
 
-                while let Ok(Some(res)) = response.message().await {
-                    if !res.data.is_empty() {
-                        response_data.extend_from_slice(&res.data);
-                    }
+                loop {
+                    match response.message().await {
+                        Ok(res) => match res {
+                            Some(response) => {
+                                if !response.data.is_empty() {
+                                    response_data.extend_from_slice(&response.data);
+                                }
+                            }
+
+                            None => {
+                                info!(
+                                    "[{}] pull success -> {}",
+                                    artifact_id.name, artifact_id.hash
+                                );
+
+                                break;
+                            }
+                        },
+
+                        Err(err) => {
+                            bail!("Stream error: {:?}", err);
+                        }
+                    };
                 }
 
                 if response_data.is_empty() {
-                    warn!(
-                        "[{}] pull missing -> {}",
-                        artifact_id.name, artifact_id.hash
-                    )
+                    bail!("artifact data not found: {:?}", artifact_id);
                 }
 
-                if !response_data.is_empty() {
-                    let archive_path = create_sandbox_file(Some("tar.zst")).await?;
+                let archive_path = create_sandbox_file(Some("tar.zst")).await?;
 
-                    let mut archive = File::create(&archive_path)
-                        .await
-                        .expect("failed to create artifact archive");
+                let mut archive = File::create(&archive_path)
+                    .await
+                    .expect("failed to create artifact archive");
 
-                    archive
-                        .write_all(&response_data)
-                        .await
-                        .expect("failed to write artifact archive");
+                archive
+                    .write_all(&response_data)
+                    .await
+                    .expect("failed to write artifact archive");
 
-                    info!("[{}] unpacking -> {}", artifact_id.name, artifact_id.hash);
+                info!("[{}] unpacking -> {}", artifact_id.name, artifact_id.hash);
 
-                    create_dir_all(&artifact_path)
-                        .await
-                        .expect("failed to create artifact path");
+                create_dir_all(&artifact_path)
+                    .await
+                    .expect("failed to create artifact path");
 
-                    unpack_zstd(&artifact_path, &archive_path).await?;
+                unpack_zstd(&artifact_path, &archive_path).await?;
 
-                    let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
+                let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
 
-                    if artifact_files.is_empty() {
-                        bail!("Artifact files not found: {:?}", artifact_path);
-                    }
-
-                    for artifact_files in &artifact_files {
-                        set_timestamps(artifact_files).await?;
-                    }
-
-                    remove_file(&archive_path).await.expect("failed to remove");
-
-                    return Ok(());
+                if artifact_files.is_empty() {
+                    bail!("Artifact files not found: {:?}", artifact_path);
                 }
+
+                for artifact_files in &artifact_files {
+                    set_timestamps(artifact_files).await?;
+                }
+
+                remove_file(&archive_path).await.expect("failed to remove");
+
+                return Ok(());
             }
         },
     }

@@ -4,15 +4,9 @@ use reqwest::{
     Client, StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::{path::Path, sync::Arc};
-use tokio::{
-    fs::{write, File},
-    io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
-    sync::Semaphore,
-};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tracing::info;
-use vorpal_store::paths::set_timestamps;
 
 const API_VERSION: &str = "6.0-preview.1";
 
@@ -104,26 +98,6 @@ impl CacheClient {
         }
     }
 
-    pub async fn download_cache(&self, archive_url: &str, archive_path: &PathBuf) -> Result<()> {
-        let response = reqwest::get(archive_url).await?;
-
-        if response.status() != StatusCode::OK {
-            return Err(anyhow!("Unexpected status code: {}", response.status()));
-        }
-
-        let response_bytes = response.bytes().await.context("Failed to read response")?;
-
-        info!("Downloaded cache with size: {} bytes", response_bytes.len());
-
-        write(&archive_path, response_bytes)
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        set_timestamps(archive_path).await?;
-
-        Ok(())
-    }
-
     pub async fn reserve_cache(
         &self,
         key: String,
@@ -158,43 +132,37 @@ impl CacheClient {
     pub async fn save_cache(
         &self,
         cache_id: u64,
-        archive_path: &Path,
+        buffer: &[u8],
         concurrency: usize,
         chunk_size: usize,
     ) -> Result<()> {
-        let file = File::open(archive_path).await?;
-        let file_size = file.metadata().await?.len();
+        let file_size = buffer.len() as u64;
         let url = format!("{}_apis/artifactcache/caches/{}", self.base_url, cache_id);
 
-        info!("Uploading cache file with size: {} bytes", file_size);
+        info!("Uploading cache buffer with size: {} bytes", file_size);
 
         // Create a semaphore to limit concurrent uploads
         let semaphore = Arc::new(Semaphore::new(concurrency));
         let mut tasks = Vec::new();
-        let file = Arc::new(tokio::sync::Mutex::new(file));
+        let buffer = Arc::new(buffer.to_vec());
 
         for chunk_start in (0..file_size).step_by(chunk_size) {
             let chunk_end = (chunk_start + chunk_size as u64 - 1).min(file_size - 1);
             let permit = semaphore.clone().acquire_owned().await?;
             let client = self.client.clone();
             let url = url.clone();
-            let file = file.clone();
+            let buffer = buffer.clone();
 
             let task = tokio::spawn(async move {
                 let _permit = permit; // Keep permit alive for the duration of the upload
-                let mut file = file.lock().await;
-                file.seek(SeekFrom::Start(chunk_start)).await?;
-
-                let mut buffer = vec![0; (chunk_end - chunk_start + 1) as usize];
-                file.read_exact(&mut buffer).await?;
-                drop(file);
+                let chunk = &buffer[chunk_start as usize..=chunk_end as usize];
 
                 let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, file_size);
                 let response = client
                     .patch(&url)
                     .header(CONTENT_TYPE, "application/octet-stream")
                     .header(CONTENT_RANGE, &range)
-                    .body(buffer)
+                    .body(chunk.to_vec())
                     .send()
                     .await?
                     .error_for_status()?;
@@ -207,22 +175,10 @@ impl CacheClient {
             tasks.push(task);
         }
 
-        // Wait for all upload tasks to complete
         for task in tasks {
             task.await??;
         }
 
-        // Commit the cache
-        info!("Committing cache");
-        let commit_request = CommitCacheRequest { size: file_size };
-        self.client
-            .post(&url)
-            .json(&commit_request)
-            .send()
-            .await?
-            .error_for_status()?;
-
-        info!("Cache saved successfully");
         Ok(())
     }
 }
