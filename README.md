@@ -265,6 +265,10 @@ There should now be a `target/debug/vorpal` binary present in the working direct
 bash ./script/install.sh
 ```
 
+> [!WARNING]
+> This step requires access to protected paths on your host filesystem. As such,
+> it will likely require `sudo` privileges (or your system's equivalent) to run.
+
 3. Generate keys for Vorpal:
 
 ```bash
