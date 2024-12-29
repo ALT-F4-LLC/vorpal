@@ -4,8 +4,6 @@ use reqwest::{
     Client, StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::Semaphore;
 use tracing::info;
 
 const API_VERSION: &str = "6.0-preview.1";
@@ -131,58 +129,38 @@ impl CacheClient {
         Ok(response)
     }
 
-    pub async fn save_cache(
-        &self,
-        cache_id: u64,
-        buffer: &[u8],
-        concurrency: usize,
-        chunk_size: usize,
-    ) -> Result<()> {
+    pub async fn save_cache(&self, cache_id: u64, buffer: &[u8], chunk_size: usize) -> Result<()> {
         let buffer_size = buffer.len() as u64;
         let url = format!("{}_apis/artifactcache/caches/{}", self.base_url, cache_id);
 
         info!("Uploading cache buffer with size: {} bytes", buffer_size);
 
-        // Create a semaphore to limit concurrent uploads
-        let semaphore = Arc::new(Semaphore::new(concurrency));
-        let mut tasks = Vec::new();
-        let buffer = Arc::new(buffer.to_vec());
+        for chunk in buffer.chunks(chunk_size) {
+            let chunk_start = chunk
+                .first()
+                .ok_or_else(|| anyhow!("Chunk start is None"))?;
+            let chunk_end = chunk.last().ok_or_else(|| anyhow!("Chunk end is None"))?;
 
-        for chunk_start in (0..buffer_size).step_by(chunk_size) {
-            let chunk_end = (chunk_start + chunk_size as u64).min(buffer_size) - 1;
-            let permit = semaphore.clone().acquire_owned().await?;
-            let client = self.client.clone();
-            let url = url.clone();
-            let buffer = buffer.clone();
+            let chunk_start = *chunk_start as u64;
+            let chunk_end = *chunk_end as u64;
 
-            let task = tokio::spawn(async move {
-                let _permit = permit; // Keep permit alive for the duration of the upload
-                let chunk = &buffer[chunk_start as usize..=chunk_end as usize];
+            let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, buffer_size);
 
-                let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, buffer_size);
-                let response = client
-                    .patch(&url)
-                    .header(CONTENT_TYPE, "application/octet-stream")
-                    .header(CONTENT_RANGE, &range)
-                    .body(chunk.to_vec())
-                    .send()
-                    .await?
-                    .error_for_status()?;
+            let response = self
+                .client
+                .patch(&url)
+                .header(CONTENT_TYPE, "application/octet-stream")
+                .header(CONTENT_RANGE, &range)
+                .body(chunk.to_vec())
+                .send()
+                .await?
+                .error_for_status()?;
 
-                info!(
-                    "Uploaded chunk '{}' response -> '{}'",
-                    range,
-                    response.status()
-                );
-
-                Result::<()>::Ok(())
-            });
-
-            tasks.push(task);
-        }
-
-        for task in tasks {
-            task.await??;
+            info!(
+                "Uploaded chunk '{}' response -> '{}'",
+                range,
+                response.status()
+            );
         }
 
         Ok(())

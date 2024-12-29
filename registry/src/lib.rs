@@ -27,7 +27,6 @@ use vorpal_store::paths::{
 mod gha;
 
 const DEFAULT_GHA_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32MB
-const DEFAULT_GHA_PARLLALELISM: usize = 4;
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -55,11 +54,12 @@ impl RegistryServer {
 }
 
 fn get_cache_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
-    let prefix = format!("vorpal-{}-{}", name, hash);
+    let prefix = "vorpal-registry";
+    let affix = format!("{}-{}", name, hash);
 
     match kind {
-        Artifact => Ok(format!("{}-artifact", prefix)),
-        ArtifactSource => Ok(format!("{}-source", prefix)),
+        Artifact => Ok(format!("{}-artifact-{}", prefix, affix)),
+        ArtifactSource => Ok(format!("{}-source-{}", prefix, affix)),
         _ => Err(anyhow::anyhow!("unsupported store kind")),
     }
 }
@@ -465,12 +465,7 @@ impl RegistryService for RegistryServer {
             }
 
             let _ = gha
-                .save_cache(
-                    reserve_response.cache_id,
-                    &data,
-                    DEFAULT_GHA_PARLLALELISM,
-                    DEFAULT_GHA_CHUNK_SIZE,
-                )
+                .save_cache(reserve_response.cache_id, &data, DEFAULT_GHA_CHUNK_SIZE)
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to save cache: {:?}", e.to_string()))
