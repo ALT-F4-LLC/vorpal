@@ -140,11 +140,12 @@ impl CacheClient {
                 .first()
                 .ok_or_else(|| anyhow!("Chunk start is None"))?;
             let chunk_end = chunk.last().ok_or_else(|| anyhow!("Chunk end is None"))?;
-
             let chunk_start = *chunk_start as u64;
             let chunk_end = *chunk_end as u64;
 
             let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, buffer_size);
+
+            info!("Uploading chunk range '{}'", range);
 
             let response = self
                 .client
