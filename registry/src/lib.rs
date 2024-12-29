@@ -5,6 +5,7 @@ use rsa::{
     sha2::Sha256,
     signature::Verifier,
 };
+use std::path::Path;
 use tokio::{
     fs::{read, write},
     sync::mpsc,
@@ -85,16 +86,22 @@ impl RegistryService for RegistryServer {
         let backend = self.backend.clone();
 
         if backend == RegistryServerBackend::GHA {
-            let gha = gha::CacheClient::new().map_err(|err| {
+            let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
+                .expect("failed to get cache key");
+            let cache_key_file = format!("/tmp/{}", cache_key);
+            let cache_key_file_path = Path::new(&cache_key_file);
+
+            if cache_key_file_path.exists() {
+                return Ok(Response::new(RegistryResponse { success: true }));
+            }
+
+            let cache_client = gha::CacheClient::new().map_err(|err| {
                 Status::internal(format!("failed to create GHA cache client: {:?}", err))
             })?;
 
-            let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
-                .map_err(|err| Status::internal(format!("failed to get cache key: {:?}", err)))?;
-
             info!("get cache entry -> {}", cache_key);
 
-            let cache_entry = gha
+            let cache_entry = cache_client
                 .get_cache_entry(&cache_key, &request.hash)
                 .await
                 .map_err(|e| {
@@ -187,12 +194,44 @@ impl RegistryService for RegistryServer {
             }
 
             if backend == RegistryServerBackend::GHA {
-                let gha = gha::CacheClient::new().expect("failed to create GHA cache client");
-
                 let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
                     .expect("failed to get cache key");
+                let cache_key_file = format!("/tmp/{}", cache_key);
+                let cache_key_file_path = Path::new(&cache_key_file);
 
-                let cache_entry = gha
+                if cache_key_file_path.exists() {
+                    let data = match read(&cache_key_file_path).await {
+                        Ok(data) => data,
+                        Err(err) => {
+                            if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await
+                            {
+                                error!("failed to send store error: {:?}", err);
+                            }
+
+                            return;
+                        }
+                    };
+
+                    for chunk in data.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
+                        if let Err(err) = tx
+                            .send(Ok(RegistryPullResponse {
+                                data: chunk.to_vec(),
+                            }))
+                            .await
+                        {
+                            error!("failed to send store chunk: {:?}", err);
+
+                            break;
+                        }
+                    }
+
+                    return;
+                }
+
+                let cache_client =
+                    gha::CacheClient::new().expect("failed to create GHA cache client");
+
+                let cache_entry = cache_client
                     .get_cache_entry(&cache_key, &request.hash)
                     .await
                     .expect("failed to get cache entry");
@@ -233,6 +272,8 @@ impl RegistryService for RegistryServer {
                         break;
                     }
                 }
+
+                let _ = write(&cache_key_file_path, &response_bytes).await;
             }
 
             if backend == RegistryServerBackend::Local {
@@ -444,7 +485,7 @@ impl RegistryService for RegistryServer {
         let name = data_name.unwrap();
 
         if backend == RegistryServerBackend::GHA {
-            let gha = gha::CacheClient::new().map_err(|err| {
+            let cache_client = gha::CacheClient::new().map_err(|err| {
                 Status::internal(format!("failed to create GHA cache client: {:?}", err))
             })?;
 
@@ -453,19 +494,19 @@ impl RegistryService for RegistryServer {
 
             let cache_size = data.len() as u64;
 
-            let reserve_response = gha
+            let cache_reserve = cache_client
                 .reserve_cache(cache_key, hash.clone(), Some(cache_size))
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
                 })?;
 
-            if reserve_response.cache_id == 0 {
+            if cache_reserve.cache_id == 0 {
                 return Err(Status::internal("failed to reserve cache returned 0"));
             }
 
-            let _ = gha
-                .save_cache(reserve_response.cache_id, &data, DEFAULT_GHA_CHUNK_SIZE)
+            let _ = cache_client
+                .save_cache(cache_reserve.cache_id, &data, DEFAULT_GHA_CHUNK_SIZE)
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to save cache: {:?}", e.to_string()))
