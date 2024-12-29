@@ -257,17 +257,15 @@ These steps guide how to compile from source and also test compiling Vorpal with
 make build
 ```
 
-There should now be a `target/debug/vorpal` binary present in the working directory.
-
 2. Run the initial install script, which will create all relevant directories and permissions needed to run the next steps.
+
+> [!CAUTION]
+> This step requires access to protected paths on your host filesystem. As such,
+> it will likely require `sudo` privileges (or your system's equivalent) to run.
 
 ```bash
 bash ./script/install.sh
 ```
-
-> [!WARNING]
-> This step requires access to protected paths on your host filesystem. As such,
-> it will likely require `sudo` privileges (or your system's equivalent) to run.
 
 3. Generate keys for Vorpal:
 
