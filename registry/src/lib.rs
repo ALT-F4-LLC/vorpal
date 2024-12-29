@@ -54,12 +54,12 @@ impl RegistryServer {
 }
 
 fn get_cache_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
-    let prefix = "vorpal-gha";
+    let prefix = "vorpal-registry";
     let affix = format!("{}-{}", name, hash);
 
     match kind {
-        Artifact => Ok(format!("{}-artifact-{}", prefix, affix)),
-        ArtifactSource => Ok(format!("{}-source-{}", prefix, affix)),
+        Artifact => Ok(format!("{}-{}-artifact", prefix, affix)),
+        ArtifactSource => Ok(format!("{}-{}-source", prefix, affix)),
         _ => Err(anyhow::anyhow!("unsupported store kind")),
     }
 }
