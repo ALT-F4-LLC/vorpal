@@ -135,23 +135,19 @@ impl CacheClient {
 
         info!("Uploading cache buffer with size: {} bytes", buffer_size);
 
-        for chunk in buffer.chunks(chunk_size) {
-            let chunk_start = chunk
-                .first()
-                .ok_or_else(|| anyhow!("Chunk start is None"))?;
-            let chunk_end = chunk.last().ok_or_else(|| anyhow!("Chunk end is None"))?;
-            let chunk_start = *chunk_start as u64;
-            let chunk_end = *chunk_end as u64;
+        for (i, chunk) in buffer.chunks(chunk_size).enumerate() {
+            let chunk_len = chunk.len() as u64;
+            let chunk_start = (i * chunk_size) as u64;
+            let chunk_end = chunk_start + chunk_len - 1;
+            let chunk_range = format!("bytes {}-{}/{}", chunk_start, chunk_end, buffer_size);
 
-            let range = format!("bytes {}-{}/{}", chunk_start, chunk_end, buffer_size);
-
-            info!("Uploading chunk range '{}'", range);
+            info!("Uploading chunk range '{}'", chunk_range);
 
             let response = self
                 .client
                 .patch(&url)
                 .header(CONTENT_TYPE, "application/octet-stream")
-                .header(CONTENT_RANGE, &range)
+                .header(CONTENT_RANGE, &chunk_range)
                 .body(chunk.to_vec())
                 .send()
                 .await?
@@ -159,7 +155,7 @@ impl CacheClient {
 
             info!(
                 "Uploaded chunk '{}' response -> '{}'",
-                range,
+                chunk_range,
                 response.status()
             );
         }

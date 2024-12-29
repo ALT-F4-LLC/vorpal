@@ -54,7 +54,7 @@ impl RegistryServer {
 }
 
 fn get_cache_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
-    let prefix = "vorpal-registry-test";
+    let prefix = "vorpal-registry-cache";
     let affix = format!("{}-{}", name, hash);
 
     match kind {
