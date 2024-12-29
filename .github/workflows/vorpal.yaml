@@ -83,6 +83,7 @@ jobs:
       - run: |
           mkdir -pv ./dist
           tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
+          rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
       - run: ./dist/vorpal keys generate
 
