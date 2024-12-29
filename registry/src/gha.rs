@@ -138,7 +138,7 @@ impl CacheClient {
         for (i, chunk) in buffer.chunks(chunk_size).enumerate() {
             let chunk_len = chunk.len() as u64;
             let chunk_start = (i * chunk_size) as u64;
-            let chunk_end = chunk_start + chunk_len - 1;
+            let chunk_end = chunk_start + chunk_len;
             let chunk_range = format!("bytes {}-{}/{}", chunk_start, chunk_end, buffer_size);
 
             info!("Uploading chunk range '{}'", chunk_range);
