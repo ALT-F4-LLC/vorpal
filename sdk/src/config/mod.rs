@@ -154,10 +154,7 @@ impl ConfigContext {
             let cache_archive_path = get_cache_archive_path(&hash, source_name);
 
             if cache_archive_path.exists() {
-                info!(
-                    "[{}] source in cache -> {}-{}",
-                    artifact_name, source_name, hash
-                );
+                info!("[{}] cached -> {}-{}", artifact_name, source_name, hash);
 
                 self.artifact_source_id
                     .insert(source_key, artifact_source_id.clone());
@@ -187,10 +184,7 @@ impl ConfigContext {
                 }
 
                 Ok(_) => {
-                    info!(
-                        "[{}] source in registry -> {}-{}",
-                        artifact_name, source_name, hash
-                    );
+                    info!("[{}] pushed -> {}-{}", artifact_name, source_name, hash);
 
                     self.artifact_source_id
                         .insert(source_key, artifact_source_id.clone());
@@ -249,10 +243,7 @@ impl ConfigContext {
                 );
             }
 
-            info!(
-                "[{}] downloading source -> {} ({})",
-                artifact_name, source_name, source.path
-            );
+            info!("[{}] downloading -> {}", artifact_name, source.path);
 
             let remote_response = reqwest::get(remote_path.as_str())
                 .await
@@ -287,10 +278,7 @@ impl ConfigContext {
 
             // Unpack source data
 
-            info!(
-                "[{}] unpacking source -> {} ({})",
-                artifact_name, source_name, source.path
-            );
+            info!("[{}] unpacking -> {}", artifact_name, source.path);
 
             if let Some(kind) = kind {
                 match kind.mime_type() {
@@ -365,9 +353,8 @@ impl ConfigContext {
             )?;
 
             info!(
-                "[{}] copying source -> {} ({})",
+                "[{}] copying -> {}",
                 artifact_name,
-                source_name,
                 local_path.canonicalize().unwrap().display()
             );
 
@@ -401,10 +388,7 @@ impl ConfigContext {
             set_timestamps(&file_path).await?;
         }
 
-        info!(
-            "[{}] hashing source -> {} ({})",
-            artifact_name, source_name, source.path
-        );
+        info!("[{}] hashing -> {}", artifact_name, source.path);
 
         // 4b. Hash source files
 
@@ -421,10 +405,7 @@ impl ConfigContext {
             }
         }
 
-        info!(
-            "[{}] packing source -> {}-{}",
-            artifact_name, source_name, source_hash
-        );
+        info!("[{}] caching -> {}", artifact_name, source.path);
 
         let cache_archive_path = get_cache_archive_path(&source_hash, source_name);
 

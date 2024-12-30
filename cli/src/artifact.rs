@@ -68,6 +68,8 @@ pub async fn build(
             }
 
             Ok(response) => {
+                info!("[{}] pulling -> {}", artifact_id.name, artifact_id.hash);
+
                 let mut response = response.into_inner();
                 let mut response_data = Vec::new();
 
@@ -80,14 +82,7 @@ pub async fn build(
                                 }
                             }
 
-                            None => {
-                                info!(
-                                    "[{}] pull success -> {}",
-                                    artifact_id.name, artifact_id.hash
-                                );
-
-                                break;
-                            }
+                            None => break,
                         },
 
                         Err(err) => {
@@ -183,7 +178,7 @@ pub async fn build(
                 }
 
                 info!(
-                    "[{}] pushing '{}' source -> {}",
+                    "[{}] pushing -> {}-{}",
                     artifact.name, source.name, source.hash
                 );
 
@@ -202,8 +197,6 @@ pub async fn build(
     }
 
     // Build artifact
-
-    info!("[{}] building -> {}", artifact_id.name, artifact_id.hash);
 
     let mut worker = ArtifactServiceClient::connect(service.to_owned())
         .await
@@ -228,14 +221,7 @@ pub async fn build(
                     }
                 }
 
-                None => {
-                    info!(
-                        "[{}] build success -> {}",
-                        artifact_id.name, artifact_id.hash
-                    );
-
-                    break;
-                }
+                None => break,
             },
 
             Err(err) => {
