@@ -66,7 +66,8 @@ enum Command {
 
 #[derive(Clone, Debug, Default)]
 pub struct ConfigContext {
-    pub artifact_id: HashMap<ArtifactId, Artifact>,
+    pub artifact_id: HashMap<ArtifactId, Artifact>, // TOOD: make this private
+    artifact_source_id: HashMap<String, ArtifactSourceId>,
     port: u16,
     registry: String,
     system: ArtifactSystem,
@@ -77,7 +78,7 @@ pub struct ArtifactMetadata {
     pub system: ArtifactSystem,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ArtifactSource {
     pub excludes: Vec<String>,
     pub hash: Option<String>,
@@ -118,6 +119,7 @@ impl ConfigContext {
     pub fn new(port: u16, registry: String, system: ArtifactSystem) -> Self {
         Self {
             artifact_id: HashMap::new(),
+            artifact_source_id: HashMap::new(),
             port,
             registry,
             system,
@@ -126,18 +128,44 @@ impl ConfigContext {
 
     async fn add_artifact_source(
         &mut self,
-        name: &str,
+        artifact_name: &str,
+        source_name: &str,
         source: ArtifactSource,
     ) -> Result<ArtifactSourceId> {
-        // 1. If source is cached using 'hash', return the source id
+        // 1. If source is cached using '<artifact-name>-<source-name>-<digest>', return the source id
+
+        let source_json = serde_json::to_string(&source).map_err(|e| anyhow::anyhow!(e))?;
+        let source_key = format!("{}-{}-{}", artifact_name, source_name, digest(source_json));
+
+        if let Some(source_id) = self.artifact_source_id.get(&source_key) {
+            return Ok(source_id.clone());
+        }
+
+        // 2. Check if source exists in local cache or registry
 
         if let Some(hash) = source.hash.clone() {
-            // Check if source exists in the registry
-            let source_request = RegistryRequest {
+            let artifact_source_id = ArtifactSourceId {
                 hash: hash.clone(),
-                kind: RegistryKind::ArtifactSource as i32,
-                name: name.to_string(),
+                name: source_name.to_string(),
             };
+
+            // 2a. Check if source exists in local cache
+
+            let cache_archive_path = get_cache_archive_path(&hash, source_name);
+
+            if cache_archive_path.exists() {
+                info!(
+                    "[{}] source in cache -> {}-{}",
+                    artifact_name, source_name, hash
+                );
+
+                self.artifact_source_id
+                    .insert(source_key, artifact_source_id.clone());
+
+                return Ok(artifact_source_id);
+            }
+
+            // 2b. Check if source exists in the registry
 
             let registry_host = self.registry.clone();
 
@@ -145,7 +173,13 @@ impl ConfigContext {
                 .await
                 .expect("failed to connect to registry");
 
-            match registry.exists(source_request.clone()).await {
+            let registry_request = RegistryRequest {
+                hash: hash.clone(),
+                kind: RegistryKind::ArtifactSource as i32,
+                name: source_name.to_string(),
+            };
+
+            match registry.exists(registry_request.clone()).await {
                 Err(status) => {
                     if status.code() != NotFound {
                         bail!("Registry pull error: {:?}", status);
@@ -153,25 +187,20 @@ impl ConfigContext {
                 }
 
                 Ok(_) => {
-                    return Ok(ArtifactSourceId {
-                        hash,
-                        name: name.to_string(),
-                    });
+                    info!(
+                        "[{}] source in registry -> {}-{}",
+                        artifact_name, source_name, hash
+                    );
+
+                    self.artifact_source_id
+                        .insert(source_key, artifact_source_id.clone());
+
+                    return Ok(artifact_source_id);
                 }
-            }
-
-            // Check if source exists in the cache
-            let cache_archive_path = get_cache_archive_path(&hash, name);
-
-            if cache_archive_path.exists() {
-                return Ok(ArtifactSourceId {
-                    hash,
-                    name: name.to_string(),
-                });
             }
         }
 
-        // 2. If source is not cached, prepare it and cache it
+        // 3. Prepare source if not cached
 
         let source_path_kind = match &source.path {
             s if Path::new(s).exists() => ArtifactSourceKind::Local,
@@ -181,20 +210,24 @@ impl ConfigContext {
         };
 
         if source_path_kind == ArtifactSourceKind::UnknownSourceKind {
-            bail!("`source.{}.path` unknown kind: {:?}", name, source.path);
+            bail!(
+                "`source.{}.path` unknown kind: {:?}",
+                source_name,
+                source.path
+            );
+        }
+
+        if source_path_kind == ArtifactSourceKind::Git {
+            bail!("`source.{}.path` git not supported", source_name);
         }
 
         let source_sandbox_path = create_sandbox_dir().await?;
-
-        if source_path_kind == ArtifactSourceKind::Git {
-            bail!("`source.{}.path` git not supported", name);
-        }
 
         if source_path_kind == ArtifactSourceKind::Http {
             if source.hash.is_none() {
                 bail!(
                     "`source.{}.hash` required for remote sources: {:?}",
-                    name,
+                    source_name,
                     source.path
                 );
             }
@@ -202,12 +235,10 @@ impl ConfigContext {
             if source.hash.is_some() && source.hash.clone().unwrap() == "" {
                 bail!(
                     "`source.{}.hash` empty for remote sources: {:?}",
-                    name,
+                    source_name,
                     source.path
                 );
             }
-
-            // Fetch source data from remote path
 
             let remote_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
 
@@ -218,7 +249,10 @@ impl ConfigContext {
                 );
             }
 
-            info!("[{}] fetching source -> ({})", name, remote_path.as_str());
+            info!(
+                "[{}] downloading source -> {} ({})",
+                artifact_name, source_name, source.path
+            );
 
             let remote_response = reqwest::get(remote_path.as_str())
                 .await
@@ -242,7 +276,7 @@ impl ConfigContext {
                     .path_segments()
                     .and_then(|segments| segments.last())
                     .and_then(|name| if name.is_empty() { None } else { Some(name) })
-                    .unwrap_or(name);
+                    .unwrap_or(source_name);
 
                 let source_file_path = source_sandbox_path.join(source_file_name);
 
@@ -253,17 +287,16 @@ impl ConfigContext {
 
             // Unpack source data
 
+            info!(
+                "[{}] unpacking source -> {} ({})",
+                artifact_name, source_name, source.path
+            );
+
             if let Some(kind) = kind {
                 match kind.mime_type() {
                     "application/gzip" => {
                         let decoder = GzipDecoder::new(remote_response_bytes);
                         let mut archive = Archive::new(decoder);
-
-                        info!(
-                            "[{}] unpacking gzip -> {}",
-                            name,
-                            source_sandbox_path.display(),
-                        );
 
                         archive
                             .unpack(&source_sandbox_path)
@@ -277,12 +310,6 @@ impl ConfigContext {
                         let decoder = BzDecoder::new(remote_response_bytes);
                         let mut archive = Archive::new(decoder);
 
-                        info!(
-                            "[{}] unpacking bzip2 -> {}",
-                            name,
-                            source_sandbox_path.display(),
-                        );
-
                         archive
                             .unpack(&source_sandbox_path)
                             .await
@@ -292,12 +319,6 @@ impl ConfigContext {
                     "application/x-xz" => {
                         let decoder = XzDecoder::new(remote_response_bytes);
                         let mut archive = Archive::new(decoder);
-
-                        info!(
-                            "[{}] unpacking xz -> {}",
-                            name,
-                            source_sandbox_path.display(),
-                        );
 
                         archive
                             .unpack(&source_sandbox_path)
@@ -312,12 +333,6 @@ impl ConfigContext {
                             .await
                             .map_err(|e| anyhow::anyhow!(e))?;
 
-                        info!(
-                            "[{}] unpacking zip -> {}",
-                            name,
-                            source_sandbox_path.display(),
-                        );
-
                         unpack_zip(&archive_sandbox_path, &source_sandbox_path).await?;
 
                         remove_file(&archive_sandbox_path)
@@ -328,7 +343,7 @@ impl ConfigContext {
                     _ => {
                         bail!(
                             "`source.{}.path` unsupported mime-type detected: {:?}",
-                            name,
+                            source_name,
                             source.path
                         );
                     }
@@ -340,7 +355,7 @@ impl ConfigContext {
             let local_path = Path::new(&source.path).to_path_buf();
 
             if !local_path.exists() {
-                bail!("`source.{}.path` not found: {:?}", name, source.path);
+                bail!("`source.{}.path` not found: {:?}", source_name, source.path);
             }
 
             let local_source_files = get_file_paths(
@@ -349,6 +364,13 @@ impl ConfigContext {
                 source.includes.clone(),
             )?;
 
+            info!(
+                "[{}] copying source -> {} ({})",
+                artifact_name,
+                source_name,
+                local_path.canonicalize().unwrap().display()
+            );
+
             copy_files(
                 &local_path,
                 local_source_files.clone(),
@@ -356,6 +378,8 @@ impl ConfigContext {
             )
             .await?;
         }
+
+        // 4. Calculate source hash
 
         let source_sandbox_files = get_file_paths(
             &source_sandbox_path,
@@ -366,22 +390,23 @@ impl ConfigContext {
         if source_sandbox_files.is_empty() {
             bail!(
                 "Artifact `source.{}.path` no files found: {:?}",
-                name,
+                source_name,
                 source.path
             );
         }
+
+        // 4a. Set timestamps
 
         for file_path in source_sandbox_files.clone().into_iter() {
             set_timestamps(&file_path).await?;
         }
 
-        let mut source_hash_default = "untracked".to_string();
+        info!(
+            "[{}] hashing source -> {} ({})",
+            artifact_name, source_name, source.path
+        );
 
-        if let Some(hash) = source.hash.clone() {
-            source_hash_default = hash;
-        }
-
-        info!("[{}] hashing source -> {}", name, source_hash_default);
+        // 4b. Hash source files
 
         let source_hash = hash_files(source_sandbox_files.clone())?;
 
@@ -389,34 +414,39 @@ impl ConfigContext {
             if hash != source_hash {
                 bail!(
                     "`source.{}.hash` mismatch: {} != {}",
-                    name,
+                    source_name,
                     source_hash,
                     hash
                 );
             }
         }
 
-        info!("[{}] caching source -> {}", name, source_hash);
+        info!(
+            "[{}] packing source -> {}-{}",
+            artifact_name, source_name, source_hash
+        );
 
-        let cache_archive_path = get_cache_archive_path(&source_hash, name);
+        let cache_archive_path = get_cache_archive_path(&source_hash, source_name);
 
-        if !cache_archive_path.exists() {
-            compress_zstd(
-                &source_sandbox_path,
-                &source_sandbox_files,
-                &cache_archive_path,
-            )
-            .await?;
-        }
+        compress_zstd(
+            &source_sandbox_path,
+            &source_sandbox_files,
+            &cache_archive_path,
+        )
+        .await?;
 
         remove_dir_all(&source_sandbox_path)
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        Ok(ArtifactSourceId {
+        let id = ArtifactSourceId {
             hash: source_hash,
-            name: name.to_string(),
-        })
+            name: source_name.to_string(),
+        };
+
+        self.artifact_source_id.insert(source_key, id.clone());
+
+        Ok(id)
     }
 
     pub async fn add_artifact(
@@ -431,8 +461,8 @@ impl ConfigContext {
 
         let mut sources = vec![];
 
-        for (source_name, source_args) in source.into_iter() {
-            let source = self.add_artifact_source(source_name, source_args).await?;
+        for (source_name, source) in source.into_iter() {
+            let source = self.add_artifact_source(name, source_name, source).await?;
 
             sources.push(source);
         }
