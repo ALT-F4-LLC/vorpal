@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use console::style;
 use tokio::{
     fs::{create_dir_all, read, remove_file, File},
     io::AsyncWriteExt,
@@ -25,6 +26,10 @@ use vorpal_store::{
 };
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
+
+fn get_prefix(name: &str) -> String {
+    style(format!("{} |>", name)).bold().to_string()
+}
 
 pub async fn build(
     artifact: &Artifact,
@@ -68,7 +73,11 @@ pub async fn build(
             }
 
             Ok(response) => {
-                info!("[{}] pulling -> {}", artifact_id.name, artifact_id.hash);
+                info!(
+                    "{} pulling: {}",
+                    get_prefix(&artifact_id.name),
+                    artifact_id.hash
+                );
 
                 let mut response = response.into_inner();
                 let mut response_data = Vec::new();
@@ -106,7 +115,11 @@ pub async fn build(
                     .await
                     .expect("failed to write artifact archive");
 
-                info!("[{}] unpacking -> {}", artifact_id.name, artifact_id.hash);
+                info!(
+                    "{} unpacking: {}",
+                    get_prefix(&artifact_id.name),
+                    artifact_id.hash
+                );
 
                 create_dir_all(&artifact_path)
                     .await
@@ -178,8 +191,10 @@ pub async fn build(
                 }
 
                 info!(
-                    "[{}] pushing -> {}-{}",
-                    artifact.name, source.name, source.hash
+                    "{} pushing source: {}-{}",
+                    get_prefix(&artifact_id.name),
+                    source.name,
+                    source.hash
                 );
 
                 let response = registry
@@ -217,7 +232,7 @@ pub async fn build(
             Ok(res) => match res {
                 Some(response) => {
                     if !response.output.is_empty() {
-                        info!("[{}] {}", artifact_id.name, response.output);
+                        info!("{} {}", get_prefix(&artifact_id.name), response.output);
                     }
                 }
 

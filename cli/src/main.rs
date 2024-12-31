@@ -1,7 +1,4 @@
-use crate::{
-    artifact::build,
-    rust::{get_rust_toolchain_version, rust_toolchain},
-};
+use crate::{artifact::build, rust::get_rust_toolchain_version};
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
@@ -248,15 +245,13 @@ async fn main() -> Result<()> {
                     // Setup toolchain artifacts
 
                     let protoc = protoc::artifact(&mut build_context).await?;
-                    let toolchain = rust_toolchain(&mut build_context, "vorpal").await?;
+                    let toolchain = rust::toolchain_artifact(&mut build_context, "vorpal").await?;
 
                     // Setup build
 
                     let build_order = build::get_order(&build_context.artifact_id).await?;
 
                     let mut ready_artifacts = vec![];
-
-                    info!("[{}] building toolchain", name);
 
                     for artifact_id in &build_order {
                         match build_context.artifact_id.get(artifact_id) {
@@ -344,8 +339,6 @@ async fn main() -> Result<()> {
 
                     command.args(["build", "--bin", config_bin]);
 
-                    info!("[{}] building configuration", name);
-
                     let mut process = command
                         .stdout(Stdio::piped())
                         .stderr(Stdio::piped())
@@ -430,8 +423,6 @@ async fn main() -> Result<()> {
             let build_order = build::get_order(&build_artifact).await?;
 
             let mut ready_artifacts = vec![];
-
-            info!("-> building configuration artifacts",);
 
             for artifact_id in &build_order {
                 match build_artifact.get(artifact_id) {

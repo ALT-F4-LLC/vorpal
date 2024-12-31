@@ -59,7 +59,7 @@ fn read_cargo_toml(path: &str) -> Result<RustArtifactCargoToml> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn rust_toolchain(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
+pub async fn toolchain_artifact(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
     let version = get_rust_toolchain_version();
     let target = get_toolchain_target(context.get_target())?;
 
@@ -138,7 +138,7 @@ pub async fn rust_toolchain(context: &mut ConfigContext, name: &str) -> Result<A
 }
 
 pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
-    let toolchain = rust_toolchain(context, name).await?;
+    let toolchain = toolchain_artifact(context, name).await?;
 
     let protoc = protoc::artifact(context).await?;
 
@@ -167,7 +167,7 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
 }
 
 pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Result<ArtifactId> {
-    let toolchain = rust_toolchain(context, name).await?;
+    let toolchain = toolchain_artifact(context, name).await?;
 
     // 1. READ CARGO.TOML FILES
 

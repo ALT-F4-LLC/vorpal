@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = { default-features = false, version = "1" }
 async-compression = { version = "0", features = ["all"] }
 clap = { default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], version = "4" }
+console = { version = "0" }
 indoc = { default-features = false, version = "2" }
 infer = { default-features = false, version = "0" }
 reqwest = { default-features = false, version = "0", features = ["json", "rustls-tls"] }
