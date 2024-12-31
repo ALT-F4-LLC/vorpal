@@ -521,10 +521,7 @@ impl ArtifactService for ArtifactServer {
 
                     if let Err(err) = tx
                         .send(Ok(ArtifactBuildResponse {
-                            output: format!(
-                                "preparing '{}' source -> {}",
-                                source.name, source.hash
-                            ),
+                            output: format!("copying source: {}-{}", source.name, source.hash),
                         }))
                         .await
                     {
@@ -580,10 +577,7 @@ impl ArtifactService for ArtifactServer {
                 if source_archive_path.exists() {
                     if let Err(err) = tx
                         .send(Ok(ArtifactBuildResponse {
-                            output: format!(
-                                "unpacking '{}' source -> {}",
-                                source.name, source.hash
-                            ),
+                            output: format!("caching source: {}-{}", source.name, source.hash),
                         }))
                         .await
                     {
@@ -640,10 +634,7 @@ impl ArtifactService for ArtifactServer {
 
                     if let Err(err) = tx
                         .send(Ok(ArtifactBuildResponse {
-                            output: format!(
-                                "preparing '{}' source -> {}",
-                                source.name, source.hash
-                            ),
+                            output: format!("copying source: {}-{}", source.name, source.hash),
                         }))
                         .await
                     {
@@ -696,7 +687,7 @@ impl ArtifactService for ArtifactServer {
 
                 if let Err(err) = tx
                     .send(Ok(ArtifactBuildResponse {
-                        output: format!("pull '{}' source -> {}", source.name, source.hash),
+                        output: format!("pulling source: {}-{}", source.name, source.hash),
                     }))
                     .await
                 {
@@ -776,7 +767,7 @@ impl ArtifactService for ArtifactServer {
                             if let Err(err) = tx
                                 .send(Ok(ArtifactBuildResponse {
                                     output: format!(
-                                        "unpacking '{}' source -> {}",
+                                        "caching source: {}-{}",
                                         source.name, source.hash
                                     ),
                                 }))
@@ -838,7 +829,7 @@ impl ArtifactService for ArtifactServer {
                             if let Err(err) = tx
                                 .send(Ok(ArtifactBuildResponse {
                                     output: format!(
-                                        "preparing '{}' source -> {}",
+                                        "copying source: {}-{}",
                                         source.name, source.hash
                                     ),
                                 }))
@@ -970,7 +961,7 @@ impl ArtifactService for ArtifactServer {
 
             if let Err(err) = tx
                 .send(Ok(ArtifactBuildResponse {
-                    output: format!("packing -> {}", manifest_hash),
+                    output: format!("packing: {}", manifest_hash),
                 }))
                 .await
             {
@@ -1016,7 +1007,7 @@ impl ArtifactService for ArtifactServer {
 
             if let Err(err) = tx
                 .send(Ok(ArtifactBuildResponse {
-                    output: format!("pushing -> {}", manifest_hash),
+                    output: format!("pushing: {}", manifest_hash),
                 }))
                 .await
             {

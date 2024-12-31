@@ -59,7 +59,7 @@ fn read_cargo_toml(path: &str) -> Result<RustArtifactCargoToml> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn rust_toolchain(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
+pub async fn toolchain_artifact(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
     let version = get_rust_toolchain_version();
     let target = get_toolchain_target(context.get_target())?;
 
@@ -138,7 +138,7 @@ pub async fn rust_toolchain(context: &mut ConfigContext, name: &str) -> Result<A
 }
 
 pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
-    let toolchain = rust_toolchain(context, name).await?;
+    let toolchain = toolchain_artifact(context, name).await?;
 
     let protoc = protoc::artifact(context).await?;
 
@@ -167,7 +167,7 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
 }
 
 pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Result<ArtifactId> {
-    let toolchain = rust_toolchain(context, name).await?;
+    let toolchain = toolchain_artifact(context, name).await?;
 
     // 1. READ CARGO.TOML FILES
 
@@ -365,11 +365,12 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
                     ".vagrant".to_string(),
                     "Dockerfile".to_string(),
                     "Vagrantfile".to_string(),
+                    "dist".to_string(),
                     "makefile".to_string(),
                     "script".to_string(),
                     "shell.nix".to_string(),
                     "target".to_string(),
-                    "vorpal-arch.png".to_string(),
+                    "vorpal-domains.svg".to_string(),
                     "vorpal-purpose.jpg".to_string(),
                 ],
                 hash: None,

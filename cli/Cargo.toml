@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { default-features = false, version = "1" }
 clap = { default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], version = "4" }
+console = { version = "0" }
 petgraph = { default-features = false, features = ["graphmap"], version = "0" }
 port-selector = { default-features = false, version = "0" }
 tokio = { default-features = false, version = "1" }

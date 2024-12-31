@@ -89,7 +89,7 @@ pub fn get_source_archive_path(hash: &str, name: &str) -> PathBuf {
 
 // Temp paths
 
-pub fn get_temp_path() -> PathBuf {
+pub fn get_sandbox_path() -> PathBuf {
     get_sandbox_dir_path().join(Uuid::now_v7().to_string())
 }
 

@@ -5,13 +5,14 @@ use rsa::{
     sha2::Sha256,
     signature::Verifier,
 };
+use std::path::Path;
 use tokio::{
     fs::{read, write},
     sync::mpsc,
 };
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
-use tracing::error;
+use tracing::{error, info};
 use vorpal_notary::get_public_key;
 use vorpal_schema::vorpal::registry::v0::{
     registry_service_server::{RegistryService, RegistryServiceServer},
@@ -24,12 +25,16 @@ use vorpal_store::paths::{
     set_timestamps,
 };
 
-const DEFAULT_CHUNK_SIZE: usize = 8192;
+mod gha;
+
+const DEFAULT_GHA_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32MB
+const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum RegistryServerBackend {
     #[default]
     Unknown,
+    GHA,
     Local,
     S3,
 }
@@ -46,6 +51,17 @@ impl RegistryServer {
             backend,
             backend_s3_bucket,
         }
+    }
+}
+
+fn get_cache_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
+    let prefix = "vorpal-registry";
+    let affix = format!("{}-{}", name, hash);
+
+    match kind {
+        Artifact => Ok(format!("{}-{}-artifact", prefix, affix)),
+        ArtifactSource => Ok(format!("{}-{}-source", prefix, affix)),
+        _ => Err(anyhow::anyhow!("unsupported store kind")),
     }
 }
 
@@ -68,6 +84,38 @@ impl RegistryService for RegistryServer {
         }
 
         let backend = self.backend.clone();
+
+        if backend == RegistryServerBackend::GHA {
+            let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
+                .expect("failed to get cache key");
+            let cache_key_file = format!("/tmp/{}", cache_key);
+            let cache_key_file_path = Path::new(&cache_key_file);
+
+            if cache_key_file_path.exists() {
+                return Ok(Response::new(RegistryResponse { success: true }));
+            }
+
+            let cache_client = gha::CacheClient::new().map_err(|err| {
+                Status::internal(format!("failed to create GHA cache client: {:?}", err))
+            })?;
+
+            info!("get cache entry -> {}", cache_key);
+
+            let cache_entry = cache_client
+                .get_cache_entry(&cache_key, &request.hash)
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
+                })?;
+
+            info!("get cache entry response -> {:?}", cache_entry);
+
+            if cache_entry.is_none() {
+                return Err(Status::not_found("store path not found"));
+            }
+
+            return Ok(Response::new(RegistryResponse { success: true }));
+        }
 
         if backend == RegistryServerBackend::Local {
             let path = match request.kind() {
@@ -145,6 +193,89 @@ impl RegistryService for RegistryServer {
                 return;
             }
 
+            if backend == RegistryServerBackend::GHA {
+                let cache_key = get_cache_key(&request.name, &request.hash, request.kind())
+                    .expect("failed to get cache key");
+                let cache_key_file = format!("/tmp/{}", cache_key);
+                let cache_key_file_path = Path::new(&cache_key_file);
+
+                if cache_key_file_path.exists() {
+                    let data = match read(&cache_key_file_path).await {
+                        Ok(data) => data,
+                        Err(err) => {
+                            if let Err(err) = tx.send(Err(Status::internal(err.to_string()))).await
+                            {
+                                error!("failed to send store error: {:?}", err);
+                            }
+
+                            return;
+                        }
+                    };
+
+                    for chunk in data.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
+                        if let Err(err) = tx
+                            .send(Ok(RegistryPullResponse {
+                                data: chunk.to_vec(),
+                            }))
+                            .await
+                        {
+                            error!("failed to send store chunk: {:?}", err);
+
+                            break;
+                        }
+                    }
+
+                    return;
+                }
+
+                let cache_client =
+                    gha::CacheClient::new().expect("failed to create GHA cache client");
+
+                let cache_entry = cache_client
+                    .get_cache_entry(&cache_key, &request.hash)
+                    .await
+                    .expect("failed to get cache entry");
+
+                if cache_entry.is_none() {
+                    if let Err(err) = tx
+                        .send(Err(Status::not_found("store path not found")))
+                        .await
+                    {
+                        error!("failed to send store error: {:?}", err);
+                    }
+
+                    return;
+                }
+
+                let cache_entry = cache_entry.unwrap();
+
+                info!(
+                    "cache entry archive location -> {:?}",
+                    cache_entry.archive_location
+                );
+
+                let response = reqwest::get(&cache_entry.archive_location)
+                    .await
+                    .expect("failed to get");
+
+                let response_bytes = response.bytes().await.expect("failed to read response");
+
+                for chunk in response_bytes.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
+                    if let Err(err) = tx
+                        .send(Ok(RegistryPullResponse {
+                            data: chunk.to_vec(),
+                        }))
+                        .await
+                    {
+                        error!("failed to send store chunk: {:?}", err);
+
+                        break;
+                    }
+                }
+
+                let _ = write(&cache_key_file_path, &response_bytes).await;
+            }
+
             if backend == RegistryServerBackend::Local {
                 let path = match request.kind() {
                     Artifact => get_artifact_archive_path(&request.hash, &request.name),
@@ -183,7 +314,7 @@ impl RegistryService for RegistryServer {
                     }
                 };
 
-                for chunk in data.chunks(DEFAULT_CHUNK_SIZE) {
+                for chunk in data.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
                     if let Err(err) = tx
                         .send(Ok(RegistryPullResponse {
                             data: chunk.to_vec(),
@@ -352,6 +483,35 @@ impl RegistryService for RegistryServer {
         let backend = self.backend.clone();
         let hash = data_hash.unwrap();
         let name = data_name.unwrap();
+
+        if backend == RegistryServerBackend::GHA {
+            let cache_client = gha::CacheClient::new().map_err(|err| {
+                Status::internal(format!("failed to create GHA cache client: {:?}", err))
+            })?;
+
+            let cache_key = get_cache_key(&name, &hash, data_kind)
+                .map_err(|err| Status::internal(format!("failed to get cache key: {:?}", err)))?;
+
+            let cache_size = data.len() as u64;
+
+            let cache_reserve = cache_client
+                .reserve_cache(cache_key, hash.clone(), Some(cache_size))
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
+                })?;
+
+            if cache_reserve.cache_id == 0 {
+                return Err(Status::internal("failed to reserve cache returned 0"));
+            }
+
+            let _ = cache_client
+                .save_cache(cache_reserve.cache_id, &data, DEFAULT_GHA_CHUNK_SIZE)
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("failed to save cache: {:?}", e.to_string()))
+                })?;
+        }
 
         if backend == RegistryServerBackend::Local {
             let path = match data_kind {

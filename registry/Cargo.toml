@@ -7,7 +7,11 @@ edition = "2021"
 anyhow = { default-features = false, version = "1" }
 aws-config = { default-features = false, features = ["behavior-version-latest", "rt-tokio", "rustls", "sso"], version = "1" }
 aws-sdk-s3 = { default-features = false, version = "1" }
+reqwest = { default-features = false, version = "0", features = ["json", "rustls-tls"] }
 rsa = { default-features = false, version = "0" }
+serde = { default-features = false, features = ["derive"], version = "1" }
+serde_json = { default-features = false, features = ["std"], version = "1" }
+sha2 = { default-features = false, version = "0" }
 tokio = { default-features = false, features = ["process", "rt-multi-thread"], version = "1" }
 tokio-stream = { default-features = false, features = ["io-util"], version = "0" }
 tonic = { default-features = false, version = "0" }

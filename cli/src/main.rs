@@ -1,7 +1,4 @@
-use crate::{
-    artifact::build,
-    rust::{get_rust_toolchain_version, rust_toolchain},
-};
+use crate::{artifact::build, rust::get_rust_toolchain_version};
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use port_selector::random_free_port;
@@ -240,24 +237,21 @@ async fn main() -> Result<()> {
                         bail!("no `--rust-path` specified");
                     }
 
-                    // Build rust toolchain, if not installed
-
-                    info!("-> building configuration toolchain artifacts...");
-
                     // Setup context
+
                     let mut build_context =
                         ConfigContext::new(0, registry.clone(), artifact_system);
 
-                    // Setup toolchain
+                    // Setup toolchain artifacts
+
                     let protoc = protoc::artifact(&mut build_context).await?;
-                    let toolchain = rust_toolchain(&mut build_context, "vorpal").await?;
+                    let toolchain = rust::toolchain_artifact(&mut build_context, "vorpal").await?;
 
                     // Setup build
+
                     let build_order = build::get_order(&build_context.artifact_id).await?;
 
                     let mut ready_artifacts = vec![];
-
-                    info!("-> building configuration toolchain...");
 
                     for artifact_id in &build_order {
                         match build_context.artifact_id.get(artifact_id) {
@@ -276,6 +270,20 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+
+                    // Get protoc
+
+                    let protoc_path = Path::new(&format!(
+                        "{}/bin/protoc",
+                        get_artifact_path(&protoc.hash, &protoc.name).display()
+                    ))
+                    .to_path_buf();
+
+                    if !protoc_path.exists() {
+                        bail!("protoc not found: {}", protoc_path.display());
+                    }
+
+                    // Get toolchain
 
                     let toolchain_path = get_artifact_path(&toolchain.hash, &toolchain.name);
 
@@ -301,21 +309,11 @@ async fn main() -> Result<()> {
                         bail!("cargo not found: {}", toolchain_cargo_path.display());
                     }
 
-                    // Get protoc
-
-                    let protoc_path = Path::new(&format!(
-                        "{}/bin/protoc",
-                        get_artifact_path(&protoc.hash, &protoc.name).display()
-                    ))
-                    .to_path_buf();
-
-                    if !protoc_path.exists() {
-                        bail!("protoc not found: {}", protoc_path.display());
-                    }
-
-                    // Build the configuration
+                    // Build configuration with toolchain
 
                     let mut command = process::Command::new(toolchain_cargo_path);
+
+                    // Setup environment variables
 
                     command.env(
                         "PATH",
@@ -335,11 +333,11 @@ async fn main() -> Result<()> {
                         format!("{}-{}", toolchain_version, toolchain_target),
                     );
 
+                    // Setup command
+
                     let config_bin = rust_bin.as_ref().unwrap();
 
-                    command.args(["build", "--bin", config_bin, "--release"]);
-
-                    info!("-> building configuration...");
+                    command.args(["build", "--bin", config_bin]);
 
                     let mut process = command
                         .stdout(Stdio::piped())
@@ -361,13 +359,13 @@ async fn main() -> Result<()> {
                         info!("{}", line);
                     }
 
-                    let target_path = format!(
-                        "{}/target/release/{}",
+                    let config_file_path = format!(
+                        "{}/target/debug/{}",
                         rust_path.as_ref().unwrap(),
                         config_bin
                     );
 
-                    Path::new(&target_path).to_path_buf()
+                    Path::new(&config_file_path).to_path_buf()
                 }
 
                 _ => bail!("unsupported language: {}", language),
@@ -425,8 +423,6 @@ async fn main() -> Result<()> {
             let build_order = build::get_order(&build_artifact).await?;
 
             let mut ready_artifacts = vec![];
-
-            info!("-> building artifacts...");
 
             for artifact_id in &build_order {
                 match build_artifact.get(artifact_id) {
@@ -528,6 +524,7 @@ async fn main() -> Result<()> {
 
             if services.contains("registry") {
                 let backend = match registry_backend.as_str() {
+                    "gha" => RegistryServerBackend::GHA,
                     "local" => RegistryServerBackend::Local,
                     "s3" => RegistryServerBackend::S3,
                     _ => RegistryServerBackend::Unknown,
