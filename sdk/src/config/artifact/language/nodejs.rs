@@ -4,7 +4,10 @@ use anyhow::{bail, Result};
 use indoc::formatdoc;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
-use crate::config::{artifact::{add_artifact, get_artifact_envkey, toolchain::nodejs}, ArtifactSource, ConfigContext};
+use crate::config::{
+    artifact::{add_artifact, get_artifact_envkey, toolchain::nodejs},
+    ArtifactSource, ConfigContext,
+};
 
 fn get_nodejs_toolchain_version<'a>() -> &'a str {
     "22.12.0"
@@ -39,16 +42,12 @@ pub async fn nodejs_package<'a>(context: &mut ConfigContext, name: &'a str) -> R
 
     let node = nodejs::artifact(context, toolchain_version).await?;
 
-    let env_paths = vec![
-        format!("{}/bin", get_artifact_envkey(&node))
-    ];
+    let env_paths = vec![format!("{}/bin", get_artifact_envkey(&node))];
 
     add_artifact(
         context,
         vec![],
-        BTreeMap::from([
-            ("PATH", env_paths.join(":")),
-        ]),
+        BTreeMap::from([("PATH", env_paths.join(":"))]),
         name,
         formatdoc! {"
             mkdir -pv $HOME
