@@ -1,2 +1,2 @@
-pub mod rust;
 pub mod nodejs;
+pub mod rust;
