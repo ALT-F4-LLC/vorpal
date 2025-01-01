@@ -42,15 +42,17 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
                 excludes: vec![],
                 hash: Some(hash.to_string()),
                 includes: vec![],
-                path: format!("https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.xz"),
-            }
+                path: format!(
+                    "https://nodejs.org/dist/v{version}/node-v{version}-{platform}.tar.xz"
+                ),
+            },
         )]),
         vec![
             "aarch64-linux",
             "aarch64-macos",
             "x86_64-linux",
             "x86_64-macos",
-        ]
+        ],
     )
     .await
 }
