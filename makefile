@@ -49,16 +49,19 @@ dist: build
 # Development (with Vorpal)
 
 vorpal-config:
-	cargo build --bin 'vorpal-config'
+	cargo build --bin "vorpal-config"
+
+vorpal-export: vorpal-config
+	cargo run --bin "vorpal" -- artifact --export --name "vorpal" > "vorpal-$(ARCH)-$(OS).json"
 
 vorpal-shell: vorpal-config
-	cargo run --bin 'vorpal' -- artifact --name 'vorpal-shell'
+	cargo run --bin "vorpal" -- artifact --name "vorpal-shell"
 
 vorpal: vorpal-config
-	cargo run --bin 'vorpal' -- artifact --name 'vorpal'
+	cargo run --bin "vorpal" -- artifact --name "vorpal"
 
 vorpal-start:
-	cargo run --bin 'vorpal' -- start
+	cargo run --bin "vorpal" -- start
 
 # Vagrant environment
 

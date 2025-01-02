@@ -13,6 +13,7 @@ clap = { default-features = false, features = ["color", "derive", "error-context
 console = { version = "0" }
 petgraph = { default-features = false, features = ["graphmap"], version = "0" }
 port-selector = { default-features = false, version = "0" }
+serde_json = { default-features = false, features = ["std"], version = "1" }
 tokio = { default-features = false, version = "1" }
 tokio-stream = { default-features = false, version = "0" }
 tonic = { default-features = false, version = "0" }
