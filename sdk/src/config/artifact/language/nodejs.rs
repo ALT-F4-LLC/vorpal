@@ -1,10 +1,12 @@
 use std::{
     collections::BTreeMap,
+    fs::read_to_string,
     path::{Path, PathBuf},
 };
 
 use anyhow::{bail, Result};
 use indoc::formatdoc;
+use serde_json::Value;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
 use crate::config::{
@@ -25,7 +27,7 @@ async fn npm_dependencies<'a>(
 ) -> Result<ArtifactId> {
     add_artifact(
         context,
-        vec![],
+        vec![node.clone()],
         BTreeMap::from([("PATH", format!("{}/bin", get_artifact_envkey(node)))]),
         &format!("{}-node-modules", name),
         formatdoc! {"
@@ -65,7 +67,12 @@ pub async fn nodejs_package<'a>(context: &mut ConfigContext, name: &'a str) -> R
         );
     }
 
-    //let package_json_path = source_path.join("package.json");
+    let package_json_path = source_path.join("package.json");
+    let package_json_str = read_to_string(package_json_path)?;
+    let package_json: Value = serde_json::from_str(&package_json_str)?;
+    let package_json_name = package_json["name"].clone();
+    let package_json_version = package_json["version"].clone();
+
     //let package_lock_path = source_path.join("package-lock.json");
 
     // Set default systems
@@ -85,18 +92,36 @@ pub async fn nodejs_package<'a>(context: &mut ConfigContext, name: &'a str) -> R
 
     add_artifact(
         context,
-        vec![node_modules.clone()],
+        vec![node_modules.clone(), node.clone()],
         BTreeMap::from([("PATH", format!("{}/bin", get_artifact_envkey(&node)))]),
         name,
         formatdoc! {"
-            pushd ./source/{name}
-            ln -sf \"{node_modules_envkey}\" ./node_modules
-            npm run build
-            unlink ./node_modules
-            npm pack --pack-destination \"$VORPAL_OUTPUT\"
-            ln -sf \"{node_modules_envkey}\" \"$VORPAL_OUTPUT/node_modules\"
+mkdir -p \"$VORPAL_WORKSPACE/out\" \"$VORPAL_WORKSPACE/unpacked\"
+pushd ./source/{name}
+
+ln -sf \"{node_modules_envkey}\" ./node_modules
+npm run build
+unlink ./node_modules
+
+npm pack --pack-destination \"$VORPAL_WORKSPACE/out\"
+
+tar \
+        -xf \
+        \"$VORPAL_WORKSPACE/out/{package_json_name}-{package_json_version}.tgz\" \
+    -C \"$VORPAL_WORKSPACE/unpacked\"
+
+cp -apv \"$VORPAL_WORKSPACE/unpacked/package/.\" \"$VORPAL_OUTPUT/\"
+
+ln -sf \"{node_modules_envkey}\" \"$VORPAL_OUTPUT/node_modules\"
+
+echo << EOJ > \"$VORPAL_OUTPUT/wrapper.sh\"
+#!/usr/bin/env sh
+exec \"{node_envkey}/bin/node\" \"$VORPAL_OUTPUT\"
+EOJ
+chmod +x \"$VORPAL_OUTPUT/wrapper.sh\"
         ",
             node_modules_envkey = get_artifact_envkey(&node_modules),
+            node_envkey = get_artifact_envkey(&node),
         },
         BTreeMap::from([(
             name,
