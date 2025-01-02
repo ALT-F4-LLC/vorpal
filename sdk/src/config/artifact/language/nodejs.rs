@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{bail, Result};
 use indoc::formatdoc;
@@ -11,6 +14,41 @@ use crate::config::{
 
 fn get_nodejs_toolchain_version<'a>() -> &'a str {
     "22.12.0"
+}
+
+async fn npm_dependencies<'a>(
+    context: &mut ConfigContext,
+    name: &'a str,
+    systems: Vec<&str>,
+    node: &ArtifactId,
+    source_path: PathBuf,
+) -> Result<ArtifactId> {
+    add_artifact(
+        context,
+        vec![],
+        BTreeMap::from([("PATH", format!("{}/bin", get_artifact_envkey(node)))]),
+        &format!("{}-node-modules", name),
+        formatdoc! {"
+            pushd ./source/{name}
+            npm install
+            cp -apv node_modules/. \"$VORPAL_OUTPUT/\"
+        "},
+        BTreeMap::from([(
+            name,
+            ArtifactSource {
+                excludes: vec![],
+                hash: None,
+                includes: vec![
+                    String::from(".npmrc"),
+                    String::from("package.json"),
+                    String::from("package-lock.json"),
+                ],
+                path: source_path.display().to_string(),
+            },
+        )]),
+        systems,
+    )
+    .await
 }
 
 pub async fn nodejs_package<'a>(context: &mut ConfigContext, name: &'a str) -> Result<ArtifactId> {
@@ -42,24 +80,24 @@ pub async fn nodejs_package<'a>(context: &mut ConfigContext, name: &'a str) -> R
 
     let node = nodejs::artifact(context, toolchain_version).await?;
 
-    let env_paths = vec![format!("{}/bin", get_artifact_envkey(&node))];
+    let node_modules =
+        npm_dependencies(context, name, systems.clone(), &node, source_path.clone()).await?;
 
     add_artifact(
         context,
-        vec![],
-        BTreeMap::from([("PATH", env_paths.join(":"))]),
+        vec![node_modules.clone()],
+        BTreeMap::from([("PATH", format!("{}/bin", get_artifact_envkey(&node)))]),
         name,
         formatdoc! {"
-            mkdir -pv $HOME
-
             pushd ./source/{name}
-
-            npm install
-
+            ln -sf \"{node_modules_envkey}\" ./node_modules
             npm run build
-
-            npm pack --pack-destination \"$VORPAL_WORKSPACE\"
-        "},
+            unlink ./node_modules
+            npm pack --pack-destination \"$VORPAL_OUTPUT\"
+            ln -sf \"{node_modules_envkey}\" \"$VORPAL_OUTPUT/node_modules\"
+        ",
+            node_modules_envkey = get_artifact_envkey(&node_modules),
+        },
         BTreeMap::from([(
             name,
             ArtifactSource {
