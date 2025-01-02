@@ -34,7 +34,15 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
         BTreeMap::new(),
         name,
         formatdoc! {"
-            cp -prv \"./source/nodejs/node-v{version}-{platform}/.\" \"$VORPAL_OUTPUT\"
+            export NODE_SRC=\"./source/nodejs/node-v{version}-{platform}\"
+            mv \"$NODE_SRC/bin/npm\" \"$NODE_SRC/bin/.npm-unwrapped\"
+            cat << EOJ > \"$NODE_SRC/bin/npm\"
+#!/usr/bin/env sh
+export PATH=\"$VORPAL_OUTPUT/bin:$PATH\"
+exec \"$VORPAL_OUTPUT/bin/.npm-unwrapped\" \"$@\"
+EOJ
+            chmod +x \"$NODE_SRC/bin/npm\"
+            cp -prv \"$NODE_SRC/.\" \"$VORPAL_OUTPUT\"
         "},
         BTreeMap::from([(
             name,
