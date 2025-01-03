@@ -1,6 +1,7 @@
 pub mod cargo;
 pub mod clippy;
 pub mod linux;
+pub mod nodejs;
 pub mod protoc;
 pub mod rust_analyzer;
 pub mod rust_src;
