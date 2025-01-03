@@ -40,20 +40,6 @@ use vorpal_worker::artifact::ArtifactServer;
 mod artifact;
 mod build;
 
-pub struct VorpalTomlLanguage {
-    pub name: String,
-}
-
-pub struct VorpalTomlRust {
-    pub bin: String,
-    pub path: String,
-}
-
-pub struct VorpalToml {
-    pub language: VorpalTomlLanguage,
-    pub rust: VorpalTomlRust,
-}
-
 #[derive(Subcommand)]
 enum Command {
     Artifact {

@@ -1,7 +1,6 @@
 use crate::config::artifact::get_artifact_envkey;
 use indoc::formatdoc;
 use std::collections::BTreeMap;
-use std::env::var;
 use vorpal_schema::vorpal::artifact::v0::{ArtifactId, ArtifactStep, ArtifactStepEnvironment};
 
 // TODO: implement amber step
@@ -12,8 +11,7 @@ pub fn bash(environment: BTreeMap<&str, String>, script: String) -> ArtifactStep
     let path_defined_default = "".to_string();
     let path_defined = environment.get("PATH").unwrap_or(&path_defined_default);
 
-    let path_default = "/usr/bin:/usr/sbin".to_string();
-    let mut path = var("PATH").unwrap_or(path_default);
+    let mut path = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string();
 
     if !path_defined.is_empty() {
         path = format!("{}:{}", path_defined, path);
@@ -35,7 +33,7 @@ pub fn bash(environment: BTreeMap<&str, String>, script: String) -> ArtifactStep
         entrypoint: Some("bash".to_string()),
         environments,
         script: Some(formatdoc! {"
-            #!/bin/sh
+            #!/bin/bash
             set -euo pipefail
 
             {script}",
@@ -138,24 +136,28 @@ pub fn bwrap(
         args.push(arg);
     }
 
+    let path = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string();
+
     ArtifactStep {
         arguments: args,
         entrypoint: Some("bwrap".to_string()),
         environments: vec![ArtifactStepEnvironment {
             key: "PATH".to_string(),
-            value: var("PATH").unwrap_or_else(|_| "/usr/bin:/usr/sbin".to_string()),
+            value: path,
         }],
         script: Some(script),
     }
 }
 
 pub fn docker(arguments: Vec<String>) -> ArtifactStep {
+    let path = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string();
+
     ArtifactStep {
         arguments,
         entrypoint: Some("docker".to_string()),
         environments: vec![ArtifactStepEnvironment {
             key: "PATH".to_string(),
-            value: var("PATH").unwrap_or_else(|_| "/usr/bin:/usr/sbin".to_string()),
+            value: path,
         }],
         script: None,
     }
