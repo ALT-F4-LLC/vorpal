@@ -42,6 +42,8 @@ jobs:
           echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
+      - run: ls -alh dist
+
       - uses: actions/upload-artifact@v4
         with:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
