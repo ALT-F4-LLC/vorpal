@@ -26,6 +26,7 @@ jobs:
         runner:
           - macos-latest
           - ubuntu-latest
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -131,6 +132,7 @@ jobs:
           pattern: vorpal-dist-*
 
       - run: |
+          ls -alh
           ls -alh vorpal-dist-arm64-darwin
           ls -alh vorpal-dist-x86_64-linux
 
@@ -148,7 +150,7 @@ jobs:
       #     body: Nightly builds from `main` branch.
       #     fail_on_unmatched_files: true
       #     files: |
-      #       vorpal-dist-arm64-darwin/vorpal-arm64-linux.tar.gz
+      #       vorpal-dist-arm64-darwin/vorpal-arm64-darwin.tar.gz
       #       vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz
       #     name: nightly
       #     prerelease: true
