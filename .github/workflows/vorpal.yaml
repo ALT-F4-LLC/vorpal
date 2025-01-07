@@ -130,7 +130,9 @@ jobs:
           fail-on-cache-miss: true
           pattern: vorpal-dist-*
 
-      - run: ls -alh
+      - run: |
+          ls -alh vorpal-dist-arm64-darwin
+          ls -alh vorpal-dist-x86_64-linux
 
       # - env:
       #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -146,8 +148,8 @@ jobs:
       #     body: Nightly builds from `main` branch.
       #     fail_on_unmatched_files: true
       #     files: |
-      #       vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz
-      #       vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
+      #       vorpal-dist-arm64-darwin/vorpal-arm64-linux.tar.gz
+      #       vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz
       #     name: nightly
       #     prerelease: true
       #     tag_name: refs/tags/nightly
