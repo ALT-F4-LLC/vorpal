@@ -24,6 +24,7 @@ jobs:
     strategy:
       matrix:
         runner:
+          - macos-13
           - macos-latest
           - ubuntu-latest
           - ubuntu-latest-arm64
@@ -34,7 +35,11 @@ jobs:
       - run: ./script/dev.sh make dist
 
       - run: |
-          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
+          if [ "$ARCH" = "arm64" ]; then
+            ARCH="aarch64"
+          fi
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
@@ -76,7 +81,11 @@ jobs:
       - run: ./script/install.sh
 
       - run: |
-          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
+          if [ "$ARCH" = "arm64" ]; then
+            ARCH="aarch64"
+          fi
+          echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/download-artifact@v4
@@ -133,7 +142,9 @@ jobs:
 
       - run: |
           ls -alh
-          ls -alh vorpal-dist-arm64-darwin
+          ls -alh vorpal-dist-aarch64-darwin
+          ls -alh vorpal-dist-aarch64-linux
+          ls -alh vorpal-dist-x86_64-darwin
           ls -alh vorpal-dist-x86_64-linux
 
       # - env:
@@ -150,7 +161,8 @@ jobs:
       #     body: Nightly builds from `main` branch.
       #     fail_on_unmatched_files: true
       #     files: |
-      #       vorpal-dist-arm64-darwin/vorpal-arm64-darwin.tar.gz
+      #       vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz
+      #       vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz
       #       vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz
       #     name: nightly
       #     prerelease: true
