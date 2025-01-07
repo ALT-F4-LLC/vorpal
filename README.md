@@ -1,5 +1,7 @@
 # vorpal
 
+I ADDED SOMEHTING TO THE README. PLEASE MAKE SURE THIS IS IN THE COMMIT! THANK YOU!!
+
 Build and ship software with one powerful tool.
 
 ![vorpal-purpose](./vorpal-purpose.jpg)
