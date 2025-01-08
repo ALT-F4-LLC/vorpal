@@ -5,8 +5,8 @@ on:
   push:
     branches:
       - main
-  # schedule:
-  #   - cron: "0 8 * * *"
+  schedule:
+    - cron: "0 8 * * *"
 
 jobs:
   code-quality:
@@ -115,7 +115,7 @@ jobs:
           kill $WORKER_PID || true
 
   release:
-    # if: github.event.schedule != ''
+    if: github.event.schedule != ''
     needs:
       - test
     permissions:
@@ -157,23 +157,19 @@ jobs:
           tag_name: refs/tags/nightly
 
       - run: |
-          mkdir -p dist/aarch64-darwin
-          mkdir -p dist/aarch64-linux
-          mkdir -p dist/x86_64-darwin
-          mkdir -p dist/x86_64-linux
-          tar -xzf vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
-          tar -xzf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
-          tar -xzf vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz -C dist/x86_64-darwin
-          tar -xzf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
-          ls -alh dist/aarch64-darwin 
-          ls -alh dist/aarch64-linux 
-          ls -alh dist/x86_64-darwin 
-          ls -alh dist/x86_64-linux 
+          mkdir -pv dist/aarch64-darwin
+          mkdir -pv dist/aarch64-linux
+          mkdir -pv dist/x86_64-darwin
+          mkdir -pv dist/x86_64-linux
+          tar -xzvf vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
+          tar -xzvf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
+          tar -xzvf vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz -C dist/x86_64-darwin
+          tar -xzvf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
 
-      # - uses: actions/attest-build-provenance@v1
-      #   with:
-      #     subject-path: |
-      #       dist/aarch64-darwin/vorpal
-      #       dist/aarch64-linux/vorpal
-      #       dist/x86_64-darwin/vorpal
-      #       dist/x86_64-linux/vorpal
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/aarch64-darwin/vorpal
+            dist/aarch64-linux/vorpal
+            dist/x86_64-darwin/vorpal
+            dist/x86_64-linux/vorpal
