@@ -38,8 +38,6 @@ jobs:
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - run: ls -alh dist
-
       - uses: actions/upload-artifact@v4
         with:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
@@ -52,8 +50,10 @@ jobs:
     strategy:
       matrix:
         runner:
+          - macos-13
           - macos-latest
           - ubuntu-latest
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
