@@ -161,10 +161,10 @@ jobs:
           mkdir -p dist/aarch64-linux
           mkdir -p dist/x86_64-linux
           mkdir -p dist/x86_64-linux
-          tar -xzf vorpal-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
-          tar -xzf vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
-          tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
-          tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
+          tar -xzf vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
+          tar -xzf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
+          tar -xzf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
+          tar -xzf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
           ls -alh dist/aarch64-darwin 
           ls -alh dist/aarch64-linux 
           ls -alh dist/x86_64-darwin 
