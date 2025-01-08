@@ -35,11 +35,7 @@ jobs:
       - run: ./script/dev.sh make dist
 
       - run: |
-          ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
-          if [ "$ARCH" = "arm64" ]; then
-            ARCH="aarch64"
-          fi
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - run: ls -alh dist
@@ -83,11 +79,7 @@ jobs:
       - run: ./script/install.sh
 
       - run: |
-          ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')
-          if [ "$ARCH" = "arm64" ]; then
-            ARCH="aarch64"
-          fi
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/download-artifact@v4
