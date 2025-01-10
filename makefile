@@ -1,4 +1,4 @@
-ARCH := $(shell uname -m | tr '[:upper:]' '[:lower:]')
+ARCH := $(shell uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 OS_TYPE ?= debian
 WORK_DIR := $(shell pwd)

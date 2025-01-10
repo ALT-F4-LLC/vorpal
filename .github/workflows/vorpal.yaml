@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: "0 8 * * *"
 
 jobs:
   code-quality:
@@ -22,8 +24,10 @@ jobs:
     strategy:
       matrix:
         runner:
+          - macos-13
           - macos-latest
           - ubuntu-latest
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +35,7 @@ jobs:
       - run: ./script/dev.sh make dist
 
       - run: |
-          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
@@ -46,8 +50,10 @@ jobs:
     strategy:
       matrix:
         runner:
+          # - macos-13
           - macos-latest
           - ubuntu-latest
+          # - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -73,7 +79,7 @@ jobs:
       - run: ./script/install.sh
 
       - run: |
-          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - uses: actions/download-artifact@v4
@@ -108,56 +114,62 @@ jobs:
           cat worker_output.log || true
           kill $WORKER_PID || true
 
-  # release:
-  #   needs:
-  #     - test
-  #   permissions:
-  #     attestations: write
-  #     contents: write
-  #     id-token: write
-  #     packages: write
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         fail-on-cache-miss: true
-  #         pattern: vorpal-*
-  #
-  #     - run: git fetch --tags
-  #
-  #     - if: github.ref == 'refs/heads/main'
-  #       env:
-  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       run: |
-  #         if gh release view edge > /dev/null 2>&1; then
-  #           gh release delete --cleanup-tag --yes edge
-  #         fi
-  #         git tag edge
-  #         git push --tags
-  #
-  #     - if: github.ref == 'refs/heads/main'
-  #       uses: softprops/action-gh-release@v2
-  #       with:
-  #         body: Latest artifacts from `main` branch when merged.
-  #         fail_on_unmatched_files: true
-  #         files: |
-  #           vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz
-  #           vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz
-  #         name: edge
-  #         prerelease: true
-  #         tag_name: refs/tags/edge
-  #
-  #     - run: |
-  #         mkdir -p dist/aarch64-linux
-  #         mkdir -p dist/x86_64-linux
-  #         tar -xzf vorpal-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
-  #         tar -xzf vorpal-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
-  #
-  #     - if: github.ref == 'refs/heads/main'
-  #       uses: actions/attest-build-provenance@v1
-  #       with:
-  #         subject-path: |
-  #           dist/aarch64-linux/vorpal
-  #           dist/x86_64-linux/vorpal
+  release:
+    if: github.event.schedule != ''
+    needs:
+      - test
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: git fetch --tags
+
+      - uses: actions/download-artifact@v4
+        with:
+          fail-on-cache-miss: true
+          pattern: vorpal-dist-*
+
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view nightly > /dev/null 2>&1; then
+            gh release delete --cleanup-tag --yes nightly
+          fi
+          git tag nightly
+          git push --tags
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body: Nightly builds from `main` branch.
+          fail_on_unmatched_files: true
+          files: |
+            vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz
+            vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz
+            vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz
+            vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz
+          name: nightly
+          prerelease: true
+          tag_name: refs/tags/nightly
+
+      - run: |
+          mkdir -pv dist/aarch64-darwin
+          mkdir -pv dist/aarch64-linux
+          mkdir -pv dist/x86_64-darwin
+          mkdir -pv dist/x86_64-linux
+          tar -xzvf vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
+          tar -xzvf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
+          tar -xzvf vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz -C dist/x86_64-darwin
+          tar -xzvf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/aarch64-darwin/vorpal
+            dist/aarch64-linux/vorpal
+            dist/x86_64-darwin/vorpal
+            dist/x86_64-linux/vorpal
