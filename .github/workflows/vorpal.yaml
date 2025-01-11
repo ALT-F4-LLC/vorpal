@@ -165,11 +165,15 @@ jobs:
           tar -xzvf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
           tar -xzvf vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz -C dist/x86_64-darwin
           tar -xzvf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
+          mv dist/aarch64-darwin/vorpal dist/aarch64-darwin/vorpal-aarch64-darwin
+          mv dist/aarch64-linux/vorpal dist/aarch64-linux/vorpal-aarch64-linux
+          mv dist/x86_64-darwin/vorpal dist/x86_64-darwin/vorpal-x86_64-darwin
+          mv dist/x86_64-linux/vorpal dist/x86_64-linux/vorpal-x86_64-linux
 
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            dist/aarch64-darwin/vorpal
-            dist/aarch64-linux/vorpal
-            dist/x86_64-darwin/vorpal
-            dist/x86_64-linux/vorpal
+            dist/aarch64-darwin/vorpal-aarch64-darwin
+            dist/aarch64-linux/vorpal-aarch64-linux
+            dist/x86_64-darwin/vorpal-x86_64-darwin
+            dist/x86_64-linux/vorpal-x86_64-linux
