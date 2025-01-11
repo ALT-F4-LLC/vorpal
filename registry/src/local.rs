@@ -6,11 +6,16 @@ use tonic::{async_trait, Status};
 use vorpal_schema::vorpal::registry::v0::{RegistryKind, RegistryPullResponse, RegistryRequest};
 use vorpal_store::paths::{get_artifact_archive_path, get_source_archive_path, set_timestamps};
 
-use crate::{PushMetadata, RegistryBackend, DEFAULT_GRPC_CHUNK_SIZE};
+use crate::{PushMetadata, RegistryBackend, RegistryError, DEFAULT_GRPC_CHUNK_SIZE};
 
 #[derive(Clone, Debug)]
 pub struct LocalRegistryBackend;
 
+impl LocalRegistryBackend {
+    pub fn new() -> Result<Self, RegistryError> {
+        Ok(Self)
+    }
+}
 
 fn get_registry_path(kind: RegistryKind, hash: &str, name: &str) -> Result<std::path::PathBuf, Status> {
     match kind {
@@ -23,15 +28,6 @@ fn get_registry_path(kind: RegistryKind, hash: &str, name: &str) -> Result<std::
 #[async_trait]
 impl RegistryBackend for LocalRegistryBackend {
     async fn exists(&self, request: &RegistryRequest) -> Result<(), Status> {
-        let path = match request.kind() {
-            RegistryKind::Artifact => {
-                vorpal_store::paths::get_artifact_archive_path(&request.hash, &request.name)
-            }
-            RegistryKind::ArtifactSource => {
-                vorpal_store::paths::get_source_archive_path(&request.hash, &request.name)
-            }
-            _ => return Err(Status::invalid_argument("unsupported store kind")),
-        };
         let path = get_registry_path(request.kind(), &request.hash, &request.name)?;
 
         if !path.exists() {
@@ -46,11 +42,6 @@ impl RegistryBackend for LocalRegistryBackend {
         request: &RegistryRequest,
         tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
     ) -> Result<(), Status> {
-        let path = match request.kind() {
-            RegistryKind::Artifact => get_artifact_archive_path(&request.hash, &request.name),
-            RegistryKind::ArtifactSource => get_source_archive_path(&request.hash, &request.name),
-            _ => return Err(Status::invalid_argument("unsupported store kind")),
-        };
         let path = get_registry_path(request.kind(), &request.hash, &request.name)?;
 
         if !path.exists() {
@@ -80,11 +71,6 @@ impl RegistryBackend for LocalRegistryBackend {
             data,
         } = metadata;
 
-        let path = match data_kind {
-            RegistryKind::Artifact => get_artifact_archive_path(&hash, &name),
-            RegistryKind::ArtifactSource => get_source_archive_path(&hash, &name),
-            _ => return Err(Status::invalid_argument("unsupported store kind")),
-        };
         let path = get_registry_path(data_kind, &hash, &name)?;
 
         if path.exists() {

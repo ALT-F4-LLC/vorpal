@@ -556,11 +556,16 @@ async fn main() -> Result<()> {
                 }
 
                 let backend: Box<dyn RegistryBackend> = match backend {
-                    RegistryServerBackend::Local => Box::new(vorpal_registry::LocalRegistryBackend),
-                    RegistryServerBackend::S3 => Box::new(vorpal_registry::S3RegistryBackend {
-                        bucket: registry_backend_s3_bucket.clone(),
-                    }),
-                    RegistryServerBackend::GHA => Box::new(vorpal_registry::GhaRegistryBackend),
+                    RegistryServerBackend::Local => {
+                        Box::new(vorpal_registry::LocalRegistryBackend::new()?)
+                    }
+                    RegistryServerBackend::S3 => Box::new(
+                        vorpal_registry::S3RegistryBackend::new(registry_backend_s3_bucket.clone())
+                            .await?,
+                    ),
+                    RegistryServerBackend::GHA => {
+                        Box::new(vorpal_registry::GhaRegistryBackend::new()?)
+                    }
                     RegistryServerBackend::Unknown => unreachable!(),
                 };
 

@@ -23,6 +23,15 @@ pub use local::LocalRegistryBackend;
 pub use s3::S3RegistryBackend;
 pub use gha::GhaRegistryBackend;
 
+#[derive(thiserror::Error, Debug)]
+pub enum RegistryError {
+    #[error("missing s3 bucket")]
+    MissingS3Bucket,
+
+    #[error("failed to create GHA cache client: {0}")]
+    FailedToCreateGhaClient(String),
+}
+
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
 pub struct PushMetadata {

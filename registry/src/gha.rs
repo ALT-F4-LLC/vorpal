@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::{
@@ -14,7 +14,7 @@ use tonic::{async_trait, Status};
 use tracing::info;
 use vorpal_schema::vorpal::registry::v0::{RegistryKind, RegistryPullResponse, RegistryRequest};
 
-use crate::{PushMetadata, RegistryBackend, DEFAULT_GRPC_CHUNK_SIZE};
+use crate::{PushMetadata, RegistryBackend, RegistryError, DEFAULT_GRPC_CHUNK_SIZE};
 
 const API_VERSION: &str = "6.0-preview.1";
 const DEFAULT_GHA_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32MB
@@ -49,7 +49,7 @@ pub struct CommitCacheRequest {
     pub size: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CacheClient {
     base_url: String,
     client: Client,
@@ -198,8 +198,20 @@ fn get_cache_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct GhaRegistryBackend;
+#[derive(Debug, Clone)]
+pub struct GhaRegistryBackend {
+    cache_client: CacheClient,
+}
+
+impl GhaRegistryBackend {
+    pub fn new() -> Result<Self, RegistryError> {
+        let cache_client = CacheClient::new().map_err(|err| {
+            RegistryError::FailedToCreateGhaClient(err.to_string())
+        })?;
+
+        Ok(Self { cache_client })
+    }
+}
 
 #[async_trait]
 impl RegistryBackend for GhaRegistryBackend {
@@ -213,13 +225,9 @@ impl RegistryBackend for GhaRegistryBackend {
             return Ok(());
         }
 
-        let cache_client = CacheClient::new().map_err(|err| {
-            Status::internal(format!("failed to create GHA cache client: {:?}", err))
-        })?;
-
         info!("get cache entry -> {}", cache_key);
 
-        let cache_entry = cache_client
+        let cache_entry = &self.cache_client
             .get_cache_entry(&cache_key, &request.hash)
             .await
             .map_err(|e| {
@@ -263,9 +271,7 @@ impl RegistryBackend for GhaRegistryBackend {
             return Ok(());
         }
 
-        let cache_client = CacheClient::new().expect("failed to create GHA cache client");
-
-        let cache_entry = cache_client
+        let cache_entry = &self.cache_client
             .get_cache_entry(&cache_key, &request.hash)
             .await
             .expect("failed to get cache entry");
@@ -308,16 +314,12 @@ impl RegistryBackend for GhaRegistryBackend {
             data,
         } = metadata;
 
-        let cache_client = CacheClient::new().map_err(|err| {
-            Status::internal(format!("failed to create GHA cache client: {:?}", err))
-        })?;
-
         let cache_key = get_cache_key(&name, &hash, data_kind)
             .map_err(|err| Status::internal(format!("failed to get cache key: {:?}", err)))?;
 
         let cache_size = data.len() as u64;
 
-        let cache_reserve = cache_client
+        let cache_reserve = &self.cache_client
             .reserve_cache(cache_key, hash.clone(), Some(cache_size))
             .await
             .map_err(|e| {
@@ -328,7 +330,7 @@ impl RegistryBackend for GhaRegistryBackend {
             return Err(Status::internal("failed to reserve cache returned 0"));
         }
 
-        let _ = cache_client
+        self.cache_client
             .save_cache(cache_reserve.cache_id, &data, DEFAULT_GHA_CHUNK_SIZE)
             .await
             .map_err(|e| Status::internal(format!("failed to save cache: {:?}", e.to_string())))?;

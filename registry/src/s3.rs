@@ -2,13 +2,28 @@ use aws_sdk_s3::Client;
 use tokio::sync::mpsc;
 use tonic::{async_trait, Status};
 use vorpal_schema::vorpal::registry::v0::{RegistryKind, RegistryPullResponse, RegistryRequest};
-use vorpal_store::paths::{self, get_store_dir_name};
+use vorpal_store::paths::get_store_dir_name;
 
-use crate::{PushMetadata, RegistryBackend};
+use crate::{PushMetadata, RegistryBackend, RegistryError};
 
 #[derive(Clone, Debug)]
 pub struct S3RegistryBackend {
-    pub bucket: Option<String>,
+    bucket: String,
+    client: Client,
+}
+
+impl S3RegistryBackend {
+    pub async fn new(bucket: Option<String>) -> Result<Self, RegistryError> {
+        let Some(bucket) = bucket else {
+            return Err(RegistryError::MissingS3Bucket);
+        };
+
+        let client_config = aws_config::load_from_env().await;
+        let client = Client::new(&client_config);
+
+        Ok(Self { bucket, client })
+    }
+}
 
 fn artifact_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, Status> {
     match kind {
@@ -23,29 +38,12 @@ fn artifact_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, St
 #[async_trait]
 impl RegistryBackend for S3RegistryBackend {
     async fn exists(&self, request: &RegistryRequest) -> Result<(), Status> {
-        let Some(bucket) = &self.bucket else {
-            return Err(Status::invalid_argument("missing s3 bucket"));
-        };
-
-        let artifact_key = match request.kind() {
-            RegistryKind::Artifact => format!(
-                "store/{}.artifact",
-                paths::get_store_dir_name(&request.hash, &request.name)
-            ),
-            RegistryKind::ArtifactSource => format!(
-                "store/{}.source",
-                paths::get_store_dir_name(&request.hash, &request.name)
-            ),
-            _ => return Err(Status::invalid_argument("unsupported store kind")),
-        };
-
-        let client_config = aws_config::load_from_env().await;
-        let client = Client::new(&client_config);
-
-        let head_result = client
         let artifact_key = artifact_key(request.kind(), &request.hash, &request.name)?;
+
+        let head_result = &self
+            .client
             .head_object()
-            .bucket(bucket)
+            .bucket(&self.bucket)
             .key(&artifact_key)
             .send()
             .await;
@@ -60,31 +58,12 @@ impl RegistryBackend for S3RegistryBackend {
     async fn pull(
         &self,
         request: &RegistryRequest,
-        tx: mpsc::Sender<Result<RegistryPullResponse,Status> > ,
+        tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
     ) -> Result<(), Status> {
-        let Some(bucket) = &self.bucket else {
-            return Err(Status::invalid_argument("missing s3 bucket"));
-        };
-
-        let client_bucket_name = bucket;
-
-        let artifact_key = match request.kind() {
-            RegistryKind::Artifact => format!(
-                "store/{}.artifact",
-                get_store_dir_name(&request.hash, &request.name)
-            ),
-            RegistryKind::ArtifactSource => {
-                format!(
-                    "store/{}.source",
-                    get_store_dir_name(&request.hash, &request.name)
-                )
-            }
-            _ => return Err(Status::invalid_argument("unsupported store kind")),
-        };
-
-        let client_config = aws_config::load_from_env().await;
-        let client = Client::new(&client_config);
         let artifact_key = artifact_key(request.kind(), &request.hash, &request.name)?;
+
+        let client = &self.client;
+        let client_bucket_name = &self.bucket;
 
         client
             .head_object()
@@ -124,23 +103,10 @@ impl RegistryBackend for S3RegistryBackend {
             data,
         } = metadata;
 
-        let Some(bucket) = &self.bucket else {
-            return Err(Status::invalid_argument("missing s3 bucket"));
-        };
-
-        let artifact_key = match data_kind {
-            RegistryKind::Artifact => {
-                format!("store/{}.artifact", get_store_dir_name(&hash, &name))
-            }
-            RegistryKind::ArtifactSource => {
-                format!("store/{}.source", get_store_dir_name(&hash, &name))
-            }
-            _ => return Err(Status::invalid_argument("unsupported store kind")),
-        };
-
-        let client_config = aws_config::load_from_env().await;
-        let client = Client::new(&client_config);
         let artifact_key = artifact_key(data_kind, &hash, &name)?;
+
+        let client = &self.client;
+        let bucket = &self.bucket;
 
         let head_result = client
             .head_object()
@@ -169,3 +135,4 @@ impl RegistryBackend for S3RegistryBackend {
         Box::new(self.clone())
     }
 }
+
