@@ -9,6 +9,15 @@ use crate::{PushMetadata, RegistryBackend};
 #[derive(Clone, Debug)]
 pub struct S3RegistryBackend {
     pub bucket: Option<String>,
+
+fn artifact_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, Status> {
+    match kind {
+        RegistryKind::Artifact => Ok(format!("store/{}.artifact", get_store_dir_name(hash, name))),
+        RegistryKind::ArtifactSource => {
+            Ok(format!("store/{}.source", get_store_dir_name(hash, name)))
+        }
+        _ => Err(Status::invalid_argument("unsupported store kind")),
+    }
 }
 
 #[async_trait]
@@ -34,6 +43,7 @@ impl RegistryBackend for S3RegistryBackend {
         let client = Client::new(&client_config);
 
         let head_result = client
+        let artifact_key = artifact_key(request.kind(), &request.hash, &request.name)?;
             .head_object()
             .bucket(bucket)
             .key(&artifact_key)
@@ -74,6 +84,7 @@ impl RegistryBackend for S3RegistryBackend {
 
         let client_config = aws_config::load_from_env().await;
         let client = Client::new(&client_config);
+        let artifact_key = artifact_key(request.kind(), &request.hash, &request.name)?;
 
         client
             .head_object()
@@ -129,6 +140,7 @@ impl RegistryBackend for S3RegistryBackend {
 
         let client_config = aws_config::load_from_env().await;
         let client = Client::new(&client_config);
+        let artifact_key = artifact_key(data_kind, &hash, &name)?;
 
         let head_result = client
             .head_object()

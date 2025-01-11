@@ -11,6 +11,15 @@ use crate::{PushMetadata, RegistryBackend, DEFAULT_GRPC_CHUNK_SIZE};
 #[derive(Clone, Debug)]
 pub struct LocalRegistryBackend;
 
+
+fn get_registry_path(kind: RegistryKind, hash: &str, name: &str) -> Result<std::path::PathBuf, Status> {
+    match kind {
+        RegistryKind::Artifact => Ok(get_artifact_archive_path(hash, name)),
+        RegistryKind::ArtifactSource => Ok(get_source_archive_path(hash, name)),
+        _ => Err(Status::invalid_argument("unsupported store kind")),
+    }
+}
+
 #[async_trait]
 impl RegistryBackend for LocalRegistryBackend {
     async fn exists(&self, request: &RegistryRequest) -> Result<(), Status> {
@@ -23,6 +32,7 @@ impl RegistryBackend for LocalRegistryBackend {
             }
             _ => return Err(Status::invalid_argument("unsupported store kind")),
         };
+        let path = get_registry_path(request.kind(), &request.hash, &request.name)?;
 
         if !path.exists() {
             return Err(Status::not_found("store path not found"));
@@ -41,6 +51,7 @@ impl RegistryBackend for LocalRegistryBackend {
             RegistryKind::ArtifactSource => get_source_archive_path(&request.hash, &request.name),
             _ => return Err(Status::invalid_argument("unsupported store kind")),
         };
+        let path = get_registry_path(request.kind(), &request.hash, &request.name)?;
 
         if !path.exists() {
             return Err(Status::not_found("store path not found"));
@@ -74,6 +85,7 @@ impl RegistryBackend for LocalRegistryBackend {
             RegistryKind::ArtifactSource => get_source_archive_path(&hash, &name),
             _ => return Err(Status::invalid_argument("unsupported store kind")),
         };
+        let path = get_registry_path(data_kind, &hash, &name)?;
 
         if path.exists() {
             return Ok(());
