@@ -157,7 +157,7 @@ pub fn unzip(version: &str, hash: &str) -> ArtifactSource {
         excludes: vec![],
         hash: Some(hash.to_string()),
         includes: vec![],
-        path: format!("https://cytranet-dal.dl.sourceforge.net/project/infozip/UnZip 6.x (latest)/UnZip 6.0/unzip{version}.tar.gz?viasf=1",),
+        path: format!("https://cfhcable.dl.sourceforge.net/project/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip{version}.tar.gz?viasf=1",),
     }
 }
 

@@ -51,7 +51,7 @@ pub async fn artifact(
     );
 
     let curl_cacert =
-        source::curl_cacert("483bb40d45c7ddb1786b7d2107c0889ee6e4724f7a9f9e69e90ae24095dd1d7f");
+        source::curl_cacert("19c0bec2c9dc55ad5e63b008d55ef6021565cfa4ff25bb8b93cf96381b050386");
 
     let diffutils_version = "3.10";
     let diffutils = source::gnu_xz(
