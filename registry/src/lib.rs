@@ -16,12 +16,12 @@ use vorpal_schema::vorpal::registry::v0::{
 };
 use vorpal_store::paths::get_public_key_path;
 
+pub mod gha;
 pub mod local;
 pub mod s3;
-pub mod gha;
+pub use gha::GhaRegistryBackend;
 pub use local::LocalRegistryBackend;
 pub use s3::S3RegistryBackend;
-pub use gha::GhaRegistryBackend;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RegistryError {

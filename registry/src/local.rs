@@ -17,7 +17,11 @@ impl LocalRegistryBackend {
     }
 }
 
-fn get_registry_path(kind: RegistryKind, hash: &str, name: &str) -> Result<std::path::PathBuf, Status> {
+fn get_registry_path(
+    kind: RegistryKind,
+    hash: &str,
+    name: &str,
+) -> Result<std::path::PathBuf, Status> {
     match kind {
         RegistryKind::Artifact => Ok(get_artifact_archive_path(hash, name)),
         RegistryKind::ArtifactSource => Ok(get_source_archive_path(hash, name)),

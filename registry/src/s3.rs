@@ -135,4 +135,3 @@ impl RegistryBackend for S3RegistryBackend {
         Box::new(self.clone())
     }
 }
-

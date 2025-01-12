@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::{
@@ -205,9 +205,8 @@ pub struct GhaRegistryBackend {
 
 impl GhaRegistryBackend {
     pub fn new() -> Result<Self, RegistryError> {
-        let cache_client = CacheClient::new().map_err(|err| {
-            RegistryError::FailedToCreateGhaClient(err.to_string())
-        })?;
+        let cache_client = CacheClient::new()
+            .map_err(|err| RegistryError::FailedToCreateGhaClient(err.to_string()))?;
 
         Ok(Self { cache_client })
     }
@@ -227,7 +226,8 @@ impl RegistryBackend for GhaRegistryBackend {
 
         info!("get cache entry -> {}", cache_key);
 
-        let cache_entry = &self.cache_client
+        let cache_entry = &self
+            .cache_client
             .get_cache_entry(&cache_key, &request.hash)
             .await
             .map_err(|e| {
@@ -271,7 +271,8 @@ impl RegistryBackend for GhaRegistryBackend {
             return Ok(());
         }
 
-        let cache_entry = &self.cache_client
+        let cache_entry = &self
+            .cache_client
             .get_cache_entry(&cache_key, &request.hash)
             .await
             .expect("failed to get cache entry");
@@ -319,7 +320,8 @@ impl RegistryBackend for GhaRegistryBackend {
 
         let cache_size = data.len() as u64;
 
-        let cache_reserve = &self.cache_client
+        let cache_reserve = &self
+            .cache_client
             .reserve_cache(cache_key, hash.clone(), Some(cache_size))
             .await
             .map_err(|e| {
