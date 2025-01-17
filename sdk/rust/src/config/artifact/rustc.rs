@@ -1,5 +1,5 @@
 use crate::config::{
-    artifact::{add_artifact, language::rust::get_toolchain_target, ConfigContext},
+    artifact::{add_artifact, language::rust::get_rust_toolchain_target, ConfigContext},
     ArtifactSource,
 };
 use anyhow::{bail, Result};
@@ -11,23 +11,25 @@ use vorpal_schema::vorpal::artifact::v0::{
 
 pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
     let hash = match context.get_target() {
-        Aarch64Linux => "d560efe018be876f2d5a9106f4b37222f0d315f52aeb12ffb0bfbfc8071fc5b1",
-        Aarch64Macos => "6d636e93ec5f9a2e8a7c5bae381dc9a89808087b2eec1f987f8ed5a797fef556",
-        X8664Linux => "4ae19ae088abd72073dbf6dfbe9c68f8c70a4c2aa77c018c63b099d8732464c3",
+        Aarch64Linux => "f5e5eac428b2a62ffc14324e3a6e171fb3032921f24973b27959834e456388b1",
+        Aarch64Macos => "d022dd6d61a7039c12834f90a0a5410c884bfb9ef1e38b085ad4d3f59a5bf04a",
+        X8664Linux => "fb18b7bb9dd94a5eeb445af1e4dd636836b6034f5dc731d534548bf5f9cb3d6f",
         X8664Macos => "1234567890",
         UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
 
-    let name = "rust-std";
+    let name = "rustc";
 
-    let target = get_toolchain_target(context.get_target())?;
+    let target = get_rust_toolchain_target(context.get_target())?;
 
     add_artifact(
         context,
         vec![],
         BTreeMap::new(),
         name,
-        format!("cp -prv \"./source/{name}/{name}-{version}-{target}/{name}-{target}/.\" \"$VORPAL_OUTPUT\""),
+        format!(
+            "cp -prv \"./source/{name}/{name}-{version}-{target}/{name}/.\" \"$VORPAL_OUTPUT\""
+        ),
         BTreeMap::from([(
             name,
             ArtifactSource {

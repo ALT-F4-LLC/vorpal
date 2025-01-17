@@ -1,5 +1,5 @@
 use crate::config::{
-    artifact::{add_artifact, language::rust::get_toolchain_target, ConfigContext},
+    artifact::{add_artifact, language::rust::get_rust_toolchain_target, ConfigContext},
     ArtifactSource,
 };
 use anyhow::{bail, Result};
@@ -20,7 +20,7 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
 
     let name = "rustfmt";
 
-    let target = get_toolchain_target(context.get_target())?;
+    let target = get_rust_toolchain_target(context.get_target())?;
 
     add_artifact(
         context,

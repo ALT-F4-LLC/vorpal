@@ -1,9 +1,7 @@
 use crate::config::{
     artifact::{
-        add_artifact, get_artifact_envkey,
-        shell::shell_artifact,
-        toolchain::{cargo, clippy, protoc, rust_analyzer, rust_src, rust_std, rustc, rustfmt},
-        ArtifactSource,
+        add_artifact, cargo, clippy, get_artifact_envkey, protoc, rust_analyzer, rust_src,
+        rust_std, rustc, rustfmt, shell::shell_artifact, ArtifactSource,
     },
     ConfigContext,
 };
@@ -36,7 +34,7 @@ struct RustArtifactCargoTomlWorkspace {
     members: Option<Vec<String>>,
 }
 
-pub fn get_toolchain_target(target: ArtifactSystem) -> Result<String> {
+pub fn get_rust_toolchain_target(target: ArtifactSystem) -> Result<String> {
     let target = match target {
         Aarch64Linux => "aarch64-unknown-linux-gnu",
         Aarch64Macos => "aarch64-apple-darwin",
@@ -61,7 +59,7 @@ fn read_cargo_toml(path: &str) -> Result<RustArtifactCargoToml> {
 #[allow(clippy::too_many_arguments)]
 pub async fn toolchain_artifact(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
     let version = get_rust_toolchain_version();
-    let target = get_toolchain_target(context.get_target())?;
+    let target = get_rust_toolchain_target(context.get_target())?;
 
     let cargo = cargo::artifact(context, &version).await?;
     let clippy = clippy::artifact(context, &version).await?;
@@ -144,7 +142,7 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
 
     let artifacts = vec![protoc.clone(), toolchain.clone()];
 
-    let toolchain_target = get_toolchain_target(context.get_target())?;
+    let toolchain_target = get_rust_toolchain_target(context.get_target())?;
 
     let envs = vec![
         format!(
@@ -249,7 +247,7 @@ pub async fn rust_package<'a>(
     // Get protoc artifact
     let protoc = protoc::artifact(context).await?;
 
-    let toolchain_target = get_toolchain_target(context.get_target())?;
+    let toolchain_target = get_rust_toolchain_target(context.get_target())?;
     let toolchain_version = get_rust_toolchain_version();
 
     // Set environment variables
