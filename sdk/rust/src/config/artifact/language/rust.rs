@@ -166,7 +166,11 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
     shell_artifact(context, artifacts, envs, name).await
 }
 
-pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Result<ArtifactId> {
+pub async fn rust_package<'a>(
+    context: &mut ConfigContext,
+    name: &'a str,
+    excludes: Vec<&'a str>,
+) -> Result<ArtifactId> {
     let toolchain = toolchain_artifact(context, name).await?;
 
     // 1. READ CARGO.TOML FILES
@@ -317,6 +321,12 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
 
     env_paths.push(format!("{}/bin", get_artifact_envkey(&protoc)));
 
+    let mut excludes_defaults = vec!["target".to_string()];
+
+    for exclude in excludes {
+        excludes_defaults.push(exclude.to_string());
+    }
+
     add_artifact(
         context,
         artifacts,
@@ -356,23 +366,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
         BTreeMap::from([(
             name,
             ArtifactSource {
-                excludes: vec![
-                    ".env".to_string(),
-                    ".envrc".to_string(),
-                    ".github".to_string(),
-                    ".gitignore".to_string(),
-                    ".packer".to_string(),
-                    ".vagrant".to_string(),
-                    "Dockerfile".to_string(),
-                    "Vagrantfile".to_string(),
-                    "dist".to_string(),
-                    "makefile".to_string(),
-                    "script".to_string(),
-                    "shell.nix".to_string(),
-                    "target".to_string(),
-                    "vorpal-domains.svg".to_string(),
-                    "vorpal-purpose.jpg".to_string(),
-                ],
+                excludes: excludes_defaults,
                 hash: None,
                 includes: vec![],
                 path: source_path.display().to_string(),
