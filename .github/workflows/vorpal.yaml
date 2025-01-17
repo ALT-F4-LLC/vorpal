@@ -76,7 +76,9 @@ jobs:
           sudo mv bwrap /etc/apparmor.d/bwrap
           sudo systemctl restart apparmor.service
 
-      - run: ./script/install.sh
+      - run: |
+          sudo mkdir -pv /var/lib/vorpal/{cache,key,sandbox,store}
+          sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
