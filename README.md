@@ -2,7 +2,9 @@
 
 Build and ship software with one powerful tool.
 
-![vorpal-purpose](./vorpal-purpose.jpg)
+<p align="center">
+  <img src="./vorpal-purpose.jpg" />
+</p>
 
 ## Overview
 
@@ -14,20 +16,17 @@ Below are examples of a Rust application in Vorpal configured in different langu
 
 ```rust
 use anyhow::Result;
-use vorpal_schema::vorpal::config::v0::Config;
 use vorpal_sdk::config::{artifact::language::rust::rust_artifact, get_context};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let context = &mut get_context().await?;
 
-    let artifact = rust_artifact(context, "example-app").await?;
+    let example = rust_artifact(context, "example-app").await?;
 
-    context
-        .run(Config {
-            artifacts: vec![artifact],
-        })
-        .await
+    let artifacts = vec![artifact];
+
+    context.run(artifacts).await
 }
 ```
 
@@ -40,7 +39,6 @@ import (
     "context"
     "log"
 
-    "github.com/vorpal-sdk/vorpal"
     "github.com/vorpal-sdk/vorpal/config"
     "github.com/vorpal-sdk/vorpal/config/artifact/language/rust"
 )
@@ -51,18 +49,37 @@ func main() {
         log.Fatal(err)
     }
 
-    artifact, err := rust.Artifact(context, "example-app")
+    example, err := rust.Artifact(context, "example-app")
     if err != nil {
         log.Fatal(err)
     }
 
-    err = context.Run(config.Config{
-        Artifacts: []config.Artifact{artifact},
-    })
+    artifacts := []config.Artifact{example}
+
+    err = context.Run(artifacts)
     if err != nil {
         log.Fatal(err)
     }
 }
+```
+
+### Python
+
+```python
+from vorpal_sdk.config import get_context
+from vorpal_sdk.config.artifact.language.rust import rust_artifact
+
+def main():
+    context = get_context()
+
+    example = rust_artifact(context, "example-app")
+
+    artifacts = [example]
+
+    context.run(artifacts)
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### TypeScript
@@ -74,17 +91,17 @@ import { rustArtifact } from '@vorpal/sdk/config/artifact/language/rust';
 async function main() {
     const context = await getContext();
 
-    const artifact = await rustArtifact(context, 'example-app');
+    const example = await rustArtifact(context, 'example-app');
 
-    await context.run({
-        artifacts: [artifact],
-    }));
+    const artifacts = [example];
+
+    await context.run(artifacts);
 }
 
 main().catch(console.error);
 ```
 
-## Infrastructure
+## Components
 
 Below is the existing working diagram that illustrates the platform's design:
 

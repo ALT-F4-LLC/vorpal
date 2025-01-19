@@ -474,10 +474,16 @@ pub async fn artifact(
         ("zlib", zlib),
     ]);
 
+    let mut source_ids = vec![];
+
+    for (source_name, source) in sources {
+        source_ids.push(context.add_artifact_source(source_name, source).await?);
+    }
+
     context.add_artifact(
         "linux-vorpal",
         artifacts.clone(),
-        sources,
+        source_ids,
         vec![
             bwrap_step(
                 vec![],

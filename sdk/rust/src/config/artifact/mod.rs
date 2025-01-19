@@ -3,17 +3,20 @@ use anyhow::{bail, Result};
 use indoc::formatdoc;
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId, ArtifactStep, ArtifactStepEnvironment, ArtifactSystem,
+    ArtifactId, ArtifactSourceId, ArtifactStep, ArtifactStepEnvironment, ArtifactSystem,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
 pub mod cargo;
 pub mod clippy;
 pub mod go;
+pub mod goimports;
+pub mod gopls;
 pub mod language;
 pub mod linux_debian;
 pub mod linux_vorpal;
 pub mod protoc;
+pub mod protoc_gen_go;
 pub mod rust_analyzer;
 pub mod rust_src;
 pub mod rust_std;
@@ -214,7 +217,7 @@ pub async fn add_artifact(
     environment: BTreeMap<&str, String>,
     name: &str,
     script: String,
-    source: BTreeMap<&str, ArtifactSource>,
+    sources: Vec<ArtifactSourceId>,
     systems: Vec<&str>,
 ) -> Result<ArtifactId> {
     // Setup target
@@ -306,6 +309,6 @@ pub async fn add_artifact(
     // Add artifact to context
 
     context
-        .add_artifact(name, artifacts, source, steps, systems)
+        .add_artifact(name, artifacts, sources, steps, systems)
         .await
 }

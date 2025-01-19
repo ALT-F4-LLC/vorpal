@@ -164,7 +164,7 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
         .add_artifact(
             "linux-debian-docker",
             vec![],
-            BTreeMap::new(),
+            vec![],
             vec![bash_step(
                 BTreeMap::new(),
                 formatdoc! {"
@@ -187,7 +187,7 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
         .add_artifact(
             "linux-debian",
             vec![dockerfile.clone()],
-            BTreeMap::new(),
+            vec![],
             vec![
                 docker_step(vec![
                     "buildx".to_string(),

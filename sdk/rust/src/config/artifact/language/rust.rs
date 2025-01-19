@@ -124,7 +124,7 @@ pub async fn toolchain_artifact(context: &mut ConfigContext, name: &str) -> Resu
             EOF",
             component_paths = component_paths.join(" "),
         },
-        BTreeMap::new(),
+        vec![],
         vec![
             "aarch64-linux",
             "aarch64-macos",
@@ -269,6 +269,18 @@ pub async fn rust_package<'a>(
         vendor_cargo_tomls.push(format!("{}/Cargo.toml", workspace));
     }
 
+    let vendor_source = context
+        .add_artifact_source(
+            format!("{}-vendor", name).as_str(),
+            ArtifactSource {
+                excludes: vec![],
+                hash: None,
+                includes: vendor_cargo_tomls.clone(),
+                path: source_path.display().to_string(),
+            },
+        )
+        .await?;
+
     let vendor = add_artifact(
         context,
         vec![toolchain.clone()],
@@ -282,7 +294,7 @@ pub async fn rust_package<'a>(
         formatdoc! {"
             mkdir -pv $HOME
 
-            pushd ./source/{name}
+            pushd ./source/{name}-vendor
 
             target_paths=({target_paths})
 
@@ -298,15 +310,7 @@ pub async fn rust_package<'a>(
             echo \"$cargo_vendor\" > \"$VORPAL_OUTPUT/config.toml\"",
             target_paths = workspaces_targets.join(" "),
         },
-        BTreeMap::from([(
-            name,
-            ArtifactSource {
-                excludes: vec![],
-                hash: None,
-                includes: vendor_cargo_tomls.clone(),
-                path: source_path.display().to_string(),
-            },
-        )]),
+        vec![vendor_source],
         systems.clone(),
     )
     .await?;
@@ -324,6 +328,18 @@ pub async fn rust_package<'a>(
     for exclude in excludes {
         excludes_defaults.push(exclude.to_string());
     }
+
+    let artifact_source = context
+        .add_artifact_source(
+            name,
+            ArtifactSource {
+                excludes: excludes_defaults,
+                hash: None,
+                includes: vec![],
+                path: source_path.display().to_string(),
+            },
+        )
+        .await?;
 
     add_artifact(
         context,
@@ -361,15 +377,7 @@ pub async fn rust_package<'a>(
             bin_names = workspaces_bin_names.join(" "),
             vendor = get_artifact_envkey(&vendor),
         },
-        BTreeMap::from([(
-            name,
-            ArtifactSource {
-                excludes: excludes_defaults,
-                hash: None,
-                includes: vec![],
-                path: source_path.display().to_string(),
-            },
-        )]),
+        vec![artifact_source],
         systems,
     )
     .await

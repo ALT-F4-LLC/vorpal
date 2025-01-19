@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package vorpal.registry.v0;
 
-import "v0/artifact/artifact.proto";
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/registry";
 
 service RegistryService {
     rpc Exists(RegistryRequest) returns (RegistryResponse);

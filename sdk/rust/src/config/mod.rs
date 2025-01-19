@@ -2,12 +2,13 @@ use crate::config::service::ConfigServer;
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use clap::{Parser, Subcommand};
-use console::style;
 use serde::{Deserialize, Serialize};
 use sha256::digest;
-use std::collections::{BTreeMap, HashMap};
-use std::env::consts::{ARCH, OS};
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    env::consts::{ARCH, OS},
+    path::Path,
+};
 use tokio::fs::{remove_dir_all, remove_file, write};
 use tokio_tar::Archive;
 use tonic::{transport::Server, Code::NotFound};
@@ -35,6 +36,7 @@ use vorpal_store::{
 
 pub mod artifact;
 pub mod service;
+pub mod source;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -46,10 +48,6 @@ pub struct Cli {
 
 fn get_default_system() -> String {
     format!("{}-{}", ARCH, OS)
-}
-
-fn get_prefix(name: &str) -> String {
-    style(format!("{} |>", name)).bold().to_string()
 }
 
 #[derive(Subcommand)]
@@ -133,14 +131,63 @@ impl ConfigContext {
 
     async fn add_artifact_source(
         &mut self,
-        artifact_name: &str,
         source_name: &str,
         source: ArtifactSource,
     ) -> Result<ArtifactSourceId> {
-        // 1. If source is cached using '<artifact-name>-<source-name>-<digest>', return the source id
+        // 1. If source is cached using '<source-name>-<digest>', return the source id
+
+        // TODO: if any paths are relative, they should be expanded to the artifact's source directory
+
+        let source_path_kind = match &source.path {
+            s if Path::new(s).exists() => ArtifactSourceKind::Local,
+            s if s.starts_with("git") => ArtifactSourceKind::Git,
+            s if s.starts_with("http") => ArtifactSourceKind::Http,
+            _ => ArtifactSourceKind::UnknownSourceKind,
+        };
+
+        if source_path_kind == ArtifactSourceKind::UnknownSourceKind {
+            bail!(
+                "`source.{}.path` unknown kind: {:?}",
+                source_name,
+                source.path
+            );
+        }
+
+        if source_path_kind == ArtifactSourceKind::Git {
+            bail!("`source.{}.path` git not supported", source_name);
+        }
+
+        let mut source = ArtifactSource {
+            excludes: source.excludes.clone(),
+            hash: source.hash.clone(),
+            includes: source.includes.clone(),
+            path: source.path.clone(),
+        };
+
+        if source_path_kind == ArtifactSourceKind::Local {
+            let local_path = Path::new(&source.path).to_path_buf();
+
+            if !local_path.exists() {
+                bail!("`source.{}.path` not found: {:?}", source_name, source.path);
+            }
+
+            source.path = local_path
+                .canonicalize()
+                .map_err(|e| anyhow::anyhow!(e))?
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            info!(
+                "{} canonicalized source: {}",
+                source_name,
+                local_path.display()
+            );
+        }
 
         let source_json = serde_json::to_string(&source).map_err(|e| anyhow::anyhow!(e))?;
-        let source_key = format!("{}-{}-{}", artifact_name, source_name, digest(source_json));
+
+        let source_key = format!("{}-{}", source_name, digest(source_json));
 
         if let Some(source_id) = self.artifact_source_id.get(&source_key) {
             return Ok(source_id.clone());
@@ -176,12 +223,7 @@ impl ConfigContext {
                 }
 
                 Ok(_) => {
-                    info!(
-                        "{} pushed source: {}-{}",
-                        get_prefix(artifact_name),
-                        source_name,
-                        hash
-                    );
+                    info!("{} pushed source: {}", source_name, hash);
 
                     self.artifact_source_id
                         .insert(source_key, artifact_source_id.clone());
@@ -195,12 +237,7 @@ impl ConfigContext {
             let cache_archive_path = get_cache_archive_path(&hash, source_name);
 
             if cache_archive_path.exists() {
-                info!(
-                    "{} cached source: {}-{}",
-                    get_prefix(artifact_name),
-                    source_name,
-                    hash
-                );
+                info!("{} cached source: {}", source_name, hash);
 
                 self.artifact_source_id
                     .insert(source_key, artifact_source_id.clone());
@@ -210,25 +247,6 @@ impl ConfigContext {
         }
 
         // 3. Prepare source if not cached
-
-        let source_path_kind = match &source.path {
-            s if Path::new(s).exists() => ArtifactSourceKind::Local,
-            s if s.starts_with("git") => ArtifactSourceKind::Git,
-            s if s.starts_with("http") => ArtifactSourceKind::Http,
-            _ => ArtifactSourceKind::UnknownSourceKind,
-        };
-
-        if source_path_kind == ArtifactSourceKind::UnknownSourceKind {
-            bail!(
-                "`source.{}.path` unknown kind: {:?}",
-                source_name,
-                source.path
-            );
-        }
-
-        if source_path_kind == ArtifactSourceKind::Git {
-            bail!("`source.{}.path` git not supported", source_name);
-        }
 
         let source_sandbox_path = create_sandbox_dir().await?;
 
@@ -258,11 +276,7 @@ impl ConfigContext {
                 );
             }
 
-            info!(
-                "{} downloading source: {}",
-                get_prefix(artifact_name),
-                source.path
-            );
+            info!("{} downloading source: {}", source_name, source.path);
 
             let remote_response = reqwest::get(remote_path.as_str())
                 .await
@@ -297,11 +311,7 @@ impl ConfigContext {
 
             // Unpack source data
 
-            info!(
-                "{} unpacking source: {}",
-                get_prefix(artifact_name),
-                source.path
-            );
+            info!("{} unpacking source: {}", source_name, source.path);
 
             if let Some(kind) = kind {
                 match kind.mime_type() {
@@ -377,7 +387,7 @@ impl ConfigContext {
 
             info!(
                 "{} copying source: {}",
-                get_prefix(artifact_name),
+                source_name,
                 local_path.canonicalize().unwrap().display()
             );
 
@@ -411,11 +421,7 @@ impl ConfigContext {
             set_timestamps(&file_path).await?;
         }
 
-        info!(
-            "{} hashing source: {}",
-            get_prefix(artifact_name),
-            source.path
-        );
+        info!("{} hashing source: {}", source_name, source.path);
 
         // 4b. Hash source files
 
@@ -432,11 +438,7 @@ impl ConfigContext {
             }
         }
 
-        info!(
-            "{} caching source: {}",
-            get_prefix(artifact_name),
-            source.path
-        );
+        info!("{} caching source: {}", source_name, source.path);
 
         let cache_archive_path = get_cache_archive_path(&source_hash, source_name);
 
@@ -465,21 +467,11 @@ impl ConfigContext {
         &mut self,
         name: &str,
         artifacts: Vec<ArtifactId>,
-        source: BTreeMap<&str, ArtifactSource>,
+        sources: Vec<ArtifactSourceId>,
         steps: Vec<ArtifactStep>,
         systems: Vec<&str>,
     ) -> Result<ArtifactId> {
-        // 1. Setup sources
-
-        let mut sources = vec![];
-
-        for (source_name, source) in source.into_iter() {
-            let source = self.add_artifact_source(name, source_name, source).await?;
-
-            sources.push(source);
-        }
-
-        // 2. Setup systems
+        // 1. Setup systems
 
         let mut systems_int = vec![];
 
@@ -493,7 +485,7 @@ impl ConfigContext {
             systems_int.push(system.into());
         }
 
-        // 3. Setup artifact id
+        // 2. Setup artifact id
 
         let artifact = Artifact {
             artifacts,
