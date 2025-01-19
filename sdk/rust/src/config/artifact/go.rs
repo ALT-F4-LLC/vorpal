@@ -15,7 +15,7 @@ pub async fn source(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
     let hash = match target {
         Aarch64Linux => "42cec86acdeb62f23b8a65afaa67c2d8c8818f28d7d3ca55430e10e8027a6234",
         Aarch64Macos => "86c352c4ced8830cd92a9c85c2944eaa95ebb1e8908b3f01258962bcc94b9c14",
-        X8664Linux => "123456789",
+        X8664Linux => "9037b22b154e44366e6a03963bd5584f76381070baa9cf6a548bd2bfcd28b72e",
         X8664Macos => "123456789",
         UnknownSystem => bail!("Invalid go system: {:?}", context.get_target()),
     };
