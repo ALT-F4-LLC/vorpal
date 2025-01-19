@@ -9,7 +9,7 @@ use vorpal_schema::vorpal::artifact::v0::{
 
 pub async fn source(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
     let hash = match context.get_target() {
-        Aarch64Linux => "1234567890",
+        Aarch64Linux => "597aae8080d7e3e575198a5417ac2278ae49078d7fa3be56405ffb43bbb9f501",
         Aarch64Macos => "55c2a0cc7137f3625bd1bf3be85ed940c643e56fa1ceaf51f94c6434980f65a5",
         X8664Linux => "1234567890",
         X8664Macos => "1234567890",

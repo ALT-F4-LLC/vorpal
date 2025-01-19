@@ -13,7 +13,7 @@ pub async fn source(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
     let target = context.get_target();
 
     let hash = match target {
-        Aarch64Linux => "123456789",
+        Aarch64Linux => "42cec86acdeb62f23b8a65afaa67c2d8c8818f28d7d3ca55430e10e8027a6234",
         Aarch64Macos => "86c352c4ced8830cd92a9c85c2944eaa95ebb1e8908b3f01258962bcc94b9c14",
         X8664Linux => "123456789",
         X8664Macos => "123456789",

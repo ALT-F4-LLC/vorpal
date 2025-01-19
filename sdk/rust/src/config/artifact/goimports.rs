@@ -17,7 +17,11 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
     add_artifact(
         context,
         vec![go.clone()],
-        BTreeMap::from([("PATH", format!("{}/bin", get_artifact_envkey(&go)))]),
+        BTreeMap::from([
+            ("GOCACHE", "$VORPAL_OUTPUT/cache".to_string()),
+            ("GOPATH", "$VORPAL_OUTPUT".to_string()),
+            ("PATH", format!("{}/bin", get_artifact_envkey(&go))),
+        ]),
         name,
         formatdoc! {"
             pushd ./source/go-tools
