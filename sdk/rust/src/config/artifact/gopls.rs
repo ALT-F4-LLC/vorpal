@@ -18,8 +18,8 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
         context,
         vec![go.clone()],
         BTreeMap::from([
-            ("GOCACHE", "$VORPAL_OUTPUT/cache".to_string()),
-            ("GOPATH", "$VORPAL_OUTPUT".to_string()),
+            ("GOCACHE", "$VORPAL_WORKSPACE/go/cache".to_string()),
+            ("GOPATH", "$VORPAL_WORKSPACE/go".to_string()),
             ("PATH", format!("{}/bin", get_artifact_envkey(&go))),
         ]),
         name,
@@ -29,6 +29,8 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
             mkdir -p $VORPAL_OUTPUT/bin
 
             go build -o $VORPAL_OUTPUT/bin/gopls .
+
+            go clean -modcache
         "},
         vec![source],
         vec![
