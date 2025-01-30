@@ -3259,6 +3259,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "tokio",
+ "vorpal-schema",
  "vorpal-sdk",
 ]
 

@@ -20,5 +20,5 @@ toml = { default-features = false, features = ["parse"], version = "0" }
 tonic = { default-features = false, version = "0" }
 tracing = { default-features = false, version = "0" }
 url = { default-features = false, version = "2" }
-vorpal-schema = { default-features = false, path = "../schema" }
-vorpal-store = { default-features = false, path = "../store" }
+vorpal-schema = { default-features = false, path = "../../schema" }
+vorpal-store = { default-features = false, path = "../../store" }

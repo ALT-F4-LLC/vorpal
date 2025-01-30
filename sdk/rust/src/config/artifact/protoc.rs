@@ -3,11 +3,11 @@ use anyhow::{bail, Result};
 use indoc::formatdoc;
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId,
+    ArtifactId, ArtifactSourceId,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
 
-pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
+pub async fn source(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
     let hash = match context.get_target() {
         Aarch64Linux => "8a592a0dd590e92b1c0d77631e683fc743d1ed8158e0b093b6cfabf0685089af",
         Aarch64Macos => "d105abb1c1d2c024f29df884f0592f1307984d63aeb10f0e61ccb94aee2c2feb",
@@ -15,8 +15,6 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
         X8664Macos => "1234567890",
         UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
-
-    let name = "protoc";
 
     let target = match context.get_target() {
         Aarch64Linux => "linux-aarch_64",
@@ -27,6 +25,24 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
     };
 
     let version = "25.4";
+
+    context
+        .add_artifact_source(
+            "protoc",
+            ArtifactSource {
+                excludes: vec![],
+                hash: Some(hash.to_string()),
+                includes: vec![],
+                path: format!("https://github.com/protocolbuffers/protobuf/releases/download/v{version}/protoc-{version}-{target}.zip"),
+            },
+        )
+        .await
+}
+
+pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
+    let name = "protoc";
+
+    let source = source(context).await?;
 
     add_artifact(
         context,
@@ -40,20 +56,13 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
 
             chmod +x \"$VORPAL_OUTPUT/bin/protoc\"",
         },
-        BTreeMap::from([(
-            name,
-            ArtifactSource {
-                excludes: vec![],
-                hash: Some(hash.to_string()),
-                includes: vec![],
-                path: format!("https://github.com/protocolbuffers/protobuf/releases/download/v{version}/{name}-{version}-{target}.zip"),
-            }
-        )]),
+        vec![source],
         vec![
             "aarch64-linux",
             "aarch64-macos",
             "x86_64-linux",
             "x86_64-macos",
-        ]
-    ).await
+        ],
+    )
+    .await
 }

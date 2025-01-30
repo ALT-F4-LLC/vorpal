@@ -1,9 +1,7 @@
 use crate::config::{
     artifact::{
-        add_artifact, get_artifact_envkey,
-        shell::shell_artifact,
-        toolchain::{cargo, clippy, protoc, rust_analyzer, rust_src, rust_std, rustc, rustfmt},
-        ArtifactSource,
+        add_artifact, cargo, clippy, get_artifact_envkey, protoc, rust_analyzer, rust_src,
+        rust_std, rustc, rustfmt, shell::shell_artifact, ArtifactSource,
     },
     ConfigContext,
 };
@@ -36,7 +34,7 @@ struct RustArtifactCargoTomlWorkspace {
     members: Option<Vec<String>>,
 }
 
-pub fn get_toolchain_target(target: ArtifactSystem) -> Result<String> {
+pub fn get_rust_toolchain_target(target: ArtifactSystem) -> Result<String> {
     let target = match target {
         Aarch64Linux => "aarch64-unknown-linux-gnu",
         Aarch64Macos => "aarch64-apple-darwin",
@@ -61,7 +59,7 @@ fn read_cargo_toml(path: &str) -> Result<RustArtifactCargoToml> {
 #[allow(clippy::too_many_arguments)]
 pub async fn toolchain_artifact(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
     let version = get_rust_toolchain_version();
-    let target = get_toolchain_target(context.get_target())?;
+    let target = get_rust_toolchain_target(context.get_target())?;
 
     let cargo = cargo::artifact(context, &version).await?;
     let clippy = clippy::artifact(context, &version).await?;
@@ -126,7 +124,7 @@ pub async fn toolchain_artifact(context: &mut ConfigContext, name: &str) -> Resu
             EOF",
             component_paths = component_paths.join(" "),
         },
-        BTreeMap::new(),
+        vec![],
         vec![
             "aarch64-linux",
             "aarch64-macos",
@@ -144,7 +142,7 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
 
     let artifacts = vec![protoc.clone(), toolchain.clone()];
 
-    let toolchain_target = get_toolchain_target(context.get_target())?;
+    let toolchain_target = get_rust_toolchain_target(context.get_target())?;
 
     let envs = vec![
         format!(
@@ -166,7 +164,11 @@ pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<Artif
     shell_artifact(context, artifacts, envs, name).await
 }
 
-pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Result<ArtifactId> {
+pub async fn rust_package<'a>(
+    context: &mut ConfigContext,
+    name: &'a str,
+    excludes: Vec<&'a str>,
+) -> Result<ArtifactId> {
     let toolchain = toolchain_artifact(context, name).await?;
 
     // 1. READ CARGO.TOML FILES
@@ -245,7 +247,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
     // Get protoc artifact
     let protoc = protoc::artifact(context).await?;
 
-    let toolchain_target = get_toolchain_target(context.get_target())?;
+    let toolchain_target = get_rust_toolchain_target(context.get_target())?;
     let toolchain_version = get_rust_toolchain_version();
 
     // Set environment variables
@@ -267,6 +269,18 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
         vendor_cargo_tomls.push(format!("{}/Cargo.toml", workspace));
     }
 
+    let vendor_source = context
+        .add_artifact_source(
+            format!("{}-vendor", name).as_str(),
+            ArtifactSource {
+                excludes: vec![],
+                hash: None,
+                includes: vendor_cargo_tomls.clone(),
+                path: source_path.display().to_string(),
+            },
+        )
+        .await?;
+
     let vendor = add_artifact(
         context,
         vec![toolchain.clone()],
@@ -280,7 +294,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
         formatdoc! {"
             mkdir -pv $HOME
 
-            pushd ./source/{name}
+            pushd ./source/{name}-vendor
 
             target_paths=({target_paths})
 
@@ -296,15 +310,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
             echo \"$cargo_vendor\" > \"$VORPAL_OUTPUT/config.toml\"",
             target_paths = workspaces_targets.join(" "),
         },
-        BTreeMap::from([(
-            name,
-            ArtifactSource {
-                excludes: vec![],
-                hash: None,
-                includes: vendor_cargo_tomls.clone(),
-                path: source_path.display().to_string(),
-            },
-        )]),
+        vec![vendor_source],
         systems.clone(),
     )
     .await?;
@@ -316,6 +322,24 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
     // Create artifact
 
     env_paths.push(format!("{}/bin", get_artifact_envkey(&protoc)));
+
+    let mut excludes_defaults = vec!["target".to_string()];
+
+    for exclude in excludes {
+        excludes_defaults.push(exclude.to_string());
+    }
+
+    let artifact_source = context
+        .add_artifact_source(
+            name,
+            ArtifactSource {
+                excludes: excludes_defaults,
+                hash: None,
+                includes: vec![],
+                path: source_path.display().to_string(),
+            },
+        )
+        .await?;
 
     add_artifact(
         context,
@@ -353,31 +377,7 @@ pub async fn rust_package<'a>(context: &mut ConfigContext, name: &'a str) -> Res
             bin_names = workspaces_bin_names.join(" "),
             vendor = get_artifact_envkey(&vendor),
         },
-        BTreeMap::from([(
-            name,
-            ArtifactSource {
-                excludes: vec![
-                    ".env".to_string(),
-                    ".envrc".to_string(),
-                    ".github".to_string(),
-                    ".gitignore".to_string(),
-                    ".packer".to_string(),
-                    ".vagrant".to_string(),
-                    "Dockerfile".to_string(),
-                    "Vagrantfile".to_string(),
-                    "dist".to_string(),
-                    "makefile".to_string(),
-                    "script".to_string(),
-                    "shell.nix".to_string(),
-                    "target".to_string(),
-                    "vorpal-domains.svg".to_string(),
-                    "vorpal-purpose.jpg".to_string(),
-                ],
-                hash: None,
-                includes: vec![],
-                path: source_path.display().to_string(),
-            },
-        )]),
+        vec![artifact_source],
         systems,
     )
     .await

@@ -81,7 +81,7 @@ pub async fn shell_artifact<'a>(
             restores = restores.join("\n"),
             unsets = unsets.join("\n"),
         },
-        BTreeMap::new(),
+        vec![],
         vec![
             "aarch64-linux",
             "aarch64-macos",
