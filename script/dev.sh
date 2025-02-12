@@ -7,7 +7,17 @@ readonly SCRIPT_PATH="${PWD}/script"
 scripts=("rustup" "protoc")
 
 if [[ "$(uname -s)" == "Linux" ]]; then
-    "${SCRIPT_PATH}/dev/debian.sh"
+    . /etc/os-release
+    if [[ "$ID" == "debian" || "$ID" == "ubuntu" ]]; then
+        "${SCRIPT_PATH}/dev/debian.sh"
+    elif [[ "$ID" == "arch" ]]; then
+        "${SCRIPT_PATH}/dev/arch.sh"
+    else
+        echo "Unknown Linux distribution."
+        echo "You will need to install the following manually:"
+        echo ""
+        echo "    bubblewrap ca-certificates curl unzip docker"
+    fi
 fi
 
 mkdir -p "${ENV_PATH}/bin"
