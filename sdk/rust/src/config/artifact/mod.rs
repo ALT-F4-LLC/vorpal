@@ -1,6 +1,7 @@
-use crate::config::{ArtifactSource, ConfigContext};
+use crate::config::context::ConfigContext;
 use anyhow::{bail, Result};
 use indoc::formatdoc;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
     ArtifactId, ArtifactSourceId, ArtifactStep, ArtifactStepEnvironment, ArtifactSystem,
@@ -24,6 +25,22 @@ pub mod rustc;
 pub mod rustfmt;
 pub mod shell;
 pub mod steps;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ArtifactSource {
+    pub excludes: Vec<String>,
+    pub hash: Option<String>,
+    pub includes: Vec<String>,
+    pub path: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ArtifactSourceKind {
+    UnknownSourceKind,
+    Git,
+    Http,
+    Local,
+}
 
 // TODO: implement amber step
 

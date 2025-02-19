@@ -1,6 +1,6 @@
 use crate::config::{
     artifact::{bash_step, docker_step, get_artifact_envkey},
-    ConfigContext,
+    context::ConfigContext,
 };
 use anyhow::Result;
 use indoc::formatdoc;

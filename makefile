@@ -48,6 +48,7 @@ dist: build
 
 # Vorpal
 generate:
+	mkdir -p sdk/go/api
 	protoc --go_opt=paths=source_relative --go_out=sdk/go/api --proto_path=schema/api v0/artifact/artifact.proto
 	protoc --go_opt=paths=source_relative --go_out=sdk/go/api --proto_path=schema/api v0/registry/registry.proto
 	protoc --go_opt=paths=source_relative --go_out=sdk/go/api --proto_path=schema/api v0/config/config.proto

@@ -1,4 +1,4 @@
-use crate::config::ConfigContext;
+use crate::config::context::ConfigContext;
 use anyhow::Result;
 use vorpal_schema::vorpal::{
     artifact::v0::{Artifact, ArtifactId},

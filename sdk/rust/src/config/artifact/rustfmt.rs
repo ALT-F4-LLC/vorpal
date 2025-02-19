@@ -1,6 +1,5 @@
-use crate::config::{
-    artifact::{add_artifact, language::rust::get_rust_toolchain_target, ConfigContext},
-    ArtifactSource,
+use crate::config::artifact::{
+    add_artifact, language::rust::get_rust_toolchain_target, ArtifactSource, ConfigContext,
 };
 use anyhow::{bail, Result};
 use std::collections::BTreeMap;

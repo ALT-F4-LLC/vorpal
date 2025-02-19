@@ -9,7 +9,7 @@ use vorpal_sdk::config::{
         protoc, protoc_gen_go,
         shell::shell_artifact,
     },
-    ConfigContext,
+    context::ConfigContext,
 };
 
 pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
@@ -38,8 +38,8 @@ pub async fn shell(context: &mut ConfigContext) -> Result<ArtifactId> {
     let name = "vorpal";
 
     let go = go::artifact(context).await?;
-    let gopls = gopls::artifact(context).await?;
     let goimports = goimports::artifact(context).await?;
+    let gopls = gopls::artifact(context).await?;
     let protoc = protoc::artifact(context).await?;
     let protoc_gen_go = protoc_gen_go::artifact(context).await?;
     let rust_toolchain = toolchain_artifact(context, name).await?;

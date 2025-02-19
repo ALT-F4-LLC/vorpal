@@ -32,7 +32,7 @@ use vorpal_schema::{
 };
 use vorpal_sdk::config::{
     artifact::{language::rust, protoc},
-    ConfigContext,
+    context::ConfigContext,
 };
 use vorpal_store::paths::{get_artifact_path, get_public_key_path};
 use vorpal_worker::artifact::ArtifactServer;
