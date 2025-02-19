@@ -1,4 +1,4 @@
-use crate::config::{
+use crate::{
     artifact::{add_artifact, ArtifactSource},
     context::ConfigContext,
 };
@@ -12,38 +12,38 @@ use vorpal_schema::vorpal::artifact::v0::{
 
 pub async fn source(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
     let hash = match context.get_target() {
-        Aarch64Linux => "597aae8080d7e3e575198a5417ac2278ae49078d7fa3be56405ffb43bbb9f501",
-        Aarch64Macos => "55c2a0cc7137f3625bd1bf3be85ed940c643e56fa1ceaf51f94c6434980f65a5",
-        X8664Linux => "07f2ee9051854e2d240c56e47cfa9ac9b7d6a2dc2a9b2b6dbd79726f78c27bb1",
+        Aarch64Linux => "8a592a0dd590e92b1c0d77631e683fc743d1ed8158e0b093b6cfabf0685089af",
+        Aarch64Macos => "d105abb1c1d2c024f29df884f0592f1307984d63aeb10f0e61ccb94aee2c2feb",
+        X8664Linux => "d5e8fb327ea9568fd1ce2de3557740948a2168faff79c0e02e64bd9f040964d9",
         X8664Macos => "1234567890",
-        UnknownSystem => bail!("Invalid protoc-gen-go system: {:?}", context.get_target()),
+        UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
 
     let target = match context.get_target() {
-        Aarch64Linux => "linux.arm64",
-        Aarch64Macos => "darwin.arm64",
-        X8664Linux => "linux.amd64",
-        X8664Macos => "darwin.amd64",
-        UnknownSystem => bail!("Invalid protoc-gen-go system: {:?}", context.get_target()),
+        Aarch64Linux => "linux-aarch_64",
+        Aarch64Macos => "osx-aarch_64",
+        X8664Linux => "linux-x86_64",
+        X8664Macos => "osx-x86_64",
+        UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
 
-    let version = "1.36.3";
+    let version = "25.4";
 
     context
         .add_artifact_source(
-            "protoc-gen-go",
+            "protoc",
             ArtifactSource {
                 excludes: vec![],
                 hash: Some(hash.to_string()),
                 includes: vec![],
-                path: format!("https://github.com/protocolbuffers/protobuf-go/releases/download/v{version}/protoc-gen-go.v{version}.{target}.tar.gz"),
+                path: format!("https://github.com/protocolbuffers/protobuf/releases/download/v{version}/protoc-{version}-{target}.zip"),
             },
         )
         .await
 }
 
 pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let name = "protoc-gen-go";
+    let name = "protoc";
 
     let source = source(context).await?;
 
@@ -55,9 +55,9 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
         formatdoc! {"
             mkdir -pv \"$VORPAL_OUTPUT/bin\"
 
-            cp -prv \"source/protoc-gen-go/protoc-gen-go\" \"$VORPAL_OUTPUT/bin/protoc-gen-go\"
+            cp -prv \"source/{name}/bin/protoc\" \"$VORPAL_OUTPUT/bin/protoc\"
 
-            chmod +x \"$VORPAL_OUTPUT/bin/protoc-gen-go\"",
+            chmod +x \"$VORPAL_OUTPUT/bin/protoc\"",
         },
         vec![source],
         vec![

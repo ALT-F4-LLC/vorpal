@@ -1,5 +1,5 @@
 use anyhow::Result;
-use vorpal_sdk::config::context::get_context;
+use vorpal_sdk::context::get_context;
 
 mod vorpal;
 

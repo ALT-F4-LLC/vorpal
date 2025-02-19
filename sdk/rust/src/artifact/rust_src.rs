@@ -1,4 +1,7 @@
-use crate::config::artifact::{add_artifact, ArtifactSource, ConfigContext};
+use crate::{
+    artifact::{add_artifact, ArtifactSource},
+    context::ConfigContext,
+};
 use anyhow::Result;
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{ArtifactId, ArtifactSourceId};

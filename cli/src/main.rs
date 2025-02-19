@@ -30,7 +30,7 @@ use vorpal_schema::{
         registry::v0::registry_service_server::RegistryServiceServer,
     },
 };
-use vorpal_sdk::config::{
+use vorpal_sdk::{
     artifact::{language::rust, protoc},
     context::ConfigContext,
 };

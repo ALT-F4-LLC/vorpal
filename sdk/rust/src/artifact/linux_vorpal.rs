@@ -1,4 +1,7 @@
-use crate::config::artifact::{bwrap_step, ArtifactSource, ConfigContext};
+use crate::{
+    artifact::{bwrap_step, ArtifactSource},
+    context::ConfigContext,
+};
 use anyhow::Result;
 use indoc::formatdoc;
 use std::collections::BTreeMap;

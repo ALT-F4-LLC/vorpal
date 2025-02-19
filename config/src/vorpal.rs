@@ -1,6 +1,6 @@
 use anyhow::Result;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
-use vorpal_sdk::config::{
+use vorpal_sdk::{
     artifact::{
         get_artifact_envkey, go, goimports, gopls,
         language::rust::{

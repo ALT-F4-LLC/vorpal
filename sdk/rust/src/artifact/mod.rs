@@ -1,4 +1,4 @@
-use crate::config::context::ConfigContext;
+use crate::context::ConfigContext;
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use serde::{Deserialize, Serialize};

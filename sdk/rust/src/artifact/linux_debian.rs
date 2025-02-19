@@ -1,4 +1,4 @@
-use crate::config::{
+use crate::{
     artifact::{bash_step, docker_step, get_artifact_envkey},
     context::ConfigContext,
 };

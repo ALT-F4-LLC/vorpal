@@ -1,5 +1,6 @@
-use crate::config::artifact::{
-    add_artifact, language::rust::get_rust_toolchain_target, ArtifactSource, ConfigContext,
+use crate::{
+    artifact::{add_artifact, language::rust::get_rust_toolchain_target, ArtifactSource},
+    context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use std::collections::BTreeMap;
@@ -14,28 +15,28 @@ pub async fn source(
     version: &str,
 ) -> Result<ArtifactSourceId> {
     let hash = match context.get_target() {
-        Aarch64Linux => "5e0b5cb7e8655501369a6f42cb10b1c5d4711a0edfcbe44483c5234da485819d",
-        Aarch64Macos => "fe82bf19b064f6fca648b9be6a53ae210a9934023df364d669fc7c4ee5ccd485",
-        X8664Linux => "84168586980d4dfa8f385c83d66af0dcc3256668f0a3109b57712340251660f1",
+        Aarch64Linux => "42781c7ae909a5cd01c955cb4343754ce33d75783b2599a3f1a3b3752a0947af",
+        Aarch64Macos => "e88e4babfc20e0546fe28bc2ba3f71a467f83e9fb1be76c9a078d327379ee4d0",
+        X8664Linux => "62091f43974e3e24583cceae24db710e9bd6863f366b9a5891bd7a5aa3d8c0fd",
         X8664Macos => "1234567890",
         UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
 
     context
         .add_artifact_source(
-            "clippy",
+            "cargo",
             ArtifactSource {
                 excludes: vec![],
                 hash: Some(hash.to_string()),
                 includes: vec![],
-                path: format!("https://static.rust-lang.org/dist/clippy-{version}-{target}.tar.gz"),
+                path: format!("https://static.rust-lang.org/dist/cargo-{version}-{target}.tar.gz"),
             },
         )
         .await
 }
 
 pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
-    let name = "clippy";
+    let name = "cargo";
 
     let target = get_rust_toolchain_target(context.get_target())?;
 
@@ -46,7 +47,9 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
         vec![],
         BTreeMap::new(),
         name,
-        format!("cp -prv \"./source/{name}/{name}-{version}-{target}/{name}-preview/.\" \"$VORPAL_OUTPUT\""),
+        format!(
+            "cp -prv \"./source/{name}/{name}-{version}-{target}/{name}/.\" \"$VORPAL_OUTPUT\""
+        ),
         vec![source],
         vec![
             "aarch64-linux",

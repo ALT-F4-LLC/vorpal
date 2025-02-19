@@ -1,4 +1,4 @@
-use crate::config::{
+use crate::{
     artifact::{ArtifactSource, ArtifactSourceKind},
     cli::{Cli, Command},
     service::ConfigServer,

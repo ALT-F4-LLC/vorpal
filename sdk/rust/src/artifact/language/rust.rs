@@ -1,4 +1,4 @@
-use crate::config::{
+use crate::{
     artifact::{
         add_artifact, cargo, clippy, get_artifact_envkey, protoc, rust_analyzer, rust_src,
         rust_std, rustc, rustfmt, shell::shell_artifact, ArtifactSource,
