@@ -401,6 +401,8 @@ impl ConfigContext {
             }
         }
 
+        // 4c. Cache source
+
         info!("{} caching source: {}", source_name, source.path);
 
         let cache_archive_path = get_cache_archive_path(&source_hash, source_name);
