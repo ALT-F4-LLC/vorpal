@@ -6,13 +6,13 @@ use vorpal_sdk::{
         language::rust::{
             get_rust_toolchain_target, get_rust_toolchain_version, rust_package, toolchain_artifact,
         },
-        protoc, protoc_gen_go,
+        protoc, protoc_gen_go, protoc_gen_go_grpc,
         shell::shell_artifact,
     },
     context::ConfigContext,
 };
 
-pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
+pub async fn package(context: &mut ConfigContext) -> Result<ArtifactId> {
     let excludes = vec![
         ".env",
         ".envrc",
@@ -42,6 +42,7 @@ pub async fn shell(context: &mut ConfigContext) -> Result<ArtifactId> {
     let gopls = gopls::artifact(context).await?;
     let protoc = protoc::artifact(context).await?;
     let protoc_gen_go = protoc_gen_go::artifact(context).await?;
+    let protoc_gen_go_grpc = protoc_gen_go_grpc::artifact(context).await?;
     let rust_toolchain = toolchain_artifact(context, name).await?;
     let rust_toolchain_target = get_rust_toolchain_target(context.get_target())?;
 
@@ -51,17 +52,19 @@ pub async fn shell(context: &mut ConfigContext) -> Result<ArtifactId> {
         gopls.clone(),
         protoc.clone(),
         protoc_gen_go.clone(),
+        protoc_gen_go_grpc.clone(),
         rust_toolchain.clone(),
     ];
 
     let envs = vec![
         format!(
-            "PATH={}/bin:{}/bin:{}/bin:{}/bin:{}/bin:{}/toolchains/{}-{}/bin:$PATH",
+            "PATH={}/bin:{}/bin:{}/bin:{}/bin:{}/bin:{}/bin:{}/toolchains/{}-{}/bin:$PATH",
             get_artifact_envkey(&go),
             get_artifact_envkey(&goimports),
             get_artifact_envkey(&gopls),
             get_artifact_envkey(&protoc),
             get_artifact_envkey(&protoc_gen_go),
+            get_artifact_envkey(&protoc_gen_go_grpc),
             get_artifact_envkey(&rust_toolchain),
             get_rust_toolchain_version(),
             rust_toolchain_target

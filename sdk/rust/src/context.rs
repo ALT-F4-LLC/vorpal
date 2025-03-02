@@ -89,6 +89,8 @@ impl ConfigContext {
 
         // TODO: if any paths are relative, they should be expanded to the artifact's source directory
 
+        // 1a. determine the kind of source path
+
         let source_path_kind = match &source.path {
             s if Path::new(s).exists() => ArtifactSourceKind::Local,
             s if s.starts_with("git") => ArtifactSourceKind::Git,
@@ -104,9 +106,7 @@ impl ConfigContext {
             );
         }
 
-        if source_path_kind == ArtifactSourceKind::Git {
-            bail!("`source.{}.path` git not supported", source_name);
-        }
+        // 1b. process source path
 
         let mut source = ArtifactSource {
             excludes: source.excludes.clone(),
@@ -114,6 +114,10 @@ impl ConfigContext {
             includes: source.includes.clone(),
             path: source.path.clone(),
         };
+
+        if source_path_kind == ArtifactSourceKind::Git {
+            bail!("`source.{}.path` git not supported", source_name);
+        }
 
         if source_path_kind == ArtifactSourceKind::Local {
             let local_path = Path::new(&source.path).to_path_buf();
@@ -136,6 +140,8 @@ impl ConfigContext {
             );
         }
 
+        // 1c. process source id
+
         let source_json = serde_json::to_string(&source).map_err(|e| anyhow::anyhow!(e))?;
 
         let source_key = format!("{}-{}", source_name, digest(source_json));
@@ -146,13 +152,17 @@ impl ConfigContext {
 
         // 2. Check if source exists in registry or local cache
 
+        // TODO: check if source is also an empty value
+
         if let Some(hash) = source.hash.clone() {
-            let artifact_source_id = ArtifactSourceId {
+            let source_id = ArtifactSourceId {
                 hash: hash.clone(),
                 name: source_name.to_string(),
             };
 
             // 2a. Check if source exists in the registry
+
+            // TODO: put client at higher level with connection pooling
 
             let registry_host = self.registry.clone();
 
@@ -177,23 +187,23 @@ impl ConfigContext {
                     info!("{} pushed source: {}", source_name, hash);
 
                     self.artifact_source_id
-                        .insert(source_key, artifact_source_id.clone());
+                        .insert(source_key, source_id.clone());
 
-                    return Ok(artifact_source_id);
+                    return Ok(source_id);
                 }
             }
 
             // 2b. Check if source exists in local cache
 
-            let cache_archive_path = get_cache_archive_path(&hash, source_name);
+            let source_cache_archive_path = get_cache_archive_path(&hash, source_name);
 
-            if cache_archive_path.exists() {
+            if source_cache_archive_path.exists() {
                 info!("{} cached source: {}", source_name, hash);
 
                 self.artifact_source_id
-                    .insert(source_key, artifact_source_id.clone());
+                    .insert(source_key, source_id.clone());
 
-                return Ok(artifact_source_id);
+                return Ok(source_id);
             }
         }
 
@@ -217,6 +227,8 @@ impl ConfigContext {
                     source.path
                 );
             }
+
+            // 3a. Download source
 
             let remote_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
 
@@ -260,7 +272,7 @@ impl ConfigContext {
                     .map_err(|e| anyhow::anyhow!(e))?;
             }
 
-            // Unpack source data
+            // 3b. Extract source
 
             info!("{} unpacking source: {}", source_name, source.path);
 

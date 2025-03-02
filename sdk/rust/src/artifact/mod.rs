@@ -18,6 +18,7 @@ pub mod linux_debian;
 pub mod linux_vorpal;
 pub mod protoc;
 pub mod protoc_gen_go;
+pub mod protoc_gen_go_grpc;
 pub mod rust_analyzer;
 pub mod rust_src;
 pub mod rust_std;
