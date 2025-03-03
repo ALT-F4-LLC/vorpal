@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	configApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/config"
 	registryApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/registry"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/cli"
@@ -26,11 +28,35 @@ import (
 )
 
 type ConfigContext struct {
-	ArtifactId       map[*artifactApi.ArtifactId]artifactApi.Artifact
+	ArtifactId       map[*artifactApi.ArtifactId]*artifactApi.Artifact
 	artifactSourceId map[string]*artifactApi.ArtifactSourceId
 	port             int
 	registry         string
 	system           artifactApi.ArtifactSystem
+}
+
+type ConfigServer struct {
+	configApi.UnimplementedConfigServiceServer
+	Config  *configApi.Config
+	Context *ConfigContext
+}
+
+func GetContext() *ConfigContext {
+	startCmd, err := cli.NewStartCommand()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return &ConfigContext{
+		system: startCmd.Target,
+	}
+}
+
+func NewConfigServer(context *ConfigContext, config *configApi.Config) *ConfigServer {
+	return &ConfigServer{
+		Config:  config,
+		Context: context,
+	}
 }
 
 func handleFile(outputPath string) archives.FileHandler {
@@ -387,18 +413,112 @@ func (c *ConfigContext) AddArtifactSource(sourceName string, source artifact.Art
 	return sourceId, nil
 }
 
-func (c *ConfigContext) AddArtifact() artifactApi.ArtifactId {
-	// TODO: Implement function
-	return artifactApi.ArtifactId{}
+func (c *ConfigContext) AddArtifact(name string, artifacts []*artifactApi.ArtifactId, sources []*artifactApi.ArtifactSourceId, steps []*artifactApi.ArtifactStep, systems []string) (*artifactApi.ArtifactId, error) {
+	// 1. Setup systems
+
+	systemsInt := make([]artifactApi.ArtifactSystem, len(systems))
+
+	for i, system := range systems {
+		systemType := artifact.GetArtifactSystem(system)
+		if systemType == artifactApi.ArtifactSystem_UNKNOWN_SYSTEM {
+			return nil, fmt.Errorf("Unsupported system: %s", system)
+		}
+
+		systemsInt[i] = systemType
+	}
+
+	// 2. Setup artifact id
+
+	artifact := &artifactApi.Artifact{
+		Artifacts: artifacts,
+		Name:      name,
+		Sources:   sources,
+		Steps:     steps,
+		Systems:   systemsInt,
+	}
+
+	artifactManifest := &artifactApi.ArtifactBuildRequest{
+		Artifact: artifact,
+		System:   c.system,
+	}
+
+	artifactManifestBytes, err := json.Marshal(artifactManifest)
+	if err != nil {
+		return nil, err
+	}
+
+	artifactManifestHash := fmt.Sprintf("%x", sha256.Sum256(artifactManifestBytes))
+
+	artifactId := &artifactApi.ArtifactId{
+		Hash: artifactManifestHash,
+		Name: name,
+	}
+
+	if _, ok := c.ArtifactId[artifactId]; !ok {
+		c.ArtifactId[artifactId] = artifact
+	}
+
+	return artifactId, nil
 }
 
-func GetContext() *ConfigContext {
-	startCmd, err := cli.NewStartCommand()
-	if err != nil {
-		log.Fatal(err)
+func (c *ConfigContext) GetArtifact(hash string, name string) (*artifactApi.Artifact, error) {
+	artifactId := &artifactApi.ArtifactId{
+		Hash: hash,
+		Name: name,
 	}
 
-	return &ConfigContext{
-		system: startCmd.Target,
+	// NOTE: this may be a bug as it requires a pointer to the artifactId
+	// instead, it may require a loop to find the artifactId
+
+	artifact, ok := c.ArtifactId[artifactId]
+	if !ok {
+		return nil, fmt.Errorf("Artifact not found: %s", name)
 	}
+
+	return artifact, nil
+}
+
+func (c *ConfigContext) GetTarget() artifactApi.ArtifactSystem {
+	return c.system
+}
+
+func (c *ConfigContext) Run(artifacts []*artifactApi.ArtifactId) error {
+	listener, err := net.Listen("tcp", fmt.Sprintf("[::]:%d", c.port))
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+
+	config := &configApi.Config{
+		Artifacts: artifacts,
+	}
+
+	var opts []grpc.ServerOption
+
+	grpcServer := grpc.NewServer(opts...)
+
+	configApi.RegisterConfigServiceServer(grpcServer, NewConfigServer(c, config))
+
+	err = grpcServer.Serve(listener)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *ConfigServer) GetConfig(ctx context.Context, request *configApi.ConfigRequest) (*configApi.Config, error) {
+	return s.Config, nil
+}
+
+func (s *ConfigServer) GetArtifact(ctx context.Context, request *artifactApi.ArtifactId) (*artifactApi.Artifact, error) {
+	artifact, err := s.Context.GetArtifact(request.Hash, request.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if artifact == nil {
+		return nil, fmt.Errorf("Artifact not found: %s", request.Name)
+	}
+
+	return artifact, nil
 }

@@ -1,7 +1,6 @@
 use crate::{
     artifact::{ArtifactSource, ArtifactSourceKind},
     cli::{Cli, Command},
-    service::ConfigServer,
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
@@ -21,7 +20,10 @@ use vorpal_schema::{
             Artifact, ArtifactBuildRequest, ArtifactId, ArtifactSourceId, ArtifactStep,
             ArtifactSystem,
         },
-        config::v0::{config_service_server::ConfigServiceServer, Config},
+        config::v0::{
+            config_service_server::{ConfigService, ConfigServiceServer},
+            Config, ConfigRequest,
+        },
         registry::v0::{
             registry_service_client::RegistryServiceClient, RegistryKind, RegistryRequest,
         },
@@ -43,9 +45,48 @@ pub struct ConfigContext {
     system: ArtifactSystem,
 }
 
+#[derive(Debug, Default)]
+pub struct ConfigServer {
+    pub config: Config,
+    pub context: ConfigContext,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArtifactMetadata {
     pub system: ArtifactSystem,
+}
+
+impl ConfigServer {
+    pub fn new(context: ConfigContext, config: Config) -> Self {
+        Self { context, config }
+    }
+}
+
+#[tonic::async_trait]
+impl ConfigService for ConfigServer {
+    async fn get_config(
+        &self,
+        _request: tonic::Request<ConfigRequest>,
+    ) -> Result<tonic::Response<Config>, tonic::Status> {
+        Ok(tonic::Response::new(self.config.clone()))
+    }
+
+    async fn get_artifact(
+        &self,
+        request: tonic::Request<ArtifactId>,
+    ) -> Result<tonic::Response<Artifact>, tonic::Status> {
+        let request = request.into_inner();
+
+        let artifact = self
+            .context
+            .get_artifact(request.hash.as_str(), request.name.as_str());
+
+        if artifact.is_none() {
+            return Err(tonic::Status::not_found("Artifact input not found"));
+        }
+
+        Ok(tonic::Response::new(artifact.unwrap().clone()))
+    }
 }
 
 pub async fn get_context() -> Result<ConfigContext> {
