@@ -1,5 +1,5 @@
 use crate::{
-    artifact::{bwrap_step, ArtifactSource},
+    artifact::{step::bwrap, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -485,7 +485,7 @@ pub async fn artifact(
         artifacts.clone(),
         source_ids,
         vec![
-            bwrap_step(
+            bwrap(
                 vec![],
                 artifacts,
                 BTreeMap::from([("PATH", "/usr/bin:/usr/sbin".to_string())]),
@@ -1130,7 +1130,7 @@ pub async fn artifact(
                     rm -rfv $VORPAL_OUTPUT/var",
                 }
             ),
-            bwrap_step(
+            bwrap(
                 vec![
                     // mount bin
                     "--bind".to_string(),

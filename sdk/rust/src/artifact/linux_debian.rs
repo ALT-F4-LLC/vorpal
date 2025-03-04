@@ -1,5 +1,8 @@
 use crate::{
-    artifact::{bash_step, docker_step, get_artifact_envkey},
+    artifact::{
+        get_artifact_envkey,
+        step::{bash, docker},
+    },
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -165,7 +168,7 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
             "linux-debian-docker",
             vec![],
             vec![],
-            vec![bash_step(
+            vec![bash(
                 BTreeMap::new(),
                 formatdoc! {"
                     cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"
@@ -189,28 +192,28 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
             vec![dockerfile.clone()],
             vec![],
             vec![
-                docker_step(vec![
+                docker(vec![
                     "buildx".to_string(),
                     "build".to_string(),
                     "--progress=plain".to_string(),
                     format!("--tag={}", image_tag),
                     get_artifact_envkey(&dockerfile),
                 ]),
-                docker_step(vec![
+                docker(vec![
                     "container".to_string(),
                     "create".to_string(),
                     "--name".to_string(),
                     source_hash.to_string(),
                     image_tag.clone(),
                 ]),
-                docker_step(vec![
+                docker(vec![
                     "container".to_string(),
                     "export".to_string(),
                     "--output".to_string(),
                     "$VORPAL_WORKSPACE/debian.tar".to_string(),
                     source_hash.to_string(),
                 ]),
-                bash_step(
+                bash(
                     BTreeMap::new(),
                     formatdoc! {"
                         ## extract files
@@ -220,13 +223,13 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
                         echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
                     "},
                 ),
-                docker_step(vec![
+                docker(vec![
                     "container".to_string(),
                     "rm".to_string(),
                     "--force".to_string(),
                     source_hash.to_string(),
                 ]),
-                docker_step(vec![
+                docker(vec![
                     "image".to_string(),
                     "rm".to_string(),
                     "--force".to_string(),
