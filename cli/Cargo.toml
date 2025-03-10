@@ -23,6 +23,6 @@ tracing-subscriber = { default-features = false, features = ["ansi", "fmt", "reg
 vorpal-notary = { default-features = false, path = "../notary" }
 vorpal-registry = { default-features = false, path = "../registry" }
 vorpal-schema = { default-features = false, path = "../schema" }
-vorpal-sdk = { default-features = false, path = "../sdk" }
+vorpal-sdk = { default-features = false, path = "../sdk/rust" }
 vorpal-store = { default-features = false, path = "../store" }
 vorpal-worker = { default-features = false, path = "../worker" }

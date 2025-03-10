@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package vorpal.config.v0;
 
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/config";
+
 import "v0/artifact/artifact.proto";
 
 service ConfigService {

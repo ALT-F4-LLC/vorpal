@@ -30,9 +30,9 @@ use vorpal_schema::{
         registry::v0::registry_service_server::RegistryServiceServer,
     },
 };
-use vorpal_sdk::config::{
-    artifact::{language::rust, toolchain::protoc},
-    ConfigContext,
+use vorpal_sdk::{
+    artifact::{language::rust, protoc},
+    context::ConfigContext,
 };
 use vorpal_store::paths::{get_artifact_path, get_public_key_path};
 use vorpal_worker::artifact::ArtifactServer;
@@ -238,7 +238,7 @@ async fn get_config_file_path(
                 bail!("config toolchain not found: {}", toolchain_path.display());
             }
 
-            let toolchain_target = rust::get_toolchain_target(artifact_system)?;
+            let toolchain_target = rust::get_rust_toolchain_target(artifact_system)?;
             let toolchain_version = get_rust_toolchain_version();
 
             let toolchain_bin_path = Path::new(&format!(
