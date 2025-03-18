@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId, ArtifactSourceId, ArtifactStepEnvironment, ArtifactSystem,
+    ArtifactId, ArtifactSourceId, ArtifactSystem,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
@@ -97,27 +97,15 @@ pub async fn add_artifact(
     let mut env = BTreeMap::new();
 
     if target == Aarch64Linux || target == X8664Linux {
-        let env_path = ArtifactStepEnvironment {
-            key: "PATH".to_string(),
-            value: "/usr/bin:/usr/sbin".to_string(),
-        };
-
-        let env_ssl_cert_file = ArtifactStepEnvironment {
-            key: "SSL_CERT_FILE".to_string(),
-            value: "/etc/ssl/certs/ca-certificates.crt".to_string(),
-        };
-
-        env.insert("PATH", env_path.value);
-        env.insert("SSL_CERT_FILE", env_ssl_cert_file.value);
+        env.insert("PATH", "/usr/bin:/usr/sbin".to_string());
+        env.insert(
+            "SSL_CERT_FILE",
+            "/etc/ssl/certs/ca-certificates.crt".to_string(),
+        );
     }
 
     if target == Aarch64Macos || target == X8664Macos {
-        let env_path = ArtifactStepEnvironment {
-            key: "PATH".to_string(),
-            value: "/usr/local/bin:/usr/bin:/usr/sbin:/bin".to_string(),
-        };
-
-        env.insert("PATH", env_path.value);
+        env.insert("PATH", "/usr/local/bin:/usr/bin:/usr/sbin:/bin".to_string());
     }
 
     // Add environment path if defined
@@ -133,11 +121,9 @@ pub async fn add_artifact(
     // Add environment variables
 
     for (key, value) in environment.clone() {
-        if key == "PATH" {
-            continue;
+        if key != "PATH" {
+            env.insert(key, value);
         }
-
-        env.insert(key, value);
     }
 
     // Setup steps
