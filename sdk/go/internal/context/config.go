@@ -17,14 +17,28 @@ import (
 	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
 	configApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/config"
 	registryApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/registry"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/cli"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/store"
 	"github.com/h2non/filetype"
 	"github.com/mholt/archives"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+type ArtifactSource struct {
+	Excludes []string
+	Hash     *string
+	Includes []string
+	Path     string
+}
+
+type ArtifactSourceKind string
+
+const (
+	ArtifactSourceKind_GIT     ArtifactSourceKind = "GIT"
+	ArtifactSourceKind_HTTP    ArtifactSourceKind = "HTTP"
+	ArtifactSourceKind_LOCAL   ArtifactSourceKind = "LOCAL"
+	ArtifactSourceKind_UNKNOWN ArtifactSourceKind = "UNKNOWN"
 )
 
 type ConfigContext struct {
@@ -41,8 +55,23 @@ type ConfigServer struct {
 	Context *ConfigContext
 }
 
+func GetArtifactSystem(system string) artifactApi.ArtifactSystem {
+	switch system {
+	case "aarch64-linux":
+		return artifactApi.ArtifactSystem_AARCH64_LINUX
+	case "aarch64-macos":
+		return artifactApi.ArtifactSystem_AARCH64_MACOS
+	case "x86_64-linux":
+		return artifactApi.ArtifactSystem_X86_64_LINUX
+	case "x86_64-macos":
+		return artifactApi.ArtifactSystem_X86_64_MACOS
+	default:
+		return artifactApi.ArtifactSystem_UNKNOWN_SYSTEM
+	}
+}
+
 func GetContext() *ConfigContext {
-	startCmd, err := cli.NewStartCommand()
+	startCmd, err := NewStartCommand()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,38 +118,38 @@ func handleFile(outputPath string) archives.FileHandler {
 	}
 }
 
-func (c *ConfigContext) AddArtifactSource(sourceName string, source artifact.ArtifactSource) (*artifactApi.ArtifactSourceId, error) {
+func (c *ConfigContext) AddArtifactSource(sourceName string, source ArtifactSource) (*artifactApi.ArtifactSourceId, error) {
 	// 1. If source is cached using '<source-name>-<digest>', return the source id
 
 	// TODO: if any paths are relative, they should be expanded to the _artifact's source directory
 
 	// 1a. Determine source kind
 
-	sourcePathKind := artifact.ArtifactSourceKind_UNKNOWN
+	sourcePathKind := ArtifactSourceKind_UNKNOWN
 
 	if _, err := os.Stat(source.Path); err == nil {
-		sourcePathKind = artifact.ArtifactSourceKind_LOCAL
+		sourcePathKind = ArtifactSourceKind_LOCAL
 	}
 
 	if strings.HasPrefix(source.Path, "git://") {
-		sourcePathKind = artifact.ArtifactSourceKind_GIT
+		sourcePathKind = ArtifactSourceKind_GIT
 	}
 
 	if strings.HasPrefix(source.Path, "http://") || strings.HasPrefix(source.Path, "https://") {
-		sourcePathKind = artifact.ArtifactSourceKind_HTTP
+		sourcePathKind = ArtifactSourceKind_HTTP
 	}
 
-	if sourcePathKind == artifact.ArtifactSourceKind_UNKNOWN {
+	if sourcePathKind == ArtifactSourceKind_UNKNOWN {
 		return nil, fmt.Errorf("`source.%s.path` unknown kind: %v", sourceName, source.Path)
 	}
 
 	// 1b. process source path
 
-	if sourcePathKind == artifact.ArtifactSourceKind_GIT {
+	if sourcePathKind == ArtifactSourceKind_GIT {
 		return nil, fmt.Errorf("`source.%s.path` git not supported", sourceName)
 	}
 
-	if sourcePathKind == artifact.ArtifactSourceKind_LOCAL {
+	if sourcePathKind == ArtifactSourceKind_LOCAL {
 		path, err := filepath.Abs(source.Path)
 		if err != nil {
 			return nil, err
@@ -201,7 +230,7 @@ func (c *ConfigContext) AddArtifactSource(sourceName string, source artifact.Art
 		return nil, err
 	}
 
-	if sourcePathKind == artifact.ArtifactSourceKind_HTTP {
+	if sourcePathKind == ArtifactSourceKind_HTTP {
 		if source.Hash == nil {
 			return nil, fmt.Errorf("`source.%s.hash` required for remote source", sourceName)
 		}
@@ -316,7 +345,7 @@ func (c *ConfigContext) AddArtifactSource(sourceName string, source artifact.Art
 		}
 	}
 
-	if sourcePathKind == artifact.ArtifactSourceKind_LOCAL {
+	if sourcePathKind == ArtifactSourceKind_LOCAL {
 		sourcePaths, err := store.GetFilePaths(source.Path, source.Excludes, source.Includes)
 		if err != nil {
 			return nil, err
@@ -419,7 +448,7 @@ func (c *ConfigContext) AddArtifact(name string, artifacts []*artifactApi.Artifa
 	systemsInt := make([]artifactApi.ArtifactSystem, len(systems))
 
 	for i, system := range systems {
-		systemType := artifact.GetArtifactSystem(system)
+		systemType := GetArtifactSystem(system)
 		if systemType == artifactApi.ArtifactSystem_UNKNOWN_SYSTEM {
 			return nil, fmt.Errorf("Unsupported system: %s", system)
 		}

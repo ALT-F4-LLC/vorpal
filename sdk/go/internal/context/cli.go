@@ -1,4 +1,4 @@
-package cli
+package context
 
 import (
 	"flag"
@@ -7,7 +7,6 @@ import (
 	"runtime"
 
 	_artifact "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact"
 )
 
 type startCommand struct {
@@ -56,7 +55,7 @@ func NewStartCommand() (*startCommand, error) {
 			return nil, fmt.Errorf("target is required")
 		}
 
-		system := artifact.GetArtifactSystem(*startTarget)
+		system := GetArtifactSystem(*startTarget)
 
 		if system == _artifact.ArtifactSystem_UNKNOWN_SYSTEM {
 			return nil, fmt.Errorf("unknown target system")

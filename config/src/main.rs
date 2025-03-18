@@ -10,8 +10,8 @@ async fn main() -> Result<()> {
 
     // 2. Create artifacts
     let artifacts = vec![
+        vorpal::devshell(context).await?,
         vorpal::package(context).await?,
-        vorpal::shell(context).await?,
     ];
 
     // 3. Run the context

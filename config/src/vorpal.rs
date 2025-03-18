@@ -12,30 +12,8 @@ use vorpal_sdk::{
     context::ConfigContext,
 };
 
-pub async fn package(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let excludes = vec![
-        ".env",
-        ".envrc",
-        ".github",
-        ".gitignore",
-        ".packer",
-        ".vagrant",
-        "Dockerfile",
-        "Vagrantfile",
-        "dist",
-        "makefile",
-        "script",
-        "sdk/go",
-        "shell.nix",
-        "vorpal-domains.svg",
-        "vorpal-purpose.jpg",
-    ];
-
-    rust_package(context, "vorpal", excludes).await
-}
-
-pub async fn shell(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let name = "vorpal";
+pub async fn devshell(context: &mut ConfigContext) -> Result<ArtifactId> {
+    let name = "vorpal-shell";
 
     let go = go::artifact(context).await?;
     let goimports = goimports::artifact(context).await?;
@@ -79,4 +57,26 @@ pub async fn shell(context: &mut ConfigContext) -> Result<ArtifactId> {
 
     // Create shell artifact
     shell_artifact(context, artifacts, envs, name).await
+}
+
+pub async fn package(context: &mut ConfigContext) -> Result<ArtifactId> {
+    let excludes = vec![
+        ".env",
+        ".envrc",
+        ".github",
+        ".gitignore",
+        ".packer",
+        ".vagrant",
+        "Dockerfile",
+        "Vagrantfile",
+        "dist",
+        "makefile",
+        "script",
+        "sdk/go",
+        "shell.nix",
+        "vorpal-domains.svg",
+        "vorpal-purpose.jpg",
+    ];
+
+    rust_package(context, "vorpal", excludes).await
 }

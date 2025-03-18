@@ -45,7 +45,7 @@ pub async fn shell_artifact<'a>(
         context,
         artifacts,
         BTreeMap::new(),
-        format!("{}-shell", name).as_str(),
+        name,
         formatdoc! {"
             mkdir -pv $VORPAL_WORKSPACE/bin
 
