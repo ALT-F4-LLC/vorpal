@@ -23,7 +23,7 @@ message RegistryRequest {
 }
 
 message RegistryResponse {
-    bool success = 1;
+    string manifest = 1;
 }
 
 message RegistryPushRequest {
@@ -31,7 +31,8 @@ message RegistryPushRequest {
     bytes data = 2;
     bytes data_signature = 3;
     string hash = 4;
-    string name = 5;
+    string manifest = 5;
+    string name = 6;
 }
 
 message RegistryPullResponse {

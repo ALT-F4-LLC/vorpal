@@ -67,6 +67,12 @@ pub fn get_artifact_archive_path(hash: &str, name: &str) -> PathBuf {
         .with_extension("artifact.tar.zst")
 }
 
+pub fn get_artifact_manifest_path(hash: &str, name: &str) -> PathBuf {
+    get_store_dir_path()
+        .join(get_store_dir_name(hash, name))
+        .with_extension("artifact.manifest")
+}
+
 pub fn get_artifact_lock_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
         .join(get_store_dir_name(hash, name))
@@ -85,6 +91,12 @@ pub fn get_source_archive_path(hash: &str, name: &str) -> PathBuf {
     get_store_dir_path()
         .join(get_store_dir_name(hash, name))
         .with_extension("source.tar.zst")
+}
+
+pub fn get_source_manifest_path(hash: &str, name: &str) -> PathBuf {
+    get_store_dir_path()
+        .join(get_store_dir_name(hash, name))
+        .with_extension("source.manifest")
 }
 
 // Temp paths

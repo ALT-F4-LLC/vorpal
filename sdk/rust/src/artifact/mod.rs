@@ -7,22 +7,7 @@ use vorpal_schema::vorpal::artifact::v0::{
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
 };
 
-pub mod cargo;
-pub mod clippy;
-pub mod go;
-pub mod goimports;
-pub mod gopls;
 pub mod language;
-pub mod linux_debian;
-pub mod linux_vorpal;
-pub mod protoc;
-pub mod protoc_gen_go;
-pub mod protoc_gen_go_grpc;
-pub mod rust_analyzer;
-pub mod rust_src;
-pub mod rust_std;
-pub mod rustc;
-pub mod rustfmt;
 pub mod shell;
 pub mod step;
 
@@ -86,8 +71,7 @@ pub async fn add_artifact(
     let mut artifacts = artifacts.clone();
 
     if target == Aarch64Linux || target == X8664Linux {
-        let linux_debian = linux_debian::artifact(context).await?;
-        let linux_vorpal = linux_vorpal::artifact(context, &linux_debian).await?;
+        let linux_vorpal = context.fetch_artifact("linux-vorpal", "").await?;
 
         artifacts.push(linux_vorpal.clone());
     }

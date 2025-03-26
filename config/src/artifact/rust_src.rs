@@ -1,10 +1,10 @@
-use crate::{
-    artifact::{add_artifact, ArtifactSource},
-    context::ConfigContext,
-};
 use anyhow::Result;
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{ArtifactId, ArtifactSourceId};
+use vorpal_sdk::{
+    artifact::{add_artifact, ArtifactSource},
+    context::ConfigContext,
+};
 
 pub async fn source(context: &mut ConfigContext, version: &str) -> Result<ArtifactSourceId> {
     let hash = "5f0adbae49a5442bf3389f7798cbacba92a94b7fefe7810ce00d1356a861d305";

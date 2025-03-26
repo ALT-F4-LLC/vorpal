@@ -3234,6 +3234,7 @@ name = "vorpal-config"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "indoc",
  "tokio",
  "vorpal-schema",
  "vorpal-sdk",
@@ -3297,11 +3298,13 @@ dependencies = [
  "serde_json",
  "sha256",
  "tokio",
+ "tokio-stream",
  "tokio-tar",
  "toml",
  "tonic",
  "tracing",
  "url",
+ "vorpal-notary",
  "vorpal-schema",
  "vorpal-store",
 ]

@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use console::style;
 use tokio::{
-    fs::{create_dir_all, read, remove_file, File},
+    fs::{create_dir_all, remove_file, File},
     io::AsyncWriteExt,
 };
 use tonic::Code::NotFound;
@@ -11,21 +11,13 @@ use vorpal_schema::vorpal::{
         artifact_service_client::ArtifactServiceClient, Artifact, ArtifactBuildRequest, ArtifactId,
         ArtifactSystem,
     },
-    registry::v0::{
-        registry_service_client::RegistryServiceClient, RegistryKind, RegistryPushRequest,
-        RegistryRequest,
-    },
+    registry::v0::{registry_service_client::RegistryServiceClient, RegistryKind, RegistryRequest},
 };
 use vorpal_store::{
     archives::unpack_zstd,
-    paths::{
-        get_artifact_path, get_cache_archive_path, get_file_paths, get_private_key_path,
-        set_timestamps,
-    },
+    paths::{get_artifact_path, get_file_paths, set_timestamps},
     temps::create_sandbox_file,
 };
-
-const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 fn get_prefix(name: &str) -> String {
     style(format!("{} |>", name)).bold().to_string()
@@ -142,73 +134,6 @@ pub async fn build(
                 return Ok(());
             }
         },
-    }
-
-    // 3. Push artifact source(s) to registry (registry)
-
-    let private_key_path = get_private_key_path();
-
-    if !private_key_path.exists() {
-        bail!("Private key not found: {}", private_key_path.display());
-    }
-
-    for source in artifact.sources.clone() {
-        let exists_request = RegistryRequest {
-            hash: source.hash.clone(),
-            kind: RegistryKind::ArtifactSource as i32,
-            name: source.name.clone(),
-        };
-
-        match registry.exists(exists_request.clone()).await {
-            Ok(_) => {}
-
-            Err(status) => {
-                if status.code() != NotFound {
-                    bail!("Registry pull error: {:?}", status);
-                }
-
-                let cache_archive_path = get_cache_archive_path(&source.hash, &source.name);
-
-                if !cache_archive_path.exists() {
-                    bail!("cache archive not found: {:?}", cache_archive_path);
-                }
-
-                let cache_archive_data = read(&cache_archive_path).await.expect("failed to read");
-
-                let cache_signature =
-                    vorpal_notary::sign(private_key_path.clone(), &cache_archive_data).await?;
-
-                let mut push_stream = vec![];
-
-                for chunk in cache_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
-                    push_stream.push(RegistryPushRequest {
-                        data: chunk.to_vec(),
-                        data_signature: cache_signature.clone().to_vec(),
-                        hash: source.hash.clone(),
-                        kind: RegistryKind::ArtifactSource as i32,
-                        name: source.name.clone(),
-                    });
-                }
-
-                info!(
-                    "{} pushing source: {}-{}",
-                    get_prefix(&artifact_id.name),
-                    source.name,
-                    source.hash
-                );
-
-                let response = registry
-                    .push(tokio_stream::iter(push_stream))
-                    .await
-                    .expect("failed to push");
-
-                let response = response.into_inner();
-
-                if !response.success {
-                    bail!("Registry push failed");
-                }
-            }
-        }
     }
 
     // Build artifact

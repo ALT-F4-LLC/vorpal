@@ -1,14 +1,14 @@
-use crate::{
+use anyhow::Result;
+use indoc::formatdoc;
+use std::collections::BTreeMap;
+use vorpal_schema::vorpal::artifact::v0::ArtifactId;
+use vorpal_sdk::{
     artifact::{
         get_artifact_envkey,
         step::{bash, docker},
     },
     context::ConfigContext,
 };
-use anyhow::Result;
-use indoc::formatdoc;
-use std::collections::BTreeMap;
-use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 
 fn generate_version_script() -> String {
     formatdoc! {"

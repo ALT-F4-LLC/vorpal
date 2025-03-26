@@ -1,15 +1,15 @@
-use crate::{
-    artifact::{add_artifact, ArtifactSource},
-    context::ConfigContext,
-};
 use anyhow::{bail, Result};
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId, ArtifactSourceId,
+    ArtifactId,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
 };
+use vorpal_sdk::{
+    artifact::{add_artifact, ArtifactSource},
+    context::ConfigContext,
+};
 
-pub async fn source(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
+pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
     let target = context.get_target();
 
     let hash = match target {
@@ -30,7 +30,7 @@ pub async fn source(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
 
     let version = "1.23.5";
 
-    context
+    let source = context
         .add_artifact_source(
             "go",
             ArtifactSource {
@@ -40,13 +40,9 @@ pub async fn source(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
                 path: format!("https://go.dev/dl/go{}.{}.tar.gz", version, target),
             },
         )
-        .await
-}
+        .await?;
 
-pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
     let name = "go";
-
-    let source = source(context).await?;
 
     add_artifact(
         context,

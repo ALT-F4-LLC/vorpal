@@ -437,12 +437,15 @@ async fn handle_build(
 
     let mut request_stream = vec![];
 
+    // TODO: include manifest in push request
+
     for chunk in artifact_data.chunks(DEFAULT_CHUNKS_SIZE) {
         request_stream.push(RegistryPushRequest {
             data: chunk.to_vec(),
             data_signature: source_signature.clone().to_vec(),
             hash: manifest_hash.clone(),
             kind: RegistryKind::Artifact as i32,
+            manifest: manifest_json.clone(),
             name: artifact.name.clone(),
         });
     }

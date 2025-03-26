@@ -25,7 +25,17 @@ impl S3RegistryBackend {
     }
 }
 
-fn artifact_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, Status> {
+fn get_artifact_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, Status> {
+    match kind {
+        RegistryKind::Artifact => Ok(format!("store/{}.artifact", get_store_dir_name(hash, name))),
+        RegistryKind::ArtifactSource => {
+            Ok(format!("store/{}.source", get_store_dir_name(hash, name)))
+        }
+        _ => Err(Status::invalid_argument("unsupported store kind")),
+    }
+}
+
+fn get_manifest_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, Status> {
     match kind {
         RegistryKind::Artifact => Ok(format!("store/{}.artifact", get_store_dir_name(hash, name))),
         RegistryKind::ArtifactSource => {
@@ -37,22 +47,38 @@ fn artifact_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, St
 
 #[async_trait]
 impl RegistryBackend for S3RegistryBackend {
-    async fn exists(&self, request: &RegistryRequest) -> Result<(), Status> {
-        let artifact_key = artifact_key(request.kind(), &request.hash, &request.name)?;
+    async fn exists(&self, request: &RegistryRequest) -> Result<String, Status> {
+        let manifest_key = get_manifest_key(request.kind(), &request.hash, &request.name)?;
 
-        let head_result = &self
-            .client
+        let client = &self.client;
+        let bucket = &self.bucket;
+
+        client
             .head_object()
-            .bucket(&self.bucket)
-            .key(&artifact_key)
+            .bucket(bucket.clone())
+            .key(&manifest_key)
             .send()
-            .await;
+            .await
+            .map_err(|err| Status::not_found(err.to_string()))?;
 
-        if head_result.is_err() {
-            return Err(Status::not_found("store path not found"));
+        let mut stream = client
+            .get_object()
+            .bucket(bucket)
+            .key(&manifest_key)
+            .send()
+            .await
+            .map_err(|err| Status::internal(err.to_string()))?
+            .body;
+
+        let mut manifest = String::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|err| Status::internal(err.to_string()))?;
+
+            manifest.push_str(&String::from_utf8_lossy(&chunk));
         }
 
-        Ok(())
+        Ok(manifest)
     }
 
     async fn pull(
@@ -60,14 +86,14 @@ impl RegistryBackend for S3RegistryBackend {
         request: &RegistryRequest,
         tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
     ) -> Result<(), Status> {
-        let artifact_key = artifact_key(request.kind(), &request.hash, &request.name)?;
-
         let client = &self.client;
-        let client_bucket_name = &self.bucket;
+        let bucket = &self.bucket;
+
+        let artifact_key = get_artifact_key(request.kind(), &request.hash, &request.name)?;
 
         client
             .head_object()
-            .bucket(client_bucket_name.clone())
+            .bucket(bucket.clone())
             .key(artifact_key.clone())
             .send()
             .await
@@ -75,7 +101,7 @@ impl RegistryBackend for S3RegistryBackend {
 
         let mut stream = client
             .get_object()
-            .bucket(client_bucket_name)
+            .bucket(bucket)
             .key(artifact_key)
             .send()
             .await
@@ -97,25 +123,26 @@ impl RegistryBackend for S3RegistryBackend {
 
     async fn push(&self, metadata: PushMetadata) -> Result<(), Status> {
         let PushMetadata {
+            data,
             data_kind,
             hash,
+            manifest,
             name,
-            data,
         } = metadata;
-
-        let artifact_key = artifact_key(data_kind, &hash, &name)?;
 
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let head_result = client
+        let artifact_key = get_artifact_key(data_kind, &hash, &name)?;
+
+        let artifact_head_result = client
             .head_object()
             .bucket(bucket)
             .key(&artifact_key)
             .send()
             .await;
 
-        if head_result.is_ok() {
+        if artifact_head_result.is_ok() {
             return Ok(());
         }
 
@@ -127,6 +154,30 @@ impl RegistryBackend for S3RegistryBackend {
             .send()
             .await
             .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
+
+        let manifest_key = get_manifest_key(data_kind, &hash, &name)?;
+
+        let manifest_head_result = client
+            .head_object()
+            .bucket(bucket)
+            .key(&manifest_key)
+            .send()
+            .await;
+
+        if manifest_head_result.is_ok() {
+            return Ok(());
+        }
+
+        let manifest_bytes = manifest.into_bytes();
+
+        let _ = client
+            .put_object()
+            .bucket(bucket)
+            .key(manifest_key)
+            .body(manifest_bytes.into())
+            .send()
+            .await
+            .map_err(|err| Status::internal(format!("failed to write manifest: {:?}", err)))?;
 
         Ok(())
     }

@@ -1,11 +1,12 @@
-use crate::{
-    artifact::{add_artifact, get_artifact_envkey, go, ArtifactSource},
-    context::ConfigContext,
-};
+use crate::artifact::go;
 use anyhow::Result;
 use indoc::formatdoc;
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{ArtifactId, ArtifactSourceId};
+use vorpal_sdk::{
+    artifact::{add_artifact, get_artifact_envkey, ArtifactSource},
+    context::ConfigContext,
+};
 
 pub async fn source(context: &mut ConfigContext, version: &str) -> Result<ArtifactSourceId> {
     let hash = "eba0f83ab252cffe2c6209f894c4c8238b2473a403bbdbcb985af25140aac95d";

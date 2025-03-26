@@ -1,12 +1,13 @@
-use crate::{
-    artifact::{add_artifact, language::rust::get_rust_toolchain_target, ArtifactSource},
-    context::ConfigContext,
-};
+use crate::artifact::rust_toolchain::get_rust_toolchain_target;
 use anyhow::{bail, Result};
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::{
     ArtifactId, ArtifactSourceId,
     ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
+};
+use vorpal_sdk::{
+    artifact::{add_artifact, ArtifactSource},
+    context::ConfigContext,
 };
 
 pub async fn source(
@@ -15,28 +16,30 @@ pub async fn source(
     version: &str,
 ) -> Result<ArtifactSourceId> {
     let hash = match context.get_target() {
-        Aarch64Linux => "42781c7ae909a5cd01c955cb4343754ce33d75783b2599a3f1a3b3752a0947af",
-        Aarch64Macos => "e88e4babfc20e0546fe28bc2ba3f71a467f83e9fb1be76c9a078d327379ee4d0",
-        X8664Linux => "62091f43974e3e24583cceae24db710e9bd6863f366b9a5891bd7a5aa3d8c0fd",
+        Aarch64Linux => "79fbf7077b846a4b28935fa6a22259d589baed2197c08bfc5c362f1e3f54db44",
+        Aarch64Macos => "ba92aa08cdada8fad8d772623b0522cb3d6e659a8edb9e037453fab998772a19",
+        X8664Linux => "b3d88f0ed6f77562f8376756d1b09fc7f5604aedcfac0ded2dd424c069e34ebe",
         X8664Macos => "1234567890",
         UnknownSystem => bail!("Invalid protoc system: {:?}", context.get_target()),
     };
 
     context
         .add_artifact_source(
-            "cargo",
+            "rust-analyzer",
             ArtifactSource {
                 excludes: vec![],
                 hash: Some(hash.to_string()),
                 includes: vec![],
-                path: format!("https://static.rust-lang.org/dist/cargo-{version}-{target}.tar.gz"),
+                path: format!(
+                    "https://static.rust-lang.org/dist/rust-analyzer-{version}-{target}.tar.gz"
+                ),
             },
         )
         .await
 }
 
 pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<ArtifactId> {
-    let name = "cargo";
+    let name = "rust-analyzer";
 
     let target = get_rust_toolchain_target(context.get_target())?;
 
@@ -47,9 +50,7 @@ pub async fn artifact(context: &mut ConfigContext, version: &str) -> Result<Arti
         vec![],
         BTreeMap::new(),
         name,
-        format!(
-            "cp -prv \"./source/{name}/{name}-{version}-{target}/{name}/.\" \"$VORPAL_OUTPUT\""
-        ),
+        format!("cp -prv \"./source/{name}/{name}-{version}-{target}/{name}-preview/.\" \"$VORPAL_OUTPUT\""),
         vec![source],
         vec![
             "aarch64-linux",

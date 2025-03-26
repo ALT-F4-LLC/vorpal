@@ -1,11 +1,11 @@
-use crate::{
-    artifact::{step::bwrap, ArtifactSource},
-    context::ConfigContext,
-};
 use anyhow::Result;
 use indoc::formatdoc;
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
+use vorpal_sdk::{
+    artifact::{step::bwrap, ArtifactSource},
+    context::ConfigContext,
+};
 
 pub fn curl(version: &str, hash: &str) -> ArtifactSource {
     ArtifactSource {

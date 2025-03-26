@@ -1,6 +1,6 @@
-use crate::{artifact::ArtifactSource, context::ConfigContext};
 use anyhow::Result;
 use vorpal_schema::vorpal::artifact::v0::ArtifactSourceId;
+use vorpal_sdk::{artifact::ArtifactSource, context::ConfigContext};
 
 pub async fn go_tools(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
     let hash = "b4faf133f053f372cfe8ea3189bf035d19ca1661cb3ac1e7cd34a465de5641c2";

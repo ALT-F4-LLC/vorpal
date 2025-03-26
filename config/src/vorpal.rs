@@ -1,14 +1,10 @@
+use crate::artifact::{
+    go, goimports, gopls, protoc, protoc_gen_go, protoc_gen_go_grpc, rust_toolchain,
+};
 use anyhow::Result;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 use vorpal_sdk::{
-    artifact::{
-        get_artifact_envkey, go, goimports, gopls,
-        language::rust::{
-            get_rust_toolchain_target, get_rust_toolchain_version, rust_package, toolchain_artifact,
-        },
-        protoc, protoc_gen_go, protoc_gen_go_grpc,
-        shell::shell_artifact,
-    },
+    artifact::{get_artifact_envkey, language::rust::rust_package, shell::shell_artifact},
     context::ConfigContext,
 };
 
@@ -21,8 +17,8 @@ pub async fn devshell(context: &mut ConfigContext) -> Result<ArtifactId> {
     let protoc = protoc::artifact(context).await?;
     let protoc_gen_go = protoc_gen_go::artifact(context).await?;
     let protoc_gen_go_grpc = protoc_gen_go_grpc::artifact(context).await?;
-    let rust_toolchain = toolchain_artifact(context, name).await?;
-    let rust_toolchain_target = get_rust_toolchain_target(context.get_target())?;
+    let rust_toolchain = rust_toolchain::artifact(context).await?;
+    let rust_toolchain_target = rust_toolchain::get_rust_toolchain_target(context.get_target())?;
 
     let artifacts = vec![
         go.clone(),
@@ -44,13 +40,13 @@ pub async fn devshell(context: &mut ConfigContext) -> Result<ArtifactId> {
             get_artifact_envkey(&protoc_gen_go),
             get_artifact_envkey(&protoc_gen_go_grpc),
             get_artifact_envkey(&rust_toolchain),
-            get_rust_toolchain_version(),
+            rust_toolchain::get_rust_toolchain_version(),
             rust_toolchain_target
         ),
         format!("RUSTUP_HOME={}", get_artifact_envkey(&rust_toolchain)),
         format!(
             "RUSTUP_TOOLCHAIN={}-{}",
-            get_rust_toolchain_version(),
+            rust_toolchain::get_rust_toolchain_version(),
             rust_toolchain_target
         ),
     ];

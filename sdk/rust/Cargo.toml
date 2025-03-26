@@ -15,10 +15,12 @@ serde = { default-features = false, features = ["serde_derive"], version = "1" }
 serde_json = { default-features = false, features = ["std"], version = "1" }
 sha256 = { default-features = false, version = "1" }
 tokio = { default-features = false, version = "1" }
+tokio-stream = { default-features = false, features = ["io-util"], version = "0" }
 tokio-tar = { default-features = false, version = "0" }
 toml = { default-features = false, features = ["parse"], version = "0" }
 tonic = { default-features = false, version = "0" }
 tracing = { default-features = false, version = "0" }
 url = { default-features = false, version = "2" }
+vorpal-notary = { default-features = false, path = "../../notary" }
 vorpal-schema = { default-features = false, path = "../../schema" }
 vorpal-store = { default-features = false, path = "../../store" }

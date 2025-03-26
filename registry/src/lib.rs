@@ -35,10 +35,11 @@ pub enum RegistryError {
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
 pub struct PushMetadata {
+    data: Vec<u8>,
     data_kind: RegistryKind,
     hash: String,
+    manifest: String,
     name: String,
-    data: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -52,12 +53,14 @@ pub enum RegistryServerBackend {
 
 #[tonic::async_trait]
 pub trait RegistryBackend: Send + Sync + 'static {
-    async fn exists(&self, request: &RegistryRequest) -> Result<(), Status>;
+    async fn exists(&self, request: &RegistryRequest) -> Result<String, Status>;
+
     async fn pull(
         &self,
         request: &RegistryRequest,
         tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
     ) -> Result<(), Status>;
+
     async fn push(&self, metadata: PushMetadata) -> Result<(), Status>;
 
     /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
@@ -98,9 +101,9 @@ impl RegistryService for RegistryServer {
             return Err(Status::invalid_argument("missing store name"));
         }
 
-        self.backend.exists(&request).await?;
+        let manifest = self.backend.exists(&request).await?;
 
-        Ok(Response::new(RegistryResponse { success: true }))
+        Ok(Response::new(RegistryResponse { manifest }))
     }
 
     async fn pull(
@@ -142,6 +145,7 @@ impl RegistryService for RegistryServer {
         let mut data: Vec<u8> = vec![];
         let mut data_hash = None;
         let mut data_kind = UnknownStoreKind;
+        let mut data_manifest = None;
         let mut data_name = None;
         let mut data_signature = vec![];
         let mut stream = request.into_inner();
@@ -153,6 +157,7 @@ impl RegistryService for RegistryServer {
 
             data_hash = Some(result.hash);
             data_kind = RegistryKind::try_from(result.kind).unwrap_or(UnknownStoreKind);
+            data_manifest = Some(result.manifest);
             data_name = Some(result.name);
             data_signature = result.data_signature;
         }
@@ -163,6 +168,10 @@ impl RegistryService for RegistryServer {
 
         let Some(data_hash) = data_hash else {
             return Err(Status::invalid_argument("missing `hash` field"));
+        };
+
+        let Some(data_manifest) = data_manifest else {
+            return Err(Status::invalid_argument("missing `manifest` field"));
         };
 
         let Some(data_name) = data_name else {
@@ -196,18 +205,20 @@ impl RegistryService for RegistryServer {
         }
 
         let hash = data_hash;
+        let manifest = data_manifest;
         let name = data_name;
 
         self.backend
             .push(PushMetadata {
+                data,
                 data_kind,
                 hash,
+                manifest: manifest.clone(),
                 name,
-                data,
             })
             .await?;
 
-        Ok(Response::new(RegistryResponse { success: true }))
+        Ok(Response::new(RegistryResponse { manifest }))
     }
 }
 

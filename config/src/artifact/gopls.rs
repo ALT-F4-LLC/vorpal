@@ -1,17 +1,17 @@
-use crate::{
-    artifact::{add_artifact, get_artifact_envkey, go},
-    context::ConfigContext,
-    source::go_tools,
-};
+use crate::{artifact::go, source::go_tools};
 use anyhow::Result;
 use indoc::formatdoc;
 use std::collections::BTreeMap;
 use vorpal_schema::vorpal::artifact::v0::ArtifactId;
+use vorpal_sdk::{
+    artifact::{add_artifact, get_artifact_envkey},
+    context::ConfigContext,
+};
 
 pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
     let go = go::artifact(context).await?;
 
-    let name = "goimports";
+    let name = "gopls";
 
     let source = go_tools(context).await?;
 
@@ -25,11 +25,11 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
         ]),
         name,
         formatdoc! {"
-            pushd ./source/go-tools
+            pushd ./source/go-tools/gopls
 
             mkdir -p $VORPAL_OUTPUT/bin
 
-            go build -o $VORPAL_OUTPUT/bin/goimports ./cmd/goimports
+            go build -o $VORPAL_OUTPUT/bin/gopls .
 
             go clean -modcache
         "},

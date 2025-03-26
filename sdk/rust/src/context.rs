@@ -8,10 +8,9 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{collections::HashMap, path::Path};
-use tokio::fs::{remove_dir_all, remove_file, write};
+use tokio::fs::{read, remove_dir_all, remove_file, write};
 use tokio_tar::Archive;
 use tonic::{transport::Server, Code::NotFound};
-use tracing::info;
 use url::Url;
 use vorpal_schema::{
     get_artifact_system,
@@ -25,21 +24,26 @@ use vorpal_schema::{
             Config, ConfigRequest,
         },
         registry::v0::{
-            registry_service_client::RegistryServiceClient, RegistryKind, RegistryRequest,
+            registry_service_client::RegistryServiceClient, RegistryKind, RegistryPushRequest,
+            RegistryRequest,
         },
     },
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zip},
     hashes::hash_files,
-    paths::{copy_files, get_cache_archive_path, get_file_paths, set_timestamps},
+    paths::{
+        copy_files, get_cache_archive_path, get_file_paths, get_private_key_path, set_timestamps,
+    },
     temps::{create_sandbox_dir, create_sandbox_file},
 };
+
+const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 #[derive(Clone, Debug, Default)]
 pub struct ConfigContext {
     pub artifact_id: HashMap<ArtifactId, Artifact>, // TOOD: make this private
-    artifact_source_id: HashMap<String, ArtifactSourceId>,
+    artifact_source_id: HashMap<ArtifactSourceId, ArtifactSource>,
     port: u16,
     registry: String,
     system: ArtifactSystem,
@@ -126,11 +130,52 @@ impl ConfigContext {
         source_name: &str,
         source: ArtifactSource,
     ) -> Result<ArtifactSourceId> {
-        // 1. If source is cached using '<source-name>-<digest>', return the source id
+        // 1. Check source exists, if hash is set
 
-        // TODO: if any paths are relative, they should be expanded to the artifact's source directory
+        if let Some(source_hash) = source.hash.clone() {
+            let source_id = ArtifactSourceId {
+                hash: source_hash.clone(),
+                name: source_name.to_string(),
+            };
 
-        // 1a. determine the kind of source path
+            if self.artifact_source_id.contains_key(&source_id) {
+                return Ok(source_id);
+            }
+
+            let registry_request = RegistryRequest {
+                hash: source_hash.clone(),
+                kind: RegistryKind::ArtifactSource as i32,
+                name: source_name.to_string(),
+            };
+
+            let registry_host = self.registry.clone();
+
+            let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
+                .await
+                .expect("failed to connect to registry");
+
+            match registry.exists(registry_request).await {
+                Err(status) => {
+                    if status.code() != NotFound {
+                        bail!("Registry pull error: {:?}", status);
+                    }
+                }
+
+                Ok(response) => {
+                    let response = response.into_inner();
+
+                    let source: ArtifactSource =
+                        serde_json::from_str(&response.manifest).map_err(|e| anyhow::anyhow!(e))?;
+
+                    self.artifact_source_id
+                        .insert(source_id.clone(), source.clone());
+
+                    return Ok(source_id);
+                }
+            }
+        }
+
+        // 2. Determine kind of source
 
         let source_path_kind = match &source.path {
             s if Path::new(s).exists() => ArtifactSourceKind::Local,
@@ -147,7 +192,7 @@ impl ConfigContext {
             );
         }
 
-        // 1b. process source path
+        // 3. Process source path
 
         let mut source = ArtifactSource {
             excludes: source.excludes.clone(),
@@ -167,88 +212,17 @@ impl ConfigContext {
                 bail!("`source.{}.path` not found: {:?}", source_name, source.path);
             }
 
+            // TODO: make path relevant to the current working directory
+
             source.path = local_path
                 .canonicalize()
                 .map_err(|e| anyhow::anyhow!(e))?
                 .to_str()
                 .unwrap()
                 .to_string();
-
-            info!(
-                "{} canonicalized source: {}",
-                source_name,
-                local_path.display()
-            );
         }
 
-        // 1c. process source id
-
-        let source_json = serde_json::to_string(&source).map_err(|e| anyhow::anyhow!(e))?;
-
-        let source_key = format!("{}-{}", source_name, digest(source_json));
-
-        if let Some(source_id) = self.artifact_source_id.get(&source_key) {
-            return Ok(source_id.clone());
-        }
-
-        // 2. Check if source exists in registry or local cache
-
-        // TODO: check if source is also an empty value
-
-        if let Some(hash) = source.hash.clone() {
-            let source_id = ArtifactSourceId {
-                hash: hash.clone(),
-                name: source_name.to_string(),
-            };
-
-            // 2a. Check if source exists in the registry
-
-            // TODO: put client at higher level with connection pooling
-
-            let registry_host = self.registry.clone();
-
-            let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
-                .await
-                .expect("failed to connect to registry");
-
-            let registry_request = RegistryRequest {
-                hash: hash.clone(),
-                kind: RegistryKind::ArtifactSource as i32,
-                name: source_name.to_string(),
-            };
-
-            match registry.exists(registry_request.clone()).await {
-                Err(status) => {
-                    if status.code() != NotFound {
-                        bail!("Registry pull error: {:?}", status);
-                    }
-                }
-
-                Ok(_) => {
-                    info!("{} pushed source: {}", source_name, hash);
-
-                    self.artifact_source_id
-                        .insert(source_key, source_id.clone());
-
-                    return Ok(source_id);
-                }
-            }
-
-            // 2b. Check if source exists in local cache
-
-            let source_cache_archive_path = get_cache_archive_path(&hash, source_name);
-
-            if source_cache_archive_path.exists() {
-                info!("{} cached source: {}", source_name, hash);
-
-                self.artifact_source_id
-                    .insert(source_key, source_id.clone());
-
-                return Ok(source_id);
-            }
-        }
-
-        // 3. Prepare source if not cached
+        // 4. Prepare source
 
         let source_sandbox_path = create_sandbox_dir().await?;
 
@@ -269,7 +243,7 @@ impl ConfigContext {
                 );
             }
 
-            // 3a. Download source
+            // 4a. Download source
 
             let remote_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
 
@@ -280,7 +254,7 @@ impl ConfigContext {
                 );
             }
 
-            info!("{} downloading source: {}", source_name, source.path);
+            println!("{} downloading source: {}", source_name, source.path);
 
             let remote_response = reqwest::get(remote_path.as_str())
                 .await
@@ -313,9 +287,9 @@ impl ConfigContext {
                     .map_err(|e| anyhow::anyhow!(e))?;
             }
 
-            // 3b. Extract source
+            // 4b. Extract source
 
-            info!("{} unpacking source: {}", source_name, source.path);
+            println!("{} unpacking source: {}", source_name, source.path);
 
             if let Some(kind) = kind {
                 match kind.mime_type() {
@@ -389,12 +363,6 @@ impl ConfigContext {
                 source.includes.clone(),
             )?;
 
-            info!(
-                "{} copying source: {}",
-                source_name,
-                local_path.canonicalize().unwrap().display()
-            );
-
             copy_files(
                 &local_path,
                 local_source_files.clone(),
@@ -403,7 +371,7 @@ impl ConfigContext {
             .await?;
         }
 
-        // 4. Calculate source hash
+        // 5. Calculate source hash
 
         let source_sandbox_files = get_file_paths(
             &source_sandbox_path,
@@ -419,15 +387,13 @@ impl ConfigContext {
             );
         }
 
-        // 4a. Set timestamps
+        // 5a. Set timestamps
 
         for file_path in source_sandbox_files.clone().into_iter() {
             set_timestamps(&file_path).await?;
         }
 
-        info!("{} hashing source: {}", source_name, source.path);
-
-        // 4b. Hash source files
+        // 5b. Hash source files
 
         let source_hash = hash_files(source_sandbox_files.clone())?;
 
@@ -442,16 +408,14 @@ impl ConfigContext {
             }
         }
 
-        // 4c. Cache source
+        // 5c. Package source
 
-        info!("{} caching source: {}", source_name, source.path);
-
-        let cache_archive_path = get_cache_archive_path(&source_hash, source_name);
+        let source_cache_archive_path = get_cache_archive_path(&source_hash, source_name);
 
         compress_zstd(
             &source_sandbox_path,
             &source_sandbox_files,
-            &cache_archive_path,
+            &source_cache_archive_path,
         )
         .await?;
 
@@ -459,14 +423,72 @@ impl ConfigContext {
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
-        let id = ArtifactSourceId {
-            hash: source_hash,
+        // 5d. push source to registry
+
+        let source_id = ArtifactSourceId {
+            hash: source_hash.clone(),
             name: source_name.to_string(),
         };
 
-        self.artifact_source_id.insert(source_key, id.clone());
+        let registry_host = self.registry.clone();
 
-        Ok(id)
+        let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
+            .await
+            .expect("failed to connect to registry");
+
+        let registry_request = RegistryRequest {
+            hash: source_hash.clone(),
+            kind: RegistryKind::ArtifactSource as i32,
+            name: source_name.to_string(),
+        };
+
+        match registry.exists(registry_request.clone()).await {
+            Err(status) => {
+                if status.code() != NotFound {
+                    bail!("Registry pull error: {:?}", status);
+                }
+
+                let private_key_path = get_private_key_path();
+
+                if !private_key_path.exists() {
+                    bail!("Private key not found: {}", private_key_path.display());
+                }
+
+                let source_archive_data = read(&source_cache_archive_path).await?;
+
+                let source_signature =
+                    vorpal_notary::sign(private_key_path.clone(), &source_archive_data).await?;
+
+                let source_json = serde_json::to_string(&source).map_err(|e| anyhow::anyhow!(e))?;
+
+                let mut source_push_stream = vec![];
+
+                for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
+                    source_push_stream.push(RegistryPushRequest {
+                        data: chunk.to_vec(),
+                        data_signature: source_signature.clone().to_vec(),
+                        hash: source_hash.clone(),
+                        kind: RegistryKind::ArtifactSource as i32,
+                        manifest: source_json.clone(),
+                        name: source_name.to_string(),
+                    });
+                }
+
+                registry
+                    .push(tokio_stream::iter(source_push_stream))
+                    .await
+                    .expect("failed to push");
+            }
+
+            Ok(_) => {}
+        }
+
+        println!("{} pushed source: {}", source_name, source_hash);
+
+        self.artifact_source_id
+            .insert(source_id.clone(), source.clone());
+
+        Ok(source_id)
     }
 
     pub async fn add_artifact(
@@ -524,6 +546,49 @@ impl ConfigContext {
         Ok(artifact_id)
     }
 
+    pub async fn fetch_artifact(&mut self, name: &str, hash: &str) -> Result<ArtifactId> {
+        let registry_host = self.registry.clone();
+
+        let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
+            .await
+            .expect("failed to connect to registry");
+
+        let registry_request = RegistryRequest {
+            hash: hash.to_string(),
+            kind: RegistryKind::Artifact as i32,
+            name: name.to_string(),
+        };
+
+        match registry.exists(registry_request.clone()).await {
+            Err(status) => {
+                if status.code() != NotFound {
+                    bail!("Registry pull error: {:?}", status);
+                }
+
+                bail!("Artifact not found: {:?}", registry_request);
+            }
+
+            Ok(response) => {
+                let res = response.into_inner();
+
+                let artifact: Artifact =
+                    serde_json::from_str(&res.manifest).map_err(|e| anyhow::anyhow!(e))?;
+
+                let artifact_id = ArtifactId {
+                    hash: hash.to_string(),
+                    name: artifact.name.clone(),
+                };
+
+                if !self.artifact_id.contains_key(&artifact_id) {
+                    self.artifact_id
+                        .insert(artifact_id.clone(), artifact.clone());
+                }
+
+                Ok(artifact_id)
+            }
+        }
+    }
+
     pub fn get_artifact(&self, hash: &str, name: &str) -> Option<&Artifact> {
         let artifact_id = ArtifactId {
             hash: hash.to_string(),
@@ -531,6 +596,15 @@ impl ConfigContext {
         };
 
         self.artifact_id.get(&artifact_id)
+    }
+
+    pub fn get_artifact_source(&self, hash: &str, name: &str) -> Option<&ArtifactSource> {
+        let source_id = ArtifactSourceId {
+            hash: hash.to_string(),
+            name: name.to_string(),
+        };
+
+        self.artifact_source_id.get(&source_id)
     }
 
     pub fn get_target(&self) -> ArtifactSystem {
