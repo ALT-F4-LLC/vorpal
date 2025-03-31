@@ -19,15 +19,21 @@ async fn main() -> Result<()> {
     let mut artifacts = vec![];
 
     if context_target == Aarch64Linux || context_target == X8664Linux {
-        let linux_vorpal = linux_vorpal::artifact(context).await?;
+        let linux_vorpal = linux_vorpal::build(context).await?;
 
         artifacts.push(linux_vorpal);
     }
 
-    let devshell = vorpal::devshell(context).await?;
+    let rust_toolchain = artifact::rust_toolchain::build(context).await?;
+    let protoc = artifact::protoc::build(context).await?;
+
+    artifacts.push(rust_toolchain);
+    artifacts.push(protoc);
+
+    // let devshell = vorpal::devshell(context).await?;
     // let package = vorpal::package(context).await?;
 
-    artifacts.push(devshell);
+    // artifacts.push(devshell);
     // artifacts.push(package);
 
     // 3. Run the context

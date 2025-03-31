@@ -197,12 +197,10 @@ pub fn zlib(version: &str, hash: &str) -> ConfigArtifactSource {
         .build()
 }
 
-pub async fn artifact(context: &mut ConfigContext) -> Result<String> {
+pub async fn build(context: &mut ConfigContext) -> Result<String> {
+    // Setup artifacts
+
     let linux_debian = linux_debian::build(context).await?;
-
-    // Setup defaults
-
-    let artifacts = vec![linux_debian.clone()];
 
     // Setup sources
 
@@ -241,7 +239,7 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<String> {
     );
 
     let curl_cacert =
-        curl_cacert("19c0bec2c9dc55ad5e63b008d55ef6021565cfa4ff25bb8b93cf96381b050386");
+        curl_cacert("74e20ed700e895a3b5f58dbcad2b20f98f041e167d50686cda66b6337af6aa21");
 
     let diffutils_version = "3.10";
     let diffutils = gnu_xz(
@@ -434,21 +432,13 @@ pub async fn artifact(context: &mut ConfigContext) -> Result<String> {
         "3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683",
     );
 
-    // TODO: fetch hash for linux-debian
-
-    // let step_stage_01_rootfs = context.fetch_artifact("TODO").await?;
-
     let step_stage_01 = step::bwrap(
         context,
         vec![],
-        artifacts,
+        vec![],
         vec!["PATH=/usr/bin:/usr/sbin".to_string()],
-        // Some(step_stage_01_rootfs),
-        None,
+        Some(linux_debian),
         formatdoc! {"
-            #!/bin/bash
-            set -euo pipefail
-
             set +h
             umask 022
 

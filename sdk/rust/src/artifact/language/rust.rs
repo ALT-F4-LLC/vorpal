@@ -53,38 +53,38 @@ pub fn get_toolchain_target(target: ConfigArtifactSystem) -> Result<String> {
 }
 
 pub async fn devshell(context: &mut ConfigContext, name: &str) -> Result<String> {
-    // let rust_toolchain = context
-    //     .fetch_artifact("12aba225f85e7310d03c83f2c137270b5127b42eb2db89d481a048f440a7aff5")
-    //     .await?;
+    let rust_toolchain = context
+        .fetch_artifact("12aba225f85e7310d03c83f2c137270b5127b42eb2db89d481a048f440a7aff5")
+        .await?;
 
-    // let rust_toolchain_target = get_toolchain_target(context.get_target())?;
+    let rust_toolchain_target = get_toolchain_target(context.get_target())?;
 
-    // let rust_toolchain_version = get_toolchain_version();
+    let rust_toolchain_version = get_toolchain_version();
 
-    // let protoc = context
-    //     .fetch_artifact("1b919861ad528e32772b65a9aaefb41014adcdcc9b296e1e3510f4cecb07ef9e")
-    //     .await?;
+    let protoc = context
+        .fetch_artifact("1b919861ad528e32772b65a9aaefb41014adcdcc9b296e1e3510f4cecb07ef9e")
+        .await?;
 
-    // let artifacts = vec![protoc.clone(), rust_toolchain.clone()];
+    let artifacts = vec![protoc.clone(), rust_toolchain.clone()];
 
-    // let envs = vec![
-    //     format!(
-    //         "PATH={}/bin:{}/toolchains/{}-{}/bin:$PATH",
-    //         get_env_key(&protoc),
-    //         get_env_key(&rust_toolchain),
-    //         rust_toolchain_version,
-    //         rust_toolchain_target
-    //     ),
-    //     format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
-    //     format!(
-    //         "RUSTUP_TOOLCHAIN={}-{}",
-    //         rust_toolchain_version, rust_toolchain_target
-    //     ),
-    // ];
+    let environments = vec![
+        format!(
+            "PATH={}/bin:{}/toolchains/{}-{}/bin:$PATH",
+            get_env_key(&protoc),
+            get_env_key(&rust_toolchain),
+            rust_toolchain_version,
+            rust_toolchain_target
+        ),
+        format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
+        format!(
+            "RUSTUP_TOOLCHAIN={}-{}",
+            rust_toolchain_version, rust_toolchain_target
+        ),
+    ];
 
     // Create shell artifact
 
-    shell::build(context, vec![], vec![], name).await
+    shell::build(context, artifacts, environments, name).await
 }
 
 pub async fn package<'a>(
@@ -108,6 +108,7 @@ pub async fn package<'a>(
     let source_path_str = source_path.display().to_string();
 
     // Load root cargo.toml
+
     let cargo_toml_path = source_path.join("Cargo.toml");
 
     if !cargo_toml_path.exists() {
@@ -118,7 +119,8 @@ pub async fn package<'a>(
 
     // TODO: implement for non-workspace based projects
 
-    // Get list of binary targets
+    // Get list of bin targets
+
     let mut workspaces = vec![];
     let mut workspaces_bin_names = vec![];
     let mut workspaces_targets = vec![];
@@ -161,35 +163,36 @@ pub async fn package<'a>(
 
     // Get protoc artifact
 
-    // let protoc = context
-    //     .fetch_artifact("1b919861ad528e32772b65a9aaefb41014adcdcc9b296e1e3510f4cecb07ef9e")
-    //     .await?;
+    let protoc = context
+        .fetch_artifact("1b919861ad528e32772b65a9aaefb41014adcdcc9b296e1e3510f4cecb07ef9e")
+        .await?;
 
     // Get rust toolchain artifact
 
-    // let rust_toolchain = context
-    //     .fetch_artifact("12aba225f85e7310d03c83f2c137270b5127b42eb2db89d481a048f440a7aff5")
-    //     .await?;
+    let rust_toolchain = context
+        .fetch_artifact("12aba225f85e7310d03c83f2c137270b5127b42eb2db89d481a048f440a7aff5")
+        .await?;
 
-    // let rust_toolchain_target = get_toolchain_target(context.get_target())?;
-    // let rust_toolchain_version = get_toolchain_version();
+    let rust_toolchain_target = get_toolchain_target(context.get_target())?;
+
+    let rust_toolchain_version = get_toolchain_version();
 
     // Set environment variables
 
-    // let mut env_paths: Vec<String> = vec![format!(
-    //     "{}/toolchains/{}-{}/bin",
-    //     get_env_key(&rust_toolchain),
-    //     rust_toolchain_version,
-    //     rust_toolchain_target
-    // )];
+    let mut environments_paths: Vec<String> = vec![format!(
+        "{}/toolchains/{}-{}/bin",
+        get_env_key(&rust_toolchain),
+        rust_toolchain_version,
+        rust_toolchain_target
+    )];
 
-    // let env_toolchain = format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
+    let rustup_toolchain = format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
 
     let shared_step_environments = vec![
-        // "HOME=$VORPAL_WORKSPACE/home".to_string(),
-        // format!("PATH={}", env_paths.join(":")),
-        // format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
-        // format!("RUSTUP_TOOLCHAIN={}", env_toolchain),
+        "HOME=$VORPAL_WORKSPACE/home".to_string(),
+        format!("PATH={}", environments_paths.join(":")),
+        format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
+        format!("RUSTUP_TOOLCHAIN={}", rustup_toolchain),
     ];
 
     // Create vendor artifact
@@ -220,10 +223,7 @@ pub async fn package<'a>(
         target_paths = workspaces_targets.join(" "),
     };
 
-    let vendor_step_artifacts = vec![
-        // protoc.clone(),
-        // rust_toolchain.clone()
-    ];
+    let vendor_step_artifacts = vec![protoc.clone(), rust_toolchain.clone()];
 
     let vendor_step = step::shell(
         context,
@@ -252,13 +252,9 @@ pub async fn package<'a>(
 
     // TODO: implement artifact for 'check` to pre-bake the vendor cache
 
-    let step_artifacts = vec![
-        // protoc.clone(),
-        // rust_toolchain.clone(),
-        vendor.clone(),
-    ];
+    let step_artifacts = vec![protoc.clone(), rust_toolchain.clone(), vendor.clone()];
 
-    // env_paths.push(format!("{}/bin", get_env_key(&protoc)));
+    environments_paths.push(format!("{}/bin", get_env_key(&protoc)));
 
     let mut source_excludes = vec!["target".to_string()];
 

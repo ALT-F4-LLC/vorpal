@@ -340,7 +340,7 @@ pub async fn build_source(
             info!(
                 "{} push source: {}",
                 get_prefix(&artifact.name),
-                source.hash.clone().unwrap()
+                source.name
             );
 
             registry_service
@@ -394,8 +394,6 @@ pub async fn build(
         Ok(response) => {
             let mut stream = response.into_inner();
             let mut stream_data = Vec::new();
-
-            info!("{} pull: {}", get_prefix(&artifact.name), artifact_hash);
 
             loop {
                 match stream.message().await {

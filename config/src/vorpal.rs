@@ -52,28 +52,29 @@ pub async fn devshell(context: &mut ConfigContext) -> Result<String> {
         ),
     ];
 
-    // Create shell artifact
+    // Create shell
+
     shell::build(context, artifacts, envs, name).await
 }
 
-// pub async fn package(context: &mut ConfigContext) -> Result<String> {
-//     let excludes = vec![
-//         ".env",
-//         ".envrc",
-//         ".github",
-//         ".gitignore",
-//         ".packer",
-//         ".vagrant",
-//         "Dockerfile",
-//         "Vagrantfile",
-//         "dist",
-//         "makefile",
-//         "script",
-//         "sdk/go",
-//         "shell.nix",
-//         "vorpal-domains.svg",
-//         "vorpal-purpose.jpg",
-//     ];
-//
-//     rust::package(context, "vorpal", excludes).await
-// }
+pub async fn package(context: &mut ConfigContext) -> Result<String> {
+    let excludes = vec![
+        ".env",
+        ".envrc",
+        ".github",
+        ".gitignore",
+        ".packer",
+        ".vagrant",
+        "Dockerfile",
+        "Vagrantfile",
+        "dist",
+        "makefile",
+        "script",
+        "sdk/go",
+        "shell.nix",
+        "vorpal-domains.svg",
+        "vorpal-purpose.jpg",
+    ];
+
+    rust::package(context, "vorpal", excludes).await
+}

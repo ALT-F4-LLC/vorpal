@@ -156,11 +156,12 @@ pub async fn bwrap(
 
     for env in environments.iter() {
         let key = env.split("=").next().unwrap();
+        let value = env.split("=").last().unwrap();
 
         environment_arguments.push(vec![
             "--setenv".to_string(),
             key.to_string(),
-            env.to_string(),
+            value.to_string(),
         ]);
     }
 
@@ -210,37 +211,35 @@ pub async fn shell(
 
     let target = context.get_target();
 
-    // Setup platform specific steps
-
-    let step_bash = bash(
-        context,
-        artifacts.clone(),
-        environments.clone(),
-        script.to_string(),
-        vec![Aarch64Darwin, X8664Darwin],
-    );
-
-    // let step_bwrap_rootfs = context.fetch_artifact("TODO").await?;
-
-    let step_bwrap = bwrap(
-        context,
-        vec![],
-        artifacts,
-        environments,
-        // Some(step_bwrap_rootfs),
-        None,
-        script,
-        vec![Aarch64Linux, X8664Linux],
-    )
-    .await?;
-
     // Setup step
 
     let step = match target {
-        Aarch64Darwin => step_bash,
-        X8664Darwin => step_bash,
-        Aarch64Linux => step_bwrap,
-        X8664Linux => step_bwrap,
+        Aarch64Darwin | X8664Darwin => bash(
+            context,
+            artifacts.clone(),
+            environments.clone(),
+            script.to_string(),
+            vec![Aarch64Darwin, X8664Darwin],
+        ),
+
+        Aarch64Linux | X8664Linux => {
+            let linux_vorpal_hash =
+                "b1724796a3cdfa26a0a33176d119cae8852e174ae31cb0200196c9881f7e6e91";
+
+            let linux_vorpal = context.fetch_artifact(linux_vorpal_hash).await?;
+
+            bwrap(
+                context,
+                vec![],
+                artifacts,
+                environments,
+                Some(linux_vorpal),
+                script,
+                vec![Aarch64Linux, X8664Linux],
+            )
+            .await?
+        }
+
         _ => bail!("unsupported shell step system: {}", target.as_str_name()),
     };
 

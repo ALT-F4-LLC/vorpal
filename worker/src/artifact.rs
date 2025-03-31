@@ -410,6 +410,8 @@ async fn build_artifact(
         )));
     }
 
+    // TODO: check if archive is already uploaded
+
     // Upload archive
 
     send_message(&tx, format!("push: {}", artifact_hash)).await?;
@@ -551,11 +553,7 @@ async fn pull_source(
         return Err(Status::not_found("source archive not found"));
     }
 
-    send_message(
-        tx,
-        format!("unpack source: {}-{}", source.name, &source_hash),
-    )
-    .await?;
+    send_message(tx, format!("unpack source: {}", source.name)).await?;
 
     let source_workspace_path = workspace_source_dir_path.join(&source.name);
 
@@ -576,11 +574,7 @@ async fn pull_source(
     let source_workspace_files = get_file_paths(&source_workspace_path, vec![], vec![])
         .map_err(|err| Status::internal(format!("failed to get source files: {:?}", err)))?;
 
-    send_message(
-        tx,
-        format!("sanitize source: {}-{}", source.name, &source_hash),
-    )
-    .await?;
+    send_message(tx, format!("sanitize source: {}", source.name)).await?;
 
     for path in source_workspace_files.iter() {
         if let Err(err) = set_timestamps(path).await {

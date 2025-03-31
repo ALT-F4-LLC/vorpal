@@ -1,14 +1,15 @@
 use crate::cli::{Cli, Command};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Parser;
 use sha256::digest;
 use std::collections::HashMap;
-use tonic::transport::Server;
+use tonic::{transport::Server, Code::NotFound};
 use vorpal_schema::{
     config::v0::{
         config_service_server::{ConfigService, ConfigServiceServer},
         Config, ConfigArtifact, ConfigArtifactRequest, ConfigArtifactSystem, ConfigRequest,
     },
+    registry::v0::registry_service_client::RegistryServiceClient,
     system_from_str,
 };
 
@@ -18,7 +19,7 @@ const _DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 pub struct ConfigContext {
     artifact: HashMap<String, ConfigArtifact>,
     port: u16,
-    // registry: String,
+    registry: String,
     system: ConfigArtifactSystem,
 }
 
@@ -77,11 +78,11 @@ pub async fn get_context() -> Result<ConfigContext> {
 }
 
 impl ConfigContext {
-    pub fn new(port: u16, _registry: String, system: ConfigArtifactSystem) -> Self {
+    pub fn new(port: u16, registry: String, system: ConfigArtifactSystem) -> Self {
         Self {
             artifact: HashMap::new(),
             port,
-            // registry,
+            registry,
             system,
         }
     }
@@ -101,37 +102,35 @@ impl ConfigContext {
         Ok(config_hash)
     }
 
-    // pub async fn fetch_artifact(&mut self, _hash: &str) -> Result<String> {
-    //     let registry_host = self.registry.clone();
-    //
-    //     let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
-    //         .await
-    //         .expect("failed to connect to registry");
-    //
-    //     let registry_request = ConfigArtifactRequest {
-    //         hash: hash.to_string(),
-    //     };
-    //
-    //     match registry.get_config_artifact(registry_request.clone()).await {
-    //         Err(status) => {
-    //             if status.code() != NotFound {
-    //                 bail!("registry get config artifact error: {:?}", status);
-    //             }
-    //
-    //             bail!("config for artifact not found: {:?}", registry_request);
-    //         }
-    //
-    //         Ok(response) => {
-    //             let config = response.into_inner();
-    //
-    //             self.artifact.insert(hash.to_string(), config);
-    //
-    //             Ok(hash.to_string())
-    //         }
-    //     }
-    //
-    //     Ok("TODO".to_string())
-    // }
+    pub async fn fetch_artifact(&mut self, hash: &str) -> Result<String> {
+        let registry_host = self.registry.clone();
+
+        let mut registry = RegistryServiceClient::connect(registry_host.to_owned())
+            .await
+            .expect("failed to connect to registry");
+
+        let registry_request = ConfigArtifactRequest {
+            hash: hash.to_string(),
+        };
+
+        match registry.get_artifact(registry_request.clone()).await {
+            Err(status) => {
+                if status.code() != NotFound {
+                    bail!("registry get config artifact error: {:?}", status);
+                }
+
+                bail!("config for artifact not found: {:?}", registry_request);
+            }
+
+            Ok(response) => {
+                let config = response.into_inner();
+
+                self.artifact.insert(hash.to_string(), config);
+            }
+        }
+
+        Ok(hash.to_string())
+    }
 
     pub fn get_artifact(&self, hash: &str) -> Option<ConfigArtifact> {
         self.artifact.get(hash).cloned()
