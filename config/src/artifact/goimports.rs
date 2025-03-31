@@ -1,45 +1,47 @@
 use crate::{artifact::go, source::go_tools};
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::BTreeMap;
-use vorpal_schema::vorpal::artifact::v0::ArtifactId;
+use vorpal_schema::config::v0::ConfigArtifactSystem::{
+    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
+};
 use vorpal_sdk::{
-    artifact::{add_artifact, get_artifact_envkey},
+    artifact::{get_env_key, step, ConfigArtifactBuilder},
     context::ConfigContext,
 };
 
-pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let go = go::artifact(context).await?;
+pub async fn build(context: &mut ConfigContext) -> Result<String> {
+    let go = go::build(context).await?;
 
     let name = "goimports";
 
-    let source = go_tools(context).await?;
+    let step_script = formatdoc! {"
+        pushd ./source/go-tools
 
-    add_artifact(
+        mkdir -p $VORPAL_OUTPUT/bin
+
+        go build -o $VORPAL_OUTPUT/bin/goimports ./cmd/goimports
+
+        go clean -modcache
+    "};
+
+    let step = step::shell(
         context,
         vec![go.clone()],
-        BTreeMap::from([
-            ("GOCACHE", "$VORPAL_WORKSPACE/go/cache".to_string()),
-            ("GOPATH", "$VORPAL_WORKSPACE/go".to_string()),
-            ("PATH", format!("{}/bin", get_artifact_envkey(&go))),
-        ]),
-        name,
-        formatdoc! {"
-            pushd ./source/go-tools
-
-            mkdir -p $VORPAL_OUTPUT/bin
-
-            go build -o $VORPAL_OUTPUT/bin/goimports ./cmd/goimports
-
-            go clean -modcache
-        "},
-        vec![source],
         vec![
-            "aarch64-linux",
-            "aarch64-macos",
-            "x86_64-linux",
-            "x86_64-macos",
+            "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
+            "GOPATH=$VORPAL_WORKSPACE/go".to_string(),
+            format!("PATH={}/bin", get_env_key(&go)),
         ],
+        step_script,
     )
-    .await
+    .await?;
+
+    ConfigArtifactBuilder::new(name.to_string())
+        .with_source(go_tools())
+        .with_step(step)
+        .with_system(Aarch64Darwin)
+        .with_system(Aarch64Linux)
+        .with_system(X8664Darwin)
+        .with_system(X8664Linux)
+        .build(context)
 }

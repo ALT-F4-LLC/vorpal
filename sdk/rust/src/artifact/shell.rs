@@ -1,33 +1,37 @@
-use crate::{artifact::add_artifact, context::ConfigContext};
+use crate::{
+    artifact::{get_env_key, step, ConfigArtifactBuilder},
+    context::ConfigContext,
+};
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::BTreeMap;
-use vorpal_schema::vorpal::artifact::v0::ArtifactId;
+use vorpal_schema::config::v0::ConfigArtifactSystem::{
+    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
+};
 
-pub async fn shell_artifact<'a>(
+pub async fn build<'a>(
     context: &mut ConfigContext,
-    artifacts: Vec<ArtifactId>,
+    artifacts: Vec<String>,
     environments: Vec<String>,
     name: &'a str,
-) -> Result<ArtifactId> {
-    let mut backups = vec![
+) -> Result<String> {
+    let mut envs_backup = vec![
         "export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"".to_string(),
         "export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"".to_string(),
         "export VORPAL_SHELL_BACKUP_VORPAL_SHELL=\"$VORPAL_SHELL\"".to_string(),
     ];
 
-    let mut exports = vec![
+    let mut envs_export = vec![
         format!("export PS1=\"({}) $PS1\"", name),
         "export VORPAL_SHELL=\"1\"".to_string(),
     ];
 
-    let mut restores = vec![
+    let mut envs_restore = vec![
         "export PATH=\"$VORPAL_SHELL_BACKUP_PATH\"".to_string(),
         "export PS1=\"$VORPAL_SHELL_BACKUP_PS1\"".to_string(),
         "export VORPAL_SHELL=\"$VORPAL_SHELL_BACKUP_VORPAL_SHELL\"".to_string(),
     ];
 
-    let mut unsets = vec![
+    let mut envs_unset = vec![
         "unset VORPAL_SHELL_BACKUP_PATH".to_string(),
         "unset VORPAL_SHELL_BACKUP_PS1".to_string(),
         "unset VORPAL_SHELL_BACKUP_VORPAL_SHELL".to_string(),
@@ -35,59 +39,66 @@ pub async fn shell_artifact<'a>(
 
     for env in environments {
         let key = env.split("=").next().unwrap();
-        backups.push(format!("export VORPAL_SHELL_BACKUP_{}=\"${}\"", key, key));
-        exports.push(format!("export {}", env));
-        restores.push(format!("export {}=\"$VORPAL_SHELL_BACKUP_{}\"", key, key));
-        unsets.push(format!("unset VORPAL_SHELL_BACKUP_{}", key));
+
+        envs_backup.push(format!("export VORPAL_SHELL_BACKUP_{}=\"${}\"", key, key));
+        envs_export.push(format!("export {}", env));
+        envs_restore.push(format!("export {}=\"$VORPAL_SHELL_BACKUP_{}\"", key, key));
+        envs_unset.push(format!("unset VORPAL_SHELL_BACKUP_{}", key));
     }
 
-    add_artifact(
-        context,
-        artifacts,
-        BTreeMap::new(),
-        name,
-        formatdoc! {"
-            mkdir -pv $VORPAL_WORKSPACE/bin
+    let path_artifacts = artifacts
+        .iter()
+        .map(|artifact| format!("{}/bin", get_env_key(artifact)))
+        .collect::<Vec<String>>()
+        .join(":");
 
-            cat > bin/activate << \"EOF\"
-            #!/bin/bash
+    let path_export = format!("export PATH=\"{path_artifacts}:$PATH\"");
 
-            # Set backup variables
-            {backups}
+    envs_export.push(path_export);
 
-            # Set new variables
-            {exports}
+    let step_script = formatdoc! {"
+        mkdir -pv $VORPAL_WORKSPACE/bin
 
-            # Restore old variables
-            exit-shell(){{
-            # Set restore variables
-            {restores}
+        cat > bin/activate << \"EOF\"
+        #!/bin/bash
 
-            # Set unset variables
-            {unsets}
-            }}
+        # Set backup variables
+        {backups}
 
-            # Run the command
-            exec \"$@\"
-            EOF
+        # Set new variables
+        {exports}
 
-            chmod +x $VORPAL_WORKSPACE/bin/activate
+        # Restore old variables
+        exit-shell(){{
+        # Set restore variables
+        {restores}
 
-            mkdir -pv $VORPAL_OUTPUT/bin
+        # Set unset variables
+        {unsets}
+        }}
 
-            cp -prv bin \"$VORPAL_OUTPUT\"",
-            backups = backups.join("\n"),
-            exports = exports.join("\n"),
-            restores = restores.join("\n"),
-            unsets = unsets.join("\n"),
-        },
-        vec![],
-        vec![
-            "aarch64-linux",
-            "aarch64-macos",
-            "x86_64-linux",
-            "x86_64-macos",
-        ],
-    )
-    .await
+        # Run the command
+        exec \"$@\"
+        EOF
+
+        chmod +x $VORPAL_WORKSPACE/bin/activate
+
+        mkdir -pv $VORPAL_OUTPUT/bin
+
+        cp -prv bin \"$VORPAL_OUTPUT\"",
+        backups = envs_backup.join("\n"),
+        exports = envs_export.join("\n"),
+        restores = envs_restore.join("\n"),
+        unsets = envs_unset.join("\n"),
+    };
+
+    let step = step::shell(context, artifacts, vec![], step_script).await?;
+
+    ConfigArtifactBuilder::new(name.to_string())
+        .with_step(step)
+        .with_system(Aarch64Darwin)
+        .with_system(Aarch64Linux)
+        .with_system(X8664Darwin)
+        .with_system(X8664Linux)
+        .build(context)
 }

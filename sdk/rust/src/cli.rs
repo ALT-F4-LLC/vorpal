@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use std::env::consts::{ARCH, OS};
 use tracing::Level;
+use vorpal_schema::system_default_str;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -8,10 +8,6 @@ use tracing::Level;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
-}
-
-fn get_default_system() -> String {
-    format!("{}-{}", ARCH, OS)
 }
 
 #[derive(Subcommand)]
@@ -26,7 +22,7 @@ pub enum Command {
         #[clap(default_value = "http://localhost:23151", long, short)]
         registry: String,
 
-        #[arg(default_value_t = get_default_system(), long, short)]
+        #[arg(default_value_t = system_default_str(), long, short)]
         target: String,
     },
 }

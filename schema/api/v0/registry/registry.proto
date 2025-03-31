@@ -4,37 +4,40 @@ package vorpal.registry.v0;
 
 option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/registry";
 
+import "v0/config/config.proto";
+
 service RegistryService {
-    rpc Exists(RegistryRequest) returns (RegistryResponse);
-    rpc Push(stream RegistryPushRequest) returns (RegistryResponse);
-    rpc Pull(RegistryRequest) returns (stream RegistryPullResponse);
+    rpc GetArchive(RegistryPullRequest) returns (RegistryGetResponse);
+    rpc GetArtifact(vorpal.config.v0.ConfigArtifactRequest) returns (vorpal.config.v0.ConfigArtifact);
+    rpc PullArchive(RegistryPullRequest) returns (stream RegistryPullResponse);
+    rpc PushArchive(stream RegistryPushRequest) returns (RegistryPushResponse);
+    rpc PutArtifact(vorpal.config.v0.ConfigArtifact) returns (RegistryPutResponse);
 }
 
-enum RegistryKind {
-    UNKNOWN_STORE_KIND = 0;
+enum RegistryArchive {
+    UNKNOWN_ARCHIVE = 0;
     ARTIFACT = 1;
     ARTIFACT_SOURCE = 2;
 }
 
-message RegistryRequest {
-    RegistryKind kind = 1;
+message RegistryPullRequest {
+    RegistryArchive archive = 1;
     string hash = 2;
-    string name = 3;
-}
-
-message RegistryResponse {
-    string manifest = 1;
-}
-
-message RegistryPushRequest {
-    RegistryKind kind = 1;
-    bytes data = 2;
-    bytes data_signature = 3;
-    string hash = 4;
-    string manifest = 5;
-    string name = 6;
 }
 
 message RegistryPullResponse {
     bytes data = 1;
 }
+
+message RegistryPushRequest {
+    RegistryArchive archive = 1;
+    bytes data = 2;
+    bytes signature = 3;
+    string hash = 4;
+}
+
+message RegistryGetResponse {}
+
+message RegistryPushResponse {}
+
+message RegistryPutResponse {}

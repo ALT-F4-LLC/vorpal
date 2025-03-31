@@ -1,12 +1,10 @@
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::BTreeMap;
-use vorpal_schema::vorpal::artifact::v0::ArtifactId;
+use vorpal_schema::config::v0::ConfigArtifactSystem::{
+    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
+};
 use vorpal_sdk::{
-    artifact::{
-        get_artifact_envkey,
-        step::{bash, docker},
-    },
+    artifact::{get_env_key, step, ConfigArtifactBuilder},
     context::ConfigContext,
 };
 
@@ -158,85 +156,124 @@ fn generate_dockerfile() -> String {
     "}
 }
 
-pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let source_hash = "465cebbdf76af0825c160bdad35db506955c47d149972c30ae7a0629c252439f";
+pub async fn build(context: &mut ConfigContext) -> Result<String> {
+    let dockerfile_step = step::bash(
+        context,
+        vec![],
+        vec![],
+        formatdoc! {"
+            cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"
+            {version_script}
+            EOF
 
-    let image_tag = format!("altf4llc/debin:{}", source_hash);
+            cat > $VORPAL_OUTPUT/Dockerfile << \"EOF\"
+            {dockerfile}
+            EOF",
+            dockerfile = generate_dockerfile(),
+            version_script = generate_version_script(),
+        },
+        vec![Aarch64Linux, X8664Linux],
+    );
 
-    let dockerfile = context
-        .add_artifact(
-            "linux-debian-docker",
-            vec![],
-            vec![],
-            vec![bash(
-                BTreeMap::new(),
-                formatdoc! {"
-                    cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"
-                    {version_script}
-                    EOF
+    let dockerfile = ConfigArtifactBuilder::new("linux-debian-dockerfile".to_string())
+        .with_step(dockerfile_step)
+        .with_system(Aarch64Darwin)
+        .with_system(Aarch64Linux)
+        .with_system(X8664Darwin)
+        .with_system(X8664Linux)
+        .build(context)?;
 
-                    cat > $VORPAL_OUTPUT/Dockerfile << \"EOF\"
-                    {dockerfile}
-                    EOF",
-                    dockerfile = generate_dockerfile(),
-                    version_script = generate_version_script(),
-                },
-            )],
-            vec!["aarch64-linux", "x86_64-linux"],
-        )
-        .await?;
+    let dockerfile_image = format!("altf4llc/debin:{}", dockerfile);
 
-    context
-        .add_artifact(
-            "linux-debian",
-            vec![dockerfile.clone()],
-            vec![],
-            vec![
-                docker(vec![
-                    "buildx".to_string(),
-                    "build".to_string(),
-                    "--progress=plain".to_string(),
-                    format!("--tag={}", image_tag),
-                    get_artifact_envkey(&dockerfile),
-                ]),
-                docker(vec![
-                    "container".to_string(),
-                    "create".to_string(),
-                    "--name".to_string(),
-                    source_hash.to_string(),
-                    image_tag.clone(),
-                ]),
-                docker(vec![
-                    "container".to_string(),
-                    "export".to_string(),
-                    "--output".to_string(),
-                    "$VORPAL_WORKSPACE/debian.tar".to_string(),
-                    source_hash.to_string(),
-                ]),
-                bash(
-                    BTreeMap::new(),
-                    formatdoc! {"
-                        ## extract files
-                        tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
+    let step_build = step::docker(
+        context,
+        vec![
+            "buildx".to_string(),
+            "build".to_string(),
+            "--progress=plain".to_string(),
+            format!("--tag={}", dockerfile_image),
+            get_env_key(&dockerfile),
+        ],
+        vec![dockerfile.clone()],
+        vec![Aarch64Linux, X8664Linux],
+    );
 
-                        ## patch files
-                        echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
-                    "},
-                ),
-                docker(vec![
-                    "container".to_string(),
-                    "rm".to_string(),
-                    "--force".to_string(),
-                    source_hash.to_string(),
-                ]),
-                docker(vec![
-                    "image".to_string(),
-                    "rm".to_string(),
-                    "--force".to_string(),
-                    image_tag,
-                ]),
-            ],
-            vec!["aarch64-linux", "x86_64-linux"],
-        )
-        .await
+    let step_create = step::docker(
+        context,
+        vec![
+            "container".to_string(),
+            "create".to_string(),
+            "--name".to_string(),
+            dockerfile.clone(),
+            dockerfile_image,
+        ],
+        vec![],
+        vec![Aarch64Linux, X8664Linux],
+    );
+
+    let step_export = step::docker(
+        context,
+        vec![
+            "container".to_string(),
+            "export".to_string(),
+            "--output".to_string(),
+            "$VORPAL_WORKSPACE/debian.tar".to_string(),
+            dockerfile.clone(),
+        ],
+        vec![],
+        vec![Aarch64Linux, X8664Linux],
+    );
+
+    let step_extract = step::bash(
+        context,
+        vec![],
+        vec![],
+        formatdoc! {"
+            ## extract files
+            tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
+
+            ## patch files
+            echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
+        "},
+        vec![Aarch64Linux, X8664Linux],
+    );
+
+    let step_stop = step::docker(
+        context,
+        vec![
+            "container".to_string(),
+            "stop".to_string(),
+            "--force".to_string(),
+            dockerfile.clone(),
+        ],
+        vec![],
+        vec![Aarch64Linux, X8664Linux],
+    );
+
+    let step_cleanup = step::docker(
+        context,
+        vec![
+            "container".to_string(),
+            "rm".to_string(),
+            "--force".to_string(),
+            dockerfile,
+        ],
+        vec![],
+        vec![Aarch64Linux, X8664Linux],
+    );
+
+    let name = "linux-debian";
+
+    ConfigArtifactBuilder::new(name.to_string())
+        .with_step(step_build)
+        .with_step(step_create)
+        .with_step(step_export)
+        .with_step(step_extract)
+        .with_step(step_stop)
+        .with_step(step_cleanup)
+        .with_system(Aarch64Darwin)
+        .with_system(Aarch64Linux)
+        .with_system(X8664Darwin)
+        .with_system(X8664Linux)
+        .build(context)
 }

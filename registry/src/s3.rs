@@ -1,10 +1,12 @@
+use crate::{RegistryBackend, RegistryError};
 use aws_sdk_s3::Client;
+use sha256::digest;
 use tokio::sync::mpsc;
 use tonic::{async_trait, Status};
-use vorpal_schema::vorpal::registry::v0::{RegistryKind, RegistryPullResponse, RegistryRequest};
-use vorpal_store::paths::get_store_dir_name;
-
-use crate::{PushMetadata, RegistryBackend, RegistryError};
+use vorpal_schema::{
+    config::v0::{ConfigArtifact, ConfigArtifactRequest},
+    registry::v0::{RegistryPullRequest, RegistryPullResponse, RegistryPushRequest},
+};
 
 #[derive(Clone, Debug)]
 pub struct S3RegistryBackend {
@@ -25,94 +27,105 @@ impl S3RegistryBackend {
     }
 }
 
-fn get_artifact_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, Status> {
-    match kind {
-        RegistryKind::Artifact => Ok(format!("store/{}.artifact", get_store_dir_name(hash, name))),
-        RegistryKind::ArtifactSource => {
-            Ok(format!("store/{}.source", get_store_dir_name(hash, name)))
-        }
-        _ => Err(Status::invalid_argument("unsupported store kind")),
-    }
+fn get_archive_key(hash: &str) -> String {
+    format!("store/{hash}.tar.zst")
 }
 
-fn get_manifest_key(kind: RegistryKind, hash: &str, name: &str) -> Result<String, Status> {
-    match kind {
-        RegistryKind::Artifact => Ok(format!("store/{}.artifact", get_store_dir_name(hash, name))),
-        RegistryKind::ArtifactSource => {
-            Ok(format!("store/{}.source", get_store_dir_name(hash, name)))
-        }
-        _ => Err(Status::invalid_argument("unsupported store kind")),
-    }
+fn get_config_key(hash: &str) -> String {
+    format!("store/{hash}.json")
 }
 
 #[async_trait]
 impl RegistryBackend for S3RegistryBackend {
-    async fn exists(&self, request: &RegistryRequest) -> Result<String, Status> {
-        let manifest_key = get_manifest_key(request.kind(), &request.hash, &request.name)?;
-
+    async fn get_archive(&self, request: &RegistryPullRequest) -> Result<(), Status> {
         let client = &self.client;
         let bucket = &self.bucket;
+
+        let archive_key = get_archive_key(&request.hash);
 
         client
             .head_object()
             .bucket(bucket.clone())
-            .key(&manifest_key)
+            .key(archive_key.clone())
             .send()
             .await
             .map_err(|err| Status::not_found(err.to_string()))?;
 
-        let mut stream = client
+        Ok(())
+    }
+
+    async fn get_artifact(
+        &self,
+        request: &ConfigArtifactRequest,
+    ) -> Result<ConfigArtifact, Status> {
+        let client = &self.client;
+        let bucket = &self.bucket;
+
+        let artifact_key = get_config_key(&request.hash);
+
+        client
+            .head_object()
+            .bucket(bucket.clone())
+            .key(&artifact_key)
+            .send()
+            .await
+            .map_err(|err| Status::not_found(err.to_string()))?;
+
+        let mut artifact_stream = client
             .get_object()
             .bucket(bucket)
-            .key(&manifest_key)
+            .key(&artifact_key)
             .send()
             .await
             .map_err(|err| Status::internal(err.to_string()))?
             .body;
 
-        let mut manifest = String::new();
+        let mut artifact_json = String::new();
 
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.map_err(|err| Status::internal(err.to_string()))?;
+        while let Some(chunk) = artifact_stream.next().await {
+            let artifact_chunk = chunk.map_err(|err| Status::internal(err.to_string()))?;
 
-            manifest.push_str(&String::from_utf8_lossy(&chunk));
+            artifact_json.push_str(&String::from_utf8_lossy(&artifact_chunk));
         }
 
-        Ok(manifest)
+        let artifact: ConfigArtifact = serde_json::from_str(&artifact_json)
+            .map_err(|err| Status::internal(format!("failed to parse artifact: {:?}", err)))?;
+
+        Ok(artifact)
     }
 
-    async fn pull(
+    async fn pull_archive(
         &self,
-        request: &RegistryRequest,
+        request: &RegistryPullRequest,
         tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
     ) -> Result<(), Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let artifact_key = get_artifact_key(request.kind(), &request.hash, &request.name)?;
+        let archive_key = get_archive_key(&request.hash);
 
         client
             .head_object()
             .bucket(bucket.clone())
-            .key(artifact_key.clone())
+            .key(archive_key.clone())
             .send()
             .await
             .map_err(|err| Status::not_found(err.to_string()))?;
 
-        let mut stream = client
+        let mut archive_stream = client
             .get_object()
             .bucket(bucket)
-            .key(artifact_key)
+            .key(archive_key)
             .send()
             .await
             .map_err(|err| Status::internal(err.to_string()))?
             .body;
 
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.map_err(|err| Status::internal(err.to_string()))?;
+        while let Some(chunk) = archive_stream.next().await {
+            let archive_chunk = chunk.map_err(|err| Status::internal(err.to_string()))?;
 
             tx.send(Ok(RegistryPullResponse {
-                data: chunk.to_vec(),
+                data: archive_chunk.to_vec(),
             }))
             .await
             .map_err(|err| Status::internal(format!("failed to send store chunk: {:?}", err)))?;
@@ -121,63 +134,66 @@ impl RegistryBackend for S3RegistryBackend {
         Ok(())
     }
 
-    async fn push(&self, metadata: PushMetadata) -> Result<(), Status> {
-        let PushMetadata {
-            data,
-            data_kind,
-            hash,
-            manifest,
-            name,
-        } = metadata;
-
+    async fn push_archive(&self, request: &RegistryPushRequest) -> Result<(), Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let artifact_key = get_artifact_key(data_kind, &hash, &name)?;
+        let archive_key = get_archive_key(&request.hash);
 
-        let artifact_head_result = client
+        let archive_head = client
+            .head_object()
+            .bucket(bucket)
+            .key(&archive_key)
+            .send()
+            .await;
+
+        if archive_head.is_ok() {
+            return Ok(());
+        }
+
+        client
+            .put_object()
+            .bucket(bucket)
+            .key(archive_key)
+            .body(request.data.clone().into())
+            .send()
+            .await
+            .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
+
+        Ok(())
+    }
+
+    async fn put_artifact(&self, request: &ConfigArtifact) -> Result<(), Status> {
+        let client = &self.client;
+        let bucket = &self.bucket;
+
+        let artifact_json = serde_json::to_vec(request)
+            .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
+        let artifact_hash = digest(&artifact_json);
+        let artifact_key = get_config_key(&artifact_hash);
+
+        let artifact_head = client
             .head_object()
             .bucket(bucket)
             .key(&artifact_key)
             .send()
             .await;
 
-        if artifact_head_result.is_ok() {
+        if artifact_head.is_ok() {
             return Ok(());
         }
 
-        let _ = client
+        let artifact_json = serde_json::to_vec(request)
+            .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
+
+        client
             .put_object()
             .bucket(bucket)
             .key(artifact_key)
-            .body(data.into())
+            .body(artifact_json.into())
             .send()
             .await
-            .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
-
-        let manifest_key = get_manifest_key(data_kind, &hash, &name)?;
-
-        let manifest_head_result = client
-            .head_object()
-            .bucket(bucket)
-            .key(&manifest_key)
-            .send()
-            .await;
-
-        if manifest_head_result.is_ok() {
-            return Ok(());
-        }
-
-        let manifest_bytes = manifest.into_bytes();
-
-        let _ = client
-            .put_object()
-            .bucket(bucket)
-            .key(manifest_key)
-            .body(manifest_bytes.into())
-            .send()
-            .await
-            .map_err(|err| Status::internal(format!("failed to write manifest: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to write store config: {:?}", err)))?;
 
         Ok(())
     }

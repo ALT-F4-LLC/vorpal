@@ -5,22 +5,12 @@ edition = "2021"
 
 [dependencies]
 anyhow = { default-features = false, version = "1" }
-async-compression = { version = "0", features = ["all"] }
 clap = { default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], version = "4" }
-console = { version = "0" }
 indoc = { default-features = false, version = "2" }
-infer = { default-features = false, version = "0" }
-reqwest = { default-features = false, version = "0", features = ["json", "rustls-tls"] }
 serde = { default-features = false, features = ["serde_derive"], version = "1" }
 serde_json = { default-features = false, features = ["std"], version = "1" }
 sha256 = { default-features = false, version = "1" }
-tokio = { default-features = false, version = "1" }
-tokio-stream = { default-features = false, features = ["io-util"], version = "0" }
-tokio-tar = { default-features = false, version = "0" }
 toml = { default-features = false, features = ["parse"], version = "0" }
 tonic = { default-features = false, version = "0" }
 tracing = { default-features = false, version = "0" }
-url = { default-features = false, version = "2" }
-vorpal-notary = { default-features = false, path = "../../notary" }
 vorpal-schema = { default-features = false, path = "../../schema" }
-vorpal-store = { default-features = false, path = "../../store" }

@@ -1,20 +1,22 @@
-use std::path::Path;
-
+use crate::{RegistryBackend, RegistryError, DEFAULT_GRPC_CHUNK_SIZE};
 use anyhow::{anyhow, Context, Result};
 use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_RANGE, CONTENT_TYPE},
     Client, StatusCode,
 };
 use serde::{Deserialize, Serialize};
+use sha256::digest;
+use std::path::Path;
 use tokio::{
     fs::{read, write},
     sync::mpsc,
 };
 use tonic::{async_trait, Status};
 use tracing::info;
-use vorpal_schema::vorpal::registry::v0::{RegistryKind, RegistryPullResponse, RegistryRequest};
-
-use crate::{PushMetadata, RegistryBackend, RegistryError, DEFAULT_GRPC_CHUNK_SIZE};
+use vorpal_schema::{
+    config::v0::{ConfigArtifact, ConfigArtifactRequest},
+    registry::v0::{RegistryPullRequest, RegistryPullResponse, RegistryPushRequest},
+};
 
 const API_VERSION: &str = "6.0-preview.1";
 const DEFAULT_GHA_CHUNK_SIZE: usize = 32 * 1024 * 1024; // 32MB
@@ -171,9 +173,10 @@ impl CacheClient {
             );
         }
 
-        // Commit the cache
         info!("Committing cache");
+
         let commit_request = CommitCacheRequest { size: buffer_size };
+
         self.client
             .post(&url)
             .json(&commit_request)
@@ -187,26 +190,12 @@ impl CacheClient {
     }
 }
 
-fn get_archive_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
-    let prefix = "vorpal-registry";
-    let affix = format!("{}-{}", name, hash);
-
-    match kind {
-        RegistryKind::Artifact => Ok(format!("{}-{}-artifact", prefix, affix)),
-        RegistryKind::ArtifactSource => Ok(format!("{}-{}-source", prefix, affix)),
-        _ => Err(anyhow::anyhow!("unsupported store kind")),
-    }
+fn get_archive_key(hash: &str) -> String {
+    format!("{}.tar.zst", hash)
 }
 
-fn get_manifest_key(name: &str, hash: &str, kind: RegistryKind) -> Result<String> {
-    let prefix = "vorpal-registry";
-    let affix = format!("{}-{}", name, hash);
-
-    match kind {
-        RegistryKind::Artifact => Ok(format!("{}-{}-artifact-manifest", prefix, affix)),
-        RegistryKind::ArtifactSource => Ok(format!("{}-{}-source-manifest", prefix, affix)),
-        _ => Err(anyhow::anyhow!("unsupported store kind")),
-    }
+fn get_config_key(hash: &str) -> String {
+    format!("{}.json", hash)
 }
 
 #[derive(Debug, Clone)]
@@ -225,43 +214,34 @@ impl GhaRegistryBackend {
 
 #[async_trait]
 impl RegistryBackend for GhaRegistryBackend {
-    async fn exists(&self, request: &RegistryRequest) -> Result<String, Status> {
-        let cache_file_key = get_manifest_key(&request.name, &request.hash, request.kind())
-            .expect("failed to get cache key");
-        let cache_file = format!("/tmp/{}", cache_file_key);
-        let cache_file_path = Path::new(&cache_file);
+    async fn get_archive(&self, request: &RegistryPullRequest) -> Result<(), Status> {
+        let artifact_key = get_archive_key(&request.hash);
+        let artifact_file = format!("/tmp/{}", artifact_key);
+        let artifact_path = Path::new(&artifact_file);
 
-        if cache_file_path.exists() {
-            let cache_data = read(&cache_file_path)
-                .await
-                .map_err(|err| Status::internal(err.to_string()))?;
-
-            let cache =
-                String::from_utf8(cache_data).map_err(|err| Status::internal(err.to_string()))?;
-
-            return Ok(cache);
+        if artifact_path.exists() {
+            return Ok(());
         }
 
-        info!("fetch cache entry: {}", cache_file_key);
+        info!("fetch cache: {}", artifact_key);
 
         let cache_entry = &self
             .cache_client
-            .get_cache_entry(&cache_file_key, &request.hash)
+            .get_cache_entry(&artifact_key, &request.hash)
             .await
             .map_err(|e| {
                 Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
             })?;
 
         if cache_entry.is_none() {
-            return Err(Status::not_found("store path not found"));
+            return Err(Status::not_found(format!(
+                "cache entry not found: {artifact_key}"
+            )));
         }
 
         let cache_entry = cache_entry.as_ref().unwrap();
 
-        info!(
-            "fetch cache entry location: {:?}",
-            cache_entry.archive_location
-        );
+        info!("fetch cache location: {:?}", cache_entry.archive_location);
 
         let cache_response = reqwest::get(&cache_entry.archive_location)
             .await
@@ -272,38 +252,94 @@ impl RegistryBackend for GhaRegistryBackend {
             .await
             .expect("failed to read response");
 
-        write(&cache_file_path, &cache_response_bytes)
+        write(&artifact_path, &cache_response_bytes)
             .await
             .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
 
-        info!("fetch cache entry saved: {:?}", cache_file_path);
+        info!("fetch cache saved: {:?}", artifact_path);
 
-        let cache_data = read(&cache_file_path)
-            .await
-            .map_err(|err| Status::internal(err.to_string()))?;
-
-        let cache =
-            String::from_utf8(cache_data).map_err(|err| Status::internal(err.to_string()))?;
-
-        Ok(cache)
+        Ok(())
     }
 
-    async fn pull(
+    async fn get_artifact(
         &self,
-        request: &RegistryRequest,
-        tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
-    ) -> Result<(), Status> {
-        let cache_file_key = get_archive_key(&request.name, &request.hash, request.kind())
-            .expect("failed to get cache key");
-        let cache_file = format!("/tmp/{}", cache_file_key);
-        let cache_file_path = Path::new(&cache_file);
+        request: &ConfigArtifactRequest,
+    ) -> Result<ConfigArtifact, Status> {
+        let artifact_key = get_config_key(&request.hash);
+        let artifact_file_path = format!("/tmp/{}", artifact_key);
+        let artifact_file = Path::new(&artifact_file_path);
 
-        if cache_file_path.exists() {
-            let cache_data = read(&cache_file_path)
+        if artifact_file.exists() {
+            let artifact_data = read(&artifact_file)
                 .await
                 .map_err(|err| Status::internal(err.to_string()))?;
 
-            for chunk in cache_data.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
+            let artifact = serde_json::from_slice::<ConfigArtifact>(&artifact_data)
+                .map_err(|err| Status::internal(err.to_string()))?;
+
+            return Ok(artifact);
+        }
+
+        info!("fetch cache: {}", artifact_key);
+
+        let cache_entry = &self
+            .cache_client
+            .get_cache_entry(&artifact_key, &request.hash)
+            .await
+            .map_err(|e| {
+                Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
+            })?;
+
+        if cache_entry.is_none() {
+            return Err(Status::not_found(format!(
+                "cache entry not found: {artifact_key}"
+            )));
+        }
+
+        let cache_entry = cache_entry.as_ref().unwrap();
+
+        info!("fetch cache location: {:?}", cache_entry.archive_location);
+
+        let cache_response = reqwest::get(&cache_entry.archive_location)
+            .await
+            .expect("failed to get");
+
+        let cache_response_bytes = cache_response
+            .bytes()
+            .await
+            .expect("failed to read response");
+
+        write(&artifact_file, &cache_response_bytes)
+            .await
+            .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
+
+        info!("fetch cache saved: {:?}", artifact_file);
+
+        let artifact_data = read(&artifact_file)
+            .await
+            .map_err(|err| Status::internal(err.to_string()))?;
+
+        let artifact = serde_json::from_slice::<ConfigArtifact>(&artifact_data)
+            .map_err(|err| Status::internal(err.to_string()))?;
+
+        Ok(artifact)
+    }
+
+    async fn pull_archive(
+        &self,
+        request: &RegistryPullRequest,
+        tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
+    ) -> Result<(), Status> {
+        let archive_key = get_archive_key(&request.hash);
+        let archive_file_path = format!("/tmp/{}", archive_key);
+        let archive_file = Path::new(&archive_file_path);
+
+        if archive_file.exists() {
+            let archive_data = read(&archive_file)
+                .await
+                .map_err(|err| Status::internal(err.to_string()))?;
+
+            for chunk in archive_data.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
                 tx.send(Ok(RegistryPullResponse {
                     data: chunk.to_vec(),
                 }))
@@ -316,11 +352,11 @@ impl RegistryBackend for GhaRegistryBackend {
             return Ok(());
         }
 
-        info!("fetch cache entry: {}", cache_file_key);
+        info!("fetch entry: {}", archive_key);
 
         let cache_entry = &self
             .cache_client
-            .get_cache_entry(&cache_file_key, &request.hash)
+            .get_cache_entry(&archive_key, &request.hash)
             .await
             .expect("failed to get cache entry");
 
@@ -328,26 +364,26 @@ impl RegistryBackend for GhaRegistryBackend {
             return Err(Status::not_found("store path not found"));
         };
 
-        info!(
-            "fetch cache entry location: {:?}",
-            cache_entry.archive_location
-        );
+        info!("fetch cache location: {:?}", cache_entry.archive_location);
 
-        let response = reqwest::get(&cache_entry.archive_location)
+        let cache_response = reqwest::get(&cache_entry.archive_location)
             .await
             .expect("failed to get");
 
-        let response_bytes = response.bytes().await.expect("failed to read response");
+        let cache_response_bytes = cache_response
+            .bytes()
+            .await
+            .expect("failed to read response");
 
-        info!("fetch cache entry saved: {:?}", cache_file_path);
+        info!("fetch cache saved: {:?}", archive_file);
 
-        write(&cache_file_path, &response_bytes)
+        write(&archive_file, &cache_response_bytes)
             .await
             .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
 
-        info!("fetch cache entry send: {:?}", response_bytes.len());
+        info!("archive send: {:?}", cache_response_bytes.len());
 
-        for chunk in response_bytes.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
+        for chunk in cache_response_bytes.chunks(DEFAULT_GRPC_CHUNK_SIZE) {
             tx.send(Ok(RegistryPullResponse {
                 data: chunk.to_vec(),
             }))
@@ -355,77 +391,108 @@ impl RegistryBackend for GhaRegistryBackend {
             .map_err(|err| Status::internal(format!("failed to send store chunk: {:?}", err)))?;
         }
 
-        info!("fetch cache entry sent: {:?}", cache_file_path);
+        info!("archive sent: {:?}", archive_file);
 
         Ok(())
     }
 
-    async fn push(&self, metadata: PushMetadata) -> Result<(), Status> {
-        let PushMetadata {
-            data,
-            data_kind,
-            hash,
-            manifest,
-            name,
-        } = metadata;
+    async fn push_archive(&self, request: &RegistryPushRequest) -> Result<(), Status> {
+        let archive_key = get_archive_key(request.hash.as_str());
+        let archive_file_path = format!("/tmp/{}", archive_key);
+        let archive_file = Path::new(&archive_file_path);
 
-        // 1. save the archive to cache
-
-        let cache_archive_key = get_archive_key(&name, &hash, data_kind)
-            .map_err(|err| Status::internal(format!("failed to get cache key: {:?}", err)))?;
-
-        let cache_archive_size = data.len() as u64;
-
-        let cache_archive_reserve = &self
-            .cache_client
-            .reserve_cache(cache_archive_key, hash.clone(), Some(cache_archive_size))
-            .await
-            .map_err(|e| {
-                Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
+        if !archive_file.exists() {
+            write(archive_file, &request.data).await.map_err(|err| {
+                Status::internal(format!("failed to write store path: {:?}", err))
             })?;
-
-        if cache_archive_reserve.cache_id == 0 {
-            return Err(Status::internal("failed to reserve cache returned 0"));
         }
 
-        self.cache_client
-            .save_cache(
-                cache_archive_reserve.cache_id,
-                &data,
-                DEFAULT_GHA_CHUNK_SIZE,
-            )
-            .await
-            .map_err(|e| Status::internal(format!("failed to save cache: {:?}", e.to_string())))?;
-
-        // 2. save the manifest to cache
-
-        let cache_manifest_key = get_manifest_key(&name, &hash, data_kind)
-            .map_err(|err| Status::internal(format!("failed to get cache key: {:?}", err)))?;
-
-        let cache_manifest_bytes = manifest.as_bytes();
-
-        let cache_manifest_size = cache_manifest_bytes.len() as u64;
-
-        let cache_manifest_reserve = &self
+        let cache_entry = &self
             .cache_client
-            .reserve_cache(cache_manifest_key, hash.clone(), Some(cache_manifest_size))
+            .get_cache_entry(&archive_key, &request.hash)
             .await
             .map_err(|e| {
-                Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
+                Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
             })?;
 
-        if cache_manifest_reserve.cache_id == 0 {
-            return Err(Status::internal("failed to reserve cache returned 0"));
+        if cache_entry.is_none() {
+            let cache_size = request.data.len() as u64;
+
+            let cache_reserve = &self
+                .cache_client
+                .reserve_cache(archive_key, request.hash.clone(), Some(cache_size))
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
+                })?;
+
+            if cache_reserve.cache_id == 0 {
+                return Err(Status::internal("failed to reserve cache returned 0"));
+            }
+
+            self.cache_client
+                .save_cache(
+                    cache_reserve.cache_id,
+                    &request.data,
+                    DEFAULT_GHA_CHUNK_SIZE,
+                )
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("failed to save cache: {:?}", e.to_string()))
+                })?;
         }
 
-        self.cache_client
-            .save_cache(
-                cache_manifest_reserve.cache_id,
-                cache_manifest_bytes,
-                DEFAULT_GHA_CHUNK_SIZE,
-            )
+        Ok(())
+    }
+
+    async fn put_artifact(&self, request: &ConfigArtifact) -> Result<(), Status> {
+        let artifact_json = serde_json::to_vec(request)
+            .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
+        let artifact_hash = digest(&artifact_json);
+        let artifact_key = get_config_key(&artifact_hash);
+        let artifact_file_path = format!("/tmp/{}", artifact_key);
+        let artifact_path = Path::new(&artifact_file_path);
+
+        if !artifact_path.exists() {
+            write(artifact_path, &artifact_json)
+                .await
+                .map_err(|err| Status::internal(format!("failed to write artifact: {:?}", err)))?;
+        }
+
+        let cache_entry = &self
+            .cache_client
+            .get_cache_entry(&artifact_key, &artifact_hash)
             .await
-            .map_err(|e| Status::internal(format!("failed to save cache: {:?}", e.to_string())))?;
+            .map_err(|e| {
+                Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
+            })?;
+
+        if cache_entry.is_none() {
+            let cache_size = artifact_json.len() as u64;
+
+            let cache_reserve = &self
+                .cache_client
+                .reserve_cache(artifact_key, artifact_hash, Some(cache_size))
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
+                })?;
+
+            if cache_reserve.cache_id == 0 {
+                return Err(Status::internal("failed to reserve cache returned 0"));
+            }
+
+            self.cache_client
+                .save_cache(
+                    cache_reserve.cache_id,
+                    &artifact_json,
+                    DEFAULT_GHA_CHUNK_SIZE,
+                )
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("failed to save cache: {:?}", e.to_string()))
+                })?;
+        }
 
         Ok(())
     }

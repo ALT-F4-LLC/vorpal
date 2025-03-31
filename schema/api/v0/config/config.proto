@@ -4,15 +4,53 @@ package vorpal.config.v0;
 
 option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/config";
 
-import "v0/artifact/artifact.proto";
-
 service ConfigService {
     rpc GetConfig(ConfigRequest) returns (Config);
-    rpc GetArtifact(vorpal.artifact.v0.ArtifactId) returns (vorpal.artifact.v0.Artifact);
+    rpc GetConfigArtifact(ConfigArtifactRequest) returns (ConfigArtifact);
 }
+
+// Schema Messages
+
+enum ConfigArtifactSystem {
+    UNKNOWN_SYSTEM = 0;
+    AARCH64_DARWIN = 1;
+    AARCH64_LINUX = 2;
+    X8664_DARWIN = 3;
+    X8664_LINUX = 4;
+}
+
+message ConfigArtifactSource {
+    optional string hash = 1;
+    repeated string excludes = 2;
+    repeated string includes = 3;
+    string path = 4;
+    string name = 5;
+}
+
+message ConfigArtifactStep {
+    optional string entrypoint = 1;
+    optional string script = 2;
+    repeated string arguments = 3;
+    repeated string artifacts = 4;
+    repeated string environments = 5;
+}
+
+message ConfigArtifact {
+    ConfigArtifactSystem target = 1;
+    repeated ConfigArtifactSource sources = 2;
+    repeated ConfigArtifactStep steps = 3;
+    repeated ConfigArtifactSystem systems = 4;
+    string name = 5;
+}
+
+message Config {
+    repeated string artifacts = 1;
+}
+
+// Request messages
 
 message ConfigRequest {}
 
-message Config {
-    repeated vorpal.artifact.v0.ArtifactId artifacts = 1;
+message ConfigArtifactRequest {
+    string hash = 1;
 }

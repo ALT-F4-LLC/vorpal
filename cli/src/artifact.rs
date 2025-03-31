@@ -1,117 +1,432 @@
+use crate::get_prefix;
 use anyhow::{bail, Result};
-use console::style;
-use tokio::{
-    fs::{create_dir_all, remove_file, File},
-    io::AsyncWriteExt,
-};
-use tonic::Code::NotFound;
+use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
+use std::path::Path;
+use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
+use tokio_tar::Archive;
+use tonic::{transport::Channel, Code::NotFound};
 use tracing::info;
-use vorpal_schema::vorpal::{
-    artifact::v0::{
-        artifact_service_client::ArtifactServiceClient, Artifact, ArtifactBuildRequest, ArtifactId,
-        ArtifactSystem,
+use url::Url;
+use vorpal_schema::{
+    artifact::v0::artifact_service_client::ArtifactServiceClient,
+    config::v0::{ConfigArtifact, ConfigArtifactSource},
+    registry::v0::{
+        registry_service_client::RegistryServiceClient, RegistryArchive, RegistryPullRequest,
+        RegistryPushRequest,
     },
-    registry::v0::{registry_service_client::RegistryServiceClient, RegistryKind, RegistryRequest},
 };
 use vorpal_store::{
-    archives::unpack_zstd,
-    paths::{get_artifact_path, get_file_paths, set_timestamps},
-    temps::create_sandbox_file,
+    archives::{compress_zstd, unpack_zip, unpack_zstd},
+    hashes::hash_files,
+    paths::{
+        copy_files, get_archive_path, get_file_paths, get_private_key_path, get_store_path,
+        set_timestamps,
+    },
+    temps::{create_sandbox_dir, create_sandbox_file},
 };
 
-fn get_prefix(name: &str) -> String {
-    style(format!("{} |>", name)).bold().to_string()
+const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
+
+#[derive(PartialEq)]
+enum ConfigArtifactSourceType {
+    Unknown,
+    Local,
+    Git,
+    Http,
+}
+
+pub async fn build_source(
+    artifact: &ConfigArtifact,
+    registry_service: &mut RegistryServiceClient<Channel>,
+    source: &ConfigArtifactSource,
+) -> Result<()> {
+    if let Some(hash) = &source.hash {
+        let registry_request = RegistryPullRequest {
+            archive: RegistryArchive::ArtifactSource as i32,
+            hash: hash.clone(),
+        };
+
+        match registry_service.get_archive(registry_request).await {
+            Err(status) => {
+                if status.code() != NotFound {
+                    bail!("registry pull error: {:?}", status);
+                }
+            }
+
+            Ok(_) => {
+                return Ok(());
+            }
+        }
+    }
+
+    // 2. Build source
+
+    info!(
+        "{} build source: {}",
+        get_prefix(&artifact.name),
+        source.name
+    );
+
+    let source_type = match &source.path {
+        s if Path::new(s).exists() => ConfigArtifactSourceType::Local,
+        s if s.starts_with("git") => ConfigArtifactSourceType::Git,
+        s if s.starts_with("http") => ConfigArtifactSourceType::Http,
+        _ => ConfigArtifactSourceType::Unknown,
+    };
+
+    if source_type == ConfigArtifactSourceType::Git {
+        bail!("`source.{}.path` git not supported", source.name);
+    }
+
+    if source_type == ConfigArtifactSourceType::Unknown {
+        bail!(
+            "`source.{}.path` unknown kind: {:?}",
+            source.name,
+            source.path
+        );
+    }
+
+    let source_sandbox = create_sandbox_dir().await?;
+
+    if source_type == ConfigArtifactSourceType::Http {
+        if source.hash.is_none() {
+            bail!(
+                "`source.{}.hash` required for remote sources: {:?}",
+                source.name,
+                source.path
+            );
+        }
+
+        if source.hash.is_some() && source.hash.clone().unwrap() == "" {
+            bail!(
+                "`source.{}.hash` empty for remote sources: {:?}",
+                source.name,
+                source.path
+            );
+        }
+
+        info!(
+            "{} download source: {}",
+            get_prefix(&artifact.name),
+            source.name
+        );
+
+        let http_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
+
+        if http_path.scheme() != "http" && http_path.scheme() != "https" {
+            bail!(
+                "source remote scheme not supported: {:?}",
+                http_path.scheme()
+            );
+        }
+
+        let remote_response = reqwest::get(http_path.as_str())
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        if !remote_response.status().is_success() {
+            anyhow::bail!("source URL not failed: {:?}", remote_response.status());
+        }
+
+        let remote_response_bytes = remote_response
+            .bytes()
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        let remote_response_bytes = remote_response_bytes.as_ref();
+
+        let kind = infer::get(remote_response_bytes);
+
+        if kind.is_none() {
+            let source_file_name = http_path
+                .path_segments()
+                .and_then(|segments| segments.last())
+                .and_then(|name| if name.is_empty() { None } else { Some(name) })
+                .unwrap_or(&source.name);
+
+            let source_file_path = source_sandbox.join(source_file_name);
+
+            write(&source_file_path, remote_response_bytes)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        info!(
+            "{} unpack source: {}",
+            get_prefix(&artifact.name),
+            source.name
+        );
+
+        if let Some(kind) = kind {
+            match kind.mime_type() {
+                "application/gzip" => {
+                    let decoder = GzipDecoder::new(remote_response_bytes);
+                    let mut archive = Archive::new(decoder);
+
+                    archive
+                        .unpack(&source_sandbox)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+
+                    // let source_cache_path = source_cache_path.join("...");
+                }
+
+                "application/x-bzip2" => {
+                    let decoder = BzDecoder::new(remote_response_bytes);
+                    let mut archive = Archive::new(decoder);
+
+                    archive
+                        .unpack(&source_sandbox)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+
+                "application/x-xz" => {
+                    let decoder = XzDecoder::new(remote_response_bytes);
+                    let mut archive = Archive::new(decoder);
+
+                    archive
+                        .unpack(&source_sandbox)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+
+                "application/zip" => {
+                    let archive_sandbox_path = create_sandbox_file(Some("zip")).await?;
+
+                    write(&archive_sandbox_path, remote_response_bytes)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+
+                    unpack_zip(&archive_sandbox_path, &source_sandbox).await?;
+
+                    remove_file(&archive_sandbox_path)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+
+                _ => {
+                    bail!(
+                        "`source.{}.path` unsupported mime-type detected: {:?}",
+                        source.name,
+                        source.path
+                    );
+                }
+            }
+        }
+    }
+
+    if source_type == ConfigArtifactSourceType::Local {
+        let local_path = Path::new(&source.path).to_path_buf();
+
+        if !local_path.exists() {
+            bail!("`source.{}.path` not found: {:?}", source.name, source.path);
+        }
+
+        info!(
+            "{} copy source: {}",
+            get_prefix(&artifact.name),
+            source.name
+        );
+
+        // TODO: make path relevant to the current working directory
+
+        let local_files = get_file_paths(
+            &local_path,
+            source.excludes.clone(),
+            source.includes.clone(),
+        )?;
+
+        copy_files(&local_path, local_files, &source_sandbox).await?;
+    }
+
+    let source_sandbox_files = get_file_paths(
+        &source_sandbox,
+        source.excludes.clone(),
+        source.includes.clone(),
+    )?;
+
+    if source_sandbox_files.is_empty() {
+        bail!(
+            "Artifact `source.{}.path` no files found: {:?}",
+            source.name,
+            source.path
+        );
+    }
+
+    // 3. Sanitize files
+
+    info!(
+        "{} sanitize source: {}",
+        get_prefix(&artifact.name),
+        source.name
+    );
+
+    for sandbox_path in source_sandbox_files.clone().into_iter() {
+        set_timestamps(&sandbox_path).await?;
+    }
+
+    // 4. Hash files
+
+    info!(
+        "{} hash source: {}",
+        get_prefix(&artifact.name),
+        source.name
+    );
+
+    let source_hash = hash_files(source_sandbox_files.clone())?;
+
+    if let Some(hash) = source.hash.clone() {
+        if hash != source_hash {
+            bail!(
+                "`source.{}.hash` mismatch: {} != {}",
+                source.name,
+                source_hash,
+                hash
+            );
+        }
+    }
+
+    // 5. Push source
+
+    let registry_request = RegistryPullRequest {
+        archive: RegistryArchive::ArtifactSource as i32,
+        hash: source_hash.clone(),
+    };
+
+    match registry_service.get_archive(registry_request).await {
+        Err(status) => {
+            if status.code() != NotFound {
+                bail!("registry pull error: {:?}", status);
+            }
+
+            info!(
+                "{} pack source: {}",
+                get_prefix(&artifact.name),
+                source.name
+            );
+
+            let source_sandbox_archive = create_sandbox_file(Some("tar.zst")).await?;
+
+            compress_zstd(
+                &source_sandbox,
+                &source_sandbox_files,
+                &source_sandbox_archive,
+            )
+            .await?;
+
+            let private_key_path = get_private_key_path();
+
+            if !private_key_path.exists() {
+                bail!("Private key not found: {}", private_key_path.display());
+            }
+
+            let source_archive_data = read(&source_sandbox_archive).await?;
+
+            let source_signature =
+                vorpal_notary::sign(private_key_path.clone(), &source_archive_data).await?;
+
+            let mut source_stream = vec![];
+
+            for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
+                source_stream.push(RegistryPushRequest {
+                    archive: RegistryArchive::ArtifactSource as i32,
+                    data: chunk.to_vec(),
+                    signature: source_signature.clone().to_vec(),
+                    hash: source_hash.clone(),
+                });
+            }
+
+            info!(
+                "{} push source: {}",
+                get_prefix(&artifact.name),
+                source.hash.clone().unwrap()
+            );
+
+            registry_service
+                .push_archive(tokio_stream::iter(source_stream))
+                .await
+                .expect("failed to push");
+
+            remove_file(&source_sandbox_archive).await?;
+        }
+
+        Ok(_) => {
+            return Ok(());
+        }
+    }
+
+    remove_dir_all(&source_sandbox)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    Ok(())
 }
 
 pub async fn build(
-    artifact: &Artifact,
-    artifact_id: &ArtifactId,
-    artifact_target: ArtifactSystem,
-    registry: &str,
-    service: &str,
+    artifact: &ConfigArtifact,
+    artifact_hash: &str,
+    artifact_service: &mut ArtifactServiceClient<Channel>,
+    registry_service: &mut RegistryServiceClient<Channel>,
 ) -> Result<()> {
-    // 1. Check if artifact exists (local)
+    // 1. Check artifact
 
-    let artifact_path = get_artifact_path(&artifact_id.hash, &artifact_id.name);
+    let artifact_path = get_store_path(&artifact_hash);
 
     if artifact_path.exists() {
         return Ok(());
     }
 
-    // 2. Check if artifact exists (registry)
+    // 2. Pull
 
-    let pull_request = RegistryRequest {
-        hash: artifact_id.hash.clone(),
-        kind: RegistryKind::Artifact as i32,
-        name: artifact_id.name.clone(),
+    let request_pull = RegistryPullRequest {
+        archive: RegistryArchive::Artifact as i32,
+        hash: artifact_hash.to_string(),
     };
 
-    let mut registry = RegistryServiceClient::connect(registry.to_owned())
-        .await
-        .expect("failed to connect to store");
-
-    match registry.exists(pull_request.clone()).await {
+    match registry_service.pull_archive(request_pull.clone()).await {
         Err(status) => {
             if status.code() != NotFound {
-                bail!("Registry pull error: {:?}", status);
+                bail!("registry pull error: {:?}", status);
             }
         }
 
-        Ok(_) => match registry.pull(pull_request.clone()).await {
-            Err(status) => {
-                if status.code() != NotFound {
-                    bail!("Registry pull error: {:?}", status);
+        Ok(response) => {
+            let mut stream = response.into_inner();
+            let mut stream_data = Vec::new();
+
+            info!("{} pull: {}", get_prefix(&artifact.name), artifact_hash);
+
+            loop {
+                match stream.message().await {
+                    Ok(Some(chunk)) => {
+                        if !chunk.data.is_empty() {
+                            stream_data.extend_from_slice(&chunk.data);
+                        }
+                    }
+
+                    Ok(None) => break,
+
+                    Err(status) => {
+                        if status.code() != NotFound {
+                            bail!("registry stream error: {:?}", status);
+                        }
+
+                        break;
+                    }
                 }
             }
 
-            Ok(response) => {
-                info!(
-                    "{} pulling: {}",
-                    get_prefix(&artifact_id.name),
-                    artifact_id.hash
-                );
+            if !stream_data.is_empty() {
+                let archive_path = get_archive_path(&artifact_hash);
 
-                let mut response = response.into_inner();
-                let mut response_data = Vec::new();
-
-                loop {
-                    match response.message().await {
-                        Ok(res) => match res {
-                            Some(response) => {
-                                if !response.data.is_empty() {
-                                    response_data.extend_from_slice(&response.data);
-                                }
-                            }
-
-                            None => break,
-                        },
-
-                        Err(err) => {
-                            bail!("Stream error: {:?}", err);
-                        }
-                    };
-                }
-
-                if response_data.is_empty() {
-                    bail!("artifact data not found: {:?}", artifact_id);
-                }
-
-                let archive_path = create_sandbox_file(Some("tar.zst")).await?;
-
-                let mut archive = File::create(&archive_path)
+                write(&archive_path, &stream_data)
                     .await
-                    .expect("failed to create artifact archive");
+                    .expect("failed to write archive");
 
-                archive
-                    .write_all(&response_data)
-                    .await
-                    .expect("failed to write artifact archive");
+                set_timestamps(&archive_path).await?;
 
-                info!(
-                    "{} unpacking: {}",
-                    get_prefix(&artifact_id.name),
-                    artifact_id.hash
-                );
+                info!("{} unpack: {}", get_prefix(&artifact.name), artifact_hash);
 
                 create_dir_all(&artifact_path)
                     .await
@@ -129,24 +444,15 @@ pub async fn build(
                     set_timestamps(artifact_files).await?;
                 }
 
-                remove_file(&archive_path).await.expect("failed to remove");
-
                 return Ok(());
             }
-        },
-    }
+        }
+    };
 
-    // Build artifact
+    // Build
 
-    let mut worker = ArtifactServiceClient::connect(service.to_owned())
-        .await
-        .expect("failed to connect to artifact");
-
-    let response = worker
-        .build(ArtifactBuildRequest {
-            artifact: Some(artifact.clone()),
-            system: artifact_target as i32,
-        })
+    let response = artifact_service
+        .build(artifact.clone())
         .await
         .expect("failed to build");
 
@@ -154,15 +460,13 @@ pub async fn build(
 
     loop {
         match stream.message().await {
-            Ok(res) => match res {
-                Some(response) => {
-                    if !response.output.is_empty() {
-                        info!("{} {}", get_prefix(&artifact_id.name), response.output);
-                    }
+            Ok(Some(response)) => {
+                if !response.output.is_empty() {
+                    info!("{} {}", get_prefix(&artifact.name), response.output);
                 }
+            }
 
-                None => break,
-            },
+            Ok(None) => break,
 
             Err(err) => {
                 bail!("Stream error: {:?}", err);

@@ -1,24 +1,18 @@
-use anyhow::Result;
-use vorpal_schema::vorpal::artifact::v0::ArtifactSourceId;
-use vorpal_sdk::{artifact::ArtifactSource, context::ConfigContext};
+use vorpal_schema::config::v0::ConfigArtifactSource;
+use vorpal_sdk::artifact::ConfigArtifactSourceBuilder;
 
-pub async fn go_tools(context: &mut ConfigContext) -> Result<ArtifactSourceId> {
+pub fn go_tools() -> ConfigArtifactSource {
     let hash = "b4faf133f053f372cfe8ea3189bf035d19ca1661cb3ac1e7cd34a465de5641c2";
 
     let version = "0.29.0";
 
-    context
-        .add_artifact_source(
-            "go-tools",
-            ArtifactSource {
-                excludes: vec![],
-                hash: Some(hash.to_string()),
-                includes: vec![],
-                path: format!(
-                    "https://go.googlesource.com/tools/+archive/refs/tags/v{}.tar.gz",
-                    version
-                ),
-            },
-        )
-        .await
+    ConfigArtifactSourceBuilder::new(
+        "go-tools".to_string(),
+        format!(
+            "https://go.googlesource.com/tools/+archive/refs/tags/v{}.tar.gz",
+            version
+        ),
+    )
+    .with_hash(hash.to_string())
+    .build()
 }

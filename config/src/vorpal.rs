@@ -2,23 +2,25 @@ use crate::artifact::{
     go, goimports, gopls, protoc, protoc_gen_go, protoc_gen_go_grpc, rust_toolchain,
 };
 use anyhow::Result;
-use vorpal_schema::vorpal::artifact::v0::ArtifactId;
 use vorpal_sdk::{
-    artifact::{get_artifact_envkey, language::rust::rust_package, shell::shell_artifact},
+    artifact::{get_env_key, language::rust, shell},
     context::ConfigContext,
 };
 
-pub async fn devshell(context: &mut ConfigContext) -> Result<ArtifactId> {
+pub async fn devshell(context: &mut ConfigContext) -> Result<String> {
     let name = "vorpal-shell";
 
-    let go = go::artifact(context).await?;
-    let goimports = goimports::artifact(context).await?;
-    let gopls = gopls::artifact(context).await?;
-    let protoc = protoc::artifact(context).await?;
-    let protoc_gen_go = protoc_gen_go::artifact(context).await?;
-    let protoc_gen_go_grpc = protoc_gen_go_grpc::artifact(context).await?;
-    let rust_toolchain = rust_toolchain::artifact(context).await?;
-    let rust_toolchain_target = rust_toolchain::get_rust_toolchain_target(context.get_target())?;
+    let target = context.get_target();
+
+    let go = go::build(context).await?;
+    let goimports = goimports::build(context).await?;
+    let gopls = gopls::build(context).await?;
+    let protoc = protoc::build(context).await?;
+    let protoc_gen_go = protoc_gen_go::build(context).await?;
+    let protoc_gen_go_grpc = protoc_gen_go_grpc::build(context).await?;
+    let rust_toolchain = rust_toolchain::build(context).await?;
+    let rust_toolchain_target = rust::get_toolchain_target(target)?;
+    let rust_toolchain_version = rust::get_toolchain_version();
 
     let artifacts = vec![
         go.clone(),
@@ -33,46 +35,45 @@ pub async fn devshell(context: &mut ConfigContext) -> Result<ArtifactId> {
     let envs = vec![
         format!(
             "PATH={}/bin:{}/bin:{}/bin:{}/bin:{}/bin:{}/bin:{}/toolchains/{}-{}/bin:$PATH",
-            get_artifact_envkey(&go),
-            get_artifact_envkey(&goimports),
-            get_artifact_envkey(&gopls),
-            get_artifact_envkey(&protoc),
-            get_artifact_envkey(&protoc_gen_go),
-            get_artifact_envkey(&protoc_gen_go_grpc),
-            get_artifact_envkey(&rust_toolchain),
-            rust_toolchain::get_rust_toolchain_version(),
+            get_env_key(&go),
+            get_env_key(&goimports),
+            get_env_key(&gopls),
+            get_env_key(&protoc),
+            get_env_key(&protoc_gen_go),
+            get_env_key(&protoc_gen_go_grpc),
+            get_env_key(&rust_toolchain),
+            rust_toolchain_version,
             rust_toolchain_target
         ),
-        format!("RUSTUP_HOME={}", get_artifact_envkey(&rust_toolchain)),
+        format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
         format!(
             "RUSTUP_TOOLCHAIN={}-{}",
-            rust_toolchain::get_rust_toolchain_version(),
-            rust_toolchain_target
+            rust_toolchain_version, rust_toolchain_target
         ),
     ];
 
     // Create shell artifact
-    shell_artifact(context, artifacts, envs, name).await
+    shell::build(context, artifacts, envs, name).await
 }
 
-pub async fn package(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let excludes = vec![
-        ".env",
-        ".envrc",
-        ".github",
-        ".gitignore",
-        ".packer",
-        ".vagrant",
-        "Dockerfile",
-        "Vagrantfile",
-        "dist",
-        "makefile",
-        "script",
-        "sdk/go",
-        "shell.nix",
-        "vorpal-domains.svg",
-        "vorpal-purpose.jpg",
-    ];
-
-    rust_package(context, "vorpal", excludes).await
-}
+// pub async fn package(context: &mut ConfigContext) -> Result<String> {
+//     let excludes = vec![
+//         ".env",
+//         ".envrc",
+//         ".github",
+//         ".gitignore",
+//         ".packer",
+//         ".vagrant",
+//         "Dockerfile",
+//         "Vagrantfile",
+//         "dist",
+//         "makefile",
+//         "script",
+//         "sdk/go",
+//         "shell.nix",
+//         "vorpal-domains.svg",
+//         "vorpal-purpose.jpg",
+//     ];
+//
+//     rust::package(context, "vorpal", excludes).await
+// }

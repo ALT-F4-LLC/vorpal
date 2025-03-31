@@ -1,141 +1,201 @@
 use crate::context::ConfigContext;
-use anyhow::{bail, Result};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId, ArtifactSourceId, ArtifactSystem,
-    ArtifactSystem::{Aarch64Linux, Aarch64Macos, X8664Linux, X8664Macos},
+use anyhow::{anyhow, Result};
+use std::collections::HashMap;
+use vorpal_schema::config::v0::{
+    ConfigArtifact, ConfigArtifactSource, ConfigArtifactStep, ConfigArtifactSystem,
 };
 
 pub mod language;
 pub mod shell;
 pub mod step;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ArtifactSource {
+pub struct ConfigArtifactSourceBuilder {
     pub excludes: Vec<String>,
     pub hash: Option<String>,
     pub includes: Vec<String>,
+    pub name: String,
     pub path: String,
 }
 
-#[derive(Debug, PartialEq)]
-pub enum ArtifactSourceKind {
-    UnknownSourceKind,
-    Git,
-    Http,
-    Local,
+pub struct ConfigArtifactStepBuilder {
+    pub arguments: HashMap<ConfigArtifactSystem, Vec<String>>,
+    pub artifacts: HashMap<ConfigArtifactSystem, Vec<String>>,
+    pub entrypoint: HashMap<ConfigArtifactSystem, String>,
+    pub environments: HashMap<ConfigArtifactSystem, Vec<String>>,
+    pub script: HashMap<ConfigArtifactSystem, String>,
 }
 
-pub fn get_artifact_envkey(artifact: &ArtifactId) -> String {
-    format!(
-        "$VORPAL_ARTIFACT_{}",
-        artifact.name.to_lowercase().replace("-", "_")
-    )
-    .to_string()
+pub struct ConfigArtifactBuilder {
+    pub name: String,
+    pub sources: Vec<ConfigArtifactSource>,
+    pub steps: Vec<ConfigArtifactStep>,
+    pub systems: Vec<ConfigArtifactSystem>,
 }
 
-pub fn add_artifact_systems(systems: Vec<&str>) -> Result<Vec<ArtifactSystem>> {
-    let mut build_systems = vec![];
-
-    for system in systems {
-        match system {
-            "aarch64-linux" => build_systems.push(Aarch64Linux),
-            "aarch64-macos" => build_systems.push(Aarch64Macos),
-            "x86_64-linux" => build_systems.push(X8664Linux),
-            "x86_64-macos" => build_systems.push(X8664Macos),
-            _ => bail!("Unsupported system: {}", system),
+impl ConfigArtifactSourceBuilder {
+    pub fn new(name: String, path: String) -> Self {
+        Self {
+            excludes: vec![],
+            hash: None,
+            includes: vec![],
+            name,
+            path,
         }
     }
 
-    Ok(build_systems)
+    pub fn with_excludes(mut self, excludes: Vec<String>) -> Self {
+        self.excludes = excludes;
+        self
+    }
+
+    pub fn with_hash(mut self, hash: String) -> Self {
+        self.hash = Some(hash);
+        self
+    }
+
+    pub fn with_includes(mut self, includes: Vec<String>) -> Self {
+        self.includes = includes;
+        self
+    }
+
+    pub fn build(self) -> ConfigArtifactSource {
+        ConfigArtifactSource {
+            includes: self.includes,
+            excludes: self.excludes,
+            hash: self.hash,
+            name: self.name,
+            path: self.path,
+        }
+    }
 }
 
-// cross-platform sandboxed artifact
-
-pub async fn add_artifact(
-    context: &mut ConfigContext,
-    artifacts: Vec<ArtifactId>,
-    environment: BTreeMap<&str, String>,
-    name: &str,
-    script: String,
-    sources: Vec<ArtifactSourceId>,
-    systems: Vec<&str>,
-) -> Result<ArtifactId> {
-    // Setup target
-
-    let target = context.get_target();
-
-    // Setup artifacts
-
-    let mut artifacts = artifacts.clone();
-
-    if target == Aarch64Linux || target == X8664Linux {
-        let linux_vorpal = context.fetch_artifact("linux-vorpal", "").await?;
-
-        artifacts.push(linux_vorpal.clone());
-    }
-
-    // Setup environments
-
-    let mut env = BTreeMap::new();
-
-    if target == Aarch64Linux || target == X8664Linux {
-        env.insert("PATH", "/usr/bin:/usr/sbin".to_string());
-        env.insert(
-            "SSL_CERT_FILE",
-            "/etc/ssl/certs/ca-certificates.crt".to_string(),
-        );
-    }
-
-    if target == Aarch64Macos || target == X8664Macos {
-        env.insert("PATH", "/usr/local/bin:/usr/bin:/usr/sbin:/bin".to_string());
-    }
-
-    // Add environment path if defined
-
-    if let Some(new_path) = environment.get("PATH") {
-        if !new_path.is_empty() {
-            if let Some(old_path) = env.get("PATH") {
-                env.insert("PATH", format!("{}:{}", new_path, old_path));
-            }
+impl ConfigArtifactStepBuilder {
+    pub fn new() -> Self {
+        Self {
+            arguments: HashMap::new(),
+            artifacts: HashMap::new(),
+            entrypoint: HashMap::new(),
+            environments: HashMap::new(),
+            script: HashMap::new(),
         }
     }
 
-    // Add environment variables
+    pub fn with_arguments(
+        mut self,
+        arguments: Vec<String>,
+        systems: Vec<ConfigArtifactSystem>,
+    ) -> Self {
+        for system in systems {
+            self.arguments.insert(system, arguments.clone());
+        }
 
-    for (key, value) in environment.clone() {
-        if key != "PATH" {
-            env.insert(key, value);
+        self
+    }
+
+    pub fn with_artifacts(
+        mut self,
+        artifacts: Vec<String>,
+        systems: Vec<ConfigArtifactSystem>,
+    ) -> Self {
+        for system in systems {
+            self.artifacts.insert(system, artifacts.clone());
+        }
+
+        self
+    }
+
+    pub fn with_entrypoint(mut self, entrypoint: &str, systems: Vec<ConfigArtifactSystem>) -> Self {
+        for system in systems {
+            self.entrypoint.insert(system, entrypoint.to_string());
+        }
+
+        self
+    }
+
+    pub fn with_environments(
+        mut self,
+        environments: Vec<String>,
+        systems: Vec<ConfigArtifactSystem>,
+    ) -> Self {
+        for system in systems {
+            self.environments.insert(system, environments.clone());
+        }
+
+        self
+    }
+
+    pub fn with_script(mut self, script: String, systems: Vec<ConfigArtifactSystem>) -> Self {
+        for system in systems {
+            self.script.insert(system, script.clone());
+        }
+
+        self
+    }
+
+    pub fn build(self, context: &mut ConfigContext) -> ConfigArtifactStep {
+        let system = context.get_target();
+
+        ConfigArtifactStep {
+            arguments: self.arguments.get(&system).unwrap_or(&vec![]).clone(),
+            artifacts: self.artifacts.get(&system).unwrap_or(&vec![]).clone(),
+            entrypoint: self.entrypoint.get(&system).cloned(),
+            environments: self.environments.get(&system).unwrap_or(&vec![]).clone(),
+            script: self.script.get(&system).cloned(),
+        }
+    }
+}
+
+impl ConfigArtifactBuilder {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            sources: vec![],
+            steps: vec![],
+            systems: vec![],
         }
     }
 
-    // Setup steps
+    pub fn with_source(mut self, source: ConfigArtifactSource) -> Self {
+        if !self.sources.contains(&source) {
+            self.sources.push(source);
+        }
 
-    let mut steps = vec![];
-
-    if target == Aarch64Linux || target == X8664Linux {
-        let linux_vorpal = artifacts
-            .iter()
-            .find(|a| a.name == "linux-vorpal")
-            .expect("linux-vorpal artifact not found");
-
-        steps.push(step::bwrap(
-            vec![],
-            artifacts.clone(),
-            env.clone(),
-            Some(linux_vorpal.clone()),
-            script.to_string(),
-        ));
+        self
     }
 
-    if target == Aarch64Macos || target == X8664Macos {
-        steps.push(step::bash(env.clone(), script.to_string()));
+    pub fn with_step(mut self, step: ConfigArtifactStep) -> Self {
+        if !self.steps.contains(&step) {
+            self.steps.push(step);
+        }
+
+        self
     }
 
-    // Add artifact to context
+    pub fn with_system(mut self, system: ConfigArtifactSystem) -> Self {
+        if !self.systems.contains(&system) {
+            self.systems.push(system);
+        }
 
-    context
-        .add_artifact(name, artifacts, sources, steps, systems)
-        .await
+        self
+    }
+
+    pub fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let artifact = ConfigArtifact {
+            name: self.name,
+            sources: self.sources,
+            steps: self.steps,
+            systems: self.systems.into_iter().map(|v| v.into()).collect(),
+            target: context.get_target().into(),
+        };
+
+        if artifact.steps.is_empty() {
+            return Err(anyhow!("artifact must have at least one step"));
+        }
+
+        context.add_artifact(artifact)
+    }
+}
+
+pub fn get_env_key(hash: &str) -> String {
+    format!("$VORPAL_ARTIFACT_{}", hash)
 }

@@ -1,18 +1,18 @@
 use crate::{
-    artifact::{add_artifact, get_artifact_envkey, shell::shell_artifact, ArtifactSource},
+    artifact::{get_env_key, shell, step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use toml::from_str;
-use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId, ArtifactSystem,
-    ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
+use vorpal_schema::config::v0::{
+    ConfigArtifactSystem,
+    ConfigArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
 };
+
 #[derive(Debug, Deserialize)]
 struct RustArtifactCargoToml {
     bin: Option<Vec<RustArtifactCargoTomlBinary>>,
@@ -36,66 +36,62 @@ fn read_cargo_toml(path: &str) -> Result<RustArtifactCargoToml> {
     Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
 
-fn get_rust_toolchain_version() -> String {
+pub fn get_toolchain_version() -> String {
     "1.83.0".to_string()
 }
 
-fn get_rust_toolchain_target(target: ArtifactSystem) -> Result<String> {
+pub fn get_toolchain_target(target: ConfigArtifactSystem) -> Result<String> {
     let target = match target {
+        Aarch64Darwin => "aarch64-apple-darwin",
         Aarch64Linux => "aarch64-unknown-linux-gnu",
-        Aarch64Macos => "aarch64-apple-darwin",
+        X8664Darwin => "x86_64-apple-darwin",
         X8664Linux => "x86_64-unknown-linux-gnu",
-        X8664Macos => "x86_64-apple-darwin",
-        UnknownSystem => bail!("Unsupported rustc target: {:?}", target),
+        _ => bail!("unsupported rust-toolchain target: {:?}", target),
     };
 
     Ok(target.to_string())
 }
 
-pub async fn rust_shell(context: &mut ConfigContext, name: &str) -> Result<ArtifactId> {
-    let rust_toolchain = context
-        .fetch_artifact(
-            "rust-toolchain",
-            "12aba225f85e7310d03c83f2c137270b5127b42eb2db89d481a048f440a7aff5",
-        )
-        .await?;
+pub async fn devshell(context: &mut ConfigContext, name: &str) -> Result<String> {
+    // let rust_toolchain = context
+    //     .fetch_artifact("12aba225f85e7310d03c83f2c137270b5127b42eb2db89d481a048f440a7aff5")
+    //     .await?;
 
-    let rust_toolchain_target = get_rust_toolchain_target(context.get_target())?;
-    let rust_toolchain_version = get_rust_toolchain_version();
+    // let rust_toolchain_target = get_toolchain_target(context.get_target())?;
 
-    let protoc = context
-        .fetch_artifact(
-            "protoc",
-            "1b919861ad528e32772b65a9aaefb41014adcdcc9b296e1e3510f4cecb07ef9e",
-        )
-        .await?;
+    // let rust_toolchain_version = get_toolchain_version();
 
-    let artifacts = vec![protoc.clone(), rust_toolchain.clone()];
+    // let protoc = context
+    //     .fetch_artifact("1b919861ad528e32772b65a9aaefb41014adcdcc9b296e1e3510f4cecb07ef9e")
+    //     .await?;
 
-    let envs = vec![
-        format!(
-            "PATH={}/bin:{}/toolchains/{}-{}/bin:$PATH",
-            get_artifact_envkey(&protoc),
-            get_artifact_envkey(&rust_toolchain),
-            rust_toolchain_version,
-            rust_toolchain_target
-        ),
-        format!("RUSTUP_HOME={}", get_artifact_envkey(&rust_toolchain)),
-        format!(
-            "RUSTUP_TOOLCHAIN={}-{}",
-            rust_toolchain_version, rust_toolchain_target
-        ),
-    ];
+    // let artifacts = vec![protoc.clone(), rust_toolchain.clone()];
+
+    // let envs = vec![
+    //     format!(
+    //         "PATH={}/bin:{}/toolchains/{}-{}/bin:$PATH",
+    //         get_env_key(&protoc),
+    //         get_env_key(&rust_toolchain),
+    //         rust_toolchain_version,
+    //         rust_toolchain_target
+    //     ),
+    //     format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
+    //     format!(
+    //         "RUSTUP_TOOLCHAIN={}-{}",
+    //         rust_toolchain_version, rust_toolchain_target
+    //     ),
+    // ];
 
     // Create shell artifact
-    shell_artifact(context, artifacts, envs, name).await
+
+    shell::build(context, vec![], vec![], name).await
 }
 
-pub async fn rust_package<'a>(
+pub async fn package<'a>(
     context: &mut ConfigContext,
     name: &'a str,
     excludes: Vec<&'a str>,
-) -> Result<ArtifactId> {
+) -> Result<String> {
     // 1. READ CARGO.TOML FILES
 
     // Get the source path
@@ -108,6 +104,8 @@ pub async fn rust_package<'a>(
             source_path
         );
     }
+
+    let source_path_str = source_path.display().to_string();
 
     // Load root cargo.toml
     let cargo_toml_path = source_path.join("Cargo.toml");
@@ -161,162 +159,155 @@ pub async fn rust_package<'a>(
 
     // 2. CREATE ARTIFACTS
 
-    // Set default systems
-    let systems = vec![
-        "aarch64-linux",
-        "aarch64-macos",
-        "x86_64-linux",
-        "x86_64-macos",
-    ];
-
     // Get protoc artifact
-    let protoc = context
-        .fetch_artifact(
-            "protoc",
-            "1b919861ad528e32772b65a9aaefb41014adcdcc9b296e1e3510f4cecb07ef9e",
-        )
-        .await?;
+
+    // let protoc = context
+    //     .fetch_artifact("1b919861ad528e32772b65a9aaefb41014adcdcc9b296e1e3510f4cecb07ef9e")
+    //     .await?;
 
     // Get rust toolchain artifact
 
-    let rust_toolchain = context
-        .fetch_artifact(
-            "rust-toolchain",
-            "12aba225f85e7310d03c83f2c137270b5127b42eb2db89d481a048f440a7aff5",
-        )
-        .await?;
+    // let rust_toolchain = context
+    //     .fetch_artifact("12aba225f85e7310d03c83f2c137270b5127b42eb2db89d481a048f440a7aff5")
+    //     .await?;
 
-    let rust_toolchain_target = get_rust_toolchain_target(context.get_target())?;
-    let rust_toolchain_version = get_rust_toolchain_version();
+    // let rust_toolchain_target = get_toolchain_target(context.get_target())?;
+    // let rust_toolchain_version = get_toolchain_version();
 
     // Set environment variables
 
-    let mut env_paths: Vec<String> = vec![format!(
-        "{}/toolchains/{}-{}/bin",
-        get_artifact_envkey(&rust_toolchain),
-        rust_toolchain_version,
-        rust_toolchain_target
-    )];
+    // let mut env_paths: Vec<String> = vec![format!(
+    //     "{}/toolchains/{}-{}/bin",
+    //     get_env_key(&rust_toolchain),
+    //     rust_toolchain_version,
+    //     rust_toolchain_target
+    // )];
 
-    let env_toolchain = format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
+    // let env_toolchain = format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
+
+    let shared_step_environments = vec![
+        // "HOME=$VORPAL_WORKSPACE/home".to_string(),
+        // format!("PATH={}", env_paths.join(":")),
+        // format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
+        // format!("RUSTUP_TOOLCHAIN={}", env_toolchain),
+    ];
 
     // Create vendor artifact
 
-    let mut vendor_cargo_tomls = vec!["Cargo.toml".to_string(), "Cargo.lock".to_string()];
+    let mut vendor_toml_paths = vec!["Cargo.toml".to_string(), "Cargo.lock".to_string()];
 
     for workspace in workspaces.iter() {
-        vendor_cargo_tomls.push(format!("{}/Cargo.toml", workspace));
+        vendor_toml_paths.push(format!("{}/Cargo.toml", workspace));
     }
 
-    let vendor_source = context
-        .add_artifact_source(
-            format!("{}-vendor", name).as_str(),
-            ArtifactSource {
-                excludes: vec![],
-                hash: None,
-                includes: vendor_cargo_tomls.clone(),
-                path: source_path.display().to_string(),
-            },
-        )
-        .await?;
+    let vendor_step_script = formatdoc! {"
+        mkdir -pv $HOME
 
-    let vendor = add_artifact(
+        pushd ./source/{name}-vendor
+
+        target_paths=({target_paths})
+
+        for target_path in ${{target_paths[@]}}; do
+            mkdir -pv \"$(dirname \"${{target_path}}\")\"
+            touch \"${{target_path}}\"
+        done
+
+        mkdir -pv \"$VORPAL_OUTPUT/vendor\"
+
+        cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
+
+        echo \"$cargo_vendor\" > \"$VORPAL_OUTPUT/config.toml\"",
+        target_paths = workspaces_targets.join(" "),
+    };
+
+    let vendor_step_artifacts = vec![
+        // protoc.clone(),
+        // rust_toolchain.clone()
+    ];
+
+    let vendor_step = step::shell(
         context,
-        vec![/* toolchain.clone() */],
-        BTreeMap::from([
-            ("HOME", "$VORPAL_WORKSPACE/home".to_string()),
-            ("PATH", env_paths.join(":")),
-            ("RUSTUP_HOME", get_artifact_envkey(&rust_toolchain)),
-            ("RUSTUP_TOOLCHAIN", env_toolchain),
-        ]),
-        format!("{}-vendor", name).as_str(),
-        formatdoc! {"
-            mkdir -pv $HOME
-
-            pushd ./source/{name}-vendor
-
-            target_paths=({target_paths})
-
-            for target_path in ${{target_paths[@]}}; do
-                mkdir -pv \"$(dirname \"${{target_path}}\")\"
-                touch \"${{target_path}}\"
-            done
-
-            mkdir -pv \"$VORPAL_OUTPUT/vendor\"
-
-            cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
-
-            echo \"$cargo_vendor\" > \"$VORPAL_OUTPUT/config.toml\"",
-            target_paths = workspaces_targets.join(" "),
-        },
-        vec![vendor_source],
-        systems.clone(),
+        vendor_step_artifacts,
+        shared_step_environments.clone(),
+        vendor_step_script,
     )
     .await?;
 
+    let vendor_name = format!("{}-vendor", name);
+
+    let vendor_source =
+        ConfigArtifactSourceBuilder::new(vendor_name.clone(), source_path_str.clone())
+            .with_excludes(vec![])
+            .with_includes(vendor_toml_paths.clone())
+            .build();
+
+    let vendor = ConfigArtifactBuilder::new(vendor_name)
+        .with_source(vendor_source)
+        .with_step(vendor_step)
+        .with_system(Aarch64Darwin)
+        .with_system(Aarch64Linux)
+        .with_system(X8664Darwin)
+        .with_system(X8664Linux)
+        .build(context)?;
+
     // TODO: implement artifact for 'check` to pre-bake the vendor cache
 
-    let artifacts = vec![protoc.clone(), rust_toolchain.clone(), vendor.clone()];
+    let step_artifacts = vec![
+        // protoc.clone(),
+        // rust_toolchain.clone(),
+        vendor.clone(),
+    ];
 
-    // Create artifact
+    // env_paths.push(format!("{}/bin", get_env_key(&protoc)));
 
-    env_paths.push(format!("{}/bin", get_artifact_envkey(&protoc)));
-
-    let mut excludes_defaults = vec!["target".to_string()];
+    let mut source_excludes = vec!["target".to_string()];
 
     for exclude in excludes {
-        excludes_defaults.push(exclude.to_string());
+        source_excludes.push(exclude.to_string());
     }
 
-    let artifact_source = context
-        .add_artifact_source(
-            name,
-            ArtifactSource {
-                excludes: excludes_defaults,
-                hash: None,
-                includes: vec![],
-                path: source_path.display().to_string(),
-            },
-        )
-        .await?;
+    let source = ConfigArtifactSourceBuilder::new(name.to_string(), source_path_str)
+        .with_excludes(source_excludes)
+        .build();
 
-    add_artifact(
+    let step_script = formatdoc! {"
+        mkdir -pv $HOME
+
+        pushd ./source/{name}
+
+        mkdir -pv .cargo
+
+        ln -sv \"{vendor}/config.toml\" .cargo/config.toml
+
+        cargo build --offline --release
+
+        cargo test --offline --release
+
+        mkdir -pv \"$VORPAL_OUTPUT/bin\"
+
+        bin_names=({bin_names})
+
+        for bin_name in ${{bin_names[@]}}; do
+            cp -pv \"target/release/${{bin_name}}\" \"$VORPAL_OUTPUT/bin/\"
+        done",
+        bin_names = workspaces_bin_names.join(" "),
+        vendor = get_env_key(&vendor),
+    };
+
+    let step = step::shell(
         context,
-        artifacts,
-        BTreeMap::from([
-            ("HOME", "$VORPAL_WORKSPACE/home".to_string()),
-            ("PATH", env_paths.join(":")),
-            ("RUSTUP_HOME", get_artifact_envkey(&rust_toolchain)),
-            (
-                "RUSTUP_TOOLCHAIN",
-                format!("{}-{}", get_rust_toolchain_version(), rust_toolchain_target),
-            ),
-        ]),
-        name,
-        formatdoc! {"
-            mkdir -pv $HOME
-
-            pushd ./source/{name}
-
-            mkdir -pv .cargo
-
-            ln -sv \"{vendor}/config.toml\" .cargo/config.toml
-
-            cargo build --offline --release
-            cargo test --offline --release
-
-            mkdir -pv \"$VORPAL_OUTPUT/bin\"
-
-            bin_names=({bin_names})
-
-            for bin_name in ${{bin_names[@]}}; do
-                cp -pv \"target/release/${{bin_name}}\" \"$VORPAL_OUTPUT/bin/\"
-            done",
-            bin_names = workspaces_bin_names.join(" "),
-            vendor = get_artifact_envkey(&vendor),
-        },
-        vec![artifact_source],
-        systems,
+        step_artifacts,
+        shared_step_environments,
+        step_script,
     )
-    .await
+    .await?;
+
+    ConfigArtifactBuilder::new(name.to_string())
+        .with_source(source)
+        .with_step(step)
+        .with_system(Aarch64Darwin)
+        .with_system(Aarch64Linux)
+        .with_system(X8664Darwin)
+        .with_system(X8664Linux)
+        .build(context)
 }

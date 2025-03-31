@@ -9,10 +9,15 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
 use tracing::error;
 use vorpal_notary::get_public_key;
-use vorpal_schema::vorpal::registry::v0::{
-    registry_service_server::{RegistryService, RegistryServiceServer},
-    RegistryKind::{self, UnknownStoreKind},
-    RegistryPullResponse, RegistryPushRequest, RegistryRequest, RegistryResponse,
+use vorpal_schema::{
+    config::v0::{ConfigArtifact, ConfigArtifactRequest},
+    registry::v0::{
+        registry_service_server::{RegistryService, RegistryServiceServer},
+        RegistryArchive,
+        RegistryArchive::UnknownArchive,
+        RegistryGetResponse, RegistryPullRequest, RegistryPullResponse, RegistryPushRequest,
+        RegistryPushResponse, RegistryPutResponse,
+    },
 };
 use vorpal_store::paths::get_public_key_path;
 
@@ -34,14 +39,6 @@ pub enum RegistryError {
 
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
-pub struct PushMetadata {
-    data: Vec<u8>,
-    data_kind: RegistryKind,
-    hash: String,
-    manifest: String,
-    name: String,
-}
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum RegistryServerBackend {
     #[default]
@@ -53,15 +50,19 @@ pub enum RegistryServerBackend {
 
 #[tonic::async_trait]
 pub trait RegistryBackend: Send + Sync + 'static {
-    async fn exists(&self, request: &RegistryRequest) -> Result<String, Status>;
+    async fn get_archive(&self, req: &RegistryPullRequest) -> Result<(), Status>;
 
-    async fn pull(
+    async fn get_artifact(&self, req: &ConfigArtifactRequest) -> Result<ConfigArtifact, Status>;
+
+    async fn pull_archive(
         &self,
-        request: &RegistryRequest,
+        req: &RegistryPullRequest,
         tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
     ) -> Result<(), Status>;
 
-    async fn push(&self, metadata: PushMetadata) -> Result<(), Status>;
+    async fn push_archive(&self, req: &RegistryPushRequest) -> Result<(), Status>;
+
+    async fn put_artifact(&self, req: &ConfigArtifact) -> Result<(), Status>;
 
     /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
     fn box_clone(&self) -> Box<dyn RegistryBackend>;
@@ -85,31 +86,42 @@ impl RegistryServer {
 
 #[tonic::async_trait]
 impl RegistryService for RegistryServer {
-    type PullStream = ReceiverStream<Result<RegistryPullResponse, Status>>;
+    type PullArchiveStream = ReceiverStream<Result<RegistryPullResponse, Status>>;
 
-    async fn exists(
+    async fn get_archive(
         &self,
-        request: Request<RegistryRequest>,
-    ) -> Result<Response<RegistryResponse>, Status> {
-        let request = request.into_inner();
+        request: Request<RegistryPullRequest>,
+    ) -> Result<Response<RegistryGetResponse>, Status> {
+        let req = request.into_inner();
 
-        if request.hash.is_empty() {
+        if req.hash.is_empty() {
             return Err(Status::invalid_argument("missing store id"));
         }
 
-        if request.name.is_empty() {
-            return Err(Status::invalid_argument("missing store name"));
-        }
+        self.backend.get_archive(&req).await?;
 
-        let manifest = self.backend.exists(&request).await?;
-
-        Ok(Response::new(RegistryResponse { manifest }))
+        Ok(Response::new(RegistryGetResponse {}))
     }
 
-    async fn pull(
+    async fn get_artifact(
         &self,
-        request: Request<RegistryRequest>,
-    ) -> Result<Response<Self::PullStream>, Status> {
+        request: Request<ConfigArtifactRequest>,
+    ) -> Result<Response<ConfigArtifact>, Status> {
+        let req = request.into_inner();
+
+        if req.hash.is_empty() {
+            return Err(Status::invalid_argument("missing store id"));
+        }
+
+        let artifact = self.backend.get_artifact(&req).await?;
+
+        Ok(Response::new(artifact))
+    }
+
+    async fn pull_archive(
+        &self,
+        request: Request<RegistryPullRequest>,
+    ) -> Result<Response<Self::PullArchiveStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
         let backend = self.backend.clone();
@@ -128,7 +140,7 @@ impl RegistryService for RegistryServer {
                 return;
             }
 
-            if let Err(err) = backend.pull(&request, tx.clone()).await {
+            if let Err(err) = backend.pull_archive(&request, tx.clone()).await {
                 if let Err(err) = tx.send(Err(err)).await {
                     error!("failed to send store error: {:?}", err);
                 }
@@ -138,51 +150,39 @@ impl RegistryService for RegistryServer {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    async fn push(
+    async fn push_archive(
         &self,
         request: Request<Streaming<RegistryPushRequest>>,
-    ) -> Result<Response<RegistryResponse>, Status> {
-        let mut data: Vec<u8> = vec![];
-        let mut data_hash = None;
-        let mut data_kind = UnknownStoreKind;
-        let mut data_manifest = None;
-        let mut data_name = None;
-        let mut data_signature = vec![];
-        let mut stream = request.into_inner();
+    ) -> Result<Response<RegistryPushResponse>, Status> {
+        let mut request_archive = UnknownArchive;
+        let mut request_data: Vec<u8> = vec![];
+        let mut request_hash = None;
+        let mut request_signature = vec![];
+        let mut request_stream = request.into_inner();
 
-        while let Some(result) = stream.next().await {
-            let result = result.map_err(|err| Status::internal(err.to_string()))?;
+        while let Some(request) = request_stream.next().await {
+            let request = request.map_err(|err| Status::internal(err.to_string()))?;
 
-            data.extend_from_slice(&result.data);
+            request_data.extend_from_slice(&request.data);
 
-            data_hash = Some(result.hash);
-            data_kind = RegistryKind::try_from(result.kind).unwrap_or(UnknownStoreKind);
-            data_manifest = Some(result.manifest);
-            data_name = Some(result.name);
-            data_signature = result.data_signature;
+            request_archive = RegistryArchive::try_from(request.archive).unwrap_or(UnknownArchive);
+            request_hash = Some(request.hash);
+            request_signature = request.signature;
         }
 
-        if data.is_empty() {
+        if request_data.is_empty() {
             return Err(Status::invalid_argument("missing `data` field"));
         }
 
-        let Some(data_hash) = data_hash else {
+        let Some(request_hash) = request_hash else {
             return Err(Status::invalid_argument("missing `hash` field"));
         };
 
-        let Some(data_manifest) = data_manifest else {
-            return Err(Status::invalid_argument("missing `manifest` field"));
-        };
-
-        let Some(data_name) = data_name else {
-            return Err(Status::invalid_argument("missing `name` field"));
-        };
-
-        if data_kind == UnknownStoreKind {
+        if request_archive == UnknownArchive {
             return Err(Status::invalid_argument("missing `kind` field"));
         }
 
-        if data_signature.is_empty() {
+        if request_signature.is_empty() {
             return Err(Status::invalid_argument("missing `data_signature` field"));
         }
 
@@ -192,33 +192,39 @@ impl RegistryService for RegistryServer {
             Status::internal(format!("failed to get public key: {:?}", err.to_string()))
         })?;
 
-        let data_signature = Signature::try_from(data_signature.as_slice())
+        let data_signature = Signature::try_from(request_signature.as_slice())
             .map_err(|err| Status::internal(format!("failed to parse signature: {:?}", err)))?;
 
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
-        if let Err(msg) = verifying_key.verify(&data, &data_signature) {
+        if let Err(msg) = verifying_key.verify(&request_data, &data_signature) {
             return Err(Status::invalid_argument(format!(
                 "invalid data signature: {:?}",
                 msg
             )));
         }
 
-        let hash = data_hash;
-        let manifest = data_manifest;
-        let name = data_name;
+        let request = RegistryPushRequest {
+            archive: request_archive as i32,
+            hash: request_hash,
+            data: request_data,
+            signature: request_signature,
+        };
 
-        self.backend
-            .push(PushMetadata {
-                data,
-                data_kind,
-                hash,
-                manifest: manifest.clone(),
-                name,
-            })
-            .await?;
+        self.backend.push_archive(&request).await?;
 
-        Ok(Response::new(RegistryResponse { manifest }))
+        Ok(Response::new(RegistryPushResponse {}))
+    }
+
+    async fn put_artifact(
+        &self,
+        request: Request<ConfigArtifact>,
+    ) -> Result<Response<RegistryPutResponse>, Status> {
+        let request = request.into_inner();
+
+        self.backend.put_artifact(&request).await?;
+
+        Ok(Response::new(RegistryPutResponse {}))
     }
 }
 

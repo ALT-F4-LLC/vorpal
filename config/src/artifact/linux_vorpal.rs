@@ -1,206 +1,205 @@
+use crate::artifact::linux_debian;
 use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::BTreeMap;
-use vorpal_schema::vorpal::artifact::v0::ArtifactId;
+use vorpal_schema::config::v0::{
+    ConfigArtifactSource,
+    ConfigArtifactSystem::{Aarch64Linux, X8664Linux},
+};
 use vorpal_sdk::{
-    artifact::{step::bwrap, ArtifactSource},
+    artifact::{step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
     context::ConfigContext,
 };
 
-pub fn curl(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://curl.se/download/curl-{version}.tar.xz"),
-    }
+pub fn curl(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "curl";
+    let path = format!("https://curl.se/download/{name}-{version}.tar.xz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn curl_cacert(hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: "https://curl.se/ca/cacert.pem".to_string(),
-    }
+pub fn curl_cacert(hash: &str) -> ConfigArtifactSource {
+    let name = "curl-cacert";
+    let path = "https://curl.se/ca/cacert.pem".to_string();
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn file(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://astron.com/pub/file/file-{version}.tar.gz"),
-    }
+pub fn file(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "file";
+    let path = format!("https://astron.com/pub/file/file-{version}.tar.gz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn gnu(name: &str, version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://ftpmirror.gnu.org/gnu/{name}/{name}-{version}.tar.gz"),
-    }
+pub fn gnu(name: &str, version: &str, hash: &str) -> ConfigArtifactSource {
+    let path = format!("https://ftpmirror.gnu.org/gnu/{name}/{name}-{version}.tar.gz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn gnu_xz(name: &str, version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://ftpmirror.gnu.org/gnu/{name}/{name}-{version}.tar.xz"),
-    }
+pub fn gnu_xz(name: &str, version: &str, hash: &str) -> ConfigArtifactSource {
+    let path = format!("https://ftpmirror.gnu.org/gnu/{name}/{name}-{version}.tar.xz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn gnu_gcc(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://ftpmirror.gnu.org/gnu/gcc/gcc-{version}/gcc-{version}.tar.xz"),
-    }
+pub fn gnu_gcc(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "gcc";
+    let path = format!("https://ftpmirror.gnu.org/gnu/gcc/gcc-{version}/gcc-{version}.tar.xz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn gnu_glibc_patch(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!(
-            "https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-{version}-fhs-1.patch",
-        ),
-    }
+pub fn gnu_glibc_patch(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "glibc-patch";
+    let path =
+        format!("https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-{version}-fhs-1.patch",);
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn libidn2(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://ftpmirror.gnu.org/gnu/libidn/libidn2-{version}.tar.gz"),
-    }
+pub fn libidn2(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "libidn2";
+    let path = format!("https://ftpmirror.gnu.org/gnu/libidn/libidn2-{version}.tar.gz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn libpsl(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!(
-            "https://github.com/rockdaboot/libpsl/releases/download/{version}/libpsl-{version}.tar.gz",
-        ),
-    }
+pub fn libpsl(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "libpsl";
+    let path = format!(
+        "https://github.com/rockdaboot/libpsl/releases/download/{version}/libpsl-{version}.tar.gz",
+    );
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn linux(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"),
-    }
+pub fn linux(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "linux";
+    let path = format!("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn ncurses(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://invisible-mirror.net/archives/ncurses/ncurses-{version}.tar.gz"),
-    }
+pub fn ncurses(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "ncurses";
+    let path = format!("https://invisible-mirror.net/archives/ncurses/ncurses-{version}.tar.gz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn openssl(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://www.openssl.org/source/openssl-{version}.tar.gz"),
-    }
+pub fn openssl(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "openssl";
+    let path = format!("https://www.openssl.org/source/openssl-{version}.tar.gz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn perl(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://www.cpan.org/src/5.0/perl-{version}.tar.xz"),
-    }
+pub fn perl(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "perl";
+    let path = format!("https://www.cpan.org/src/5.0/perl-{version}.tar.xz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn python(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://www.python.org/ftp/python/{version}/Python-{version}.tar.xz"),
-    }
+pub fn python(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "python";
+    let path = format!("https://www.python.org/ftp/python/{version}/Python-{version}.tar.xz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn unzip_patch_fixes(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-consolidated_fixes-1.patch"),
-    }
+pub fn unzip_patch_fixes(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "unzip-patch-fixes";
+    let path = format!("https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-consolidated_fixes-1.patch");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn unzip_patch_gcc14(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!(
-            "https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-gcc14-1.patch"
-        ),
-    }
+pub fn unzip_patch_gcc14(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "unzip-patch-gcc14";
+    let path =
+        format!("https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-gcc14-1.patch");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn unzip(version: &str, hash: &str) -> ArtifactSource {
+pub fn unzip(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "unzip";
     let version = version.replace(".", "");
+    let path = format!("https://cfhcable.dl.sourceforge.net/project/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip{version}.tar.gz?viasf=1");
 
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://cfhcable.dl.sourceforge.net/project/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip{version}.tar.gz?viasf=1",),
-    }
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn util_linux(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!(
-            "https://www.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-{version}.tar.xz"
-        ),
-    }
+pub fn util_linux(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "util-linux";
+    let path = format!(
+        "https://www.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-{version}.tar.xz"
+    );
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn xz(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://github.com/tukaani-project/xz/releases/download/v{version}/xz-{version}.tar.xz"),
-    }
+pub fn xz(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "xz";
+    let path = format!(
+        "https://github.com/tukaani-project/xz/releases/download/v{version}/xz-{version}.tar.xz"
+    );
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub fn zlib(version: &str, hash: &str) -> ArtifactSource {
-    ArtifactSource {
-        excludes: vec![],
-        hash: Some(hash.to_string()),
-        includes: vec![],
-        path: format!("https://zlib.net/fossils/zlib-{version}.tar.gz"),
-    }
+pub fn zlib(version: &str, hash: &str) -> ConfigArtifactSource {
+    let name = "zlib";
+    let path = format!("https://zlib.net/fossils/zlib-{version}.tar.gz");
+
+    ConfigArtifactSourceBuilder::new(name.to_string(), path)
+        .with_hash(hash.to_string())
+        .build()
 }
 
-pub async fn artifact(
-    context: &mut ConfigContext,
-    linux_debian: &ArtifactId,
-) -> Result<ArtifactId> {
+pub async fn artifact(context: &mut ConfigContext) -> Result<String> {
+    let linux_debian = linux_debian::build(context).await?;
+
     // Setup defaults
 
     let artifacts = vec![linux_debian.clone()];
@@ -435,1090 +434,1095 @@ pub async fn artifact(
         "3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683",
     );
 
-    let sources = BTreeMap::from([
-        ("bash", bash),
-        ("binutils", binutils),
-        ("bison", bison),
-        ("coreutils", coreutils),
-        ("curl", curl),
-        ("curl-cacert", curl_cacert),
-        ("diffutils", diffutils),
-        ("file", file),
-        ("findutils", findutils),
-        ("gawk", gawk),
-        ("gcc", gcc),
-        ("gettext", gettext),
-        ("glibc", glibc),
-        ("glibc-patch", glibc_patch),
-        ("grep", grep),
-        ("gzip", gzip),
-        ("libidn2", libidn2),
-        ("libpsl", libpsl),
-        ("libunistring", libunistring),
-        ("linux", linux),
-        ("m4", m4),
-        ("make", make),
-        ("ncurses", ncurses),
-        ("openssl", openssl),
-        ("patch", patch),
-        ("perl", perl),
-        ("python", python),
-        ("sed", sed),
-        ("tar", tar),
-        ("texinfo", texinfo),
-        ("unzip", unzip),
-        ("unzip-patch-fixes", unzip_patch_fixes),
-        ("unzip-patch-gcc14", unzip_patch_gcc14),
-        ("util-linux", util_linux),
-        ("xz", xz),
-        ("zlib", zlib),
-    ]);
+    // TODO: fetch hash for linux-debian
 
-    let mut source_ids = vec![];
+    // let step_stage_01_rootfs = context.fetch_artifact("TODO").await?;
 
-    for (source_name, source) in sources {
-        source_ids.push(context.add_artifact_source(source_name, source).await?);
-    }
+    let step_stage_01 = step::bwrap(
+        context,
+        vec![],
+        artifacts,
+        vec!["PATH=/usr/bin:/usr/sbin".to_string()],
+        // Some(step_stage_01_rootfs),
+        None,
+        formatdoc! {"
+            #!/bin/bash
+            set -euo pipefail
 
-    context.add_artifact(
-        "linux-vorpal",
-        artifacts.clone(),
-        source_ids,
+            set +h
+            umask 022
+
+            ### Setup environment
+
+            export VORPAL_SOURCE=\"$(pwd)/source\"
+
+            ### Setup GCC (base)
+
+            pushd $VORPAL_SOURCE/gcc/gcc-{gcc_version}
+
+            ./contrib/download_prerequisites
+
+            case $(uname -m) in
+                x86_64)
+                    sed -e '/m64=/s/lib64/lib/' \
+                        -i.orig gcc/config/i386/t-linux64
+                ;;
+                aarch64)
+                    sed -e '/lp64=/s/lib64/lib/' \
+                        -i.orig ./gcc/config/aarch64/t-aarch64-linux
+                ;;
+            esac
+
+            popd
+
+            ## Setup ncurses
+
+            pushd $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
+
+            sed -i s/mawk// configure
+
+            popd
+
+            ## Setup gawk 
+
+            pushd $VORPAL_SOURCE/gawk/gawk-{gawk_version}
+
+            sed -i 's/extras//' Makefile.in
+
+            popd
+
+            ## Patch GLIBC
+
+            pushd $VORPAL_SOURCE/glibc/glibc-{glibc_version}
+
+            patch -Np1 -i $VORPAL_SOURCE/glibc-patch/glibc-{glibc_version}-fhs-1.patch
+
+            popd
+
+            ## Setup source paths
+
+            mv -v $VORPAL_SOURCE/binutils $VORPAL_SOURCE/binutils-pass-01
+            mv -v $VORPAL_SOURCE/gcc $VORPAL_SOURCE/gcc-pass-01
+
+            echo \"Copying binutils-pass-01 to binutils-pass-02\"
+            cp -pr $VORPAL_SOURCE/binutils-pass-01 $VORPAL_SOURCE/binutils-pass-02
+
+            echo \"Copying gcc-pass-01 to gcc-pass-02\"
+            cp -pr $VORPAL_SOURCE/gcc-pass-01 $VORPAL_SOURCE/gcc-pass-02
+
+            echo \"Copying gcc-pass-01 to libstdc++\"
+            cp -pr $VORPAL_SOURCE/gcc-pass-01 $VORPAL_SOURCE/libstdc++
+
+            ## Patch binutils-pass-02
+
+            pushd $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}
+
+            sed '6009s/$add_dir//' -i ltmain.sh
+
+            popd
+
+            ## Patch gcc-pass-02
+
+            pushd $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}
+
+            sed '/thread_header =/s/@.*@/gthr-posix.h/' \
+                -i libgcc/Makefile.in libstdc++-v3/include/Makefile.in
+
+            popd
+
+            ### Setup paths
+
+            mkdir -pv $VORPAL_OUTPUT/{{etc,var}} $VORPAL_OUTPUT/usr/{{bin,lib,sbin}}
+
+            for i in bin lib sbin; do
+              ln -sv usr/$i $VORPAL_OUTPUT/$i
+            done
+
+            case $(uname -m) in
+              aarch64) mkdir -pv $VORPAL_OUTPUT/lib64 ;;
+              x86_64) mkdir -pv $VORPAL_OUTPUT/lib64 ;;
+            esac
+
+            mkdir -pv $VORPAL_OUTPUT/tools
+
+            ## Setup environment
+
+            export LC_ALL=\"POSIX\"
+            export VORPAL_TARGET=\"$(uname -m)-vorpal-linux-gnu\"
+            export PATH=\"$VORPAL_OUTPUT/tools/bin:$PATH\"
+            export CONFIG_SITE=\"$VORPAL_OUTPUT/usr/share/config.site\"
+            export MAKEFLAGS=\"-j$(nproc)\"
+
+            ### Build binutils (pass 01)
+
+            mkdir -pv $VORPAL_SOURCE/binutils-pass-01/binutils-{binutils_version}/build
+            pushd $VORPAL_SOURCE/binutils-pass-01/binutils-{binutils_version}/build
+
+            ../configure \
+                --prefix=\"$VORPAL_OUTPUT/tools\" \
+                --with-sysroot=\"$VORPAL_OUTPUT\" \
+                --target=\"$VORPAL_TARGET\" \
+                --disable-nls \
+                --enable-gprofng=\"no\" \
+                --disable-werror \
+                --enable-new-dtags \
+                --enable-default-hash-style=\"gnu\"
+
+            make
+            make install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/binutils-pass-01
+
+            ### Build gcc (pass 01)
+
+            mkdir -pv $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
+            pushd $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
+
+            ../configure \
+                --target=\"$VORPAL_TARGET\" \
+                --prefix=\"$VORPAL_OUTPUT/tools\" \
+                --with-glibc-version=\"2.40\" \
+                --with-sysroot=\"$VORPAL_OUTPUT\" \
+                --with-newlib \
+                --without-headers \
+                --enable-default-pie \
+                --enable-default-ssp \
+                --disable-nls \
+                --disable-shared \
+                --disable-multilib \
+                --disable-threads \
+                --disable-libatomic \
+                --disable-libgomp \
+                --disable-libquadmath \
+                --disable-libssp \
+                --disable-libvtv \
+                --disable-libstdcxx \
+                --enable-languages=\"c,c++\"
+
+            make
+            make install
+
+            OUTPUT_LIBGCC=$($VORPAL_TARGET-gcc -print-libgcc-file-name)
+            OUTPUT_LIBGCC_DIR=$(dirname \"${{OUTPUT_LIBGCC}}\")
+            OUTPUT_LIMITS_PATH=${{OUTPUT_LIBGCC_DIR}}/include/limits.h
+
+            echo \"OUTPUT_LIBGCC: ${{OUTPUT_LIBGCC}}\"
+            echo \"OUTPUT_LIBGCC_DIR: ${{OUTPUT_LIBGCC_DIR}}\"
+            echo \"OUTPUT_LIMITS_PATH: ${{OUTPUT_LIMITS_PATH}}\"
+
+            cat ../gcc/limitx.h ../gcc/glimits.h ../gcc/limity.h \
+                > $OUTPUT_LIMITS_PATH
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/gcc-pass-01
+
+            ### Build linux headers
+
+            pushd $VORPAL_SOURCE/linux/linux-{linux_version}
+
+            make mrproper
+            make headers
+
+            find usr/include -type f ! -name '*.h' -delete
+            cp -prv usr/include \"$VORPAL_OUTPUT/usr\"
+
+            popd
+
+            rm -rf $VORPAL_SOURCE/linux/linux-{linux_version}
+
+            ### Build glibc
+
+            mkdir -pv $VORPAL_SOURCE/glibc/glibc-{glibc_version}/build
+            pushd $VORPAL_SOURCE/glibc/glibc-{glibc_version}/build
+
+            case $(uname -m) in
+                aarch64) ln -sfv ../lib/ld-linux-aarch64.so.1 $VORPAL_OUTPUT/lib64
+                ;;
+                i?86)   ln -sfv ld-linux.so.2 $VORPAL_OUTPUT/lib/ld-lsb.so.3
+                ;;
+                x86_64) ln -sfv ../lib/ld-linux-x86-64.so.2 $VORPAL_OUTPUT/lib64
+                        ln -sfv ../lib/ld-linux-x86-64.so.2 $VORPAL_OUTPUT/lib64/ld-lsb-x86-64.so.3
+                ;;
+            esac
+
+            echo \"rootsbindir=/usr/sbin\" > configparms
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../scripts/config.guess)\" \
+                --enable-kernel=\"4.19\" \
+                --with-headers=\"$VORPAL_OUTPUT/usr/include\" \
+                --disable-nscd \
+                libc_cv_slibdir=\"/usr/lib\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            sed '/RTLDLIST=/s@/usr@@g' -i $VORPAL_OUTPUT/usr/bin/ldd
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/glibc
+
+            ## Test glibc
+
+            echo 'Testing glibc'
+            echo 'int main(){{}}' | $VORPAL_TARGET-gcc -xc -
+
+            readelf -l a.out | grep ld-linux
+
+            rm -v a.out
+
+            ## Build libstdc++
+
+            mkdir -pv $VORPAL_SOURCE/libstdc++/gcc-{gcc_version}/build
+            pushd $VORPAL_SOURCE/libstdc++/gcc-{gcc_version}/build
+
+            ../libstdc++-v3/configure \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../libstdc++/config.guess)\" \
+                --prefix=\"/usr\" \
+                --disable-multilib \
+                --disable-nls \
+                --disable-libstdcxx-pch \
+                --with-gxx-include-dir=\"/tools/$VORPAL_TARGET/include/c++/14.2.0\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            rm -v $VORPAL_OUTPUT/usr/lib/lib{{stdc++{{,exp,fs}},supc++}}.la
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/libstdc++
+
+            ## Build m4
+
+            mkdir -pv $VORPAL_SOURCE/m4/m4-{m4_version}/build
+            pushd $VORPAL_SOURCE/m4/m4-{m4_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/m4
+
+            ## Build ncurses
+
+            mkdir -pv $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
+            pushd $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
+
+            mkdir -pv build
+            pushd build
+
+            ../configure AWK=gawk
+
+            make -C include
+            make -C progs tic
+
+            popd
+
+            ./configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(./config.guess)\" \
+                --mandir=\"/usr/share/man\" \
+                --with-manpage-format=\"normal\" \
+                --with-shared \
+                --without-normal \
+                --with-cxx-shared \
+                --without-debug \
+                --without-ada \
+                --disable-stripping \
+                AWK=gawk
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" TIC_PATH=\"$(pwd)/build/progs/tic\" install
+
+            ln -sv libncursesw.so $VORPAL_OUTPUT/usr/lib/libncurses.so
+
+            sed -e 's/^#if.*XOPEN.*$/#if 1/' \
+                -i $VORPAL_OUTPUT/usr/include/curses.h
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/ncurses
+
+            ## Build bash
+
+            mkdir -pv $VORPAL_SOURCE/bash/bash-{bash_version}/build
+            pushd $VORPAL_SOURCE/bash/bash-{bash_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --build=\"$(sh ../support/config.guess)\" \
+                --host=\"$VORPAL_TARGET\" \
+                --without-bash-malloc
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            ln -sv bash $VORPAL_OUTPUT/usr/bin/sh
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/bash
+
+            ## Build coreutils
+
+            mkdir -pv $VORPAL_SOURCE/coreutils/coreutils-{coreutils_version}/build
+            pushd $VORPAL_SOURCE/coreutils/coreutils-{coreutils_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\" \
+                --enable-install-program=\"hostname\" \
+                --enable-no-install-program=\"kill,uptime\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            mv -v $VORPAL_OUTPUT/usr/bin/chroot $VORPAL_OUTPUT/usr/sbin
+
+            mkdir -pv $VORPAL_OUTPUT/usr/share/man/man8
+
+            mv -v $VORPAL_OUTPUT/usr/share/man/man1/chroot.1 \
+                $VORPAL_OUTPUT/usr/share/man/man8/chroot.8
+
+            sed -i 's/\"1\"/\"8\"/' \
+                $VORPAL_OUTPUT/usr/share/man/man8/chroot.8
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/coreutils
+
+            ## Build diffutils
+
+            mkdir -pv $VORPAL_SOURCE/diffutils/diffutils-{diffutils_version}/build
+            pushd $VORPAL_SOURCE/diffutils/diffutils-{diffutils_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/diffutils
+
+            ## Build file
+
+            mkdir -pv $VORPAL_SOURCE/file/file-{file_version}
+            pushd $VORPAL_SOURCE/file/file-{file_version}
+
+            mkdir -pv build
+            pushd build
+
+            ../configure \
+                --disable-bzlib \
+                --disable-libseccomp \
+                --disable-xzlib \
+                --disable-zlib
+
+            make
+
+            popd
+
+            ./configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(./config.guess)\"
+
+            make FILE_COMPILE=\"$(pwd)/build/src/file\"
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            rm -v $VORPAL_OUTPUT/usr/lib/libmagic.la
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/file
+
+            ## Build findutils
+
+            mkdir -pv $VORPAL_SOURCE/findutils/findutils-{findutils_version}/build
+            pushd $VORPAL_SOURCE/findutils/findutils-{findutils_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --localstatedir=\"/var/lib/locate\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/findutils
+
+            ## Build gawk
+
+            mkdir -pv $VORPAL_SOURCE/gawk/gawk-{gawk_version}/build
+            pushd $VORPAL_SOURCE/gawk/gawk-{gawk_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/gawk
+
+            ## Build grep
+
+            mkdir -pv $VORPAL_SOURCE/grep/grep-{grep_version}/build
+            pushd $VORPAL_SOURCE/grep/grep-{grep_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/grep
+
+            ## Build gzip
+
+            mkdir -pv $VORPAL_SOURCE/gzip/gzip-{gzip_version}/build
+            pushd $VORPAL_SOURCE/gzip/gzip-{gzip_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/gzip
+
+            ## Build make
+
+            mkdir -pv $VORPAL_SOURCE/make/make-{make_version}/build
+            pushd $VORPAL_SOURCE/make/make-{make_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --without-guile \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/make
+
+            ## Build patch
+
+            mkdir -pv $VORPAL_SOURCE/patch/patch-{patch_version}/build
+            pushd $VORPAL_SOURCE/patch/patch-{patch_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/patch
+
+            ## Build sed
+
+            mkdir -pv $VORPAL_SOURCE/sed/sed-{sed_version}/build
+            pushd $VORPAL_SOURCE/sed/sed-{sed_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/sed
+
+            ## Build tar
+
+            mkdir -pv $VORPAL_SOURCE/tar/tar-{tar_version}/build
+            pushd $VORPAL_SOURCE/tar/tar-{tar_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$($VORPAL_SOURCE/tar/tar-{tar_version}/build-aux/config.guess)\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/tar
+
+            ## Build xz
+
+            mkdir -pv $VORPAL_SOURCE/xz/xz-{xz_version}/build
+            pushd $VORPAL_SOURCE/xz/xz-{xz_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --host=\"$VORPAL_TARGET\" \
+                --build=\"$(../build-aux/config.guess)\" \
+                --disable-static \
+                --docdir=\"/usr/share/doc/xz-5.6.3\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            rm -v $VORPAL_OUTPUT/usr/lib/liblzma.la
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/xz
+
+            ## Build binutils (pass 02)
+
+            mkdir -pv $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}/build
+            pushd $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --build=\"$(../config.guess)\" \
+                --host=\"$VORPAL_TARGET\" \
+                --disable-nls \
+                --enable-shared \
+                --enable-gprofng=\"no\" \
+                --disable-werror \
+                --enable-64-bit-bfd \
+                --enable-new-dtags \
+                --enable-default-hash-style=\"gnu\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            rm -v $VORPAL_OUTPUT/usr/lib/lib{{bfd,ctf,ctf-nobfd,opcodes,sframe}}.{{a,la}}
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/binutils-pass-02
+
+            ## Build gcc (pass 02)
+
+            mkdir -pv $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}/build
+            pushd $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}/build
+
+            ../configure \
+                --build=\"$(../config.guess)\" \
+                --host=\"$VORPAL_TARGET\" \
+                --target=\"$VORPAL_TARGET\" \
+                LDFLAGS_FOR_TARGET=\"-L$PWD/$VORPAL_TARGET/libgcc\" \
+                --prefix=\"/usr\" \
+                --with-build-sysroot=\"$VORPAL_OUTPUT\" \
+                --enable-default-pie \
+                --enable-default-ssp \
+                --disable-nls \
+                --disable-multilib \
+                --disable-libatomic \
+                --disable-libgomp \
+                --disable-libquadmath \
+                --disable-libsanitizer \
+                --disable-libssp \
+                --disable-libvtv \
+                --enable-languages=\"c,c++\"
+
+            make
+            make DESTDIR=\"$VORPAL_OUTPUT\" install
+
+            ln -sv gcc $VORPAL_OUTPUT/usr/bin/cc
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/gcc-pass-02
+
+            ## Setup root symlinks
+
+            ln -svf usr/bin $VORPAL_OUTPUT/bin
+            ln -svf usr/lib $VORPAL_OUTPUT/lib
+            ln -svf usr/sbin $VORPAL_OUTPUT/sbin
+
+            ## Cleanup root directories
+
+            rm -rfv $VORPAL_OUTPUT/tools
+            rm -rfv $VORPAL_OUTPUT/var",
+        },
+        vec![Aarch64Linux, X8664Linux],
+    )
+    .await?;
+
+    let step_stage_02 = step::bwrap(
+        context,
+        // TODO: impove readability with list in list
         vec![
-            bwrap(
-                vec![],
-                artifacts,
-                BTreeMap::from([("PATH", "/usr/bin:/usr/sbin".to_string())]),
-                Some(linux_debian.clone()),
-                formatdoc! {"
-                    #!/bin/bash
-                    set -euo pipefail
-
-                    set +h
-                    umask 022
-
-                    ### Setup environment
-
-                    export VORPAL_SOURCE=\"$(pwd)/source\"
-
-                    ### Setup GCC (base)
-
-                    pushd $VORPAL_SOURCE/gcc/gcc-{gcc_version}
-
-                    ./contrib/download_prerequisites
-
-                    case $(uname -m) in
-                        x86_64)
-                            sed -e '/m64=/s/lib64/lib/' \
-                                -i.orig gcc/config/i386/t-linux64
-                        ;;
-                        aarch64)
-                            sed -e '/lp64=/s/lib64/lib/' \
-                                -i.orig ./gcc/config/aarch64/t-aarch64-linux
-                        ;;
-                    esac
-
-                    popd
-
-                    ## Setup ncurses
-
-                    pushd $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
-
-                    sed -i s/mawk// configure
-
-                    popd
-
-                    ## Setup gawk 
-
-                    pushd $VORPAL_SOURCE/gawk/gawk-{gawk_version}
-
-                    sed -i 's/extras//' Makefile.in
-
-                    popd
-
-                    ## Patch GLIBC
-
-                    pushd $VORPAL_SOURCE/glibc/glibc-{glibc_version}
-
-                    patch -Np1 -i $VORPAL_SOURCE/glibc-patch/glibc-{glibc_version}-fhs-1.patch
-
-                    popd
-
-                    ## Setup source paths
-
-                    mv -v $VORPAL_SOURCE/binutils $VORPAL_SOURCE/binutils-pass-01
-                    mv -v $VORPAL_SOURCE/gcc $VORPAL_SOURCE/gcc-pass-01
-
-                    echo \"Copying binutils-pass-01 to binutils-pass-02\"
-                    cp -pr $VORPAL_SOURCE/binutils-pass-01 $VORPAL_SOURCE/binutils-pass-02
-
-                    echo \"Copying gcc-pass-01 to gcc-pass-02\"
-                    cp -pr $VORPAL_SOURCE/gcc-pass-01 $VORPAL_SOURCE/gcc-pass-02
-
-                    echo \"Copying gcc-pass-01 to libstdc++\"
-                    cp -pr $VORPAL_SOURCE/gcc-pass-01 $VORPAL_SOURCE/libstdc++
-
-                    ## Patch binutils-pass-02
-
-                    pushd $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}
-
-                    sed '6009s/$add_dir//' -i ltmain.sh
-
-                    popd
-
-                    ## Patch gcc-pass-02
-
-                    pushd $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}
-
-                    sed '/thread_header =/s/@.*@/gthr-posix.h/' \
-                        -i libgcc/Makefile.in libstdc++-v3/include/Makefile.in
-
-                    popd
-
-                    ### Setup paths
-
-                    mkdir -pv $VORPAL_OUTPUT/{{etc,var}} $VORPAL_OUTPUT/usr/{{bin,lib,sbin}}
-
-                    for i in bin lib sbin; do
-                      ln -sv usr/$i $VORPAL_OUTPUT/$i
-                    done
-
-                    case $(uname -m) in
-                      aarch64) mkdir -pv $VORPAL_OUTPUT/lib64 ;;
-                      x86_64) mkdir -pv $VORPAL_OUTPUT/lib64 ;;
-                    esac
-
-                    mkdir -pv $VORPAL_OUTPUT/tools
-
-                    ## Setup environment
-
-                    export LC_ALL=\"POSIX\"
-                    export VORPAL_TARGET=\"$(uname -m)-vorpal-linux-gnu\"
-                    export PATH=\"$VORPAL_OUTPUT/tools/bin:$PATH\"
-                    export CONFIG_SITE=\"$VORPAL_OUTPUT/usr/share/config.site\"
-                    export MAKEFLAGS=\"-j$(nproc)\"
-
-                    ### Build binutils (pass 01)
-
-                    mkdir -pv $VORPAL_SOURCE/binutils-pass-01/binutils-{binutils_version}/build
-                    pushd $VORPAL_SOURCE/binutils-pass-01/binutils-{binutils_version}/build
-
-                    ../configure \
-                        --prefix=\"$VORPAL_OUTPUT/tools\" \
-                        --with-sysroot=\"$VORPAL_OUTPUT\" \
-                        --target=\"$VORPAL_TARGET\" \
-                        --disable-nls \
-                        --enable-gprofng=\"no\" \
-                        --disable-werror \
-                        --enable-new-dtags \
-                        --enable-default-hash-style=\"gnu\"
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/binutils-pass-01
-
-                    ### Build gcc (pass 01)
-
-                    mkdir -pv $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
-                    pushd $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
-
-                    ../configure \
-                        --target=\"$VORPAL_TARGET\" \
-                        --prefix=\"$VORPAL_OUTPUT/tools\" \
-                        --with-glibc-version=\"2.40\" \
-                        --with-sysroot=\"$VORPAL_OUTPUT\" \
-                        --with-newlib \
-                        --without-headers \
-                        --enable-default-pie \
-                        --enable-default-ssp \
-                        --disable-nls \
-                        --disable-shared \
-                        --disable-multilib \
-                        --disable-threads \
-                        --disable-libatomic \
-                        --disable-libgomp \
-                        --disable-libquadmath \
-                        --disable-libssp \
-                        --disable-libvtv \
-                        --disable-libstdcxx \
-                        --enable-languages=\"c,c++\"
-
-                    make
-                    make install
-
-                    OUTPUT_LIBGCC=$($VORPAL_TARGET-gcc -print-libgcc-file-name)
-                    OUTPUT_LIBGCC_DIR=$(dirname \"${{OUTPUT_LIBGCC}}\")
-                    OUTPUT_LIMITS_PATH=${{OUTPUT_LIBGCC_DIR}}/include/limits.h
-
-                    echo \"OUTPUT_LIBGCC: ${{OUTPUT_LIBGCC}}\"
-                    echo \"OUTPUT_LIBGCC_DIR: ${{OUTPUT_LIBGCC_DIR}}\"
-                    echo \"OUTPUT_LIMITS_PATH: ${{OUTPUT_LIMITS_PATH}}\"
-
-                    cat ../gcc/limitx.h ../gcc/glimits.h ../gcc/limity.h \
-                        > $OUTPUT_LIMITS_PATH
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/gcc-pass-01
-
-                    ### Build linux headers
-
-                    pushd $VORPAL_SOURCE/linux/linux-{linux_version}
-
-                    make mrproper
-                    make headers
-
-                    find usr/include -type f ! -name '*.h' -delete
-                    cp -prv usr/include \"$VORPAL_OUTPUT/usr\"
-
-                    popd
-
-                    rm -rf $VORPAL_SOURCE/linux/linux-{linux_version}
-
-                    ### Build glibc
-
-                    mkdir -pv $VORPAL_SOURCE/glibc/glibc-{glibc_version}/build
-                    pushd $VORPAL_SOURCE/glibc/glibc-{glibc_version}/build
-
-                    case $(uname -m) in
-                        aarch64) ln -sfv ../lib/ld-linux-aarch64.so.1 $VORPAL_OUTPUT/lib64
-                        ;;
-                        i?86)   ln -sfv ld-linux.so.2 $VORPAL_OUTPUT/lib/ld-lsb.so.3
-                        ;;
-                        x86_64) ln -sfv ../lib/ld-linux-x86-64.so.2 $VORPAL_OUTPUT/lib64
-                                ln -sfv ../lib/ld-linux-x86-64.so.2 $VORPAL_OUTPUT/lib64/ld-lsb-x86-64.so.3
-                        ;;
-                    esac
-
-                    echo \"rootsbindir=/usr/sbin\" > configparms
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../scripts/config.guess)\" \
-                        --enable-kernel=\"4.19\" \
-                        --with-headers=\"$VORPAL_OUTPUT/usr/include\" \
-                        --disable-nscd \
-                        libc_cv_slibdir=\"/usr/lib\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    sed '/RTLDLIST=/s@/usr@@g' -i $VORPAL_OUTPUT/usr/bin/ldd
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/glibc
-
-                    ## Test glibc
-
-                    echo 'Testing glibc'
-                    echo 'int main(){{}}' | $VORPAL_TARGET-gcc -xc -
-
-                    readelf -l a.out | grep ld-linux
-
-                    rm -v a.out
-
-                    ## Build libstdc++
-
-                    mkdir -pv $VORPAL_SOURCE/libstdc++/gcc-{gcc_version}/build
-                    pushd $VORPAL_SOURCE/libstdc++/gcc-{gcc_version}/build
-
-                    ../libstdc++-v3/configure \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../libstdc++/config.guess)\" \
-                        --prefix=\"/usr\" \
-                        --disable-multilib \
-                        --disable-nls \
-                        --disable-libstdcxx-pch \
-                        --with-gxx-include-dir=\"/tools/$VORPAL_TARGET/include/c++/14.2.0\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    rm -v $VORPAL_OUTPUT/usr/lib/lib{{stdc++{{,exp,fs}},supc++}}.la
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/libstdc++
-
-                    ## Build m4
-
-                    mkdir -pv $VORPAL_SOURCE/m4/m4-{m4_version}/build
-                    pushd $VORPAL_SOURCE/m4/m4-{m4_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/m4
-
-                    ## Build ncurses
-
-                    mkdir -pv $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
-                    pushd $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
-
-                    mkdir -pv build
-                    pushd build
-
-                    ../configure AWK=gawk
-
-                    make -C include
-                    make -C progs tic
-
-                    popd
-
-                    ./configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(./config.guess)\" \
-                        --mandir=\"/usr/share/man\" \
-                        --with-manpage-format=\"normal\" \
-                        --with-shared \
-                        --without-normal \
-                        --with-cxx-shared \
-                        --without-debug \
-                        --without-ada \
-                        --disable-stripping \
-                        AWK=gawk
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" TIC_PATH=\"$(pwd)/build/progs/tic\" install
-
-                    ln -sv libncursesw.so $VORPAL_OUTPUT/usr/lib/libncurses.so
-
-                    sed -e 's/^#if.*XOPEN.*$/#if 1/' \
-                        -i $VORPAL_OUTPUT/usr/include/curses.h
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/ncurses
-
-                    ## Build bash
-
-                    mkdir -pv $VORPAL_SOURCE/bash/bash-{bash_version}/build
-                    pushd $VORPAL_SOURCE/bash/bash-{bash_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --build=\"$(sh ../support/config.guess)\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --without-bash-malloc
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    ln -sv bash $VORPAL_OUTPUT/usr/bin/sh
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/bash
-
-                    ## Build coreutils
-
-                    mkdir -pv $VORPAL_SOURCE/coreutils/coreutils-{coreutils_version}/build
-                    pushd $VORPAL_SOURCE/coreutils/coreutils-{coreutils_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\" \
-                        --enable-install-program=\"hostname\" \
-                        --enable-no-install-program=\"kill,uptime\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    mv -v $VORPAL_OUTPUT/usr/bin/chroot $VORPAL_OUTPUT/usr/sbin
-
-                    mkdir -pv $VORPAL_OUTPUT/usr/share/man/man8
-
-                    mv -v $VORPAL_OUTPUT/usr/share/man/man1/chroot.1 \
-                        $VORPAL_OUTPUT/usr/share/man/man8/chroot.8
-
-                    sed -i 's/\"1\"/\"8\"/' \
-                        $VORPAL_OUTPUT/usr/share/man/man8/chroot.8
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/coreutils
-
-                    ## Build diffutils
-
-                    mkdir -pv $VORPAL_SOURCE/diffutils/diffutils-{diffutils_version}/build
-                    pushd $VORPAL_SOURCE/diffutils/diffutils-{diffutils_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/diffutils
-
-                    ## Build file
-
-                    mkdir -pv $VORPAL_SOURCE/file/file-{file_version}
-                    pushd $VORPAL_SOURCE/file/file-{file_version}
-
-                    mkdir -pv build
-                    pushd build
-
-                    ../configure \
-                        --disable-bzlib \
-                        --disable-libseccomp \
-                        --disable-xzlib \
-                        --disable-zlib
-
-                    make
-
-                    popd
-
-                    ./configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(./config.guess)\"
-
-                    make FILE_COMPILE=\"$(pwd)/build/src/file\"
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    rm -v $VORPAL_OUTPUT/usr/lib/libmagic.la
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/file
-
-                    ## Build findutils
-
-                    mkdir -pv $VORPAL_SOURCE/findutils/findutils-{findutils_version}/build
-                    pushd $VORPAL_SOURCE/findutils/findutils-{findutils_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --localstatedir=\"/var/lib/locate\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/findutils
-
-                    ## Build gawk
-
-                    mkdir -pv $VORPAL_SOURCE/gawk/gawk-{gawk_version}/build
-                    pushd $VORPAL_SOURCE/gawk/gawk-{gawk_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/gawk
-
-                    ## Build grep
-
-                    mkdir -pv $VORPAL_SOURCE/grep/grep-{grep_version}/build
-                    pushd $VORPAL_SOURCE/grep/grep-{grep_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/grep
-
-                    ## Build gzip
-
-                    mkdir -pv $VORPAL_SOURCE/gzip/gzip-{gzip_version}/build
-                    pushd $VORPAL_SOURCE/gzip/gzip-{gzip_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/gzip
-
-                    ## Build make
-
-                    mkdir -pv $VORPAL_SOURCE/make/make-{make_version}/build
-                    pushd $VORPAL_SOURCE/make/make-{make_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --without-guile \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/make
-
-                    ## Build patch
-
-                    mkdir -pv $VORPAL_SOURCE/patch/patch-{patch_version}/build
-                    pushd $VORPAL_SOURCE/patch/patch-{patch_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/patch
-
-                    ## Build sed
-
-                    mkdir -pv $VORPAL_SOURCE/sed/sed-{sed_version}/build
-                    pushd $VORPAL_SOURCE/sed/sed-{sed_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/sed
-
-                    ## Build tar
-
-                    mkdir -pv $VORPAL_SOURCE/tar/tar-{tar_version}/build
-                    pushd $VORPAL_SOURCE/tar/tar-{tar_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$($VORPAL_SOURCE/tar/tar-{tar_version}/build-aux/config.guess)\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/tar
-
-                    ## Build xz
-
-                    mkdir -pv $VORPAL_SOURCE/xz/xz-{xz_version}/build
-                    pushd $VORPAL_SOURCE/xz/xz-{xz_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --build=\"$(../build-aux/config.guess)\" \
-                        --disable-static \
-                        --docdir=\"/usr/share/doc/xz-5.6.3\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    rm -v $VORPAL_OUTPUT/usr/lib/liblzma.la
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/xz
-
-                    ## Build binutils (pass 02)
-
-                    mkdir -pv $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}/build
-                    pushd $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --build=\"$(../config.guess)\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --disable-nls \
-                        --enable-shared \
-                        --enable-gprofng=\"no\" \
-                        --disable-werror \
-                        --enable-64-bit-bfd \
-                        --enable-new-dtags \
-                        --enable-default-hash-style=\"gnu\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    rm -v $VORPAL_OUTPUT/usr/lib/lib{{bfd,ctf,ctf-nobfd,opcodes,sframe}}.{{a,la}}
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/binutils-pass-02
-
-                    ## Build gcc (pass 02)
-
-                    mkdir -pv $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}/build
-                    pushd $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}/build
-
-                    ../configure \
-                        --build=\"$(../config.guess)\" \
-                        --host=\"$VORPAL_TARGET\" \
-                        --target=\"$VORPAL_TARGET\" \
-                        LDFLAGS_FOR_TARGET=\"-L$PWD/$VORPAL_TARGET/libgcc\" \
-                        --prefix=\"/usr\" \
-                        --with-build-sysroot=\"$VORPAL_OUTPUT\" \
-                        --enable-default-pie \
-                        --enable-default-ssp \
-                        --disable-nls \
-                        --disable-multilib \
-                        --disable-libatomic \
-                        --disable-libgomp \
-                        --disable-libquadmath \
-                        --disable-libsanitizer \
-                        --disable-libssp \
-                        --disable-libvtv \
-                        --enable-languages=\"c,c++\"
-
-                    make
-                    make DESTDIR=\"$VORPAL_OUTPUT\" install
-
-                    ln -sv gcc $VORPAL_OUTPUT/usr/bin/cc
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/gcc-pass-02
-
-                    ## Setup root symlinks
-
-                    ln -svf usr/bin $VORPAL_OUTPUT/bin
-                    ln -svf usr/lib $VORPAL_OUTPUT/lib
-                    ln -svf usr/sbin $VORPAL_OUTPUT/sbin
-
-                    ## Cleanup root directories
-
-                    rm -rfv $VORPAL_OUTPUT/tools
-                    rm -rfv $VORPAL_OUTPUT/var",
-                }
-            ),
-            bwrap(
-                vec![
-                    // mount bin
-                    "--bind".to_string(),
-                    "$VORPAL_OUTPUT/bin".to_string(),
-                    "/bin".to_string(),
-                    // mount etc
-                    "--bind".to_string(),
-                    "$VORPAL_OUTPUT/etc".to_string(),
-                    "/etc".to_string(),
-                    // mount lib
-                    "--bind".to_string(),
-                    "$VORPAL_OUTPUT/lib".to_string(),
-                    "/lib".to_string(),
-                    // mount lib64 (if exists)
-                    "--bind-try".to_string(),
-                    "$VORPAL_OUTPUT/lib64".to_string(),
-                    "/lib64".to_string(),
-                    // mount sbin
-                    "--bind".to_string(),
-                    "$VORPAL_OUTPUT/sbin".to_string(),
-                    "/sbin".to_string(),
-                    // mount usr
-                    "--bind".to_string(),
-                    "$VORPAL_OUTPUT/usr".to_string(),
-                    "/usr".to_string(),
-                    // mount current directory
-                    "--bind".to_string(),
-                    "$VORPAL_WORKSPACE".to_string(),
-                    "$VORPAL_WORKSPACE".to_string(),
-                    // change directory
-                    "--chdir".to_string(),
-                    "$VORPAL_WORKSPACE".to_string(),
-                    // set group id
-                    "--gid".to_string(),
-                    "0".to_string(),
-                    // set user id
-                    "--uid".to_string(),
-                    "0".to_string(),
-                ],
-                vec![],
-                BTreeMap::from([("PATH", "/usr/bin:/usr/sbin".to_string())]),
-                None,
-                formatdoc! {"
-                    #!/bin/bash
-                    set -euo pipefail
-
-                    ## Setup paths
-
-                    export VORPAL_SOURCE=\"$(pwd)/source\"
-
-                    ## Setup environment
-
-                    export MAKEFLAGS=\"-j$(nproc)\"
-
-                    ## Setup system directories
-
-                    mkdir -pv /{{boot,home,mnt,opt,srv}}
-                    mkdir -pv /etc/{{opt,sysconfig}}
-                    mkdir -pv /lib/firmware
-                    mkdir -pv /media/{{floppy,cdrom}}
-                    mkdir -pv /usr/{{,local/}}{{include,src}}
-                    mkdir -pv /usr/lib/locale
-                    mkdir -pv /usr/local/{{bin,lib,sbin}}
-                    mkdir -pv /usr/{{,local/}}share/{{color,dict,doc,info,locale,man}}
-                    mkdir -pv /usr/{{,local/}}share/{{misc,terminfo,zoneinfo}}
-                    mkdir -pv /usr/{{,local/}}share/man/man{{1..8}}
-                    mkdir -pv /var/{{cache,local,log,mail,opt,spool}}
-                    mkdir -pv /var/lib/{{color,misc,locate}}
-
-                    ## Setup root
-
-                    install -dv -m 0750 /root
-
-                    ## Setup system files
-
-                    cat > /etc/hosts << \"EOF\"
-                    127.0.0.1  localhost
-                    ::1        localhost
-                    EOF
-
-                    cat > /etc/passwd << \"EOF\"
-                    root:x:0:0:root:/root:/bin/bash
-                    bin:x:1:1:bin:/dev/null:/usr/bin/false
-                    daemon:x:6:6:Daemon User:/dev/null:/usr/bin/false
-                    messagebus:x:18:18:D-Bus Message Daemon User:/run/dbus:/usr/bin/false
-                    uuidd:x:80:80:UUID Generation Daemon User:/dev/null:/usr/bin/false
-                    nobody:x:65534:65534:Unprivileged User:/dev/null:/usr/bin/false
-                    EOF
-
-                    cat > /etc/group << \"EOF\"
-                    root:x:0:
-                    bin:x:1:daemon
-                    sys:x:2:
-                    kmem:x:3:
-                    tape:x:4:
-                    tty:x:5:
-                    daemon:x:6:
-                    floppy:x:7:
-                    disk:x:8:
-                    lp:x:9:
-                    dialout:x:10:
-                    audio:x:11:
-                    video:x:12:
-                    utmp:x:13:
-                    cdrom:x:15:
-                    adm:x:16:
-                    messagebus:x:18:
-                    input:x:24:
-                    mail:x:34:
-                    kvm:x:61:
-                    uuidd:x:80:
-                    wheel:x:97:
-                    users:x:999:
-                    nogroup:x:65534:
-                    EOF
-
-                    ## Setup locale
-
-                    localedef -i C -f UTF-8 C.UTF-8
-
-                    ## Setup logs
-
-                    touch /var/log/{{btmp,lastlog,faillog,wtmp}}
-
-                    ## Setup resolv.conf
-
-                    echo 'nameserver 1.1.1.1' > /etc/resolv.conf
-
-                    ## Build gettext
-
-                    mkdir -pv $VORPAL_SOURCE/gettext/gettext-{gettext_version}/build
-                    pushd $VORPAL_SOURCE/gettext/gettext-{gettext_version}/build
-
-                    ../configure --disable-shared
-
-                    make
-
-                    cp -pv gettext-tools/src/{{msgfmt,msgmerge,xgettext}} /usr/bin
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/gettext
-
-                    ## Build bison
-
-                    mkdir -pv $VORPAL_SOURCE/bison/bison-{bison_version}/build
-                    pushd $VORPAL_SOURCE/bison/bison-{bison_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --docdir=\"/usr/share/doc/bison-3.8.2\"
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/bison
-
-                    ## Build perl
-
-                    pushd $VORPAL_SOURCE/perl/perl-{perl_version}
-
-                    sh Configure \
-                        -des \
-                        -D prefix=\"/usr\" \
-                        -D vendorprefix=\"/usr\" \
-                        -D useshrplib \
-                        -D privlib=\"/usr/lib/perl5/5.40/core_perl\" \
-                        -D archlib=\"/usr/lib/perl5/5.40/core_perl\" \
-                        -D sitelib=\"/usr/lib/perl5/5.40/site_perl\" \
-                        -D sitearch=\"/usr/lib/perl5/5.40/site_perl\" \
-                        -D vendorlib=\"/usr/lib/perl5/5.40/vendor_perl\" \
-                        -D vendorarch=\"/usr/lib/perl5/5.40/vendor_perl\"
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rf $VORPAL_SOURCE/perl
-
-                    ## Build Python
-
-                    mkdir -pv $VORPAL_SOURCE/python/Python-{python_version}/build
-                    pushd $VORPAL_SOURCE/python/Python-{python_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --enable-shared \
-                        --without-ensurepip
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/python
-
-                    ## Build texinfo
-
-                    mkdir -pv $VORPAL_SOURCE/texinfo/texinfo-{texinfo_version}/build
-                    pushd $VORPAL_SOURCE/texinfo/texinfo-{texinfo_version}/build
-
-                    ../configure --prefix=\"/usr\"
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rf $VORPAL_SOURCE/texinfo
-
-                    ## Build util-linux
-
-                    mkdir -pv $VORPAL_SOURCE/util-linux/util-linux-{util_linux_version}/build
-                    pushd $VORPAL_SOURCE/util-linux/util-linux-{util_linux_version}/build
-
-                    mkdir -pv /var/lib/hwclock
-
-                    # note: \"--disable-makeinstall-chown\" for sandbox limitations
-
-                    ../configure \
-                        --libdir=\"/usr/lib\" \
-                        --runstatedir=\"/run\" \
-                        --disable-chfn-chsh \
-                        --disable-login \
-                        --disable-nologin \
-                        --disable-su \
-                        --disable-setpriv \
-                        --disable-runuser \
-                        --disable-pylibmount \
-                        --disable-static \
-                        --disable-liblastlog2 \
-                        --disable-makeinstall-chown \
-                        --without-python \
-                        ADJTIME_PATH=\"/var/lib/hwclock/adjtime\" \
-                        --docdir=\"/usr/share/doc/util-linux-2.40.2\"
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/util-linux
-
-                    ## Build zlib
-
-                    mkdir -pv $VORPAL_SOURCE/zlib/zlib-{zlib_version}/build
-                    pushd $VORPAL_SOURCE/zlib/zlib-{zlib_version}/build
-
-                    ../configure --prefix=\"/usr\"
-
-                    make
-                    # make check
-                    make install
-
-                    rm -fv /usr/lib/libz.a
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/zlib
-
-                    ## Build openssl
-
-                    mkdir -pv $VORPAL_SOURCE/openssl/openssl-{openssl_version}/build
-                    pushd $VORPAL_SOURCE/openssl/openssl-{openssl_version}/build
-
-                    ../config \
-                        --prefix=\"/usr\" \
-                        --openssldir=\"/etc/ssl\" \
-                        --libdir=\"lib\" \
-                        shared \
-                        zlib-dynamic
-
-                    make
-
-                    # HARNESS_JOBS=$(nproc) make test
-
-                    sed -i '/INSTALL_LIBS/s/libcrypto.a libssl.a//' Makefile
-
-                    make MANSUFFIX=ssl install
-
-                    mv -v /usr/share/doc/openssl /usr/share/doc/openssl-3.3.1
-                    cp -pfrv doc/* /usr/share/doc/openssl-3.3.1
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/openssl
-
-                    ## END OF STANDARD
-                    ## START OF EXTRAS
-
-                    ## Build libunistring
-
-                    mkdir -pv $VORPAL_SOURCE/libunistring/libunistring-{libunistring_version}/build
-                    pushd $VORPAL_SOURCE/libunistring/libunistring-{libunistring_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --disable-static \
-                        --docdir=\"/usr/share/doc/libunistring-1.2\"
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/libunistring
-
-                    ## Build libidn2
-
-                    mkdir -pv $VORPAL_SOURCE/libidn2/libidn2-{libidn2_version}/build
-                    pushd $VORPAL_SOURCE/libidn2/libidn2-{libidn2_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --disable-static
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/libidn2
-
-                    ## Build libpsl
-
-                    mkdir -pv $VORPAL_SOURCE/libpsl/libpsl-{libpsl_version}/build
-                    pushd $VORPAL_SOURCE/libpsl/libpsl-{libpsl_version}/build
-
-                    ../configure --prefix=\"/usr\"
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/libpsl
-
-                    ## Build CA certificates
-
-                    cp -pv $VORPAL_SOURCE/curl-cacert/cacert.pem /etc/ssl/certs/ca-certificates.crt
-
-                    ## Build curl
-
-                    mkdir -pv $VORPAL_SOURCE/curl/curl-{curl_version}/build
-                    pushd $VORPAL_SOURCE/curl/curl-{curl_version}/build
-
-                    ../configure \
-                        --prefix=\"/usr\" \
-                        --disable-static \
-                        --with-openssl \
-                        --enable-threaded-resolver \
-                        --with-ca-path=\"/etc/ssl/certs\"
-
-                    make
-                    make install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/curl
-
-                    ## Build unzip
-
-                    pushd $VORPAL_SOURCE/unzip/unzip{unzip_version}
-
-                    patch -Np1 -i $VORPAL_SOURCE/unzip-patch-fixes/unzip-6.0-consolidated_fixes-1.patch
-                    patch -Np1 -i $VORPAL_SOURCE/unzip-patch-gcc14/unzip-6.0-gcc14-1.patch
-
-                    make -f unix/Makefile generic
-
-                    make prefix=/usr MANDIR=/usr/share/man/man1 \
-                        -f unix/Makefile install
-
-                    popd
-
-                    rm -rfv $VORPAL_SOURCE/unzip
-
-                    ## Cleanup
-
-                    rm -rfv /usr/share/{{info,man,doc}}/*
-
-                    find /usr/{{lib,libexec}} -name \\*.la -delete",
-                    unzip_version = unzip_version.replace(".", "").as_str(),
-                },
-            ),
+            // mount bin
+            "--bind".to_string(),
+            "$VORPAL_OUTPUT/bin".to_string(),
+            "/bin".to_string(),
+            // mount etc
+            "--bind".to_string(),
+            "$VORPAL_OUTPUT/etc".to_string(),
+            "/etc".to_string(),
+            // mount lib
+            "--bind".to_string(),
+            "$VORPAL_OUTPUT/lib".to_string(),
+            "/lib".to_string(),
+            // mount lib64 (if exists)
+            "--bind-try".to_string(),
+            "$VORPAL_OUTPUT/lib64".to_string(),
+            "/lib64".to_string(),
+            // mount sbin
+            "--bind".to_string(),
+            "$VORPAL_OUTPUT/sbin".to_string(),
+            "/sbin".to_string(),
+            // mount usr
+            "--bind".to_string(),
+            "$VORPAL_OUTPUT/usr".to_string(),
+            "/usr".to_string(),
+            // mount current directory
+            "--bind".to_string(),
+            "$VORPAL_WORKSPACE".to_string(),
+            "$VORPAL_WORKSPACE".to_string(),
+            // change directory
+            "--chdir".to_string(),
+            "$VORPAL_WORKSPACE".to_string(),
+            // set group id
+            "--gid".to_string(),
+            "0".to_string(),
+            // set user id
+            "--uid".to_string(),
+            "0".to_string(),
         ],
-        vec!["aarch64-linux", "x86_64-linux"],
-    ).await
+        vec![],
+        vec!["PATH=/usr/bin:/usr/sbin".to_string()],
+        None,
+        formatdoc! {"
+            #!/bin/bash
+            set -euo pipefail
+
+            ## Setup paths
+
+            export VORPAL_SOURCE=\"$(pwd)/source\"
+
+            ## Setup environment
+
+            export MAKEFLAGS=\"-j$(nproc)\"
+
+            ## Setup system directories
+
+            mkdir -pv /{{boot,home,mnt,opt,srv}}
+            mkdir -pv /etc/{{opt,sysconfig}}
+            mkdir -pv /lib/firmware
+            mkdir -pv /media/{{floppy,cdrom}}
+            mkdir -pv /usr/{{,local/}}{{include,src}}
+            mkdir -pv /usr/lib/locale
+            mkdir -pv /usr/local/{{bin,lib,sbin}}
+            mkdir -pv /usr/{{,local/}}share/{{color,dict,doc,info,locale,man}}
+            mkdir -pv /usr/{{,local/}}share/{{misc,terminfo,zoneinfo}}
+            mkdir -pv /usr/{{,local/}}share/man/man{{1..8}}
+            mkdir -pv /var/{{cache,local,log,mail,opt,spool}}
+            mkdir -pv /var/lib/{{color,misc,locate}}
+
+            ## Setup root
+
+            install -dv -m 0750 /root
+
+            ## Setup system files
+
+            cat > /etc/hosts << \"EOF\"
+            127.0.0.1  localhost
+            ::1        localhost
+            EOF
+
+            cat > /etc/passwd << \"EOF\"
+            root:x:0:0:root:/root:/bin/bash
+            bin:x:1:1:bin:/dev/null:/usr/bin/false
+            daemon:x:6:6:Daemon User:/dev/null:/usr/bin/false
+            messagebus:x:18:18:D-Bus Message Daemon User:/run/dbus:/usr/bin/false
+            uuidd:x:80:80:UUID Generation Daemon User:/dev/null:/usr/bin/false
+            nobody:x:65534:65534:Unprivileged User:/dev/null:/usr/bin/false
+            EOF
+
+            cat > /etc/group << \"EOF\"
+            root:x:0:
+            bin:x:1:daemon
+            sys:x:2:
+            kmem:x:3:
+            tape:x:4:
+            tty:x:5:
+            daemon:x:6:
+            floppy:x:7:
+            disk:x:8:
+            lp:x:9:
+            dialout:x:10:
+            audio:x:11:
+            video:x:12:
+            utmp:x:13:
+            cdrom:x:15:
+            adm:x:16:
+            messagebus:x:18:
+            input:x:24:
+            mail:x:34:
+            kvm:x:61:
+            uuidd:x:80:
+            wheel:x:97:
+            users:x:999:
+            nogroup:x:65534:
+            EOF
+
+            ## Setup locale
+
+            localedef -i C -f UTF-8 C.UTF-8
+
+            ## Setup logs
+
+            touch /var/log/{{btmp,lastlog,faillog,wtmp}}
+
+            ## Setup resolv.conf
+
+            echo 'nameserver 1.1.1.1' > /etc/resolv.conf
+
+            ## Build gettext
+
+            mkdir -pv $VORPAL_SOURCE/gettext/gettext-{gettext_version}/build
+            pushd $VORPAL_SOURCE/gettext/gettext-{gettext_version}/build
+
+            ../configure --disable-shared
+
+            make
+
+            cp -pv gettext-tools/src/{{msgfmt,msgmerge,xgettext}} /usr/bin
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/gettext
+
+            ## Build bison
+
+            mkdir -pv $VORPAL_SOURCE/bison/bison-{bison_version}/build
+            pushd $VORPAL_SOURCE/bison/bison-{bison_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --docdir=\"/usr/share/doc/bison-3.8.2\"
+
+            make
+            make install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/bison
+
+            ## Build perl
+
+            pushd $VORPAL_SOURCE/perl/perl-{perl_version}
+
+            sh Configure \
+                -des \
+                -D prefix=\"/usr\" \
+                -D vendorprefix=\"/usr\" \
+                -D useshrplib \
+                -D privlib=\"/usr/lib/perl5/5.40/core_perl\" \
+                -D archlib=\"/usr/lib/perl5/5.40/core_perl\" \
+                -D sitelib=\"/usr/lib/perl5/5.40/site_perl\" \
+                -D sitearch=\"/usr/lib/perl5/5.40/site_perl\" \
+                -D vendorlib=\"/usr/lib/perl5/5.40/vendor_perl\" \
+                -D vendorarch=\"/usr/lib/perl5/5.40/vendor_perl\"
+
+            make
+            make install
+
+            popd
+
+            rm -rf $VORPAL_SOURCE/perl
+
+            ## Build Python
+
+            mkdir -pv $VORPAL_SOURCE/python/Python-{python_version}/build
+            pushd $VORPAL_SOURCE/python/Python-{python_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --enable-shared \
+                --without-ensurepip
+
+            make
+            make install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/python
+
+            ## Build texinfo
+
+            mkdir -pv $VORPAL_SOURCE/texinfo/texinfo-{texinfo_version}/build
+            pushd $VORPAL_SOURCE/texinfo/texinfo-{texinfo_version}/build
+
+            ../configure --prefix=\"/usr\"
+
+            make
+            make install
+
+            popd
+
+            rm -rf $VORPAL_SOURCE/texinfo
+
+            ## Build util-linux
+
+            mkdir -pv $VORPAL_SOURCE/util-linux/util-linux-{util_linux_version}/build
+            pushd $VORPAL_SOURCE/util-linux/util-linux-{util_linux_version}/build
+
+            mkdir -pv /var/lib/hwclock
+
+            # note: \"--disable-makeinstall-chown\" for sandbox limitations
+
+            ../configure \
+                --libdir=\"/usr/lib\" \
+                --runstatedir=\"/run\" \
+                --disable-chfn-chsh \
+                --disable-login \
+                --disable-nologin \
+                --disable-su \
+                --disable-setpriv \
+                --disable-runuser \
+                --disable-pylibmount \
+                --disable-static \
+                --disable-liblastlog2 \
+                --disable-makeinstall-chown \
+                --without-python \
+                ADJTIME_PATH=\"/var/lib/hwclock/adjtime\" \
+                --docdir=\"/usr/share/doc/util-linux-2.40.2\"
+
+            make
+            make install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/util-linux
+
+            ## Build zlib
+
+            mkdir -pv $VORPAL_SOURCE/zlib/zlib-{zlib_version}/build
+            pushd $VORPAL_SOURCE/zlib/zlib-{zlib_version}/build
+
+            ../configure --prefix=\"/usr\"
+
+            make
+            # make check
+            make install
+
+            rm -fv /usr/lib/libz.a
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/zlib
+
+            ## Build openssl
+
+            mkdir -pv $VORPAL_SOURCE/openssl/openssl-{openssl_version}/build
+            pushd $VORPAL_SOURCE/openssl/openssl-{openssl_version}/build
+
+            ../config \
+                --prefix=\"/usr\" \
+                --openssldir=\"/etc/ssl\" \
+                --libdir=\"lib\" \
+                shared \
+                zlib-dynamic
+
+            make
+
+            # HARNESS_JOBS=$(nproc) make test
+
+            sed -i '/INSTALL_LIBS/s/libcrypto.a libssl.a//' Makefile
+
+            make MANSUFFIX=ssl install
+
+            mv -v /usr/share/doc/openssl /usr/share/doc/openssl-3.3.1
+            cp -pfrv doc/* /usr/share/doc/openssl-3.3.1
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/openssl
+
+            ## END OF STANDARD
+            ## START OF EXTRAS
+
+            ## Build libunistring
+
+            mkdir -pv $VORPAL_SOURCE/libunistring/libunistring-{libunistring_version}/build
+            pushd $VORPAL_SOURCE/libunistring/libunistring-{libunistring_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --disable-static \
+                --docdir=\"/usr/share/doc/libunistring-1.2\"
+
+            make
+            make install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/libunistring
+
+            ## Build libidn2
+
+            mkdir -pv $VORPAL_SOURCE/libidn2/libidn2-{libidn2_version}/build
+            pushd $VORPAL_SOURCE/libidn2/libidn2-{libidn2_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --disable-static
+
+            make
+            make install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/libidn2
+
+            ## Build libpsl
+
+            mkdir -pv $VORPAL_SOURCE/libpsl/libpsl-{libpsl_version}/build
+            pushd $VORPAL_SOURCE/libpsl/libpsl-{libpsl_version}/build
+
+            ../configure --prefix=\"/usr\"
+
+            make
+            make install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/libpsl
+
+            ## Build CA certificates
+
+            cp -pv $VORPAL_SOURCE/curl-cacert/cacert.pem /etc/ssl/certs/ca-certificates.crt
+
+            ## Build curl
+
+            mkdir -pv $VORPAL_SOURCE/curl/curl-{curl_version}/build
+            pushd $VORPAL_SOURCE/curl/curl-{curl_version}/build
+
+            ../configure \
+                --prefix=\"/usr\" \
+                --disable-static \
+                --with-openssl \
+                --enable-threaded-resolver \
+                --with-ca-path=\"/etc/ssl/certs\"
+
+            make
+            make install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/curl
+
+            ## Build unzip
+
+            pushd $VORPAL_SOURCE/unzip/unzip{unzip_version}
+
+            patch -Np1 -i $VORPAL_SOURCE/unzip-patch-fixes/unzip-6.0-consolidated_fixes-1.patch
+            patch -Np1 -i $VORPAL_SOURCE/unzip-patch-gcc14/unzip-6.0-gcc14-1.patch
+
+            make -f unix/Makefile generic
+
+            make prefix=/usr MANDIR=/usr/share/man/man1 \
+                -f unix/Makefile install
+
+            popd
+
+            rm -rfv $VORPAL_SOURCE/unzip
+
+            ## Cleanup
+
+            rm -rfv /usr/share/{{info,man,doc}}/*
+
+            find /usr/{{lib,libexec}} -name \\*.la -delete",
+            unzip_version = unzip_version.replace(".", "").as_str(),
+        },
+        vec![Aarch64Linux, X8664Linux],
+    )
+    .await?;
+
+    let name = "linux-vorpal";
+
+    ConfigArtifactBuilder::new(name.to_string())
+        .with_source(bash)
+        .with_source(binutils)
+        .with_source(bison)
+        .with_source(coreutils)
+        .with_source(curl)
+        .with_source(curl_cacert)
+        .with_source(diffutils)
+        .with_source(file)
+        .with_source(findutils)
+        .with_source(gawk)
+        .with_source(gcc)
+        .with_source(gettext)
+        .with_source(glibc)
+        .with_source(glibc_patch)
+        .with_source(grep)
+        .with_source(gzip)
+        .with_source(libidn2)
+        .with_source(libpsl)
+        .with_source(libunistring)
+        .with_source(linux)
+        .with_source(m4)
+        .with_source(make)
+        .with_source(ncurses)
+        .with_source(openssl)
+        .with_source(patch)
+        .with_source(perl)
+        .with_source(python)
+        .with_source(sed)
+        .with_source(tar)
+        .with_source(texinfo)
+        .with_source(unzip)
+        .with_source(unzip_patch_fixes)
+        .with_source(unzip_patch_gcc14)
+        .with_source(util_linux)
+        .with_source(xz)
+        .with_source(zlib)
+        .with_step(step_stage_01)
+        .with_step(step_stage_02)
+        .with_system(Aarch64Linux)
+        .with_system(X8664Linux)
+        .build(context)
 }

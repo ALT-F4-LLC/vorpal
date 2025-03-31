@@ -1,10 +1,7 @@
 use crate::artifact::ArtifactServer;
 use anyhow::Result;
-use std::env::consts::{ARCH, OS};
 use tonic::transport::Server;
-use vorpal_schema::{
-    get_artifact_system, vorpal::artifact::v0::artifact_service_server::ArtifactServiceServer,
-};
+use vorpal_schema::{artifact::v0::artifact_service_server::ArtifactServiceServer, system_default};
 use vorpal_store::paths::get_public_key_path;
 
 pub async fn listen(registry: &str, port: u16) -> Result<()> {
@@ -16,17 +13,16 @@ pub async fn listen(registry: &str, port: u16) -> Result<()> {
         ));
     }
 
-    let system = get_artifact_system(format!("{}-{}", ARCH, OS).as_str());
-
     let addr = format!("[::]:{}", port)
         .parse()
         .expect("failed to parse address");
 
-    let artifact_service =
-        ArtifactServiceServer::new(ArtifactServer::new(registry.to_string(), system));
+    let system = system_default()?;
+
+    let service = ArtifactServiceServer::new(ArtifactServer::new(registry.to_string(), system));
 
     Server::builder()
-        .add_service(artifact_service)
+        .add_service(service)
         .serve(addr)
         .await
         .expect("failed to start worker server");

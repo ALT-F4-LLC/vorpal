@@ -1,11 +1,8 @@
 use anyhow::Result;
 use sha256::digest;
-use std::env::consts::{ARCH, OS};
 use std::path::Path;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, process::Stdio};
-use tokio::fs::remove_dir_all;
-use tokio::fs::{create_dir_all, read, remove_file, write, File};
-use tokio::io::AsyncWriteExt;
+use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
@@ -13,36 +10,28 @@ use tokio::{
     fs::set_permissions,
     io::{AsyncBufReadExt, BufReader},
 };
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::{wrappers::LinesStream, StreamExt};
-use tonic::{Request, Response, Status};
+use tokio_stream::{
+    wrappers::{LinesStream, ReceiverStream},
+    StreamExt,
+};
+use tonic::{Code::NotFound, Request, Response, Status};
 use tracing::error;
-use vorpal_schema::vorpal::artifact::v0::{
-    Artifact, ArtifactId, ArtifactSourceId, ArtifactStepEnvironment,
-};
-use vorpal_schema::vorpal::{
-    artifact::v0::ArtifactSystem,
-    artifact::v0::{
-        artifact_service_server::ArtifactService, ArtifactBuildRequest, ArtifactBuildResponse,
-    },
-};
 use vorpal_schema::{
-    get_artifact_system,
-    vorpal::{
-        artifact::v0::ArtifactSystem::UnknownSystem,
-        registry::v0::{
-            registry_service_client::RegistryServiceClient, RegistryKind, RegistryPushRequest,
-            RegistryRequest,
-        },
+    artifact::v0::{artifact_service_server::ArtifactService, ArtifactBuildResponse},
+    config::v0::{ConfigArtifact, ConfigArtifactSource, ConfigArtifactSystem},
+    registry::v0::{
+        registry_service_client::RegistryServiceClient, RegistryArchive, RegistryPullRequest,
+        RegistryPushRequest,
     },
+    system_default,
 };
-use vorpal_store::temps::{create_sandbox_dir, create_sandbox_file};
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     paths::{
-        copy_files, get_artifact_lock_path, get_artifact_path, get_cache_path, get_file_paths,
-        get_private_key_path, get_source_archive_path, set_timestamps,
+        get_archive_path, get_file_paths, get_private_key_path, get_store_lock_path,
+        get_store_path, set_timestamps,
     },
+    temps::{create_sandbox_dir, create_sandbox_file},
 };
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
@@ -50,29 +39,30 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 #[derive(Debug, Default)]
 pub struct ArtifactServer {
     pub registry: String,
-    pub system: ArtifactSystem,
+    pub system: ConfigArtifactSystem,
 }
 
 impl ArtifactServer {
-    pub fn new(registry: String, system: ArtifactSystem) -> Self {
+    pub fn new(registry: String, system: ConfigArtifactSystem) -> Self {
         Self { registry, system }
     }
 }
 
-fn expand_env(text: &str, envs: &[&ArtifactStepEnvironment]) -> String {
+fn expand_env(text: &str, envs: &[&String]) -> String {
     envs.iter().fold(text.to_string(), |acc, e| {
-        acc.replace(&format!("${}", e.key), &e.value)
+        let e = e.split('=').collect::<Vec<&str>>();
+        acc.replace(&format!("${}", e[0]), e[1])
     })
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn run_step(
-    artifact_artifacts: Vec<ArtifactId>,
-    artifact_name: String,
+    artifact_hash: &str,
     artifact_path: &Path,
     step_arguments: Vec<String>,
+    step_artifacts: Vec<String>,
     step_entrypoint: Option<String>,
-    step_environments: Vec<ArtifactStepEnvironment>,
+    step_environments: Vec<String>,
     step_script: Option<String>,
     tx: &Sender<Result<ArtifactBuildResponse, Status>>,
     workspace_path: &Path,
@@ -83,8 +73,8 @@ async fn run_step(
 
     let mut paths = vec![];
 
-    for artifact in artifact_artifacts.iter() {
-        let path = get_artifact_path(&artifact.hash, &artifact.name);
+    for artifact in step_artifacts.iter() {
+        let path = get_store_path(artifact);
 
         if !path.exists() {
             return Err(Status::internal("artifact not found"));
@@ -92,38 +82,25 @@ async fn run_step(
 
         let path_str = path.display().to_string();
 
-        environments.push(ArtifactStepEnvironment {
-            key: format!(
-                "VORPAL_ARTIFACT_{}",
-                artifact.name.to_lowercase().replace('-', "_")
-            ),
-            value: path_str.clone(),
-        });
+        environments.push(format!("VORPAL_ARTIFACT_{}={}", artifact, path_str));
 
         paths.push(path_str);
     }
 
     // Add default environment variables
 
-    let name_envkey = artifact_name.to_lowercase().replace('-', "_");
+    if !paths.is_empty() {
+        paths.push(format!("VORPAL_ARTIFACTS={}", paths.join(" ")))
+    }
 
     environments.extend([
-        ArtifactStepEnvironment {
-            key: format!("VORPAL_ARTIFACT_{}", name_envkey.clone()),
-            value: artifact_path.display().to_string(),
-        },
-        ArtifactStepEnvironment {
-            key: "VORPAL_ARTIFACTS".to_string(),
-            value: paths.join(" ").to_string(),
-        },
-        ArtifactStepEnvironment {
-            key: "VORPAL_OUTPUT".to_string(),
-            value: artifact_path.display().to_string(),
-        },
-        ArtifactStepEnvironment {
-            key: "VORPAL_WORKSPACE".to_string(),
-            value: workspace_path.display().to_string(),
-        },
+        format!(
+            "VORPAL_ARTIFACT_{}={}",
+            artifact_hash,
+            get_store_path(artifact_hash).display()
+        ),
+        format!("VORPAL_OUTPUT={}", artifact_path.display()),
+        format!("VORPAL_WORKSPACE={}", workspace_path.display()),
     ]);
 
     // Add all custom environment variables
@@ -134,11 +111,11 @@ async fn run_step(
 
     let mut environments_sorted = environments;
 
-    environments_sorted.sort_by(|a, b| b.key.len().cmp(&a.key.len()));
+    environments_sorted.sort_by(|a, b| a.len().cmp(&b.len()));
 
     let vorpal_envs: Vec<_> = environments_sorted
         .iter()
-        .filter(|e| e.key.starts_with("VORPAL_"))
+        .filter(|e| e.starts_with("VORPAL_"))
         .collect();
 
     // Setup script
@@ -180,8 +157,10 @@ async fn run_step(
     // Setup environment variables
 
     for env in environments_sorted.iter() {
-        let env_value = expand_env(&env.value, &vorpal_envs);
-        command.env(&env.key, env_value);
+        let env = env.split('=').collect::<Vec<&str>>();
+        let env_value = expand_env(&env[1], &vorpal_envs);
+
+        command.env(&env[0], env_value);
     }
 
     // Setup arguments
@@ -266,14 +245,14 @@ impl ArtifactService for ArtifactServer {
 
     async fn build(
         &self,
-        request: Request<ArtifactBuildRequest>,
+        request: Request<ConfigArtifact>,
     ) -> Result<Response<Self::BuildStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
         let registry = self.registry.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = handle_build(request.into_inner(), registry, tx.clone()).await {
+            if let Err(err) = build_artifact(request.into_inner(), registry, tx.clone()).await {
                 if let Err(err) = send_build_response(&tx, Err(err)).await {
                     error!("Failed to send response: {:?}", err);
                 }
@@ -284,71 +263,62 @@ impl ArtifactService for ArtifactServer {
     }
 }
 
-async fn handle_build(
-    request: ArtifactBuildRequest,
+async fn build_artifact(
+    request: ConfigArtifact,
     registry: String,
     tx: Sender<Result<ArtifactBuildResponse, Status>>,
 ) -> Result<(), Status> {
-    let artifact = &request
-        .artifact
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("artifact is missing"))?;
-
-    if artifact.name.is_empty() {
-        return Err(Status::invalid_argument("name is missing"));
+    if request.name.is_empty() {
+        return Err(Status::invalid_argument("artifact 'name' is missing"));
     }
 
-    if artifact.steps.is_empty() {
-        return Err(Status::invalid_argument("steps are missing"));
+    if request.steps.is_empty() {
+        return Err(Status::invalid_argument("artifact 'steps' are missing"));
     }
 
-    let manifest_json = serde_json::to_string(&request)
-        .map_err(|err| Status::internal(format!("failed to serialize manifest: {:?}", err)))?;
+    let artifact_json = serde_json::to_string(&request)
+        .map_err(|err| Status::internal(format!("artifact failed to serialize: {:?}", err)))?;
 
-    let request_system = ArtifactSystem::try_from(request.system).unwrap_or(UnknownSystem);
+    let artifact_target = ConfigArtifactSystem::try_from(request.target).map_err(|err| {
+        Status::invalid_argument(format!("artifact failed to parse target: {:?}", err))
+    })?;
 
-    if request_system == UnknownSystem {
+    if artifact_target == ConfigArtifactSystem::UnknownSystem {
         return Err(Status::invalid_argument("unknown target"));
     }
 
-    let worker_system = format!("{}-{}", ARCH, OS);
+    let worker_target = system_default()
+        .map_err(|err| Status::internal(format!("worker failed to get target: {:?}", err)))?;
 
-    let worker_target = get_artifact_system::<ArtifactSystem>(&worker_system);
-
-    if request_system != worker_target {
-        return Err(Status::invalid_argument("target mismatch"));
+    if artifact_target != worker_target {
+        return Err(Status::invalid_argument(
+            "artifact 'target' unsupported for worker",
+        ));
     }
 
-    let manifest_hash = digest(manifest_json.as_bytes());
+    let artifact_hash = digest(artifact_json.as_bytes());
 
-    // Check if artifact is locked
+    // Check if artifact exists
 
-    let lock_path = get_artifact_lock_path(&manifest_hash, &artifact.name);
-
-    if lock_path.exists() {
-        return Err(Status::already_exists("artifact is locked"));
-    }
-
-    // If artifact exists, return
-
-    let artifact_path = get_artifact_path(&manifest_hash, &artifact.name);
+    let artifact_path = get_store_path(&artifact_hash);
 
     if artifact_path.exists() {
         return Err(Status::already_exists("artifact exists"));
     }
 
-    // Create lock file
+    // Check if artifact is locked
 
-    if let Err(err) = write(&lock_path, "").await {
-        return Err(Status::internal(format!(
-            "failed to create lock file: {:?}",
-            err
-        )));
+    let artifact_lock = get_store_lock_path(&artifact_hash);
+
+    if artifact_lock.exists() {
+        return Err(Status::already_exists("artifact is locked"));
     }
 
-    if let Err(err) = create_dir_all(&artifact_path).await {
+    // Create lock file
+
+    if let Err(err) = write(&artifact_lock, "").await {
         return Err(Status::internal(format!(
-            "failed to create artifact path: {:?}",
+            "failed to create lock file: {:?}",
             err
         )));
     }
@@ -359,28 +329,40 @@ async fn handle_build(
         .await
         .map_err(|err| Status::internal(format!("failed to create workspace: {:?}", err)))?;
 
-    // let workspace_path_canonical = workspace_path
-    //     .canonicalize()
-    //     .map_err(|err| Status::internal(format!("failed to canonicalize workspace: {:?}", err)))?;
+    let workspace_source_path = workspace_path.join("source");
 
-    // Connect to registry
+    if let Err(err) = create_dir_all(&workspace_source_path).await {
+        return Err(Status::internal(format!(
+            "failed to create source path: {:?}",
+            err
+        )));
+    }
+
+    // Pull sources
 
     let mut registry_client = RegistryServiceClient::connect(registry)
         .await
         .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
-    // Pull any source archives
+    for source in request.sources.iter() {
+        pull_source(source, &workspace_source_path, &mut registry_client, &tx).await?;
+    }
 
-    pull_source_archives(artifact, &workspace_path, &mut registry_client, &tx).await?;
+    // Run steps
 
-    // Run artifact steps
+    if let Err(err) = create_dir_all(&artifact_path).await {
+        return Err(Status::internal(format!(
+            "failed to create artifact path: {:?}",
+            err
+        )));
+    }
 
-    for step in artifact.steps.iter() {
+    for step in request.steps.iter() {
         if let Err(err) = run_step(
-            artifact.artifacts.clone(),
-            artifact.name.clone(),
+            &artifact_hash,
             &artifact_path,
             step.arguments.clone(),
+            step.artifacts.clone(),
             step.entrypoint.clone(),
             step.environments.clone(),
             step.script.clone(),
@@ -400,67 +382,9 @@ async fn handle_build(
         return Err(Status::internal("no output files found"));
     }
 
-    // Create artifact tar from build output files
+    // Sanitize files
 
-    send_message(&tx, format!("packing: {}", manifest_hash)).await?;
-
-    let artifact_archive_path = create_sandbox_file(Some("tar.zst"))
-        .await
-        .map_err(|err| Status::internal(format!("failed to create artifact archive: {:?}", err)))?;
-
-    if let Err(err) =
-        compress_zstd(&artifact_path, &artifact_path_files, &artifact_archive_path).await
-    {
-        return Err(Status::internal(format!(
-            "failed to compress artifact: {:?}",
-            err
-        )));
-    }
-
-    // upload artifact to registry
-
-    send_message(&tx, format!("pushing: {}", manifest_hash)).await?;
-
-    let artifact_data = read(&artifact_archive_path)
-        .await
-        .map_err(|err| Status::internal(format!("failed to read artifact archive: {:?}", err)))?;
-
-    let private_key_path = get_private_key_path();
-
-    if !private_key_path.exists() {
-        return Err(Status::internal("private key not found"));
-    }
-
-    let source_signature = vorpal_notary::sign(private_key_path, &artifact_data)
-        .await
-        .map_err(|err| Status::internal(format!("failed to sign artifact: {:?}", err)))?;
-
-    let mut request_stream = vec![];
-
-    // TODO: include manifest in push request
-
-    for chunk in artifact_data.chunks(DEFAULT_CHUNKS_SIZE) {
-        request_stream.push(RegistryPushRequest {
-            data: chunk.to_vec(),
-            data_signature: source_signature.clone().to_vec(),
-            hash: manifest_hash.clone(),
-            kind: RegistryKind::Artifact as i32,
-            manifest: manifest_json.clone(),
-            name: artifact.name.clone(),
-        });
-    }
-
-    if let Err(err) = registry_client
-        .push(tokio_stream::iter(request_stream))
-        .await
-    {
-        return Err(Status::internal(format!(
-            "failed to push artifact: {:?}",
-            err
-        )));
-    }
-
-    // sanitize output files
+    send_message(&tx, format!("sanitize: {}", artifact_hash)).await?;
 
     for path in artifact_path_files.iter() {
         if let Err(err) = set_timestamps(path).await {
@@ -471,9 +395,65 @@ async fn handle_build(
         }
     }
 
+    // Create archive
+
+    send_message(&tx, format!("pack: {}", artifact_hash)).await?;
+
+    let artifact_archive = create_sandbox_file(Some("tar.zst"))
+        .await
+        .map_err(|err| Status::internal(format!("failed to create artifact archive: {:?}", err)))?;
+
+    if let Err(err) = compress_zstd(&artifact_path, &artifact_path_files, &artifact_archive).await {
+        return Err(Status::internal(format!(
+            "failed to compress artifact: {:?}",
+            err
+        )));
+    }
+
+    // Upload archive
+
+    send_message(&tx, format!("push: {}", artifact_hash)).await?;
+
+    let artifact_data = read(&artifact_archive)
+        .await
+        .map_err(|err| Status::internal(format!("failed to read artifact archive: {:?}", err)))?;
+
+    let private_key_path = get_private_key_path();
+
+    if !private_key_path.exists() {
+        return Err(Status::internal("private key not found"));
+    }
+
+    let artifact_signature = vorpal_notary::sign(private_key_path, &artifact_data)
+        .await
+        .map_err(|err| Status::internal(format!("failed to sign artifact: {:?}", err)))?;
+
+    let mut request_stream = vec![];
+
+    for chunk in artifact_data.chunks(DEFAULT_CHUNKS_SIZE) {
+        request_stream.push(RegistryPushRequest {
+            archive: RegistryArchive::Artifact as i32,
+            data: chunk.to_vec(),
+            hash: artifact_hash.clone(),
+            signature: artifact_signature.clone().to_vec(),
+        });
+    }
+
+    if let Err(err) = registry_client
+        .push_archive(tokio_stream::iter(request_stream))
+        .await
+    {
+        return Err(Status::internal(format!(
+            "failed to push artifact: {:?}",
+            err
+        )));
+    }
+
+    // TODO: put artifact in registry
+
     // Remove artifact archive
 
-    if let Err(err) = remove_file(&artifact_archive_path).await {
+    if let Err(err) = remove_file(&artifact_archive).await {
         return Err(Status::internal(format!(
             "failed to remove artifact archive: {:?}",
             err
@@ -491,7 +471,7 @@ async fn handle_build(
 
     // Remove lock file
 
-    if let Err(err) = remove_file(&lock_path).await {
+    if let Err(err) = remove_file(&artifact_lock).await {
         return Err(Status::internal(format!(
             "failed to remove lock file: {:?}",
             err
@@ -501,218 +481,108 @@ async fn handle_build(
     Ok(())
 }
 
-async fn pull_source_archives(
-    artifact: &Artifact,
-    workspace_path: &Path,
-    registry_client: &mut RegistryServiceClient<tonic::transport::Channel>,
-    tx: &Sender<Result<ArtifactBuildResponse, Status>>,
-) -> Result<(), Status> {
-    let workspace_source_dir_path = workspace_path.join("source");
-
-    if let Err(err) = create_dir_all(&workspace_source_dir_path).await {
-        return Err(Status::internal(format!(
-            "failed to create source path: {:?}",
-            err
-        )));
-    }
-
-    for source in artifact.sources.iter() {
-        handle_source(source, &workspace_source_dir_path, registry_client, tx).await?;
-    }
-
-    Ok(())
-}
-
-async fn handle_source(
-    source: &ArtifactSourceId,
+async fn pull_source(
+    source: &ConfigArtifactSource,
     workspace_source_dir_path: &Path,
     registry_client: &mut RegistryServiceClient<tonic::transport::Channel>,
     tx: &Sender<Result<ArtifactBuildResponse, Status>>,
 ) -> Result<(), Status> {
-    let workspace_source_path = workspace_source_dir_path.join(&source.name);
+    if source.hash.is_none() {
+        return Err(Status::invalid_argument("source 'hash' is missing"));
+    }
 
-    if let Err(err) = create_dir_all(&workspace_source_path).await {
+    if source.name.is_empty() {
+        return Err(Status::invalid_argument("source 'name' is missing"));
+    }
+
+    let source_hash = source.hash.clone().unwrap();
+    let source_archive = get_archive_path(&source_hash);
+
+    if !source_archive.exists() {
+        send_message(tx, format!("pull source: {}-{}", source.name, &source_hash)).await?;
+
+        let registry_request = RegistryPullRequest {
+            archive: RegistryArchive::ArtifactSource as i32,
+            hash: source_hash.clone(),
+        };
+
+        match registry_client.pull_archive(registry_request).await {
+            Err(status) => {
+                if status.code() != NotFound {
+                    return Err(Status::internal(format!(
+                        "failed to pull source archive: {:?}",
+                        status
+                    )));
+                }
+
+                return Err(Status::not_found("source archive not found in registry"));
+            }
+
+            Ok(response) => {
+                let mut response = response.into_inner();
+                let mut response_data = Vec::new();
+
+                while let Ok(message) = response.message().await {
+                    if message.is_none() {
+                        break;
+                    }
+
+                    if let Some(res) = message {
+                        if !res.data.is_empty() {
+                            response_data.extend(res.data);
+                        }
+                    }
+                }
+
+                if response_data.is_empty() {
+                    return Err(Status::not_found("source archive empty in registry"));
+                }
+
+                write(&source_archive, &response_data)
+                    .await
+                    .map_err(|err| {
+                        Status::internal(format!("failed to write store path: {:?}", err))
+                    })?;
+            }
+        }
+    }
+
+    if !source_archive.exists() {
+        return Err(Status::not_found("source archive not found"));
+    }
+
+    send_message(
+        tx,
+        format!("unpack source: {}-{}", source.name, &source_hash),
+    )
+    .await?;
+
+    let source_workspace_path = workspace_source_dir_path.join(&source.name);
+
+    if let Err(err) = create_dir_all(&source_workspace_path).await {
         return Err(Status::internal(format!(
             "failed to create source path: {:?}",
             err
         )));
     }
 
-    let source_cache_path = get_cache_path(&source.hash, &source.name);
-
-    if source_cache_path.exists() {
-        let source_cache_files = get_file_paths(&source_cache_path, vec![], vec![])
-            .map_err(|err| Status::internal(format!("failed to get source files: {:?}", err)))?;
-
-        send_message(
-            tx,
-            format!("copying source: {}-{}", source.name, source.hash),
-        )
-        .await?;
-
-        let workspace_source_files = copy_files(
-            &source_cache_path,
-            source_cache_files.clone(),
-            &workspace_source_path,
-        )
-        .await
-        .map_err(|err| Status::internal(format!("failed to copy source files: {:?}", err)))?;
-
-        for path in workspace_source_files.iter() {
-            if let Err(err) = set_timestamps(path).await {
-                return Err(Status::internal(format!(
-                    "failed to sanitize output files: {:?}",
-                    err
-                )));
-            }
-        }
-
-        return Ok(());
-    }
-
-    let source_archive_path = get_source_archive_path(&source.hash, &source.name);
-
-    if source_archive_path.exists() {
-        send_message(
-            tx,
-            format!("caching source: {}-{}", source.name, source.hash),
-        )
-        .await?;
-
-        if let Err(err) = create_dir_all(&source_cache_path).await {
-            return Err(Status::internal(format!(
-                "failed to create source path: {:?}",
-                err
-            )));
-        }
-
-        if let Err(err) = unpack_zstd(&source_cache_path, &source_archive_path).await {
-            return Err(Status::internal(format!(
-                "failed to unpack source archive: {:?}",
-                err
-            )));
-        }
-
-        let source_cache_files = get_file_paths(&source_cache_path, vec![], vec![])
-            .map_err(|err| Status::internal(format!("failed to get source files: {:?}", err)))?;
-
-        send_message(
-            tx,
-            format!("copying source: {}-{}", source.name, source.hash),
-        )
-        .await?;
-
-        let workspace_source_files = copy_files(
-            &source_cache_path,
-            source_cache_files,
-            &workspace_source_path,
-        )
-        .await
-        .map_err(|err| Status::internal(format!("failed to copy source files: {:?}", err)))?;
-
-        for path in workspace_source_files.iter() {
-            if let Err(err) = set_timestamps(path).await {
-                return Err(Status::internal(format!(
-                    "failed to sanitize output files: {:?}",
-                    err
-                )));
-            }
-        }
-
-        return Ok(());
-    }
-
-    send_message(
-        tx,
-        format!("pulling source: {}-{}", source.name, source.hash),
-    )
-    .await?;
-
-    let pull_request = RegistryRequest {
-        hash: source.hash.clone(),
-        name: source.name.clone(),
-        kind: RegistryKind::ArtifactSource as i32,
-    };
-
-    let response = registry_client.pull(pull_request).await.map_err(|status| {
-        Status::internal(format!("failed to pull source archive: {:?}", status))
-    })?;
-
-    let mut response = response.into_inner();
-    let mut response_data = Vec::new();
-
-    while let Ok(message) = response.message().await {
-        if message.is_none() {
-            break;
-        }
-
-        if let Some(res) = message {
-            if !res.data.is_empty() {
-                response_data.extend(res.data);
-            }
-        }
-    }
-
-    if response_data.is_empty() {
-        return Ok(());
-    }
-
-    let mut source_archive = File::create(&source_archive_path)
-        .await
-        .map_err(|err| Status::internal(format!("failed to create source archive: {:?}", err)))?;
-
-    if let Err(err) = source_archive.write_all(&response_data).await {
-        return Err(Status::internal(format!(
-            "failed to write source archive: {:?}",
-            err
-        )));
-    }
-
-    if let Err(err) = set_timestamps(&source_archive_path).await {
-        return Err(Status::internal(format!(
-            "failed to set source archive timestamps: {:?}",
-            err
-        )));
-    }
-
-    send_message(
-        tx,
-        format!("caching source: {}-{}", source.name, source.hash),
-    )
-    .await?;
-
-    if let Err(err) = create_dir_all(&source_cache_path).await {
-        return Err(Status::internal(format!(
-            "failed to create source path: {:?}",
-            err
-        )));
-    }
-
-    if let Err(err) = unpack_zstd(&source_cache_path, &source_archive_path).await {
+    if let Err(err) = unpack_zstd(&source_workspace_path, &source_archive).await {
         return Err(Status::internal(format!(
             "failed to unpack source archive: {:?}",
             err
         )));
     }
 
-    let source_cache_files = get_file_paths(&source_cache_path, vec![], vec![])
+    let source_workspace_files = get_file_paths(&source_workspace_path, vec![], vec![])
         .map_err(|err| Status::internal(format!("failed to get source files: {:?}", err)))?;
 
     send_message(
         tx,
-        format!("copying source: {}-{}", source.name, source.hash),
+        format!("sanitize source: {}-{}", source.name, &source_hash),
     )
     .await?;
 
-    let workspace_source_files = copy_files(
-        &source_cache_path,
-        source_cache_files.clone(),
-        &workspace_source_path,
-    )
-    .await
-    .map_err(|err| Status::internal(format!("failed to copy source files: {:?}", err)))?;
-
-    for path in workspace_source_files.iter() {
+    for path in source_workspace_files.iter() {
         if let Err(err) = set_timestamps(path).await {
             return Err(Status::internal(format!(
                 "failed to sanitize output files: {:?}",

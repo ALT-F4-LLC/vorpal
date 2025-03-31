@@ -7,10 +7,6 @@ use walkdir::WalkDir;
 
 // Store paths
 
-pub fn get_store_dir_name(hash: &str, name: &str) -> String {
-    format!("{}-{}", name, hash)
-}
-
 pub fn get_root_dir_path() -> PathBuf {
     Path::new("/var/lib/vorpal").to_path_buf()
 }
@@ -31,18 +27,6 @@ pub fn get_store_dir_path() -> PathBuf {
     get_root_dir_path().join("store")
 }
 
-// Cache paths
-
-pub fn get_cache_path(hash: &str, name: &str) -> PathBuf {
-    get_cache_dir_path().join(get_store_dir_name(hash, name))
-}
-
-pub fn get_cache_archive_path(hash: &str, name: &str) -> PathBuf {
-    get_cache_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("tar.zst")
-}
-
 // Key paths
 
 pub fn get_private_key_path() -> PathBuf {
@@ -53,50 +37,24 @@ pub fn get_public_key_path() -> PathBuf {
     get_key_dir_path().join("public").with_extension("pem")
 }
 
-// Artifact paths - "/vorpal/store/{hash}.artifact"
+// Archive paths
 
-pub fn get_artifact_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("artifact")
+pub fn get_archive_path(hash: &str) -> PathBuf {
+    get_store_dir_path().join(hash).with_extension("tar.zst")
 }
 
-pub fn get_artifact_archive_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("artifact.tar.zst")
+// Store paths
+
+pub fn get_store_path(hash: &str) -> PathBuf {
+    get_store_dir_path().join(hash)
 }
 
-pub fn get_artifact_manifest_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("artifact.manifest")
+pub fn get_store_config_path(hash: &str) -> PathBuf {
+    get_store_dir_path().join(hash).with_extension("json")
 }
 
-pub fn get_artifact_lock_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("artifact.lock")
-}
-
-// Source paths - "/vorpal/store/{hash}.source"
-
-pub fn get_source_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("source")
-}
-
-pub fn get_source_archive_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("source.tar.zst")
-}
-
-pub fn get_source_manifest_path(hash: &str, name: &str) -> PathBuf {
-    get_store_dir_path()
-        .join(get_store_dir_name(hash, name))
-        .with_extension("source.manifest")
+pub fn get_store_lock_path(hash: &str) -> PathBuf {
+    get_store_dir_path().join(hash).with_extension("lock")
 }
 
 // Temp paths

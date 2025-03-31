@@ -3210,21 +3210,24 @@ name = "vorpal-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-compression",
  "clap",
  "console",
+ "infer",
  "petgraph",
  "port-selector",
- "serde_json",
+ "reqwest",
  "tokio",
  "tokio-stream",
+ "tokio-tar",
  "tonic",
  "tonic-health",
  "tracing",
  "tracing-subscriber",
+ "url",
  "vorpal-notary",
  "vorpal-registry",
  "vorpal-schema",
- "vorpal-sdk",
  "vorpal-store",
  "vorpal-worker",
 ]
@@ -3262,7 +3265,7 @@ dependencies = [
  "rsa",
  "serde",
  "serde_json",
- "sha2",
+ "sha256",
  "thiserror 2.0.11",
  "tokio",
  "tokio-stream",
@@ -3277,6 +3280,7 @@ dependencies = [
 name = "vorpal-schema"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "prost",
  "serde",
  "tonic",
@@ -3288,25 +3292,15 @@ name = "vorpal-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-compression",
  "clap",
- "console",
  "indoc",
- "infer",
- "reqwest",
  "serde",
  "serde_json",
  "sha256",
- "tokio",
- "tokio-stream",
- "tokio-tar",
  "toml",
  "tonic",
  "tracing",
- "url",
- "vorpal-notary",
  "vorpal-schema",
- "vorpal-store",
 ]
 
 [[package]]

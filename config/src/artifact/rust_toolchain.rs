@@ -1,106 +1,84 @@
 use crate::artifact::{cargo, clippy, rust_analyzer, rust_src, rust_std, rustc, rustfmt};
-use anyhow::{bail, Result};
+use anyhow::Result;
 use indoc::formatdoc;
-use std::collections::BTreeMap;
-use vorpal_schema::vorpal::artifact::v0::{
-    ArtifactId, ArtifactSystem,
-    ArtifactSystem::{Aarch64Linux, Aarch64Macos, UnknownSystem, X8664Linux, X8664Macos},
+use vorpal_schema::config::v0::ConfigArtifactSystem::{
+    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
 };
 use vorpal_sdk::{
-    artifact::{add_artifact, get_artifact_envkey},
+    artifact::{get_env_key, language::rust, step, ConfigArtifactBuilder},
     context::ConfigContext,
 };
 
-pub fn get_rust_toolchain_version() -> String {
-    "1.83.0".to_string()
-}
-
-pub fn get_rust_toolchain_target(target: ArtifactSystem) -> Result<String> {
-    let target = match target {
-        Aarch64Linux => "aarch64-unknown-linux-gnu",
-        Aarch64Macos => "aarch64-apple-darwin",
-        X8664Linux => "x86_64-unknown-linux-gnu",
-        X8664Macos => "x86_64-apple-darwin",
-        UnknownSystem => bail!("Unsupported rustc target: {:?}", target),
-    };
-
-    Ok(target.to_string())
-}
-
-pub async fn artifact(context: &mut ConfigContext) -> Result<ArtifactId> {
-    let version = get_rust_toolchain_version();
-    let target = get_rust_toolchain_target(context.get_target())?;
-
-    let cargo = cargo::artifact(context, &version).await?;
-    let clippy = clippy::artifact(context, &version).await?;
-    let rust_analyzer = rust_analyzer::artifact(context, &version).await?;
-    let rust_src = rust_src::artifact(context, &version).await?;
-    let rust_std = rust_std::artifact(context, &version).await?;
-    let rustc = rustc::artifact(context, &version).await?;
-    let rustfmt = rustfmt::artifact(context, &version).await?;
+pub async fn build(context: &mut ConfigContext) -> Result<String> {
+    let cargo = cargo::build(context).await?;
+    let clippy = clippy::build(context).await?;
+    let rust_analyzer = rust_analyzer::build(context).await?;
+    let rust_src = rust_src::build(context).await?;
+    let rust_std = rust_std::build(context).await?;
+    let rustc = rustc::build(context).await?;
+    let rustfmt = rustfmt::build(context).await?;
 
     let artifacts = vec![
-        cargo.clone(),
-        clippy.clone(),
-        rust_analyzer.clone(),
-        rust_src.clone(),
-        rust_std.clone(),
-        rustc.clone(),
-        rustfmt.clone(),
+        cargo,
+        clippy,
+        rust_analyzer,
+        rust_src,
+        rust_std,
+        rustc,
+        rustfmt,
     ];
 
-    let mut component_paths = vec![];
+    let mut toolchain_component_paths = vec![];
 
     for component in &artifacts {
-        component_paths.push(get_artifact_envkey(component));
+        toolchain_component_paths.push(get_env_key(component));
     }
 
-    add_artifact(
-        context,
-        artifacts,
-        BTreeMap::new(),
-        "rust-toolchain",
-        formatdoc! {"
-            toolchain_dir=\"$VORPAL_OUTPUT/toolchains/{version}-{target}\"
+    let toolchain_target = rust::get_toolchain_target(context.get_target())?;
+    let toolchain_version = rust::get_toolchain_version();
 
-            mkdir -pv \"$toolchain_dir\"
+    let step_script = formatdoc! {"
+        toolchain_dir=\"$VORPAL_OUTPUT/toolchains/{toolchain_version}-{toolchain_target}\"
 
-            components=({component_paths})
+        mkdir -pv \"$toolchain_dir\"
 
-            for component in \"${{components[@]}}\"; do
-                find \"$component\" | while read -r file; do
-                    relative_path=$(echo \"$file\" | sed -e \"s|$component||\")
+        components=({component_paths})
 
-                    echo \"Copying $file to $toolchain_dir$relative_path\"
+        for component in \"${{components[@]}}\"; do
+            find \"$component\" | while read -r file; do
+                relative_path=$(echo \"$file\" | sed -e \"s|$component||\")
 
-                    if [[ \"$relative_path\" == \"/manifest.in\" ]]; then
-                        continue
-                    fi
+                echo \"Copying $file to $toolchain_dir$relative_path\"
 
-                    if [ -d \"$file\" ]; then
-                        mkdir -pv \"$toolchain_dir$relative_path\"
-                    else
-                        cp -pv \"$file\" \"$toolchain_dir$relative_path\"
-                    fi
-                done
+                if [[ \"$relative_path\" == \"/manifest.in\" ]]; then
+                    continue
+                fi
+
+                if [ -d \"$file\" ]; then
+                    mkdir -pv \"$toolchain_dir$relative_path\"
+                else
+                    cp -pv \"$file\" \"$toolchain_dir$relative_path\"
+                fi
             done
+        done
 
-            cat > \"$VORPAL_OUTPUT/settings.toml\" << \"EOF\"
-            auto_self_update = \"disable\"
-            profile = \"minimal\"
-            version = \"12\"
+        cat > \"$VORPAL_OUTPUT/settings.toml\" << \"EOF\"
+        auto_self_update = \"disable\"
+        profile = \"minimal\"
+        version = \"12\"
 
-            [overrides]
-            EOF",
-            component_paths = component_paths.join(" "),
-        },
-        vec![],
-        vec![
-            "aarch64-linux",
-            "aarch64-macos",
-            "x86_64-linux",
-            "x86_64-macos",
-        ],
-    )
-    .await
+        [overrides]
+        EOF",
+        component_paths = toolchain_component_paths.join(" "),
+    };
+
+    let step = step::shell(context, artifacts, vec![], step_script).await?;
+
+    ConfigArtifactBuilder::new("rust-toolchain".to_string())
+        .with_step(step)
+        .with_system(Aarch64Darwin)
+        .with_system(Aarch64Linux)
+        .with_system(X8664Darwin)
+        .with_system(X8664Linux)
+        .build(context)
 }

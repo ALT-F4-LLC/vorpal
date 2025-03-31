@@ -1,14 +1,15 @@
-use crate::{PushMetadata, RegistryBackend, RegistryError, DEFAULT_GRPC_CHUNK_SIZE};
+use crate::{RegistryBackend, RegistryError, DEFAULT_GRPC_CHUNK_SIZE};
+use sha256::digest;
 use tokio::{
     fs::{read, write},
     sync::mpsc,
 };
 use tonic::{async_trait, Status};
-use vorpal_schema::vorpal::registry::v0::{RegistryKind, RegistryPullResponse, RegistryRequest};
-use vorpal_store::paths::{
-    get_artifact_archive_path, get_artifact_manifest_path, get_source_archive_path,
-    get_source_manifest_path, set_timestamps,
+use vorpal_schema::{
+    config::v0::{ConfigArtifact, ConfigArtifactRequest},
+    registry::v0::{RegistryPullRequest, RegistryPullResponse, RegistryPushRequest},
 };
+use vorpal_store::paths::{get_archive_path, get_store_config_path, set_timestamps};
 
 #[derive(Clone, Debug)]
 pub struct LocalRegistryBackend;
@@ -19,55 +20,44 @@ impl LocalRegistryBackend {
     }
 }
 
-fn get_archive_path(
-    kind: RegistryKind,
-    hash: &str,
-    name: &str,
-) -> Result<std::path::PathBuf, Status> {
-    match kind {
-        RegistryKind::Artifact => Ok(get_artifact_archive_path(hash, name)),
-        RegistryKind::ArtifactSource => Ok(get_source_archive_path(hash, name)),
-        _ => Err(Status::invalid_argument("unsupported store kind")),
-    }
-}
-
-fn get_manifest_path(
-    kind: RegistryKind,
-    hash: &str,
-    name: &str,
-) -> Result<std::path::PathBuf, Status> {
-    match kind {
-        RegistryKind::Artifact => Ok(get_artifact_manifest_path(hash, name)),
-        RegistryKind::ArtifactSource => Ok(get_source_manifest_path(hash, name)),
-        _ => Err(Status::invalid_argument("unsupported store kind")),
-    }
-}
-
 #[async_trait]
 impl RegistryBackend for LocalRegistryBackend {
-    async fn exists(&self, request: &RegistryRequest) -> Result<String, Status> {
-        let manifest_path = get_manifest_path(request.kind(), &request.hash, &request.name)?;
+    async fn get_archive(&self, request: &RegistryPullRequest) -> Result<(), Status> {
+        let artifact_path = get_archive_path(&request.hash);
 
-        if !manifest_path.exists() {
-            return Err(Status::not_found("store manifest not found"));
+        if !artifact_path.exists() {
+            return Err(Status::not_found("store config not found"));
         }
 
-        let manifest_data = read(&manifest_path)
-            .await
-            .map_err(|err| Status::internal(format!("failed to read manifest: {:?}", err)))?;
-
-        let manifest = String::from_utf8(manifest_data)
-            .map_err(|err| Status::internal(format!("failed to parse manifest: {:?}", err)))?;
-
-        Ok(manifest)
+        Ok(())
     }
 
-    async fn pull(
+    async fn get_artifact(
         &self,
-        request: &RegistryRequest,
+        request: &ConfigArtifactRequest,
+    ) -> Result<ConfigArtifact, Status> {
+        let artifact_path = get_store_config_path(&request.hash);
+
+        if !artifact_path.exists() {
+            return Err(Status::not_found("store config not found"));
+        }
+
+        let artifact_data = read(&artifact_path)
+            .await
+            .map_err(|err| Status::internal(format!("failed to read config: {:?}", err)))?;
+
+        let artifact: ConfigArtifact = serde_json::from_slice(&artifact_data)
+            .map_err(|err| Status::internal(format!("failed to parse config: {:?}", err)))?;
+
+        Ok(artifact)
+    }
+
+    async fn pull_archive(
+        &self,
+        request: &RegistryPullRequest,
         tx: mpsc::Sender<Result<RegistryPullResponse, Status>>,
     ) -> Result<(), Status> {
-        let archive_path = get_archive_path(request.kind(), &request.hash, &request.name)?;
+        let archive_path = get_archive_path(&request.hash);
 
         if !archive_path.exists() {
             return Err(Status::not_found("store path not found"));
@@ -88,34 +78,39 @@ impl RegistryBackend for LocalRegistryBackend {
         Ok(())
     }
 
-    async fn push(&self, metadata: PushMetadata) -> Result<(), Status> {
-        let PushMetadata {
-            data,
-            data_kind,
-            hash,
-            manifest,
-            name,
-        } = metadata;
+    async fn push_archive(&self, request: &RegistryPushRequest) -> Result<(), Status> {
+        let archive_path = get_archive_path(&request.hash);
 
-        let archive_path = get_archive_path(data_kind, &hash, &name)?;
+        if !archive_path.exists() {
+            write(&archive_path, &request.data).await.map_err(|err| {
+                Status::internal(format!("failed to write store path: {:?}", err))
+            })?;
 
-        write(&archive_path, &data)
-            .await
-            .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
+            set_timestamps(&archive_path)
+                .await
+                .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
+        }
 
-        set_timestamps(&archive_path)
-            .await
-            .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
+        Ok(())
+    }
 
-        let manifest_path = get_manifest_path(data_kind, &hash, &name)?;
+    async fn put_artifact(&self, request: &ConfigArtifact) -> Result<(), Status> {
+        let artifact_json = serde_json::to_vec(request)
+            .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
+        let artifact_hash = digest(&artifact_json);
+        let artifact_path = get_store_config_path(&artifact_hash);
 
-        write(&manifest_path, &manifest)
-            .await
-            .map_err(|err| Status::internal(format!("failed to write manifest: {:?}", err)))?;
+        if !artifact_path.exists() {
+            write(&artifact_path, serde_json::to_vec(request).unwrap())
+                .await
+                .map_err(|err| {
+                    Status::internal(format!("failed to write store config: {:?}", err))
+                })?;
 
-        set_timestamps(&manifest_path)
-            .await
-            .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
+            set_timestamps(&artifact_path)
+                .await
+                .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
+        }
 
         Ok(())
     }
