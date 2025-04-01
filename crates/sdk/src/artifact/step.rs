@@ -170,9 +170,29 @@ pub async fn bwrap(
 
     let mut environment_arguments = vec![];
 
+    let path_env_bins = artifacts
+        .iter()
+        .map(|a| format!("{}/bin", get_env_key(a)))
+        .collect::<Vec<String>>()
+        .join(":");
+
+    let mut path_env = format!("{path_env_bins}:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin");
+
+    if let Some(path) = environments.iter().find(|x| x.starts_with("PATH=")) {
+        if let Some(path_value) = path.split('=').nth(1) {
+            path_env = format!("{}:{}", path_value, path_env);
+        }
+    }
+
+    environment_arguments.push(vec!["--setenv".to_string(), "PATH".to_string(), path_env]);
+
     for env in environments.iter() {
         let key = env.split("=").next().unwrap();
         let value = env.split("=").last().unwrap();
+
+        if key.starts_with("PATH") {
+            continue;
+        }
 
         environment_arguments.push(vec![
             "--setenv".to_string(),
