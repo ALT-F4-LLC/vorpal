@@ -79,112 +79,98 @@ pub async fn get_order(build_artifact: &HashMap<String, ConfigArtifact>) -> Resu
 }
 
 pub async fn get_path(
+    config_path: &String,
     language: String,
     registry: &String,
-    rust_bin: &Option<String>,
-    rust_path: &String,
+    rust_bin: &String,
     service: &String,
     target: ConfigArtifactSystem,
 ) -> Result<PathBuf> {
-    match language.as_str() {
+    info!("{} language: {}", get_prefix("config"), language);
+
+    if config_path.is_empty() {
+        bail!("no `--go-path` specified");
+    }
+
+    info!("{} path: {}", get_prefix("config"), config_path);
+
+    // Setup context
+
+    let mut context = ConfigContext::new(0, registry.clone(), target);
+
+    // Setup artifacts
+
+    let mut toolkit_artifact = HashMap::new();
+
+    if target == Aarch64Linux || target == X8664Linux {
+        let linux_vorpal = linux_vorpal::build(&mut context).await?;
+        let linux_vorpal_config = context.get_artifact(&linux_vorpal);
+
+        if linux_vorpal_config.is_none() {
+            bail!("toolkit artifact not found: linux-vorpal");
+        }
+
+        toolkit_artifact.insert(linux_vorpal, linux_vorpal_config.clone().unwrap());
+
+        fetch_artifacts_context(
+            &mut context,
+            linux_vorpal_config.unwrap(),
+            &mut toolkit_artifact,
+        )?;
+    }
+
+    // Setup default artifacts
+
+    let protoc_hash = protoc::build(&mut context).await?;
+    let protoc = context.get_artifact(&protoc_hash);
+
+    if protoc.is_none() {
+        bail!("toolkit artifact not found: protoc");
+    }
+
+    toolkit_artifact.insert(protoc_hash.clone(), protoc.clone().unwrap());
+
+    fetch_artifacts_context(&mut context, protoc.unwrap(), &mut toolkit_artifact)?;
+
+    // Setup clients
+
+    let mut client_artifact = ArtifactServiceClient::connect(service.to_owned())
+        .await
+        .expect("failed to connect to artifact");
+
+    let mut client_registry = RegistryServiceClient::connect(registry.to_owned())
+        .await
+        .expect("failed to connect to registry");
+
+    let config_file = match language.as_str() {
+        // "go" => Ok(()),
         "rust" => {
-            info!("{} language: {}", get_prefix("config"), language);
+            info!("{} rust-bin: {}", get_prefix("config"), rust_bin);
 
-            if rust_bin.is_none() {
-                bail!("no `--rust-bin` specified");
-            }
+            let rust_toolchain_hash = rust_toolchain::build(&mut context).await?;
+            let rust_toolchain = context.get_artifact(&rust_toolchain_hash);
 
-            info!(
-                "{} rust-bin: {}",
-                get_prefix("config"),
-                rust_bin.as_ref().unwrap()
-            );
-
-            info!("{} rust-path: {}", get_prefix("config"), rust_path);
-
-            // Setup context
-
-            let mut context = ConfigContext::new(0, registry.clone(), target);
-
-            // Setup artifacts
-
-            let mut artifact_pending = HashMap::new();
-
-            if target == Aarch64Linux || target == X8664Linux {
-                let linux_vorpal = linux_vorpal::build(&mut context).await?;
-                let linux_vorpal_config = context.get_artifact(&linux_vorpal);
-
-                if linux_vorpal_config.is_none() {
-                    bail!("artifact 'linux-vorpal' not found");
-                }
-
-                artifact_pending.insert(linux_vorpal, linux_vorpal_config.clone().unwrap());
-
-                fetch_artifacts_context(
-                    &mut context,
-                    linux_vorpal_config.unwrap(),
-                    &mut artifact_pending,
-                )?;
-            }
-
-            let protoc = protoc::build(&mut context).await?;
-            let protoc_config = context.get_artifact(&protoc);
-
-            if protoc_config.is_none() {
-                bail!("artifact 'protoc' not found");
-            }
-
-            artifact_pending.insert(protoc.clone(), protoc_config.clone().unwrap());
-
-            fetch_artifacts_context(&mut context, protoc_config.unwrap(), &mut artifact_pending)?;
-
-            let rust_toolchain = rust_toolchain::build(&mut context).await?;
-            let rust_toolchain_config = context.get_artifact(&rust_toolchain);
-
-            if rust_toolchain_config.is_none() {
+            if rust_toolchain.is_none() {
                 bail!("artifact 'rust-toolchain' not found");
             }
 
-            artifact_pending.insert(
-                rust_toolchain.clone(),
-                rust_toolchain_config.clone().unwrap(),
-            );
+            toolkit_artifact.insert(rust_toolchain_hash.clone(), rust_toolchain.clone().unwrap());
 
-            fetch_artifacts_context(
-                &mut context,
-                rust_toolchain_config.unwrap(),
-                &mut artifact_pending,
-            )?;
+            fetch_artifacts_context(&mut context, rust_toolchain.unwrap(), &mut toolkit_artifact)?;
 
             // Build artifacts
 
-            let mut client_artifact = ArtifactServiceClient::connect(service.to_owned())
-                .await
-                .expect("failed to connect to artifact");
-
-            let mut client_registry = RegistryServiceClient::connect(registry.to_owned())
-                .await
-                .expect("failed to connect to registry");
-
             build_artifacts(
                 None,
-                artifact_pending,
+                toolkit_artifact,
                 &mut client_artifact,
                 &mut client_registry,
             )
             .await?;
 
-            // Get protoc
-
-            let protoc_path = get_store_path(&protoc);
-
-            if !protoc_path.exists() {
-                bail!("protoc not found: {}", protoc_path.display());
-            }
-
             // Get rust-toolchain
 
-            let rust_toolchain_path = get_store_path(&rust_toolchain);
+            let rust_toolchain_path = get_store_path(&rust_toolchain_hash);
 
             if !rust_toolchain_path.exists() {
                 bail!(
@@ -195,57 +181,55 @@ pub async fn get_path(
 
             let rust_toolchain_target = rust::toolchain_target(target)?;
             let rust_toolchain_version = rust::toolchain_version();
+            let rust_toolchain_identifier =
+                format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
 
-            let rust_toolchain_bin_path = Path::new(&format!(
-                "{}/toolchains/{}-{}/bin",
+            let rust_toolchain_path = Path::new(&format!(
+                "{}/toolchains/{}",
                 rust_toolchain_path.display(),
-                rust_toolchain_version,
-                rust_toolchain_target
+                rust_toolchain_identifier
             ))
             .to_path_buf();
 
             let rust_toolchain_cargo_path =
-                Path::new(&format!("{}/cargo", rust_toolchain_bin_path.display())).to_path_buf();
+                Path::new(&format!("{}/bin/cargo", rust_toolchain_path.display())).to_path_buf();
 
             if !rust_toolchain_cargo_path.exists() {
                 bail!("cargo not found: {}", rust_toolchain_cargo_path.display());
             }
 
-            // Build configuration with toolchain
+            // Setup command
 
             let mut command = process::Command::new(rust_toolchain_cargo_path.clone());
 
-            // Setup environment variables
+            // Setup command environment
+
+            let protoc_path = get_store_path(&protoc_hash);
+
+            if !protoc_path.exists() {
+                bail!("protoc not found: {}", protoc_path.display());
+            }
 
             let env_path = format!(
-                "{}:{}/bin:{}",
-                rust_toolchain_bin_path.display(),
+                "{}/bin:{}/bin:{}",
+                rust_toolchain_path.display(),
                 protoc_path.display(),
                 var("PATH").unwrap_or_default()
             );
 
             command.env("PATH", env_path.as_str());
-
-            info!("{} path: {}", get_prefix("config"), env_path);
-
             command.env("RUSTUP_HOME", rust_toolchain_path.display().to_string());
+            command.env("RUSTUP_TOOLCHAIN", rust_toolchain_identifier);
 
-            command.env(
-                "RUSTUP_TOOLCHAIN",
-                format!("{}-{}", rust_toolchain_version, rust_toolchain_target),
-            );
+            // Setup command arguments
 
-            // Setup command
-
-            let config_bin = rust_bin.as_ref().unwrap();
-
-            command.args(["build", "--bin", config_bin]);
+            command.args(["build", "--bin", rust_bin]);
 
             info!(
                 "{} command: {} build --bin {}",
                 get_prefix("config"),
                 rust_toolchain_cargo_path.display(),
-                config_bin
+                rust_bin
             );
 
             let mut process = command
@@ -268,15 +252,15 @@ pub async fn get_path(
                 info!("{}", line);
             }
 
-            let config_file_path = format!("{}/target/debug/{}", rust_path, config_bin);
-
-            info!("{} path: {}", get_prefix("config"), config_file_path);
-
-            Ok(Path::new(&config_file_path).to_path_buf())
+            format!("{}/target/debug/{}", config_path, rust_bin)
         }
 
         _ => bail!("unsupported language: {}", language),
-    }
+    };
+
+    info!("{} file: {}", get_prefix("config"), config_file);
+
+    Ok(Path::new(&config_file).to_path_buf())
 }
 
 pub async fn start(

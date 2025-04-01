@@ -9,6 +9,5 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { default-features = false, version = "1" }
-indoc = { default-features = false, version = "2" }
 tokio = { default-features = false, features = ["rt-multi-thread"], version = "1" }
 vorpal-sdk = { default-features = false, path = "../sdk" }

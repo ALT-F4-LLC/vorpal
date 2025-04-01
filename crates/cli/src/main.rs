@@ -77,8 +77,8 @@ pub struct Cli {
     #[command(subcommand)]
     command: Command,
 
-    #[arg(default_value = "Vorpal.toml", long, short)]
-    config: String,
+    #[arg(default_value_t = get_current_dir(), long)]
+    config_path: String,
 
     #[arg(default_value = "rust", long)]
     language: String,
@@ -90,10 +90,7 @@ pub struct Cli {
     registry: String,
 
     #[arg(default_value = "vorpal-config", long)]
-    rust_bin: Option<String>,
-
-    #[arg(default_value_t = get_current_dir(), long)]
-    rust_path: String,
+    rust_bin: String,
 }
 
 fn get_current_dir() -> String {
@@ -109,12 +106,11 @@ async fn main() -> Result<()> {
 
     let Cli {
         command,
-        config: _,
+        config_path,
         language,
         level,
         registry,
         rust_bin,
-        rust_path,
     } = cli;
 
     match &command {
@@ -152,9 +148,15 @@ async fn main() -> Result<()> {
                 bail!("unsupported target: {}", target.as_str_name());
             }
 
-            let config_path =
-                config::get_path(language, &registry, &rust_bin, &rust_path, service, target)
-                    .await?;
+            let config_path = config::get_path(
+                &config_path,
+                language,
+                &registry,
+                &rust_bin,
+                service,
+                target,
+            )
+            .await?;
 
             if !config_path.exists() {
                 bail!("config file not found: {}", config_path.display());
