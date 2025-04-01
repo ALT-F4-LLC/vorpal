@@ -2,7 +2,6 @@
 members = [
     "crates/cli",
     "crates/config",
-    "crates/config-sdk",
     "crates/notary",
     "crates/registry",
     "crates/schema",

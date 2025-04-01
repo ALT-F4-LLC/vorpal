@@ -1,37 +1,37 @@
+use crate::{
+    artifact::{step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
+    context::ConfigContext,
+};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use vorpal_schema::config::v0::ConfigArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
 };
-use vorpal_sdk::{
-    artifact::{step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
-    context::ConfigContext,
-};
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let name = "protoc";
+    let name = "protoc-gen-go";
 
     let target = context.get_target();
 
     let source_hash = match target {
-        Aarch64Darwin => "d105abb1c1d2c024f29df884f0592f1307984d63aeb10f0e61ccb94aee2c2feb",
-        Aarch64Linux => "8a592a0dd590e92b1c0d77631e683fc743d1ed8158e0b093b6cfabf0685089af",
+        Aarch64Darwin => "55c2a0cc7137f3625bd1bf3be85ed940c643e56fa1ceaf51f94c6434980f65a5",
+        Aarch64Linux => "597aae8080d7e3e575198a5417ac2278ae49078d7fa3be56405ffb43bbb9f501",
         X8664Darwin => "123456789",
-        X8664Linux => "d5e8fb327ea9568fd1ce2de3557740948a2168faff79c0e02e64bd9f040964d9",
+        X8664Linux => "07f2ee9051854e2d240c56e47cfa9ac9b7d6a2dc2a9b2b6dbd79726f78c27bb1",
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
 
     let source_target = match target {
-        Aarch64Darwin => "osx-aarch_64",
-        Aarch64Linux => "linux-aarch_64",
-        X8664Darwin => "osx-x86_64",
-        X8664Linux => "linux-x86_64",
+        Aarch64Darwin => "darwin.arm64",
+        Aarch64Linux => "linux.arm64",
+        X8664Darwin => "darwin.amd64",
+        X8664Linux => "linux.amd64",
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
 
-    let source_version = "25.4";
+    let source_version = "1.36.3";
 
-    let source_path = format!("https://github.com/protocolbuffers/protobuf/releases/download/v{source_version}/protoc-{source_version}-{source_target}.zip");
+    let source_path = format!("https://github.com/protocolbuffers/protobuf-go/releases/download/v{source_version}/protoc-gen-go.v{source_version}.{source_target}.tar.gz");
 
     let source = ConfigArtifactSourceBuilder::new(name.to_string(), source_path)
         .with_hash(source_hash.to_string())
@@ -40,9 +40,9 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let step_script = formatdoc! {"
         mkdir -pv \"$VORPAL_OUTPUT/bin\"
 
-        cp -prv \"source/{name}/bin/protoc\" \"$VORPAL_OUTPUT/bin/protoc\"
+        cp -prv \"source/protoc-gen-go/protoc-gen-go\" \"$VORPAL_OUTPUT/bin/protoc-gen-go\"
 
-        chmod +x \"$VORPAL_OUTPUT/bin/protoc\"",
+        chmod +x \"$VORPAL_OUTPUT/bin/protoc-gen-go\"",
     };
 
     let step = step::shell(context, vec![], vec![], step_script).await?;

@@ -1,11 +1,11 @@
+use crate::{
+    artifact::{get_env_key, step, ConfigArtifactBuilder},
+    context::ConfigContext,
+};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::config::v0::ConfigArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
-};
-use vorpal_sdk::{
-    artifact::{get_env_key, step, ConfigArtifactBuilder},
-    context::ConfigContext,
 };
 
 fn generate_version_script() -> String {

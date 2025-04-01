@@ -13,15 +13,14 @@ use vorpal_schema::{
     system_from_str,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ConfigContext {
     artifact: HashMap<String, ConfigArtifact>,
     port: u16,
-    registry: RegistryServiceClient<tonic::transport::Channel>,
+    registry: String,
     system: ConfigArtifactSystem,
 }
 
-#[derive(Debug)]
 pub struct ConfigServer {
     pub config: Config,
     pub context: ConfigContext,
@@ -70,21 +69,13 @@ pub async fn get_context() -> Result<ConfigContext> {
         } => {
             let target = system_from_str(&target)?;
 
-            let registry = RegistryServiceClient::connect(registry.clone())
-                .await
-                .expect("failed to connect to registry");
-
             Ok(ConfigContext::new(port, registry, target))
         }
     }
 }
 
 impl ConfigContext {
-    pub fn new(
-        port: u16,
-        registry: RegistryServiceClient<tonic::transport::Channel>,
-        system: ConfigArtifactSystem,
-    ) -> Self {
+    pub fn new(port: u16, registry: String, system: ConfigArtifactSystem) -> Self {
         Self {
             artifact: HashMap::new(),
             port,
@@ -113,11 +104,15 @@ impl ConfigContext {
             return Ok(hash.to_string());
         }
 
+        let mut client = RegistryServiceClient::connect(self.registry.clone())
+            .await
+            .expect("failed to connect to registry");
+
         let request = ConfigArtifactRequest {
             hash: hash.to_string(),
         };
 
-        match self.registry.get_config_artifact(request.clone()).await {
+        match client.get_config_artifact(request.clone()).await {
             Err(status) => {
                 if status.code() != NotFound {
                     bail!("registry get config artifact error: {:?}", status);
@@ -151,9 +146,7 @@ impl ConfigContext {
 
         let config = Config { artifacts };
 
-        let context = self.clone();
-
-        let config_service = ConfigServiceServer::new(ConfigServer::new(context, config));
+        let config_service = ConfigServiceServer::new(ConfigServer::new(self.clone(), config));
 
         println!("Config listening: {}", addr);
 

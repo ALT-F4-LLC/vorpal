@@ -601,8 +601,6 @@ async fn pull_source(
     let source_workspace_files = get_file_paths(&source_workspace_path, vec![], vec![])
         .map_err(|err| Status::internal(format!("failed to get source files: {:?}", err)))?;
 
-    send_message(tx, format!("sanitize source: {}", artifact_source.name)).await?;
-
     for path in source_workspace_files.iter() {
         if let Err(err) = set_timestamps(path).await {
             return Err(Status::internal(format!(

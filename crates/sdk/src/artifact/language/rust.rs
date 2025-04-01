@@ -1,5 +1,8 @@
 use crate::{
-    artifact::{get_env_key, shell, step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
+    artifact::{
+        get_env_key, rust_toolchain, shell, step, ConfigArtifactBuilder,
+        ConfigArtifactSourceBuilder,
+    },
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -39,7 +42,7 @@ fn read_cargo(path: &str) -> Result<RustArtifactCargoToml> {
 pub fn toolchain_hash(target: ConfigArtifactSystem) -> Result<&'static str> {
     let target = match target {
         Aarch64Darwin => "79d82dbb5e0db73b239859a74f070a6135adff3e1a13d05aa3dcb6863d819a70",
-        Aarch64Linux => "",
+        Aarch64Linux => "TODO",
         X8664Darwin => "",
         X8664Linux => "",
         _ => bail!("unsupported 'rust-toolchain' target: {:?}", target),
@@ -64,16 +67,14 @@ pub fn toolchain_version() -> String {
     "1.83.0".to_string()
 }
 
-pub async fn devshell(
+pub async fn build_shell(
     context: &mut ConfigContext,
     artifacts: Vec<String>,
     name: &str,
 ) -> Result<String> {
     let mut devshell_artifacts = vec![];
 
-    let toolchain = context
-        .fetch_artifact(toolchain_hash(context.get_target())?)
-        .await?;
+    let toolchain = rust_toolchain::build(context).await?;
     let toolchain_target = toolchain_target(context.get_target())?;
     let toolchain_version = toolchain_version();
 
@@ -100,7 +101,7 @@ pub async fn devshell(
     shell::build(context, devshell_artifacts, devshell_environments, name).await
 }
 
-pub async fn package<'a>(
+pub async fn build<'a>(
     context: &mut ConfigContext,
     artifacts: Vec<String>,
     name: &'a str,
@@ -177,9 +178,7 @@ pub async fn package<'a>(
 
     // Get rust toolchain artifact
 
-    let toolchain = context
-        .fetch_artifact(toolchain_hash(context.get_target())?)
-        .await?;
+    let toolchain = rust_toolchain::build(context).await?;
     let toolchain_target = toolchain_target(context.get_target())?;
     let toolchain_version = toolchain_version();
 

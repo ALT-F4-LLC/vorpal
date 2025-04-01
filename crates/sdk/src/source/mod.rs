@@ -1,5 +1,5 @@
+use crate::artifact::ConfigArtifactSourceBuilder;
 use vorpal_schema::config::v0::ConfigArtifactSource;
-use vorpal_sdk::artifact::ConfigArtifactSourceBuilder;
 
 pub fn go_tools() -> ConfigArtifactSource {
     let hash = "b4faf133f053f372cfe8ea3189bf035d19ca1661cb3ac1e7cd34a465de5641c2";

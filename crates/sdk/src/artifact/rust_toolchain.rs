@@ -1,12 +1,12 @@
 use crate::artifact::{cargo, clippy, rust_analyzer, rust_src, rust_std, rustc, rustfmt};
+use crate::{
+    artifact::{get_env_key, language::rust, step, ConfigArtifactBuilder},
+    context::ConfigContext,
+};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::config::v0::ConfigArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
-};
-use vorpal_sdk::{
-    artifact::{get_env_key, language::rust, step, ConfigArtifactBuilder},
-    context::ConfigContext,
 };
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {

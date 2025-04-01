@@ -3228,6 +3228,7 @@ dependencies = [
  "vorpal-notary",
  "vorpal-registry",
  "vorpal-schema",
+ "vorpal-sdk",
  "vorpal-store",
  "vorpal-worker",
 ]
@@ -3239,18 +3240,6 @@ dependencies = [
  "anyhow",
  "indoc",
  "tokio",
- "vorpal-schema",
- "vorpal-sdk",
-]
-
-[[package]]
-name = "vorpal-config-sdk"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "indoc",
- "tokio",
- "vorpal-schema",
  "vorpal-sdk",
 ]
 

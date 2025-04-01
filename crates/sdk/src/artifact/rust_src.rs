@@ -1,10 +1,10 @@
+use crate::{
+    artifact::{language::rust, step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
+    context::ConfigContext,
+};
 use anyhow::Result;
 use vorpal_schema::config::v0::ConfigArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
-};
-use vorpal_sdk::{
-    artifact::{language::rust, step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
-    context::ConfigContext,
 };
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {

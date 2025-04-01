@@ -1,25 +1,25 @@
 use crate::{artifact::go, source::go_tools};
+use crate::{
+    artifact::{get_env_key, step, ConfigArtifactBuilder},
+    context::ConfigContext,
+};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::config::v0::ConfigArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
 };
-use vorpal_sdk::{
-    artifact::{get_env_key, step, ConfigArtifactBuilder},
-    context::ConfigContext,
-};
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let go = go::build(context).await?;
 
-    let name = "goimports";
+    let name = "gopls";
 
     let step_script = formatdoc! {"
-        pushd ./source/go-tools
+        pushd ./source/go-tools/gopls
 
         mkdir -p $VORPAL_OUTPUT/bin
 
-        go build -o $VORPAL_OUTPUT/bin/goimports ./cmd/goimports
+        go build -o $VORPAL_OUTPUT/bin/gopls .
 
         go clean -modcache
     "};

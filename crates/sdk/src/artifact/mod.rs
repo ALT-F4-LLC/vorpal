@@ -5,7 +5,23 @@ use vorpal_schema::config::v0::{
     ConfigArtifact, ConfigArtifactSource, ConfigArtifactStep, ConfigArtifactSystem,
 };
 
+pub mod cargo;
+pub mod clippy;
+pub mod go;
+pub mod goimports;
+pub mod gopls;
 pub mod language;
+pub mod linux_debian;
+pub mod linux_vorpal;
+pub mod protoc;
+pub mod protoc_gen_go;
+pub mod protoc_gen_go_grpc;
+pub mod rust_analyzer;
+pub mod rust_src;
+pub mod rust_std;
+pub mod rust_toolchain;
+pub mod rustc;
+pub mod rustfmt;
 pub mod shell;
 pub mod step;
 

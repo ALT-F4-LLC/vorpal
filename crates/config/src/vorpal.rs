@@ -1,32 +1,16 @@
-use crate::artifact::{go, goimports, gopls, protoc_gen_go, protoc_gen_go_grpc};
-use anyhow::{bail, Result};
-use vorpal_schema::config::v0::{
-    ConfigArtifactSystem,
-    ConfigArtifactSystem::{Aarch64Darwin, Aarch64Linux, UnknownSystem, X8664Darwin, X8664Linux},
+use anyhow::Result;
+use vorpal_sdk::{
+    artifact::{go, goimports, gopls, language::rust, protoc, protoc_gen_go, protoc_gen_go_grpc},
+    context::ConfigContext,
 };
-use vorpal_sdk::{artifact::language::rust, context::ConfigContext};
 
-fn protoc_hash(target: ConfigArtifactSystem) -> Result<&'static str> {
-    let hash = match target {
-        Aarch64Darwin => "c07583ea769b3a2bb08c32af98b43d2158a4fd4b6bfd0f6e83737e4e8db8e7c8",
-        Aarch64Linux => "",
-        X8664Darwin => "",
-        X8664Linux => "",
-        UnknownSystem => bail!("unsupported 'protoc' system"),
-    };
-
-    Ok(hash)
-}
-
-pub async fn devshell(context: &mut ConfigContext) -> Result<String> {
+pub async fn build_shell(context: &mut ConfigContext) -> Result<String> {
     let name = "vorpal-shell";
-
-    let target = context.get_target();
 
     let go = go::build(context).await?;
     let goimports = goimports::build(context).await?;
     let gopls = gopls::build(context).await?;
-    let protoc = context.fetch_artifact(protoc_hash(target)?).await?;
+    let protoc = protoc::build(context).await?;
     let protoc_gen_go = protoc_gen_go::build(context).await?;
     let protoc_gen_go_grpc = protoc_gen_go_grpc::build(context).await?;
 
@@ -39,15 +23,13 @@ pub async fn devshell(context: &mut ConfigContext) -> Result<String> {
         protoc_gen_go_grpc.clone(),
     ];
 
-    rust::devshell(context, artifacts, name).await
+    rust::build_shell(context, artifacts, name).await
 }
 
-pub async fn package(context: &mut ConfigContext) -> Result<String> {
+pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "vorpal";
 
-    let protoc = context
-        .fetch_artifact(protoc_hash(context.get_target())?)
-        .await?;
+    let protoc = protoc::build(context).await?;
 
     let artifacts = vec![protoc.clone()];
 
@@ -69,5 +51,5 @@ pub async fn package(context: &mut ConfigContext) -> Result<String> {
         "vorpal-purpose.jpg",
     ];
 
-    rust::package(context, artifacts, name, excludes).await
+    rust::build(context, artifacts, name, excludes).await
 }

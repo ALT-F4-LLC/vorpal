@@ -1,5 +1,5 @@
 use crate::{
-    artifact::{get_env_key, ConfigArtifactStepBuilder},
+    artifact::{get_env_key, linux_vorpal, ConfigArtifactStepBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -104,7 +104,7 @@ pub async fn bwrap(
     .flat_map(|x| x.into_iter())
     .collect::<Vec<String>>();
 
-    let mut bwrap_artifacts = vec![];
+    let mut bwrap_artifacts = artifacts.clone();
 
     if let Some(rootfs) = rootfs {
         let rootfs_envkey = get_env_key(&rootfs);
@@ -135,7 +135,11 @@ pub async fn bwrap(
                 rootfs_envkey.clone(),
                 rootfs_envkey.clone(),
             ],
-            vec!["--setenv".to_string(), rootfs_envkey.clone(), rootfs_envkey],
+            vec![
+                "--setenv".to_string(),
+                rootfs_envkey.replace("$", "").clone(),
+                rootfs_envkey,
+            ],
         ]
         .into_iter()
         .flat_map(|x| x)
@@ -152,8 +156,8 @@ pub async fn bwrap(
     for artifact in artifacts.iter() {
         artifact_arguments.push(vec![
             "--ro-bind".to_string(),
-            artifact.to_string(),
-            artifact.to_string(),
+            get_env_key(artifact),
+            get_env_key(artifact),
         ]);
     }
 
@@ -235,9 +239,7 @@ pub async fn shell(
         ),
 
         Aarch64Linux | X8664Linux => {
-            let linux_vorpal = context
-                .fetch_artifact("b1724796a3cdfa26a0a33176d119cae8852e174ae31cb0200196c9881f7e6e91")
-                .await?;
+            let linux_vorpal = linux_vorpal::build(context).await?;
 
             bwrap(
                 context,

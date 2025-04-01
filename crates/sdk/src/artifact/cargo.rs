@@ -1,25 +1,25 @@
-use anyhow::{bail, Result};
-use vorpal_schema::config::v0::ConfigArtifactSystem::{
-    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
-};
-use vorpal_sdk::{
+use crate::{
     artifact::{
         language::rust::{toolchain_target, toolchain_version},
         step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder,
     },
     context::ConfigContext,
 };
+use anyhow::{bail, Result};
+use vorpal_schema::config::v0::ConfigArtifactSystem::{
+    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
+};
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let name = "rust-analyzer";
+    let name = "cargo";
 
     let target = context.get_target();
 
     let source_hash = match target {
-        Aarch64Darwin => "ba92aa08cdada8fad8d772623b0522cb3d6e659a8edb9e037453fab998772a19",
-        Aarch64Linux => "79fbf7077b846a4b28935fa6a22259d589baed2197c08bfc5c362f1e3f54db44",
+        Aarch64Darwin => "e88e4babfc20e0546fe28bc2ba3f71a467f83e9fb1be76c9a078d327379ee4d0",
+        Aarch64Linux => "42781c7ae909a5cd01c955cb4343754ce33d75783b2599a3f1a3b3752a0947af",
         X8664Darwin => "123456789",
-        X8664Linux => "b3d88f0ed6f77562f8376756d1b09fc7f5604aedcfac0ded2dd424c069e34ebe",
+        X8664Linux => "62091f43974e3e24583cceae24db710e9bd6863f366b9a5891bd7a5aa3d8c0fd",
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
 
@@ -32,7 +32,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_hash(source_hash.to_string())
         .build();
 
-    let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}-preview/.\" \"$VORPAL_OUTPUT\"");
+    let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}/.\" \"$VORPAL_OUTPUT\"");
     let step = step::shell(context, vec![], vec![], step_script).await?;
 
     ConfigArtifactBuilder::new(name.to_string())

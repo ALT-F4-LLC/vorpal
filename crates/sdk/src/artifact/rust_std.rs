@@ -1,30 +1,30 @@
-use anyhow::{bail, Result};
-use vorpal_schema::config::v0::ConfigArtifactSystem::{
-    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
-};
-use vorpal_sdk::{
+use crate::{
     artifact::{
-        language::rust::{get_toolchain_target, get_toolchain_version},
+        language::rust::{toolchain_target, toolchain_version},
         step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder,
     },
     context::ConfigContext,
 };
+use anyhow::{bail, Result};
+use vorpal_schema::config::v0::ConfigArtifactSystem::{
+    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
+};
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let name = "rustc";
+    let name = "rust-std";
 
     let target = context.get_target();
 
     let source_hash = match target {
-        Aarch64Darwin => "d022dd6d61a7039c12834f90a0a5410c884bfb9ef1e38b085ad4d3f59a5bf04a",
-        Aarch64Linux => "f5e5eac428b2a62ffc14324e3a6e171fb3032921f24973b27959834e456388b1",
+        Aarch64Darwin => "6d636e93ec5f9a2e8a7c5bae381dc9a89808087b2eec1f987f8ed5a797fef556",
+        Aarch64Linux => "d560efe018be876f2d5a9106f4b37222f0d315f52aeb12ffb0bfbfc8071fc5b1",
         X8664Darwin => "123456789",
-        X8664Linux => "fb18b7bb9dd94a5eeb445af1e4dd636836b6034f5dc731d534548bf5f9cb3d6f",
+        X8664Linux => "4ae19ae088abd72073dbf6dfbe9c68f8c70a4c2aa77c018c63b099d8732464c3",
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
 
-    let source_target = get_toolchain_target(target)?;
-    let source_version = get_toolchain_version();
+    let source_target = toolchain_target(target)?;
+    let source_version = toolchain_version();
     let source_path =
         format!("https://static.rust-lang.org/dist/{name}-{source_version}-{source_target}.tar.gz");
 
@@ -32,7 +32,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_hash(source_hash.to_string())
         .build();
 
-    let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}/.\" \"$VORPAL_OUTPUT\"");
+    let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}-{source_target}/.\" \"$VORPAL_OUTPUT\"");
     let step = step::shell(context, vec![], vec![], step_script).await?;
 
     ConfigArtifactBuilder::new(name.to_string())

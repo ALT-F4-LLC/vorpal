@@ -27,5 +27,6 @@ url = { default-features = false, version = "2" }
 vorpal-notary = { default-features = false, path = "../notary" }
 vorpal-registry = { default-features = false, path = "../registry" }
 vorpal-schema = { default-features = false, path = "../schema" }
+vorpal-sdk = { default-features = false, path = "../sdk" }
 vorpal-store = { default-features = false, path = "../store" }
 vorpal-worker = { default-features = false, path = "../worker" }

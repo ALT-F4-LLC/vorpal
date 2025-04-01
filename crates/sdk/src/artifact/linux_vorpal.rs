@@ -1,13 +1,13 @@
 use crate::artifact::linux_debian;
+use crate::{
+    artifact::{step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
+    context::ConfigContext,
+};
 use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_schema::config::v0::{
     ConfigArtifactSource,
     ConfigArtifactSystem::{Aarch64Linux, X8664Linux},
-};
-use vorpal_sdk::{
-    artifact::{step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
-    context::ConfigContext,
 };
 
 pub fn curl(version: &str, hash: &str) -> ConfigArtifactSource {
