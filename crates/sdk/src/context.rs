@@ -74,23 +74,23 @@ pub async fn get_context() -> Result<ConfigContext> {
                 .await
                 .expect("failed to connect to registry");
 
-            Ok(ConfigContext::new(port, registry, target).await?)
+            Ok(ConfigContext::new(port, registry, target))
         }
     }
 }
 
 impl ConfigContext {
-    pub async fn new(
+    pub fn new(
         port: u16,
         registry: RegistryServiceClient<tonic::transport::Channel>,
         system: ConfigArtifactSystem,
-    ) -> Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             artifact: HashMap::new(),
             port,
             registry,
             system,
-        })
+        }
     }
 
     pub fn add_artifact(&mut self, config: ConfigArtifact) -> Result<String> {
