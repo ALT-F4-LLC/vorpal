@@ -218,9 +218,9 @@ pub async fn get_path(
             // Setup environment variables
 
             let env_path = format!(
-                "{}:{}:{}",
+                "{}:{}/bin:{}",
                 rust_toolchain_bin_path.display(),
-                format!("{}/bin", protoc_path.display()),
+                protoc_path.display(),
                 var("PATH").unwrap_or_default()
             );
 
@@ -426,7 +426,7 @@ pub async fn build_artifacts(
                 }
 
                 build(
-                    &artifact,
+                    artifact,
                     &artifact_hash,
                     &artifact_source_hash,
                     client_artifact,

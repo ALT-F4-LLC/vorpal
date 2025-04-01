@@ -142,7 +142,7 @@ pub async fn bwrap(
             ],
         ]
         .into_iter()
-        .flat_map(|x| x)
+        .flatten()
         .collect::<Vec<String>>();
 
         bwrap_arguments.extend(rootfs_arguments);
@@ -163,7 +163,7 @@ pub async fn bwrap(
 
     let bwrap_arguments_artifacts = artifact_arguments
         .into_iter()
-        .flat_map(|x| x)
+        .flatten()
         .collect::<Vec<String>>();
 
     // Setup environment arguments
@@ -183,7 +183,7 @@ pub async fn bwrap(
 
     let bwrap_arguments_environments = environment_arguments
         .into_iter()
-        .flat_map(|x| x)
+        .flatten()
         .collect::<Vec<String>>();
 
     // Setup all arguments
@@ -192,7 +192,7 @@ pub async fn bwrap(
         .into_iter()
         .chain(bwrap_arguments_artifacts.into_iter())
         .chain(bwrap_arguments_environments.into_iter())
-        .chain(arguments.into_iter().map(|x| x))
+        .chain(arguments.into_iter())
         .collect::<Vec<String>>();
 
     let step = ConfigArtifactStepBuilder::new()

@@ -85,6 +85,12 @@ impl ConfigArtifactSourceBuilder {
     }
 }
 
+impl Default for ConfigArtifactStepBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigArtifactStepBuilder {
     pub fn new() -> Self {
         Self {

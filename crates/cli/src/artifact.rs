@@ -282,56 +282,52 @@ pub async fn build_source(
         hash: source_hash.clone(),
     };
 
-    match registry.get_archive(registry_request).await {
-        Err(status) => {
-            if status.code() != Code::NotFound {
-                bail!("registry pull error: {:?}", status);
-            }
-
-            info!("{} pack source: {}", get_prefix(artifact_name), source.name);
-
-            let source_sandbox_archive = create_sandbox_file(Some("tar.zst")).await?;
-
-            compress_zstd(
-                &source_sandbox,
-                &source_sandbox_files,
-                &source_sandbox_archive,
-            )
-            .await?;
-
-            let private_key_path = get_private_key_path();
-
-            if !private_key_path.exists() {
-                bail!("Private key not found: {}", private_key_path.display());
-            }
-
-            let source_archive_data = read(&source_sandbox_archive).await?;
-
-            let source_signature =
-                vorpal_notary::sign(private_key_path.clone(), &source_archive_data).await?;
-
-            let mut source_stream = vec![];
-
-            for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
-                source_stream.push(RegistryPushRequest {
-                    archive: RegistryArchive::ArtifactSource as i32,
-                    data: chunk.to_vec(),
-                    signature: source_signature.clone().to_vec(),
-                    hash: source_hash.clone(),
-                });
-            }
-
-            info!("{} push source: {}", get_prefix(artifact_name), source.name);
-
-            registry
-                .push_archive(tokio_stream::iter(source_stream))
-                .await
-                .expect("failed to push");
-
-            remove_file(&source_sandbox_archive).await?;
+    if let Err(status) = registry.get_archive(registry_request).await {
+        if status.code() != Code::NotFound {
+            bail!("registry pull error: {:?}", status);
         }
 
-        Ok(_) => {}
+        info!("{} pack source: {}", get_prefix(artifact_name), source.name);
+
+        let source_sandbox_archive = create_sandbox_file(Some("tar.zst")).await?;
+
+        compress_zstd(
+            &source_sandbox,
+            &source_sandbox_files,
+            &source_sandbox_archive,
+        )
+        .await?;
+
+        let private_key_path = get_private_key_path();
+
+        if !private_key_path.exists() {
+            bail!("Private key not found: {}", private_key_path.display());
+        }
+
+        let source_archive_data = read(&source_sandbox_archive).await?;
+
+        let source_signature =
+            vorpal_notary::sign(private_key_path.clone(), &source_archive_data).await?;
+
+        let mut source_stream = vec![];
+
+        for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
+            source_stream.push(RegistryPushRequest {
+                archive: RegistryArchive::ArtifactSource as i32,
+                data: chunk.to_vec(),
+                signature: source_signature.clone().to_vec(),
+                hash: source_hash.clone(),
+            });
+        }
+
+        info!("{} push source: {}", get_prefix(artifact_name), source.name);
+
+        registry
+            .push_archive(tokio_stream::iter(source_stream))
+            .await
+            .expect("failed to push");
+
+        remove_file(&source_sandbox_archive).await?;
     }
 
     remove_dir_all(&source_sandbox)
@@ -350,7 +346,7 @@ pub async fn build(
 ) -> Result<()> {
     // 1. Check artifact
 
-    let artifact_path = get_store_path(&artifact_hash);
+    let artifact_path = get_store_path(artifact_hash);
 
     if artifact_path.exists() {
         return Ok(());
@@ -395,7 +391,7 @@ pub async fn build(
             }
 
             if !stream_data.is_empty() {
-                let archive_path = get_archive_path(&artifact_hash);
+                let archive_path = get_archive_path(artifact_hash);
 
                 write(&archive_path, &stream_data)
                     .await

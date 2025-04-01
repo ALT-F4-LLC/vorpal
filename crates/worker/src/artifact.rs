@@ -114,7 +114,7 @@ async fn run_step(
 
     let mut environments_sorted = environments;
 
-    environments_sorted.sort_by(|a, b| a.len().cmp(&b.len()));
+    environments_sorted.sort_by_key(|a| a.len());
 
     let vorpal_envs: Vec<_> = environments_sorted
         .iter()
@@ -161,9 +161,9 @@ async fn run_step(
 
     for env in environments_sorted.iter() {
         let env = env.split('=').collect::<Vec<&str>>();
-        let env_value = expand_env(&env[1], &vorpal_envs);
+        let env_value = expand_env(env[1], &vorpal_envs);
 
-        command.env(&env[0], env_value);
+        command.env(env[0], env_value);
     }
 
     // Setup arguments
@@ -517,7 +517,7 @@ async fn pull_source(
         Status::invalid_argument(format!("source 'hash' not found: {}", artifact_source.name))
     })?;
 
-    let source_archive = get_archive_path(&source_hash);
+    let source_archive = get_archive_path(source_hash);
 
     if !source_archive.exists() {
         send_message(

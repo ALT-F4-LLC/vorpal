@@ -136,7 +136,7 @@ impl ConfigContext {
     }
 
     pub fn get_target(&self) -> ConfigArtifactSystem {
-        self.system.clone()
+        self.system
     }
 
     pub async fn run(&self, artifacts: Vec<String>) -> Result<()> {
