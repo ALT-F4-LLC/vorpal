@@ -101,5 +101,4 @@ pub async fn build<'a>(
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
         .build(context)
-        .await
 }

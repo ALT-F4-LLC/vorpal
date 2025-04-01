@@ -257,8 +257,7 @@ pub async fn package<'a>(
         .with_system(Aarch64Linux)
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
-        .build(context)
-        .await?;
+        .build(context)?;
 
     // TODO: implement artifact for 'check` to pre-bake the vendor cache
 
@@ -310,5 +309,4 @@ pub async fn package<'a>(
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
         .build(context)
-        .await
 }

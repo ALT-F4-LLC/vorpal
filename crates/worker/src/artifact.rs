@@ -568,6 +568,10 @@ async fn pull_source(
                     .map_err(|err| {
                         Status::internal(format!("failed to write store path: {:?}", err))
                     })?;
+
+                set_timestamps(&source_archive).await.map_err(|err| {
+                    Status::internal(format!("failed to set source timestamps: {:?}", err))
+                })?;
             }
         }
     }

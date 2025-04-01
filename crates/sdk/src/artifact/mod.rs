@@ -179,7 +179,7 @@ impl ConfigArtifactBuilder {
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+    pub fn build(self, context: &mut ConfigContext) -> Result<String> {
         let artifact = ConfigArtifact {
             name: self.name,
             sources: self.sources,
@@ -192,7 +192,7 @@ impl ConfigArtifactBuilder {
             return Err(anyhow!("artifact must have at least one step"));
         }
 
-        context.add_artifact(artifact).await
+        context.add_artifact(artifact)
     }
 }
 

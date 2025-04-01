@@ -93,7 +93,7 @@ impl ConfigContext {
         })
     }
 
-    pub async fn add_artifact(&mut self, config: ConfigArtifact) -> Result<String> {
+    pub fn add_artifact(&mut self, config: ConfigArtifact) -> Result<String> {
         // 1. Calculate hash
 
         let artifact_json = serde_json::to_string(&config).map_err(|e| anyhow::anyhow!(e))?;

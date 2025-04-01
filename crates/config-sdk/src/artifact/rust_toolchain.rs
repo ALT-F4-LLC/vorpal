@@ -81,5 +81,4 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
         .build(context)
-        .await
 }
