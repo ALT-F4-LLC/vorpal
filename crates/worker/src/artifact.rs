@@ -30,6 +30,7 @@ use vorpal_schema::{
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
+    notary,
     paths::{
         get_archive_path, get_file_paths, get_private_key_path, get_store_lock_path,
         get_store_path, set_timestamps,
@@ -443,7 +444,7 @@ async fn build_artifact(
         return Err(Status::internal("private key not found"));
     }
 
-    let artifact_signature = vorpal_notary::sign(private_key_path, &artifact_data)
+    let artifact_signature = notary::sign(private_key_path, &artifact_data)
         .await
         .map_err(|err| Status::internal(format!("failed to sign artifact: {:?}", err)))?;
 

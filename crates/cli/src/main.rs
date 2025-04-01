@@ -20,7 +20,7 @@ use vorpal_schema::{
     },
     system_default, system_default_str, system_from_str,
 };
-use vorpal_store::paths::get_public_key_path;
+use vorpal_store::{notary::generate_keys, paths::get_public_key_path};
 use vorpal_worker::artifact::ArtifactServer;
 
 mod artifact;
@@ -259,8 +259,7 @@ async fn main() -> Result<()> {
                     bail!("public key exists but private key is missing");
                 }
 
-                vorpal_notary::generate_keys(key_dir_path, private_key_path, public_key_path)
-                    .await?;
+                generate_keys(key_dir_path, private_key_path, public_key_path).await?;
 
                 Ok(())
             }

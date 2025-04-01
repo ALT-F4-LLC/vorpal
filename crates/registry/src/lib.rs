@@ -8,7 +8,6 @@ use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
 use tracing::error;
-use vorpal_notary::get_public_key;
 use vorpal_schema::{
     config::v0::{ConfigArtifact, ConfigArtifactRequest},
     registry::v0::{
@@ -19,7 +18,7 @@ use vorpal_schema::{
         RegistryPushResponse, RegistryPutResponse,
     },
 };
-use vorpal_store::paths::get_public_key_path;
+use vorpal_store::{notary::get_public_key, paths::get_public_key_path};
 
 pub mod gha;
 pub mod local;

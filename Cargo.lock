@@ -3225,7 +3225,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "vorpal-notary",
  "vorpal-registry",
  "vorpal-schema",
  "vorpal-sdk",
@@ -3241,17 +3240,6 @@ dependencies = [
  "indoc",
  "tokio",
  "vorpal-sdk",
-]
-
-[[package]]
-name = "vorpal-notary"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rand",
- "rsa",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -3271,7 +3259,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tracing",
- "vorpal-notary",
  "vorpal-schema",
  "vorpal-store",
 ]
@@ -3312,11 +3299,14 @@ dependencies = [
  "async_zip",
  "filetime",
  "futures-lite",
+ "rand",
+ "rsa",
  "sanitize-filename",
  "sha256",
  "tokio",
  "tokio-tar",
  "tokio-util",
+ "tracing",
  "uuid",
  "walkdir",
 ]
@@ -3332,7 +3322,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tracing",
- "vorpal-notary",
  "vorpal-schema",
  "vorpal-store",
 ]

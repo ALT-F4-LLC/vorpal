@@ -67,245 +67,282 @@ pub fn toolchain_version() -> String {
     "1.83.0".to_string()
 }
 
-pub async fn build_shell(
-    context: &mut ConfigContext,
-    artifacts: Vec<String>,
-    name: &str,
-) -> Result<String> {
-    let mut devshell_artifacts = vec![];
-
-    let toolchain = rust_toolchain::build(context).await?;
-    let toolchain_target = toolchain_target(context.get_target())?;
-    let toolchain_version = toolchain_version();
-
-    devshell_artifacts.push(toolchain.clone());
-
-    devshell_artifacts.extend(artifacts);
-
-    let devshell_environments = vec![
-        format!(
-            "PATH={}/toolchains/{}-{}/bin:$PATH",
-            get_env_key(&toolchain),
-            toolchain_version,
-            toolchain_target
-        ),
-        format!("RUSTUP_HOME={}", get_env_key(&toolchain)),
-        format!(
-            "RUSTUP_TOOLCHAIN={}-{}",
-            toolchain_version, toolchain_target
-        ),
-    ];
-
-    // Create shell artifact
-
-    shell::build(context, devshell_artifacts, devshell_environments, name).await
-}
-
-pub async fn build<'a>(
-    context: &mut ConfigContext,
+pub struct RustShellBuilder<'a> {
     artifacts: Vec<String>,
     name: &'a str,
-    excludes: Vec<&'a str>,
-) -> Result<String> {
-    // 1. READ CARGO.TOML FILES
+}
 
-    // Get the source path
-    let source_path = Path::new(".").to_path_buf();
-
-    if !source_path.exists() {
-        bail!(
-            "Artifact `source.{}.path` not found: {:?}",
+impl<'a> RustShellBuilder<'a> {
+    pub fn new(name: &'a str) -> Self {
+        Self {
+            artifacts: vec![],
             name,
-            source_path
-        );
-    }
-
-    let source_path_str = source_path.display().to_string();
-
-    // Load root cargo.toml
-
-    let cargo_toml_path = source_path.join("Cargo.toml");
-
-    if !cargo_toml_path.exists() {
-        bail!("Cargo.toml not found: {:?}", cargo_toml_path);
-    }
-
-    let cargo_toml = read_cargo(cargo_toml_path.to_str().unwrap())?;
-
-    // TODO: implement for non-workspace based projects
-
-    // Get list of bin targets
-
-    let mut workspaces = vec![];
-    let mut workspaces_bin_names = vec![];
-    let mut workspaces_targets = vec![];
-
-    if let Some(workspace) = cargo_toml.workspace {
-        if let Some(members) = workspace.members {
-            for member in members {
-                let member_path = source_path.join(member.clone());
-                let member_cargo_toml_path = member_path.join("Cargo.toml");
-
-                if !member_cargo_toml_path.exists() {
-                    bail!("Cargo.toml not found: {:?}", member_cargo_toml_path);
-                }
-
-                let member_cargo = read_cargo(member_cargo_toml_path.to_str().unwrap())?;
-
-                let mut member_target_paths = vec![];
-
-                if let Some(bins) = member_cargo.bin {
-                    for bin in bins {
-                        member_target_paths.push(format!("{}/{}", member, bin.path));
-                        workspaces_bin_names.push(bin.name);
-                    }
-                }
-
-                if member_target_paths.is_empty() {
-                    member_target_paths.push(format!("{}/src/lib.rs", member));
-                }
-
-                for member_path in member_target_paths {
-                    workspaces_targets.push(member_path);
-                }
-
-                workspaces.push(member);
-            }
         }
     }
 
-    // 2. CREATE ARTIFACTS
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts = artifacts;
+        self
+    }
 
-    // Get rust toolchain artifact
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let mut artifacts = vec![];
 
-    let toolchain = rust_toolchain::build(context).await?;
-    let toolchain_target = toolchain_target(context.get_target())?;
-    let toolchain_version = toolchain_version();
+        let toolchain = rust_toolchain::build(context).await?;
+        let toolchain_target = toolchain_target(context.get_target())?;
+        let toolchain_version = toolchain_version();
 
-    // Set environment variables
+        artifacts.push(toolchain.clone());
+        artifacts.extend(self.artifacts);
 
-    let toolchain_name = format!("{}-{}", toolchain_version, toolchain_target);
-
-    let step_environments = vec![
-        "HOME=$VORPAL_WORKSPACE/home".to_string(),
-        format!(
-            "PATH={}",
+        let environments = vec![
             format!(
-                "{}/toolchains/{}-{}/bin",
+                "PATH={}/toolchains/{}-{}/bin:$PATH",
                 get_env_key(&toolchain),
                 toolchain_version,
                 toolchain_target
-            )
-        ),
-        format!("RUSTUP_HOME={}", get_env_key(&toolchain)),
-        format!("RUSTUP_TOOLCHAIN={}", toolchain_name),
-    ];
+            ),
+            format!("RUSTUP_HOME={}", get_env_key(&toolchain)),
+            format!(
+                "RUSTUP_TOOLCHAIN={}-{}",
+                toolchain_version, toolchain_target
+            ),
+        ];
 
-    // Create vendor artifact
+        // Create shell artifact
 
-    let mut vendor_cargo_paths = vec!["Cargo.toml".to_string(), "Cargo.lock".to_string()];
+        shell::build(context, artifacts, environments, self.name).await
+    }
+}
 
-    for workspace in workspaces.iter() {
-        vendor_cargo_paths.push(format!("{}/Cargo.toml", workspace));
+pub struct RustBuilder<'a> {
+    artifacts: Vec<String>,
+    name: &'a str,
+    excludes: Vec<&'a str>,
+}
+
+impl<'a> RustBuilder<'a> {
+    pub fn new(name: &'a str) -> Self {
+        Self {
+            artifacts: vec![],
+            name,
+            excludes: vec![],
+        }
     }
 
-    let vendor_step_script = formatdoc! {"
-        mkdir -pv $HOME
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts = artifacts;
+        self
+    }
 
-        pushd ./source/{name}-vendor
+    pub fn with_excludes(mut self, excludes: Vec<&'a str>) -> Self {
+        self.excludes = excludes;
+        self
+    }
 
-        target_paths=({target_paths})
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        // 1. READ CARGO.TOML FILES
 
-        for target_path in ${{target_paths[@]}}; do
-            mkdir -pv \"$(dirname \"${{target_path}}\")\"
-            touch \"${{target_path}}\"
-        done
+        // Get the source path
+        let source_path = Path::new(".").to_path_buf();
 
-        mkdir -pv \"$VORPAL_OUTPUT/vendor\"
+        if !source_path.exists() {
+            bail!(
+                "Artifact `source.{}.path` not found: {:?}",
+                self.name,
+                source_path
+            );
+        }
 
-        cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
+        let source_path_str = source_path.display().to_string();
 
-        echo \"$cargo_vendor\" > \"$VORPAL_OUTPUT/config.toml\"",
-        target_paths = workspaces_targets.join(" "),
-    };
+        // Load root cargo.toml
 
-    let mut vendor_step_artifacts = vec![toolchain.clone()];
+        let cargo_toml_path = source_path.join("Cargo.toml");
 
-    vendor_step_artifacts.extend(artifacts.clone());
+        if !cargo_toml_path.exists() {
+            bail!("Cargo.toml not found: {:?}", cargo_toml_path);
+        }
 
-    let vendor_step = step::shell(
-        context,
-        vendor_step_artifacts,
-        step_environments.clone(),
-        vendor_step_script,
-    )
-    .await?;
+        let cargo_toml = read_cargo(cargo_toml_path.to_str().unwrap())?;
 
-    let vendor_name = format!("{}-vendor", name);
+        // TODO: implement for non-workspace based projects
 
-    let vendor_source =
-        ConfigArtifactSourceBuilder::new(vendor_name.clone(), source_path_str.clone())
-            .with_excludes(vec![])
-            .with_includes(vendor_cargo_paths.clone())
+        // Get list of bin targets
+
+        let mut workspaces = vec![];
+        let mut workspaces_bin_names = vec![];
+        let mut workspaces_targets = vec![];
+
+        if let Some(workspace) = cargo_toml.workspace {
+            if let Some(members) = workspace.members {
+                for member in members {
+                    let member_path = source_path.join(member.clone());
+                    let member_cargo_toml_path = member_path.join("Cargo.toml");
+
+                    if !member_cargo_toml_path.exists() {
+                        bail!("Cargo.toml not found: {:?}", member_cargo_toml_path);
+                    }
+
+                    let member_cargo = read_cargo(member_cargo_toml_path.to_str().unwrap())?;
+
+                    let mut member_target_paths = vec![];
+
+                    if let Some(bins) = member_cargo.bin {
+                        for bin in bins {
+                            member_target_paths.push(format!("{}/{}", member, bin.path));
+                            workspaces_bin_names.push(bin.name);
+                        }
+                    }
+
+                    if member_target_paths.is_empty() {
+                        member_target_paths.push(format!("{}/src/lib.rs", member));
+                    }
+
+                    for member_path in member_target_paths {
+                        workspaces_targets.push(member_path);
+                    }
+
+                    workspaces.push(member);
+                }
+            }
+        }
+
+        // 2. CREATE ARTIFACTS
+
+        // Get rust toolchain artifact
+
+        let toolchain = rust_toolchain::build(context).await?;
+        let toolchain_target = toolchain_target(context.get_target())?;
+        let toolchain_version = toolchain_version();
+
+        // Set environment variables
+
+        let toolchain_name = format!("{}-{}", toolchain_version, toolchain_target);
+
+        let step_environments = vec![
+            "HOME=$VORPAL_WORKSPACE/home".to_string(),
+            format!(
+                "PATH={}",
+                format!(
+                    "{}/toolchains/{}-{}/bin",
+                    get_env_key(&toolchain),
+                    toolchain_version,
+                    toolchain_target
+                )
+            ),
+            format!("RUSTUP_HOME={}", get_env_key(&toolchain)),
+            format!("RUSTUP_TOOLCHAIN={}", toolchain_name),
+        ];
+
+        // Create vendor artifact
+
+        let mut vendor_cargo_paths = vec!["Cargo.toml".to_string(), "Cargo.lock".to_string()];
+
+        for workspace in workspaces.iter() {
+            vendor_cargo_paths.push(format!("{}/Cargo.toml", workspace));
+        }
+
+        let vendor_step_script = formatdoc! {"
+            mkdir -pv $HOME
+
+            pushd ./source/{name}-vendor
+
+            target_paths=({target_paths})
+
+            for target_path in ${{target_paths[@]}}; do
+                mkdir -pv \"$(dirname \"${{target_path}}\")\"
+                touch \"${{target_path}}\"
+            done
+
+            mkdir -pv \"$VORPAL_OUTPUT/vendor\"
+
+            cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
+
+            echo \"$cargo_vendor\" > \"$VORPAL_OUTPUT/config.toml\"",
+            name = self.name,
+            target_paths = workspaces_targets.join(" "),
+        };
+
+        let mut vendor_step_artifacts = vec![toolchain.clone()];
+
+        vendor_step_artifacts.extend(self.artifacts.clone());
+
+        let vendor_step = step::shell(
+            context,
+            vendor_step_artifacts,
+            step_environments.clone(),
+            vendor_step_script,
+        )
+        .await?;
+
+        let vendor_name = format!("{}-vendor", self.name);
+
+        let vendor_source =
+            ConfigArtifactSourceBuilder::new(vendor_name.clone(), source_path_str.clone())
+                .with_excludes(vec![])
+                .with_includes(vendor_cargo_paths.clone())
+                .build();
+
+        let vendor = ConfigArtifactBuilder::new(vendor_name)
+            .with_source(vendor_source)
+            .with_step(vendor_step)
+            .with_system(Aarch64Darwin)
+            .with_system(Aarch64Linux)
+            .with_system(X8664Darwin)
+            .with_system(X8664Linux)
+            .build(context)?;
+
+        // TODO: implement artifact for 'check` to pre-bake the vendor cache
+
+        let mut source_excludes = vec!["target".to_string()];
+
+        for exclude in self.excludes {
+            source_excludes.push(exclude.to_string());
+        }
+
+        let source = ConfigArtifactSourceBuilder::new(self.name.to_string(), source_path_str)
+            .with_excludes(source_excludes)
             .build();
 
-    let vendor = ConfigArtifactBuilder::new(vendor_name)
-        .with_source(vendor_source)
-        .with_step(vendor_step)
-        .with_system(Aarch64Darwin)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Darwin)
-        .with_system(X8664Linux)
-        .build(context)?;
+        let mut step_artifacts = vec![toolchain.clone(), vendor.clone()];
 
-    // TODO: implement artifact for 'check` to pre-bake the vendor cache
+        step_artifacts.extend(self.artifacts.clone());
 
-    let mut source_excludes = vec!["target".to_string()];
+        let step_script = formatdoc! {"
+            mkdir -pv $HOME
 
-    for exclude in excludes {
-        source_excludes.push(exclude.to_string());
+            pushd ./source/{name}
+
+            mkdir -pv .cargo
+
+            ln -sv \"{vendor}/config.toml\" .cargo/config.toml
+
+            cargo build --offline --release
+
+            cargo test --offline --release
+
+            mkdir -pv \"$VORPAL_OUTPUT/bin\"
+
+            bin_names=({bin_names})
+
+            for bin_name in ${{bin_names[@]}}; do
+                cp -pv \"target/release/${{bin_name}}\" \"$VORPAL_OUTPUT/bin/\"
+            done",
+            bin_names = workspaces_bin_names.join(" "),
+            name = self.name,
+            vendor = get_env_key(&vendor),
+        };
+
+        let step = step::shell(context, step_artifacts, step_environments, step_script).await?;
+
+        ConfigArtifactBuilder::new(self.name.to_string())
+            .with_source(source)
+            .with_step(step)
+            .with_system(Aarch64Darwin)
+            .with_system(Aarch64Linux)
+            .with_system(X8664Darwin)
+            .with_system(X8664Linux)
+            .build(context)
     }
-
-    let source = ConfigArtifactSourceBuilder::new(name.to_string(), source_path_str)
-        .with_excludes(source_excludes)
-        .build();
-
-    let mut step_artifacts = vec![toolchain.clone(), vendor.clone()];
-
-    step_artifacts.extend(artifacts.clone());
-
-    let step_script = formatdoc! {"
-        mkdir -pv $HOME
-
-        pushd ./source/{name}
-
-        mkdir -pv .cargo
-
-        ln -sv \"{vendor}/config.toml\" .cargo/config.toml
-
-        cargo build --offline --release
-
-        cargo test --offline --release
-
-        mkdir -pv \"$VORPAL_OUTPUT/bin\"
-
-        bin_names=({bin_names})
-
-        for bin_name in ${{bin_names[@]}}; do
-            cp -pv \"target/release/${{bin_name}}\" \"$VORPAL_OUTPUT/bin/\"
-        done",
-        bin_names = workspaces_bin_names.join(" "),
-        vendor = get_env_key(&vendor),
-    };
-
-    let step = step::shell(context, step_artifacts, step_environments, step_script).await?;
-
-    ConfigArtifactBuilder::new(name.to_string())
-        .with_source(source)
-        .with_step(step)
-        .with_system(Aarch64Darwin)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Darwin)
-        .with_system(X8664Linux)
-        .build(context)
 }

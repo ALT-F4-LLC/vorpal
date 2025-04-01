@@ -18,6 +18,7 @@ use vorpal_schema::{
 };
 use vorpal_store::{
     archives::unpack_zstd,
+    notary,
     paths::{get_archive_path, get_file_paths, get_store_path, set_timestamps},
 };
 use vorpal_store::{
@@ -306,8 +307,7 @@ pub async fn build_source(
 
         let source_archive_data = read(&source_sandbox_archive).await?;
 
-        let source_signature =
-            vorpal_notary::sign(private_key_path.clone(), &source_archive_data).await?;
+        let source_signature = notary::sign(private_key_path.clone(), &source_archive_data).await?;
 
         let mut source_stream = vec![];
 

@@ -243,8 +243,6 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         vec![
             "container".to_string(),
             "stop".to_string(),
-            "--timeout".to_string(),
-            "0".to_string(),
             dockerfile.clone(),
         ],
         vec![],

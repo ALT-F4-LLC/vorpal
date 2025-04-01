@@ -17,6 +17,5 @@ tokio = { default-features = false, features = ["process", "rt-multi-thread"], v
 tokio-stream = { default-features = false, features = ["io-util"], version = "0" }
 tonic = { default-features = false, version = "0" }
 tracing = { default-features = false, version = "0" }
-vorpal-notary = { default-features = false, path = "../notary" }
 vorpal-schema = { default-features = false, path = "../schema" }
 vorpal-store = { default-features = false, path = "../store" }
