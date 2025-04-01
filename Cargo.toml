@@ -1,12 +1,13 @@
 [workspace]
 members = [
-    "cli",
-    "config",
-    "notary",
-    "registry",
-    "schema",
-    "sdk/rust",
-    "store",
-    "worker"
+    "crates/cli",
+    "crates/config",
+    "crates/config-sdk",
+    "crates/notary",
+    "crates/registry",
+    "crates/schema",
+    "crates/sdk",
+    "crates/store",
+    "crates/worker"
 ]
 resolver = "2"

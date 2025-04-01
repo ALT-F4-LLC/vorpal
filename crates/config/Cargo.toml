@@ -1,0 +1,15 @@
+[package]
+name = "vorpal-config"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "vorpal-config"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { default-features = false, version = "1" }
+indoc = { default-features = false, version = "2" }
+tokio = { default-features = false, features = ["rt-multi-thread"], version = "1" }
+vorpal-schema = { default-features = false, path = "../schema" }
+vorpal-sdk = { default-features = false, path = "../sdk" }

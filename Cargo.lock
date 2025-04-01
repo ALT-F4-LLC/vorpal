@@ -3244,6 +3244,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorpal-config-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "indoc",
+ "tokio",
+ "vorpal-schema",
+ "vorpal-sdk",
+]
+
+[[package]]
 name = "vorpal-notary"
 version = "0.1.0"
 dependencies = [

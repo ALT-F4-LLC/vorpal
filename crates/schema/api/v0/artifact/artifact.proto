@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package vorpal.artifact.v0;
+
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact";
+
+import "v0/config/config.proto";
+
+service ArtifactService {
+    rpc Build (ArtifactBuildRequest) returns (stream ArtifactBuildResponse);
+}
+
+message ArtifactBuildRequest {
+    map<string, string> artifact_source_hash = 1;
+    vorpal.config.v0.ConfigArtifact artifact = 2;
+}
+
+message ArtifactBuildResponse {
+    string output = 1;
+}
