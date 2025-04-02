@@ -145,10 +145,7 @@ impl ConfigContext {
             .expect("failed to parse address");
 
         let config = Config { artifacts };
-
         let config_service = ConfigServiceServer::new(ConfigServer::new(self.clone(), config));
-
-        println!("Config listening: {}", addr);
 
         Server::builder()
             .add_service(config_service)

@@ -7,6 +7,7 @@ use std::{
     env::var,
     path::{Path, PathBuf},
     process::Stdio,
+    time::Duration,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -226,7 +227,7 @@ pub async fn get_path(
             command.args(["build", "--bin", rust_bin]);
 
             info!(
-                "{} command: {} build --bin {}",
+                "{} build: {} build --bin {}",
                 get_prefix("config"),
                 rust_toolchain_cargo_path.display(),
                 rust_bin
@@ -269,7 +270,7 @@ pub async fn start(
 ) -> Result<(Child, ConfigServiceClient<Channel>)> {
     let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
 
-    let mut command = process::Command::new(file);
+    let mut command = process::Command::new(file.clone());
 
     command.args([
         "start",
@@ -279,47 +280,59 @@ pub async fn start(
         &registry,
     ]);
 
+    info!(
+        "{} start: {} start --port {} --registry {}",
+        get_prefix("config"),
+        file,
+        port,
+        registry
+    );
+
     let mut config_process = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .spawn()
         .map_err(|_| anyhow!("failed to start config server"))?;
 
-    let stdout = config_process.stdout.take().unwrap();
-    let stderr = config_process.stderr.take().unwrap();
+    info!(
+        "{} process: {}",
+        get_prefix("config"),
+        config_process.id().unwrap()
+    );
 
-    let stdout = LinesStream::new(BufReader::new(stdout).lines());
-    let stderr = LinesStream::new(BufReader::new(stderr).lines());
+    let config_host = format!("http://localhost:{:?}", port);
 
-    let mut stdio_merged = StreamExt::merge(stdout, stderr);
+    let mut attempts = 0;
+    let max_attempts = 3;
+    let max_wait_time = Duration::from_millis(500);
 
-    let host = format!("http://localhost:{:?}", port);
+    let config_client = loop {
+        attempts += 1;
 
-    while let Some(line) = stdio_merged.next().await {
-        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
+        match ConfigServiceClient::connect(config_host.clone()).await {
+            Ok(srv) => break srv,
+            Err(e) => {
+                if attempts >= max_attempts {
+                    let _ = config_process
+                        .kill()
+                        .await
+                        .map_err(|_| anyhow!("failed to kill config server"));
 
-        if !line.contains("Config listening") {
-            info!("{}", line);
-        }
+                    bail!("failed to connect after {} attempts: {}", max_attempts, e);
+                }
 
-        if line.contains("Config listening") {
-            break;
-        }
-    }
+                info!(
+                    "{} connection {}/{} failed, retry in {} ms...",
+                    get_prefix("config"),
+                    attempts,
+                    max_attempts,
+                    max_wait_time.as_millis()
+                );
 
-    let config_service = match ConfigServiceClient::connect(host).await {
-        Ok(srv) => srv,
-        Err(e) => {
-            let _ = config_process
-                .kill()
-                .await
-                .map_err(|_| anyhow!("failed to kill config server"));
-
-            bail!("failed to connect to config server: {}", e);
+                tokio::time::sleep(max_wait_time).await;
+            }
         }
     };
 
-    Ok((config_process, config_service))
+    Ok((config_process, config_client))
 }
 
 pub async fn fetch_artifacts(
