@@ -1,10 +1,10 @@
 use crate::{
-    artifact::{get_env_key, step, ConfigArtifactBuilder},
+    artifact::{get_env_key, step, ArtifactBuilder},
     context::ConfigContext,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::config::v0::ConfigArtifactSystem::{
+use vorpal_schema::artifact::v0::ArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
 };
 
@@ -175,13 +175,14 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         vec![Aarch64Linux, X8664Linux],
     );
 
-    let dockerfile = ConfigArtifactBuilder::new("linux-debian-dockerfile".to_string())
+    let dockerfile = ArtifactBuilder::new("linux-debian-dockerfile".to_string())
         .with_step(dockerfile_step)
         .with_system(Aarch64Darwin)
         .with_system(Aarch64Linux)
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
-        .build(context)?;
+        .build(context)
+        .await?;
 
     let dockerfile_image = format!("altf4llc/debin:{}", dockerfile);
 
@@ -263,7 +264,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let name = "linux-debian";
 
-    ConfigArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name.to_string())
         .with_step(step_build)
         .with_step(step_create)
         .with_step(step_export)
@@ -275,4 +276,5 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
         .build(context)
+        .await
 }

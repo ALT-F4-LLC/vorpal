@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package vorpal.worker.v0;
+
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/worker";
+
+import "v0/artifact/artifact.proto";
+
+service WorkerService {
+    rpc BuildArtifact(vorpal.artifact.v0.Artifact) returns (stream BuildArtifactResponse);
+}
+
+message BuildArtifactResponse {
+    string output = 1;
+}

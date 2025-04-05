@@ -1,4 +1,4 @@
-use crate::{build, build_source, get_prefix};
+use crate::{build, get_prefix};
 use anyhow::{anyhow, bail, Result};
 use petgraph::{algo::toposort, graphmap::DiGraphMap};
 use port_selector::random_free_port;
@@ -15,16 +15,16 @@ use tokio::{
     process::Child,
 };
 use tokio_stream::{wrappers::LinesStream, StreamExt};
-use tonic::{transport::Channel, Code};
+use tonic::{transport::Channel, Code::NotFound};
 use tracing::info;
 use vorpal_schema::{
-    artifact::v0::artifact_service_client::ArtifactServiceClient,
-    config::v0::{
-        config_service_client::ConfigServiceClient,
-        ConfigArtifact, ConfigArtifactRequest, ConfigArtifactSystem,
-        ConfigArtifactSystem::{Aarch64Linux, X8664Linux},
+    archive::v0::archive_service_client::ArchiveServiceClient,
+    artifact::v0::{
+        artifact_service_client::ArtifactServiceClient,
+        Artifact, ArtifactRequest, ArtifactSystem,
+        ArtifactSystem::{Aarch64Linux, X8664Linux},
     },
-    registry::v0::registry_service_client::RegistryServiceClient,
+    worker::v0::worker_service_client::WorkerServiceClient,
 };
 use vorpal_sdk::{
     artifact::{language::rust, linux_vorpal, protoc, rust_toolchain},
@@ -34,8 +34,8 @@ use vorpal_store::paths::get_store_path;
 
 fn fetch_artifacts_context(
     context: &mut ConfigContext,
-    config: ConfigArtifact,
-    pending: &mut HashMap<String, ConfigArtifact>,
+    config: Artifact,
+    pending: &mut HashMap<String, Artifact>,
 ) -> Result<()> {
     for step in config.steps.iter() {
         for hash in step.artifacts.iter() {
@@ -56,8 +56,65 @@ fn fetch_artifacts_context(
     Ok(())
 }
 
-pub async fn get_order(build_artifact: &HashMap<String, ConfigArtifact>) -> Result<Vec<String>> {
-    let mut artifact_graph = DiGraphMap::<&String, ConfigArtifact>::new();
+pub async fn fetch_artifacts(
+    artifact: &Artifact,
+    artifact_map: &mut HashMap<String, Artifact>,
+    client_config: &mut ArtifactServiceClient<Channel>,
+    client_registry: &mut ArtifactServiceClient<Channel>,
+) -> Result<()> {
+    for step in artifact.steps.iter() {
+        for digest in step.artifacts.iter() {
+            if artifact_map.contains_key(digest) {
+                continue;
+            }
+
+            let request = ArtifactRequest {
+                digest: digest.to_string(),
+            };
+
+            let response = match client_config.get_artifact(request).await {
+                Ok(res) => res,
+                Err(error) => {
+                    if error.code() != NotFound {
+                        bail!("config get artifact error: {:?}", error);
+                    }
+
+                    let registry_request = ArtifactRequest {
+                        digest: digest.to_string(),
+                    };
+
+                    match client_registry.get_artifact(registry_request).await {
+                        Ok(res) => res,
+                        Err(status) => {
+                            if status.code() != NotFound {
+                                bail!("registry get artifact error: {:?}", status);
+                            }
+
+                            bail!("artifact not found in registry: {}", digest);
+                        }
+                    }
+                }
+            };
+
+            let artifact = response.into_inner();
+
+            artifact_map.insert(digest.to_string(), artifact.clone());
+
+            Box::pin(fetch_artifacts(
+                &artifact,
+                artifact_map,
+                client_config,
+                client_registry,
+            ))
+            .await?
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn get_order(build_artifact: &HashMap<String, Artifact>) -> Result<Vec<String>> {
+    let mut artifact_graph = DiGraphMap::<&String, Artifact>::new();
 
     for (artifact_hash, artifact) in build_artifact.iter() {
         artifact_graph.add_node(artifact_hash);
@@ -80,12 +137,15 @@ pub async fn get_order(build_artifact: &HashMap<String, ConfigArtifact>) -> Resu
 }
 
 pub async fn get_path(
+    agent: &String,
     config_path: &String,
-    language: String,
+    language: &String,
     registry: &String,
+    registry_archive: &mut ArchiveServiceClient<Channel>,
+    registry_artifact: &mut ArtifactServiceClient<Channel>,
     rust_bin: &String,
-    service: &String,
-    target: ConfigArtifactSystem,
+    target: &ArtifactSystem,
+    worker: &mut WorkerServiceClient<Channel>,
 ) -> Result<PathBuf> {
     info!("{} language: {}", get_prefix("config"), language);
 
@@ -97,13 +157,13 @@ pub async fn get_path(
 
     // Setup context
 
-    let mut context = ConfigContext::new(0, registry.clone(), target);
+    let mut context = ConfigContext::new(agent.clone(), 0, registry.clone(), *target);
 
     // Setup artifacts
 
     let mut toolkit_artifact = HashMap::new();
 
-    if target == Aarch64Linux || target == X8664Linux {
+    if *target == Aarch64Linux || *target == X8664Linux {
         let linux_vorpal = linux_vorpal::build(&mut context).await?;
         let linux_vorpal_config = context.get_artifact(&linux_vorpal);
 
@@ -135,14 +195,6 @@ pub async fn get_path(
 
     // Setup clients
 
-    let mut client_artifact = ArtifactServiceClient::connect(service.to_owned())
-        .await
-        .expect("failed to connect to artifact");
-
-    let mut client_registry = RegistryServiceClient::connect(registry.to_owned())
-        .await
-        .expect("failed to connect to registry");
-
     let config_file = match language.as_str() {
         // "go" => Ok(()),
         "rust" => {
@@ -164,8 +216,9 @@ pub async fn get_path(
             build_artifacts(
                 None,
                 toolkit_artifact,
-                &mut client_artifact,
-                &mut client_registry,
+                registry_archive,
+                registry_artifact,
+                worker,
             )
             .await?;
 
@@ -180,7 +233,7 @@ pub async fn get_path(
                 );
             }
 
-            let rust_toolchain_target = rust::toolchain_target(target)?;
+            let rust_toolchain_target = rust::toolchain_target(*target)?;
             let rust_toolchain_version = rust::toolchain_version();
             let rust_toolchain_identifier =
                 format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
@@ -267,7 +320,7 @@ pub async fn get_path(
 pub async fn start(
     file: String,
     registry: String,
-) -> Result<(Child, ConfigServiceClient<Channel>)> {
+) -> Result<(Child, ArtifactServiceClient<Channel>)> {
     let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
 
     let mut command = process::Command::new(file.clone());
@@ -307,7 +360,7 @@ pub async fn start(
     let config_client = loop {
         attempts += 1;
 
-        match ConfigServiceClient::connect(config_host.clone()).await {
+        match ArtifactServiceClient::connect(config_host.clone()).await {
             Ok(srv) => break srv,
             Err(e) => {
                 if attempts >= max_attempts {
@@ -335,71 +388,15 @@ pub async fn start(
     Ok((config_process, config_client))
 }
 
-pub async fn fetch_artifacts(
-    artifact: &ConfigArtifact,
-    artifact_map: &mut HashMap<String, ConfigArtifact>,
-    client_config: &mut ConfigServiceClient<Channel>,
-    client_registry: &mut RegistryServiceClient<Channel>,
-) -> Result<()> {
-    for step in artifact.steps.iter() {
-        for step_artifact_hash in step.artifacts.iter() {
-            if artifact_map.contains_key(step_artifact_hash) {
-                continue;
-            }
-
-            let request = ConfigArtifactRequest {
-                hash: step_artifact_hash.to_string(),
-            };
-
-            let response = match client_config.get_config_artifact(request).await {
-                Ok(res) => res,
-                Err(error) => {
-                    if error.code() != Code::NotFound {
-                        bail!("artifact not found in config: {}", step_artifact_hash);
-                    }
-
-                    let registry_request = ConfigArtifactRequest {
-                        hash: step_artifact_hash.to_string(),
-                    };
-
-                    match client_registry.get_config_artifact(registry_request).await {
-                        Ok(res) => res,
-                        Err(status) => {
-                            if status.code() != Code::NotFound {
-                                bail!("registry get artifact error: {:?}", status);
-                            }
-
-                            bail!("artifact not found in registry: {}", step_artifact_hash);
-                        }
-                    }
-                }
-            };
-
-            let artifact = response.into_inner();
-
-            artifact_map.insert(step_artifact_hash.to_string(), artifact.clone());
-
-            Box::pin(fetch_artifacts(
-                &artifact,
-                artifact_map,
-                client_config,
-                client_registry,
-            ))
-            .await?
-        }
-    }
-
-    Ok(())
-}
-
 pub async fn build_artifacts(
-    artifact_selected: Option<&ConfigArtifact>,
-    artifact_config: HashMap<String, ConfigArtifact>,
+    artifact_selected: Option<&Artifact>,
+    artifact_config: HashMap<String, Artifact>,
+    client_archive: &mut ArchiveServiceClient<Channel>,
     client_artifact: &mut ArtifactServiceClient<Channel>,
-    client_registry: &mut RegistryServiceClient<Channel>,
+    client_worker: &mut WorkerServiceClient<Channel>,
 ) -> Result<()> {
     let artifact_order = get_order(&artifact_config).await?;
-    let mut artifact_complete = HashMap::<String, ConfigArtifact>::new();
+    let mut artifact_complete = HashMap::<String, Artifact>::new();
 
     for artifact_hash in artifact_order {
         match artifact_config.get(&artifact_hash) {
@@ -414,24 +411,9 @@ pub async fn build_artifacts(
                     }
                 }
 
-                let mut artifact_source_hash = HashMap::<String, String>::new();
+                build(artifact, &artifact_hash, client_archive, client_worker).await?;
 
-                for source in artifact.sources.iter() {
-                    let hash = build_source(&artifact.name, source, client_registry).await?;
-
-                    artifact_source_hash.insert(source.name.clone(), hash);
-                }
-
-                build(
-                    artifact,
-                    &artifact_hash,
-                    &artifact_source_hash,
-                    client_artifact,
-                    client_registry,
-                )
-                .await?;
-
-                match client_registry.put_config_artifact(artifact.clone()).await {
+                match client_artifact.store_artifact(artifact.clone()).await {
                     Err(status) => {
                         bail!("registry put error: {:?}", status);
                     }

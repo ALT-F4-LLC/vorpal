@@ -1,30 +1,27 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .message_attribute(
-            "vorpal.Artifact.v0.ArtifactBuildRequest",
+            "vorpal.artifact.v0.ArtifactSource",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.config.v0.ConfigArtifactSource",
+            "vorpal.artifact.v0.ArtifactStep",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.config.v0.ConfigArtifactStep",
+            "vorpal.artifact.v0.Artifact",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
-            "vorpal.config.v0.ConfigArtifact",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
-        )
-        .message_attribute(
-            "vorpal.config.v0.Config",
+            "vorpal.artifact.v0.Artifacts",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .compile_protos(
             &[
+                "v0/agent/agent.proto",
+                "v0/archive/archive.proto",
                 "v0/artifact/artifact.proto",
-                "v0/config/config.proto",
-                "v0/registry/registry.proto",
+                "v0/worker/worker.proto",
             ],
             &["api"],
         )?;

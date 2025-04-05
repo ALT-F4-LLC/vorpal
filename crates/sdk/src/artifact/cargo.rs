@@ -1,12 +1,12 @@
 use crate::{
     artifact::{
         language::rust::{toolchain_target, toolchain_version},
-        step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder,
+        step, ArtifactBuilder, ArtifactSourceBuilder,
     },
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
-use vorpal_schema::config::v0::ConfigArtifactSystem::{
+use vorpal_schema::artifact::v0::ArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
 };
 
@@ -28,14 +28,14 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let source_path =
         format!("https://static.rust-lang.org/dist/{name}-{source_version}-{source_target}.tar.gz");
 
-    let source = ConfigArtifactSourceBuilder::new(name.to_string(), source_path)
+    let source = ArtifactSourceBuilder::new(name.to_string(), source_path)
         .with_hash(source_hash.to_string())
         .build();
 
     let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}/.\" \"$VORPAL_OUTPUT\"");
     let step = step::shell(context, vec![], vec![], step_script).await?;
 
-    ConfigArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name.to_string())
         .with_source(source)
         .with_step(step)
         .with_system(Aarch64Darwin)
@@ -43,4 +43,5 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
         .build(context)
+        .await
 }

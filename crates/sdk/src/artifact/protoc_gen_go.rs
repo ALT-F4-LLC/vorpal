@@ -1,10 +1,10 @@
 use crate::{
-    artifact::{step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
+    artifact::{step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
-use vorpal_schema::config::v0::ConfigArtifactSystem::{
+use vorpal_schema::artifact::v0::ArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
 };
 
@@ -33,7 +33,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let source_path = format!("https://github.com/protocolbuffers/protobuf-go/releases/download/v{source_version}/protoc-gen-go.v{source_version}.{source_target}.tar.gz");
 
-    let source = ConfigArtifactSourceBuilder::new(name.to_string(), source_path)
+    let source = ArtifactSourceBuilder::new(name.to_string(), source_path)
         .with_hash(source_hash.to_string())
         .build();
 
@@ -47,7 +47,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let step = step::shell(context, vec![], vec![], step_script).await?;
 
-    ConfigArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name.to_string())
         .with_source(source)
         .with_step(step)
         .with_system(Aarch64Darwin)
@@ -55,4 +55,5 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
         .build(context)
+        .await
 }

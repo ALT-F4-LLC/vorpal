@@ -1,12 +1,12 @@
-use crate::artifact::ConfigArtifactSourceBuilder;
-use vorpal_schema::config::v0::ConfigArtifactSource;
+use crate::artifact::ArtifactSourceBuilder;
+use vorpal_schema::artifact::v0::ArtifactSource;
 
-pub fn go_tools() -> ConfigArtifactSource {
+pub fn go_tools() -> ArtifactSource {
     let hash = "b4faf133f053f372cfe8ea3189bf035d19ca1661cb3ac1e7cd34a465de5641c2";
 
     let version = "0.29.0";
 
-    ConfigArtifactSourceBuilder::new(
+    ArtifactSourceBuilder::new(
         "go-tools".to_string(),
         format!(
             "https://go.googlesource.com/tools/+archive/refs/tags/v{}.tar.gz",

@@ -1,7 +1,7 @@
-use crate::artifact::ArtifactServer;
+use crate::artifact::WorkerServer;
 use anyhow::Result;
 use tonic::transport::Server;
-use vorpal_schema::{artifact::v0::artifact_service_server::ArtifactServiceServer, system_default};
+use vorpal_schema::{system_default, worker::v0::worker_service_server::WorkerServiceServer};
 use vorpal_store::paths::get_public_key_path;
 
 pub async fn listen(registry: &str, port: u16) -> Result<()> {
@@ -19,7 +19,7 @@ pub async fn listen(registry: &str, port: u16) -> Result<()> {
 
     let system = system_default()?;
 
-    let service = ArtifactServiceServer::new(ArtifactServer::new(registry.to_string(), system));
+    let service = WorkerServiceServer::new(WorkerServer::new(registry.to_string(), system));
 
     Server::builder()
         .add_service(service)

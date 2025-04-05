@@ -1,6 +1,5 @@
 use anyhow::Result;
 use sha256::digest;
-use std::collections::HashMap;
 use std::path::Path;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, process::Stdio};
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
@@ -18,15 +17,12 @@ use tokio_stream::{
 use tonic::{Code::NotFound, Request, Response, Status};
 use tracing::error;
 use vorpal_schema::{
-    artifact::v0::{
-        artifact_service_server::ArtifactService, ArtifactBuildRequest, ArtifactBuildResponse,
+    archive::v0::{
+        archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
     },
-    config::v0::{ConfigArtifactSource, ConfigArtifactSystem},
-    registry::v0::{
-        registry_service_client::RegistryServiceClient, RegistryArchive, RegistryPullRequest,
-        RegistryPushRequest,
-    },
+    artifact::v0::{Artifact, ArtifactSource, ArtifactSystem},
     system_default,
+    worker::v0::{worker_service_server::WorkerService, BuildArtifactResponse},
 };
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
@@ -41,13 +37,13 @@ use vorpal_store::{
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 #[derive(Debug, Default)]
-pub struct ArtifactServer {
+pub struct WorkerServer {
     pub registry: String,
-    pub system: ConfigArtifactSystem,
+    pub system: ArtifactSystem,
 }
 
-impl ArtifactServer {
-    pub fn new(registry: String, system: ConfigArtifactSystem) -> Self {
+impl WorkerServer {
+    pub fn new(registry: String, system: ArtifactSystem) -> Self {
         Self { registry, system }
     }
 }
@@ -68,7 +64,7 @@ async fn run_step(
     step_entrypoint: Option<String>,
     step_environments: Vec<String>,
     step_script: Option<String>,
-    tx: &Sender<Result<ArtifactBuildResponse, Status>>,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
     workspace_path: &Path,
 ) -> Result<(), Status> {
     let mut environments = vec![];
@@ -207,7 +203,7 @@ async fn run_step(
         let output = line
             .map_err(|err| Status::internal(format!("failed to read sandbox output: {:?}", err)))?;
 
-        tx.send(Ok(ArtifactBuildResponse { output }))
+        tx.send(Ok(BuildArtifactResponse { output }))
             .await
             .map_err(|err| Status::internal(format!("failed to send sandbox output: {:?}", err)))?;
     }
@@ -226,8 +222,8 @@ async fn run_step(
 
 /// Sends a response to the client and logs errors if any.
 async fn send_build_response(
-    tx: &Sender<Result<ArtifactBuildResponse, Status>>,
-    response: Result<ArtifactBuildResponse, Status>,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
+    response: Result<BuildArtifactResponse, Status>,
 ) -> Result<(), Status> {
     tx.send(response).await.map_err(|err| {
         error!("Failed to send response: {:?}", err);
@@ -237,20 +233,20 @@ async fn send_build_response(
 
 /// Writes a message to the client stream and propagates errors.
 async fn send_message(
-    tx: &Sender<Result<ArtifactBuildResponse, Status>>,
-    message: String,
+    output: String,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
-    send_build_response(tx, Ok(ArtifactBuildResponse { output: message })).await
+    send_build_response(tx, Ok(BuildArtifactResponse { output })).await
 }
 
 #[tonic::async_trait]
-impl ArtifactService for ArtifactServer {
-    type BuildStream = ReceiverStream<Result<ArtifactBuildResponse, Status>>;
+impl WorkerService for WorkerServer {
+    type BuildArtifactStream = ReceiverStream<Result<BuildArtifactResponse, Status>>;
 
-    async fn build(
+    async fn build_artifact(
         &self,
-        request: Request<ArtifactBuildRequest>,
-    ) -> Result<Response<Self::BuildStream>, Status> {
+        request: Request<Artifact>,
+    ) -> Result<Response<Self::BuildArtifactStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
         let registry = self.registry.clone();
@@ -268,17 +264,10 @@ impl ArtifactService for ArtifactServer {
 }
 
 async fn build_artifact(
-    request: ArtifactBuildRequest,
+    artifact: Artifact,
     registry: String,
-    tx: Sender<Result<ArtifactBuildResponse, Status>>,
+    tx: Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
-    if request.artifact.is_none() {
-        return Err(Status::invalid_argument("build 'artifact' is missing"));
-    }
-
-    let artifact = request.artifact.unwrap();
-    let artifact_source_hash = request.artifact_source_hash;
-
     if artifact.name.is_empty() {
         return Err(Status::invalid_argument("artifact 'name' is missing"));
     }
@@ -290,11 +279,11 @@ async fn build_artifact(
     let artifact_json = serde_json::to_string(&artifact)
         .map_err(|err| Status::internal(format!("artifact failed to serialize: {:?}", err)))?;
 
-    let artifact_target = ConfigArtifactSystem::try_from(artifact.target).map_err(|err| {
+    let artifact_target = ArtifactSystem::try_from(artifact.target).map_err(|err| {
         Status::invalid_argument(format!("artifact failed to parse target: {:?}", err))
     })?;
 
-    if artifact_target == ConfigArtifactSystem::UnknownSystem {
+    if artifact_target == ArtifactSystem::UnknownSystem {
         return Err(Status::invalid_argument("unknown target"));
     }
 
@@ -307,11 +296,11 @@ async fn build_artifact(
         ));
     }
 
-    let artifact_hash = digest(artifact_json.as_bytes());
+    let artifact_digest = digest(artifact_json.as_bytes());
 
     // Check if artifact exists
 
-    let artifact_path = get_store_path(&artifact_hash);
+    let artifact_path = get_store_path(&artifact_digest);
 
     if artifact_path.exists() {
         return Err(Status::already_exists("artifact exists"));
@@ -319,7 +308,7 @@ async fn build_artifact(
 
     // Check if artifact is locked
 
-    let artifact_lock = get_store_lock_path(&artifact_hash);
+    let artifact_lock = get_store_lock_path(&artifact_digest);
 
     if artifact_lock.exists() {
         return Err(Status::already_exists("artifact is locked"));
@@ -351,19 +340,8 @@ async fn build_artifact(
 
     // Pull sources
 
-    let mut client_registry = RegistryServiceClient::connect(registry)
-        .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
-
-    for artifact_source in artifact.sources.iter() {
-        pull_source(
-            artifact_source,
-            &artifact_source_hash,
-            &mut client_registry,
-            &tx,
-            &workspace_source_path,
-        )
-        .await?;
+    for source in artifact.sources.iter() {
+        pull_source(&registry, source, &tx, &workspace_source_path).await?;
     }
 
     // Run steps
@@ -377,7 +355,7 @@ async fn build_artifact(
 
     for step in artifact.steps.iter() {
         if let Err(err) = run_step(
-            &artifact_hash,
+            &artifact_digest,
             &artifact_path,
             step.arguments.clone(),
             step.artifacts.clone(),
@@ -402,7 +380,7 @@ async fn build_artifact(
 
     // Sanitize files
 
-    send_message(&tx, format!("sanitize: {}", artifact_hash)).await?;
+    send_message(format!("sanitize: {}", artifact_digest), &tx).await?;
 
     for path in artifact_path_files.iter() {
         if let Err(err) = set_timestamps(path).await {
@@ -415,7 +393,7 @@ async fn build_artifact(
 
     // Create archive
 
-    send_message(&tx, format!("pack: {}", artifact_hash)).await?;
+    send_message(format!("pack: {}", artifact_digest), &tx).await?;
 
     let artifact_archive = create_sandbox_file(Some("tar.zst"))
         .await
@@ -432,7 +410,7 @@ async fn build_artifact(
 
     // Upload archive
 
-    send_message(&tx, format!("push: {}", artifact_hash)).await?;
+    send_message(format!("push: {}", artifact_digest), &tx).await?;
 
     let artifact_data = read(&artifact_archive)
         .await
@@ -451,18 +429,18 @@ async fn build_artifact(
     let mut request_stream = vec![];
 
     for chunk in artifact_data.chunks(DEFAULT_CHUNKS_SIZE) {
-        request_stream.push(RegistryPushRequest {
-            archive: RegistryArchive::Artifact as i32,
+        request_stream.push(ArchivePushRequest {
             data: chunk.to_vec(),
-            hash: artifact_hash.clone(),
+            digest: artifact_digest.clone(),
             signature: artifact_signature.clone().to_vec(),
         });
     }
 
-    if let Err(err) = client_registry
-        .push_archive(tokio_stream::iter(request_stream))
+    let mut client = ArchiveServiceClient::connect(registry)
         .await
-    {
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+
+    if let Err(err) = client.push(tokio_stream::iter(request_stream)).await {
         return Err(Status::internal(format!(
             "failed to push artifact: {:?}",
             err
@@ -502,37 +480,42 @@ async fn build_artifact(
 }
 
 async fn pull_source(
-    artifact_source: &ConfigArtifactSource,
-    artifact_source_hash: &HashMap<String, String>,
-    client_registry: &mut RegistryServiceClient<tonic::transport::Channel>,
-    tx: &Sender<Result<ArtifactBuildResponse, Status>>,
-    workspace_source_dir_path: &Path,
+    registry: &str,
+    source: &ArtifactSource,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
+    source_dir_path: &Path,
 ) -> Result<(), Status> {
-    let source_name = artifact_source.name.clone();
-
-    if source_name.is_empty() {
-        return Err(Status::invalid_argument("source 'name' is missing"));
+    if source.digest.is_none() {
+        return Err(Status::invalid_argument(
+            "artifact source 'digest' is missing",
+        ));
     }
 
-    let source_hash = artifact_source_hash.get(&source_name).ok_or_else(|| {
-        Status::invalid_argument(format!("source 'hash' not found: {}", artifact_source.name))
-    })?;
+    if source.name.is_empty() {
+        return Err(Status::invalid_argument(
+            "artifact source 'name' is missing",
+        ));
+    }
 
-    let source_archive = get_archive_path(source_hash);
+    let source_digest = source.digest.as_ref().unwrap();
+    let source_archive = get_archive_path(source_digest);
+
+    let mut client = ArchiveServiceClient::connect(registry.to_string())
+        .await
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
     if !source_archive.exists() {
         send_message(
-            tx,
-            format!("pull source: {}-{}", artifact_source.name, &source_hash),
+            format!("pull source: {}-{}", source.name, source_digest),
+            &tx,
         )
         .await?;
 
-        let registry_request = RegistryPullRequest {
-            archive: RegistryArchive::ArtifactSource as i32,
-            hash: source_hash.clone(),
+        let request = ArchivePullRequest {
+            digest: source_digest.to_string(),
         };
 
-        match client_registry.pull_archive(registry_request).await {
+        match client.pull(request).await {
             Err(status) => {
                 if status.code() != NotFound {
                     return Err(Status::internal(format!(
@@ -581,9 +564,9 @@ async fn pull_source(
         return Err(Status::not_found("source archive not found"));
     }
 
-    send_message(tx, format!("unpack source: {}", artifact_source.name)).await?;
+    send_message(format!("unpack source: {}", source.name), &tx).await?;
 
-    let source_workspace_path = workspace_source_dir_path.join(&artifact_source.name);
+    let source_workspace_path = source_dir_path.join(&source.name);
 
     if let Err(err) = create_dir_all(&source_workspace_path).await {
         return Err(Status::internal(format!(

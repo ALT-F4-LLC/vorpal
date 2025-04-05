@@ -1,8 +1,5 @@
 use crate::{
-    artifact::{
-        get_env_key, rust_toolchain, shell, step, ConfigArtifactBuilder,
-        ConfigArtifactSourceBuilder,
-    },
+    artifact::{get_env_key, rust_toolchain, shell, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -11,9 +8,9 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 use toml::from_str;
-use vorpal_schema::config::v0::{
-    ConfigArtifactSystem,
-    ConfigArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+use vorpal_schema::artifact::v0::{
+    ArtifactSystem,
+    ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
 };
 
 #[derive(Debug, Deserialize)]
@@ -39,7 +36,7 @@ fn read_cargo(path: &str) -> Result<RustArtifactCargoToml> {
     Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
 
-pub fn toolchain_hash(target: ConfigArtifactSystem) -> Result<&'static str> {
+pub fn toolchain_hash(target: ArtifactSystem) -> Result<&'static str> {
     let target = match target {
         Aarch64Darwin => "79d82dbb5e0db73b239859a74f070a6135adff3e1a13d05aa3dcb6863d819a70",
         Aarch64Linux => "TODO",
@@ -51,7 +48,7 @@ pub fn toolchain_hash(target: ConfigArtifactSystem) -> Result<&'static str> {
     Ok(target)
 }
 
-pub fn toolchain_target(target: ConfigArtifactSystem) -> Result<String> {
+pub fn toolchain_target(target: ArtifactSystem) -> Result<String> {
     let target = match target {
         Aarch64Darwin => "aarch64-apple-darwin",
         Aarch64Linux => "aarch64-unknown-linux-gnu",
@@ -279,19 +276,20 @@ impl<'a> RustBuilder<'a> {
         let vendor_name = format!("{}-vendor", self.name);
 
         let vendor_source =
-            ConfigArtifactSourceBuilder::new(vendor_name.clone(), source_path_str.clone())
+            ArtifactSourceBuilder::new(vendor_name.clone(), source_path_str.clone())
                 .with_excludes(vec![])
                 .with_includes(vendor_cargo_paths.clone())
                 .build();
 
-        let vendor = ConfigArtifactBuilder::new(vendor_name)
+        let vendor = ArtifactBuilder::new(vendor_name)
             .with_source(vendor_source)
             .with_step(vendor_step)
             .with_system(Aarch64Darwin)
             .with_system(Aarch64Linux)
             .with_system(X8664Darwin)
             .with_system(X8664Linux)
-            .build(context)?;
+            .build(context)
+            .await?;
 
         // TODO: implement artifact for 'check` to pre-bake the vendor cache
 
@@ -301,7 +299,7 @@ impl<'a> RustBuilder<'a> {
             source_excludes.push(exclude.to_string());
         }
 
-        let source = ConfigArtifactSourceBuilder::new(self.name.to_string(), source_path_str)
+        let source = ArtifactSourceBuilder::new(self.name.to_string(), source_path_str)
             .with_excludes(source_excludes)
             .build();
 
@@ -336,7 +334,7 @@ impl<'a> RustBuilder<'a> {
 
         let step = step::shell(context, step_artifacts, step_environments, step_script).await?;
 
-        ConfigArtifactBuilder::new(self.name.to_string())
+        ArtifactBuilder::new(self.name.to_string())
             .with_source(source)
             .with_step(step)
             .with_system(Aarch64Darwin)
@@ -344,5 +342,6 @@ impl<'a> RustBuilder<'a> {
             .with_system(X8664Darwin)
             .with_system(X8664Linux)
             .build(context)
+            .await
     }
 }

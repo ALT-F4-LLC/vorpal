@@ -1,11 +1,7 @@
 [package]
-name = "vorpal-cli"
+name = "vorpal-agent"
 version = "0.1.0"
 edition = "2021"
-
-[[bin]]
-name = "vorpal"
-path = "src/main.rs"
 
 [dependencies]
 anyhow = { default-features = false, version = "1" }
@@ -16,6 +12,8 @@ infer = { default-features = false, version = "0" }
 petgraph = { default-features = false, features = ["graphmap"], version = "0" }
 port-selector = { default-features = false, version = "0" }
 reqwest = { default-features = false, version = "0", features = ["json", "rustls-tls"] }
+serde_json = { default-features = false, features = ["std"], version = "1" }
+sha256 = { default-features = false, version = "1" }
 tokio = { default-features = false, version = "1" }
 tokio-stream = { default-features = false, version = "0" }
 tokio-tar = { default-features = false, version = "0" }
@@ -24,7 +22,6 @@ tonic-health = { default-features = false, version = "0" }
 tracing = { default-features = false, version = "0" }
 tracing-subscriber = { default-features = false, features = ["ansi", "fmt", "registry", "std"], version = "0" }
 url = { default-features = false, version = "2" }
-vorpal-agent = { default-features = false, path = "../agent" }
 vorpal-registry = { default-features = false, path = "../registry" }
 vorpal-schema = { default-features = false, path = "../schema" }
 vorpal-sdk = { default-features = false, path = "../sdk" }

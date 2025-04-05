@@ -1,9 +1,7 @@
 use crate::context::ConfigContext;
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
-use vorpal_schema::config::v0::{
-    ConfigArtifact, ConfigArtifactSource, ConfigArtifactStep, ConfigArtifactSystem,
-};
+use vorpal_schema::artifact::v0::{Artifact, ArtifactSource, ArtifactStep, ArtifactSystem};
 
 pub mod cargo;
 pub mod clippy;
@@ -25,7 +23,7 @@ pub mod rustfmt;
 pub mod shell;
 pub mod step;
 
-pub struct ConfigArtifactSourceBuilder {
+pub struct ArtifactSourceBuilder {
     pub excludes: Vec<String>,
     pub hash: Option<String>,
     pub includes: Vec<String>,
@@ -33,22 +31,22 @@ pub struct ConfigArtifactSourceBuilder {
     pub path: String,
 }
 
-pub struct ConfigArtifactStepBuilder {
-    pub arguments: HashMap<ConfigArtifactSystem, Vec<String>>,
-    pub artifacts: HashMap<ConfigArtifactSystem, Vec<String>>,
-    pub entrypoint: HashMap<ConfigArtifactSystem, String>,
-    pub environments: HashMap<ConfigArtifactSystem, Vec<String>>,
-    pub script: HashMap<ConfigArtifactSystem, String>,
+pub struct ArtifactStepBuilder {
+    pub arguments: HashMap<ArtifactSystem, Vec<String>>,
+    pub artifacts: HashMap<ArtifactSystem, Vec<String>>,
+    pub entrypoint: HashMap<ArtifactSystem, String>,
+    pub environments: HashMap<ArtifactSystem, Vec<String>>,
+    pub script: HashMap<ArtifactSystem, String>,
 }
 
-pub struct ConfigArtifactBuilder {
+pub struct ArtifactBuilder {
     pub name: String,
-    pub sources: Vec<ConfigArtifactSource>,
-    pub steps: Vec<ConfigArtifactStep>,
-    pub systems: Vec<ConfigArtifactSystem>,
+    pub sources: Vec<ArtifactSource>,
+    pub steps: Vec<ArtifactStep>,
+    pub systems: Vec<ArtifactSystem>,
 }
 
-impl ConfigArtifactSourceBuilder {
+impl ArtifactSourceBuilder {
     pub fn new(name: String, path: String) -> Self {
         Self {
             excludes: vec![],
@@ -74,24 +72,24 @@ impl ConfigArtifactSourceBuilder {
         self
     }
 
-    pub fn build(self) -> ConfigArtifactSource {
-        ConfigArtifactSource {
+    pub fn build(self) -> ArtifactSource {
+        ArtifactSource {
+            digest: self.hash,
             includes: self.includes,
             excludes: self.excludes,
-            hash: self.hash,
             name: self.name,
             path: self.path,
         }
     }
 }
 
-impl Default for ConfigArtifactStepBuilder {
+impl Default for ArtifactStepBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ConfigArtifactStepBuilder {
+impl ArtifactStepBuilder {
     pub fn new() -> Self {
         Self {
             arguments: HashMap::new(),
@@ -102,11 +100,7 @@ impl ConfigArtifactStepBuilder {
         }
     }
 
-    pub fn with_arguments(
-        mut self,
-        arguments: Vec<String>,
-        systems: Vec<ConfigArtifactSystem>,
-    ) -> Self {
+    pub fn with_arguments(mut self, arguments: Vec<String>, systems: Vec<ArtifactSystem>) -> Self {
         for system in systems {
             self.arguments.insert(system, arguments.clone());
         }
@@ -114,11 +108,7 @@ impl ConfigArtifactStepBuilder {
         self
     }
 
-    pub fn with_artifacts(
-        mut self,
-        artifacts: Vec<String>,
-        systems: Vec<ConfigArtifactSystem>,
-    ) -> Self {
+    pub fn with_artifacts(mut self, artifacts: Vec<String>, systems: Vec<ArtifactSystem>) -> Self {
         for system in systems {
             self.artifacts.insert(system, artifacts.clone());
         }
@@ -126,7 +116,7 @@ impl ConfigArtifactStepBuilder {
         self
     }
 
-    pub fn with_entrypoint(mut self, entrypoint: &str, systems: Vec<ConfigArtifactSystem>) -> Self {
+    pub fn with_entrypoint(mut self, entrypoint: &str, systems: Vec<ArtifactSystem>) -> Self {
         for system in systems {
             self.entrypoint.insert(system, entrypoint.to_string());
         }
@@ -137,7 +127,7 @@ impl ConfigArtifactStepBuilder {
     pub fn with_environments(
         mut self,
         environments: Vec<String>,
-        systems: Vec<ConfigArtifactSystem>,
+        systems: Vec<ArtifactSystem>,
     ) -> Self {
         for system in systems {
             self.environments.insert(system, environments.clone());
@@ -146,7 +136,7 @@ impl ConfigArtifactStepBuilder {
         self
     }
 
-    pub fn with_script(mut self, script: String, systems: Vec<ConfigArtifactSystem>) -> Self {
+    pub fn with_script(mut self, script: String, systems: Vec<ArtifactSystem>) -> Self {
         for system in systems {
             self.script.insert(system, script.clone());
         }
@@ -154,10 +144,10 @@ impl ConfigArtifactStepBuilder {
         self
     }
 
-    pub fn build(self, context: &mut ConfigContext) -> ConfigArtifactStep {
+    pub fn build(self, context: &mut ConfigContext) -> ArtifactStep {
         let system = context.get_target();
 
-        ConfigArtifactStep {
+        ArtifactStep {
             arguments: self.arguments.get(&system).unwrap_or(&vec![]).clone(),
             artifacts: self.artifacts.get(&system).unwrap_or(&vec![]).clone(),
             entrypoint: self.entrypoint.get(&system).cloned(),
@@ -167,7 +157,7 @@ impl ConfigArtifactStepBuilder {
     }
 }
 
-impl ConfigArtifactBuilder {
+impl ArtifactBuilder {
     pub fn new(name: String) -> Self {
         Self {
             name,
@@ -177,7 +167,7 @@ impl ConfigArtifactBuilder {
         }
     }
 
-    pub fn with_source(mut self, source: ConfigArtifactSource) -> Self {
+    pub fn with_source(mut self, source: ArtifactSource) -> Self {
         if !self.sources.contains(&source) {
             self.sources.push(source);
         }
@@ -185,7 +175,7 @@ impl ConfigArtifactBuilder {
         self
     }
 
-    pub fn with_step(mut self, step: ConfigArtifactStep) -> Self {
+    pub fn with_step(mut self, step: ArtifactStep) -> Self {
         if !self.steps.contains(&step) {
             self.steps.push(step);
         }
@@ -193,7 +183,7 @@ impl ConfigArtifactBuilder {
         self
     }
 
-    pub fn with_system(mut self, system: ConfigArtifactSystem) -> Self {
+    pub fn with_system(mut self, system: ArtifactSystem) -> Self {
         if !self.systems.contains(&system) {
             self.systems.push(system);
         }
@@ -201,8 +191,8 @@ impl ConfigArtifactBuilder {
         self
     }
 
-    pub fn build(self, context: &mut ConfigContext) -> Result<String> {
-        let artifact = ConfigArtifact {
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let artifact = Artifact {
             name: self.name,
             sources: self.sources,
             steps: self.steps,
@@ -214,7 +204,7 @@ impl ConfigArtifactBuilder {
             return Err(anyhow!("artifact must have at least one step"));
         }
 
-        context.add_artifact(artifact)
+        context.add_artifact(artifact).await
     }
 }
 

@@ -1,9 +1,9 @@
 use crate::{
-    artifact::{step, ConfigArtifactBuilder, ConfigArtifactSourceBuilder},
+    artifact::{step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
-use vorpal_schema::config::v0::ConfigArtifactSystem::{
+use vorpal_schema::artifact::v0::ArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
 };
 
@@ -12,7 +12,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let target = context.get_target();
 
-    let source_hash = match target {
+    let source_digest = match target {
         Aarch64Darwin => "86c352c4ced8830cd92a9c85c2944eaa95ebb1e8908b3f01258962bcc94b9c14",
         Aarch64Linux => "42cec86acdeb62f23b8a65afaa67c2d8c8818f28d7d3ca55430e10e8027a6234",
         X8664Darwin => "123456789",
@@ -31,14 +31,14 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let source_version = "1.23.5";
     let source_path = format!("https://go.dev/dl/go{source_version}.{source_target}.tar.gz");
 
-    let source = ConfigArtifactSourceBuilder::new(name.to_string(), source_path)
-        .with_hash(source_hash.to_string())
+    let source = ArtifactSourceBuilder::new(name.to_string(), source_path)
+        .with_hash(source_digest.to_string())
         .build();
 
     let step_script = format!("cp -prv \"./source/{name}/go/.\" \"$VORPAL_OUTPUT\"");
     let step = step::shell(context, vec![], vec![], step_script).await?;
 
-    ConfigArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name.to_string())
         .with_source(source)
         .with_step(step)
         .with_system(Aarch64Darwin)
@@ -46,4 +46,5 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_system(X8664Darwin)
         .with_system(X8664Linux)
         .build(context)
+        .await
 }

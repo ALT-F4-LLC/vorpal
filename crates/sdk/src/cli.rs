@@ -13,6 +13,9 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     Start {
+        #[clap(default_value = "http://localhost:23151", long, short)]
+        agent: String,
+
         #[clap(default_value_t = Level::INFO, global = true, long)]
         level: Level,
 

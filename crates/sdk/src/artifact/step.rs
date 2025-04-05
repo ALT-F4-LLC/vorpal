@@ -1,12 +1,12 @@
 use crate::{
-    artifact::{get_env_key, linux_vorpal, ConfigArtifactStepBuilder},
+    artifact::{get_env_key, linux_vorpal, ArtifactStepBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
-use vorpal_schema::config::v0::{
-    ConfigArtifactStep, ConfigArtifactSystem,
-    ConfigArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+use vorpal_schema::artifact::v0::{
+    ArtifactStep, ArtifactSystem,
+    ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
 };
 
 // TODO: implement amber step
@@ -16,8 +16,8 @@ pub fn bash(
     artifacts: Vec<String>,
     environments: Vec<String>,
     script: String,
-    systems: Vec<ConfigArtifactSystem>,
-) -> ConfigArtifactStep {
+    systems: Vec<ArtifactSystem>,
+) -> ArtifactStep {
     let envs_path_bins = artifacts
         .iter()
         .map(|a| format!("{}/bin", get_env_key(a)))
@@ -52,7 +52,7 @@ pub fn bash(
         {script}
     "};
 
-    ConfigArtifactStepBuilder::new()
+    ArtifactStepBuilder::new()
         .with_artifacts(artifacts, systems.clone())
         .with_entrypoint("bash", systems.clone())
         .with_environments(envs, systems.clone())
@@ -67,8 +67,8 @@ pub async fn bwrap(
     environments: Vec<String>,
     rootfs: Option<String>,
     script: String,
-    systems: Vec<ConfigArtifactSystem>,
-) -> Result<ConfigArtifactStep> {
+    systems: Vec<ArtifactSystem>,
+) -> Result<ArtifactStep> {
     let mut bwrap_arguments = vec![
         vec!["--unshare-all".to_string()],
         vec!["--share-net".to_string()],
@@ -215,7 +215,7 @@ pub async fn bwrap(
         .chain(arguments.into_iter())
         .collect::<Vec<String>>();
 
-    let step = ConfigArtifactStepBuilder::new()
+    let step = ArtifactStepBuilder::new()
         .with_arguments(bwrap_arguments, systems.clone())
         .with_artifacts(bwrap_artifacts, systems.clone())
         .with_entrypoint("bwrap", systems.clone())
@@ -242,7 +242,7 @@ pub async fn shell(
     artifacts: Vec<String>,
     environments: Vec<String>,
     script: String,
-) -> Result<ConfigArtifactStep> {
+) -> Result<ArtifactStep> {
     // Setup target
 
     let target = context.get_target();
@@ -283,9 +283,9 @@ pub fn docker(
     context: &mut ConfigContext,
     arguments: Vec<String>,
     artifacts: Vec<String>,
-    systems: Vec<ConfigArtifactSystem>,
-) -> ConfigArtifactStep {
-    ConfigArtifactStepBuilder::new()
+    systems: Vec<ArtifactSystem>,
+) -> ArtifactStep {
+    ArtifactStepBuilder::new()
         .with_arguments(arguments, systems.clone())
         .with_artifacts(artifacts, systems.clone())
         .with_entrypoint("docker", systems.clone())

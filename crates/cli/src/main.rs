@@ -1,4 +1,4 @@
-use crate::artifact::{build, build_source};
+use crate::artifact::build;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use console::style;
@@ -7,21 +7,29 @@ use tonic::transport::Server;
 use tracing::{info, subscriber, warn, Level};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::FmtSubscriber;
-use vorpal_registry::{RegistryBackend, RegistryServer, RegistryServerBackend};
+use vorpal_agent::service::AgentServer;
+use vorpal_registry::{
+    archive::{ArchiveBackend, ArchiveServer},
+    artifact::{ArtifactBackend, ArtifactServer as RegistryArtifactServer},
+    GhaBackend, LocalBackend, S3Backend, ServerBackend,
+};
 use vorpal_schema::{
+    agent::v0::agent_service_server::AgentServiceServer,
+    archive::v0::{
+        archive_service_client::ArchiveServiceClient, archive_service_server::ArchiveServiceServer,
+    },
     artifact::v0::{
         artifact_service_client::ArtifactServiceClient,
-        artifact_service_server::ArtifactServiceServer,
-    },
-    config::v0::{ConfigArtifact, ConfigArtifactRequest, ConfigArtifactSystem, ConfigRequest},
-    registry::v0::{
-        registry_service_client::RegistryServiceClient,
-        registry_service_server::RegistryServiceServer,
+        artifact_service_server::ArtifactServiceServer, Artifact, ArtifactRequest, ArtifactSystem,
+        ArtifactsRequest,
     },
     system_default, system_default_str, system_from_str,
+    worker::v0::{
+        worker_service_client::WorkerServiceClient, worker_service_server::WorkerServiceServer,
+    },
 };
 use vorpal_store::{notary::generate_keys, paths::get_public_key_path};
-use vorpal_worker::artifact::ArtifactServer;
+use vorpal_worker::artifact::WorkerServer;
 
 mod artifact;
 mod build;
@@ -40,9 +48,6 @@ enum Command {
         #[arg(long)]
         name: String,
 
-        #[clap(default_value = "http://localhost:23151", long)]
-        service: String,
-
         #[arg(default_value_t = system_default_str(), long)]
         target: String,
     },
@@ -54,7 +59,7 @@ enum Command {
         #[clap(default_value = "23151", long)]
         port: u16,
 
-        #[arg(default_value = "artifact,registry", long)]
+        #[arg(default_value = "agent,registry,worker", long)]
         services: String,
 
         #[arg(default_value = "local", long)]
@@ -74,6 +79,9 @@ pub enum CommandKeys {
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 pub struct Cli {
+    #[clap(default_value = "http://localhost:23151", long, short)]
+    agent: String,
+
     #[command(subcommand)]
     command: Command,
 
@@ -91,6 +99,9 @@ pub struct Cli {
 
     #[arg(default_value = "vorpal-config", long)]
     rust_bin: String,
+
+    #[clap(default_value = "http://localhost:23151", long)]
+    worker: String,
 }
 
 fn get_current_dir() -> String {
@@ -105,21 +116,24 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let Cli {
+        agent,
         command,
         config_path,
         language,
         level,
         registry,
         rust_bin,
+        worker,
     } = cli;
 
     match &command {
         Command::Artifact {
             export: _artifact_export,
             name,
-            service,
             target,
         } => {
+            // Setup logging
+
             let subscriber_writer = std::io::stderr.with_max_level(level);
 
             let mut subscriber = FmtSubscriber::builder()
@@ -136,25 +150,40 @@ async fn main() -> Result<()> {
 
             subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
-            if service.is_empty() {
-                bail!("no `--artifact-service` specified");
-            }
-
             // Get config
 
             let target = system_from_str(target)?;
 
-            if target == ConfigArtifactSystem::UnknownSystem {
+            if target == ArtifactSystem::UnknownSystem {
                 bail!("unsupported target: {}", target.as_str_name());
             }
 
+            // Setup clients
+
+            let mut registry_archive = ArchiveServiceClient::connect(registry.to_owned())
+                .await
+                .expect("failed to connect to registry");
+
+            let mut registry_artifact = ArtifactServiceClient::connect(registry.to_owned())
+                .await
+                .expect("failed to connect to registry");
+
+            let mut worker = WorkerServiceClient::connect(worker.to_owned())
+                .await
+                .expect("failed to connect to artifact");
+
+            // Start config
+
             let config_path = config::get_path(
+                &agent,
                 &config_path,
-                language,
+                &language,
                 &registry,
+                &mut registry_archive,
+                &mut registry_artifact,
                 &rust_bin,
-                service,
-                target,
+                &target,
+                &mut worker,
             )
             .await?;
 
@@ -162,10 +191,13 @@ async fn main() -> Result<()> {
                 bail!("config file not found: {}", config_path.display());
             }
 
-            let (mut config_process, mut client_config) =
+            let (mut config_process, mut config_artifact) =
                 config::start(config_path.display().to_string(), registry.clone()).await?;
 
-            let config_response = match client_config.get_config(ConfigRequest {}).await {
+            let config_response = match config_artifact
+                .get_artifacts(ArtifactsRequest { digests: vec![] })
+                .await
+            {
                 Ok(res) => res,
                 Err(error) => {
                     bail!("failed to get config: {}", error);
@@ -176,63 +208,51 @@ async fn main() -> Result<()> {
 
             // Populate artifacts
 
-            let mut artifact_selected = HashMap::<String, ConfigArtifact>::new();
+            let mut artifact_selected = HashMap::<String, Artifact>::new();
 
-            for hash in config_response.artifacts.into_iter() {
-                let request = ConfigArtifactRequest { hash: hash.clone() };
+            for digest in config_response.digests.into_iter() {
+                let request = ArtifactRequest {
+                    digest: digest.clone(),
+                };
 
-                let response = match client_config.get_config_artifact(request).await {
+                let response = match config_artifact.get_artifact(request).await {
                     Ok(res) => res,
                     Err(error) => {
                         bail!("failed to get artifact: {}", error);
                     }
                 };
 
-                artifact_selected.insert(hash, response.into_inner());
+                artifact_selected.insert(digest, response.into_inner());
             }
 
-            // Find artifact
+            // Populate artifacts
 
-            let (artifact_selected_hash, artifact_selected) = artifact_selected
+            let (selected_hash, selected) = artifact_selected
                 .clone()
                 .into_iter()
                 .find(|(_, artifact)| artifact.name == *name)
                 .ok_or_else(|| anyhow!("selected 'artifact' not found: {}", name))?;
 
-            // Fetch artifacts
+            let mut artifact = HashMap::<String, Artifact>::new();
 
-            let mut client_registry = RegistryServiceClient::connect(registry.to_owned())
-                .await
-                .expect("failed to connect to registry");
-
-            let mut artifact_pending = HashMap::<String, ConfigArtifact>::new();
-
-            artifact_pending.insert(
-                artifact_selected_hash.to_string(),
-                artifact_selected.clone(),
-            );
+            artifact.insert(selected_hash.to_string(), selected.clone());
 
             config::fetch_artifacts(
-                &artifact_selected,
-                &mut artifact_pending,
-                &mut client_config,
-                &mut client_registry,
+                &selected,
+                &mut artifact,
+                &mut config_artifact,
+                &mut registry_artifact,
             )
             .await?;
-
-            // Setup service
-
-            let mut client_artifact = ArtifactServiceClient::connect(service.to_owned())
-                .await
-                .expect("failed to connect to artifact");
 
             // Build artifacts
 
             config::build_artifacts(
-                Some(&artifact_selected),
-                artifact_pending,
-                &mut client_artifact,
-                &mut client_registry,
+                Some(&selected),
+                artifact,
+                &mut registry_archive,
+                &mut registry_artifact,
+                &mut worker,
             )
             .await?;
 
@@ -299,49 +319,66 @@ async fn main() -> Result<()> {
 
             let mut router = Server::builder().add_service(health_service);
 
-            if services.contains("artifact") {
-                let system = system_default()?;
+            if services.contains("agent") {
+                let service = AgentServiceServer::new(AgentServer::new(agent.clone()));
 
-                let service = ArtifactServiceServer::new(ArtifactServer::new(registry, system));
-
-                info!("artifact service: [::]:{}", port);
+                info!("agent service: [::]:{}", port);
 
                 router = router.add_service(service);
             }
 
             if services.contains("registry") {
                 let backend = match registry_backend.as_str() {
-                    "gha" => RegistryServerBackend::GHA,
-                    "local" => RegistryServerBackend::Local,
-                    "s3" => RegistryServerBackend::S3,
-                    _ => RegistryServerBackend::Unknown,
+                    "gha" => ServerBackend::GHA,
+                    "local" => ServerBackend::Local,
+                    "s3" => ServerBackend::S3,
+                    _ => ServerBackend::Unknown,
                 };
 
-                if backend == RegistryServerBackend::Unknown {
+                if backend == ServerBackend::Unknown {
                     bail!("unknown registry backend: {}", registry_backend);
                 }
 
-                if backend == RegistryServerBackend::S3 && registry_backend_s3_bucket.is_none() {
+                if backend == ServerBackend::S3 && registry_backend_s3_bucket.is_none() {
                     bail!("s3 backend requires '--registry-backend-s3-bucket' parameter");
                 }
 
-                let backend: Box<dyn RegistryBackend> = match backend {
-                    RegistryServerBackend::Local => {
-                        Box::new(vorpal_registry::LocalRegistryBackend::new()?)
+                let backend_archive: Box<dyn ArchiveBackend> = match backend {
+                    ServerBackend::Local => Box::new(LocalBackend::new()?),
+                    ServerBackend::S3 => {
+                        Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?)
                     }
-                    RegistryServerBackend::S3 => Box::new(
-                        vorpal_registry::S3RegistryBackend::new(registry_backend_s3_bucket.clone())
-                            .await?,
-                    ),
-                    RegistryServerBackend::GHA => {
-                        Box::new(vorpal_registry::GhaRegistryBackend::new()?)
-                    }
-                    RegistryServerBackend::Unknown => unreachable!(),
+                    ServerBackend::GHA => Box::new(GhaBackend::new()?),
+                    ServerBackend::Unknown => unreachable!(),
                 };
 
-                let service = RegistryServiceServer::new(RegistryServer::new(backend));
+                let backend_artifact: Box<dyn ArtifactBackend> = match backend {
+                    ServerBackend::Local => Box::new(LocalBackend::new()?),
+                    ServerBackend::S3 => {
+                        Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?)
+                    }
+                    ServerBackend::GHA => Box::new(GhaBackend::new()?),
+                    ServerBackend::Unknown => unreachable!(),
+                };
 
                 info!("registry service: [::]:{}", port);
+
+                router = router.add_service(ArchiveServiceServer::new(ArchiveServer::new(
+                    backend_archive,
+                )));
+
+                router = router.add_service(ArtifactServiceServer::new(
+                    RegistryArtifactServer::new(backend_artifact),
+                ));
+            }
+
+            if services.contains("worker") {
+                let system = system_default()?;
+
+                let service =
+                    WorkerServiceServer::new(WorkerServer::new(registry.to_owned(), system));
+
+                info!("worker service: [::]:{}", port);
 
                 router = router.add_service(service);
             }
