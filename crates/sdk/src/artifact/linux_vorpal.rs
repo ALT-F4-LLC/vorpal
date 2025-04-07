@@ -1164,7 +1164,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let step_stage_03 = step::bwrap(
         context,
-        vec![
+        [
             arguments.clone(),
             vec![
                 // mount tools
