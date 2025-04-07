@@ -205,12 +205,8 @@ pub async fn build_artifacts(
 
                 build(artifact, &artifact_hash, client_archive, client_worker).await?;
 
-                match client_artifact.store_artifact(artifact.clone()).await {
-                    Err(status) => {
-                        bail!("registry put error: {:?}", status);
-                    }
-
-                    Ok(_) => {}
+                if let Err(status) = client_artifact.store_artifact(artifact.clone()).await {
+                    bail!("registry put error: {:?}", status);
                 }
 
                 artifact_complete.insert(artifact_hash.to_string(), artifact.clone());

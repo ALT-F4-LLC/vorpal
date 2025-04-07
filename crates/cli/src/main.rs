@@ -244,11 +244,7 @@ async fn main() -> Result<()> {
             // Export artifact
 
             if *artifact_export {
-                let artifacts = artifact
-                    .clone()
-                    .into_iter()
-                    .map(|(_, artifact)| artifact)
-                    .collect::<Vec<Artifact>>();
+                let artifacts = artifact.clone().into_values().collect::<Vec<Artifact>>();
 
                 let artifact_json =
                     serde_json::to_string_pretty(&artifacts).expect("failed to serialize artifact");
