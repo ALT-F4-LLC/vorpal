@@ -20,9 +20,9 @@ use vorpal_schema::{
         archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
     },
     artifact::v0::{Artifact, ArtifactSource, ArtifactSystem},
-    system_default,
     worker::v0::{worker_service_server::WorkerService, BuildArtifactResponse},
 };
+use vorpal_sdk::system::get_system_default;
 use vorpal_store::{
     archives::{compress_zstd, unpack_zstd},
     notary,
@@ -286,7 +286,7 @@ async fn build_artifact(
         return Err(Status::invalid_argument("unknown target"));
     }
 
-    let worker_target = system_default()
+    let worker_target = get_system_default()
         .map_err(|err| Status::internal(format!("worker failed to get target: {:?}", err)))?;
 
     if artifact_target != worker_target {

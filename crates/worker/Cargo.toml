@@ -12,4 +12,5 @@ tokio-stream = { default-features = false, features = ["io-util"], version = "0"
 tonic = { default-features = false, version = "0" }
 tracing = { default-features = false, version = "0" }
 vorpal-schema = { default-features = false, path = "../schema" }
+vorpal-sdk = { default-features = false, path = "../sdk" }
 vorpal-store = { default-features = false, path = "../store" }

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package vorpal.agent.v0;
 
-option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact";
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/agent";
 
 import "v0/artifact/artifact.proto";
 

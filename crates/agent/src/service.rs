@@ -35,11 +35,11 @@ async fn prepare_artifact(
         .await
         .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
-    let request = request.into_inner();
+    let artifact = request.into_inner();
 
-    let mut sources = vec![];
+    let mut artifact_sources = vec![];
 
-    for source in request.sources.into_iter() {
+    for source in artifact.sources.into_iter() {
         let digest = build_source(&mut client, &source, &tx.clone())
             .await
             .map_err(|err| Status::internal(format!("failed to build source: {:?}", err)))?;
@@ -52,15 +52,17 @@ async fn prepare_artifact(
             path: source.path,
         };
 
-        sources.push(source);
+        artifact_sources.push(source);
     }
 
+    // TODO: explore using combined sources digest for the artifact
+
     let artifact = Artifact {
-        name: request.name,
-        sources,
-        steps: request.steps,
-        systems: request.systems,
-        target: request.target,
+        name: artifact.name,
+        sources: artifact_sources,
+        steps: artifact.steps,
+        systems: artifact.systems,
+        target: artifact.target,
     };
 
     let artifact_json = serde_json::to_string(&artifact)

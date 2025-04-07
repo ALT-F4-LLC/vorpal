@@ -3243,6 +3243,7 @@ dependencies = [
  "vorpal-agent",
  "vorpal-registry",
  "vorpal-schema",
+ "vorpal-sdk",
  "vorpal-store",
  "vorpal-worker",
 ]
@@ -3336,6 +3337,7 @@ dependencies = [
  "tonic",
  "tracing",
  "vorpal-schema",
+ "vorpal-sdk",
  "vorpal-store",
 ]
 

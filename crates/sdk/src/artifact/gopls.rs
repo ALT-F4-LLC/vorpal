@@ -1,7 +1,11 @@
-use crate::{artifact::go, source::go_tools};
 use crate::{
-    artifact::{get_env_key, step, ArtifactBuilder},
+    artifact::{
+        get_env_key, go,
+        language::go::{get_goarch, get_goos},
+        step, ArtifactBuilder,
+    },
     context::ConfigContext,
+    source::go_tools,
 };
 use anyhow::Result;
 use indoc::formatdoc;
@@ -28,7 +32,9 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         context,
         vec![go.clone()],
         vec![
+            format!("GOARCH={}", get_goarch(context.get_target())),
             "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
+            format!("GOOS={}", get_goos(context.get_target())),
             "GOPATH=$VORPAL_WORKSPACE/go".to_string(),
             format!("PATH={}/bin", get_env_key(&go)),
         ],

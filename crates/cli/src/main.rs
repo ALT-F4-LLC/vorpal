@@ -22,11 +22,11 @@ use vorpal_schema::{
         artifact_service_server::ArtifactServiceServer, Artifact, ArtifactRequest,
         ArtifactsRequest,
     },
-    system_default, system_default_str,
     worker::v0::{
         worker_service_client::WorkerServiceClient, worker_service_server::WorkerServiceServer,
     },
 };
+use vorpal_sdk::system::{get_system_default, get_system_default_str};
 use vorpal_store::{notary::generate_keys, paths::get_public_key_path};
 use vorpal_worker::artifact::WorkerServer;
 
@@ -46,7 +46,7 @@ enum Command {
         #[arg(long, short)]
         name: String,
 
-        #[arg(default_value_t = system_default_str(), long, short)]
+        #[arg(default_value_t = get_system_default_str(), long, short)]
         target: String,
     },
 
@@ -380,7 +380,7 @@ async fn main() -> Result<()> {
             }
 
             if services.contains("worker") {
-                let system = system_default()?;
+                let system = get_system_default()?;
 
                 let service =
                     WorkerServiceServer::new(WorkerServer::new(registry.to_owned(), system));

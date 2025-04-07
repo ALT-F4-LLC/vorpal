@@ -50,10 +50,36 @@ dist: build
 
 # Vorpal
 generate:
-	mkdir -p sdk/go/api
-	protoc --go_opt=paths=source_relative --go_out=sdk/go/api --go-grpc_opt=paths=source_relative --go-grpc_out=sdk/go/api --proto_path=crates/schema/api v0/artifact/artifact.proto
-	protoc --go_opt=paths=source_relative --go_out=sdk/go/api --go-grpc_opt=paths=source_relative --go-grpc_out=sdk/go/api --proto_path=crates/schema/api v0/registry/registry.proto
-	protoc --go_opt=paths=source_relative --go_out=sdk/go/api --go-grpc_opt=paths=source_relative --go-grpc_out=sdk/go/api --proto_path=crates/schema/api v0/config/config.proto
+	rm -rfv sdk/go/api
+	mkdir -pv sdk/go/api
+	protoc \
+		--go_opt=paths=source_relative \
+		--go_out=sdk/go/api \
+		--go-grpc_opt=paths=source_relative \
+		--go-grpc_out=sdk/go/api \
+		--proto_path=crates/schema/api \
+		v0/agent/agent.proto
+	protoc \
+		--go_opt=paths=source_relative \
+		--go_out=sdk/go/api \
+		--go-grpc_opt=paths=source_relative \
+		--go-grpc_out=sdk/go/api \
+		--proto_path=crates/schema/api \
+		v0/artifact/artifact.proto
+	protoc \
+		--go_opt=paths=source_relative \
+		--go_out=sdk/go/api \
+		--go-grpc_opt=paths=source_relative \
+		--go-grpc_out=sdk/go/api \
+		--proto_path=crates/schema/api \
+		v0/archive/archive.proto
+	protoc \
+		--go_opt=paths=source_relative \
+		--go_out=sdk/go/api \
+		--go-grpc_opt=paths=source_relative \
+		--go-grpc_out=sdk/go/api \
+		--proto_path=crates/schema/api \
+		v0/worker/worker.proto
 
 generate-toolkits:
 	cat /var/lib/vorpal/store/8ad451bdcda8f24f4af59ccca23fd71a06975a9d069571f19b9a0d503f8a65c8.json \

@@ -198,12 +198,6 @@ pub fn zlib(version: &str, hash: &str) -> ArtifactSource {
 }
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    // Setup artifacts
-
-    let linux_debian = linux_debian::build(context).await?;
-
-    // Setup sources
-
     let bash_version = "5.2.32";
     let bash = gnu(
         "bash",
@@ -432,12 +426,16 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         "3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683",
     );
 
-    let step_stage_01 = step::bwrap(
+    let environments = vec!["PATH=/usr/bin:/usr/sbin".to_string()];
+
+    let rootfs = linux_debian::build(context).await?;
+
+    let step_setup = step::bwrap(
         context,
         vec![],
         vec![],
-        vec!["PATH=/usr/bin:/usr/sbin".to_string()],
-        Some(linux_debian),
+        environments.clone(),
+        Some(rootfs.clone()),
         formatdoc! {"
             set +h
             umask 022
@@ -492,13 +490,23 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             ## Setup source paths
 
             mv -v $VORPAL_SOURCE/binutils $VORPAL_SOURCE/binutils-pass-01
+            mv -v $VORPAL_SOURCE/glibc $VORPAL_SOURCE/glibc-pass-01
             mv -v $VORPAL_SOURCE/gcc $VORPAL_SOURCE/gcc-pass-01
 
             echo \"Copying binutils-pass-01 to binutils-pass-02\"
             cp -pr $VORPAL_SOURCE/binutils-pass-01 $VORPAL_SOURCE/binutils-pass-02
 
+            echo \"Copying binutils-pass-02 to binutils-pass-03\"
+            cp -pr $VORPAL_SOURCE/binutils-pass-02 $VORPAL_SOURCE/binutils-pass-03
+
             echo \"Copying gcc-pass-01 to gcc-pass-02\"
             cp -pr $VORPAL_SOURCE/gcc-pass-01 $VORPAL_SOURCE/gcc-pass-02
+
+            echo \"Copying gcc-pass-02 to gcc-pass-03\"
+            cp -pr $VORPAL_SOURCE/gcc-pass-02 $VORPAL_SOURCE/gcc-pass-03
+
+            echo \"Copying glibc-pass-01 to glibc-pass-02\"
+            cp -pr $VORPAL_SOURCE/glibc-pass-01 $VORPAL_SOURCE/glibc-pass-02
 
             echo \"Copying gcc-pass-01 to libstdc++\"
             cp -pr $VORPAL_SOURCE/gcc-pass-01 $VORPAL_SOURCE/libstdc++
@@ -533,15 +541,30 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
               x86_64) mkdir -pv $VORPAL_OUTPUT/lib64 ;;
             esac
 
-            mkdir -pv $VORPAL_OUTPUT/tools
+            mkdir -pv $VORPAL_OUTPUT/tools",
+        },
+        vec![Aarch64Linux, X8664Linux],
+    )
+    .await?;
 
-            ## Setup environment
+    let step_stage_01 = step::bwrap(
+        context,
+        vec![],
+        vec![],
+        environments.clone(),
+        Some(rootfs.clone()),
+        formatdoc! {"
+            set +h
+            umask 022
+
+            ### Setup environment
 
             export LC_ALL=\"POSIX\"
             export VORPAL_TARGET=\"$(uname -m)-vorpal-linux-gnu\"
             export PATH=\"$VORPAL_OUTPUT/tools/bin:$PATH\"
             export CONFIG_SITE=\"$VORPAL_OUTPUT/usr/share/config.site\"
             export MAKEFLAGS=\"-j$(nproc)\"
+            export VORPAL_SOURCE=\"$(pwd)/source\"
 
             ### Build binutils (pass 01)
 
@@ -563,7 +586,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/binutils-pass-01
+            rm -rf $VORPAL_SOURCE/binutils-pass-01
 
             ### Build gcc (pass 01)
 
@@ -607,7 +630,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/gcc-pass-01
+            rm -rf $VORPAL_SOURCE/gcc-pass-01
 
             ### Build linux headers
 
@@ -617,16 +640,17 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             make headers
 
             find usr/include -type f ! -name '*.h' -delete
+
             cp -prv usr/include \"$VORPAL_OUTPUT/usr\"
 
             popd
 
             rm -rf $VORPAL_SOURCE/linux/linux-{linux_version}
 
-            ### Build glibc
+            ### Build glibc-pass-01
 
-            mkdir -pv $VORPAL_SOURCE/glibc/glibc-{glibc_version}/build
-            pushd $VORPAL_SOURCE/glibc/glibc-{glibc_version}/build
+            mkdir -pv $VORPAL_SOURCE/glibc-pass-01/glibc-{glibc_version}/build
+            pushd $VORPAL_SOURCE/glibc-pass-01/glibc-{glibc_version}/build
 
             case $(uname -m) in
                 aarch64) ln -sfv ../lib/ld-linux-aarch64.so.1 $VORPAL_OUTPUT/lib64
@@ -656,7 +680,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/glibc
+            rm -rf $VORPAL_SOURCE/glibc-pass-01
 
             ## Test glibc
 
@@ -688,7 +712,30 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/libstdc++
+            rm -rf $VORPAL_SOURCE/libstdc++",
+        },
+        vec![Aarch64Linux, X8664Linux],
+    )
+    .await?;
+
+    let step_stage_02 = step::bwrap(
+        context,
+        vec![],
+        vec![],
+        environments.clone(),
+        Some(rootfs.clone()),
+        formatdoc! {"
+            set +h
+            umask 022
+
+            ## Setup environment
+
+            export LC_ALL=\"POSIX\"
+            export VORPAL_TARGET=\"$(uname -m)-vorpal-linux-gnu\"
+            export PATH=\"$VORPAL_OUTPUT/tools/bin:$PATH\"
+            export CONFIG_SITE=\"$VORPAL_OUTPUT/usr/share/config.site\"
+            export MAKEFLAGS=\"-j$(nproc)\"
+            export VORPAL_SOURCE=\"$(pwd)/source\"
 
             ## Build m4
 
@@ -705,7 +752,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/m4
+            rm -rf $VORPAL_SOURCE/m4
 
             ## Build ncurses
 
@@ -746,7 +793,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/ncurses
+            rm -rf $VORPAL_SOURCE/ncurses
 
             ## Build bash
 
@@ -766,7 +813,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/bash
+            rm -rf $VORPAL_SOURCE/bash
 
             ## Build coreutils
 
@@ -795,7 +842,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/coreutils
+            rm -rf $VORPAL_SOURCE/coreutils
 
             ## Build diffutils
 
@@ -812,7 +859,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/diffutils
+            rm -rf $VORPAL_SOURCE/diffutils
 
             ## Build file
 
@@ -844,7 +891,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/file
+            rm -rf $VORPAL_SOURCE/file
 
             ## Build findutils
 
@@ -862,7 +909,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/findutils
+            rm -rf $VORPAL_SOURCE/findutils
 
             ## Build gawk
 
@@ -879,7 +926,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/gawk
+            rm -rf $VORPAL_SOURCE/gawk
 
             ## Build grep
 
@@ -896,7 +943,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/grep
+            rm -rf $VORPAL_SOURCE/grep
 
             ## Build gzip
 
@@ -912,7 +959,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/gzip
+            rm -rf $VORPAL_SOURCE/gzip
 
             ## Build make
 
@@ -930,7 +977,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/make
+            rm -rf $VORPAL_SOURCE/make
 
             ## Build patch
 
@@ -947,7 +994,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/patch
+            rm -rf $VORPAL_SOURCE/patch
 
             ## Build sed
 
@@ -964,7 +1011,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/sed
+            rm -rf $VORPAL_SOURCE/sed
 
             ## Build tar
 
@@ -981,7 +1028,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/tar
+            rm -rf $VORPAL_SOURCE/tar
 
             ## Build xz
 
@@ -1002,7 +1049,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/xz
+            rm -rf $VORPAL_SOURCE/xz
 
             ## Build binutils (pass 02)
 
@@ -1028,7 +1075,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/binutils-pass-02
+            rm -rf $VORPAL_SOURCE/binutils-pass-02
 
             ## Build gcc (pass 02)
 
@@ -1061,72 +1108,76 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/gcc-pass-02
+            rm -rf $VORPAL_SOURCE/gcc-pass-02
 
             ## Setup root symlinks
 
             ln -svf usr/bin $VORPAL_OUTPUT/bin
             ln -svf usr/lib $VORPAL_OUTPUT/lib
-            ln -svf usr/sbin $VORPAL_OUTPUT/sbin
-
-            ## Cleanup root directories
-
-            rm -rfv $VORPAL_OUTPUT/tools
-            rm -rfv $VORPAL_OUTPUT/var",
+            ln -svf usr/sbin $VORPAL_OUTPUT/sbin",
         },
         vec![Aarch64Linux, X8664Linux],
     )
     .await?;
 
-    let step_stage_02 = step::bwrap(
+    // TODO: impove readability with list in list
+
+    let arguments = vec![
+        // mount bin
+        "--bind".to_string(),
+        "$VORPAL_OUTPUT/bin".to_string(),
+        "/bin".to_string(),
+        // mount etc
+        "--bind".to_string(),
+        "$VORPAL_OUTPUT/etc".to_string(),
+        "/etc".to_string(),
+        // mount lib
+        "--bind".to_string(),
+        "$VORPAL_OUTPUT/lib".to_string(),
+        "/lib".to_string(),
+        // mount lib64 (if exists)
+        "--bind-try".to_string(),
+        "$VORPAL_OUTPUT/lib64".to_string(),
+        "/lib64".to_string(),
+        // mount sbin
+        "--bind".to_string(),
+        "$VORPAL_OUTPUT/sbin".to_string(),
+        "/sbin".to_string(),
+        // mount usr
+        "--bind".to_string(),
+        "$VORPAL_OUTPUT/usr".to_string(),
+        "/usr".to_string(),
+        // mount current directory
+        "--bind".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        // change directory
+        "--chdir".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        // set group id
+        "--gid".to_string(),
+        "0".to_string(),
+        // set user id
+        "--uid".to_string(),
+        "0".to_string(),
+    ];
+
+    let step_stage_03 = step::bwrap(
         context,
-        // TODO: impove readability with list in list
         vec![
-            // mount bin
-            "--bind".to_string(),
-            "$VORPAL_OUTPUT/bin".to_string(),
-            "/bin".to_string(),
-            // mount etc
-            "--bind".to_string(),
-            "$VORPAL_OUTPUT/etc".to_string(),
-            "/etc".to_string(),
-            // mount lib
-            "--bind".to_string(),
-            "$VORPAL_OUTPUT/lib".to_string(),
-            "/lib".to_string(),
-            // mount lib64 (if exists)
-            "--bind-try".to_string(),
-            "$VORPAL_OUTPUT/lib64".to_string(),
-            "/lib64".to_string(),
-            // mount sbin
-            "--bind".to_string(),
-            "$VORPAL_OUTPUT/sbin".to_string(),
-            "/sbin".to_string(),
-            // mount usr
-            "--bind".to_string(),
-            "$VORPAL_OUTPUT/usr".to_string(),
-            "/usr".to_string(),
-            // mount current directory
-            "--bind".to_string(),
-            "$VORPAL_WORKSPACE".to_string(),
-            "$VORPAL_WORKSPACE".to_string(),
-            // change directory
-            "--chdir".to_string(),
-            "$VORPAL_WORKSPACE".to_string(),
-            // set group id
-            "--gid".to_string(),
-            "0".to_string(),
-            // set user id
-            "--uid".to_string(),
-            "0".to_string(),
-        ],
+            arguments.clone(),
+            vec![
+                // mount tools
+                "--bind".to_string(),
+                "$VORPAL_OUTPUT/tools".to_string(),
+                "/tools".to_string(),
+            ],
+        ]
+        .concat(),
         vec![],
-        vec!["PATH=/usr/bin:/usr/sbin".to_string()],
+        environments.clone(),
         None,
         formatdoc! {"
-            #!/bin/bash
-            set -euo pipefail
-
             ## Setup paths
 
             export VORPAL_SOURCE=\"$(pwd)/source\"
@@ -1222,7 +1273,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/gettext
+            rm -rf $VORPAL_SOURCE/gettext
 
             ## Build bison
 
@@ -1238,7 +1289,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/bison
+            rm -rf $VORPAL_SOURCE/bison
 
             ## Build perl
 
@@ -1278,7 +1329,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/python
+            rm -rf $VORPAL_SOURCE/python
 
             ## Build texinfo
 
@@ -1325,7 +1376,109 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/util-linux
+            rm -rf $VORPAL_SOURCE/util-linux
+
+            ## Cleanup
+
+            rm -rf /usr/share/{{info,man,doc}}/*
+
+            find /usr/{{lib,libexec}} -name \\*.la -delete",
+        },
+        vec![Aarch64Linux, X8664Linux],
+    )
+    .await?;
+
+    let step_cleanup = step::bwrap(
+        context,
+        vec![],
+        vec![],
+        environments.clone(),
+        Some(rootfs.clone()),
+        formatdoc! {"
+            rm -rf $VORPAL_OUTPUT/tools",
+        },
+        vec![Aarch64Linux, X8664Linux],
+    )
+    .await?;
+
+    let step_stage_04 = step::bwrap(
+        context,
+        arguments.clone(),
+        vec![],
+        environments.clone(),
+        None,
+        formatdoc! {"
+            ## Setup paths
+
+            export VORPAL_SOURCE=\"$(pwd)/source\"
+
+            ## Setup environment
+
+            export MAKEFLAGS=\"-j$(nproc)\"
+
+            ## Build glibc-pass-02
+
+            mkdir -pv $VORPAL_SOURCE/glibc-pass-02/glibc-{glibc_version}/build
+            pushd $VORPAL_SOURCE/glibc-pass-02/glibc-{glibc_version}/build
+
+            echo 'rootsbindir=/usr/sbin' > configparms
+
+            ../configure \
+                --prefix=/usr \
+                --disable-werror \
+                --enable-kernel=5.4 \
+                --enable-stack-protector=strong \
+                --disable-nscd \
+                libc_cv_slibdir=/usr/lib
+
+            make
+
+            touch /etc/ld.so.conf
+
+            sed '/test-installation/s@$(PERL)@echo not running@' -i ../Makefile
+
+            make install
+
+            sed '/RTLDLIST=/s@/usr@@g' -i /usr/bin/ldd
+
+            make localedata/install-locales
+
+            cat > /etc/nsswitch.conf << \"EOF\"
+            # Begin /etc/nsswitch.conf
+
+            passwd: files
+            group: files
+            shadow: files
+
+            hosts: files dns
+            networks: files
+
+            protocols: files
+            services: files
+            ethers: files
+            rpc: files
+
+            # End /etc/nsswitch.conf
+            EOF
+
+            cat > /etc/ld.so.conf << \"EOF\"
+            # Begin /etc/ld.so.conf
+            /usr/local/lib
+            /opt/lib
+
+            EOF
+
+            cat >> /etc/ld.so.conf << \"EOF\"
+            # Add an include directory
+            include /etc/ld.so.conf.d/*.conf
+
+            EOF
+
+            mkdir -pv /etc/ld.so.conf.d
+
+            popd
+
+            rm -rf $VORPAL_SOURCE/glibc-pass-02
 
             ## Build zlib
 
@@ -1335,14 +1488,97 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             ../configure --prefix=\"/usr\"
 
             make
-            # make check
             make install
 
-            rm -fv /usr/lib/libz.a
+            rm -rf /usr/lib/libz.a
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/zlib
+            rm -rf $VORPAL_SOURCE/zlib
+
+            ## Build binutils-pass-03
+
+            mkdir -pv $VORPAL_SOURCE/binutils-pass-03/binutils-{binutils_version}/build
+            pushd $VORPAL_SOURCE/binutils-pass-03/binutils-{binutils_version}/build
+
+            ../configure \
+                --prefix=/usr \
+                --sysconfdir=/etc \
+                --enable-ld=default \
+                --enable-plugins \
+                --enable-shared \
+                --disable-werror \
+                --enable-64-bit-bfd \
+                --enable-new-dtags \
+                --with-system-zlib \
+                --enable-default-hash-style=gnu
+
+            make tooldir=/usr
+            make tooldir=/usr install
+
+            rm -rf /usr/lib/lib{{bfd,ctf,ctf-nobfd,gprofng,opcodes,sframe}}.a \
+                /usr/share/doc/gprofng/
+
+            popd
+
+            rm -rf $VORPAL_SOURCE/binutils-pass-03
+
+            ## Build gcc-pass-03
+
+            mkdir -pv $VORPAL_SOURCE/gcc-pass-03/gcc-{gcc_version}/build
+            pushd $VORPAL_SOURCE/gcc-pass-03/gcc-{gcc_version}/build
+
+            ../configure \
+                --prefix=/usr \
+                LD=ld \
+                --enable-languages=c,c++ \
+                --enable-default-pie \
+                --enable-default-ssp \
+                --enable-host-pie \
+                --disable-multilib \
+                --disable-bootstrap \
+                --disable-fixincludes \
+                --with-system-zlib
+
+            make
+
+            ulimit -s -H unlimited
+
+            sed -e '/cpython/d' -i ../gcc/testsuite/gcc.dg/plugin/plugin.exp
+            sed -e 's/no-pic /&-no-pie /' -i ../gcc/testsuite/gcc.target/i386/pr113689-1.c
+            sed -e 's/300000/(1|300000)/' -i ../libgomp/testsuite/libgomp.c-c++-common/pr109062.c
+            sed -e 's/{{ target nonpic }} //' \
+                -e '/GOTPCREL/d' \
+                -i ../gcc/testsuite/gcc.target/i386/fentryname3.c
+
+            make install
+
+            chown -v -R root:root \
+                /usr/lib/gcc/$(gcc -dumpmachine)/14.2.0/include{{,-fixed}}
+
+            ln -svr /usr/bin/cpp /usr/lib
+            ln -sv gcc.1 /usr/share/man/man1/cc.1
+            ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/14.2.0/liblto_plugin.so \
+                    /usr/lib/bfd-plugins/
+
+            echo 'int main(){{}}' > dummy.c
+            cc dummy.c -v -Wl,--verbose &> dummy.log
+            readelf -l a.out | grep ': /lib'
+
+            grep -E -o '/usr/lib.*/S?crt[1in].*succeeded' dummy.log
+            grep -B4 '^ /usr/include' dummy.log
+            grep 'SEARCH.*/usr/lib' dummy.log |sed 's|; |\\n|g'
+            grep \"/lib.*/libc.so.6 \" dummy.log
+            grep found dummy.log
+
+            rm -v dummy.c a.out dummy.log
+
+            mkdir -pv /usr/share/gdb/auto-load/usr/lib
+            mv -v /usr/lib/*gdb.py /usr/share/gdb/auto-load/usr/lib
+
+            popd
+
+            rm -rf $VORPAL_SOURCE/gcc-pass-03
 
             ## Build openssl
 
@@ -1369,10 +1605,24 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/openssl
+            rm -rf $VORPAL_SOURCE/openssl",
+        },
+        vec![Aarch64Linux, X8664Linux],
+    )
+    .await?;
 
-            ## END OF STANDARD
-            ## START OF EXTRAS
+    let step_stage_05 = step::bwrap(
+        context,
+        arguments.clone(),
+        vec![],
+        environments.clone(),
+        None,
+        formatdoc! {"
+            ## Setup environment
+
+            export MAKEFLAGS=\"-j$(nproc)\"
+            export VORPAL_SOURCE=\"$(pwd)/source\"
+            export VORPAL_TARGET=\"$(uname -m)-vorpal-linux-gnu\"
 
             ## Build libunistring
 
@@ -1389,7 +1639,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/libunistring
+            rm -rf $VORPAL_SOURCE/libunistring
 
             ## Build libidn2
 
@@ -1405,7 +1655,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/libidn2
+            rm -rf $VORPAL_SOURCE/libidn2
 
             ## Build libpsl
 
@@ -1419,7 +1669,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/libpsl
+            rm -rf $VORPAL_SOURCE/libpsl
 
             ## Build CA certificates
 
@@ -1442,7 +1692,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/curl
+            rm -rf $VORPAL_SOURCE/curl
 
             ## Build unzip
 
@@ -1458,13 +1708,13 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
             popd
 
-            rm -rfv $VORPAL_SOURCE/unzip
+            rm -rf $VORPAL_SOURCE/unzip
 
             ## Cleanup
 
-            rm -rfv /usr/share/{{info,man,doc}}/*
+            find /usr/lib /usr/libexec -name \\*.la -delete
 
-            find /usr/{{lib,libexec}} -name \\*.la -delete",
+            find /usr -depth -name $VORPAL_TARGET\\* | xargs rm -rf",
             unzip_version = unzip_version.replace(".", "").as_str(),
         },
         vec![Aarch64Linux, X8664Linux],
@@ -1510,8 +1760,13 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_source(util_linux)
         .with_source(xz)
         .with_source(zlib)
+        .with_step(step_setup)
         .with_step(step_stage_01)
         .with_step(step_stage_02)
+        .with_step(step_stage_03)
+        .with_step(step_cleanup)
+        .with_step(step_stage_04)
+        .with_step(step_stage_05)
         .with_system(Aarch64Linux)
         .with_system(X8664Linux)
         .build(context)

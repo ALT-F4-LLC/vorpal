@@ -1,4 +1,7 @@
-use crate::cli::{Cli, Command};
+use crate::{
+    cli::{Cli, Command},
+    system::get_system,
+};
 use anyhow::{bail, Result};
 use clap::Parser;
 use sha256::digest;
@@ -12,7 +15,6 @@ use vorpal_schema::{
         Artifact, ArtifactRequest, ArtifactResponse, ArtifactSystem, ArtifactsRequest,
         ArtifactsResponse,
     },
-    system_from_str,
 };
 
 #[derive(Clone)]
@@ -45,7 +47,7 @@ impl ArtifactService for ArtifactServer {
         let request = request.into_inner();
 
         if request.digest.is_empty() {
-            return Err(tonic::Status::invalid_argument("'name' is required"));
+            return Err(tonic::Status::invalid_argument("'digest' is required"));
         }
 
         let artifact = self.store.get(request.digest.as_str());
@@ -86,7 +88,7 @@ pub async fn get_context() -> Result<ConfigContext> {
             registry,
             target,
         } => {
-            let target = system_from_str(&target)?;
+            let target = get_system(&target)?;
 
             Ok(ConfigContext::new(agent, port, registry, target))
         }
@@ -161,9 +163,9 @@ impl ConfigContext {
         Ok(artifact_digest)
     }
 
-    pub async fn fetch_artifact(&mut self, artifact_digest: &str) -> Result<String> {
-        if self.store.contains_key(artifact_digest) {
-            return Ok(artifact_digest.to_string());
+    pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
+        if self.store.contains_key(digest) {
+            return Ok(digest.to_string());
         }
 
         let mut client = ArtifactServiceClient::connect(self.registry.clone())
@@ -171,7 +173,7 @@ impl ConfigContext {
             .expect("failed to connect to artifact service");
 
         let request = ArtifactRequest {
-            digest: artifact_digest.to_string(),
+            digest: digest.to_string(),
         };
 
         match client.get_artifact(request.clone()).await {
@@ -180,14 +182,13 @@ impl ConfigContext {
                     bail!("artifact service error: {:?}", status);
                 }
 
-                bail!("artifact not found: {artifact_digest}");
+                bail!("artifact not found: {digest}");
             }
 
             Ok(response) => {
                 let artifact = response.into_inner();
 
-                self.store
-                    .insert(artifact_digest.to_string(), artifact.clone());
+                self.store.insert(digest.to_string(), artifact.clone());
 
                 for step in artifact.steps.iter() {
                     for artifact_digest in step.artifacts.iter() {
@@ -195,7 +196,7 @@ impl ConfigContext {
                     }
                 }
 
-                Ok(artifact_digest.to_string())
+                Ok(digest.to_string())
             }
         }
     }
