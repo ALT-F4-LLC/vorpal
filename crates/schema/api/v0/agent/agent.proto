@@ -7,10 +7,11 @@ option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact";
 import "v0/artifact/artifact.proto";
 
 service AgentService {
-    rpc PrepareArtifact(vorpal.artifact.v0.Artifact) returns (PrepareArtifactResponse) {}
+    rpc PrepareArtifact(vorpal.artifact.v0.Artifact) returns (stream PrepareArtifactResponse) {}
 }
 
 message PrepareArtifactResponse {
-  string artifact_digest = 1;
-  vorpal.artifact.v0.Artifact artifact = 2;
+  optional string artifact_digest = 1;
+  optional string artifact_output = 2;
+  vorpal.artifact.v0.Artifact artifact = 3;
 }

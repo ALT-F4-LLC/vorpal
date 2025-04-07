@@ -204,10 +204,10 @@ impl ArtifactBuilder {
             return Err(anyhow!("artifact must have at least one step"));
         }
 
-        context.add_artifact(artifact).await
+        context.add_artifact(artifact.clone()).await
     }
 }
 
-pub fn get_env_key(hash: &str) -> String {
-    format!("$VORPAL_ARTIFACT_{}", hash)
+pub fn get_env_key(digest: &str) -> String {
+    format!("$VORPAL_ARTIFACT_{}", digest)
 }

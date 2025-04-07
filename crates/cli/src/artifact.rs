@@ -1,4 +1,3 @@
-use crate::get_prefix;
 use anyhow::{bail, Result};
 use tokio::fs::{create_dir_all, write};
 use tonic::{transport::Channel, Code};
@@ -73,7 +72,7 @@ pub async fn build(
 
                 set_timestamps(&archive_path).await?;
 
-                info!("{} unpack: {}", get_prefix(&artifact.name), artifact_hash);
+                info!("{} |> unpack: {}", artifact.name, artifact_hash);
 
                 create_dir_all(&artifact_path)
                     .await
@@ -109,7 +108,7 @@ pub async fn build(
         match stream.message().await {
             Ok(Some(response)) => {
                 if !response.output.is_empty() {
-                    info!("{} {}", get_prefix(&artifact.name), response.output);
+                    info!("{} |> {}", &artifact.name, response.output);
                 }
             }
 

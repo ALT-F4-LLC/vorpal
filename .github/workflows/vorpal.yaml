@@ -108,8 +108,8 @@ jobs:
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
-      - run: ./dist/vorpal artifact --name "vorpal-shell"
-      - run: ./dist/vorpal artifact --name "vorpal"
+      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-shell"
+      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal"
 
       - if: always()
         run: |

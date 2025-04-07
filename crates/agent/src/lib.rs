@@ -2,10 +2,12 @@ use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use std::path::Path;
 use tokio::fs::{read, remove_dir_all, remove_file, write};
+use tokio::sync::mpsc::Sender;
 use tokio_tar::Archive;
-use tonic::{transport::Channel, Code};
+use tonic::{transport::Channel, Code, Status};
 use url::Url;
 use vorpal_schema::{
+    agent::v0::PrepareArtifactResponse,
     archive::v0::{
         archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
     },
@@ -37,6 +39,7 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 pub async fn build_source(
     client: &mut ArchiveServiceClient<Channel>,
     source: &ArtifactSource,
+    tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
     if let Some(digest) = &source.digest {
         let request = ArchivePullRequest {
@@ -77,8 +80,6 @@ pub async fn build_source(
         );
     }
 
-    println!("compiling source: {}", source.name);
-
     let source_sandbox = create_sandbox_dir().await?;
 
     if source_type == ArtifactSourceType::Http {
@@ -101,18 +102,24 @@ pub async fn build_source(
         let http_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
 
         if http_path.scheme() != "http" && http_path.scheme() != "https" {
-            bail!(
-                "source remote scheme not supported: {:?}",
-                http_path.scheme()
-            );
+            bail!("remote scheme not supported: {:?}", http_path.scheme());
         }
+
+        let _ = tx
+            .send(Ok(PrepareArtifactResponse {
+                artifact: None,
+                artifact_digest: None,
+                artifact_output: Some(format!("download: {}", http_path)),
+            }))
+            .await
+            .map_err(|_| Status::internal("failed to send response"));
 
         let remote_response = reqwest::get(http_path.as_str())
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
         if !remote_response.status().is_success() {
-            anyhow::bail!("source URL not failed: {:?}", remote_response.status());
+            anyhow::bail!("URL not failed: {:?}", remote_response.status());
         }
 
         let remote_response_bytes = remote_response
@@ -138,7 +145,14 @@ pub async fn build_source(
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
 
-        println!("unpacking source: {}", source.name);
+        let _ = tx
+            .send(Ok(PrepareArtifactResponse {
+                artifact: None,
+                artifact_digest: None,
+                artifact_output: Some(format!("unpack: {}", http_path)),
+            }))
+            .await
+            .map_err(|_| Status::internal("failed to send response"));
 
         if let Some(kind) = kind {
             match kind.mime_type() {
@@ -214,7 +228,14 @@ pub async fn build_source(
             source.includes.clone(),
         )?;
 
-        println!("copying source: {}", source.name);
+        let _ = tx
+            .send(Ok(PrepareArtifactResponse {
+                artifact: None,
+                artifact_digest: None,
+                artifact_output: Some(format!("copy: {}", local_path.display())),
+            }))
+            .await
+            .map_err(|_| Status::internal("failed to send response"));
 
         copy_files(&local_path, local_files, &source_sandbox).await?;
     }
@@ -267,7 +288,14 @@ pub async fn build_source(
 
         let source_sandbox_archive = create_sandbox_file(Some("tar.zst")).await?;
 
-        println!("compressing source: {}", source.name);
+        let _ = tx
+            .send(Ok(PrepareArtifactResponse {
+                artifact: None,
+                artifact_digest: None,
+                artifact_output: Some(format!("pack: {}", source_digest)),
+            }))
+            .await
+            .map_err(|_| Status::internal("failed to send response"));
 
         compress_zstd(
             &source_sandbox,
@@ -296,7 +324,14 @@ pub async fn build_source(
             });
         }
 
-        println!("pushing source: {}", source.name);
+        let _ = tx
+            .send(Ok(PrepareArtifactResponse {
+                artifact: None,
+                artifact_digest: None,
+                artifact_output: Some(format!("push: {}", source_digest)),
+            }))
+            .await
+            .map_err(|_| Status::internal("failed to send response"));
 
         client
             .push(tokio_stream::iter(source_stream))

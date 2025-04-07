@@ -1,20 +1,20 @@
 use crate::{artifact::ArtifactBackend, s3::get_artifact_key, S3Backend};
 use sha256::digest;
 use tonic::{async_trait, Status};
-use vorpal_schema::artifact::v0::{Artifact, ArtifactRequest};
+use vorpal_schema::artifact::v0::Artifact;
 
 #[async_trait]
 impl ArtifactBackend for S3Backend {
-    async fn get_artifact(&self, request: &ArtifactRequest) -> Result<Artifact, Status> {
+    async fn get_artifact(&self, artifact_digest: String) -> Result<Artifact, Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let request_key = get_artifact_key(&request.digest);
+        let artifact_key = get_artifact_key(&artifact_digest);
 
         client
             .head_object()
             .bucket(bucket.clone())
-            .key(&request_key)
+            .key(&artifact_key)
             .send()
             .await
             .map_err(|err| Status::not_found(err.to_string()))?;
@@ -22,7 +22,7 @@ impl ArtifactBackend for S3Backend {
         let mut artifact_stream = client
             .get_object()
             .bucket(bucket)
-            .key(&request_key)
+            .key(&artifact_key)
             .send()
             .await
             .map_err(|err| Status::internal(err.to_string()))?

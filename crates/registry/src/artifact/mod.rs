@@ -12,8 +12,8 @@ pub mod s3;
 
 #[tonic::async_trait]
 pub trait ArtifactBackend: Send + Sync + 'static {
-    async fn get_artifact(&self, req: &ArtifactRequest) -> Result<Artifact, Status>;
-    async fn store_artifact(&self, req: &Artifact) -> Result<String, Status>;
+    async fn get_artifact(&self, artifact_digest: String) -> Result<Artifact, Status>;
+    async fn store_artifact(&self, artifact: &Artifact) -> Result<String, Status>;
 
     /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
     fn box_clone(&self) -> Box<dyn ArtifactBackend>;
@@ -41,13 +41,13 @@ impl ArtifactService for ArtifactServer {
         &self,
         request: Request<ArtifactRequest>,
     ) -> Result<Response<Artifact>, Status> {
-        let req = request.into_inner();
+        let request = request.into_inner();
 
-        if req.digest.is_empty() {
+        if request.digest.is_empty() {
             return Err(Status::invalid_argument("missing `digest` field"));
         }
 
-        let artifact = self.backend.get_artifact(&req).await?;
+        let artifact = self.backend.get_artifact(request.digest).await?;
 
         Ok(Response::new(artifact))
     }

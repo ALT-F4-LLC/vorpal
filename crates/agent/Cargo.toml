@@ -6,11 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = { default-features = false, version = "1" }
 async-compression = { version = "0", features = ["all"] }
-clap = { default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], version = "4" }
-console = { version = "0" }
 infer = { default-features = false, version = "0" }
-petgraph = { default-features = false, features = ["graphmap"], version = "0" }
-port-selector = { default-features = false, version = "0" }
 reqwest = { default-features = false, version = "0", features = ["json", "rustls-tls"] }
 serde_json = { default-features = false, features = ["std"], version = "1" }
 sha256 = { default-features = false, version = "1" }
@@ -18,12 +14,6 @@ tokio = { default-features = false, version = "1" }
 tokio-stream = { default-features = false, version = "0" }
 tokio-tar = { default-features = false, version = "0" }
 tonic = { default-features = false, version = "0" }
-tonic-health = { default-features = false, version = "0" }
-tracing = { default-features = false, version = "0" }
-tracing-subscriber = { default-features = false, features = ["ansi", "fmt", "registry", "std"], version = "0" }
 url = { default-features = false, version = "2" }
-vorpal-registry = { default-features = false, path = "../registry" }
 vorpal-schema = { default-features = false, path = "../schema" }
-vorpal-sdk = { default-features = false, path = "../sdk" }
 vorpal-store = { default-features = false, path = "../store" }
-vorpal-worker = { default-features = false, path = "../worker" }

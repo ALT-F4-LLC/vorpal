@@ -2,11 +2,10 @@ use crate::artifact::build;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use console::style;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 use tonic::transport::Server;
 use tracing::{info, subscriber, warn, Level};
-use tracing_subscriber::fmt::writer::MakeWriterExt;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_agent::service::AgentServer;
 use vorpal_registry::{
     archive::{ArchiveBackend, ArchiveServer},
@@ -20,10 +19,10 @@ use vorpal_schema::{
     },
     artifact::v0::{
         artifact_service_client::ArtifactServiceClient,
-        artifact_service_server::ArtifactServiceServer, Artifact, ArtifactRequest, ArtifactSystem,
+        artifact_service_server::ArtifactServiceServer, Artifact, ArtifactRequest,
         ArtifactsRequest,
     },
-    system_default, system_default_str, system_from_str,
+    system_default, system_default_str,
     worker::v0::{
         worker_service_client::WorkerServiceClient, worker_service_server::WorkerServiceServer,
     },
@@ -35,20 +34,19 @@ mod artifact;
 mod build;
 mod config;
 
-pub fn get_prefix(name: &str) -> String {
-    style(format!("{} |>", name)).bold().to_string()
-}
-
 #[derive(Subcommand)]
 enum Command {
     Artifact {
-        #[arg(default_value_t = false, long)]
+        #[arg(default_value = "vorpal-config", long, short)]
+        config: String,
+
+        #[arg(default_value_t = false, long, short)]
         export: bool,
 
-        #[arg(long)]
+        #[arg(long, short)]
         name: String,
 
-        #[arg(default_value_t = system_default_str(), long)]
+        #[arg(default_value_t = system_default_str(), long, short)]
         target: String,
     },
 
@@ -56,10 +54,10 @@ enum Command {
     Keys(CommandKeys),
 
     Start {
-        #[clap(default_value = "23151", long)]
+        #[clap(default_value = "23151", long, short)]
         port: u16,
 
-        #[arg(default_value = "agent,registry,worker", long)]
+        #[arg(default_value = "agent,registry,worker", long, short)]
         services: String,
 
         #[arg(default_value = "local", long)]
@@ -85,30 +83,28 @@ pub struct Cli {
     #[command(subcommand)]
     command: Command,
 
-    #[arg(default_value_t = get_current_dir(), long)]
-    config_path: String,
+    #[arg(default_value_t = get_default_context(), long, short)]
+    context: String,
 
-    #[arg(default_value = "rust", long)]
-    language: String,
-
-    #[arg(default_value_t = Level::INFO, global = true, long)]
+    #[arg(default_value_t = Level::INFO, global = true, long, short)]
     level: Level,
 
     #[clap(default_value = "http://localhost:23151", long, short)]
     registry: String,
 
-    #[arg(default_value = "vorpal-config", long)]
-    rust_bin: String,
-
-    #[clap(default_value = "http://localhost:23151", long)]
+    #[clap(default_value = "http://localhost:23151", long, short)]
     worker: String,
 }
 
-fn get_current_dir() -> String {
+fn get_default_context() -> String {
     std::env::current_dir()
-        .unwrap_or_default()
+        .unwrap_or_else(|_| Path::new(".").to_path_buf())
         .to_string_lossy()
         .to_string()
+}
+
+pub fn get_prefix(name: &str) -> String {
+    style(format!("{} |>", name)).bold().to_string()
 }
 
 #[tokio::main]
@@ -118,17 +114,26 @@ async fn main() -> Result<()> {
     let Cli {
         agent,
         command,
-        config_path,
-        language,
+        context,
         level,
         registry,
-        rust_bin,
         worker,
     } = cli;
 
+    if context.is_empty() {
+        bail!("no `--context` specified");
+    }
+
+    let context_path = Path::new(&context);
+
+    if !context_path.exists() {
+        bail!("context not found: {}", context_path.display());
+    }
+
     match &command {
         Command::Artifact {
-            export: _artifact_export,
+            config,
+            export: artifact_export,
             name,
             target,
         } => {
@@ -150,12 +155,54 @@ async fn main() -> Result<()> {
 
             subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
-            // Get config
+            // Setup config
 
-            let target = system_from_str(target)?;
+            let config_file_path = format!("{}/{}", context, config.replace("./", ""));
+            let config_path = Path::new(&config_file_path);
 
-            if target == ArtifactSystem::UnknownSystem {
-                bail!("unsupported target: {}", target.as_str_name());
+            if !config_path.exists() {
+                bail!("config not found: {}", config_path.display());
+            }
+
+            // Start config
+
+            let (mut config_process, mut config_artifact) = config::start(
+                config_path.display().to_string(),
+                registry.clone(),
+                target.to_string(),
+            )
+            .await?;
+
+            // Populate artifacts
+
+            let config_response = match config_artifact
+                .get_artifacts(ArtifactsRequest { digests: vec![] })
+                .await
+            {
+                Ok(res) => res,
+                Err(error) => {
+                    bail!("failed to get config: {}", error);
+                }
+            };
+
+            let config_response = config_response.into_inner();
+            let mut config_result = HashMap::<String, Artifact>::new();
+
+            for digest in config_response.digests.into_iter() {
+                let request = ArtifactRequest {
+                    digest: digest.clone(),
+                };
+
+                let response = match config_artifact.get_artifact(request).await {
+                    Ok(res) => res,
+                    Err(error) => {
+                        bail!("failed to get artifact: {}", error);
+                    }
+                };
+
+                let artifact = response.into_inner();
+
+                config_result.insert(digest, artifact.clone());
             }
 
             // Setup clients
@@ -172,62 +219,9 @@ async fn main() -> Result<()> {
                 .await
                 .expect("failed to connect to artifact");
 
-            // Start config
-
-            let config_path = config::get_path(
-                &agent,
-                &config_path,
-                &language,
-                &registry,
-                &mut registry_archive,
-                &mut registry_artifact,
-                &rust_bin,
-                &target,
-                &mut worker,
-            )
-            .await?;
-
-            if !config_path.exists() {
-                bail!("config file not found: {}", config_path.display());
-            }
-
-            let (mut config_process, mut config_artifact) =
-                config::start(config_path.display().to_string(), registry.clone()).await?;
-
-            let config_response = match config_artifact
-                .get_artifacts(ArtifactsRequest { digests: vec![] })
-                .await
-            {
-                Ok(res) => res,
-                Err(error) => {
-                    bail!("failed to get config: {}", error);
-                }
-            };
-
-            let config_response = config_response.into_inner();
-
             // Populate artifacts
 
-            let mut artifact_selected = HashMap::<String, Artifact>::new();
-
-            for digest in config_response.digests.into_iter() {
-                let request = ArtifactRequest {
-                    digest: digest.clone(),
-                };
-
-                let response = match config_artifact.get_artifact(request).await {
-                    Ok(res) => res,
-                    Err(error) => {
-                        bail!("failed to get artifact: {}", error);
-                    }
-                };
-
-                artifact_selected.insert(digest, response.into_inner());
-            }
-
-            // Populate artifacts
-
-            let (selected_hash, selected) = artifact_selected
+            let (selected_hash, selected) = config_result
                 .clone()
                 .into_iter()
                 .find(|(_, artifact)| artifact.name == *name)
@@ -245,6 +239,25 @@ async fn main() -> Result<()> {
             )
             .await?;
 
+            config_process.kill().await?;
+
+            // Export artifact
+
+            if *artifact_export {
+                let artifacts = artifact
+                    .clone()
+                    .into_iter()
+                    .map(|(_, artifact)| artifact)
+                    .collect::<Vec<Artifact>>();
+
+                let artifact_json =
+                    serde_json::to_string_pretty(&artifacts).expect("failed to serialize artifact");
+
+                println!("{}", artifact_json);
+
+                return Ok(());
+            }
+
             // Build artifacts
 
             config::build_artifacts(
@@ -255,8 +268,6 @@ async fn main() -> Result<()> {
                 &mut worker,
             )
             .await?;
-
-            config_process.kill().await?;
 
             Ok(())
         }

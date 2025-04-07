@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use tracing::Level;
 use vorpal_schema::system_default_str;
 
 #[derive(Parser)]
@@ -13,19 +12,16 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     Start {
-        #[clap(default_value = "http://localhost:23151", long, short)]
+        #[clap(default_value = "http://localhost:23151", long)]
         agent: String,
 
-        #[clap(default_value_t = Level::INFO, global = true, long)]
-        level: Level,
-
-        #[clap(long, short)]
+        #[clap(long)]
         port: u16,
 
-        #[clap(default_value = "http://localhost:23151", long, short)]
+        #[clap(default_value = "http://localhost:23151", long)]
         registry: String,
 
-        #[arg(default_value_t = system_default_str(), long, short)]
+        #[arg(default_value_t = system_default_str(), long)]
         target: String,
     },
 }

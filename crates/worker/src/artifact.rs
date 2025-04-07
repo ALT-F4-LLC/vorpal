@@ -4,8 +4,7 @@ use std::path::Path;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, process::Stdio};
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
 use tokio::process::Command;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc, mpsc::Sender};
 use tokio::{
     fs::set_permissions,
     io::{AsyncBufReadExt, BufReader},
@@ -378,9 +377,9 @@ async fn build_artifact(
         return Err(Status::internal("no output files found"));
     }
 
-    // Sanitize files
+    send_message(format!("pack: {}", artifact_digest), &tx).await?;
 
-    send_message(format!("sanitize: {}", artifact_digest), &tx).await?;
+    // Sanitize files
 
     for path in artifact_path_files.iter() {
         if let Err(err) = set_timestamps(path).await {
@@ -392,8 +391,6 @@ async fn build_artifact(
     }
 
     // Create archive
-
-    send_message(format!("pack: {}", artifact_digest), &tx).await?;
 
     let artifact_archive = create_sandbox_file(Some("tar.zst"))
         .await
@@ -505,11 +502,7 @@ async fn pull_source(
         .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
     if !source_archive.exists() {
-        send_message(
-            format!("pull source: {}-{}", source.name, source_digest),
-            &tx,
-        )
-        .await?;
+        send_message(format!("pull: {}", source_digest), &tx).await?;
 
         let request = ArchivePullRequest {
             digest: source_digest.to_string(),
@@ -564,7 +557,7 @@ async fn pull_source(
         return Err(Status::not_found("source archive not found"));
     }
 
-    send_message(format!("unpack source: {}", source.name), &tx).await?;
+    send_message(format!("unpack: {}", source_digest), &tx).await?;
 
     let source_workspace_path = source_dir_path.join(&source.name);
 

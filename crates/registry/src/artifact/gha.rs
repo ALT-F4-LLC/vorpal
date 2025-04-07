@@ -9,31 +9,31 @@ use std::path::Path;
 use tokio::fs::{read, write};
 use tonic::{async_trait, Status};
 use tracing::info;
-use vorpal_schema::artifact::v0::{Artifact, ArtifactRequest};
+use vorpal_schema::artifact::v0::Artifact;
 
 #[async_trait]
 impl ArtifactBackend for GhaBackend {
-    async fn get_artifact(&self, request: &ArtifactRequest) -> Result<Artifact, Status> {
-        let request_key = get_artifact_key(&request.digest);
-        let request_file = format!("/tmp/{}", request_key);
-        let request_path = Path::new(&request_file);
+    async fn get_artifact(&self, artifact_digest: String) -> Result<Artifact, Status> {
+        let artifact_key = get_artifact_key(&artifact_digest);
+        let artifact_file = format!("/tmp/{}", artifact_key);
+        let artifact_path = Path::new(&artifact_file);
 
-        if request_path.exists() {
-            let data = read(&request_path)
+        if artifact_path.exists() {
+            let artifact_data = read(&artifact_path)
                 .await
                 .map_err(|err| Status::internal(err.to_string()))?;
 
-            let artifact = serde_json::from_slice::<Artifact>(&data)
+            let artifact = serde_json::from_slice::<Artifact>(&artifact_data)
                 .map_err(|err| Status::internal(err.to_string()))?;
 
             return Ok(artifact);
         }
 
-        info!("fetch cache: {}", request_key);
+        info!("cache: {}", artifact_key);
 
         let cache_entry = &self
             .cache_client
-            .get_cache_entry(&request_key, &request.digest)
+            .get_cache_entry(&artifact_key, &artifact_digest)
             .await
             .map_err(|e| {
                 Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
@@ -41,13 +41,13 @@ impl ArtifactBackend for GhaBackend {
 
         if cache_entry.is_none() {
             return Err(Status::not_found(format!(
-                "cache entry not found: {request_key}"
+                "cache entry not found: {artifact_key}"
             )));
         }
 
         let cache_entry = cache_entry.as_ref().unwrap();
 
-        info!("fetch cache location: {:?}", cache_entry.archive_location);
+        info!("cache location: {:?}", cache_entry.archive_location);
 
         let cache_response = reqwest::get(&cache_entry.archive_location)
             .await
@@ -58,50 +58,56 @@ impl ArtifactBackend for GhaBackend {
             .await
             .expect("failed to read response");
 
-        write(&request_path, &cache_response_bytes)
+        write(&artifact_path, &cache_response_bytes)
             .await
             .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
 
-        info!("fetch cache saved: {:?}", request_path);
+        info!("cache written: {:?}", artifact_path);
 
-        let data = read(&request_path)
+        let artifact_data = read(&artifact_path)
             .await
             .map_err(|err| Status::internal(err.to_string()))?;
 
-        let artifact = serde_json::from_slice::<Artifact>(&data)
+        let artifact = serde_json::from_slice::<Artifact>(&artifact_data)
             .map_err(|err| Status::internal(err.to_string()))?;
 
         Ok(artifact)
     }
 
-    async fn store_artifact(&self, request: &Artifact) -> Result<String, Status> {
-        let request_json = serde_json::to_vec(request)
+    async fn store_artifact(&self, artifact: &Artifact) -> Result<String, Status> {
+        let artifact_json = serde_json::to_vec(artifact)
             .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
-        let request_digest = digest(&request_json);
-        let request_key = get_artifact_key(&request_digest);
-        let request_file = format!("/tmp/{}", request_key);
-        let request_path = Path::new(&request_file);
+        let artifact_digest = digest(&artifact_json);
+        let artifact_key = get_artifact_key(&artifact_digest);
+        let artifact_file = format!("/tmp/{}", artifact_key);
+        let artifact_path = Path::new(&artifact_file);
 
-        if !request_path.exists() {
-            write(request_path, &request_json)
+        if !artifact_path.exists() {
+            write(artifact_path, &artifact_json)
                 .await
                 .map_err(|err| Status::internal(format!("failed to write artifact: {:?}", err)))?;
         }
 
+        info!("cache: {}", artifact_key);
+
         let cache_entry = &self
             .cache_client
-            .get_cache_entry(&request_key, &request_digest)
+            .get_cache_entry(&artifact_key, &artifact_digest)
             .await
             .map_err(|e| {
                 Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
             })?;
 
         if cache_entry.is_none() {
-            let cache_size = request_json.len() as u64;
+            let cache_size = artifact_json.len() as u64;
 
             let cache_reserve = &self
                 .cache_client
-                .reserve_cache(request_key, request_digest.clone(), Some(cache_size))
+                .reserve_cache(
+                    artifact_key.clone(),
+                    artifact_digest.clone(),
+                    Some(cache_size),
+                )
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
@@ -111,19 +117,23 @@ impl ArtifactBackend for GhaBackend {
                 return Err(Status::internal("failed to reserve cache returned 0"));
             }
 
+            info!("cache reserved: {:?}", cache_reserve.cache_id);
+
             self.cache_client
                 .save_cache(
                     cache_reserve.cache_id,
-                    &request_json,
+                    &artifact_json,
                     DEFAULT_GHA_CHUNK_SIZE,
                 )
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to save cache: {:?}", e.to_string()))
                 })?;
+
+            info!("cache saved: {:?}", cache_reserve.cache_id);
         }
 
-        Ok(request_digest)
+        Ok(artifact_digest)
     }
 
     fn box_clone(&self) -> Box<dyn ArtifactBackend> {

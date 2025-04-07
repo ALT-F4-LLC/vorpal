@@ -1,7 +1,10 @@
 use crate::build_source;
 use anyhow::Result;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
+
 use vorpal_schema::{
     agent::v0::{
         agent_service_server::{AgentService, AgentServiceServer},
@@ -23,53 +26,86 @@ impl AgentServer {
     }
 }
 
+async fn prepare_artifact(
+    registry: String,
+    request: Request<Artifact>,
+    tx: &mpsc::Sender<Result<PrepareArtifactResponse, Status>>,
+) -> Result<(), Status> {
+    let mut client = ArchiveServiceClient::connect(registry.to_owned())
+        .await
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+
+    let request = request.into_inner();
+
+    let mut sources = vec![];
+
+    for source in request.sources.into_iter() {
+        let digest = build_source(&mut client, &source, &tx.clone())
+            .await
+            .map_err(|err| Status::internal(format!("failed to build source: {:?}", err)))?;
+
+        let source = ArtifactSource {
+            digest: Some(digest.to_string()),
+            excludes: source.excludes,
+            includes: source.includes,
+            name: source.name,
+            path: source.path,
+        };
+
+        sources.push(source);
+    }
+
+    let artifact = Artifact {
+        name: request.name,
+        sources,
+        steps: request.steps,
+        systems: request.systems,
+        target: request.target,
+    };
+
+    let artifact_json = serde_json::to_string(&artifact)
+        .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
+
+    let artifact_digest = sha256::digest(&artifact_json);
+
+    let artifact_response = PrepareArtifactResponse {
+        artifact: Some(artifact),
+        artifact_digest: Some(artifact_digest),
+        artifact_output: None,
+    };
+
+    let _ = tx
+        .send(Ok(artifact_response))
+        .await
+        .map_err(|_| Status::internal("failed to send response"));
+
+    Ok(())
+}
+
 #[tonic::async_trait]
 impl AgentService for AgentServer {
+    type PrepareArtifactStream = ReceiverStream<Result<PrepareArtifactResponse, Status>>;
+
     async fn prepare_artifact(
         &self,
         request: Request<Artifact>,
-    ) -> Result<Response<PrepareArtifactResponse>, Status> {
-        let mut client = ArchiveServiceClient::connect(self.registry.to_owned())
-            .await
-            .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+    ) -> Result<Response<Self::PrepareArtifactStream>, Status> {
+        let (tx, rx) = mpsc::channel(100);
 
-        let request = request.into_inner();
+        let registry = self.registry.clone();
 
-        let mut sources = vec![];
+        tokio::spawn(async move {
+            if let Err(err) = prepare_artifact(registry, request, &tx).await {
+                let _ = tx
+                    .send(Err(Status::internal(format!(
+                        "failed to prepare artifact: {:?}",
+                        err
+                    ))))
+                    .await;
+            }
+        });
 
-        for source in request.sources.into_iter() {
-            let digest = build_source(&mut client, &source)
-                .await
-                .map_err(|err| Status::internal(format!("failed to build source: {:?}", err)))?;
-
-            let source = ArtifactSource {
-                digest: Some(digest.to_string()),
-                excludes: source.excludes,
-                includes: source.includes,
-                name: source.name,
-                path: source.path,
-            };
-
-            sources.push(source);
-        }
-
-        let artifact = Artifact {
-            name: request.name,
-            sources,
-            steps: request.steps,
-            systems: request.systems,
-            target: request.target,
-        };
-
-        let artifact_json = serde_json::to_string(&artifact)
-            .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
-
-        let artifact_digest = sha256::digest(&artifact_json);
-
-        Ok(Response::new(PrepareArtifactResponse {
-            artifact: Some(artifact),
-            artifact_digest: artifact_digest.to_string(),
-        }))
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
 

@@ -1,19 +1,16 @@
 use crate::cli::{Cli, Command};
 use anyhow::{bail, Result};
 use clap::Parser;
+use sha256::digest;
 use std::collections::HashMap;
-use tonic::{
-    transport::{Channel, Server},
-    Code::NotFound,
-    Request, Response, Status,
-};
+use tonic::{transport::Server, Code::NotFound, Request, Response, Status};
 use vorpal_schema::{
     agent::v0::agent_service_client::AgentServiceClient,
     artifact::v0::{
         artifact_service_client::ArtifactServiceClient,
         artifact_service_server::{ArtifactService, ArtifactServiceServer},
-        Artifact, ArtifactRequest, ArtifactResponse, ArtifactStep, ArtifactSystem,
-        ArtifactsRequest, ArtifactsResponse,
+        Artifact, ArtifactRequest, ArtifactResponse, ArtifactSystem, ArtifactsRequest,
+        ArtifactsResponse,
     },
     system_from_str,
 };
@@ -21,21 +18,21 @@ use vorpal_schema::{
 #[derive(Clone)]
 pub struct ConfigContext {
     agent: String,
-    artifact: HashMap<String, Artifact>,
     port: u16,
     registry: String,
+    store: HashMap<String, Artifact>,
     system: ArtifactSystem,
 }
 
 #[derive(Clone)]
 pub struct ArtifactServer {
     pub artifacts: Vec<String>,
-    pub context: ConfigContext,
+    pub store: HashMap<String, Artifact>,
 }
 
 impl ArtifactServer {
-    pub fn new(artifacts: Vec<String>, context: ConfigContext) -> Self {
-        Self { artifacts, context }
+    pub fn new(artifacts: Vec<String>, store: HashMap<String, Artifact>) -> Self {
+        Self { artifacts, store }
     }
 }
 
@@ -46,13 +43,18 @@ impl ArtifactService for ArtifactServer {
         request: Request<ArtifactRequest>,
     ) -> Result<Response<Artifact>, Status> {
         let request = request.into_inner();
-        let request_artifact = self.context.get_artifact(&request.digest);
 
-        if request_artifact.is_none() {
+        if request.digest.is_empty() {
+            return Err(tonic::Status::invalid_argument("'name' is required"));
+        }
+
+        let artifact = self.store.get(request.digest.as_str());
+
+        if artifact.is_none() {
             return Err(tonic::Status::not_found("artifact not found"));
         }
 
-        Ok(Response::new(request_artifact.unwrap().clone()))
+        Ok(Response::new(artifact.unwrap().clone()))
     }
 
     async fn get_artifacts(
@@ -83,7 +85,6 @@ pub async fn get_context() -> Result<ConfigContext> {
             port,
             registry,
             target,
-            ..
         } => {
             let target = system_from_str(&target)?;
 
@@ -96,15 +97,23 @@ impl ConfigContext {
     pub fn new(agent: String, port: u16, registry: String, system: ArtifactSystem) -> Self {
         Self {
             agent,
-            artifact: HashMap::new(),
             port,
             registry,
+            store: HashMap::new(),
             system,
         }
     }
 
     pub async fn add_artifact(&mut self, artifact: Artifact) -> Result<String> {
-        // 1. Prepare artifact
+        let artifact_json =
+            serde_json::to_string(&artifact).expect("failed to serialize artifact to JSON");
+        let artifact_digest = digest(artifact_json);
+
+        if self.store.contains_key(artifact_digest.as_str()) {
+            return Ok(artifact_digest);
+        }
+
+        // TODO: make this run in parallel
 
         let mut client = AgentServiceClient::connect(self.agent.clone())
             .await
@@ -115,63 +124,46 @@ impl ConfigContext {
             .await
             .expect("failed to prepare artifact");
 
-        let response = response.into_inner();
+        let mut response = response.into_inner();
+        let mut response_artifact = None;
+        let mut response_artifact_digest = None;
 
-        if response.artifact.is_none() {
-            bail!("artifact not returned from agent service");
-        }
+        while let Ok(message) = response.message().await {
+            if message.is_none() {
+                break;
+            }
 
-        // 2. Insert context
-
-        self.artifact
-            .insert(response.artifact_digest.clone(), response.artifact.unwrap());
-
-        // 3. Return digest
-
-        Ok(response.artifact_digest)
-    }
-
-    async fn fetch_step_artifacts(
-        &mut self,
-        artifact_client: &mut ArtifactServiceClient<Channel>,
-        artifact_steps: Vec<ArtifactStep>,
-    ) -> Result<()> {
-        for step in artifact_steps.iter() {
-            for artifact_digest in step.artifacts.iter() {
-                if self.artifact.contains_key(artifact_digest) {
-                    continue;
+            if let Some(res) = message {
+                if let Some(artifact_output) = res.artifact_output {
+                    println!("{} |> {}", artifact.name, artifact_output);
                 }
 
-                let request = ArtifactRequest {
-                    digest: artifact_digest.to_string(),
-                };
-
-                let response = match artifact_client.get_artifact(request).await {
-                    Ok(res) => res,
-                    Err(error) => {
-                        if error.code() != NotFound {
-                            bail!("artifact service error: {:?}", error);
-                        }
-
-                        bail!("artifact not found: {artifact_digest}");
-                    }
-                };
-
-                let artifact = response.into_inner();
-
-                self.artifact
-                    .insert(artifact_digest.to_string(), artifact.clone());
-
-                Box::pin(self.fetch_step_artifacts(artifact_client, artifact.steps)).await?
+                response_artifact = res.artifact;
+                response_artifact_digest = res.artifact_digest;
             }
         }
 
-        Ok(())
+        if response_artifact.is_none() {
+            bail!("artifact not returned from agent service");
+        }
+
+        if response_artifact_digest.is_none() {
+            bail!("artifact digest not returned from agent service");
+        }
+
+        let artifact = response_artifact.unwrap();
+        let artifact_digest = response_artifact_digest.unwrap();
+
+        if !self.store.contains_key(artifact_digest.as_str()) {
+            self.store.insert(artifact_digest.clone(), artifact.clone());
+        }
+
+        Ok(artifact_digest)
     }
 
-    pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
-        if self.artifact.contains_key(digest) {
-            return Ok(digest.to_string());
+    pub async fn fetch_artifact(&mut self, artifact_digest: &str) -> Result<String> {
+        if self.store.contains_key(artifact_digest) {
+            return Ok(artifact_digest.to_string());
         }
 
         let mut client = ArtifactServiceClient::connect(self.registry.clone())
@@ -179,7 +171,7 @@ impl ConfigContext {
             .expect("failed to connect to artifact service");
 
         let request = ArtifactRequest {
-            digest: digest.to_string(),
+            digest: artifact_digest.to_string(),
         };
 
         match client.get_artifact(request.clone()).await {
@@ -188,24 +180,28 @@ impl ConfigContext {
                     bail!("artifact service error: {:?}", status);
                 }
 
-                bail!("artifact not found: {digest}");
+                bail!("artifact not found: {artifact_digest}");
             }
 
             Ok(response) => {
                 let artifact = response.into_inner();
 
-                self.fetch_step_artifacts(&mut client, artifact.steps.clone())
-                    .await?;
+                self.store
+                    .insert(artifact_digest.to_string(), artifact.clone());
 
-                self.artifact.insert(digest.to_string(), artifact);
+                for step in artifact.steps.iter() {
+                    for artifact_digest in step.artifacts.iter() {
+                        Box::pin(self.fetch_artifact(artifact_digest)).await?;
+                    }
+                }
 
-                Ok(digest.to_string())
+                Ok(artifact_digest.to_string())
             }
         }
     }
 
-    pub fn get_artifact(&self, hash: &str) -> Option<Artifact> {
-        self.artifact.get(hash).cloned()
+    pub fn get_artifact(&self, digest: &str) -> Option<Artifact> {
+        self.store.get(digest).cloned()
     }
 
     pub fn get_target(&self) -> ArtifactSystem {
@@ -217,7 +213,10 @@ impl ConfigContext {
             .parse()
             .expect("failed to parse address");
 
-        let service = ArtifactServiceServer::new(ArtifactServer::new(artifacts, self.clone()));
+        let service =
+            ArtifactServiceServer::new(ArtifactServer::new(artifacts, self.store.clone()));
+
+        println!("artifact service: {}", addr);
 
         Server::builder()
             .add_service(service)
