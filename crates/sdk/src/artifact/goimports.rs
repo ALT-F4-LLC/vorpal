@@ -32,6 +32,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         context,
         vec![go.clone()],
         vec![
+            "CGO_ENABLED=0".to_string(),
             format!("GOARCH={}", get_goarch(context.get_target())),
             "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
             format!("GOOS={}", get_goos(context.get_target())),
