@@ -69,12 +69,12 @@ pub async fn build_source(
     };
 
     if source_type == ArtifactSourceType::Git {
-        bail!("`source.{}.path` git not supported", source.name);
+        bail!("'source.{}.path' git not supported", source.name);
     }
 
     if source_type == ArtifactSourceType::Unknown {
         bail!(
-            "`source.{}.path` unknown kind: {:?}",
+            "'source.{}.path' unknown kind: {:?}",
             source.name,
             source.path
         );
@@ -85,7 +85,7 @@ pub async fn build_source(
     if source_type == ArtifactSourceType::Http {
         if source.digest.is_none() {
             bail!(
-                "`source.{}.hash` required for remote sources: {:?}",
+                "'source.{}.hash' required for remote sources: {:?}",
                 source.name,
                 source.path
             );
@@ -93,7 +93,7 @@ pub async fn build_source(
 
         if source.digest.is_some() && source.digest.clone().unwrap() == "" {
             bail!(
-                "`source.{}.hash` empty for remote sources: {:?}",
+                "'source.{}.hash' empty for remote sources: {:?}",
                 source.name,
                 source.path
             );
@@ -204,7 +204,7 @@ pub async fn build_source(
 
                 _ => {
                     bail!(
-                        "`source.{}.path` unsupported mime-type detected: {:?}",
+                        "'source.{}.path' unsupported mime-type detected: {:?}",
                         source.name,
                         source.path
                     );
@@ -217,7 +217,7 @@ pub async fn build_source(
         let local_path = Path::new(&source.path).to_path_buf();
 
         if !local_path.exists() {
-            bail!("`source.{}.path` not found: {:?}", source.name, source.path);
+            bail!("'source.{}.path' not found: {:?}", source.name, source.path);
         }
 
         // TODO: make path relevant to the current working directory
@@ -248,7 +248,7 @@ pub async fn build_source(
 
     if source_sandbox_files.is_empty() {
         bail!(
-            "Artifact `source.{}.path` no files found: {:?}",
+            "Artifact 'source.{}.path' no files found: {:?}",
             source.name,
             source.path
         );
@@ -267,7 +267,7 @@ pub async fn build_source(
     if let Some(hash) = source.digest.clone() {
         if hash != source_digest {
             bail!(
-                "`source.{}.hash` mismatch: {} != {}",
+                "'source.{}.hash' mismatch: {} != {}",
                 source.name,
                 source_digest,
                 hash

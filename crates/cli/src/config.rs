@@ -132,15 +132,35 @@ pub async fn start(
 
     let mut stdio_merged = StreamExt::merge(stdout, stderr);
 
-    while let Some(line) = stdio_merged.next().await {
-        let line = line.map_err(|err| anyhow!("failed to read line: {:?}", err))?;
+    loop {
+        match stdio_merged.next().await {
+            Some(Ok(line)) => {
+                if line.contains("artifact service:") {
+                    break;
+                }
 
-        if !line.contains("artifact service:") {
-            info!("{}", line);
-        }
+                if line.starts_with("Error: ") {
+                    let _ = config_process
+                        .kill()
+                        .await
+                        .map_err(|_| anyhow!("failed to kill config server"));
 
-        if line.contains("artifact service:") {
-            break;
+                    bail!("{}", line.replace("Error: ", ""));
+                } else {
+                    info!("{}", line);
+                }
+            }
+
+            Some(Err(err)) => {
+                let _ = config_process
+                    .kill()
+                    .await
+                    .map_err(|_| anyhow!("failed to kill config server"));
+
+                bail!("failed to read line: {:?}", err);
+            }
+
+            None => break,
         }
     }
 

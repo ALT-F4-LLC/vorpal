@@ -130,18 +130,24 @@ impl ConfigContext {
         let mut response_artifact = None;
         let mut response_artifact_digest = None;
 
-        while let Ok(message) = response.message().await {
-            if message.is_none() {
-                break;
-            }
+        loop {
+            match response.message().await {
+                Ok(Some(message)) => {
+                    if let Some(artifact_output) = message.artifact_output {
+                        println!("{} |> {}", artifact.name, artifact_output);
+                    }
 
-            if let Some(res) = message {
-                if let Some(artifact_output) = res.artifact_output {
-                    println!("{} |> {}", artifact.name, artifact_output);
+                    response_artifact = message.artifact;
+                    response_artifact_digest = message.artifact_digest;
                 }
+                Ok(None) => break,
+                Err(status) => {
+                    if status.code() != NotFound {
+                        bail!("{}", status.message());
+                    }
 
-                response_artifact = res.artifact;
-                response_artifact_digest = res.artifact_digest;
+                    break;
+                }
             }
         }
 

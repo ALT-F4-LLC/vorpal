@@ -42,7 +42,7 @@ async fn prepare_artifact(
     for source in artifact.sources.into_iter() {
         let digest = build_source(&mut client, &source, &tx.clone())
             .await
-            .map_err(|err| Status::internal(format!("failed to build source: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("{}", err)))?;
 
         let source = ArtifactSource {
             digest: Some(digest.to_string()),
@@ -98,12 +98,7 @@ impl AgentService for AgentServer {
 
         tokio::spawn(async move {
             if let Err(err) = prepare_artifact(registry, request, &tx).await {
-                let _ = tx
-                    .send(Err(Status::internal(format!(
-                        "failed to prepare artifact: {:?}",
-                        err
-                    ))))
-                    .await;
+                let _ = tx.send(Err(err)).await;
             }
         });
 

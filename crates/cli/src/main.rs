@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use console::style;
 use std::{collections::HashMap, path::Path};
 use tonic::transport::Server;
-use tracing::{info, subscriber, warn, Level};
+use tracing::{error, info, subscriber, warn, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_agent::service::AgentServer;
 use vorpal_registry::{
@@ -166,12 +166,19 @@ async fn main() -> Result<()> {
 
             // Start config
 
-            let (mut config_process, mut config_artifact) = config::start(
+            let (mut config_process, mut config_artifact) = match config::start(
                 config_path.display().to_string(),
                 registry.clone(),
                 target.to_string(),
             )
-            .await?;
+            .await
+            {
+                Ok(res) => res,
+                Err(error) => {
+                    error!("{}", error);
+                    return Ok(());
+                }
+            };
 
             // Populate artifacts
 
