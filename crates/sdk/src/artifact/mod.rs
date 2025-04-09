@@ -23,12 +23,12 @@ pub mod rustfmt;
 pub mod shell;
 pub mod step;
 
-pub struct ArtifactSourceBuilder {
+pub struct ArtifactSourceBuilder<'a> {
+    pub digest: Option<&'a str>,
     pub excludes: Vec<String>,
-    pub hash: Option<String>,
     pub includes: Vec<String>,
-    pub name: String,
-    pub path: String,
+    pub name: &'a str,
+    pub path: &'a str,
 }
 
 pub struct ArtifactStepBuilder {
@@ -39,31 +39,31 @@ pub struct ArtifactStepBuilder {
     pub script: HashMap<ArtifactSystem, String>,
 }
 
-pub struct ArtifactBuilder {
-    pub name: String,
+pub struct ArtifactBuilder<'a> {
+    pub name: &'a str,
     pub sources: Vec<ArtifactSource>,
     pub steps: Vec<ArtifactStep>,
     pub systems: Vec<ArtifactSystem>,
 }
 
-impl ArtifactSourceBuilder {
-    pub fn new(name: String, path: String) -> Self {
+impl<'a> ArtifactSourceBuilder<'a> {
+    pub fn new(name: &'a str, path: &'a str) -> Self {
         Self {
+            digest: None,
             excludes: vec![],
-            hash: None,
             includes: vec![],
             name,
             path,
         }
     }
 
-    pub fn with_excludes(mut self, excludes: Vec<String>) -> Self {
-        self.excludes = excludes;
+    pub fn with_digest(mut self, digest: &'a str) -> Self {
+        self.digest = Some(digest);
         self
     }
 
-    pub fn with_hash(mut self, hash: String) -> Self {
-        self.hash = Some(hash);
+    pub fn with_excludes(mut self, excludes: Vec<String>) -> Self {
+        self.excludes = excludes;
         self
     }
 
@@ -74,11 +74,11 @@ impl ArtifactSourceBuilder {
 
     pub fn build(self) -> ArtifactSource {
         ArtifactSource {
-            digest: self.hash,
+            digest: self.digest.map(|v| v.to_string()),
             includes: self.includes,
             excludes: self.excludes,
-            name: self.name,
-            path: self.path,
+            name: self.name.to_string(),
+            path: self.path.to_string(),
         }
     }
 }
@@ -100,9 +100,10 @@ impl ArtifactStepBuilder {
         }
     }
 
-    pub fn with_arguments(mut self, arguments: Vec<String>, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn with_arguments(mut self, arguments: Vec<&str>, systems: Vec<ArtifactSystem>) -> Self {
         for system in systems {
-            self.arguments.insert(system, arguments.clone());
+            self.arguments
+                .insert(system, arguments.iter().map(|v| v.to_string()).collect());
         }
 
         self
@@ -157,8 +158,8 @@ impl ArtifactStepBuilder {
     }
 }
 
-impl ArtifactBuilder {
-    pub fn new(name: String) -> Self {
+impl<'a> ArtifactBuilder<'a> {
+    pub fn new(name: &'a str) -> Self {
         Self {
             name,
             sources: vec![],
@@ -193,7 +194,7 @@ impl ArtifactBuilder {
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let artifact = Artifact {
-            name: self.name,
+            name: self.name.to_string(),
             sources: self.sources,
             steps: self.steps,
             systems: self.systems.into_iter().map(|v| v.into()).collect(),
@@ -204,7 +205,7 @@ impl ArtifactBuilder {
             return Err(anyhow!("artifact must have at least one step"));
         }
 
-        context.add_artifact(artifact.clone()).await
+        context.add_artifact(&artifact).await
     }
 }
 

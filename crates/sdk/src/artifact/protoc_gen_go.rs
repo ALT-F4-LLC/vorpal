@@ -13,7 +13,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let target = context.get_target();
 
-    let source_hash = match target {
+    let source_digest = match target {
         Aarch64Darwin => "55c2a0cc7137f3625bd1bf3be85ed940c643e56fa1ceaf51f94c6434980f65a5",
         Aarch64Linux => "597aae8080d7e3e575198a5417ac2278ae49078d7fa3be56405ffb43bbb9f501",
         X8664Darwin => "123456789",
@@ -33,8 +33,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let source_path = format!("https://github.com/protocolbuffers/protobuf-go/releases/download/v{source_version}/protoc-gen-go.v{source_version}.{source_target}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name.to_string(), source_path)
-        .with_hash(source_hash.to_string())
+    let source = ArtifactSourceBuilder::new(name, source_path.as_str())
+        .with_digest(source_digest)
         .build();
 
     let step_script = formatdoc! {"
@@ -47,7 +47,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let step = step::shell(context, vec![], vec![], step_script).await?;
 
-    ArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name)
         .with_source(source)
         .with_step(step)
         .with_system(Aarch64Darwin)

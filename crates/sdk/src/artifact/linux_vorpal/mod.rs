@@ -337,42 +337,42 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let arguments = vec![
         // mount bin
-        "--bind".to_string(),
-        "$VORPAL_OUTPUT/bin".to_string(),
-        "/bin".to_string(),
+        "--bind",
+        "$VORPAL_OUTPUT/bin",
+        "/bin",
         // mount etc
-        "--bind".to_string(),
-        "$VORPAL_OUTPUT/etc".to_string(),
-        "/etc".to_string(),
+        "--bind",
+        "$VORPAL_OUTPUT/etc",
+        "/etc",
         // mount lib
-        "--bind".to_string(),
-        "$VORPAL_OUTPUT/lib".to_string(),
-        "/lib".to_string(),
+        "--bind",
+        "$VORPAL_OUTPUT/lib",
+        "/lib",
         // mount lib64 (if exists)
-        "--bind-try".to_string(),
-        "$VORPAL_OUTPUT/lib64".to_string(),
-        "/lib64".to_string(),
+        "--bind-try",
+        "$VORPAL_OUTPUT/lib64",
+        "/lib64",
         // mount sbin
-        "--bind".to_string(),
-        "$VORPAL_OUTPUT/sbin".to_string(),
-        "/sbin".to_string(),
+        "--bind",
+        "$VORPAL_OUTPUT/sbin",
+        "/sbin",
         // mount usr
-        "--bind".to_string(),
-        "$VORPAL_OUTPUT/usr".to_string(),
-        "/usr".to_string(),
+        "--bind",
+        "$VORPAL_OUTPUT/usr",
+        "/usr",
         // mount current directory
-        "--bind".to_string(),
-        "$VORPAL_WORKSPACE".to_string(),
-        "$VORPAL_WORKSPACE".to_string(),
+        "--bind",
+        "$VORPAL_WORKSPACE",
+        "$VORPAL_WORKSPACE",
         // change directory
-        "--chdir".to_string(),
-        "$VORPAL_WORKSPACE".to_string(),
+        "--chdir",
+        "$VORPAL_WORKSPACE",
         // set group id
-        "--gid".to_string(),
-        "0".to_string(),
+        "--gid",
+        "0",
         // set user id
-        "--uid".to_string(),
-        "0".to_string(),
+        "--uid",
+        "0",
     ];
 
     let step_stage_03_script = stage_03::script(
@@ -390,9 +390,9 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             arguments.clone(),
             vec![
                 // mount tools
-                "--bind".to_string(),
-                "$VORPAL_OUTPUT/tools".to_string(),
-                "/tools".to_string(),
+                "--bind",
+                "$VORPAL_OUTPUT/tools",
+                "/tools",
             ],
         ]
         .concat(),
@@ -457,7 +457,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let name = "linux-vorpal";
 
-    ArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name)
         .with_source(bash)
         .with_source(binutils)
         .with_source(bison)

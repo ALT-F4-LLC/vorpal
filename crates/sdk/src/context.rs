@@ -64,7 +64,7 @@ impl ArtifactService for ArtifactServer {
         _: tonic::Request<ArtifactsRequest>,
     ) -> Result<tonic::Response<ArtifactsResponse>, tonic::Status> {
         let response = ArtifactsResponse {
-            digests: self.artifacts.clone(),
+            digests: self.artifacts.iter().map(|s| s.to_string()).collect(),
         };
 
         Ok(Response::new(response))
@@ -106,12 +106,12 @@ impl ConfigContext {
         }
     }
 
-    pub async fn add_artifact(&mut self, artifact: Artifact) -> Result<String> {
+    pub async fn add_artifact(&mut self, artifact: &Artifact) -> Result<String> {
         let artifact_json =
-            serde_json::to_string(&artifact).expect("failed to serialize artifact to JSON");
+            serde_json::to_string(artifact).expect("failed to serialize artifact to JSON");
         let artifact_digest = digest(artifact_json);
 
-        if self.store.contains_key(artifact_digest.as_str()) {
+        if self.store.contains_key(&artifact_digest) {
             return Ok(artifact_digest);
         }
 
@@ -162,7 +162,7 @@ impl ConfigContext {
         let artifact = response_artifact.unwrap();
         let artifact_digest = response_artifact_digest.unwrap();
 
-        if !self.store.contains_key(artifact_digest.as_str()) {
+        if !self.store.contains_key(&artifact_digest) {
             self.store.insert(artifact_digest.clone(), artifact.clone());
         }
 

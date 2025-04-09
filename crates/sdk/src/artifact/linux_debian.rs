@@ -175,7 +175,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         vec![Aarch64Linux, X8664Linux],
     );
 
-    let dockerfile = ArtifactBuilder::new("linux-debian-dockerfile".to_string())
+    let dockerfile = ArtifactBuilder::new("linux-debian-dockerfile")
         .with_step(dockerfile_step)
         .with_system(Aarch64Darwin)
         .with_system(Aarch64Linux)
@@ -189,11 +189,11 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let step_build = step::docker(
         context,
         vec![
-            "buildx".to_string(),
-            "build".to_string(),
-            "--progress=plain".to_string(),
-            format!("--tag={}", dockerfile_image),
-            get_env_key(&dockerfile),
+            "buildx",
+            "build",
+            "--progress=plain",
+            format!("--tag={}", dockerfile_image).as_str(),
+            &get_env_key(&dockerfile),
         ],
         vec![dockerfile.clone()],
         vec![Aarch64Linux, X8664Linux],
@@ -202,11 +202,11 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let step_create = step::docker(
         context,
         vec![
-            "container".to_string(),
-            "create".to_string(),
-            "--name".to_string(),
-            dockerfile.clone(),
-            dockerfile_image,
+            "container",
+            "create",
+            "--name",
+            &dockerfile,
+            &dockerfile_image,
         ],
         vec![],
         vec![Aarch64Linux, X8664Linux],
@@ -215,11 +215,11 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let step_export = step::docker(
         context,
         vec![
-            "container".to_string(),
-            "export".to_string(),
-            "--output".to_string(),
-            "$VORPAL_WORKSPACE/debian.tar".to_string(),
-            dockerfile.clone(),
+            "container",
+            "export",
+            "--output",
+            "$VORPAL_WORKSPACE/debian.tar",
+            &dockerfile,
         ],
         vec![],
         vec![Aarch64Linux, X8664Linux],
@@ -241,30 +241,21 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let step_stop = step::docker(
         context,
-        vec![
-            "container".to_string(),
-            "stop".to_string(),
-            dockerfile.clone(),
-        ],
+        vec!["container", "stop", &dockerfile],
         vec![],
         vec![Aarch64Linux, X8664Linux],
     );
 
     let step_cleanup = step::docker(
         context,
-        vec![
-            "container".to_string(),
-            "rm".to_string(),
-            "--force".to_string(),
-            dockerfile,
-        ],
+        vec!["container", "rm", "--force", &dockerfile],
         vec![],
         vec![Aarch64Linux, X8664Linux],
     );
 
     let name = "linux-debian";
 
-    ArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name)
         .with_step(step_build)
         .with_step(step_create)
         .with_step(step_export)

@@ -17,13 +17,13 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let name = "protoc-gen-go-grpc";
 
-    let source_hash = "eba0f83ab252cffe2c6209f894c4c8238b2473a403bbdbcb985af25140aac95d";
+    let source_digest = "eba0f83ab252cffe2c6209f894c4c8238b2473a403bbdbcb985af25140aac95d";
     let source_version = "1.70.0";
     let source_path =
         format!("https://github.com/grpc/grpc-go/archive/refs/tags/v{source_version}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name.to_string(), source_path)
-        .with_hash(source_hash.to_string())
+    let source = ArtifactSourceBuilder::new(name, source_path.as_str())
+        .with_digest(source_digest)
         .build();
 
     let step_script = formatdoc! {"
@@ -53,7 +53,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     )
     .await?;
 
-    ArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name)
         .with_source(source)
         .with_step(step)
         .with_system(Aarch64Darwin)

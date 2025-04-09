@@ -74,7 +74,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let step = step::shell(context, artifacts, vec![], step_script).await?;
 
-    ArtifactBuilder::new("rust-toolchain".to_string())
+    ArtifactBuilder::new("rust-toolchain")
         .with_step(step)
         .with_system(Aarch64Darwin)
         .with_system(Aarch64Linux)

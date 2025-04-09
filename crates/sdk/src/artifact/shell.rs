@@ -94,7 +94,7 @@ pub async fn build<'a>(
 
     let step = step::shell(context, artifacts, vec![], step_script).await?;
 
-    ArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name)
         .with_step(step)
         .with_system(Aarch64Darwin)
         .with_system(Aarch64Linux)

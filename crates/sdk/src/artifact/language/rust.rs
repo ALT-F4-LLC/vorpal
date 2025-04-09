@@ -276,12 +276,12 @@ impl<'a> RustBuilder<'a> {
         let vendor_name = format!("{}-vendor", self.name);
 
         let vendor_source =
-            ArtifactSourceBuilder::new(vendor_name.clone(), source_path_str.clone())
+            ArtifactSourceBuilder::new(vendor_name.as_str(), source_path_str.as_str())
                 .with_excludes(vec![])
                 .with_includes(vendor_cargo_paths.clone())
                 .build();
 
-        let vendor = ArtifactBuilder::new(vendor_name)
+        let vendor = ArtifactBuilder::new(vendor_name.as_str())
             .with_source(vendor_source)
             .with_step(vendor_step)
             .with_system(Aarch64Darwin)
@@ -299,13 +299,13 @@ impl<'a> RustBuilder<'a> {
             source_excludes.push(exclude.to_string());
         }
 
-        let source = ArtifactSourceBuilder::new(self.name.to_string(), source_path_str)
+        let source = ArtifactSourceBuilder::new(self.name, source_path_str.as_str())
             .with_excludes(source_excludes)
             .build();
 
-        let mut step_artifacts = vec![toolchain.clone(), vendor.clone()];
+        let mut step_artifacts = vec![toolchain, vendor.clone()];
 
-        step_artifacts.extend(self.artifacts.clone());
+        step_artifacts.extend(self.artifacts);
 
         let step_script = formatdoc! {"
             mkdir -pv $HOME
@@ -334,7 +334,7 @@ impl<'a> RustBuilder<'a> {
 
         let step = step::shell(context, step_artifacts, step_environments, step_script).await?;
 
-        ArtifactBuilder::new(self.name.to_string())
+        ArtifactBuilder::new(self.name)
             .with_source(source)
             .with_step(step)
             .with_system(Aarch64Darwin)

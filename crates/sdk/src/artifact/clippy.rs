@@ -15,7 +15,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let target = context.get_target();
 
-    let source_hash = match target {
+    let source_digest = match target {
         Aarch64Darwin => "fe82bf19b064f6fca648b9be6a53ae210a9934023df364d669fc7c4ee5ccd485",
         Aarch64Linux => "5e0b5cb7e8655501369a6f42cb10b1c5d4711a0edfcbe44483c5234da485819d",
         X8664Darwin => "123456789",
@@ -28,14 +28,14 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let source_path =
         format!("https://static.rust-lang.org/dist/{name}-{source_version}-{source_target}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name.to_string(), source_path)
-        .with_hash(source_hash.to_string())
+    let source = ArtifactSourceBuilder::new(name, source_path.as_str())
+        .with_digest(source_digest)
         .build();
 
     let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}-preview/.\" \"$VORPAL_OUTPUT\"");
     let step = step::shell(context, vec![], vec![], step_script).await?;
 
-    ArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name)
         .with_source(source)
         .with_step(step)
         .with_system(Aarch64Darwin)

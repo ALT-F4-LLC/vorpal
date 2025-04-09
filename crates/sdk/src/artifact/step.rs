@@ -62,14 +62,20 @@ pub fn bash(
 
 pub async fn bwrap(
     context: &mut ConfigContext,
-    arguments: Vec<String>,
+    arguments: Vec<&str>,
     artifacts: Vec<String>,
     environments: Vec<String>,
     rootfs: Option<String>,
     script: String,
     systems: Vec<ArtifactSystem>,
 ) -> Result<ArtifactStep> {
-    let mut bwrap_arguments = vec![
+    // Setup artifacts
+
+    let mut step_artifacts = vec![];
+
+    // Setup arguments
+
+    let mut step_arguments = vec![
         vec!["--unshare-all".to_string()],
         vec!["--share-net".to_string()],
         vec!["--clearenv".to_string()],
@@ -104,37 +110,26 @@ pub async fn bwrap(
     .flat_map(|x| x.into_iter())
     .collect::<Vec<String>>();
 
-    let mut bwrap_artifacts = artifacts.clone();
-
     if let Some(rootfs) = rootfs {
         let rootfs_envkey = get_env_key(&rootfs);
-        let rootfs_path_bin = format!("{rootfs_envkey}/bin");
-        let rootfs_path_etc = format!("{rootfs_envkey}/etc");
-        let rootfs_path_lib = format!("{rootfs_envkey}/lib");
-        let rootfs_path_lib64 = format!("{rootfs_envkey}/lib64");
-        let rootfs_path_sbin = format!("{rootfs_envkey}/sbin");
-        let rootfs_path_usr = format!("{rootfs_envkey}/usr");
+        let rootfs_bin = format!("{rootfs_envkey}/bin");
+        let rootfs_etc = format!("{rootfs_envkey}/etc");
+        let rootfs_lib = format!("{rootfs_envkey}/lib");
+        let rootfs_lib64 = format!("{rootfs_envkey}/lib64");
+        let rootfs_sbin = format!("{rootfs_envkey}/sbin");
+        let rootfs_usr = format!("{rootfs_envkey}/usr");
 
-        let rootfs_arguments = vec![
-            vec!["--ro-bind".to_string(), rootfs_path_bin, "/bin".to_string()],
-            vec!["--ro-bind".to_string(), rootfs_path_etc, "/etc".to_string()],
-            vec!["--ro-bind".to_string(), rootfs_path_lib, "/lib".to_string()],
+        let rootfs_args = vec![
+            vec!["--ro-bind".to_string(), rootfs_bin, "/bin".to_string()],
+            vec!["--ro-bind".to_string(), rootfs_etc, "/etc".to_string()],
+            vec!["--ro-bind".to_string(), rootfs_lib, "/lib".to_string()],
             vec![
                 "--ro-bind-try".to_string(),
-                rootfs_path_lib64,
+                rootfs_lib64,
                 "/lib64".to_string(),
             ],
-            vec![
-                "--ro-bind".to_string(),
-                rootfs_path_sbin,
-                "/sbin".to_string(),
-            ],
-            vec!["--ro-bind".to_string(), rootfs_path_usr, "/usr".to_string()],
-            vec![
-                "--ro-bind".to_string(),
-                rootfs_envkey.clone(),
-                rootfs_envkey.clone(),
-            ],
+            vec!["--ro-bind".to_string(), rootfs_sbin, "/sbin".to_string()],
+            vec!["--ro-bind".to_string(), rootfs_usr, "/usr".to_string()],
             vec![
                 "--setenv".to_string(),
                 rootfs_envkey.replace("$", "").clone(),
@@ -145,15 +140,20 @@ pub async fn bwrap(
         .flatten()
         .collect::<Vec<String>>();
 
-        bwrap_arguments.extend(rootfs_arguments);
-        bwrap_artifacts.push(rootfs);
+        step_arguments.extend(rootfs_args);
+
+        step_artifacts.push(rootfs);
     }
 
     // Setup artifact arguments
 
+    for artifact in artifacts.into_iter() {
+        step_artifacts.push(artifact.to_string());
+    }
+
     let mut artifact_arguments = vec![];
 
-    for artifact in artifacts.iter() {
+    for artifact in step_artifacts.iter() {
         artifact_arguments.push(vec![
             "--ro-bind".to_string(),
             get_env_key(artifact),
@@ -161,7 +161,7 @@ pub async fn bwrap(
         ]);
     }
 
-    let bwrap_arguments_artifacts = artifact_arguments
+    let bwrap_args_artifacts = artifact_arguments
         .into_iter()
         .flatten()
         .collect::<Vec<String>>();
@@ -170,7 +170,7 @@ pub async fn bwrap(
 
     let mut environment_arguments = vec![];
 
-    let path_env_bins = artifacts
+    let path_env_bins = step_artifacts
         .iter()
         .map(|a| format!("{}/bin", get_env_key(a)))
         .collect::<Vec<String>>()
@@ -201,23 +201,27 @@ pub async fn bwrap(
         ]);
     }
 
-    let bwrap_arguments_environments = environment_arguments
+    let bwrap_args_environments = environment_arguments
         .into_iter()
         .flatten()
         .collect::<Vec<String>>();
 
     // Setup all arguments
 
-    let bwrap_arguments = bwrap_arguments
-        .into_iter()
-        .chain(bwrap_arguments_artifacts.into_iter())
-        .chain(bwrap_arguments_environments.into_iter())
-        .chain(arguments.into_iter())
-        .collect::<Vec<String>>();
+    for argument in arguments.into_iter() {
+        step_arguments.push(argument.to_string());
+    }
+
+    let step_arguments = step_arguments
+        .iter()
+        .chain(bwrap_args_artifacts.iter())
+        .chain(bwrap_args_environments.iter())
+        .map(|a| a.as_str())
+        .collect::<Vec<&str>>();
 
     let step = ArtifactStepBuilder::new()
-        .with_arguments(bwrap_arguments, systems.clone())
-        .with_artifacts(bwrap_artifacts, systems.clone())
+        .with_arguments(step_arguments, systems.clone())
+        .with_artifacts(step_artifacts, systems.clone())
         .with_entrypoint("bwrap", systems.clone())
         .with_environments(
             vec!["PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()],
@@ -252,7 +256,7 @@ pub async fn shell(
     let step = match target {
         Aarch64Darwin | X8664Darwin => bash(
             context,
-            artifacts.clone(),
+            artifacts,
             environments.clone(),
             script.to_string(),
             vec![Aarch64Darwin, X8664Darwin],
@@ -281,7 +285,7 @@ pub async fn shell(
 
 pub fn docker(
     context: &mut ConfigContext,
-    arguments: Vec<String>,
+    arguments: Vec<&str>,
     artifacts: Vec<String>,
     systems: Vec<ArtifactSystem>,
 ) -> ArtifactStep {

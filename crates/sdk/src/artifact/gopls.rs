@@ -43,7 +43,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     )
     .await?;
 
-    ArtifactBuilder::new(name.to_string())
+    ArtifactBuilder::new(name)
         .with_source(go_tools())
         .with_step(step)
         .with_system(Aarch64Darwin)
