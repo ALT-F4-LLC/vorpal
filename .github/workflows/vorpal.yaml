@@ -53,7 +53,7 @@ jobs:
           - macos-13
           - macos-latest
           - ubuntu-latest
-          - ubuntu-latest-arm64
+          # - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
