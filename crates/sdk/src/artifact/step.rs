@@ -18,34 +18,35 @@ pub fn bash(
     script: String,
     systems: Vec<ArtifactSystem>,
 ) -> ArtifactStep {
-    let envs_path_bins = artifacts
+    let mut step_environments = vec![];
+
+    for environment in environments.iter() {
+        if environment.starts_with("PATH=") {
+            continue;
+        }
+
+        step_environments.push(environment.to_string());
+    }
+
+    let step_path_bins = artifacts
         .iter()
         .map(|a| format!("{}/bin", get_env_key(a)))
         .collect::<Vec<String>>()
         .join(":");
 
-    let mut envs = vec![];
+    let step_path_default = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin";
 
-    for env in environments.iter() {
-        if env.starts_with("PATH=") {
-            continue;
-        }
-
-        envs.push(env.to_string());
-    }
-
-    let envs_path_default = "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin";
-    let mut envs_path = format!("{envs_path_bins}:{envs_path_default}");
+    let mut step_path = format!("{step_path_bins}:{step_path_default}");
 
     if let Some(path) = environments.iter().find(|x| x.starts_with("PATH=")) {
         if let Some(path_value) = path.split('=').nth(1) {
-            envs_path = format!("{path_value}:{envs_path}");
+            step_path = format!("{path_value}:{step_path}");
         }
     }
 
-    envs.push(format!("PATH={}", envs_path));
+    step_environments.push(format!("PATH={}", step_path));
 
-    let script = formatdoc! {"
+    let step_script = formatdoc! {"
         #!/bin/bash
         set -euo pipefail
 
@@ -55,8 +56,8 @@ pub fn bash(
     ArtifactStepBuilder::new()
         .with_artifacts(artifacts, systems.clone())
         .with_entrypoint("bash", systems.clone())
-        .with_environments(envs, systems.clone())
-        .with_script(script, systems)
+        .with_environments(step_environments, systems.clone())
+        .with_script(step_script, systems)
         .build(context)
 }
 
@@ -69,79 +70,73 @@ pub async fn bwrap(
     script: String,
     systems: Vec<ArtifactSystem>,
 ) -> Result<ArtifactStep> {
+    // Setup arguments
+
+    let mut step_arguments = vec![
+        "--unshare-all".to_string(),
+        "--share-net".to_string(),
+        "--clearenv".to_string(),
+        "--chdir".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        "--gid".to_string(),
+        "1000".to_string(),
+        "--uid".to_string(),
+        "1000".to_string(),
+        "--dev".to_string(),
+        "/dev".to_string(),
+        "--proc".to_string(),
+        "/proc".to_string(),
+        "--tmpfs".to_string(),
+        "/tmp".to_string(),
+        "--bind".to_string(),
+        "$VORPAL_OUTPUT".to_string(),
+        "$VORPAL_OUTPUT".to_string(),
+        "--bind".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        "--setenv".to_string(),
+        "VORPAL_OUTPUT".to_string(),
+        "$VORPAL_OUTPUT".to_string(),
+        "--setenv".to_string(),
+        "VORPAL_WORKSPACE".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+    ];
+
     // Setup artifacts
 
     let mut step_artifacts = vec![];
 
-    // Setup arguments
-
-    let mut step_arguments = vec![
-        vec!["--unshare-all".to_string()],
-        vec!["--share-net".to_string()],
-        vec!["--clearenv".to_string()],
-        vec!["--chdir".to_string(), "$VORPAL_WORKSPACE".to_string()],
-        vec!["--gid".to_string(), "1000".to_string()],
-        vec!["--uid".to_string(), "1000".to_string()],
-        vec!["--dev".to_string(), "/dev".to_string()],
-        vec!["--proc".to_string(), "/proc".to_string()],
-        vec!["--tmpfs".to_string(), "/tmp".to_string()],
-        vec![
-            "--bind".to_string(),
-            "$VORPAL_OUTPUT".to_string(),
-            "$VORPAL_OUTPUT".to_string(),
-        ],
-        vec![
-            "--bind".to_string(),
-            "$VORPAL_WORKSPACE".to_string(),
-            "$VORPAL_WORKSPACE".to_string(),
-        ],
-        vec![
-            "--setenv".to_string(),
-            "VORPAL_OUTPUT".to_string(),
-            "$VORPAL_OUTPUT".to_string(),
-        ],
-        vec![
-            "--setenv".to_string(),
-            "VORPAL_WORKSPACE".to_string(),
-            "$VORPAL_WORKSPACE".to_string(),
-        ],
-    ]
-    .into_iter()
-    .flat_map(|x| x.into_iter())
-    .collect::<Vec<String>>();
-
     if let Some(rootfs) = rootfs {
-        let rootfs_envkey = get_env_key(&rootfs);
-        let rootfs_bin = format!("{rootfs_envkey}/bin");
-        let rootfs_etc = format!("{rootfs_envkey}/etc");
-        let rootfs_lib = format!("{rootfs_envkey}/lib");
-        let rootfs_lib64 = format!("{rootfs_envkey}/lib64");
-        let rootfs_sbin = format!("{rootfs_envkey}/sbin");
-        let rootfs_usr = format!("{rootfs_envkey}/usr");
+        let rootfs_env = get_env_key(&rootfs);
+        let rootfs_bin = format!("{rootfs_env}/bin");
+        let rootfs_etc = format!("{rootfs_env}/etc");
+        let rootfs_lib = format!("{rootfs_env}/lib");
+        let rootfs_lib64 = format!("{rootfs_env}/lib64");
+        let rootfs_sbin = format!("{rootfs_env}/sbin");
+        let rootfs_usr = format!("{rootfs_env}/usr");
 
         let rootfs_args = vec![
-            vec!["--ro-bind".to_string(), rootfs_bin, "/bin".to_string()],
-            vec!["--ro-bind".to_string(), rootfs_etc, "/etc".to_string()],
-            vec!["--ro-bind".to_string(), rootfs_lib, "/lib".to_string()],
-            vec![
-                "--ro-bind-try".to_string(),
-                rootfs_lib64,
-                "/lib64".to_string(),
-            ],
-            vec!["--ro-bind".to_string(), rootfs_sbin, "/sbin".to_string()],
-            vec!["--ro-bind".to_string(), rootfs_usr, "/usr".to_string()],
-            vec![
-                "--setenv".to_string(),
-                rootfs_envkey.replace("$", "").clone(),
-                rootfs_envkey,
-            ],
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<String>>();
+            "--ro-bind".to_string(),
+            rootfs_bin,
+            "/bin".to_string(),
+            "--ro-bind".to_string(),
+            rootfs_etc,
+            "/etc".to_string(),
+            "--ro-bind".to_string(),
+            rootfs_lib,
+            "/lib".to_string(),
+            "--ro-bind-try".to_string(),
+            rootfs_lib64,
+            "/lib64".to_string(),
+            "--ro-bind".to_string(),
+            rootfs_sbin,
+            "/sbin".to_string(),
+            "--ro-bind".to_string(),
+            rootfs_usr,
+            "/usr".to_string(),
+        ];
 
         step_arguments.extend(rootfs_args);
-
         step_artifacts.push(rootfs);
     }
 
@@ -151,40 +146,34 @@ pub async fn bwrap(
         step_artifacts.push(artifact.to_string());
     }
 
-    let mut artifact_arguments = vec![];
-
     for artifact in step_artifacts.iter() {
-        artifact_arguments.push(vec![
-            "--ro-bind".to_string(),
-            get_env_key(artifact),
-            get_env_key(artifact),
-        ]);
+        step_arguments.push("--ro-bind".to_string());
+        step_arguments.push(get_env_key(artifact));
+        step_arguments.push(get_env_key(artifact));
+        step_arguments.push("--setenv".to_string());
+        step_arguments.push(get_env_key(artifact).replace("$", ""));
+        step_arguments.push(get_env_key(artifact));
     }
-
-    let bwrap_args_artifacts = artifact_arguments
-        .into_iter()
-        .flatten()
-        .collect::<Vec<String>>();
 
     // Setup environment arguments
 
-    let mut environment_arguments = vec![];
-
-    let path_env_bins = step_artifacts
+    let step_path_bins = step_artifacts
         .iter()
         .map(|a| format!("{}/bin", get_env_key(a)))
         .collect::<Vec<String>>()
         .join(":");
 
-    let mut path_env = format!("{path_env_bins}:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin");
+    let mut step_path = format!("{step_path_bins}:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin");
 
     if let Some(path) = environments.iter().find(|x| x.starts_with("PATH=")) {
         if let Some(path_value) = path.split('=').nth(1) {
-            path_env = format!("{}:{}", path_value, path_env);
+            step_path = format!("{}:{}", path_value, step_path);
         }
     }
 
-    environment_arguments.push(vec!["--setenv".to_string(), "PATH".to_string(), path_env]);
+    step_arguments.push("--setenv".to_string());
+    step_arguments.push("PATH".to_string());
+    step_arguments.push(step_path);
 
     for env in environments.iter() {
         let key = env.split("=").next().unwrap();
@@ -194,48 +183,40 @@ pub async fn bwrap(
             continue;
         }
 
-        environment_arguments.push(vec![
-            "--setenv".to_string(),
-            key.to_string(),
-            value.to_string(),
-        ]);
+        step_arguments.push("--setenv".to_string());
+        step_arguments.push(key.to_string());
+        step_arguments.push(value.to_string());
     }
 
-    let bwrap_args_environments = environment_arguments
-        .into_iter()
-        .flatten()
-        .collect::<Vec<String>>();
-
-    // Setup all arguments
+    // Setup arguments
 
     for argument in arguments.into_iter() {
         step_arguments.push(argument.to_string());
     }
 
-    let step_arguments = step_arguments
-        .iter()
-        .chain(bwrap_args_artifacts.iter())
-        .chain(bwrap_args_environments.iter())
-        .map(|a| a.as_str())
-        .collect::<Vec<&str>>();
+    // Setup script
+
+    let step_script = formatdoc! {"
+        #!/bin/bash
+        set -euo pipefail
+
+        {script}
+    "};
+
+    // Setup step
 
     let step = ArtifactStepBuilder::new()
-        .with_arguments(step_arguments, systems.clone())
+        .with_arguments(
+            step_arguments.iter().map(|x| x.as_str()).collect(),
+            systems.clone(),
+        )
         .with_artifacts(step_artifacts, systems.clone())
         .with_entrypoint("bwrap", systems.clone())
         .with_environments(
             vec!["PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()],
             systems.clone(),
         )
-        .with_script(
-            formatdoc! {"
-                #!/bin/bash
-                set -euo pipefail
-
-                {script}
-            "},
-            systems,
-        )
+        .with_script(step_script, systems)
         .build(context);
 
     Ok(step)
@@ -249,11 +230,11 @@ pub async fn shell(
 ) -> Result<ArtifactStep> {
     // Setup target
 
-    let target = context.get_target();
+    let step_target = context.get_target();
 
     // Setup step
 
-    let step = match target {
+    let step = match step_target {
         Aarch64Darwin | X8664Darwin => bash(
             context,
             artifacts,
@@ -277,7 +258,10 @@ pub async fn shell(
             .await?
         }
 
-        _ => bail!("unsupported shell step system: {}", target.as_str_name()),
+        _ => bail!(
+            "unsupported shell step system: {}",
+            step_target.as_str_name()
+        ),
     };
 
     Ok(step)

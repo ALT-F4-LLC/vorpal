@@ -37,8 +37,12 @@ pub async fn build<'a>(
         "unset VORPAL_SHELL_BACKUP_VORPAL_SHELL".to_string(),
     ];
 
-    for env in environments {
+    for env in environments.clone().into_iter() {
         let key = env.split("=").next().unwrap();
+
+        if key == "PATH" {
+            continue;
+        }
 
         envs_backup.push(format!("export VORPAL_SHELL_BACKUP_{}=\"${}\"", key, key));
         envs_export.push(format!("export {}", env));
@@ -46,15 +50,25 @@ pub async fn build<'a>(
         envs_unset.push(format!("unset VORPAL_SHELL_BACKUP_{}", key));
     }
 
-    let path_artifacts = artifacts
+    // Setup path
+
+    let step_path_artifacts = artifacts
         .iter()
         .map(|artifact| format!("{}/bin", get_env_key(artifact)))
         .collect::<Vec<String>>()
         .join(":");
 
-    let path_export = format!("export PATH=\"{path_artifacts}:$PATH\"");
+    let mut step_path = step_path_artifacts;
 
-    envs_export.push(path_export);
+    if let Some(path) = environments.iter().find(|x| x.starts_with("PATH=")) {
+        if let Some(path_value) = path.split('=').nth(1) {
+            step_path = format!("{path_value}:{step_path}");
+        }
+    }
+
+    envs_export.push(format!("export PATH={step_path}:$PATH"));
+
+    // Setup script
 
     let step_script = formatdoc! {"
         mkdir -pv $VORPAL_WORKSPACE/bin
@@ -62,22 +76,14 @@ pub async fn build<'a>(
         cat > bin/activate << \"EOF\"
         #!/bin/bash
 
-        # Set backup variables
         {backups}
-
-        # Set new variables
         {exports}
 
-        # Restore old variables
         exit-shell(){{
-        # Set restore variables
         {restores}
-
-        # Set unset variables
         {unsets}
         }}
 
-        # Run the command
         exec \"$@\"
         EOF
 

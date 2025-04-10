@@ -7,7 +7,7 @@ import (
 	"text/template"
 
 	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/context"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
 
 type ShellArtifactTemplate struct {
@@ -17,28 +17,19 @@ type ShellArtifactTemplate struct {
 	Unsets   string
 }
 
-const ShellArtifactScriptTemplate = `
-mkdir -pv $VORPAL_WORKSPACE/bin
+const ShellArtifactScriptTemplate = `mkdir -pv $VORPAL_WORKSPACE/bin
 
 cat > bin/activate << "EOF"
 #!/bin/bash
 
-# Set backup variables
 {{.Backups}}
-
-# Set new variables
 {{.Exports}}
 
-# Restore old variables
-exit-shell(){{
-# Set restore variables
+exit-shell(){
 {{.Restores}}
-
-# Set unset variables
 {{.Unsets}}
-}}
+}
 
-# Run the command
 exec "$@"
 EOF
 
@@ -46,10 +37,9 @@ chmod +x $VORPAL_WORKSPACE/bin/activate
 
 mkdir -pv $VORPAL_OUTPUT/bin
 
-cp -prv bin "$VORPAL_OUTPUT"
-`
+cp -prv bin "$VORPAL_OUTPUT"`
 
-func ShellArtifact(ctx *context.ConfigContext, artifacts []*artifactApi.ArtifactId, environments []string, name string) (*artifactApi.ArtifactId, error) {
+func ShellArtifact(context *config.ConfigContext, artifacts []*string, environments []string, name string) (*string, error) {
 	backups := []string{
 		"export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"",
 		"export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"",
@@ -57,7 +47,7 @@ func ShellArtifact(ctx *context.ConfigContext, artifacts []*artifactApi.Artifact
 	}
 
 	exports := []string{
-		fmt.Sprintf("export PS1=(\"%s\")", name),
+		fmt.Sprintf("export PS1=\"(%s) $PS1\"", name),
 		"export VORPAL_SHELL=\"1\"",
 	}
 
@@ -75,11 +65,36 @@ func ShellArtifact(ctx *context.ConfigContext, artifacts []*artifactApi.Artifact
 
 	for _, envvar := range environments {
 		key := strings.Split(envvar, "=")[0]
+
+		if strings.Contains(envvar, "PATH=") {
+			continue
+		}
+
 		backups = append(backups, fmt.Sprintf("export VORPAL_SHELL_BACKUP_%s=\"$%s\"", key, key))
 		exports = append(exports, fmt.Sprintf("export %s", envvar))
 		restores = append(restores, fmt.Sprintf("export %s=\"$VORPAL_SHELL_BACKUP_%s\"", key, key))
 		unsets = append(unsets, fmt.Sprintf("unset VORPAL_SHELL_BACKUP_%s", key))
 	}
+
+	// Setup path
+
+	stepPathArtifacts := make([]string, 0)
+
+	for _, artifact := range artifacts {
+		stepPathArtifacts = append(stepPathArtifacts, fmt.Sprintf("%s/bin", GetEnvKey(artifact)))
+	}
+
+	stepPath := strings.Join(stepPathArtifacts, ":")
+
+	for _, envvar := range environments {
+		if strings.Contains(envvar, "PATH=") {
+			stepPath = fmt.Sprintf("%s:%s", strings.Replace(envvar, "PATH=", "", 1), stepPath)
+		}
+	}
+
+	exports = append(exports, fmt.Sprintf("export PATH=%s:$PATH", stepPath))
+
+	// Setup script
 
 	scriptTemplate, err := template.New("script").Parse(ShellArtifactScriptTemplate)
 	if err != nil {
@@ -88,29 +103,31 @@ func ShellArtifact(ctx *context.ConfigContext, artifacts []*artifactApi.Artifact
 
 	var scriptBuffer bytes.Buffer
 
-	scriptTemplateVars := ShellArtifactTemplate{
+	stepScriptVars := ShellArtifactTemplate{
 		Backups:  strings.Join(backups, "\n"),
 		Exports:  strings.Join(exports, "\n"),
 		Restores: strings.Join(restores, "\n"),
 		Unsets:   strings.Join(unsets, "\n"),
 	}
 
-	if err := scriptTemplate.Execute(&scriptBuffer, scriptTemplateVars); err != nil {
+	if err := scriptTemplate.Execute(&scriptBuffer, stepScriptVars); err != nil {
 		return nil, err
 	}
 
-	return AddArtifact(
-		ctx,
-		artifacts,
-		map[string]string{},
-		name,
-		scriptBuffer.String(),
-		[]*artifactApi.ArtifactSourceId{},
-		[]string{
-			"aarch64-linux",
-			"aarch64-macos",
-			"x86_64-linux",
-			"x86_64-macos",
-		},
-	), nil
+	stepScript := scriptBuffer.String()
+
+	step, err := Shell(context, artifacts, []string{}, stepScript)
+	if err != nil {
+		return nil, err
+	}
+
+	artifact := NewArtifactBuilder(name)
+
+	artifact = artifact.WithStep(step)
+	artifact = artifact.WithSystem(artifactApi.ArtifactSystem_AARCH64_DARWIN)
+	artifact = artifact.WithSystem(artifactApi.ArtifactSystem_AARCH64_LINUX)
+	artifact = artifact.WithSystem(artifactApi.ArtifactSystem_X8664_DARWIN)
+	artifact = artifact.WithSystem(artifactApi.ArtifactSystem_X8664_LINUX)
+
+	return artifact.Build(context)
 }

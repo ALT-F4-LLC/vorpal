@@ -94,7 +94,7 @@ impl<'a> RustShellBuilder<'a> {
 
         let environments = vec![
             format!(
-                "PATH={}/toolchains/{}-{}/bin:$PATH",
+                "PATH={}/toolchains/{}-{}/bin",
                 get_env_key(&toolchain),
                 toolchain_version,
                 toolchain_target

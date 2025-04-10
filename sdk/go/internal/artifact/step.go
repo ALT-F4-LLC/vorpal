@@ -1,44 +1,109 @@
 package artifact
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
+	"text/template"
 
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
 
-func GetArtifactEnvKey(artifact *artifact.ArtifactId) string {
-	return fmt.Sprintf("$VORPAL_ARTIFACT_%s", strings.ReplaceAll(strings.ToLower(artifact.Name), "-", "_"))
+type BashScriptTemplateArgs struct {
+	Script string
 }
 
-func Bash(environment map[string]string, script *string) artifact.ArtifactStep {
-	entrypoint := "bash"
+type BwrapScriptTemplateArgs struct {
+	Script string
+}
 
-	environments := make([]artifact.ArtifactStepEnvironment, 0)
+const BashScriptTemplate = `#!/bin/bash
+set -euo pipefail
 
-	path := "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"
+{{.Script}}
+`
 
-	for key, value := range environment {
-		if key == "PATH" {
-			value = value + ":" + path
+const BwrapScriptTemplate = `#!/bin/bash
+set -euo pipefail
+
+{{.Script}}
+`
+
+func Bash(
+	context *config.ConfigContext,
+	artifacts []*string,
+	environments []string,
+	script *string,
+	systems []artifactApi.ArtifactSystem,
+) (*artifactApi.ArtifactStep, error) {
+	stepEnvironments := make([]string, 0)
+
+	stepEntrypoint := "bash"
+
+	for _, value := range environments {
+		if strings.Contains(value, "PATH=") {
+			continue
 		}
 
-		environments = append(environments, artifact.ArtifactStepEnvironment{
-			Key:   key,
-			Value: value,
-		})
+		stepEnvironments = append(stepEnvironments, value)
 	}
 
-	return artifact.ArtifactStep{
-		Arguments:    []string{},
-		Entrypoint:   &entrypoint,
-		Environments: nil,
-		Script:       script,
+	stepPathBins := make([]string, 0)
+
+	for _, art := range artifacts {
+		stepPathBins = append(stepPathBins, fmt.Sprintf("%s/bin", GetEnvKey(art)))
 	}
+
+	stepPathDefault := "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"
+
+	stepPath := fmt.Sprintf("%s:%s", strings.Join(stepPathBins, ":"), stepPathDefault)
+
+	for _, value := range environments {
+		if strings.Contains(value, "PATH=") {
+			stepPath = fmt.Sprintf("%s:%s", strings.ReplaceAll(value, "PATH=", ""), stepPath)
+		}
+	}
+
+	stepEnvironments = append(stepEnvironments, fmt.Sprintf("PATH=%s", stepPath))
+
+	scriptTemplate, err := template.New("script").Parse(BashScriptTemplate)
+	if err != nil {
+		return nil, err
+	}
+
+	var scriptBuffer bytes.Buffer
+
+	scriptTemplateVars := BashScriptTemplateArgs{
+		Script: *script,
+	}
+
+	if err := scriptTemplate.Execute(&scriptBuffer, scriptTemplateVars); err != nil {
+		return nil, err
+	}
+
+	step := NewArtifactStepBuilder()
+
+	step = step.WithArtifacts(artifacts, systems)
+	step = step.WithEntrypoint(stepEntrypoint, systems)
+	step = step.WithEnvironments(stepEnvironments, systems)
+	step = step.WithScript(scriptBuffer.String(), systems)
+
+	return step.Build(context), nil
 }
 
-func Bwrap(arguments []string, artifacts []*artifact.ArtifactId, environment map[string]string, rootfs *artifact.ArtifactId, script string) artifact.ArtifactStep {
-	argumentsDefaults := []string{
+func Bwrap(
+	context *config.ConfigContext,
+	arguments []string,
+	artifacts []*string,
+	environments []string,
+	rootfs *string,
+	script string,
+	systems []artifactApi.ArtifactSystem,
+) (*artifactApi.ArtifactStep, error) {
+	// Setup arguments
+
+	stepArguments := []string{
 		"--unshare-all",
 		"--share-net",
 		"--clearenv",
@@ -68,99 +133,163 @@ func Bwrap(arguments []string, artifacts []*artifact.ArtifactId, environment map
 		"$VORPAL_WORKSPACE",
 	}
 
+	// Setup artifacts arguments
+
+	stepArtifacts := make([]*string, 0)
+
 	if rootfs != nil {
-		argumentsRootfs := []string{
-			// mount bin
+		rootfsArgs := []string{
 			"--ro-bind",
-			fmt.Sprintf("%s/bin", rootfs),
+			fmt.Sprintf("%s/bin", *rootfs),
 			"/bin",
-			// mount etc
 			"--ro-bind",
-			fmt.Sprintf("%s/etc", rootfs),
+			fmt.Sprintf("%s/etc", *rootfs),
 			"/etc",
-			// mount lib
 			"--ro-bind",
-			fmt.Sprintf("%s/lib", rootfs),
+			fmt.Sprintf("%s/lib", *rootfs),
 			"/lib",
-			// mount lib64 (if exists)
 			"--ro-bind-try",
-			fmt.Sprintf("%s/lib64", rootfs),
+			fmt.Sprintf("%s/lib64", *rootfs),
 			"/lib64",
-			// mount sbin
 			"--ro-bind",
-			fmt.Sprintf("%s/sbin", rootfs),
+			fmt.Sprintf("%s/sbin", *rootfs),
 			"/sbin",
-			// mount usr
 			"--ro-bind",
-			fmt.Sprintf("%s/usr", rootfs),
+			fmt.Sprintf("%s/usr", *rootfs),
 			"/usr",
 		}
 
-		argumentsDefaults = append(argumentsDefaults, argumentsRootfs...)
+		stepArguments = append(stepArguments, rootfsArgs...)
+		stepArtifacts = append(stepArtifacts, rootfs)
 	}
 
 	for _, artifact := range artifacts {
-		argumentsArtifact := []string{
-			"--ro-bind",
-			GetArtifactEnvKey(artifact),
-			GetArtifactEnvKey(artifact),
+		stepArtifacts = append(stepArtifacts, artifact)
+	}
+
+	stepArgumentsArtifacts := make([]string, 0)
+
+	for _, art := range artifacts {
+		stepArgumentsArtifacts = append(stepArgumentsArtifacts, "--ro-bind")
+		stepArgumentsArtifacts = append(stepArgumentsArtifacts, GetEnvKey(art))
+		stepArgumentsArtifacts = append(stepArgumentsArtifacts, GetEnvKey(art))
+		stepArgumentsArtifacts = append(stepArgumentsArtifacts, "--setenv")
+		stepArgumentsArtifacts = append(stepArgumentsArtifacts, strings.ReplaceAll(GetEnvKey(art), "$", ""))
+		stepArgumentsArtifacts = append(stepArgumentsArtifacts, GetEnvKey(art))
+	}
+
+	// Setup environment arguments
+
+	stepPathBins := make([]string, 0)
+
+	for _, art := range stepArtifacts {
+		stepPathBins = append(stepPathBins, fmt.Sprintf("%s/bin", GetEnvKey(art)))
+	}
+
+	stepPath := fmt.Sprintf("%s:%s", "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin", strings.Join(stepPathBins, ":"))
+
+	for _, value := range environments {
+		if strings.Contains(value, "PATH=") {
+			stepPath = fmt.Sprintf("%s:%s", strings.ReplaceAll(value, "PATH=", ""), stepPath)
 		}
-
-		argumentsEnv := []string{
-			"--setenv",
-			strings.ReplaceAll(GetArtifactEnvKey(artifact), "$", ""),
-			GetArtifactEnvKey(artifact),
-		}
-
-		argumentsDefaults = append(argumentsDefaults, argumentsArtifact...)
-		argumentsDefaults = append(argumentsDefaults, argumentsEnv...)
 	}
 
-	for key, value := range environment {
-		argumentsEnv := []string{
-			"--setenv",
-			key,
-			value,
-		}
+	stepArguments = append(stepArguments, "--setenv")
+	stepArguments = append(stepArguments, "PATH")
+	stepArguments = append(stepArguments, stepPath)
 
-		argumentsDefaults = append(argumentsDefaults, argumentsEnv...)
+	// Setup arguments
+
+	for _, argument := range arguments {
+		stepArguments = append(stepArguments, argument)
 	}
 
-	for _, arg := range arguments {
-		argumentsDefaults = append(argumentsDefaults, arg)
+	// Setup script
+
+	scriptTemplate, err := template.New("script").Parse(BwrapScriptTemplate)
+	if err != nil {
+		return nil, err
 	}
 
-	path := "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"
+	var scriptBuffer bytes.Buffer
 
-	entrypoint := "bwrap"
-
-	return artifact.ArtifactStep{
-		Arguments:  argumentsDefaults,
-		Entrypoint: &entrypoint,
-		Environments: []*artifact.ArtifactStepEnvironment{
-			{
-				Key:   "PATH",
-				Value: path,
-			},
-		},
-		Script: &script,
+	scriptTemplateVars := BwrapScriptTemplateArgs{
+		Script: script,
 	}
+
+	if err := scriptTemplate.Execute(&scriptBuffer, scriptTemplateVars); err != nil {
+		return nil, err
+	}
+
+	// Setup step
+
+	step := NewArtifactStepBuilder()
+
+	step = step.WithArguments(stepArguments, systems)
+	step = step.WithArtifacts(stepArtifacts, systems)
+	step = step.WithEntrypoint("bwrap", systems)
+	step = step.WithEnvironments([]string{"PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"}, systems)
+	step = step.WithScript(script, systems)
+
+	return step.Build(context), nil
 }
 
-func Docker(arguments []string) artifact.ArtifactStep {
-	entrypoint := "docker"
+func Shell(
+	context *config.ConfigContext,
+	artifacts []*string,
+	environments []string,
+	script string,
+) (*artifactApi.ArtifactStep, error) {
+	stepTarget := context.GetTarget()
 
-	path := "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"
-
-	return artifact.ArtifactStep{
-		Arguments:  arguments,
-		Entrypoint: &entrypoint,
-		Environments: []*artifact.ArtifactStepEnvironment{
-			{
-				Key:   "PATH",
-				Value: path,
+	if stepTarget == artifactApi.ArtifactSystem_AARCH64_DARWIN || stepTarget == artifactApi.ArtifactSystem_X8664_DARWIN {
+		return Bash(
+			context,
+			artifacts,
+			environments,
+			&script,
+			[]artifactApi.ArtifactSystem{
+				artifactApi.ArtifactSystem_AARCH64_DARWIN,
+				artifactApi.ArtifactSystem_X8664_DARWIN,
 			},
-		},
-		Script: nil,
+		)
 	}
+
+	if stepTarget == artifactApi.ArtifactSystem_AARCH64_LINUX || stepTarget == artifactApi.ArtifactSystem_X8664_LINUX {
+		linux_vorpal, err := context.FetchArtifact("vorpal-linux")
+		if err != nil {
+			return nil, err
+		}
+
+		return Bwrap(
+			context,
+			[]string{},
+			artifacts,
+			environments,
+			linux_vorpal,
+			script,
+			[]artifactApi.ArtifactSystem{
+				artifactApi.ArtifactSystem_AARCH64_LINUX,
+				artifactApi.ArtifactSystem_X8664_LINUX,
+			},
+		)
+	}
+
+	return nil, fmt.Errorf("unsupported shell step system: %s", stepTarget)
+}
+
+func Docker(
+	context *config.ConfigContext,
+	arguments []string,
+	artifacts []*string,
+	systems []artifactApi.ArtifactSystem,
+) *artifactApi.ArtifactStep {
+	step := NewArtifactStepBuilder()
+
+	step = step.WithArguments(arguments, systems)
+	step = step.WithArtifacts(artifacts, systems)
+	step = step.WithEntrypoint("docker", systems)
+	step = step.WithEnvironments([]string{"PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"}, systems)
+
+	return step.Build(context)
 }
