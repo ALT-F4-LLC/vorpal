@@ -156,6 +156,35 @@ func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, er
 	return &artifactDigest, nil
 }
 
+func fetchArtifacts(client artifactApi.ArtifactServiceClient, digest string, store map[string]*artifactApi.Artifact) error {
+	if _, ok := store[digest]; ok {
+		return nil
+	}
+
+	clientResponse, err := client.GetArtifact(context.Background(), &artifactApi.ArtifactRequest{Digest: digest})
+	if err != nil {
+		return fmt.Errorf("error fetching artifact: %v", err)
+	}
+
+	if _, ok := store[digest]; !ok {
+		store[digest] = clientResponse
+	}
+
+	for _, step := range clientResponse.Steps {
+		if step != nil {
+			for _, digest := range step.Artifacts {
+				if _, ok := store[digest]; ok {
+					return nil
+				}
+
+				fetchArtifacts(client, digest, store)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 	if _, ok := c.store[digest]; ok {
 		return &digest, nil
@@ -170,23 +199,9 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 
 	client := artifactApi.NewArtifactServiceClient(clientConn)
 
-	clientResponse, err := client.GetArtifact(context.Background(), &artifactApi.ArtifactRequest{Digest: digest})
-	if err != nil {
-		return nil, fmt.Errorf("error fetching artifact: %v", err)
-	}
+	fetchArtifacts(client, digest, c.store)
 
-	artifactJson, err := json.Marshal(clientResponse)
-	if err != nil {
-		return nil, err
-	}
-
-	artifactDigest := fmt.Sprintf("%x", sha256.Sum256(artifactJson))
-
-	if _, ok := c.store[artifactDigest]; !ok {
-		c.store[artifactDigest] = clientResponse
-	}
-
-	return &artifactDigest, nil
+	return &digest, nil
 }
 
 func (c *ConfigContext) GetArtifact(digest string) *artifactApi.Artifact {
@@ -198,18 +213,20 @@ func (c *ConfigContext) GetTarget() artifactApi.ArtifactSystem {
 }
 
 func (c *ConfigContext) Run(artifacts []*string) error {
-	listener, err := net.Listen("tcp", fmt.Sprintf("[::]:%d", c.port))
+	var grpcServerOpts []grpc.ServerOption
+
+	grpcServer := grpc.NewServer(grpcServerOpts...)
+
+	artifactApi.RegisterArtifactServiceServer(grpcServer, NewArtifactServer(artifacts, c.store))
+
+	listenerAddr := fmt.Sprintf("[::]:%d", c.port)
+
+	listener, err := net.Listen("tcp", listenerAddr)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	var opts []grpc.ServerOption
-
-	grpcServer := grpc.NewServer(opts...)
-
-	artifactApi.RegisterArtifactServiceServer(grpcServer, NewArtifactServer(artifacts, c.store))
-
-	log.Printf("artifact service: %d", c.port)
+	log.Printf("artifact service: %s", listenerAddr)
 
 	err = grpcServer.Serve(listener)
 	if err != nil {

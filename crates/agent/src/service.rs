@@ -10,8 +10,7 @@ use vorpal_schema::{
         agent_service_server::{AgentService, AgentServiceServer},
         PrepareArtifactResponse,
     },
-    archive::v0::archive_service_client::ArchiveServiceClient,
-    artifact::v0::{Artifact, ArtifactSource},
+    artifact::v0::{artifact_service_client::ArtifactServiceClient, Artifact, ArtifactSource},
 };
 use vorpal_store::paths::get_public_key_path;
 
@@ -31,16 +30,12 @@ async fn prepare_artifact(
     request: Request<Artifact>,
     tx: &mpsc::Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<(), Status> {
-    let mut client = ArchiveServiceClient::connect(registry.to_owned())
-        .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
-
     let artifact = request.into_inner();
 
     let mut artifact_sources = vec![];
 
     for source in artifact.sources.into_iter() {
-        let digest = build_source(&mut client, &source, &tx.clone())
+        let digest = build_source(registry.clone(), &source, &tx.clone())
             .await
             .map_err(|err| Status::internal(format!("{}", err)))?;
 
@@ -57,6 +52,8 @@ async fn prepare_artifact(
 
     // TODO: explore using combined sources digest for the artifact
 
+    // Store artifact in the registry
+
     let artifact = Artifact {
         name: artifact.name,
         sources: artifact_sources,
@@ -65,14 +62,22 @@ async fn prepare_artifact(
         target: artifact.target,
     };
 
-    let artifact_json = serde_json::to_string(&artifact)
-        .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
+    let mut client = ArtifactServiceClient::connect(registry.to_owned())
+        .await
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
-    let artifact_digest = sha256::digest(&artifact_json);
+    let response = client
+        .store_artifact(artifact.clone())
+        .await
+        .map_err(|err| {
+            Status::internal(format!("failed to store artifact in registry: {:?}", err))
+        })?;
+
+    let response = response.into_inner();
 
     let artifact_response = PrepareArtifactResponse {
         artifact: Some(artifact),
-        artifact_digest: Some(artifact_digest),
+        artifact_digest: Some(response.digest),
         artifact_output: None,
     };
 

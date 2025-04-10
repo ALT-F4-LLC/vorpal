@@ -4,7 +4,7 @@ use std::path::Path;
 use tokio::fs::{read, remove_dir_all, remove_file, write};
 use tokio::sync::mpsc::Sender;
 use tokio_tar::Archive;
-use tonic::{transport::Channel, Code, Status};
+use tonic::{Code, Status};
 use url::Url;
 use vorpal_schema::{
     agent::v0::PrepareArtifactResponse,
@@ -37,10 +37,14 @@ enum ArtifactSourceType {
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 pub async fn build_source(
-    client: &mut ArchiveServiceClient<Channel>,
+    registry: String,
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
+    let mut client = ArchiveServiceClient::connect(registry.to_owned())
+        .await
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+
     if let Some(digest) = &source.digest {
         let request = ArchivePullRequest {
             digest: digest.to_string(),

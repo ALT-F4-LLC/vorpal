@@ -267,7 +267,6 @@ async fn main() -> Result<()> {
                 Some(&selected),
                 artifact,
                 &mut registry_archive,
-                &mut registry_artifact,
                 &mut worker,
             )
             .await?;

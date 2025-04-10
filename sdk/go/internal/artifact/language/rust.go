@@ -68,19 +68,19 @@ func (a *RustShellBuilder) WithArtifacts(artifacts []*string) *RustShellBuilder 
 	return a
 }
 
-func (a *RustShellBuilder) Build(content *config.ConfigContext) (*string, error) {
+func (a *RustShellBuilder) Build(context *config.ConfigContext) (*string, error) {
 	artifacts := make([]*string, 0)
 
 	toolchain_digest := toolchain_digest()
 
-	toolchain, err := content.FetchArtifact(toolchain_digest)
+	toolchain, err := context.FetchArtifact(toolchain_digest)
 	if err != nil {
 		return nil, err
 	}
 
 	toolchain_version := toolchain_version()
 
-	toolchain_target, err := toolchain_target(content.GetTarget())
+	toolchain_target, err := toolchain_target(context.GetTarget())
 	if err != nil {
 		return nil, err
 	}
@@ -99,5 +99,5 @@ func (a *RustShellBuilder) Build(content *config.ConfigContext) (*string, error)
 		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s-%s", toolchain_version, *toolchain_target),
 	}
 
-	return artifact.ShellArtifact(content, artifacts, environments, a.name)
+	return artifact.ShellArtifact(context, artifacts, environments, a.name)
 }

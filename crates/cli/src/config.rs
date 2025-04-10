@@ -204,7 +204,6 @@ pub async fn build_artifacts(
     artifact_selected: Option<&Artifact>,
     artifact_config: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
-    client_artifact: &mut ArtifactServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
 ) -> Result<()> {
     let artifact_order = get_order(&artifact_config).await?;
@@ -224,10 +223,6 @@ pub async fn build_artifacts(
                 }
 
                 build(artifact, &artifact_hash, client_archive, client_worker).await?;
-
-                if let Err(status) = client_artifact.store_artifact(artifact.clone()).await {
-                    bail!("registry put error: {:?}", status);
-                }
 
                 artifact_complete.insert(artifact_hash.to_string(), artifact.clone());
 

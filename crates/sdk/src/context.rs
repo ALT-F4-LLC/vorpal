@@ -108,7 +108,8 @@ impl ConfigContext {
 
     pub async fn add_artifact(&mut self, artifact: &Artifact) -> Result<String> {
         let artifact_json =
-            serde_json::to_string(artifact).expect("failed to serialize artifact to JSON");
+            serde_json::to_vec(artifact).expect("failed to serialize artifact to JSON");
+
         let artifact_digest = digest(artifact_json);
 
         if self.store.contains_key(&artifact_digest) {
@@ -216,18 +217,17 @@ impl ConfigContext {
     }
 
     pub async fn run(&self, artifacts: Vec<String>) -> Result<()> {
-        let addr = format!("[::]:{}", self.port)
-            .parse()
-            .expect("failed to parse address");
-
         let service =
             ArtifactServiceServer::new(ArtifactServer::new(artifacts, self.store.clone()));
 
-        println!("artifact service: {}", addr);
+        let service_addr_str = format!("[::]:{}", self.port);
+        let service_addr = service_addr_str.parse().expect("failed to parse address");
+
+        println!("artifact service: {}", service_addr_str);
 
         Server::builder()
             .add_service(service)
-            .serve(addr)
+            .serve(service_addr)
             .await
             .map_err(|e| anyhow::anyhow!("failed to serve: {}", e))
     }
