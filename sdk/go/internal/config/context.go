@@ -205,7 +205,10 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 
 	client := artifactApi.NewArtifactServiceClient(clientConn)
 
-	fetchArtifacts(client, digest, c.store)
+	err = fetchArtifacts(client, digest, c.store)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching artifact: %v", err)
+	}
 
 	return &digest, nil
 }
