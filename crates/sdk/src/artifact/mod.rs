@@ -8,6 +8,7 @@ pub mod clippy;
 pub mod go;
 pub mod goimports;
 pub mod gopls;
+pub mod grpcurl;
 pub mod language;
 pub mod linux_debian;
 pub mod linux_vorpal;
