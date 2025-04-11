@@ -42,26 +42,26 @@ async fn main() -> Result<()> {
 package main
 
 import (
-	"log"
+    "log"
 
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact/language"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact/language"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
 
 func main() {
-	// 1. Get context
-	context := config.GetContext()
+    // 1. Get context
+    context := config.GetContext()
 
-	// 2. Create artifact
-	example, err := language.
-		NewRustBuilder("example").
-		Build(context)
-	if err != nil {
-		log.Fatalf("failed to build artifact: %v", err)
-	}
+    // 2. Create artifact
+    example, err := language.
+        NewRustBuilder("example").
+        Build(context)
+    if err != nil {
+        log.Fatalf("failed to build artifact: %v", err)
+    }
 
-	// 3. Run context with artifacts
-	context.Run([]*string{example})
+    // 3. Run context with artifacts
+    context.Run([]*string{example})
 }
 ```
 
