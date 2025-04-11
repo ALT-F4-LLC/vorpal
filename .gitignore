@@ -1,8 +1,8 @@
+*.pb.go
 *.tar.*
 .env
 .vagrant
 dist
 packer_*_*_*.box
-rootfs
 target
 vorpal-*-*

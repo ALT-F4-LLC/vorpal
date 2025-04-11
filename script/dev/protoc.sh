@@ -39,6 +39,4 @@ curl -L \
 
 unzip "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" -d "${1}"
 
-rm -rf "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}"
-
 rm -f "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"

@@ -6,6 +6,7 @@ Vagrant.configure("2") do |config|
   # Speed is important here as a lot of compiling is done in the vm
   # Be sure to set a high enough value for your system
   config.vm.provider :vmware_desktop do |vmware|
+    vmware.vmx["ethernet0.pcislotnumber"] = "160"
     vmware.vmx["memsize"] = "16384"
     vmware.vmx["numvcpus"] = "8"
   end
@@ -24,19 +25,28 @@ Vagrant.configure("2") do |config|
         --exclude="packer_debian_vmware_arm64.box" \
         --exclude="target" \
         /vagrant/. $HOME/vorpal/.
+
+      pushd $HOME/vorpal
+
+      ./script/dev.sh make
+
+      popd
     }' >> ~/.bashrc
 
     echo 'function setup_vorpal {
       sync_vorpal
 
+      sudo rm -rf /var/lib/vorpal
+      sudo mkdir -pv /var/lib/vorpal/{key,sandbox,store}
+      sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
+
       pushd $HOME/vorpal
 
-      ./script/dev.sh make dist
-      ./script/install.sh
+      ./target/debug/vorpal keys generate
 
       popd
     }' >> ~/.bashrc
 
-  echo "PATH=\"${HOME}/vorpal/.env/bin:${HOME}/.cargo/bin:\${PATH}\"" >> ~/.bashrc
+  echo "PATH=\"${HOME}/.cargo/bin:\${PATH}\"" >> ~/.bashrc
   SHELL
 end

@@ -2,32 +2,37 @@
 
 Build and ship software with one powerful tool.
 
-![vorpal-purpose](./vorpal-purpose.jpg)
+<p align="center">
+  <img src="./vorpal-purpose.jpg" />
+</p>
 
 ## Overview
 
-Vorpal builds and ships software distributively using BYOL (bring-you-own-language) configurations. This allows developers to manage dependencies to deployments in a reproducible and repeatable way using the language and existing tooling of their choice.
+Vorpal uses declarative "bring-your-own-language" configurations to build software distributively and natively in a repeatable and reproducible way.
 
-Below are examples of a Rust application in Vorpal configured in different languages:
+Examples of building a Rust application in multiple languages:
 
 ### Rust
 
 ```rust
 use anyhow::Result;
-use vorpal_schema::vorpal::config::v0::Config;
-use vorpal_sdk::config::{artifact::language::rust::rust_artifact, get_context};
+use vorpal_sdk::{
+    artifact::language::rust::RustArtifactBuilder,
+    context::get_context,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // 1. Get context
     let context = &mut get_context().await?;
 
-    let artifact = rust_artifact(context, "example-app").await?;
+    // 2. Create artifact
+    let example = RustArtifactBuilder::new("example")
+        .build(context)
+        .await?;
 
-    context
-        .run(Config {
-            artifacts: vec![artifact],
-        })
-        .await
+    // 3. Run context with artifacts
+    context.run(vec![example]).await
 }
 ```
 
@@ -37,54 +42,71 @@ async fn main() -> Result<()> {
 package main
 
 import (
-    "context"
     "log"
 
-    "github.com/vorpal-sdk/vorpal"
-    "github.com/vorpal-sdk/vorpal/config"
-    "github.com/vorpal-sdk/vorpal/config/artifact/language/rust"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact/language"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
 
 func main() {
-    context, err := config.GetContext(context.Background())
+    // 1. Get context
+    context := config.GetContext()
+
+    // 2. Create artifact
+    example, err := language.
+        NewRustBuilder("example").
+        Build(context)
     if err != nil {
-        log.Fatal(err)
+        log.Fatalf("failed to build artifact: %v", err)
     }
 
-    artifact, err := rust.Artifact(context, "example-app")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    err = context.Run(config.Config{
-        Artifacts: []config.Artifact{artifact},
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
+    // 3. Run context with artifacts
+    context.Run([]*string{example})
 }
+```
+
+### Python
+
+```python
+from vorpal_sdk.config import get_context
+from vorpal_sdk.config.artifact.language.rust import rust_artifact
+
+def main():
+    # 1. Get context
+    context = get_context()
+
+    # 2. Create artifact
+    example = rust_artifact(context, "example")
+
+    # 3. Run context with artifacts
+    context.run([example])
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### TypeScript
 
 ```typescript
 import { getContext } from '@vorpal/sdk';
-import { rustArtifact } from '@vorpal/sdk/config/artifact/language/rust';
+import { RustArtifactBuilder } from '@vorpal/sdk/config/artifact/language/rust';
 
 async function main() {
+    // 1. Get context
     const context = await getContext();
 
-    const artifact = await rustArtifact(context, 'example-app');
+    // 2. Create artifact
+    const example = await new RustArtifactBuilder('example')
+        .build(context);
 
-    await context.run({
-        artifacts: [artifact],
-    }));
+    // 3. Run context with artifacts
+    await context.run([example]);
 }
 
 main().catch(console.error);
 ```
 
-## Infrastructure
+## Components
 
 Below is the existing working diagram that illustrates the platform's design:
 
@@ -102,16 +124,13 @@ Artifact {
     // name of artifact
     name: "example".to_string(),
 
-    // artifacts for this artifact
-    artifacts: vec![],
-
     // source paths for artifact
     sources: vec![
         ArtifactSource {
+            name: "example", // required, unique per source
             excludes: vec![], // optional, to remove files
             hash: None, // optional, to track changes
             includes: vec![], // optional, to only use files
-            name: "example", // required, unique per source
             path: ".", // required, relative location to context
         }
     ],
@@ -120,14 +139,18 @@ Artifact {
     steps: vec![
         ArtifactStep {
             entrypoint: Some("/bin/bash"), // required, host path for command (can be artifact)
-            arguments: vec![], // optional, arguements for entrypoint
+            arguments: vec![], // optional, arguments for entrypoint
+            artifacts: vec![], // optional, artifacts included in step
             environments: vec![], // optional, environment variables for step
             script: Some("echo \"hello, world!\" > $VORPAL_OUTPUT/hello_world.txt"), // optional, script passed to executor
         },
     ],
 
     // systems for artifact
-    systems: vec!["aarch64-linux", "aarch64-macos"],
+    systems: vec![Aarch64Darwin, Aarch64Linux],
+
+    // target
+    target: Aarch64Darwin
 };
 ```
 

@@ -3206,6 +3206,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vorpal-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "infer",
+ "reqwest",
+ "serde_json",
+ "sha256",
+ "tokio",
+ "tokio-stream",
+ "tokio-tar",
+ "tonic",
+ "url",
+ "vorpal-schema",
+ "vorpal-store",
+]
+
+[[package]]
 name = "vorpal-cli"
 version = "0.1.0"
 dependencies = [
@@ -3221,7 +3240,7 @@ dependencies = [
  "tonic-health",
  "tracing",
  "tracing-subscriber",
- "vorpal-notary",
+ "vorpal-agent",
  "vorpal-registry",
  "vorpal-schema",
  "vorpal-sdk",
@@ -3239,17 +3258,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vorpal-notary"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rand",
- "rsa",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "vorpal-registry"
 version = "0.1.0"
 dependencies = [
@@ -3260,13 +3268,12 @@ dependencies = [
  "rsa",
  "serde",
  "serde_json",
- "sha2",
+ "sha256",
  "thiserror 2.0.11",
  "tokio",
  "tokio-stream",
  "tonic",
  "tracing",
- "vorpal-notary",
  "vorpal-schema",
  "vorpal-store",
 ]
@@ -3275,6 +3282,7 @@ dependencies = [
 name = "vorpal-schema"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "prost",
  "serde",
  "tonic",
@@ -3286,23 +3294,14 @@ name = "vorpal-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-compression",
  "clap",
- "console",
  "indoc",
- "infer",
- "reqwest",
  "serde",
  "serde_json",
  "sha256",
- "tokio",
- "tokio-tar",
  "toml",
  "tonic",
- "tracing",
- "url",
  "vorpal-schema",
- "vorpal-store",
 ]
 
 [[package]]
@@ -3314,11 +3313,14 @@ dependencies = [
  "async_zip",
  "filetime",
  "futures-lite",
+ "rand",
+ "rsa",
  "sanitize-filename",
  "sha256",
  "tokio",
  "tokio-tar",
  "tokio-util",
+ "tracing",
  "uuid",
  "walkdir",
 ]
@@ -3334,8 +3336,8 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tracing",
- "vorpal-notary",
  "vorpal-schema",
+ "vorpal-sdk",
  "vorpal-store",
 ]
 

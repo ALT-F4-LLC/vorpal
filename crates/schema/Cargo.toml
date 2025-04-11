@@ -1,0 +1,16 @@
+[package]
+name = "vorpal-schema"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { default-features = false, version = "1" }
+prost = { default-features = false, features = ["derive"], version = "0" }
+serde = { default-features = false, features = ["serde_derive"], version = "1" }
+tonic = { default-features = false, features = ["codegen", "prost", "transport"], version = "0" }
+
+[build-dependencies]
+tonic-build = { default-features = false, features = ["transport", "prost"], version = "0" }
+
+[package.metadata.cargo-machete]
+ignored = ["prost", "serde", "tonic-build"]
