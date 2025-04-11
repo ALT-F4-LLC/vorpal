@@ -1,9 +1,5 @@
 use crate::{
-    artifact::{
-        get_env_key, go,
-        language::go::{get_goarch, get_goos},
-        protoc, step, ArtifactBuilder, ArtifactSourceBuilder,
-    },
+    artifact::{get_env_key, go, protoc, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -19,10 +15,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "grpcurl";
 
     let source_version = "1.9.3";
-
     let source_path =
-        format!("https://github.com/fullstorydev/grpcurl/releases/tag/v{source_version}",);
-
+        format!("https://github.com/fullstorydev/grpcurl/releases/tag/v{source_version}");
     let source_digest = "3db5cef04f38e71c4007ed96cc827209ae5a1b6613c710cd656a252fafcde86c";
 
     let source = ArtifactSourceBuilder::new(name, &source_path)
@@ -35,8 +29,6 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         pushd ./source/{name}/grpcurl-{source_version}
 
         go build -o $VORPAL_OUTPUT/bin/grpcurl ./cmd/grpcurl
-
-        chmod +x $VORPAL_OUTPUT/bin/grpcurl
 
         go clean -modcache
     "};
