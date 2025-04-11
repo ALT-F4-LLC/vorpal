@@ -36,18 +36,6 @@ fn read_cargo(path: &str) -> Result<RustArtifactCargoToml> {
     Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
 
-pub fn toolchain_hash(target: ArtifactSystem) -> Result<&'static str> {
-    let target = match target {
-        Aarch64Darwin => "79d82dbb5e0db73b239859a74f070a6135adff3e1a13d05aa3dcb6863d819a70",
-        Aarch64Linux => "TODO",
-        X8664Darwin => "",
-        X8664Linux => "",
-        _ => bail!("unsupported 'rust-toolchain' target: {:?}", target),
-    };
-
-    Ok(target)
-}
-
 pub fn toolchain_target(target: ArtifactSystem) -> Result<String> {
     let target = match target {
         Aarch64Darwin => "aarch64-apple-darwin",
