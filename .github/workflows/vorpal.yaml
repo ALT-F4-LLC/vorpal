@@ -9,10 +9,43 @@ on:
     - cron: "0 8 * * *"
 
 jobs:
+  check:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-13
+          - macos-latest
+          - ubuntu-latest
+          - ubuntu-latest-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: target
+
+      - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make check
+
+      - uses: actions/cache/save@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: target
+
   code-quality:
+    needs:
+      - check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: target
+
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make format
       - run: ./script/dev.sh make lint
@@ -30,6 +63,11 @@ jobs:
           - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: target
 
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make dist
