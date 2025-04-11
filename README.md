@@ -42,30 +42,26 @@ async fn main() -> Result<()> {
 package main
 
 import (
-	"context"
 	"log"
 
-	"github.com/vorpal-sdk/vorpal/config"
-	"github.com/vorpal-sdk/vorpal/config/artifact/language/rust"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact/language"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
 
 func main() {
-	// 1. Get context
-	ctx, err := config.GetContext(context.Background())
+    // 1. Get context
+	context := config.GetContext()
+
+    // 2. Create artifact
+	example, err := language.
+		NewRustBuilder("example").
+		Build(context)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to build artifact: %v", err)
 	}
 
-	// 2. Create artifact
-	example, err := rust.NewArtifactBuilder("example").Build(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 3. Run context with artifacts
-	if err := ctx.Run([]config.Artifact{example}); err != nil {
-		log.Fatal(err)
-	}
+    // 3. Run context with artifacts
+	context.Run([]*string{example})
 }
 ```
 
