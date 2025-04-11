@@ -1,7 +1,7 @@
 use anyhow::Result;
 use vorpal_sdk::{
     artifact::{
-        go, goimports, gopls,
+        go, goimports, gopls, grpcurl,
         language::rust::{RustBuilder, RustShellBuilder},
         protoc, protoc_gen_go, protoc_gen_go_grpc,
     },
@@ -17,6 +17,7 @@ async fn main() -> Result<()> {
             go::build(context).await?,
             goimports::build(context).await?,
             gopls::build(context).await?,
+            grpcurl::build(context).await?,
             protoc::build(context).await?,
             protoc_gen_go::build(context).await?,
             protoc_gen_go_grpc::build(context).await?,

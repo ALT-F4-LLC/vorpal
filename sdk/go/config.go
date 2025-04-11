@@ -21,6 +21,11 @@ func newShellArtifacts(context *config.ConfigContext) ([]*string, error) {
 		return nil, err
 	}
 
+	grpcurl, err := artifact.Grpcurl(context)
+	if err != nil {
+		return nil, err
+	}
+
 	protoc, err := artifact.Protoc(context)
 	if err != nil {
 		return nil, err
@@ -40,6 +45,7 @@ func newShellArtifacts(context *config.ConfigContext) ([]*string, error) {
 		gobin,
 		goimports,
 		gopls,
+		grpcurl,
 		protoc,
 		protocGenGo,
 		protocGenGoGRPC,

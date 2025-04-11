@@ -15,8 +15,7 @@ func main() {
 		log.Fatalf("failed to create shell artifacts: %v", err)
 	}
 
-	vorpalShell, err := language.
-		NewRustShellBuilder("vorpal-shell").
+	vorpalShell, err := language.NewRustShellBuilder("vorpal-shell").
 		WithArtifacts(vorpalShellArtifacts).
 		Build(context)
 	if err != nil {
@@ -28,8 +27,7 @@ func main() {
 		log.Fatalf("failed to create artifacts: %v", err)
 	}
 
-	vorpal, err := language.
-		NewRustBuilder("vorpal").
+	vorpal, err := language.NewRustBuilder("vorpal").
 		WithArtifacts(vorpalArtifacts).
 		WithExcludes([]string{
 			".env",
