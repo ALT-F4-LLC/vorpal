@@ -179,10 +179,6 @@ func fetchArtifacts(client artifactApi.ArtifactServiceClient, digest string, sto
 	for _, step := range clientResponse.Steps {
 		if step != nil {
 			for _, digest := range step.Artifacts {
-				if _, ok := store[digest]; ok {
-					return nil
-				}
-
 				fetchArtifacts(client, digest, store)
 			}
 		}
