@@ -10,11 +10,7 @@ use vorpal_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. Get context
-
     let context = &mut get_context().await?;
-
-    // 2. Create artifacts
 
     let vorpal_shell = RustShellBuilder::new("vorpal-shell")
         .with_artifacts(vec![
@@ -44,13 +40,12 @@ async fn main() -> Result<()> {
             "script",
             "sdk/go",
             "shell.nix",
+            "vorpal-config",
             "vorpal-domains.svg",
             "vorpal-purpose.jpg",
         ])
         .build(context)
         .await?;
-
-    // 3. Run context with artifacts
 
     context.run(vec![vorpal_shell, vorpal]).await
 }

@@ -141,6 +141,7 @@ impl<'a> RustBuilder<'a> {
         // 1. READ CARGO.TOML FILES
 
         // Get the source path
+
         let source_path = Path::new(".").to_path_buf();
 
         if !source_path.exists() {
@@ -181,11 +182,11 @@ impl<'a> RustBuilder<'a> {
                         bail!("Cargo.toml not found: {:?}", member_cargo_toml_path);
                     }
 
-                    let member_cargo = read_cargo(member_cargo_toml_path.to_str().unwrap())?;
+                    let member_cargo_toml = read_cargo(member_cargo_toml_path.to_str().unwrap())?;
 
                     let mut member_target_paths = vec![];
 
-                    if let Some(bins) = member_cargo.bin {
+                    if let Some(bins) = member_cargo_toml.bin {
                         for bin in bins {
                             member_target_paths.push(format!("{}/{}", member, bin.path));
                             workspaces_bin_names.push(bin.name);
@@ -196,8 +197,8 @@ impl<'a> RustBuilder<'a> {
                         member_target_paths.push(format!("{}/src/lib.rs", member));
                     }
 
-                    for member_path in member_target_paths {
-                        workspaces_targets.push(member_path);
+                    for member_target_path in member_target_paths {
+                        workspaces_targets.push(member_target_path);
                     }
 
                     workspaces.push(member);

@@ -9,7 +9,7 @@ import (
 )
 
 type ArtifactSourceBuilder struct {
-	Digest   string
+	Digest   *string
 	Excludes []string
 	Includes []string
 	Name     string
@@ -34,7 +34,7 @@ type ArtifactBuilder struct {
 func NewArtifactSourceBuilder(name, path string) *ArtifactSourceBuilder {
 	return &ArtifactSourceBuilder{
 		Excludes: []string{},
-		Digest:   "",
+		Digest:   nil,
 		Includes: []string{},
 		Name:     name,
 		Path:     path,
@@ -47,7 +47,7 @@ func (a *ArtifactSourceBuilder) WithExcludes(excludes []string) *ArtifactSourceB
 }
 
 func (a *ArtifactSourceBuilder) WithHash(hash string) *ArtifactSourceBuilder {
-	a.Digest = hash
+	a.Digest = &hash
 	return a
 }
 
@@ -58,8 +58,8 @@ func (a *ArtifactSourceBuilder) WithIncludes(includes []string) *ArtifactSourceB
 
 func (a *ArtifactSourceBuilder) Build() artifact.ArtifactSource {
 	var digest *string
-	if a.Digest != "" {
-		digest = &a.Digest
+	if a.Digest != nil {
+		digest = a.Digest
 	}
 
 	return artifact.ArtifactSource{

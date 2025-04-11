@@ -142,11 +142,17 @@ func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, er
 		}
 
 		if response.ArtifactOutput != nil {
-			log.Printf("%s {} |> %v", artifact.Name, response.ArtifactOutput)
+			output := fmt.Sprintf("%s |> %s", artifact.Name, *response.ArtifactOutput)
+			println(output)
 		}
 
-		artifact = response.Artifact
-		artifactDigest = *response.ArtifactDigest
+		if response.Artifact != nil {
+			artifact = response.Artifact
+		}
+
+		if response.ArtifactDigest != nil {
+			artifactDigest = *response.ArtifactDigest
+		}
 	}
 
 	if _, ok := c.store[artifactDigest]; !ok {
