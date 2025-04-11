@@ -14,7 +14,7 @@ func Grpcurl(context *config.ConfigContext) (*string, error) {
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "6a3b61b2852a5543ee883cc2fedf355947d21f27a976921b078142d7216cfbd8"
+		digest = "718ab77ba1f560c9d585e4914fac47d63494c54707a6d25c93a3ee0a9434b092"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = ""
 	case artifact.ArtifactSystem_X8664_DARWIN:

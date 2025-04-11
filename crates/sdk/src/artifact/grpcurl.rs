@@ -16,7 +16,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let source_version = "1.9.3";
     let source_path =
-        format!("https://github.com/fullstorydev/grpcurl/releases/tag/v{source_version}");
+        format!("https://github.com/fullstorydev/grpcurl/archive/refs/tags/v{source_version}.tar.gz");
     let source_digest = "3db5cef04f38e71c4007ed96cc827209ae5a1b6613c710cd656a252fafcde86c";
 
     let source = ArtifactSourceBuilder::new(name, &source_path)
