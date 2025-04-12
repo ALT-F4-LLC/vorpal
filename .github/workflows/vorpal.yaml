@@ -27,7 +27,6 @@ jobs:
           path: vendor
 
       - run: ./script/dev.sh # pre-bake
-      - run: ./script/dev.sh make .cargo
       - run: ./script/dev.sh make vendor
 
       - uses: actions/cache/save@v4
@@ -60,8 +59,6 @@ jobs:
           path: target
 
       - run: ./script/dev.sh # pre-bake
-      - run: ./script/dev.sh make .cargo
-      - run: ./script/dev.sh make vendor
       - run: ./script/dev.sh make check
 
       - uses: actions/cache/save@v4
@@ -87,8 +84,6 @@ jobs:
           path: target
 
       - run: ./script/dev.sh # pre-bake
-      - run: ./script/dev.sh make .cargo
-      - run: ./script/dev.sh make vendor
       - run: ./script/dev.sh make format
       - run: ./script/dev.sh make lint
 
@@ -119,8 +114,6 @@ jobs:
           path: target
 
       - run: ./script/dev.sh # pre-bake
-      - run: ./script/dev.sh make .cargo
-      - run: ./script/dev.sh make vendor
       - run: ./script/dev.sh make build
       - run: ./script/dev.sh make test
       - run: ./script/dev.sh make dist

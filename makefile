@@ -30,22 +30,22 @@ clean:
 	echo '[source.vendored-sources]' >> $(CARGO_DIR)/config.toml
 	echo 'directory = "$(VENDOR_DIR)"' >> $(CARGO_DIR)/config.toml
 
-vendor:
+vendor: .cargo
 	cargo vendor --versioned-dirs $(VENDOR_DIR)
 
-check:
+check: .cargo vendor
 	cargo --offline check $(CARGO_FLAGS)
 
-format:
+format: .cargo vendor
 	cargo --offline fmt --all --check
 
-lint:
+lint: .cargo vendor
 	cargo --offline clippy -- --deny warnings
 
-build:
+build: .cargo vendor
 	cargo --offline build $(CARGO_FLAGS)
 
-test:
+test: .cargo vendor
 	cargo --offline test $(CARGO_FLAGS)
 
 dist:
