@@ -7,7 +7,7 @@ DIST_DIR := $(WORK_DIR)/dist
 VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_DIR := /var/lib/vorpal
 TARGET ?= debug
-CARGO_FLAGS := $(if $(filter $(TARGET),release),--release,)
+CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
 
 ifndef VERBOSE
 .SILENT:
@@ -31,19 +31,19 @@ clean:
 	rm -rf $(VENDOR_DIR)
 
 check:
-	cargo --offline check $(CARGO_FLAGS)
+	cargo check $(CARGO_FLAGS)
 
 format:
-	cargo --offline fmt --all --check
+	cargo fmt --all --check
 
 lint:
-	cargo --offline clippy -- --deny warnings
+	cargo clippy $(CARGO_FLAGS) -- --deny warnings
 
 build:
-	cargo --offline build $(CARGO_FLAGS)
+	cargo build $(CARGO_FLAGS)
 
 test:
-	cargo --offline test $(CARGO_FLAGS)
+	cargo test $(CARGO_FLAGS)
 
 dist:
 	mkdir -p $(DIST_DIR)
@@ -114,13 +114,13 @@ vorpal-config:
 	cargo build --bin "vorpal-config"
 
 vorpal-export: vorpal-config
-	cargo run --bin "vorpal" -- artifact --export --name "vorpal" > "vorpal-$(ARCH)-$(OS).json"
+	cargo run --bin "vorpal" -- artifact --config "target/debug/vorpal-config" --export --name "vorpal" > "vorpal-$(ARCH)-$(OS).json"
 
 vorpal-shell: vorpal-config
-	cargo run --bin "vorpal" -- artifact --name "vorpal-shell"
+	cargo run --bin "vorpal" -- artifact --config "target/debug/vorpal-config" --name "vorpal-shell"
 
 vorpal: vorpal-config
-	cargo run --bin "vorpal" -- artifact --name "vorpal"
+	cargo run --bin "vorpal" -- artifact --config "target/debug/vorpal-config" --name "vorpal"
 
 vorpal-start:
 	cargo run --bin "vorpal" -- start

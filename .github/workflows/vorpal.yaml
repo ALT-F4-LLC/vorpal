@@ -23,11 +23,22 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
+          path: target
+
+      - uses: actions/cache/restore@v4
+        with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
 
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make .cargo vendor
+      - run: ./script/dev.sh make TARGET=release check
+
+      - uses: actions/cache/save@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
+          path: target
 
       - uses: actions/cache/save@v4
         with:
@@ -43,13 +54,18 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
+          path: target
+
+      - uses: actions/cache/restore@v4
+        with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
 
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make .cargo vendor
       - run: ./script/dev.sh make format
-      - run: ./script/dev.sh make lint
+      - run: ./script/dev.sh make TARGET=release lint
 
   package:
     needs:
@@ -67,14 +83,18 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
+          path: target
+
+      - uses: actions/cache/restore@v4
+        with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
 
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make .cargo vendor
-      - run: ./script/dev.sh make check
-      - run: ./script/dev.sh make build
-      - run: ./script/dev.sh make test
+      - run: ./script/dev.sh make TARGET=release build
+      - run: ./script/dev.sh make TARGET=release test
       - run: ./script/dev.sh make dist
 
       - run: |
