@@ -17,19 +17,12 @@ endif
 
 # Development (without Vorpal)
 
-clean-cargo:
+clean:
 	cargo clean
-
-clean-dist:
-	rm -rf $(DIST_DIR)
-
-clean-vendor:
-	rm -rf $(VENDOR_DIR)
 	rm -rf $(CARGO_DIR)
+	rm -rf $(VENDOR_DIR)
 
-clean: clean-cargo clean-dist clean-vendor
-
-vendor:
+cargo-vendor:
 	mkdir -p .cargo
 	cargo vendor --versioned-dirs $(VENDOR_DIR) > $(CARGO_DIR)/config.toml
 
@@ -49,7 +42,8 @@ test:
 	cargo --offline test $(CARGO_FLAGS)
 
 dist:
-	mkdir -pv $(DIST_DIR)
+	rm -rf $(DIST_DIR)
+	mkdir -p $(DIST_DIR)
 	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
 		-C $(WORK_DIR)/target/$(TARGET) \
 		vorpal \
