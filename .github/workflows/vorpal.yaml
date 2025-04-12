@@ -64,6 +64,8 @@ jobs:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
+      - run: ls -alh
+
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make check
 
