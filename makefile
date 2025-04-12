@@ -20,11 +20,18 @@ endif
 clean:
 	cargo clean
 	rm -rf $(CARGO_DIR)
+	rm -rf $(DIST_DIR)
 	rm -rf $(VENDOR_DIR)
 
-cargo-vendor:
-	mkdir -p .cargo
-	cargo vendor --versioned-dirs $(VENDOR_DIR) > $(CARGO_DIR)/config.toml
+.cargo:
+	mkdir -p $(CARGO_DIR)
+	echo '[source.crates-io]' >> $(CARGO_DIR)/config.toml
+	echo 'replace-with = "vendored-sources"' >> $(CARGO_DIR)/config.toml
+	echo '[source.vendored-sources]' >> $(CARGO_DIR)/config.toml
+	echo 'directory = "$(VENDOR_DIR)"' >> $(CARGO_DIR)/config.toml
+
+vendor:
+	cargo vendor --versioned-dirs $(VENDOR_DIR)
 
 check:
 	cargo --offline check $(CARGO_FLAGS)
@@ -42,7 +49,6 @@ test:
 	cargo --offline test $(CARGO_FLAGS)
 
 dist:
-	rm -rf $(DIST_DIR)
 	mkdir -p $(DIST_DIR)
 	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
 		-C $(WORK_DIR)/target/$(TARGET) \
