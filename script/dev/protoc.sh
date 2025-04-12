@@ -7,7 +7,7 @@ PROTOC_SYSTEM=""
 PROTOC_VERSION="28.0"
 
 if [[ -f "${1}/bin/protoc" ]]; then
-    protoc --version
+    "${1}/bin/protoc" --version
     exit 0
 fi
 

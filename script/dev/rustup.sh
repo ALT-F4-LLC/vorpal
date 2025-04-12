@@ -6,6 +6,4 @@ if [[ ! -d "$HOME/.rustup" ]]; then
         | sh -s -- --default-toolchain 'none' --no-modify-path --profile 'minimal' -y
 fi
 
-PATH="$HOME/.cargo/bin:$PATH"
-
-cargo --version
+"$HOME/.cargo/bin/cargo" --version
