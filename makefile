@@ -56,6 +56,7 @@ vendor:
 	cargo vendor --versioned-dirs $(VENDOR_DIR)
 
 # Vorpal
+
 generate:
 	rm -rfv sdk/go/api
 	mkdir -pv sdk/go/api
@@ -110,20 +111,17 @@ generate-toolkits:
 
 # Development (with Vorpal)
 
-vorpal-config:
-	cargo build --bin "vorpal-config"
+vorpal-export:
+	"target/$(TARGET)/vorpal" artifact --config "target/$(TARGET)/vorpal-config" --export --name "vorpal" > "vorpal-$(ARCH)-$(OS).json"
 
-vorpal-export: vorpal-config
-	cargo run --bin "vorpal" -- artifact --config "target/debug/vorpal-config" --export --name "vorpal" > "vorpal-$(ARCH)-$(OS).json"
+vorpal-shell:
+	"target/$(TARGET)/vorpal" artifact --config "target/$(TARGET)/vorpal-config" --name "vorpal-shell"
 
-vorpal-shell: vorpal-config
-	cargo run --bin "vorpal" -- artifact --config "target/debug/vorpal-config" --name "vorpal-shell"
-
-vorpal: vorpal-config
-	cargo run --bin "vorpal" -- artifact --config "target/debug/vorpal-config" --name "vorpal"
+vorpal:
+	"target/$(TARGET)/vorpal" artifact --config "target/$(TARGET)/vorpal-config" --name "vorpal"
 
 vorpal-start:
-	cargo run --bin "vorpal" -- start
+	"target/$(TARGET)/vorpal" start
 
 # Vagrant environment
 
