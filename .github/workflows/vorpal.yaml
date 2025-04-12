@@ -95,7 +95,7 @@ jobs:
       - run: ./script/dev.sh make .cargo vendor
       - run: ./script/dev.sh make TARGET=release build
       - run: ./script/dev.sh make TARGET=release test
-      - run: ./script/dev.sh make dist
+      - run: ./script/dev.sh make TARGET=release dist
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
