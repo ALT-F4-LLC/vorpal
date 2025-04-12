@@ -46,11 +46,6 @@ jobs:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
 
-      - uses: actions/cache/restore@v4
-        with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
-          path: target
-
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make .cargo vendor
       - run: ./script/dev.sh make format
@@ -74,11 +69,6 @@ jobs:
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
-
-      - uses: actions/cache/restore@v4
-        with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
-          path: target
 
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make .cargo vendor
