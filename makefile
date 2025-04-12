@@ -2,9 +2,11 @@ ARCH := $(shell uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 OS_TYPE ?= debian
 WORK_DIR := $(shell pwd)
+CARGO_DIR := $(WORK_DIR)/.cargo
 DIST_DIR := $(WORK_DIR)/dist
-TARGET ?= debug
+VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_DIR := /var/lib/vorpal
+TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--release,)
 
 ifndef VERBOSE
@@ -19,29 +21,34 @@ clean-cargo:
 	cargo clean
 
 clean-dist:
-	rm -rfv $(DIST_DIR)
+	rm -rf $(DIST_DIR)
 
-clean-vagrant:
-	vagrant destroy --force
+clean-vendor:
+	rm -rf $(VENDOR_DIR)
+	rm -rf $(CARGO_DIR)
 
-clean: clean-cargo clean-dist clean-vagrant
+clean: clean-cargo clean-dist clean-vendor
+
+vendor:
+	mkdir -p .cargo
+	cargo vendor --versioned-dirs $(VENDOR_DIR) > $(CARGO_DIR)/config.toml
 
 check:
-	cargo check $(CARGO_FLAGS)
+	cargo --offline check $(CARGO_FLAGS)
 
 format:
-	cargo fmt --check
+	cargo --offline fmt --all --check
 
 lint:
-	cargo clippy -- -D warnings
+	cargo --offline clippy -- --deny warnings
 
 build:
-	cargo build $(CARGO_FLAGS)
+	cargo --offline build $(CARGO_FLAGS)
 
 test:
-	cargo test $(CARGO_FLAGS)
+	cargo --offline test $(CARGO_FLAGS)
 
-dist: build
+dist:
 	mkdir -pv $(DIST_DIR)
 	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
 		-C $(WORK_DIR)/target/$(TARGET) \
@@ -133,4 +140,5 @@ vagrant-box:
 		$(WORK_DIR)/packer_debian_vmware_arm64.box
 
 vagrant:
+	vagrant destroy --force || true
 	vagrant up --provider "vmware_desktop"

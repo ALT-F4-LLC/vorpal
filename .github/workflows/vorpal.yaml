@@ -9,7 +9,7 @@ on:
     - cron: "0 8 * * *"
 
 jobs:
-  check:
+  vendor:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -23,7 +23,45 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: |
+            .cargo/config.yaml
+            vendor
+
+      - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make vendor
+
+      - uses: actions/cache/save@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: |
+            .cargo/config.yaml
+            vendor
+
+  check:
+    needs:
+      - vendor
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-13
+          - macos-latest
+          - ubuntu-latest
+          - ubuntu-latest-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: |
+            .cargo/config.yaml
+            vendor
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
       - run: ./script/dev.sh # pre-bake
@@ -31,7 +69,7 @@ jobs:
 
       - uses: actions/cache/save@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
   code-quality:
@@ -43,7 +81,14 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: |
+            .cargo/config.yaml
+            vendor
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
       - run: ./script/dev.sh # pre-bake
@@ -67,9 +112,18 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          path: |
+            .cargo/config.yaml
+            vendor
+
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           path: target
 
       - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make build
+      - run: ./script/dev.sh make test
       - run: ./script/dev.sh make dist
 
       - run: |
