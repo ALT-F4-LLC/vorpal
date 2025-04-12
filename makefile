@@ -17,12 +17,6 @@ endif
 
 # Development (without Vorpal)
 
-clean:
-	cargo clean
-	rm -rf $(CARGO_DIR)
-	rm -rf $(DIST_DIR)
-	rm -rf $(VENDOR_DIR)
-
 .cargo:
 	mkdir -p $(CARGO_DIR)
 	echo '[source.crates-io]' >> $(CARGO_DIR)/config.toml
@@ -30,22 +24,25 @@ clean:
 	echo '[source.vendored-sources]' >> $(CARGO_DIR)/config.toml
 	echo 'directory = "$(VENDOR_DIR)"' >> $(CARGO_DIR)/config.toml
 
-vendor: .cargo
-	cargo vendor --versioned-dirs $(VENDOR_DIR)
+clean:
+	cargo clean
+	rm -rf $(CARGO_DIR)
+	rm -rf $(DIST_DIR)
+	rm -rf $(VENDOR_DIR)
 
-check: .cargo vendor
+check:
 	cargo --offline check $(CARGO_FLAGS)
 
-format: .cargo vendor
+format:
 	cargo --offline fmt --all --check
 
-lint: .cargo vendor
+lint:
 	cargo --offline clippy -- --deny warnings
 
-build: .cargo vendor
+build:
 	cargo --offline build $(CARGO_FLAGS)
 
-test: .cargo vendor
+test:
 	cargo --offline test $(CARGO_FLAGS)
 
 dist:
@@ -54,6 +51,9 @@ dist:
 		-C $(WORK_DIR)/target/$(TARGET) \
 		vorpal \
 		vorpal-config
+
+vendor:
+	cargo vendor --versioned-dirs $(VENDOR_DIR)
 
 # Vorpal
 generate:

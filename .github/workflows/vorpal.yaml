@@ -27,48 +27,16 @@ jobs:
           path: vendor
 
       - run: ./script/dev.sh # pre-bake
-      - run: ./script/dev.sh make vendor
+      - run: ./script/dev.sh make .cargo vendor
 
       - uses: actions/cache/save@v4
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
-
-  check:
-    needs:
-      - vendor
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        runner:
-          - macos-13
-          - macos-latest
-          - ubuntu-latest
-          - ubuntu-latest-arm64
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/cache/restore@v4
-        with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
-          path: vendor
-
-      - uses: actions/cache/restore@v4
-        with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
-          path: target
-
-      - run: ./script/dev.sh # pre-bake
-      - run: ./script/dev.sh make check
-
-      - uses: actions/cache/save@v4
-        with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
-          path: target
 
   code-quality:
     needs:
-      - check
+      - vendor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +52,7 @@ jobs:
           path: target
 
       - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make .cargo vendor
       - run: ./script/dev.sh make format
       - run: ./script/dev.sh make lint
 
@@ -103,17 +72,17 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          path: |
-            .cargo/config.yaml
-            vendor
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: vendor
 
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
       - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make .cargo vendor
+      - run: ./script/dev.sh make check
       - run: ./script/dev.sh make build
       - run: ./script/dev.sh make test
       - run: ./script/dev.sh make dist
