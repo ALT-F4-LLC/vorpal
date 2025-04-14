@@ -18,9 +18,9 @@ func Protoc(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = "d0f3c08c81bebdb5a502863c786a03d661e4faad1941e941f705bb076eaff13c"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "0a493af2551398c22cc36c3aad51bf0dcee8b9b8d78a58a04a521f15a63f6b46"
+		digest = "2a3d7816b06f1a046cbf8e82c1a94fe71b4fd384726f2064c9e0960ac75dadec"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "0a493af2551398c22cc36c3aad51bf0dcee8b9b8d78a58a04a521f15a63f6b46"
+		digest = "<TODO>"
 	default:
 		return nil, errors.New("unsupported target")
 	}

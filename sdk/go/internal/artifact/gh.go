@@ -18,9 +18,9 @@ func Gh(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = "57bb095cfcbfabbb06129e01463fd7162e7f60b09f0b39d86295c9eca35a75c6"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "0a493af2551398c22cc36c3aad51bf0dcee8b9b8d78a58a04a521f15a63f6b46"
+		digest = "ea0b5de3b00c3b223ac156924b4f2d5755c365d619d5b4d82f03dc5f96c90a99"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "0a493af2551398c22cc36c3aad51bf0dcee8b9b8d78a58a04a521f15a63f6b46"
+		digest = "<TODO>"
 	default:
 		return nil, errors.New("unsupported target")
 	}

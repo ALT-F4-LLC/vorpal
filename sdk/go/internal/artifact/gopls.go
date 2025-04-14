@@ -18,9 +18,9 @@ func Gopls(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = "be4a64072d90e74eb5eb071c03003d42201e33298cb2152352054413a96478aa"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "0a493af2551398c22cc36c3aad51bf0dcee8b9b8d78a58a04a521f15a63f6b46"
+		digest = "b26284154f652b584319e36e674f0547d8bd22f0fd52c48ed705d567ccbadc73"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "0a493af2551398c22cc36c3aad51bf0dcee8b9b8d78a58a04a521f15a63f6b46"
+		digest = "<TODO>"
 	default:
 		return nil, errors.New("unsupported target")
 	}

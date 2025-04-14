@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 
 	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
@@ -19,17 +18,6 @@ type command struct {
 	Variable map[string]string
 }
 
-func getDefaultSystem() string {
-	arch := runtime.GOARCH
-	os := runtime.GOOS
-
-	if arch == "arm64" {
-		arch = "aarch64"
-	}
-
-	return fmt.Sprintf("%s-%s", arch, os)
-}
-
 func newCommand() (*command, error) {
 	startCmd := flag.NewFlagSet("start", flag.ExitOnError)
 
@@ -39,7 +27,7 @@ func newCommand() (*command, error) {
 	startArtifact := startCmd.String("artifact", "", "artifact to use")
 	startPort := startCmd.Int("port", 0, "port to listen on")
 	startRegistry := startCmd.String("registry", "localhost:23151", "registry to use")
-	startTarget := startCmd.String("target", getDefaultSystem(), "target system")
+	startTarget := startCmd.String("target", GetSystemDefaultStr(), "target system")
 	startCmd.Var(newStringSliceValue(&startVariable), "variable", "variables to use (key=value)")
 
 	switch os.Args[1] {

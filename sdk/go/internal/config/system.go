@@ -11,6 +11,10 @@ func GetSystemDefaultStr() string {
 	goarch := runtime.GOARCH
 	goos := runtime.GOOS
 
+	if goarch == "amd64" {
+		goarch = "x86_64"
+	}
+
 	if goarch == "arm64" {
 		goarch = "aarch64"
 	}
