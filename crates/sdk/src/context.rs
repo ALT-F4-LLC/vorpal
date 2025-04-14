@@ -18,23 +18,29 @@ use vorpal_schema::{
 };
 
 #[derive(Clone)]
+pub struct ConfigContextStore {
+    artifact: HashMap<String, Artifact>,
+    variable: HashMap<String, String>,
+}
+
+#[derive(Clone)]
 pub struct ConfigContext {
     agent: String,
+    artifact: String,
     port: u16,
     registry: String,
-    store: HashMap<String, Artifact>,
+    store: ConfigContextStore,
     system: ArtifactSystem,
 }
 
 #[derive(Clone)]
 pub struct ArtifactServer {
-    pub artifacts: Vec<String>,
-    pub store: HashMap<String, Artifact>,
+    pub store: ConfigContextStore,
 }
 
 impl ArtifactServer {
-    pub fn new(artifacts: Vec<String>, store: HashMap<String, Artifact>) -> Self {
-        Self { artifacts, store }
+    pub fn new(store: ConfigContextStore) -> Self {
+        Self { store }
     }
 }
 
@@ -50,7 +56,7 @@ impl ArtifactService for ArtifactServer {
             return Err(tonic::Status::invalid_argument("'digest' is required"));
         }
 
-        let artifact = self.store.get(request.digest.as_str());
+        let artifact = self.store.artifact.get(request.digest.as_str());
 
         if artifact.is_none() {
             return Err(tonic::Status::not_found("artifact not found"));
@@ -64,7 +70,7 @@ impl ArtifactService for ArtifactServer {
         _: tonic::Request<ArtifactsRequest>,
     ) -> Result<tonic::Response<ArtifactsResponse>, tonic::Status> {
         let response = ArtifactsResponse {
-            digests: self.artifacts.iter().map(|s| s.to_string()).collect(),
+            digests: self.store.artifact.keys().cloned().collect(),
         };
 
         Ok(Response::new(response))
@@ -84,24 +90,51 @@ pub async fn get_context() -> Result<ConfigContext> {
     match args.command {
         Command::Start {
             agent,
+            artifact,
             port,
             registry,
             target,
+            variable,
         } => {
             let target = get_system(&target)?;
 
-            Ok(ConfigContext::new(agent, port, registry, target))
+            let variable = variable
+                .iter()
+                .map(|v| {
+                    let mut parts = v.split('=');
+                    let name = parts.next().unwrap_or_default();
+                    let value = parts.next().unwrap_or_default();
+                    (name.to_string(), value.to_string())
+                })
+                .collect();
+
+            Ok(ConfigContext::new(
+                agent, artifact, port, registry, target, variable,
+            ))
         }
     }
 }
 
 impl ConfigContext {
-    pub fn new(agent: String, port: u16, registry: String, system: ArtifactSystem) -> Self {
+    pub fn new(
+        agent: String,
+        artifact: String,
+        port: u16,
+        registry: String,
+        system: ArtifactSystem,
+        variable: HashMap<String, String>,
+    ) -> Self {
+        let store = ConfigContextStore {
+            artifact: HashMap::new(),
+            variable: variable.clone(),
+        };
+
         Self {
             agent,
+            artifact,
             port,
             registry,
-            store: HashMap::new(),
+            store,
             system,
         }
     }
@@ -112,7 +145,7 @@ impl ConfigContext {
 
         let artifact_digest = digest(artifact_json);
 
-        if self.store.contains_key(&artifact_digest) {
+        if self.store.artifact.contains_key(&artifact_digest) {
             return Ok(artifact_digest);
         }
 
@@ -163,15 +196,17 @@ impl ConfigContext {
         let artifact = response_artifact.unwrap();
         let artifact_digest = response_artifact_digest.unwrap();
 
-        if !self.store.contains_key(&artifact_digest) {
-            self.store.insert(artifact_digest.clone(), artifact.clone());
+        if !self.store.artifact.contains_key(&artifact_digest) {
+            self.store
+                .artifact
+                .insert(artifact_digest.clone(), artifact.clone());
         }
 
         Ok(artifact_digest)
     }
 
     pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
-        if self.store.contains_key(digest) {
+        if self.store.artifact.contains_key(digest) {
             return Ok(digest.to_string());
         }
 
@@ -195,7 +230,9 @@ impl ConfigContext {
             Ok(response) => {
                 let artifact = response.into_inner();
 
-                self.store.insert(digest.to_string(), artifact.clone());
+                self.store
+                    .artifact
+                    .insert(digest.to_string(), artifact.clone());
 
                 for step in artifact.steps.iter() {
                     for artifact_digest in step.artifacts.iter() {
@@ -209,16 +246,23 @@ impl ConfigContext {
     }
 
     pub fn get_artifact(&self, digest: &str) -> Option<Artifact> {
-        self.store.get(digest).cloned()
+        self.store.artifact.get(digest).cloned()
+    }
+
+    pub fn get_artifact_name(&self) -> &str {
+        self.artifact.as_str()
     }
 
     pub fn get_target(&self) -> ArtifactSystem {
         self.system
     }
 
-    pub async fn run(&self, artifacts: Vec<String>) -> Result<()> {
-        let service =
-            ArtifactServiceServer::new(ArtifactServer::new(artifacts, self.store.clone()));
+    pub fn get_variable(&self, name: &str) -> Option<String> {
+        self.store.variable.get(name).cloned()
+    }
+
+    pub async fn run(&self) -> Result<()> {
+        let service = ArtifactServiceServer::new(ArtifactServer::new(self.store.clone()));
 
         let service_addr_str = format!("[::]:{}", self.port);
         let service_addr = service_addr_str.parse().expect("failed to parse address");

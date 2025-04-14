@@ -57,6 +57,16 @@ pub struct RustShellBuilder<'a> {
     name: &'a str,
 }
 
+pub struct RustBuilder<'a> {
+    artifacts: Vec<String>,
+    check: bool,
+    excludes: Vec<&'a str>,
+    format: bool,
+    lint: bool,
+    name: &'a str,
+    tests: bool,
+}
+
 impl<'a> RustShellBuilder<'a> {
     pub fn new(name: &'a str) -> Self {
         Self {
@@ -100,18 +110,16 @@ impl<'a> RustShellBuilder<'a> {
     }
 }
 
-pub struct RustBuilder<'a> {
-    artifacts: Vec<String>,
-    name: &'a str,
-    excludes: Vec<&'a str>,
-}
-
 impl<'a> RustBuilder<'a> {
     pub fn new(name: &'a str) -> Self {
         Self {
             artifacts: vec![],
-            name,
+            check: false,
             excludes: vec![],
+            format: false,
+            lint: false,
+            name,
+            tests: false,
         }
     }
 
@@ -120,8 +128,28 @@ impl<'a> RustBuilder<'a> {
         self
     }
 
+    pub fn with_check(mut self) -> Self {
+        self.check = true;
+        self
+    }
+
     pub fn with_excludes(mut self, excludes: Vec<&'a str>) -> Self {
         self.excludes = excludes;
+        self
+    }
+
+    pub fn with_format(mut self, format: bool) -> Self {
+        self.format = format;
+        self
+    }
+
+    pub fn with_lint(mut self, lint: bool) -> Self {
+        self.lint = lint;
+        self
+    }
+
+    pub fn with_tests(mut self, tests: bool) -> Self {
+        self.tests = tests;
         self
     }
 
@@ -144,13 +172,13 @@ impl<'a> RustBuilder<'a> {
 
         // Load root cargo.toml
 
-        let cargo_toml_path = source_path.join("Cargo.toml");
+        let source_cargo_path = source_path.join("Cargo.toml");
 
-        if !cargo_toml_path.exists() {
-            bail!("Cargo.toml not found: {:?}", cargo_toml_path);
+        if !source_cargo_path.exists() {
+            bail!("Cargo.toml not found: {:?}", source_cargo_path);
         }
 
-        let cargo_toml = read_cargo(cargo_toml_path.to_str().unwrap())?;
+        let source_cargo = read_cargo(source_cargo_path.to_str().unwrap())?;
 
         // TODO: implement for non-workspace based projects
 
@@ -160,7 +188,7 @@ impl<'a> RustBuilder<'a> {
         let mut workspaces_bin_names = vec![];
         let mut workspaces_targets = vec![];
 
-        if let Some(workspace) = cargo_toml.workspace {
+        if let Some(workspace) = source_cargo.workspace {
             if let Some(members) = workspace.members {
                 for member in members {
                     let member_path = source_path.join(member.clone());
@@ -198,27 +226,27 @@ impl<'a> RustBuilder<'a> {
 
         // Get rust toolchain artifact
 
-        let toolchain = rust_toolchain::build(context).await?;
-        let toolchain_target = toolchain_target(context.get_target())?;
-        let toolchain_version = toolchain_version();
+        let rust_toolchain = rust_toolchain::build(context).await?;
+        let rust_toolchain_target = toolchain_target(context.get_target())?;
+        let rust_toolchain_version = toolchain_version();
+        let rust_toolchain_name = format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
 
         // Set environment variables
 
-        let toolchain_name = format!("{}-{}", toolchain_version, toolchain_target);
+        let mut step_artifacts = vec![rust_toolchain.clone()];
 
         let step_environments = vec![
             "HOME=$VORPAL_WORKSPACE/home".to_string(),
             format!(
                 "PATH={}",
                 format!(
-                    "{}/toolchains/{}-{}/bin",
-                    get_env_key(&toolchain),
-                    toolchain_version,
-                    toolchain_target
+                    "{}/toolchains/{}/bin",
+                    get_env_key(&rust_toolchain),
+                    rust_toolchain_name
                 )
             ),
-            format!("RUSTUP_HOME={}", get_env_key(&toolchain)),
-            format!("RUSTUP_TOOLCHAIN={}", toolchain_name),
+            format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
+            format!("RUSTUP_TOOLCHAIN={}", rust_toolchain_name),
         ];
 
         // Create vendor artifact
@@ -250,13 +278,9 @@ impl<'a> RustBuilder<'a> {
             target_paths = workspaces_targets.join(" "),
         };
 
-        let mut vendor_step_artifacts = vec![toolchain.clone()];
-
-        vendor_step_artifacts.extend(self.artifacts.clone());
-
         let vendor_step = step::shell(
             context,
-            vendor_step_artifacts,
+            step_artifacts.clone(),
             step_environments.clone(),
             vendor_step_script,
         )
@@ -280,7 +304,9 @@ impl<'a> RustBuilder<'a> {
             .build(context)
             .await?;
 
-        // TODO: implement artifact for 'check` to pre-bake the vendor cache
+        step_artifacts.push(vendor.clone());
+
+        // Setup global values
 
         let mut source_excludes = vec!["target".to_string()];
 
@@ -292,9 +318,7 @@ impl<'a> RustBuilder<'a> {
             .with_excludes(source_excludes)
             .build();
 
-        let mut step_artifacts = vec![toolchain, vendor.clone()];
-
-        step_artifacts.extend(self.artifacts);
+        // Create artifact
 
         let step_script = formatdoc! {"
             mkdir -pv $HOME
@@ -305,9 +329,23 @@ impl<'a> RustBuilder<'a> {
 
             ln -sv \"{vendor}/config.toml\" .cargo/config.toml
 
-            cargo build --offline --release
+            if [ \"{enable_check}\" = \"true\" ]; then
+                cargo --offline check --release
+            fi
 
-            cargo test --offline --release
+            if [ \"{enable_format}\" = \"true\" ]; then
+                cargo --offline fmt --all --check
+            fi
+
+            if [ \"{enable_lint}\" = \"true\" ]; then
+                cargo --offline clippy -- --deny warnings
+            fi
+
+            cargo --offline build --release
+
+            if [ \"{enable_tests}\" = \"true\" ]; then
+                cargo --offline test --release
+            fi
 
             mkdir -pv \"$VORPAL_OUTPUT/bin\"
 
@@ -317,11 +355,21 @@ impl<'a> RustBuilder<'a> {
                 cp -pv \"target/release/${{bin_name}}\" \"$VORPAL_OUTPUT/bin/\"
             done",
             bin_names = workspaces_bin_names.join(" "),
+            enable_check = if self.check { "true" } else { "false" },
+            enable_format = if self.format { "true" } else { "false" },
+            enable_lint = if self.lint { "true" } else { "false" },
+            enable_tests = if self.tests { "true" } else { "false" },
             name = self.name,
             vendor = get_env_key(&vendor),
         };
 
-        let step = step::shell(context, step_artifacts, step_environments, step_script).await?;
+        let step = step::shell(
+            context,
+            [step_artifacts.clone(), self.artifacts.clone()].concat(),
+            step_environments,
+            step_script,
+        )
+        .await?;
 
         ArtifactBuilder::new(self.name)
             .with_source(source)

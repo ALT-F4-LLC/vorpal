@@ -31,25 +31,29 @@ const (
 	ArtifactSourceKind_UNKNOWN ArtifactSourceKind = "UNKNOWN"
 )
 
+type ConfigContextStore struct {
+	artifact map[string]*artifactApi.Artifact
+	variable map[string]string
+}
+
 type ConfigContext struct {
 	agent    string
+	artifact string
 	port     int
 	registry string
-	store    map[string]*artifactApi.Artifact
+	store    ConfigContextStore
 	system   artifactApi.ArtifactSystem
 }
 
 type ArtifactServer struct {
 	artifactApi.UnimplementedArtifactServiceServer
 
-	artifacts []*string
-	store     map[string]*artifactApi.Artifact
+	store ConfigContextStore
 }
 
-func NewArtifactServer(artifacts []*string, store map[string]*artifactApi.Artifact) *ArtifactServer {
+func NewArtifactServer(store ConfigContextStore) *ArtifactServer {
 	return &ArtifactServer{
-		artifacts: artifacts,
-		store:     store,
+		store: store,
 	}
 }
 
@@ -58,7 +62,7 @@ func (s *ArtifactServer) GetArtifact(ctx context.Context, request *artifactApi.A
 		return nil, fmt.Errorf("'digest' is required")
 	}
 
-	response := s.store[request.Digest]
+	response := s.store.artifact[request.Digest]
 	if response == nil {
 		return nil, fmt.Errorf("artifact not found")
 	}
@@ -69,10 +73,8 @@ func (s *ArtifactServer) GetArtifact(ctx context.Context, request *artifactApi.A
 func (s *ArtifactServer) GetArtifacts(ctx context.Context, request *artifactApi.ArtifactsRequest) (*artifactApi.ArtifactsResponse, error) {
 	digests := make([]string, 0)
 
-	for _, digest := range s.artifacts {
-		if digest != nil {
-			digests = append(digests, *digest)
-		}
+	for digest := range s.store.artifact {
+		digests = append(digests, digest)
 	}
 
 	response := &artifactApi.ArtifactsResponse{
@@ -87,16 +89,22 @@ func (s *ArtifactServer) StoreArtifact(ctx context.Context, request *artifactApi
 }
 
 func GetContext() *ConfigContext {
-	cmd, err := NewCommand()
+	cmd, err := newCommand()
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	store := ConfigContextStore{
+		artifact: make(map[string]*artifactApi.Artifact),
+		variable: cmd.Variable,
+	}
+
 	return &ConfigContext{
 		agent:    cmd.Agent,
+		artifact: cmd.Artifact,
 		port:     cmd.Port,
 		registry: cmd.Registry,
-		store:    make(map[string]*artifactApi.Artifact),
+		store:    store,
 		system:   cmd.Target,
 	}
 }
@@ -111,7 +119,7 @@ func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, er
 
 	artifactDigest := fmt.Sprintf("%x", sha256.Sum256(artifactJson))
 
-	if _, ok := c.store[artifactDigest]; ok {
+	if _, ok := c.store.artifact[artifactDigest]; ok {
 		return &artifactDigest, nil
 	}
 
@@ -155,8 +163,8 @@ func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, er
 		}
 	}
 
-	if _, ok := c.store[artifactDigest]; !ok {
-		c.store[artifactDigest] = artifact
+	if _, ok := c.store.artifact[artifactDigest]; !ok {
+		c.store.artifact[artifactDigest] = artifact
 	}
 
 	return &artifactDigest, nil
@@ -188,7 +196,7 @@ func fetchArtifacts(client artifactApi.ArtifactServiceClient, digest string, sto
 }
 
 func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
-	if _, ok := c.store[digest]; ok {
+	if _, ok := c.store.artifact[digest]; ok {
 		return &digest, nil
 	}
 
@@ -201,7 +209,7 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 
 	client := artifactApi.NewArtifactServiceClient(clientConn)
 
-	err = fetchArtifacts(client, digest, c.store)
+	err = fetchArtifacts(client, digest, c.store.artifact)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching artifact: %v", err)
 	}
@@ -210,19 +218,33 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 }
 
 func (c *ConfigContext) GetArtifact(digest string) *artifactApi.Artifact {
-	return c.store[digest]
+	return c.store.artifact[digest]
+}
+
+func (c *ConfigContext) GetArtifactName() string {
+	return c.artifact
 }
 
 func (c *ConfigContext) GetTarget() artifactApi.ArtifactSystem {
 	return c.system
 }
 
-func (c *ConfigContext) Run(artifacts []*string) error {
+func (c *ConfigContext) GetVariable(name string) *string {
+	if _, ok := c.store.variable[name]; !ok {
+		return nil
+	}
+
+	value := c.store.variable[name]
+
+	return &value
+}
+
+func (c *ConfigContext) Run() error {
 	var grpcServerOpts []grpc.ServerOption
 
 	grpcServer := grpc.NewServer(grpcServerOpts...)
 
-	artifactApi.RegisterArtifactServiceServer(grpcServer, NewArtifactServer(artifacts, c.store))
+	artifactApi.RegisterArtifactServiceServer(grpcServer, NewArtifactServer(c.store))
 
 	listenerAddr := fmt.Sprintf("[::]:%d", c.port)
 

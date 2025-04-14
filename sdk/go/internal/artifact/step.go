@@ -20,13 +20,11 @@ type BwrapScriptTemplateArgs struct {
 
 const BashScriptTemplate = `#!/bin/bash
 set -euo pipefail
-
 {{.Script}}
 `
 
 const BwrapScriptTemplate = `#!/bin/bash
 set -euo pipefail
-
 {{.Script}}
 `
 

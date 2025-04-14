@@ -16,6 +16,9 @@ pub enum Command {
         agent: String,
 
         #[clap(long)]
+        artifact: String,
+
+        #[clap(long)]
         port: u16,
 
         #[clap(default_value = "http://localhost:23151", long)]
@@ -23,5 +26,8 @@ pub enum Command {
 
         #[arg(default_value_t = get_system_default_str(), long)]
         target: String,
+
+        #[clap(long)]
+        variable: Vec<String>,
     },
 }

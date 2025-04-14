@@ -17,7 +17,8 @@ type ShellArtifactTemplate struct {
 	Unsets   string
 }
 
-const ShellArtifactScriptTemplate = `mkdir -pv $VORPAL_WORKSPACE/bin
+const ShellArtifactScriptTemplate = `
+mkdir -pv $VORPAL_WORKSPACE/bin
 
 cat > bin/activate << "EOF"
 #!/bin/bash

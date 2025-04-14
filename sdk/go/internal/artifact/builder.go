@@ -24,11 +24,23 @@ type ArtifactStepBuilder struct {
 	Script       map[artifact.ArtifactSystem]string
 }
 
+type ArtifactTaskBuilder struct {
+	Artifacts []*string
+	Name      string
+	Script    string
+}
+
 type ArtifactBuilder struct {
 	Name    string
 	Sources []*artifact.ArtifactSource
 	Steps   []*artifact.ArtifactStep
 	Systems []artifact.ArtifactSystem
+}
+
+type VariableBuilder struct {
+	Encrypt bool
+	Name    string
+	Require bool
 }
 
 func NewArtifactSourceBuilder(name, path string) *ArtifactSourceBuilder {
@@ -161,6 +173,34 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) *artifact.Artifac
 	}
 }
 
+func NewArtifactTaskBuilder(name string, script string) *ArtifactTaskBuilder {
+	return &ArtifactTaskBuilder{
+		Artifacts: []*string{},
+		Name:      name,
+		Script:    script,
+	}
+}
+
+func (a *ArtifactTaskBuilder) WithArtifacts(artifacts []*string) *ArtifactTaskBuilder {
+	a.Artifacts = artifacts
+	return a
+}
+
+func (a *ArtifactTaskBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+	step, err := Shell(ctx, a.Artifacts, []string{}, a.Script)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewArtifactBuilder(a.Name).
+		WithStep(step).
+		WithSystem(artifact.ArtifactSystem_AARCH64_DARWIN).
+		WithSystem(artifact.ArtifactSystem_AARCH64_LINUX).
+		WithSystem(artifact.ArtifactSystem_X8664_DARWIN).
+		WithSystem(artifact.ArtifactSystem_X8664_LINUX).
+		Build(ctx)
+}
+
 func NewArtifactBuilder(name string) *ArtifactBuilder {
 	return &ArtifactBuilder{
 		Name:    name,
@@ -241,4 +281,32 @@ func (a *ArtifactBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 
 func GetEnvKey(digest *string) string {
 	return fmt.Sprintf("$VORPAL_ARTIFACT_%s", *digest)
+}
+
+func NewVariableBuilder(name string) *VariableBuilder {
+	return &VariableBuilder{
+		Encrypt: false,
+		Name:    name,
+		Require: false,
+	}
+}
+
+func (v *VariableBuilder) WithEncrypt() *VariableBuilder {
+	v.Encrypt = true
+	return v
+}
+
+func (v *VariableBuilder) WithRequire() *VariableBuilder {
+	v.Require = true
+	return v
+}
+
+func (v *VariableBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+	variable := ctx.GetVariable(v.Name)
+
+	if v.Require && variable == nil {
+		return nil, fmt.Errorf("variable '%s' is required", v.Name)
+	}
+
+	return variable, nil
 }
