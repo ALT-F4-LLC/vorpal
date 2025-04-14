@@ -1,16 +1,15 @@
 use crate::build_source;
 use anyhow::Result;
+use sha256::digest;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::Server;
-use tonic::{Request, Response, Status};
-
+use tonic::{transport::Server, Request, Response, Status};
 use vorpal_schema::{
     agent::v0::{
         agent_service_server::{AgentService, AgentServiceServer},
         PrepareArtifactResponse,
     },
-    artifact::v0::{artifact_service_client::ArtifactServiceClient, Artifact, ArtifactSource},
+    artifact::v0::{Artifact, ArtifactSource},
 };
 use vorpal_store::paths::get_public_key_path;
 
@@ -31,6 +30,8 @@ async fn prepare_artifact(
     tx: &mpsc::Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     let artifact = request.into_inner();
+
+    // TODO: Check if artifact already exists in the registry
 
     let mut artifact_sources = vec![];
 
@@ -60,24 +61,17 @@ async fn prepare_artifact(
         steps: artifact.steps,
         systems: artifact.systems,
         target: artifact.target,
+        // variables: artifact.variables,
     };
 
-    let mut client = ArtifactServiceClient::connect(registry.to_owned())
-        .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+    let artifact_json =
+        serde_json::to_vec(&artifact).map_err(|err| Status::internal(format!("{}", err)))?;
 
-    let response = client
-        .store_artifact(artifact.clone())
-        .await
-        .map_err(|err| {
-            Status::internal(format!("failed to store artifact in registry: {:?}", err))
-        })?;
-
-    let response = response.into_inner();
+    let artifact_digest = digest(artifact_json);
 
     let artifact_response = PrepareArtifactResponse {
         artifact: Some(artifact),
-        artifact_digest: Some(response.digest),
+        artifact_digest: Some(artifact_digest),
         artifact_output: None,
     };
 

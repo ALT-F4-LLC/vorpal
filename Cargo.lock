@@ -3253,6 +3253,7 @@ name = "vorpal-config"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "indoc",
  "tokio",
  "vorpal-sdk",
 ]
@@ -3282,7 +3283,6 @@ dependencies = [
 name = "vorpal-schema"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "prost",
  "serde",
  "tonic",

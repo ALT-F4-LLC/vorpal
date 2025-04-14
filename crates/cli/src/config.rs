@@ -9,65 +9,42 @@ use tokio::{
     process::Child,
 };
 use tokio_stream::{wrappers::LinesStream, StreamExt};
-use tonic::{transport::Channel, Code::NotFound};
+use tonic::transport::Channel;
 use tracing::{info, warn};
 use vorpal_schema::{
     archive::v0::archive_service_client::ArchiveServiceClient,
-    artifact::v0::{artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest},
+    artifact::v0::{artifact_service_client::ArtifactServiceClient, Artifact},
     worker::v0::worker_service_client::WorkerServiceClient,
 };
-
 use vorpal_store::paths::get_store_path;
 
-pub async fn fetch_artifacts(
+pub async fn get_artifacts(
     artifact: &Artifact,
-    artifact_map: &mut HashMap<String, Artifact>,
-    client_config: &mut ArtifactServiceClient<Channel>,
-    client_registry: &mut ArtifactServiceClient<Channel>,
+    artifact_digest: &str,
+    build_store: &mut HashMap<String, Artifact>,
+    config_store: &HashMap<String, Artifact>,
 ) -> Result<()> {
+    if !build_store.contains_key(artifact_digest) {
+        build_store.insert(artifact_digest.to_string(), artifact.clone());
+    }
+
     for step in artifact.steps.iter() {
-        for digest in step.artifacts.iter() {
-            if artifact_map.contains_key(digest) {
+        for artifact_digest in step.artifacts.iter() {
+            if build_store.contains_key(artifact_digest) {
                 continue;
             }
 
-            let request = ArtifactRequest {
-                digest: digest.to_string(),
-            };
+            let artifact = config_store
+                .get(artifact_digest)
+                .ok_or_else(|| anyhow!("artifact 'config' not found: {}", artifact_digest))?;
 
-            let response = match client_config.get_artifact(request).await {
-                Ok(res) => res,
-                Err(error) => {
-                    if error.code() != NotFound {
-                        bail!("config get artifact error: {:?}", error);
-                    }
+            build_store.insert(artifact_digest.to_string(), artifact.clone());
 
-                    let registry_request = ArtifactRequest {
-                        digest: digest.to_string(),
-                    };
-
-                    match client_registry.get_artifact(registry_request).await {
-                        Ok(res) => res,
-                        Err(status) => {
-                            if status.code() != NotFound {
-                                bail!("registry get artifact error: {:?}", status);
-                            }
-
-                            bail!("artifact not found in registry: {}", digest);
-                        }
-                    }
-                }
-            };
-
-            let artifact = response.into_inner();
-
-            artifact_map.insert(digest.to_string(), artifact.clone());
-
-            Box::pin(fetch_artifacts(
-                &artifact,
-                artifact_map,
-                client_config,
-                client_registry,
+            Box::pin(get_artifacts(
+                artifact,
+                artifact_digest,
+                build_store,
+                config_store,
             ))
             .await?
         }
@@ -76,10 +53,10 @@ pub async fn fetch_artifacts(
     Ok(())
 }
 
-pub async fn get_order(build_artifact: &HashMap<String, Artifact>) -> Result<Vec<String>> {
+pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Vec<String>> {
     let mut artifact_graph = DiGraphMap::<&String, Artifact>::new();
 
-    for (artifact_hash, artifact) in build_artifact.iter() {
+    for (artifact_hash, artifact) in config_artifact.iter() {
         artifact_graph.add_node(artifact_hash);
 
         for step in artifact.steps.iter() {
@@ -100,9 +77,11 @@ pub async fn get_order(build_artifact: &HashMap<String, Artifact>) -> Result<Vec
 }
 
 pub async fn start(
+    artifact: String,
     file: String,
     registry: String,
     target: String,
+    variable: Vec<String>,
 ) -> Result<(Child, ArtifactServiceClient<Channel>)> {
     let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
 
@@ -110,6 +89,8 @@ pub async fn start(
 
     command.args([
         "start",
+        "--artifact",
+        &artifact,
         "--port",
         &port.to_string(),
         "--registry",
@@ -117,6 +98,10 @@ pub async fn start(
         "--target",
         &target,
     ]);
+
+    for var in variable.iter() {
+        command.arg("--variable").arg(var);
+    }
 
     let mut config_process = command
         .stdout(Stdio::piped())
@@ -201,34 +186,41 @@ pub async fn start(
 }
 
 pub async fn build_artifacts(
+    artifact_path: bool,
     artifact_selected: Option<&Artifact>,
-    artifact_config: HashMap<String, Artifact>,
+    build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
 ) -> Result<()> {
-    let artifact_order = get_order(&artifact_config).await?;
-    let mut artifact_complete = HashMap::<String, Artifact>::new();
+    let artifact_order = get_order(&build_store).await?;
+    let mut build_complete = HashMap::<String, Artifact>::new();
 
-    for artifact_hash in artifact_order {
-        match artifact_config.get(&artifact_hash) {
-            None => bail!("artifact 'config' not found: {}", artifact_hash),
+    for artifact_digest in artifact_order {
+        match build_store.get(&artifact_digest) {
+            None => bail!("artifact 'config' not found: {}", artifact_digest),
 
             Some(artifact) => {
                 for step in artifact.steps.iter() {
                     for hash in step.artifacts.iter() {
-                        if !artifact_complete.contains_key(hash) {
+                        if !build_complete.contains_key(hash) {
                             bail!("artifact 'build' not found: {}", hash);
                         }
                     }
                 }
 
-                build(artifact, &artifact_hash, client_archive, client_worker).await?;
+                build(artifact, &artifact_digest, client_archive, client_worker).await?;
 
-                artifact_complete.insert(artifact_hash.to_string(), artifact.clone());
+                build_complete.insert(artifact_digest.to_string(), artifact.clone());
 
                 if let Some(artifact_selected) = artifact_selected {
                     if artifact_selected.name == artifact.name {
-                        println!("{}", get_store_path(&artifact_hash).display());
+                        let mut output = artifact_digest.clone();
+
+                        if artifact_path {
+                            output = get_store_path(&artifact_digest).display().to_string();
+                        }
+
+                        println!("{}", output);
                     }
                 }
             }
