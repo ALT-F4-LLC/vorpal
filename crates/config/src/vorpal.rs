@@ -9,7 +9,7 @@ use vorpal_sdk::{
     context::ConfigContext,
 };
 
-pub async fn package(context: &mut ConfigContext) -> Result<()> {
+pub async fn package(context: &mut ConfigContext) -> Result<String> {
     let artifacts = vec![protoc::build(context).await?];
 
     let excludes = vec![
@@ -37,12 +37,10 @@ pub async fn package(context: &mut ConfigContext) -> Result<()> {
         .with_artifacts(artifacts)
         .with_excludes(excludes)
         .build(context)
-        .await?;
-
-    Ok(())
+        .await
 }
 
-pub async fn shell(context: &mut ConfigContext) -> Result<()> {
+pub async fn shell(context: &mut ConfigContext) -> Result<String> {
     let artifacts = vec![
         gh::build(context).await?,
         go::build(context).await?,
@@ -57,12 +55,10 @@ pub async fn shell(context: &mut ConfigContext) -> Result<()> {
     RustShellBuilder::new("vorpal-shell")
         .with_artifacts(artifacts)
         .build(context)
-        .await?;
-
-    Ok(())
+        .await
 }
 
-pub async fn release(context: &mut ConfigContext) -> Result<()> {
+pub async fn release(context: &mut ConfigContext) -> Result<String> {
     let aarch64_darwin = VariableBuilder::new("aarch64-darwin")
         .with_require()
         .build(context)?
@@ -129,7 +125,5 @@ pub async fn release(context: &mut ConfigContext) -> Result<()> {
     ArtifactTaskBuilder::new("vorpal-release", script)
         .with_artifacts(artifacts)
         .build(context)
-        .await?;
-
-    Ok(())
+        .await
 }

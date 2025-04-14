@@ -18,9 +18,9 @@ func ProtocGenGoGRPC(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = "ee99a33b1d55752ff6dc8449af4b8ac1df89e0aaf72f932e41690221bba5459c"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = ""
+		digest = "0a493af2551398c22cc36c3aad51bf0dcee8b9b8d78a58a04a521f15a63f6b46"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "0a493af2551398c22cc36c3aad51bf0dcee8b9b8d78a58a04a521f15a63f6b46"
 	default:
 		return nil, errors.New("unsupported target")
 	}

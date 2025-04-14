@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
-use vorpal_sdk::context::get_context;
+use indoc::formatdoc;
+use vorpal_sdk::{artifact::ArtifactTaskBuilder, context::get_context};
 
 mod vorpal;
 
@@ -11,8 +12,20 @@ async fn main() -> Result<()> {
         "vorpal-shell" => vorpal::shell(context).await?,
         "vorpal" => vorpal::package(context).await?,
         "vorpal-release" => vorpal::release(context).await?,
-        _ => return Err(anyhow!("unknown artifact: {}", context.get_artifact_name())),
-    }
+        "vorpal-example" => {
+            let script = formatdoc! {r#"
+                vorpal --version
+            "#};
+
+            ArtifactTaskBuilder::new("vorpal-example", script)
+                .with_artifacts(vec![vorpal::package(context).await?])
+                .build(context)
+                .await?
+        }
+        _ => {
+            return Err(anyhow!("unknown: {}", context.get_artifact_name()));
+        }
+    };
 
     context.run().await
 }
