@@ -121,23 +121,23 @@ async fn main() -> Result<()> {
                 pushd vorpal
 
                 git fetch --tags
-                # git tag --delete nightly || true
-                # git push origin :refs/tags/nightly || true
-                # gh release delete --yes nightly || true
+                git tag --delete nightly || true
+                git push origin :refs/tags/nightly || true
+                gh release delete --yes nightly || true
 
-                # git tag nightly
-                # git push --tags
+                git tag nightly
+                git push --tags
 
-                #gh release create \
-                #    --notes "Nightly builds from main branch." \
-                #    --prerelease \
-                #    --title "nightly" \
-                #    --verify-tag \
-                #    nightly \
-                #    /var/lib/vorpal/store/{aarch64_darwin}.tar.zst \
-                #    /var/lib/vorpal/store/{aarch64_linux}.tar.zst \
-                #    /var/lib/vorpal/store/{x8664_darwin}.tar.zst \
-                #    /var/lib/vorpal/store/{x8664_linux}.tar.zst"#
+                gh release create \
+                    --notes "Nightly builds from main branch." \
+                    --prerelease \
+                    --title "nightly" \
+                    --verify-tag \
+                    nightly \
+                    /var/lib/vorpal/store/{aarch64_darwin}.tar.zst \
+                    /var/lib/vorpal/store/{aarch64_linux}.tar.zst \
+                    /var/lib/vorpal/store/{x8664_darwin}.tar.zst \
+                    /var/lib/vorpal/store/{x8664_linux}.tar.zst"#
             };
 
             ArtifactTaskBuilder::new("vorpal-release", script)
