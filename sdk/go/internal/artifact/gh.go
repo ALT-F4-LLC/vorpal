@@ -16,7 +16,7 @@ func Gh(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
 		digest = "a038ac34aeef1ac2acabafe4a99312e88bc4a611746d23d14c179b81123aa25e"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = ""
+		digest = "57bb095cfcbfabbb06129e01463fd7162e7f60b09f0b39d86295c9eca35a75c6"
 	case artifact.ArtifactSystem_X8664_DARWIN:
 		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:

@@ -13,10 +13,10 @@ func main() {
 	var err error
 
 	switch context.GetArtifactName() {
-	case "vorpal":
-		err = NewVorpal(context)
 	case "vorpal-shell":
 		err = NewVorpalShell(context)
+	case "vorpal":
+		err = NewVorpal(context)
 	case "vorpal-release":
 		err = NewVorpalRelease(context)
 	default:

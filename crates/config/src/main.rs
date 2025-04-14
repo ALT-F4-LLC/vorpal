@@ -8,9 +8,9 @@ async fn main() -> Result<()> {
     let context = &mut get_context().await?;
 
     match context.get_artifact_name() {
+        "vorpal-shell" => vorpal::shell(context).await?,
         "vorpal" => vorpal::package(context).await?,
         "vorpal-release" => vorpal::release(context).await?,
-        "vorpal-shell" => vorpal::shell(context).await?,
         _ => return Err(anyhow!("unknown artifact: {}", context.get_artifact_name())),
     }
 

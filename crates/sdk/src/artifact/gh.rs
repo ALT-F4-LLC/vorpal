@@ -15,7 +15,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let source_digest = match target {
         Aarch64Darwin => "f9d97acb8bc92eca98e2e1ab608050972e4c55dfa4a31001a63a0ce30ee4b545",
-        Aarch64Linux => "",
+        Aarch64Linux => "c63c8e24845de186b7130a8b9a0923ef93a8a031746dafaefae987ef04258f26",
         X8664Darwin => "",
         X8664Linux => "",
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
@@ -29,9 +29,17 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
 
+    let source_extension = match target {
+        Aarch64Darwin => "zip",
+        Aarch64Linux => "tar.gz",
+        X8664Darwin => "zip",
+        X8664Linux => "tar.gz",
+        _ => bail!("unsupported {name} system: {}", target.as_str_name()),
+    };
+
     let source_version = "2.69.0";
 
-    let source_path = format!("https://github.com/cli/cli/releases/download/v{source_version}/gh_{source_version}_{source_target}.zip");
+    let source_path = format!("https://github.com/cli/cli/releases/download/v{source_version}/gh_{source_version}_{source_target}.{source_extension}");
 
     let source = ArtifactSourceBuilder::new(name, source_path.as_str())
         .with_digest(source_digest)
