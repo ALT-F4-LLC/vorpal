@@ -8,6 +8,7 @@ VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_DIR := /var/lib/vorpal
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
+CONFIG_FILE ?= target/$(TARGET)/vorpal-config
 
 ifndef VERBOSE
 .SILENT:
@@ -91,25 +92,33 @@ generate:
 
 # Development (with Vorpal)
 
+vorpal-example:
+	"target/$(TARGET)/vorpal" artifact \
+		--config "$(CONFIG_FILE)" \
+		--name "vorpal-example"
+
 vorpal-export:
 	"target/$(TARGET)/vorpal" artifact \
-		--config "target/$(TARGET)/vorpal-config" \
+		--config "$(CONFIG_FILE)" \
 		--export \
 		--name "vorpal"
 
 vorpal-shell:
 	"target/$(TARGET)/vorpal" artifact \
-		--config "target/$(TARGET)/vorpal-config" \
+		--config "$(CONFIG_FILE)" \
 		--name "vorpal-shell" \
 		--path
 
 vorpal:
 	"target/$(TARGET)/vorpal" artifact \
-		--config "target/$(TARGET)/vorpal-config" \
+		--config "$(CONFIG_FILE)" \
 		--name "vorpal"
 
 vorpal-start:
 	"target/$(TARGET)/vorpal" start
+
+vorpal-config-start:
+	"$(CONFIG_FILE)" start --artifact "$(ARTIFACT)" --port "50051"
 
 # Vagrant environment
 

@@ -173,6 +173,7 @@ jobs:
 
       - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-shell"
       - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal"
+      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-example"
 
       - if: always()
         run: |
