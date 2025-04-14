@@ -7,8 +7,8 @@ Vagrant.configure("2") do |config|
   # Be sure to set a high enough value for your system
   config.vm.provider :vmware_desktop do |vmware|
     vmware.vmx["ethernet0.pcislotnumber"] = "160"
-    vmware.vmx["memsize"] = "16384"
-    vmware.vmx["numvcpus"] = "8"
+    vmware.vmx["memsize"] = "8192"
+    vmware.vmx["numvcpus"] = "4"
   end
 
   config.vm.provision "shell", keep_color: true, privileged: false, inline: <<-SHELL
