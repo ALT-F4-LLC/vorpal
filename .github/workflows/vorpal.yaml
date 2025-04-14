@@ -166,7 +166,7 @@ jobs:
 
       - run: |
           ./dist/vorpal start --registry-backend "gha" \
-            > worker_output.log 2>&1 &
+            > ./dist/worker_output.log 2>&1 &
           WORKER_PID=$(echo $!)
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
@@ -184,7 +184,7 @@ jobs:
 
       - if: always()
         run: |
-          cat worker_output.log || true
+          cat ./dist/worker_output.log || true
           kill $WORKER_PID || true
 
   release:
