@@ -176,6 +176,7 @@ jobs:
           WORKER_PID=$(echo $!)
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
+          sleep 5
 
       - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-shell"
       - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal"
