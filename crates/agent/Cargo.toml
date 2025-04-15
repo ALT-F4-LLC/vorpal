@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { version = "1" }
-async-compression = { features = ["bzip2", "xz"], version = "0" }
+async-compression = { features = ["all"], version = "0" }
 infer = { version = "0" }
 reqwest = { default-features = false, features = ["rustls-tls"], version = "0" }
 serde_json = { version = "1" }

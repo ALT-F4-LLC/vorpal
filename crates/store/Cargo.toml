@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = { version = "1" }
-async-compression = { features = ["gzip", "tokio", "zstd"], version = "0" }
-async_zip = { features = ["tokio"], version = "0" }
+async-compression = { features = ["all"], version = "0" }
+async_zip = { features = ["deflate", "tokio"], version = "0" }
 filetime = { version = "0" }
 futures-lite = { version = "2" }
 rsa = { features = ["sha2"], version = "0" }
