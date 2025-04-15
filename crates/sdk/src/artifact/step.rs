@@ -143,7 +143,7 @@ pub async fn bwrap(
     // Setup artifact arguments
 
     for artifact in artifacts.into_iter() {
-        step_artifacts.push(artifact.to_string());
+        step_artifacts.push(artifact);
     }
 
     for artifact in step_artifacts.iter() {

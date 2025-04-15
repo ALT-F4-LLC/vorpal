@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use tokio::fs::{create_dir_all, write};
 use tonic::{transport::Channel, Code};
-use tracing::info;
+use tracing::{error, info};
 use vorpal_schema::{
     archive::v0::{archive_service_client::ArchiveServiceClient, ArchivePullRequest},
     artifact::v0::Artifact,
@@ -115,7 +115,8 @@ pub async fn build(
             Ok(None) => break,
 
             Err(err) => {
-                bail!("Stream error: {:?}", err);
+                error!("{} |> {}", &artifact.name, err.message());
+                std::process::exit(1);
             }
         };
     }

@@ -2,10 +2,13 @@ ARCH := $(shell uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 OS_TYPE ?= debian
 WORK_DIR := $(shell pwd)
+CARGO_DIR := $(WORK_DIR)/.cargo
 DIST_DIR := $(WORK_DIR)/dist
-TARGET ?= debug
+VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_DIR := /var/lib/vorpal
-CARGO_FLAGS := $(if $(filter $(TARGET),release),--release,)
+TARGET ?= debug
+CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
+CONFIG_FILE ?= target/$(TARGET)/vorpal-config
 
 ifndef VERBOSE
 .SILENT:
@@ -15,25 +18,27 @@ endif
 
 # Development (without Vorpal)
 
-clean-cargo:
+.cargo:
+	mkdir -p $(CARGO_DIR)
+	echo '[source.crates-io]' >> $(CARGO_DIR)/config.toml
+	echo 'replace-with = "vendored-sources"' >> $(CARGO_DIR)/config.toml
+	echo '[source.vendored-sources]' >> $(CARGO_DIR)/config.toml
+	echo 'directory = "$(VENDOR_DIR)"' >> $(CARGO_DIR)/config.toml
+
+clean:
 	cargo clean
-
-clean-dist:
-	rm -rfv $(DIST_DIR)
-
-clean-vagrant:
-	vagrant destroy --force
-
-clean: clean-cargo clean-dist clean-vagrant
+	rm -rf $(CARGO_DIR)
+	rm -rf $(DIST_DIR)
+	rm -rf $(VENDOR_DIR)
 
 check:
 	cargo check $(CARGO_FLAGS)
 
 format:
-	cargo fmt --check
+	cargo fmt --all --check
 
 lint:
-	cargo clippy -- -D warnings
+	cargo clippy $(CARGO_FLAGS) -- --deny warnings
 
 build:
 	cargo build $(CARGO_FLAGS)
@@ -41,14 +46,18 @@ build:
 test:
 	cargo test $(CARGO_FLAGS)
 
-dist: build
-	mkdir -pv $(DIST_DIR)
+dist:
+	mkdir -p $(DIST_DIR)
 	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
 		-C $(WORK_DIR)/target/$(TARGET) \
 		vorpal \
 		vorpal-config
 
+vendor:
+	cargo vendor --versioned-dirs $(VENDOR_DIR)
+
 # Vorpal
+
 generate:
 	rm -rfv sdk/go/api
 	mkdir -pv sdk/go/api
@@ -81,42 +90,35 @@ generate:
 		--proto_path=crates/schema/api \
 		v0/worker/worker.proto
 
-generate-toolkits:
-	cat /var/lib/vorpal/store/8ad451bdcda8f24f4af59ccca23fd71a06975a9d069571f19b9a0d503f8a65c8.json \
-		> crates/cli/src/toolkit/aarch64-darwin/protoc.json
-	cat /var/lib/vorpal/store/84707c7325d3a0cbd8044020a5256b6fd43a79bd837948bb4a7e90d671c919e6.json \
-		> crates/cli/src/toolkit/aarch64-darwin/rust-toolchain.json
-	cat /var/lib/vorpal/store/8372cc49eb6d38aa86080493c58a09bbb74da56d771938770f3d4cec593a5260.json \
-		> crates/cli/src/toolkit/aarch64-darwin/cargo.json
-	cat /var/lib/vorpal/store/345ef03ddf58536389f1a915f8b4bbf21e8b529ac288fbe3ae897986ddf1807f.json \
-		> crates/cli/src/toolkit/aarch64-darwin/clippy.json
-	cat /var/lib/vorpal/store/4bd3745cd87cc821da649df3f115cf499344f8dda3c6c7fd9b291a17752d0d88.json \
-		> crates/cli/src/toolkit/aarch64-darwin/rust-analyzer.json
-	cat /var/lib/vorpal/store/b6a0e429fe2619118ac130ddb3399195b0331aab404d2fb4506635e17791ff32.json \
-		> crates/cli/src/toolkit/aarch64-darwin/rust-src.json
-	cat /var/lib/vorpal/store/371b8c3b3e23b72b036bef9faf812e0508fb5902b04abf1b2b9d4c654ab3ba66.json \
-		> crates/cli/src/toolkit/aarch64-darwin/rust-std.json
-	cat /var/lib/vorpal/store/39c04b25f924f05473a07be53bce9eb8920e6a83daefa957941933b737ca0c6f.json \
-		> crates/cli/src/toolkit/aarch64-darwin/rustc.json
-	cat /var/lib/vorpal/store/f12b6581f5198f2f1a804538e059645af0590225d9bfac35d2ebd20ff47fbc09.json \
-		> crates/cli/src/toolkit/aarch64-darwin/rustfmt.json
-
 # Development (with Vorpal)
 
-vorpal-config:
-	cargo build --bin "vorpal-config"
+vorpal-example:
+	"target/$(TARGET)/vorpal" artifact \
+		--config "$(CONFIG_FILE)" \
+		--name "vorpal-example"
 
-vorpal-export: vorpal-config
-	cargo run --bin "vorpal" -- artifact --export --name "vorpal" > "vorpal-$(ARCH)-$(OS).json"
+vorpal-export:
+	"target/$(TARGET)/vorpal" artifact \
+		--config "$(CONFIG_FILE)" \
+		--export \
+		--name "vorpal"
 
-vorpal-shell: vorpal-config
-	cargo run --bin "vorpal" -- artifact --name "vorpal-shell"
+vorpal-shell:
+	"target/$(TARGET)/vorpal" artifact \
+		--config "$(CONFIG_FILE)" \
+		--name "vorpal-shell" \
+		--path
 
-vorpal: vorpal-config
-	cargo run --bin "vorpal" -- artifact --name "vorpal"
+vorpal:
+	"target/$(TARGET)/vorpal" artifact \
+		--config "$(CONFIG_FILE)" \
+		--name "vorpal"
 
 vorpal-start:
-	cargo run --bin "vorpal" -- start
+	"target/$(TARGET)/vorpal" start
+
+vorpal-config-start:
+	"$(CONFIG_FILE)" start --artifact "$(ARTIFACT)" --port "50051"
 
 # Vagrant environment
 
@@ -133,4 +135,5 @@ vagrant-box:
 		$(WORK_DIR)/packer_debian_vmware_arm64.box
 
 vagrant:
+	vagrant destroy --force || true
 	vagrant up --provider "vmware_desktop"

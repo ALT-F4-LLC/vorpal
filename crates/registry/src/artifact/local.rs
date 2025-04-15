@@ -3,12 +3,12 @@ use sha256::digest;
 use tokio::fs::{read, write};
 use tonic::{async_trait, Status};
 use vorpal_schema::artifact::v0::Artifact;
-use vorpal_store::paths::{get_store_config_path, set_timestamps};
+use vorpal_store::paths::{get_config_path, set_timestamps};
 
 #[async_trait]
 impl ArtifactBackend for LocalBackend {
     async fn get_artifact(&self, artifact_digest: String) -> Result<Artifact, Status> {
-        let request_path = get_store_config_path(&artifact_digest);
+        let request_path = get_config_path(&artifact_digest);
 
         if !request_path.exists() {
             return Err(Status::not_found("store config not found"));
@@ -28,7 +28,7 @@ impl ArtifactBackend for LocalBackend {
         let request_json = serde_json::to_vec(request)
             .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
         let request_digest = digest(&request_json);
-        let request_path = get_store_config_path(&request_digest);
+        let request_path = get_config_path(&request_digest);
 
         if !request_path.exists() {
             write(&request_path, serde_json::to_vec(request).unwrap())

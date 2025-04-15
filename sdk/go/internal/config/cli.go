@@ -4,36 +4,31 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"runtime"
+	"strings"
 
 	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
 )
 
 type command struct {
 	Agent    string
+	Artifact string
 	Port     int
 	Registry string
 	Target   artifactApi.ArtifactSystem
+	Variable map[string]string
 }
 
-func getDefaultSystem() string {
-	arch := runtime.GOARCH
-	os := runtime.GOOS
-
-	if arch == "arm64" {
-		arch = "aarch64"
-	}
-
-	return fmt.Sprintf("%s-%s", arch, os)
-}
-
-func NewCommand() (*command, error) {
+func newCommand() (*command, error) {
 	startCmd := flag.NewFlagSet("start", flag.ExitOnError)
 
+	var startVariable []string
+
 	startAgent := startCmd.String("agent", "localhost:23151", "agent to use")
+	startArtifact := startCmd.String("artifact", "", "artifact to use")
 	startPort := startCmd.Int("port", 0, "port to listen on")
 	startRegistry := startCmd.String("registry", "localhost:23151", "registry to use")
-	startTarget := startCmd.String("target", getDefaultSystem(), "target system")
+	startTarget := startCmd.String("target", GetSystemDefaultStr(), "target system")
+	startCmd.Var(newStringSliceValue(&startVariable), "variable", "variables to use (key=value)")
 
 	switch os.Args[1] {
 	case "start":
@@ -41,6 +36,10 @@ func NewCommand() (*command, error) {
 
 		if *startAgent == "" {
 			return nil, fmt.Errorf("agent is required")
+		}
+
+		if *startArtifact == "" {
+			return nil, fmt.Errorf("artifact is required")
 		}
 
 		if *startPort == 0 {
@@ -60,13 +59,53 @@ func NewCommand() (*command, error) {
 			return nil, fmt.Errorf("failed to get system: %w", err)
 		}
 
+		variable := make(map[string]string)
+
+		for _, v := range startVariable {
+			parts := strings.Split(v, ",")
+			for _, part := range parts {
+				kv := strings.Split(part, "=")
+
+				if len(kv) != 2 {
+					return nil, fmt.Errorf("invalid variable format: %s", part)
+				}
+
+				variable[kv[0]] = kv[1]
+			}
+		}
+
 		return &command{
 			Agent:    *startAgent,
+			Artifact: *startArtifact,
 			Port:     *startPort,
 			Registry: *startRegistry,
 			Target:   *system,
+			Variable: variable,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown command")
 	}
+}
+
+// stringSliceValue implements the flag.Value interface
+type stringSliceValue struct {
+	values *[]string
+}
+
+func newStringSliceValue(p *[]string) *stringSliceValue {
+	return &stringSliceValue{values: p}
+}
+
+// String returns the string representation of the slice
+func (s *stringSliceValue) String() string {
+	if s.values == nil || len(*s.values) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%v", *s.values)
+}
+
+// Set appends the value to the slice
+func (s *stringSliceValue) Set(value string) error {
+	*s.values = append(*s.values, value)
+	return nil
 }

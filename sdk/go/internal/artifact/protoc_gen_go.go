@@ -18,9 +18,9 @@ func ProtocGenGo(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = "2f7455a7197f272a0647f8ba466eb3abb56898eb8979eea8af49479cce3e1153"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = ""
+		digest = "c111d8788b4e1109be52b2f4c2ba9ed8c42831ea0e8ed67730fefe61d1b4bd6b"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "5bdb70e7412dc35c61a706b8a623978f0f8ff1ff11e9b5a31ef4b49dfb71a6df"
 	default:
 		return nil, errors.New("unsupported target")
 	}

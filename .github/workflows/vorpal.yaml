@@ -9,7 +9,7 @@ on:
     - cron: "0 8 * * *"
 
 jobs:
-  check:
+  vendor:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -23,32 +23,49 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: vendor
+
       - run: ./script/dev.sh # pre-bake
-      - run: ./script/dev.sh make check
+      - run: ./script/dev.sh make .cargo vendor
+      - run: ./script/dev.sh make TARGET=release check
 
       - uses: actions/cache/save@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
+
+      - uses: actions/cache/save@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: vendor
 
   code-quality:
     needs:
-      - check
+      - vendor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: vendor
+
       - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make .cargo vendor
       - run: ./script/dev.sh make format
-      - run: ./script/dev.sh make lint
+      - run: ./script/dev.sh make TARGET=release lint
 
   package:
     needs:
@@ -66,11 +83,19 @@ jobs:
 
       - uses: actions/cache/restore@v4
         with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: vendor
+
       - run: ./script/dev.sh # pre-bake
-      - run: ./script/dev.sh make dist
+      - run: ./script/dev.sh make .cargo vendor
+      - run: ./script/dev.sh make TARGET=release build
+      - run: ./script/dev.sh make TARGET=release test
+      - run: ./script/dev.sh make TARGET=release dist
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
@@ -91,11 +116,11 @@ jobs:
           - macos-13
           - macos-latest
           - ubuntu-latest
-          # - ubuntu-latest-arm64
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
-      - if: matrix.runner == 'ubuntu-latest'
+      - if: contains(matrix.runner, 'ubuntu')
         run: |
           ./script/dev/debian.sh
 
@@ -141,17 +166,18 @@ jobs:
 
       - run: |
           ./dist/vorpal start --registry-backend "gha" \
-            > worker_output.log 2>&1 &
+            > ./dist/worker_output.log 2>&1 &
           WORKER_PID=$(echo $!)
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
       - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-shell"
       - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal"
+      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-example"
 
       - if: always()
         run: |
-          cat worker_output.log || true
+          cat ./dist/worker_output.log || true
           kill $WORKER_PID || true
 
   release:

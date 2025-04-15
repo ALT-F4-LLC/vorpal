@@ -19,7 +19,9 @@ use vorpal_schema::{
     archive::v0::{
         archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
     },
-    artifact::v0::{Artifact, ArtifactSource, ArtifactSystem},
+    artifact::v0::{
+        artifact_service_client::ArtifactServiceClient, Artifact, ArtifactSource, ArtifactSystem,
+    },
     worker::v0::{worker_service_server::WorkerService, BuildArtifactResponse},
 };
 use vorpal_sdk::system::get_system_default;
@@ -47,6 +49,119 @@ impl WorkerServer {
     }
 }
 
+async fn pull_source(
+    registry: &str,
+    source: &ArtifactSource,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
+    source_dir_path: &Path,
+) -> Result<(), Status> {
+    if source.digest.is_none() {
+        return Err(Status::invalid_argument(
+            "artifact source 'digest' is missing",
+        ));
+    }
+
+    if source.name.is_empty() {
+        return Err(Status::invalid_argument(
+            "artifact source 'name' is missing",
+        ));
+    }
+
+    let source_digest = source.digest.as_ref().unwrap();
+    let source_archive = get_archive_path(source_digest);
+
+    let mut client = ArchiveServiceClient::connect(registry.to_string())
+        .await
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+
+    if !source_archive.exists() {
+        send_message(format!("pull: {}", source_digest), tx).await?;
+
+        let request = ArchivePullRequest {
+            digest: source_digest.to_string(),
+        };
+
+        match client.pull(request).await {
+            Err(status) => {
+                if status.code() != NotFound {
+                    return Err(Status::internal(format!(
+                        "failed to pull source archive: {:?}",
+                        status
+                    )));
+                }
+
+                return Err(Status::not_found("source archive not found in registry"));
+            }
+
+            Ok(response) => {
+                let mut response = response.into_inner();
+                let mut response_data = Vec::new();
+
+                while let Ok(message) = response.message().await {
+                    if message.is_none() {
+                        break;
+                    }
+
+                    if let Some(res) = message {
+                        if !res.data.is_empty() {
+                            response_data.extend(res.data);
+                        }
+                    }
+                }
+
+                if response_data.is_empty() {
+                    return Err(Status::not_found("source archive empty in registry"));
+                }
+
+                write(&source_archive, &response_data)
+                    .await
+                    .map_err(|err| {
+                        Status::internal(format!("failed to write store path: {:?}", err))
+                    })?;
+
+                set_timestamps(&source_archive).await.map_err(|err| {
+                    Status::internal(format!("failed to set source timestamps: {:?}", err))
+                })?;
+            }
+        }
+    }
+
+    if !source_archive.exists() {
+        return Err(Status::not_found("source archive not found"));
+    }
+
+    send_message(format!("unpack: {}", source_digest), tx).await?;
+
+    let source_workspace_path = source_dir_path.join(&source.name);
+
+    if let Err(err) = create_dir_all(&source_workspace_path).await {
+        return Err(Status::internal(format!(
+            "failed to create source path: {:?}",
+            err
+        )));
+    }
+
+    if let Err(err) = unpack_zstd(&source_workspace_path, &source_archive).await {
+        return Err(Status::internal(format!(
+            "failed to unpack source archive: {:?}",
+            err
+        )));
+    }
+
+    let source_workspace_files = get_file_paths(&source_workspace_path, vec![], vec![])
+        .map_err(|err| Status::internal(format!("failed to get source files: {:?}", err)))?;
+
+    for path in source_workspace_files.iter() {
+        if let Err(err) = set_timestamps(path).await {
+            return Err(Status::internal(format!(
+                "failed to sanitize output files: {:?}",
+                err
+            )));
+        }
+    }
+
+    Ok(())
+}
 fn expand_env(text: &str, envs: &[&String]) -> String {
     envs.iter().fold(text.to_string(), |acc, e| {
         let e = e.split('=').collect::<Vec<&str>>();
@@ -198,9 +313,13 @@ async fn run_step(
 
     let mut stdio_merged = StreamExt::merge(stdout, stderr);
 
+    let mut last_line = "".to_string();
+
     while let Some(line) = stdio_merged.next().await {
         let output = line
             .map_err(|err| Status::internal(format!("failed to read sandbox output: {:?}", err)))?;
+
+        last_line = output.clone();
 
         tx.send(Ok(BuildArtifactResponse { output }))
             .await
@@ -213,7 +332,7 @@ async fn run_step(
         .map_err(|err| Status::internal(format!("failed to wait for sandbox: {:?}", err)))?;
 
     if !status.success() {
-        return Err(Status::internal("sandbox failed"));
+        return Err(Status::internal(last_line.to_string()));
     }
 
     Ok(())
@@ -366,93 +485,108 @@ async fn build_artifact(
         )
         .await
         {
-            return Err(Status::internal(format!("failed to run step: {:?}", err)));
+            return Err(Status::internal(err.message()));
         }
     }
 
     let artifact_path_files = get_file_paths(&artifact_path, vec![], vec![])
         .map_err(|err| Status::internal(format!("failed to get output files: {:?}", err)))?;
 
-    if artifact_path_files.is_empty() || artifact_path_files.len() == 1 {
-        return Err(Status::internal("no output files found"));
-    }
+    if artifact_path_files.len() > 1 {
+        send_message(format!("pack: {}", artifact_digest), &tx).await?;
 
-    send_message(format!("pack: {}", artifact_digest), &tx).await?;
+        // Sanitize files
 
-    // Sanitize files
+        for path in artifact_path_files.iter() {
+            if let Err(err) = set_timestamps(path).await {
+                return Err(Status::internal(format!(
+                    "failed to sanitize output files: {:?}",
+                    err
+                )));
+            }
+        }
 
-    for path in artifact_path_files.iter() {
-        if let Err(err) = set_timestamps(path).await {
+        // Create archive
+
+        let artifact_archive = create_sandbox_file(Some("tar.zst")).await.map_err(|err| {
+            Status::internal(format!("failed to create artifact archive: {:?}", err))
+        })?;
+
+        if let Err(err) =
+            compress_zstd(&artifact_path, &artifact_path_files, &artifact_archive).await
+        {
             return Err(Status::internal(format!(
-                "failed to sanitize output files: {:?}",
+                "failed to compress artifact: {:?}",
                 err
             )));
         }
-    }
 
-    // Create archive
+        // TODO: check if archive is already uploaded
 
-    let artifact_archive = create_sandbox_file(Some("tar.zst"))
-        .await
-        .map_err(|err| Status::internal(format!("failed to create artifact archive: {:?}", err)))?;
+        // Upload archive
 
-    if let Err(err) = compress_zstd(&artifact_path, &artifact_path_files, &artifact_archive).await {
-        return Err(Status::internal(format!(
-            "failed to compress artifact: {:?}",
-            err
-        )));
-    }
+        send_message(format!("push: {}", artifact_digest), &tx).await?;
 
-    // TODO: check if archive is already uploaded
+        let artifact_data = read(&artifact_archive).await.map_err(|err| {
+            Status::internal(format!("failed to read artifact archive: {:?}", err))
+        })?;
 
-    // Upload archive
+        let private_key_path = get_private_key_path();
 
-    send_message(format!("push: {}", artifact_digest), &tx).await?;
+        if !private_key_path.exists() {
+            return Err(Status::internal("private key not found"));
+        }
 
-    let artifact_data = read(&artifact_archive)
-        .await
-        .map_err(|err| Status::internal(format!("failed to read artifact archive: {:?}", err)))?;
+        let artifact_signature = notary::sign(private_key_path, &artifact_data)
+            .await
+            .map_err(|err| Status::internal(format!("failed to sign artifact: {:?}", err)))?;
 
-    let private_key_path = get_private_key_path();
+        let mut request_stream = vec![];
 
-    if !private_key_path.exists() {
-        return Err(Status::internal("private key not found"));
-    }
+        for chunk in artifact_data.chunks(DEFAULT_CHUNKS_SIZE) {
+            request_stream.push(ArchivePushRequest {
+                data: chunk.to_vec(),
+                digest: artifact_digest.clone(),
+                signature: artifact_signature.clone().to_vec(),
+            });
+        }
 
-    let artifact_signature = notary::sign(private_key_path, &artifact_data)
-        .await
-        .map_err(|err| Status::internal(format!("failed to sign artifact: {:?}", err)))?;
+        let mut client = ArchiveServiceClient::connect(registry.clone())
+            .await
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
-    let mut request_stream = vec![];
+        if let Err(err) = client.push(tokio_stream::iter(request_stream)).await {
+            return Err(Status::internal(format!(
+                "failed to push artifact: {:?}",
+                err
+            )));
+        }
 
-    for chunk in artifact_data.chunks(DEFAULT_CHUNKS_SIZE) {
-        request_stream.push(ArchivePushRequest {
-            data: chunk.to_vec(),
-            digest: artifact_digest.clone(),
-            signature: artifact_signature.clone().to_vec(),
-        });
-    }
+        // Store artifact in registry
 
-    let mut client = ArchiveServiceClient::connect(registry)
-        .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+        let mut client = ArtifactServiceClient::connect(registry)
+            .await
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
-    if let Err(err) = client.push(tokio_stream::iter(request_stream)).await {
-        return Err(Status::internal(format!(
-            "failed to push artifact: {:?}",
-            err
-        )));
-    }
+        client
+            .store_artifact(artifact.clone())
+            .await
+            .map_err(|err| {
+                Status::internal(format!("failed to store artifact in registry: {:?}", err))
+            })?;
 
-    // TODO: put artifact in registry
+        // Remove artifact archive
 
-    // Remove artifact archive
-
-    if let Err(err) = remove_file(&artifact_archive).await {
-        return Err(Status::internal(format!(
-            "failed to remove artifact archive: {:?}",
-            err
-        )));
+        if let Err(err) = remove_file(&artifact_archive).await {
+            return Err(Status::internal(format!(
+                "failed to remove artifact archive: {:?}",
+                err
+            )));
+        }
+    } else {
+        remove_dir_all(&artifact_path).await.map_err(|err| {
+            Status::internal(format!("failed to remove artifact path: {:?}", err))
+        })?;
     }
 
     // Remove workspace
@@ -471,120 +605,6 @@ async fn build_artifact(
             "failed to remove lock file: {:?}",
             err
         )));
-    }
-
-    Ok(())
-}
-
-async fn pull_source(
-    registry: &str,
-    source: &ArtifactSource,
-    tx: &Sender<Result<BuildArtifactResponse, Status>>,
-    source_dir_path: &Path,
-) -> Result<(), Status> {
-    if source.digest.is_none() {
-        return Err(Status::invalid_argument(
-            "artifact source 'digest' is missing",
-        ));
-    }
-
-    if source.name.is_empty() {
-        return Err(Status::invalid_argument(
-            "artifact source 'name' is missing",
-        ));
-    }
-
-    let source_digest = source.digest.as_ref().unwrap();
-    let source_archive = get_archive_path(source_digest);
-
-    let mut client = ArchiveServiceClient::connect(registry.to_string())
-        .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
-
-    if !source_archive.exists() {
-        send_message(format!("pull: {}", source_digest), tx).await?;
-
-        let request = ArchivePullRequest {
-            digest: source_digest.to_string(),
-        };
-
-        match client.pull(request).await {
-            Err(status) => {
-                if status.code() != NotFound {
-                    return Err(Status::internal(format!(
-                        "failed to pull source archive: {:?}",
-                        status
-                    )));
-                }
-
-                return Err(Status::not_found("source archive not found in registry"));
-            }
-
-            Ok(response) => {
-                let mut response = response.into_inner();
-                let mut response_data = Vec::new();
-
-                while let Ok(message) = response.message().await {
-                    if message.is_none() {
-                        break;
-                    }
-
-                    if let Some(res) = message {
-                        if !res.data.is_empty() {
-                            response_data.extend(res.data);
-                        }
-                    }
-                }
-
-                if response_data.is_empty() {
-                    return Err(Status::not_found("source archive empty in registry"));
-                }
-
-                write(&source_archive, &response_data)
-                    .await
-                    .map_err(|err| {
-                        Status::internal(format!("failed to write store path: {:?}", err))
-                    })?;
-
-                set_timestamps(&source_archive).await.map_err(|err| {
-                    Status::internal(format!("failed to set source timestamps: {:?}", err))
-                })?;
-            }
-        }
-    }
-
-    if !source_archive.exists() {
-        return Err(Status::not_found("source archive not found"));
-    }
-
-    send_message(format!("unpack: {}", source_digest), tx).await?;
-
-    let source_workspace_path = source_dir_path.join(&source.name);
-
-    if let Err(err) = create_dir_all(&source_workspace_path).await {
-        return Err(Status::internal(format!(
-            "failed to create source path: {:?}",
-            err
-        )));
-    }
-
-    if let Err(err) = unpack_zstd(&source_workspace_path, &source_archive).await {
-        return Err(Status::internal(format!(
-            "failed to unpack source archive: {:?}",
-            err
-        )));
-    }
-
-    let source_workspace_files = get_file_paths(&source_workspace_path, vec![], vec![])
-        .map_err(|err| Status::internal(format!("failed to get source files: {:?}", err)))?;
-
-    for path in source_workspace_files.iter() {
-        if let Err(err) = set_timestamps(path).await {
-            return Err(Status::internal(format!(
-                "failed to sanitize output files: {:?}",
-                err
-            )));
-        }
     }
 
     Ok(())

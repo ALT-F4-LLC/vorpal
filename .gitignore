@@ -1,8 +1,10 @@
 *.pb.go
 *.tar.*
+.cargo
 .env
 .vagrant
 dist
 packer_*_*_*.box
 target
+vendor
 vorpal-*-*

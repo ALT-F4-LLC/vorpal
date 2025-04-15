@@ -1,10 +1,14 @@
 use crate::context::ConfigContext;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
-use vorpal_schema::artifact::v0::{Artifact, ArtifactSource, ArtifactStep, ArtifactSystem};
+use vorpal_schema::artifact::v0::{
+    Artifact, ArtifactSource, ArtifactStep, ArtifactSystem,
+    ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+};
 
 pub mod cargo;
 pub mod clippy;
+pub mod gh;
 pub mod go;
 pub mod goimports;
 pub mod gopls;
@@ -40,11 +44,23 @@ pub struct ArtifactStepBuilder {
     pub script: HashMap<ArtifactSystem, String>,
 }
 
+pub struct ArtifactTaskBuilder<'a> {
+    pub artifacts: Vec<String>,
+    pub name: &'a str,
+    pub script: String,
+}
+
 pub struct ArtifactBuilder<'a> {
     pub name: &'a str,
     pub sources: Vec<ArtifactSource>,
     pub steps: Vec<ArtifactStep>,
     pub systems: Vec<ArtifactSystem>,
+}
+
+pub struct VariableBuilder<'a> {
+    pub encrypt: bool,
+    pub name: &'a str,
+    pub require: bool,
 }
 
 impl<'a> ArtifactSourceBuilder<'a> {
@@ -159,6 +175,32 @@ impl ArtifactStepBuilder {
     }
 }
 
+impl<'a> ArtifactTaskBuilder<'a> {
+    pub fn new(name: &'a str, script: String) -> Self {
+        Self {
+            artifacts: vec![],
+            name,
+            script,
+        }
+    }
+
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts = artifacts;
+        self
+    }
+
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        ArtifactBuilder::new(self.name)
+            .with_step(step::shell(context, self.artifacts, vec![], self.script).await?)
+            .with_system(Aarch64Darwin)
+            .with_system(Aarch64Linux)
+            .with_system(X8664Darwin)
+            .with_system(X8664Linux)
+            .build(context)
+            .await
+    }
+}
+
 impl<'a> ArtifactBuilder<'a> {
     pub fn new(name: &'a str) -> Self {
         Self {
@@ -166,6 +208,7 @@ impl<'a> ArtifactBuilder<'a> {
             sources: vec![],
             steps: vec![],
             systems: vec![],
+            // variables: vec![],
         }
     }
 
@@ -193,6 +236,14 @@ impl<'a> ArtifactBuilder<'a> {
         self
     }
 
+    // pub fn with_variable(mut self, variable: ArtifactVariable) -> Self {
+    //     if !self.variables.contains(&variable) {
+    //         self.variables.push(variable);
+    //     }
+    //
+    //     self
+    // }
+
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let artifact = Artifact {
             name: self.name.to_string(),
@@ -200,16 +251,47 @@ impl<'a> ArtifactBuilder<'a> {
             steps: self.steps,
             systems: self.systems.into_iter().map(|v| v.into()).collect(),
             target: context.get_target().into(),
+            // variables: self.variables,
         };
 
         if artifact.steps.is_empty() {
-            return Err(anyhow!("artifact must have at least one step"));
+            return Err(anyhow!("must have at least one step"));
         }
 
         context.add_artifact(&artifact).await
     }
 }
 
-pub fn get_env_key(digest: &str) -> String {
+impl<'a> VariableBuilder<'a> {
+    pub fn new(name: &'a str) -> Self {
+        Self {
+            encrypt: false,
+            name,
+            require: false,
+        }
+    }
+
+    pub fn with_encrypt(mut self) -> Self {
+        self.encrypt = true;
+        self
+    }
+
+    pub fn with_require(mut self) -> Self {
+        self.require = true;
+        self
+    }
+
+    pub fn build(self, context: &mut ConfigContext) -> Result<Option<String>> {
+        let variable = context.get_variable(self.name);
+
+        if self.require && variable.is_none() {
+            bail!("variable '{}' is required", self.name)
+        }
+
+        Ok(variable)
+    }
+}
+
+pub fn get_env_key(digest: &String) -> String {
     format!("$VORPAL_ARTIFACT_{}", digest)
 }

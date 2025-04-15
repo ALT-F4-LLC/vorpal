@@ -49,7 +49,7 @@ pub fn get_store_path(hash: &str) -> PathBuf {
     get_store_dir_path().join(hash)
 }
 
-pub fn get_store_config_path(hash: &str) -> PathBuf {
+pub fn get_config_path(hash: &str) -> PathBuf {
     get_store_dir_path().join(hash).with_extension("json")
 }
 

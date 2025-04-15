@@ -18,9 +18,7 @@ use vorpal_schema::{
         archive_service_client::ArchiveServiceClient, archive_service_server::ArchiveServiceServer,
     },
     artifact::v0::{
-        artifact_service_client::ArtifactServiceClient,
-        artifact_service_server::ArtifactServiceServer, Artifact, ArtifactRequest,
-        ArtifactsRequest,
+        artifact_service_server::ArtifactServiceServer, Artifact, ArtifactRequest, ArtifactsRequest,
     },
     worker::v0::{
         worker_service_client::WorkerServiceClient, worker_service_server::WorkerServiceServer,
@@ -46,8 +44,14 @@ enum Command {
         #[arg(long, short)]
         name: String,
 
+        #[arg(default_value_t = false, long, short)]
+        path: bool,
+
         #[arg(default_value_t = get_system_default_str(), long, short)]
         target: String,
+
+        #[arg(long, short)]
+        variable: Vec<String>,
     },
 
     #[clap(subcommand)]
@@ -134,8 +138,10 @@ async fn main() -> Result<()> {
         Command::Artifact {
             config,
             export: artifact_export,
-            name,
+            name: artifact_name,
+            path: artifact_path,
             target,
+            variable,
         } => {
             // Setup logging
 
@@ -161,102 +167,94 @@ async fn main() -> Result<()> {
             let config_path = Path::new(&config_file_path);
 
             if !config_path.exists() {
-                bail!("config not found: {}", config_path.display());
+                error!("config not found: {}", config_path.display());
+                std::process::exit(1);
             }
 
             // Start config
 
-            let (mut config_process, mut config_artifact) = match config::start(
+            let (mut config_process, mut config_client) = match config::start(
+                artifact_name.to_string(),
                 config_path.display().to_string(),
                 registry.clone(),
                 target.to_string(),
+                variable.clone(),
             )
             .await
             {
                 Ok(res) => res,
                 Err(error) => {
                     error!("{}", error);
-                    return Ok(());
+                    std::process::exit(1);
                 }
             };
 
             // Populate artifacts
 
-            let config_response = match config_artifact
+            let config_response = match config_client
                 .get_artifacts(ArtifactsRequest { digests: vec![] })
                 .await
             {
                 Ok(res) => res,
                 Err(error) => {
-                    bail!("failed to get config: {}", error);
+                    error!("failed to get config: {}", error);
+                    std::process::exit(1);
                 }
             };
 
             let config_response = config_response.into_inner();
-            let mut config_result = HashMap::<String, Artifact>::new();
+            let mut config_store = HashMap::<String, Artifact>::new();
 
             for digest in config_response.digests.into_iter() {
                 let request = ArtifactRequest {
                     digest: digest.clone(),
                 };
 
-                let response = match config_artifact.get_artifact(request).await {
+                let response = match config_client.get_artifact(request).await {
                     Ok(res) => res,
                     Err(error) => {
-                        bail!("failed to get artifact: {}", error);
+                        error!("failed to get artifact: {}", error);
+                        std::process::exit(1);
                     }
                 };
 
                 let artifact = response.into_inner();
 
-                config_result.insert(digest, artifact.clone());
+                config_store.insert(digest, artifact);
             }
+
+            let (artifact_digest, artifact) = config_store
+                .clone()
+                .into_iter()
+                .find(|(_, val)| val.name == *artifact_name)
+                .ok_or_else(|| anyhow!("selected 'artifact' not found: {}", artifact_name))?;
+
+            let mut build_store = HashMap::<String, Artifact>::new();
+
+            config::get_artifacts(&artifact, &artifact_digest, &mut build_store, &config_store)
+                .await?;
 
             // Setup clients
 
-            let mut registry_archive = ArchiveServiceClient::connect(registry.to_owned())
+            let mut client_archive = ArchiveServiceClient::connect(registry.to_owned())
                 .await
                 .expect("failed to connect to registry");
 
-            let mut registry_artifact = ArtifactServiceClient::connect(registry.to_owned())
-                .await
-                .expect("failed to connect to registry");
-
-            let mut worker = WorkerServiceClient::connect(worker.to_owned())
+            let mut client_worker = WorkerServiceClient::connect(worker.to_owned())
                 .await
                 .expect("failed to connect to artifact");
-
-            // Populate artifacts
-
-            let (selected_hash, selected) = config_result
-                .clone()
-                .into_iter()
-                .find(|(_, artifact)| artifact.name == *name)
-                .ok_or_else(|| anyhow!("selected 'artifact' not found: {}", name))?;
-
-            let mut artifact = HashMap::<String, Artifact>::new();
-
-            artifact.insert(selected_hash.to_string(), selected.clone());
-
-            config::fetch_artifacts(
-                &selected,
-                &mut artifact,
-                &mut config_artifact,
-                &mut registry_artifact,
-            )
-            .await?;
 
             config_process.kill().await?;
 
             // Export artifact
 
             if *artifact_export {
-                let artifacts = artifact.clone().into_values().collect::<Vec<Artifact>>();
+                let artifacts = build_store.clone().into_values().collect::<Vec<Artifact>>();
 
-                let artifact_json =
+                let artifacts_json =
                     serde_json::to_string_pretty(&artifacts).expect("failed to serialize artifact");
 
-                println!("{}", artifact_json);
+                println!("{}", artifacts_json);
 
                 return Ok(());
             }
@@ -264,10 +262,11 @@ async fn main() -> Result<()> {
             // Build artifacts
 
             config::build_artifacts(
-                Some(&selected),
-                artifact,
-                &mut registry_archive,
-                &mut worker,
+                *artifact_path,
+                Some(&artifact),
+                build_store,
+                &mut client_archive,
+                &mut client_worker,
             )
             .await?;
 

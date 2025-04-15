@@ -18,9 +18,9 @@ func GoBin(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = "42c82308fb915d08bdec4c9bb9d89f4e96fcaaab5e42af9e7e8137880001d1c6"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = ""
+		digest = "ea09f27786bb3eb7d91425c08ac7098b2192c32cbb5c1a2196f5c8e4a9a4d0ff"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "4712252ab9e5e4bde8909f4aa03460b01d7f3b910c8eea51dec89b55391ae71a"
 	default:
 		return nil, errors.New("unsupported target")
 	}

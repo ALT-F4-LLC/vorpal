@@ -29,6 +29,21 @@ type RustArtifactCargoTomlWorkspace struct {
 	Members []string `toml:"members,omitempty"`
 }
 
+type RustShellBuilder struct {
+	artifacts []*string
+	name      string
+}
+
+type RustBuilder struct {
+	artifacts []*string
+	check     bool
+	excludes  []string
+	format    bool
+	lint      bool
+	name      string
+	tests     bool
+}
+
 type VendorStepScriptTemplateArgs struct {
 	Name        string
 	TargetPaths string
@@ -36,11 +51,16 @@ type VendorStepScriptTemplateArgs struct {
 
 type StepScriptTemplateArgs struct {
 	BinNames string
+	Check    string
+	Format   string
+	Lint     string
 	Name     string
+	Tests    string
 	Vendor   string
 }
 
-const VendorStepScriptTemplate = `mkdir -pv $HOME
+const VendorStepScriptTemplate = `
+mkdir -pv $HOME
 
 pushd ./source/{{.Name}}-vendor
 
@@ -57,7 +77,8 @@ cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
 echo "$cargo_vendor" > "$VORPAL_OUTPUT/config.toml"`
 
-const StepScriptTemplate = `mkdir -pv $HOME
+const StepScriptTemplate = `
+mkdir -pv $HOME
 
 pushd ./source/{{.Name}}
 
@@ -65,9 +86,23 @@ mkdir -pv .cargo
 
 ln -sv "{{.Vendor}}/config.toml" .cargo/config.toml
 
-cargo build --offline --release
+if [ "{{.Check}}" = "true" ]; then
+    cargo --offline check --release
+fi
 
-cargo test --offline --release
+if [ "{{.Format}}" = "true" ]; then
+    cargo --offline fmt --all --check
+fi
+
+if [ "{{.Lint}}" = "true" ]; then
+    cargo --offline clippy -- --deny warnings
+fi
+
+cargo --offline build --release
+
+if [ "{{.Tests}}" = "true" ]; then
+    cargo --offline test --release
+fi
 
 mkdir -pv "$VORPAL_OUTPUT/bin"
 
@@ -88,9 +123,9 @@ func toolchain_digest(context *config.ConfigContext) (*string, error) {
 	case artifactApi.ArtifactSystem_AARCH64_LINUX:
 		digest = "ad490acd52f5b4d5b539df8f565df3a90271225a1ef6256c1027eac0b70cb4d4"
 	case artifactApi.ArtifactSystem_X8664_DARWIN:
-		digest = ""
+		digest = "589c625bd79be3ed8b9d5168c54a889dba971a6e9d9722750c4b4577247ec94e"
 	case artifactApi.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "5442c5e085972b7119661da12d03d40fb17770edf8879ab898aee3dafdd1c48c"
 	default:
 		return nil, errors.New("unsupported target")
 	}
@@ -122,17 +157,6 @@ func toolchain_version() string {
 	return "1.83.0"
 }
 
-type RustShellBuilder struct {
-	artifacts []*string
-	name      string
-}
-
-type RustBuilder struct {
-	artifacts []*string
-	name      string
-	excludes  []string
-}
-
 func NewRustShellBuilder(name string) *RustShellBuilder {
 	return &RustShellBuilder{
 		artifacts: make([]*string, 0),
@@ -143,8 +167,12 @@ func NewRustShellBuilder(name string) *RustShellBuilder {
 func NewRustBuilder(name string) *RustBuilder {
 	return &RustBuilder{
 		artifacts: make([]*string, 0),
-		name:      name,
+		check:     false,
 		excludes:  make([]string, 0),
+		format:    false,
+		lint:      false,
+		name:      name,
+		tests:     false,
 	}
 }
 
@@ -195,8 +223,28 @@ func (a *RustBuilder) WithArtifacts(artifacts []*string) *RustBuilder {
 	return a
 }
 
+func (a *RustBuilder) WithCheck() *RustBuilder {
+	a.check = true
+	return a
+}
+
 func (a *RustBuilder) WithExcludes(excludes []string) *RustBuilder {
 	a.excludes = excludes
+	return a
+}
+
+func (a *RustBuilder) WithFormat() *RustBuilder {
+	a.format = true
+	return a
+}
+
+func (a *RustBuilder) WithLint() *RustBuilder {
+	a.lint = true
+	return a
+}
+
+func (a *RustBuilder) WithTests() *RustBuilder {
+	a.tests = true
 	return a
 }
 
@@ -209,23 +257,23 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	// Load root cargo.toml
 
-	cargoTomlPath := filepath.Join(sourcePath, "Cargo.toml")
+	sourceCargoPath := filepath.Join(sourcePath, "Cargo.toml")
 
-	if _, err := os.Stat(cargoTomlPath); err != nil {
+	if _, err := os.Stat(sourceCargoPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("cargo.toml file not found in %s", sourcePath)
 		}
 		return nil, err
 	}
 
-	tomlData, err := os.ReadFile(cargoTomlPath)
+	sourceCargoData, err := os.ReadFile(sourceCargoPath)
 	if err != nil {
 		return nil, err
 	}
 
-	var cargoToml RustArtifactCargoToml
+	var sourceCargo RustArtifactCargoToml
 
-	_, cargoTomlErr := toml.Decode(string(tomlData), &cargoToml)
+	_, cargoTomlErr := toml.Decode(string(sourceCargoData), &sourceCargo)
 	if cargoTomlErr != nil {
 		return nil, cargoTomlErr
 	}
@@ -234,8 +282,8 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 	workspacesBinNames := make([]string, 0)
 	workspacesTargets := make([]string, 0)
 
-	if cargoToml.Workspace != nil && len(cargoToml.Workspace.Members) > 0 {
-		for _, member := range cargoToml.Workspace.Members {
+	if sourceCargo.Workspace != nil && len(sourceCargo.Workspace.Members) > 0 {
+		for _, member := range sourceCargo.Workspace.Members {
 			memberPath := filepath.Join(sourcePath, member)
 			memberCargoTomlPath := filepath.Join(memberPath, "Cargo.toml")
 
@@ -292,33 +340,34 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	// Get rust toolchain artifact
 
-	toolchain_digest, err := toolchain_digest(context)
+	rust_toolchain_digest, err := toolchain_digest(context)
 	if err != nil {
 		return nil, err
 	}
 
-	toolchain, err := context.FetchArtifact(*toolchain_digest)
+	rustToolchain, err := context.FetchArtifact(*rust_toolchain_digest)
 	if err != nil {
 		return nil, err
 	}
 
-	toolchain_target, err := toolchain_target(context.GetTarget())
+	rust_toolchain_target, err := toolchain_target(context.GetTarget())
 	if err != nil {
 		return nil, err
 	}
 
-	toolchain_version := toolchain_version()
+	rust_toolchain_version := toolchain_version()
+
+	rust_toolchain_name := fmt.Sprintf("%s-%s", rust_toolchain_version, *rust_toolchain_target)
 
 	stepEnvironments := []string{
 		"HOME=$VORPAL_WORKSPACE/home",
 		fmt.Sprintf(
-			"PATH=%s/toolchains/%s-%s/bin",
-			artifact.GetEnvKey(toolchain),
-			toolchain_version,
-			*toolchain_target,
+			"PATH=%s/toolchains/%s/bin",
+			artifact.GetEnvKey(rustToolchain),
+			rust_toolchain_name,
 		),
-		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(toolchain)),
-		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s-%s", toolchain_version, *toolchain_target),
+		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(rustToolchain)),
+		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rust_toolchain_name),
 	}
 
 	// Create vendor artifact
@@ -347,17 +396,11 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	vendorStepArtifacts := make([]*string, 0)
-
-	vendorStepArtifacts = append(vendorStepArtifacts, toolchain)
-
-	for _, artifact := range a.artifacts {
-		vendorStepArtifacts = append(vendorStepArtifacts, artifact)
-	}
+	stepArtifacts := []*string{rustToolchain}
 
 	vendorStep, err := artifact.Shell(
 		context,
-		vendorStepArtifacts,
+		stepArtifacts,
 		stepEnvironments,
 		vendorStepScriptBuffer.String(),
 	)
@@ -380,6 +423,8 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
+	stepArtifacts = append(stepArtifacts, vendor)
+
 	// TODO: implement artifact for 'check` to pre-bake the vendor cache
 
 	sourceExcludes := make([]string, 0)
@@ -393,11 +438,6 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 	source := artifact.NewArtifactSourceBuilder(a.name, sourcePath).
 		WithExcludes(sourceExcludes).
 		Build()
-
-	stepArtifacts := make([]*string, 0)
-
-	stepArtifacts = append(stepArtifacts, toolchain)
-	stepArtifacts = append(stepArtifacts, vendor)
 
 	for _, artifact := range a.artifacts {
 		stepArtifacts = append(stepArtifacts, artifact)
@@ -414,7 +454,11 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	stepScriptArgs := StepScriptTemplateArgs{
 		BinNames: stepScriptBinNames,
+		Check:    fmt.Sprintf("%t", a.check),
+		Format:   fmt.Sprintf("%t", a.format),
+		Lint:     fmt.Sprintf("%t", a.lint),
 		Name:     a.name,
+		Tests:    fmt.Sprintf("%t", a.tests),
 		Vendor:   artifact.GetEnvKey(vendor),
 	}
 
