@@ -171,16 +171,9 @@ jobs:
           echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           echo "Worker pid: $WORKER_PID"
 
-      - run: |
-          ls -alh .
-          echo "start vorpal-shell"
-          ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-shell"
-          ls -alh .
-          echo "start vorpal"
-          ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal"
-          ls -alh .
-          echo "start vorpal-example"
-          ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-example"
+      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-shell"
+      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal"
+      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-example"
 
       - if: always()
         run: |
