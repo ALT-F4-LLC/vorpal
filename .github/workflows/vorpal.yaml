@@ -120,7 +120,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - if: matrix.runner == 'ubuntu-latest'
+      - if: contains(matrix.runner, 'ubuntu')
         run: |
           ./script/dev/debian.sh
 
