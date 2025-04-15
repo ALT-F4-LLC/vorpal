@@ -125,7 +125,7 @@ func toolchain_digest(context *config.ConfigContext) (*string, error) {
 	case artifactApi.ArtifactSystem_X8664_DARWIN:
 		digest = "589c625bd79be3ed8b9d5168c54a889dba971a6e9d9722750c4b4577247ec94e"
 	case artifactApi.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "5442c5e085972b7119661da12d03d40fb17770edf8879ab898aee3dafdd1c48c"
 	default:
 		return nil, errors.New("unsupported target")
 	}

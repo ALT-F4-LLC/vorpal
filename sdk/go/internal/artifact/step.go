@@ -265,7 +265,20 @@ func Shell(
 	}
 
 	if stepTarget == artifactApi.ArtifactSystem_AARCH64_LINUX || stepTarget == artifactApi.ArtifactSystem_X8664_LINUX {
-		linux_vorpal, err := context.FetchArtifact("79958083229520a9e8cbf94ed5f6da40c3bf98ae666b3e20c01bc272fd92c2bb")
+		var linux_vorpal_digest string
+
+		switch stepTarget {
+		case artifactApi.ArtifactSystem_AARCH64_LINUX:
+			linux_vorpal_digest = "79958083229520a9e8cbf94ed5f6da40c3bf98ae666b3e20c01bc272fd92c2bb"
+		case artifactApi.ArtifactSystem_X8664_LINUX:
+			linux_vorpal_digest = "6787f5abf88580349785c101492445298e0577d192455481e758b56163e5ebde"
+		}
+
+		if linux_vorpal_digest == "" {
+			return nil, fmt.Errorf("unsupported shell step system: %s", stepTarget)
+		}
+
+		linux_vorpal, err := context.FetchArtifact(linux_vorpal_digest)
 		if err != nil {
 			return nil, err
 		}

@@ -211,7 +211,7 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 
 	err = fetchArtifacts(client, digest, c.store.artifact)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching artifact: %v", err)
+		return nil, fmt.Errorf("error fetching '%s': %v", digest, err)
 	}
 
 	return &digest, nil

@@ -20,7 +20,7 @@ func Protoc(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_X8664_DARWIN:
 		digest = "2a3d7816b06f1a046cbf8e82c1a94fe71b4fd384726f2064c9e0960ac75dadec"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "<TODO>"
+		digest = "c5bded4de6ca52ac5e731e328e22b5dfb957009ed5a553e24ba9fdec4379ba44"
 	default:
 		return nil, errors.New("unsupported target")
 	}
