@@ -1,12 +1,12 @@
 use anyhow::Result;
-use rand::rngs::OsRng;
-use rsa::pkcs8::{
-    DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding,
-};
 use rsa::pss::SigningKey;
 use rsa::sha2::Sha256;
 use rsa::signature::RandomizedSigner;
 use rsa::signature::SignatureEncoding;
+use rsa::{
+    pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding},
+    rand_core,
+};
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use std::path::PathBuf;
 use tokio::fs;
@@ -36,7 +36,7 @@ pub async fn generate_keys(
         .await
         .expect("failed to create key directory");
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand_core::OsRng;
 
     let private_key = RsaPrivateKey::new(&mut rng, BITS).expect("failed to generate private key");
 
@@ -82,7 +82,7 @@ pub async fn sign(private_key_path: PathBuf, source_data: &[u8]) -> Result<Box<[
 
     let signing_key = SigningKey::<Sha256>::new(private_key);
 
-    let mut signing_rng = OsRng;
+    let mut signing_rng = rand_core::OsRng;
 
     let signature = signing_key.sign_with_rng(&mut signing_rng, source_data);
 

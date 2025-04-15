@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = { default-features = false, version = "1" }
-clap = { default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"], version = "4" }
-indoc = { default-features = false, version = "2" }
-serde = { default-features = false, features = ["serde_derive"], version = "1" }
-serde_json = { default-features = false, features = ["std"], version = "1" }
-sha256 = { default-features = false, version = "1" }
-toml = { default-features = false, features = ["parse"], version = "0" }
-tonic = { default-features = false, version = "0" }
-vorpal-schema = { default-features = false, path = "../schema" }
+anyhow = { version = "1" }
+clap = { features = ["derive"], version = "4" }
+indoc = { version = "2" }
+serde = { version = "1" }
+serde_json = { version = "1" }
+sha256 = { version = "1" }
+toml = { version = "0" }
+tonic = { version = "0" }
+vorpal-schema = { path = "../schema" }
