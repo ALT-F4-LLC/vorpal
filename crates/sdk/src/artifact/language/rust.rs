@@ -59,11 +59,15 @@ pub struct RustShellBuilder<'a> {
 
 pub struct RustBuilder<'a> {
     artifacts: Vec<String>,
+    bins: Vec<String>,
+    build: bool,
     check: bool,
     excludes: Vec<&'a str>,
     format: bool,
     lint: bool,
     name: &'a str,
+    packages: Vec<String>,
+    source: Option<String>,
     tests: bool,
 }
 
@@ -114,17 +118,26 @@ impl<'a> RustBuilder<'a> {
     pub fn new(name: &'a str) -> Self {
         Self {
             artifacts: vec![],
+            bins: vec![],
+            build: true,
             check: false,
             excludes: vec![],
             format: false,
             lint: false,
             name,
+            packages: vec![],
+            source: None,
             tests: false,
         }
     }
 
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts = artifacts;
+        self
+    }
+
+    pub fn with_bins(mut self, bins: Vec<&str>) -> Self {
+        self.bins = bins.iter().map(|s| s.to_string()).collect();
         self
     }
 
@@ -148,6 +161,16 @@ impl<'a> RustBuilder<'a> {
         self
     }
 
+    pub fn with_packages(mut self, packages: Vec<&'a str>) -> Self {
+        self.packages = packages.iter().map(|s| s.to_string()).collect();
+        self
+    }
+
+    pub fn with_source(mut self, source: String) -> Self {
+        self.source = Some(source);
+        self
+    }
+
     pub fn with_tests(mut self, tests: bool) -> Self {
         self.tests = tests;
         self
@@ -158,7 +181,10 @@ impl<'a> RustBuilder<'a> {
 
         // Get the source path
 
-        let source_path = Path::new(".").to_path_buf();
+        let source_path = match self.source {
+            Some(ref source) => Path::new(source),
+            None => Path::new("."),
+        };
 
         if !source_path.exists() {
             bail!(
@@ -184,43 +210,59 @@ impl<'a> RustBuilder<'a> {
 
         // Get list of bin targets
 
-        let mut workspaces = vec![];
-        let mut workspaces_bin_names = vec![];
-        let mut workspaces_targets = vec![];
+        let mut packages = vec![];
+        let mut packages_bin_names = vec![];
+        let mut packages_manifests = vec![];
+        let mut packages_targets = vec![];
 
         if let Some(workspace) = source_cargo.workspace {
-            if let Some(members) = workspace.members {
-                for member in members {
-                    let member_path = source_path.join(member.clone());
-                    let member_cargo_toml_path = member_path.join("Cargo.toml");
-
-                    if !member_cargo_toml_path.exists() {
-                        bail!("Cargo.toml not found: {:?}", member_cargo_toml_path);
+            if let Some(pkgs) = workspace.members {
+                for package in pkgs {
+                    if !self.packages.is_empty() && !self.packages.contains(&package) {
+                        continue;
                     }
 
-                    let member_cargo_toml = read_cargo(member_cargo_toml_path.to_str().unwrap())?;
+                    let package_path = source_path.join(package.clone());
+                    let package_cargo_path = package_path.join("Cargo.toml");
 
-                    let mut member_target_paths = vec![];
+                    if !package_cargo_path.exists() {
+                        bail!("Cargo.toml not found: {:?}", package_cargo_path);
+                    }
 
-                    if let Some(bins) = member_cargo_toml.bin {
+                    let package_cargo = read_cargo(package_cargo_path.to_str().unwrap())?;
+
+                    let mut package_target_paths = vec![];
+
+                    if let Some(bins) = package_cargo.bin {
                         for bin in bins {
-                            member_target_paths.push(format!("{}/{}", member, bin.path));
-                            workspaces_bin_names.push(bin.name);
+                            package_target_paths.push(package_path.join(bin.path));
+
+                            if self.bins.is_empty() || self.bins.contains(&bin.name) {
+                                let manifest_path = package_cargo_path.display().to_string();
+
+                                if !packages_manifests.contains(&manifest_path) {
+                                    packages_manifests.push(manifest_path);
+                                }
+
+                                packages_bin_names.push(bin.name);
+                            }
                         }
                     }
 
-                    if member_target_paths.is_empty() {
-                        member_target_paths.push(format!("{}/src/lib.rs", member));
+                    if package_target_paths.is_empty() {
+                        package_target_paths.push(package_path.join("src/lib.rs"));
                     }
 
-                    for member_target_path in member_target_paths {
-                        workspaces_targets.push(member_target_path);
+                    for member_target_path in package_target_paths {
+                        packages_targets.push(member_target_path);
                     }
 
-                    workspaces.push(member);
+                    packages.push(package);
                 }
             }
         }
+
+        // TODO: if no workspaces found then check source cargo
 
         // 2. CREATE ARTIFACTS
 
@@ -253,29 +295,36 @@ impl<'a> RustBuilder<'a> {
 
         let mut vendor_cargo_paths = vec!["Cargo.toml".to_string(), "Cargo.lock".to_string()];
 
-        for workspace in workspaces.iter() {
-            vendor_cargo_paths.push(format!("{}/Cargo.toml", workspace));
+        for package in packages.iter() {
+            vendor_cargo_paths.push(format!("{}/Cargo.toml", package));
         }
 
-        let vendor_step_script = formatdoc! {"
+        let vendor_step_script = formatdoc! {r#"
             mkdir -pv $HOME
 
             pushd ./source/{name}-vendor
 
+            cat > Cargo.toml << "EOF"
+            [workspace]
+            members = [{packages}]
+            resolver = "2"
+            EOF
+
             target_paths=({target_paths})
 
             for target_path in ${{target_paths[@]}}; do
-                mkdir -pv \"$(dirname \"${{target_path}}\")\"
-                touch \"${{target_path}}\"
+                mkdir -pv $(dirname ${{target_path}})
+                touch ${{target_path}}
             done
 
-            mkdir -pv \"$VORPAL_OUTPUT/vendor\"
+            mkdir -pv $VORPAL_OUTPUT/vendor
 
             cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
-            echo \"$cargo_vendor\" > \"$VORPAL_OUTPUT/config.toml\"",
+            echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml"#,
             name = self.name,
-            target_paths = workspaces_targets.join(" "),
+            packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+            target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display().to_string())).collect::<Vec<_>>().join(" "),
         };
 
         let vendor_step = step::shell(
@@ -290,7 +339,6 @@ impl<'a> RustBuilder<'a> {
 
         let vendor_source =
             ArtifactSourceBuilder::new(vendor_name.as_str(), source_path_str.as_str())
-                .with_excludes(vec![])
                 .with_includes(vendor_cargo_paths.clone())
                 .build();
 
@@ -308,58 +356,89 @@ impl<'a> RustBuilder<'a> {
 
         // Setup global values
 
+        let mut source_includes = vec![];
         let mut source_excludes = vec!["target".to_string()];
+
+        if !self.packages.is_empty() {
+            for package in self.packages.into_iter() {
+                source_includes.push(package);
+            }
+        }
 
         for exclude in self.excludes {
             source_excludes.push(exclude.to_string());
         }
 
-        let source = ArtifactSourceBuilder::new(self.name, source_path_str.as_str())
-            .with_excludes(source_excludes)
-            .build();
+        let mut source_builder = ArtifactSourceBuilder::new(self.name, source_path_str.as_str());
+
+        if !source_includes.is_empty() {
+            source_builder = source_builder.with_includes(source_includes);
+        } else {
+            source_builder = source_builder.with_excludes(source_excludes);
+        }
+
+        let source = source_builder.build();
 
         // Create artifact
 
-        let step_script = formatdoc! {"
+        let step_script = formatdoc! {r#"
             mkdir -pv $HOME
 
             pushd ./source/{name}
 
             mkdir -pv .cargo
+            mkdir -pv $VORPAL_OUTPUT/bin
 
-            ln -sv \"{vendor}/config.toml\" .cargo/config.toml
+            ln -sv {vendor}/config.toml .cargo/config.toml
 
-            if [ \"{enable_check}\" = \"true\" ]; then
-                cargo --offline check --release
-            fi
+            cat > Cargo.toml << "EOF"
+            [workspace]
+            members = [{packages}]
+            resolver = "2"
+            EOF
 
-            if [ \"{enable_format}\" = \"true\" ]; then
+            bin_names=({bin_names})
+            manifest_paths=({manifest_paths})
+
+            if [ "{enable_format}" = "true" ]; then
+                echo "Running formatter..."
                 cargo --offline fmt --all --check
             fi
 
-            if [ \"{enable_lint}\" = \"true\" ]; then
-                cargo --offline clippy -- --deny warnings
-            fi
-
-            cargo --offline build --release
-
-            if [ \"{enable_tests}\" = \"true\" ]; then
-                cargo --offline test --release
-            fi
-
-            mkdir -pv \"$VORPAL_OUTPUT/bin\"
-
-            bin_names=({bin_names})
+            for manifest_path in ${{manifest_paths[@]}}; do
+                if [ "{enable_lint}" = "true" ]; then
+                    echo "Running linter..."
+                    cargo --offline clippy --manifest-path ${{manifest_path}} -- --deny warnings
+                fi
+            done
 
             for bin_name in ${{bin_names[@]}}; do
-                cp -pv \"target/release/${{bin_name}}\" \"$VORPAL_OUTPUT/bin/\"
-            done",
-            bin_names = workspaces_bin_names.join(" "),
+                if [ "{enable_check}" = "true" ]; then
+                    echo "Running check..."
+                    cargo --offline check --bin ${{bin_name}} --release
+                fi
+
+                if [ "{enable_build}" = "true" ]; then
+                    echo "Running build..."
+                    cargo --offline build --bin ${{bin_name}} --release
+                fi
+
+                if [ "{enable_tests}" = "true" ]; then
+                    echo "Running tests..."
+                    cargo --offline test --bin ${{bin_name}} --release
+                fi
+
+                cp -pv ./target/release/${{bin_name}} $VORPAL_OUTPUT/bin/
+            done"#,
+            bin_names = packages_bin_names.join(" "),
+            enable_build = if self.build { "true" } else { "false" },
             enable_check = if self.check { "true" } else { "false" },
             enable_format = if self.format { "true" } else { "false" },
             enable_lint = if self.lint { "true" } else { "false" },
             enable_tests = if self.tests { "true" } else { "false" },
+            manifest_paths = packages_manifests.join(" "),
             name = self.name,
+            packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
             vendor = get_env_key(&vendor),
         };
 

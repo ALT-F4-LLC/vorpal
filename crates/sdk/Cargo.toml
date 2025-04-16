@@ -12,4 +12,5 @@ serde_json = { version = "1" }
 sha256 = { version = "1" }
 toml = { version = "0" }
 tonic = { version = "0" }
+tracing = { version = "0" }
 vorpal-schema = { path = "../schema" }

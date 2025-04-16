@@ -8,7 +8,6 @@ VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_DIR := /var/lib/vorpal
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
-CONFIG_FILE ?= target/$(TARGET)/vorpal-config
 
 ifndef VERBOSE
 .SILENT:
@@ -50,8 +49,7 @@ dist:
 	mkdir -p $(DIST_DIR)
 	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
 		-C $(WORK_DIR)/target/$(TARGET) \
-		vorpal \
-		vorpal-config
+		vorpal
 
 vendor:
 	cargo vendor --versioned-dirs $(VENDOR_DIR)
@@ -92,27 +90,8 @@ generate:
 
 # Development (with Vorpal)
 
-vorpal-example:
-	"target/$(TARGET)/vorpal" artifact \
-		--config "$(CONFIG_FILE)" \
-		--name "vorpal-example"
-
-vorpal-export:
-	"target/$(TARGET)/vorpal" artifact \
-		--config "$(CONFIG_FILE)" \
-		--export \
-		--name "vorpal"
-
-vorpal-shell:
-	"target/$(TARGET)/vorpal" artifact \
-		--config "$(CONFIG_FILE)" \
-		--name "vorpal-shell" \
-		--path
-
 vorpal:
-	"target/$(TARGET)/vorpal" artifact \
-		--config "$(CONFIG_FILE)" \
-		--name "vorpal"
+	"target/$(TARGET)/vorpal" artifact --name $(ARTIFACT) $(VORPAL_FLAGS)
 
 vorpal-start:
 	"target/$(TARGET)/vorpal" start

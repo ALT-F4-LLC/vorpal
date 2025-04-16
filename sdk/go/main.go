@@ -107,25 +107,17 @@ func main() {
 		WithArtifacts([]*string{
 			protoc,
 		}).
-		WithExcludes([]string{
-			".cargo",
-			".env",
-			".envrc",
-			".github",
-			".gitignore",
-			".packer",
-			".vagrant",
-			"Dockerfile",
-			"Vagrantfile",
-			"dist",
-			"makefile",
-			"script",
-			"sdk/go",
-			"shell.nix",
-			"vendor",
-			"vorpal-config",
-			"vorpal-domains.svg",
-			"vorpal-purpose.jpg",
+		WithBins([]string{
+			"vorpal",
+		}).
+		WithPackages([]string{
+			"crates/agent",
+			"crates/cli",
+			"crates/registry",
+			"crates/schema",
+			"crates/sdk",
+			"crates/store",
+			"crates/worker",
 		}).
 		Build(context)
 	if err != nil {
@@ -141,6 +133,9 @@ func main() {
 				vorpal,
 			}).
 			Build(context)
+		if err != nil {
+			log.Fatalf("failed to create vorpal-example artifact: %v", err)
+		}
 
 	case "vorpal-release":
 		varAarch64Darwin, err := artifact.

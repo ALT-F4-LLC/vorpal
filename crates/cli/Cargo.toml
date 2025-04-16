@@ -14,7 +14,7 @@ console = { version = "0" }
 petgraph = { version = "0" }
 port-selector = { version = "0" }
 serde_json = { version = "1" }
-tokio = { version = "1" }
+tokio = { features = ["rt-multi-thread"], version = "1" }
 tokio-stream = { version = "0" }
 tonic = { version = "0" }
 tonic-health = { version = "0" }

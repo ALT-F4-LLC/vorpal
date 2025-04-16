@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -36,27 +36,35 @@ type RustShellBuilder struct {
 
 type RustBuilder struct {
 	artifacts []*string
+	bins      []string
+	build     bool
 	check     bool
 	excludes  []string
 	format    bool
 	lint      bool
 	name      string
+	packages  []string
+	source    *string
 	tests     bool
 }
 
 type VendorStepScriptTemplateArgs struct {
 	Name        string
+	Packages    string
 	TargetPaths string
 }
 
 type StepScriptTemplateArgs struct {
-	BinNames string
-	Check    string
-	Format   string
-	Lint     string
-	Name     string
-	Tests    string
-	Vendor   string
+	BinNames      string
+	Build         string
+	Check         string
+	Format        string
+	Lint          string
+	ManifestPaths string
+	Name          string
+	Packages      string
+	Tests         string
+	Vendor        string
 }
 
 const VendorStepScriptTemplate = `
@@ -64,18 +72,24 @@ mkdir -pv $HOME
 
 pushd ./source/{{.Name}}-vendor
 
+cat > Cargo.toml << "EOF"
+[workspace]
+members = [{{.Packages}}]
+resolver = "2"
+EOF
+
 target_paths=({{.TargetPaths}})
 
 for target_path in ${{"{"}}target_paths{{"["}}@{{"]"}}{{"}"}}; do
-    mkdir -pv "$(dirname "${{"{"}}target_path{{"}"}}")"
-    touch "${{"{"}}target_path{{"}"}}"
+    mkdir -pv $(dirname ${{"{"}}target_path{{"}"}})
+    touch ${{"{"}}target_path{{"}"}}
 done
 
-mkdir -pv "$VORPAL_OUTPUT/vendor"
+mkdir -pv $VORPAL_OUTPUT/vendor
 
 cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
-echo "$cargo_vendor" > "$VORPAL_OUTPUT/config.toml"`
+echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml`
 
 const StepScriptTemplate = `
 mkdir -pv $HOME
@@ -83,33 +97,48 @@ mkdir -pv $HOME
 pushd ./source/{{.Name}}
 
 mkdir -pv .cargo
+mkdir -pv $VORPAL_OUTPUT/bin
 
-ln -sv "{{.Vendor}}/config.toml" .cargo/config.toml
+ln -sv {{.Vendor}}/config.toml .cargo/config.toml
 
-if [ "{{.Check}}" = "true" ]; then
-    cargo --offline check --release
-fi
+cat > Cargo.toml << "EOF"
+[workspace]
+members = [{{.Packages}}]
+resolver = "2"
+EOF
+
+bin_names=({{.BinNames}})
+manifest_paths=({{.ManifestPaths}})
 
 if [ "{{.Format}}" = "true" ]; then
+    echo "Running formatter..."
     cargo --offline fmt --all --check
 fi
 
-if [ "{{.Lint}}" = "true" ]; then
-    cargo --offline clippy -- --deny warnings
-fi
-
-cargo --offline build --release
-
-if [ "{{.Tests}}" = "true" ]; then
-    cargo --offline test --release
-fi
-
-mkdir -pv "$VORPAL_OUTPUT/bin"
-
-bin_names=({{.BinNames}})
+for manifest_path in ${{"{"}}manifest_paths{{"["}}@{{"]"}}{{"}"}}; do
+    if [ "{{.Lint}}" = "true" ]; then
+        echo "Running linter..."
+        cargo --offline clippy --manifest-path ${{"{"}}manifest_path{{"}"}} -- --deny warnings
+    fi
+done
 
 for bin_name in ${{"{"}}bin_names{{"["}}@{{"]"}}{{"}"}}; do
-    cp -pv "target/release/${{"{"}}bin_name{{"}"}}" "$VORPAL_OUTPUT/bin/"
+    if [ "{{.Check}}" = "true" ]; then
+        echo "Running check..."
+        cargo --offline check --bin ${{"{"}}bin_name{{"}"}} --release
+    fi
+
+    if [ "{{.Build}}" = "true" ]; then
+        echo "Running build..."
+        cargo --offline build --bin ${{"{"}}bin_name{{"}"}} --release
+    fi
+
+    if [ "{{.Tests}}" = "true" ]; then
+        echo "Running tests..."
+        cargo --offline test --bin ${{"{"}}bin_name{{"}"}} --release
+    fi
+
+    cp -pv ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
 done`
 
 func toolchain_digest(context *config.ConfigContext) (*string, error) {
@@ -167,11 +196,15 @@ func NewRustShellBuilder(name string) *RustShellBuilder {
 func NewRustBuilder(name string) *RustBuilder {
 	return &RustBuilder{
 		artifacts: make([]*string, 0),
+		bins:      make([]string, 0),
+		build:     true,
 		check:     false,
 		excludes:  make([]string, 0),
 		format:    false,
 		lint:      false,
 		name:      name,
+		packages:  make([]string, 0),
+		source:    nil,
 		tests:     false,
 	}
 }
@@ -223,6 +256,11 @@ func (a *RustBuilder) WithArtifacts(artifacts []*string) *RustBuilder {
 	return a
 }
 
+func (a *RustBuilder) WithBins(bins []string) *RustBuilder {
+	a.bins = bins
+	return a
+}
+
 func (a *RustBuilder) WithCheck() *RustBuilder {
 	a.check = true
 	return a
@@ -243,6 +281,16 @@ func (a *RustBuilder) WithLint() *RustBuilder {
 	return a
 }
 
+func (a *RustBuilder) WithPackages(packages []string) *RustBuilder {
+	a.packages = packages
+	return a
+}
+
+func (a *RustBuilder) WithSource(source *string) *RustBuilder {
+	a.source = source
+	return a
+}
+
 func (a *RustBuilder) WithTests() *RustBuilder {
 	a.tests = true
 	return a
@@ -253,11 +301,15 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	// Get the source path
 
-	sourcePath := filepath.Dir(".")
+	sourcePath := "."
+
+	if a.source != nil {
+		sourcePath = *a.source
+	}
 
 	// Load root cargo.toml
 
-	sourceCargoPath := filepath.Join(sourcePath, "Cargo.toml")
+	sourceCargoPath := fmt.Sprintf("%s/Cargo.toml", sourcePath)
 
 	if _, err := os.Stat(sourceCargoPath); err != nil {
 		if os.IsNotExist(err) {
@@ -278,61 +330,73 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 		return nil, cargoTomlErr
 	}
 
-	workspaces := make([]string, 0)
-	workspacesBinNames := make([]string, 0)
-	workspacesTargets := make([]string, 0)
+	packages := make([]string, 0)
+	packagesBinNames := make([]string, 0)
+	packagesManifests := make([]string, 0)
+	packagesTargets := make([]string, 0)
 
 	if sourceCargo.Workspace != nil && len(sourceCargo.Workspace.Members) > 0 {
 		for _, member := range sourceCargo.Workspace.Members {
-			memberPath := filepath.Join(sourcePath, member)
-			memberCargoTomlPath := filepath.Join(memberPath, "Cargo.toml")
+			if len(a.packages) > 0 && !slices.Contains(a.packages, member) {
+				continue
+			}
 
-			if _, err := os.Stat(memberCargoTomlPath); err != nil {
+			pkg := fmt.Sprintf("%s/%s", sourcePath, member)
+			pkgCargoPath := fmt.Sprintf("%s/Cargo.toml", pkg)
+
+			if _, err := os.Stat(pkgCargoPath); err != nil {
 				return nil, err
 			}
 
-			memberTomlData, err := os.ReadFile(memberCargoTomlPath)
+			pkgCargoData, err := os.ReadFile(pkgCargoPath)
 			if err != nil {
 				return nil, err
 			}
 
-			var memberCargoToml RustArtifactCargoToml
+			var pkgCargo RustArtifactCargoToml
 
-			_, memberCargoTomlErr := toml.Decode(string(memberTomlData), &memberCargoToml)
-			if memberCargoTomlErr != nil {
-				return nil, memberCargoTomlErr
+			_, pkgCargoErr := toml.Decode(string(pkgCargoData), &pkgCargo)
+			if pkgCargoErr != nil {
+				return nil, pkgCargoErr
 			}
 
-			memberTargetPaths := make([]string, 0)
+			pkgTargetPaths := make([]string, 0)
 
-			if memberCargoToml.Bin != nil && len(memberCargoToml.Bin) > 0 {
-				for _, bin := range memberCargoToml.Bin {
-					memberTargetPath := filepath.Join(memberPath, bin.Path)
+			if pkgCargo.Bin != nil && len(pkgCargo.Bin) > 0 {
+				for _, bin := range pkgCargo.Bin {
+					pkgTargetPath := fmt.Sprintf("%s/%s", pkg, bin.Path)
 
-					if _, err := os.Stat(memberTargetPath); err != nil {
+					if _, err := os.Stat(pkgTargetPath); err != nil {
 						return nil, err
 					}
 
-					memberTargetPaths = append(memberTargetPaths, memberTargetPath)
-					workspacesBinNames = append(workspacesBinNames, bin.Name)
+					pkgTargetPaths = append(pkgTargetPaths, pkgTargetPath)
+
+					if len(a.bins) == 0 || slices.Contains(a.bins, bin.Name) {
+						if !slices.Contains(packagesManifests, pkgCargoPath) {
+							packagesManifests = append(packagesManifests, pkgCargoPath)
+						}
+
+						packagesBinNames = append(packagesBinNames, bin.Name)
+					}
 				}
 			}
 
-			if len(memberTargetPaths) == 0 {
-				memberTargetPath := filepath.Join(memberPath, "src/lib.rs")
+			if len(pkgTargetPaths) == 0 {
+				pkgTargetPath := fmt.Sprintf("%s/src/lib.rs", pkg)
 
-				if _, err := os.Stat(memberTargetPath); err != nil {
+				if _, err := os.Stat(pkgTargetPath); err != nil {
 					return nil, err
 				}
 
-				memberTargetPaths = append(memberTargetPaths, memberTargetPath)
+				pkgTargetPaths = append(pkgTargetPaths, pkgTargetPath)
 			}
 
-			for _, memberTargetPath := range memberTargetPaths {
-				workspacesTargets = append(workspacesTargets, memberTargetPath)
+			for _, memberTargetPath := range pkgTargetPaths {
+				packagesTargets = append(packagesTargets, memberTargetPath)
 			}
 
-			workspaces = append(workspaces, member)
+			packages = append(packages, member)
 		}
 	}
 
@@ -374,8 +438,8 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	vendorCargoPaths := []string{"Cargo.toml", "Cargo.lock"}
 
-	for _, workspace := range workspaces {
-		vendorCargoPaths = append(vendorCargoPaths, filepath.Join(workspace, "Cargo.toml"))
+	for _, workspace := range packages {
+		vendorCargoPaths = append(vendorCargoPaths, fmt.Sprintf("%s/Cargo.toml", workspace))
 	}
 
 	vendorStepScript, err := template.New("script").Parse(VendorStepScriptTemplate)
@@ -385,11 +449,21 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	var vendorStepScriptBuffer bytes.Buffer
 
-	vendorStepScriptTargetPaths := strings.Join(workspacesTargets, " ")
+	stepPackagesTargets := make([]string, 0)
+	stepScriptPackages := make([]string, 0)
+
+	for _, pkg := range packagesTargets {
+		stepPackagesTargets = append(stepPackagesTargets, fmt.Sprintf("\"%s\"", pkg))
+	}
+
+	for _, pkg := range packages {
+		stepScriptPackages = append(stepScriptPackages, fmt.Sprintf("\"%s\"", pkg))
+	}
 
 	vendorStepScriptArgs := VendorStepScriptTemplateArgs{
 		Name:        a.name,
-		TargetPaths: vendorStepScriptTargetPaths,
+		Packages:    strings.Join(stepScriptPackages, ","),
+		TargetPaths: strings.Join(stepPackagesTargets, " "),
 	}
 
 	if err := vendorStepScript.Execute(&vendorStepScriptBuffer, vendorStepScriptArgs); err != nil {
@@ -427,17 +501,30 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	// TODO: implement artifact for 'check` to pre-bake the vendor cache
 
+	sourceIncludes := make([]string, 0)
 	sourceExcludes := make([]string, 0)
 
 	sourceExcludes = append(sourceExcludes, "target")
+
+	if len(a.packages) > 0 {
+		for _, pkg := range a.packages {
+			sourceIncludes = append(sourceIncludes, pkg)
+		}
+	}
 
 	for _, exclude := range a.excludes {
 		sourceExcludes = append(sourceExcludes, exclude)
 	}
 
-	source := artifact.NewArtifactSourceBuilder(a.name, sourcePath).
-		WithExcludes(sourceExcludes).
-		Build()
+	sourceBuilder := artifact.NewArtifactSourceBuilder(a.name, sourcePath)
+
+	if len(sourceIncludes) > 0 {
+		sourceBuilder = sourceBuilder.WithIncludes(sourceIncludes)
+	} else {
+		sourceBuilder = sourceBuilder.WithExcludes(sourceExcludes)
+	}
+
+	source := sourceBuilder.Build()
 
 	for _, artifact := range a.artifacts {
 		stepArtifacts = append(stepArtifacts, artifact)
@@ -450,16 +537,19 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	var stepScriptBuffer bytes.Buffer
 
-	stepScriptBinNames := strings.Join(workspacesBinNames, " ")
+	stepScriptBinNames := strings.Join(packagesBinNames, " ")
 
 	stepScriptArgs := StepScriptTemplateArgs{
-		BinNames: stepScriptBinNames,
-		Check:    fmt.Sprintf("%t", a.check),
-		Format:   fmt.Sprintf("%t", a.format),
-		Lint:     fmt.Sprintf("%t", a.lint),
-		Name:     a.name,
-		Tests:    fmt.Sprintf("%t", a.tests),
-		Vendor:   artifact.GetEnvKey(vendor),
+		BinNames:      stepScriptBinNames,
+		Build:         fmt.Sprintf("%t", a.build),
+		Check:         fmt.Sprintf("%t", a.check),
+		Format:        fmt.Sprintf("%t", a.format),
+		Lint:          fmt.Sprintf("%t", a.lint),
+		ManifestPaths: strings.Join(packagesManifests, " "),
+		Name:          a.name,
+		Packages:      strings.Join(stepScriptPackages, ","),
+		Tests:         fmt.Sprintf("%t", a.tests),
+		Vendor:        artifact.GetEnvKey(vendor),
 	}
 
 	if err := stepScript.Execute(&stepScriptBuffer, stepScriptArgs); err != nil {
