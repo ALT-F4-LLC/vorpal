@@ -24,8 +24,15 @@ use vorpal_schema::{
         worker_service_client::WorkerServiceClient, worker_service_server::WorkerServiceServer,
     },
 };
-use vorpal_sdk::system::{get_system_default, get_system_default_str};
-use vorpal_store::{notary::generate_keys, paths::get_public_key_path};
+use vorpal_sdk::{
+    artifact::{language::rust::RustBuilder, protoc},
+    context::ConfigContext,
+    system::{get_system_default, get_system_default_str},
+};
+use vorpal_store::{
+    notary::generate_keys,
+    paths::{get_public_key_path, get_store_path},
+};
 use vorpal_worker::artifact::WorkerServer;
 
 mod artifact;
@@ -81,22 +88,25 @@ pub enum CommandKeys {
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 pub struct Cli {
-    #[clap(default_value = "http://localhost:23151", long, short)]
+    #[clap(default_value = "http://localhost:23151", long)]
     agent: String,
 
     #[command(subcommand)]
     command: Command,
 
-    #[arg(default_value_t = get_default_context(), long, short)]
+    #[arg(default_value_t = get_default_context(), long)]
     context: String,
 
-    #[arg(default_value_t = Level::INFO, global = true, long, short)]
+    #[arg(default_value_t = Level::INFO, global = true, long)]
     level: Level,
 
-    #[clap(default_value = "http://localhost:23151", long, short)]
+    #[arg(default_value = "rust", long)]
+    language: String,
+
+    #[clap(default_value = "http://localhost:23151", long)]
     registry: String,
 
-    #[clap(default_value = "http://localhost:23151", long, short)]
+    #[clap(default_value = "http://localhost:23151", long)]
     worker: String,
 }
 
@@ -119,6 +129,7 @@ async fn main() -> Result<()> {
         agent,
         command,
         context,
+        language,
         level,
         registry,
         worker,
@@ -161,17 +172,69 @@ async fn main() -> Result<()> {
 
             subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
-            // Setup config
+            // Setup clients
 
-            let config_file_path = format!("{}/{}", context, config.replace("./", ""));
+            let mut client_archive = ArchiveServiceClient::connect(registry.to_owned())
+                .await
+                .expect("failed to connect to registry");
+
+            let mut client_worker = WorkerServiceClient::connect(worker.to_owned())
+                .await
+                .expect("failed to connect to artifact");
+
+            // Setup toolchain
+
+            let mut config_context = ConfigContext::new(
+                "http://localhost:23151".to_string(),
+                config.to_string(),
+                0,
+                registry.to_string(),
+                target.to_string(),
+                variable.clone(),
+            )?;
+
+            let protoc = protoc::build(&mut config_context).await?;
+
+            let mut config_digest = None;
+
+            if language == "rust" {
+                let digest = RustBuilder::new(config)
+                    .with_artifacts(vec![protoc])
+                    .with_bins(vec![config])
+                    .with_packages(vec!["crates/config", "crates/schema", "crates/sdk"])
+                    .build(&mut config_context)
+                    .await?;
+
+                config_digest = Some(digest);
+            }
+
+            if config_digest.is_none() {
+                bail!("no config digest found");
+            }
+
+            config::build_artifacts(
+                *artifact_path,
+                None,
+                config_context.get_artifact_store(),
+                &mut client_archive,
+                &mut client_worker,
+            )
+            .await?;
+
+            // Start config
+
+            let config_file_path = format!(
+                "{}/bin/{}",
+                &get_store_path(&config_digest.unwrap()).display(),
+                config
+            );
+
             let config_path = Path::new(&config_file_path);
 
             if !config_path.exists() {
                 error!("config not found: {}", config_path.display());
                 std::process::exit(1);
             }
-
-            // Start config
 
             let (mut config_process, mut config_client) = match config::start(
                 artifact_name.to_string(),
@@ -223,6 +286,8 @@ async fn main() -> Result<()> {
                 config_store.insert(digest, artifact);
             }
 
+            config_process.kill().await?;
+
             let (artifact_digest, artifact) = config_store
                 .clone()
                 .into_iter()
@@ -234,20 +299,6 @@ async fn main() -> Result<()> {
             config::get_artifacts(&artifact, &artifact_digest, &mut build_store, &config_store)
                 .await?;
 
-            // Setup clients
-
-            let mut client_archive = ArchiveServiceClient::connect(registry.to_owned())
-                .await
-                .expect("failed to connect to registry");
-
-            let mut client_worker = WorkerServiceClient::connect(worker.to_owned())
-                .await
-                .expect("failed to connect to artifact");
-
-            config_process.kill().await?;
-
-            // Export artifact
-
             if *artifact_export {
                 let artifacts = build_store.clone().into_values().collect::<Vec<Artifact>>();
 
@@ -258,8 +309,6 @@ async fn main() -> Result<()> {
 
                 return Ok(());
             }
-
-            // Build artifacts
 
             config::build_artifacts(
                 *artifact_path,

@@ -3669,6 +3669,7 @@ dependencies = [
  "sha256",
  "toml",
  "tonic",
+ "tracing",
  "vorpal-schema",
 ]
 

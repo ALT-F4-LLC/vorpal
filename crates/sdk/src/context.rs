@@ -7,6 +7,7 @@ use clap::Parser;
 use sha256::digest;
 use std::collections::HashMap;
 use tonic::{transport::Server, Code::NotFound, Request, Response, Status};
+use tracing::info;
 use vorpal_schema::{
     agent::v0::agent_service_client::AgentServiceClient,
     artifact::v0::{
@@ -95,23 +96,9 @@ pub async fn get_context() -> Result<ConfigContext> {
             registry,
             target,
             variable,
-        } => {
-            let target = get_system(&target)?;
-
-            let variable = variable
-                .iter()
-                .map(|v| {
-                    let mut parts = v.split('=');
-                    let name = parts.next().unwrap_or_default();
-                    let value = parts.next().unwrap_or_default();
-                    (name.to_string(), value.to_string())
-                })
-                .collect();
-
-            Ok(ConfigContext::new(
-                agent, artifact, port, registry, target, variable,
-            ))
-        }
+        } => Ok(ConfigContext::new(
+            agent, artifact, port, registry, target, variable,
+        )?),
     }
 }
 
@@ -121,22 +108,32 @@ impl ConfigContext {
         artifact: String,
         port: u16,
         registry: String,
-        system: ArtifactSystem,
-        variable: HashMap<String, String>,
-    ) -> Self {
+        system: String,
+        variable: Vec<String>,
+    ) -> Result<Self> {
         let store = ConfigContextStore {
             artifact: HashMap::new(),
-            variable: variable.clone(),
+            variable: variable
+                .iter()
+                .map(|v| {
+                    let mut parts = v.split('=');
+                    let name = parts.next().unwrap_or_default();
+                    let value = parts.next().unwrap_or_default();
+                    (name.to_string(), value.to_string())
+                })
+                .collect(),
         };
 
-        Self {
+        let system = get_system(&system)?;
+
+        Ok(Self {
             agent,
             artifact,
             port,
             registry,
             store,
             system,
-        }
+        })
     }
 
     pub async fn add_artifact(&mut self, artifact: &Artifact) -> Result<String> {
@@ -168,7 +165,11 @@ impl ConfigContext {
             match response.message().await {
                 Ok(Some(message)) => {
                     if let Some(artifact_output) = message.artifact_output {
-                        println!("{} |> {}", artifact.name, artifact_output);
+                        if self.port == 0 {
+                            info!("{} |> {}", artifact.name, artifact_output);
+                        } else {
+                            println!("{} |> {}", artifact.name, artifact_output);
+                        }
                     }
 
                     response_artifact = message.artifact;
@@ -243,6 +244,10 @@ impl ConfigContext {
                 Ok(digest.to_string())
             }
         }
+    }
+
+    pub fn get_artifact_store(&self) -> HashMap<String, Artifact> {
+        self.store.artifact.clone()
     }
 
     pub fn get_artifact(&self, digest: &str) -> Option<Artifact> {

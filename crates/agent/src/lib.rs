@@ -232,14 +232,14 @@ pub async fn build_source(
             source.includes.clone(),
         )?;
 
-        let _ = tx
-            .send(Ok(PrepareArtifactResponse {
-                artifact: None,
-                artifact_digest: None,
-                artifact_output: Some(format!("copy: {}", local_path.display())),
-            }))
-            .await
-            .map_err(|_| Status::internal("failed to send response"));
+        // let _ = tx
+        //     .send(Ok(PrepareArtifactResponse {
+        //         artifact: None,
+        //         artifact_digest: None,
+        //         artifact_output: Some(format!("copy: {}", local_path.display())),
+        //     }))
+        //     .await
+        //     .map_err(|_| Status::internal("failed to send response"));
 
         copy_files(&local_path, local_files, &source_sandbox).await?;
     }

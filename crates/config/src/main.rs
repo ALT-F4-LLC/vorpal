@@ -40,25 +40,15 @@ async fn main() -> Result<()> {
 
     let vorpal = RustBuilder::new("vorpal")
         .with_artifacts(vec![protoc])
-        .with_excludes(vec![
-            ".cargo",
-            ".env",
-            ".envrc",
-            ".github",
-            ".gitignore",
-            ".packer",
-            ".vagrant",
-            "Dockerfile",
-            "Vagrantfile",
-            "dist",
-            "makefile",
-            "script",
-            "sdk/go",
-            "shell.nix",
-            "vendor",
-            "vorpal-config",
-            "vorpal-domains.svg",
-            "vorpal-purpose.jpg",
+        .with_bins(vec!["vorpal"])
+        .with_packages(vec![
+            "crates/agent",
+            "crates/cli",
+            "crates/registry",
+            "crates/schema",
+            "crates/sdk",
+            "crates/store",
+            "crates/worker",
         ])
         .build(context)
         .await?;

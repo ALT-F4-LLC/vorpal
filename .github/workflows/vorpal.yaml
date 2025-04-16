@@ -178,9 +178,9 @@ jobs:
           echo "Worker pid: $WORKER_PID"
           sleep 5
 
-      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-shell"
-      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal"
-      - run: ./dist/vorpal artifact --config "dist/vorpal-config" --name "vorpal-example"
+      - run: ./dist/vorpal artifact --name "vorpal-shell"
+      - run: ./dist/vorpal artifact --name "vorpal"
+      - run: ./dist/vorpal artifact --name "vorpal-example"
 
       - if: always()
         run: |
