@@ -1,5 +1,5 @@
 use crate::{
-    artifact::{get_env_key, rust_toolchain, shell, step, ArtifactBuilder, ArtifactSourceBuilder},
+    artifact::{get_env_key, rust_toolchain, script, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -106,7 +106,7 @@ impl<'a> RustShellBuilder<'a> {
 
         // Create shell artifact
 
-        shell::build(context, artifacts, environments, self.name).await
+        script::devshell(context, artifacts, environments, self.name).await
     }
 }
 

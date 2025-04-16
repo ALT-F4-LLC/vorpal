@@ -215,7 +215,7 @@ func (a *RustShellBuilder) Build(context *config.ConfigContext) (*string, error)
 		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s-%s", toolchain_version, *toolchain_target),
 	}
 
-	return artifact.ShellArtifact(context, artifacts, environments, a.name)
+	return artifact.ScriptDevshell(context, artifacts, environments, a.name)
 }
 
 func (a *RustBuilder) WithArtifacts(artifacts []*string) *RustBuilder {

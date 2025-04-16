@@ -8,7 +8,7 @@ use vorpal_schema::artifact::v0::ArtifactSystem::{
     Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
 };
 
-pub async fn build<'a>(
+pub async fn devshell<'a>(
     context: &mut ConfigContext,
     artifacts: Vec<String>,
     environments: Vec<String>,
@@ -79,7 +79,7 @@ pub async fn build<'a>(
         {backups}
         {exports}
 
-        exit-shell(){{
+        deactivate(){{
         {restores}
         {unsets}
         }}
