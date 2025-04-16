@@ -58,7 +58,8 @@ impl S3Backend {
             return Err(BackendError::MissingS3Bucket);
         };
 
-        let client_config = aws_config::load_from_env().await;
+        let client_version = aws_config::BehaviorVersion::v2025_01_17();
+        let client_config = aws_config::load_defaults(client_version).await;
         let client = Client::new(&client_config);
 
         Ok(Self { bucket, client })

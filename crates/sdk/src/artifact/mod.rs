@@ -25,7 +25,7 @@ pub mod rust_std;
 pub mod rust_toolchain;
 pub mod rustc;
 pub mod rustfmt;
-pub mod shell;
+pub mod script;
 pub mod step;
 
 pub struct ArtifactSourceBuilder<'a> {

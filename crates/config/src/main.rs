@@ -99,6 +99,8 @@ async fn main() -> Result<()> {
                 .build(context)?
                 .unwrap();
 
+            // Fetch artifacts
+
             let aarch64_darwin = context.fetch_artifact(&aarch64_darwin).await?;
             let aarch64_linux = context.fetch_artifact(&aarch64_linux).await?;
             let x8664_darwin = context.fetch_artifact(&x8664_darwin).await?;

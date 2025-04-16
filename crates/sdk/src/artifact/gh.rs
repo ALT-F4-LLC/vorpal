@@ -30,10 +30,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     };
 
     let source_extension = match target {
-        Aarch64Darwin => "zip",
-        Aarch64Linux => "tar.gz",
-        X8664Darwin => "zip",
-        X8664Linux => "tar.gz",
+        Aarch64Darwin | X8664Darwin => "zip",
+        Aarch64Linux | X8664Linux => "tar.gz",
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
 

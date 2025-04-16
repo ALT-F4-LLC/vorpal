@@ -26,7 +26,7 @@ cat > bin/activate << "EOF"
 {{.Backups}}
 {{.Exports}}
 
-exit-shell(){
+deactivate(){
 {{.Restores}}
 {{.Unsets}}
 }
@@ -40,7 +40,7 @@ mkdir -pv $VORPAL_OUTPUT/bin
 
 cp -prv bin "$VORPAL_OUTPUT"`
 
-func ShellArtifact(context *config.ConfigContext, artifacts []*string, environments []string, name string) (*string, error) {
+func ScriptDevshell(context *config.ConfigContext, artifacts []*string, environments []string, name string) (*string, error) {
 	backups := []string{
 		"export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"",
 		"export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"",

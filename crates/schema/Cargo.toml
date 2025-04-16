@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-prost = { default-features = false, features = ["derive"], version = "0" }
-serde = { default-features = false, features = ["serde_derive"], version = "1" }
-tonic = { default-features = false, features = ["codegen", "prost", "transport"], version = "0" }
+prost = { version = "0" }
+serde = { features = ["serde_derive"], version = "1" }
+tonic = { version = "0" }
 
 [build-dependencies]
-tonic-build = { default-features = false, features = ["transport", "prost"], version = "0" }
+tonic-build = { version = "0" }
 
 [package.metadata.cargo-machete]
 ignored = ["prost", "serde", "tonic-build"]
