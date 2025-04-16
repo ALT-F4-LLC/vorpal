@@ -324,7 +324,7 @@ impl<'a> RustBuilder<'a> {
             echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml"#,
             name = self.name,
             packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-            target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display().to_string())).collect::<Vec<_>>().join(" "),
+            target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display())).collect::<Vec<_>>().join(" "),
         };
 
         let vendor_step = step::shell(
