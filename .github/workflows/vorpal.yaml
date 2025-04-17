@@ -179,16 +179,16 @@ jobs:
           sleep 5
 
       - run: |
-          ./dist/vorpal artifact --language "rust" --name "vorpal-shell"
-          ./dist/vorpal artifact --language "go" --name "vorpal-shell"
+          ./dist/vorpal --language "rust" artifact --name "vorpal-shell"
+          ./dist/vorpal --language "go" artifact --name "vorpal-shell"
 
       - run: |
-          ./dist/vorpal artifact --language "rust" --name "vorpal"
-          ./dist/vorpal artifact --language "go" --name "vorpal"
+          ./dist/vorpal --language "rust" artifact --name "vorpal"
+          ./dist/vorpal --language "go" artifact --name "vorpal"
 
       - run: |
-          ./dist/vorpal artifact --language "rust" --name "vorpal-example"
-          ./dist/vorpal artifact --language "go" --name "vorpal-example"
+          ./dist/vorpal --language "rust" artifact --name "vorpal-example"
+          ./dist/vorpal --language "go" artifact --name "vorpal-example"
 
       - if: always()
         run: |
