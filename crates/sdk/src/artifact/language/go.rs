@@ -120,7 +120,7 @@ impl<'a> GoBuilder<'a> {
 
         let step = step::shell(
             context,
-            vec![vec![go.clone()], self.artifacts].concat(),
+            [vec![go.clone()], self.artifacts].concat(),
             vec![
                 "CGO_ENABLED=0".to_string(),
                 format!("GOARCH={}", get_goarch(context.get_target())),
