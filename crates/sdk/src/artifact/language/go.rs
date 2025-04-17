@@ -110,7 +110,7 @@ impl<'a> GoBuilder<'a> {
             mkdir -p $VORPAL_OUTPUT/bin"#,
         };
 
-        if self.build_scripts.len() > 0 {
+        if !self.build_scripts.is_empty() {
             let build_scripts = self.build_scripts.join("\n");
 
             step_script = formatdoc! {r#"
