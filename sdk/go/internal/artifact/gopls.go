@@ -14,13 +14,13 @@ func Gopls(context *config.ConfigContext) (*string, error) {
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "91cc5dc188bc8bc5e6ff63aede51540ae15c7980ab898e1b0afb6db79657fa43"
+		digest = "eb74536ca2985d1a22d2458b12750c5ef6ff5824fd5d4162133c8a1b025e3679"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "be4a64072d90e74eb5eb071c03003d42201e33298cb2152352054413a96478aa"
+		digest = "3c9fcea77069bdfc93bbfbaffc6cb66c62ab9b5325a263b05709bc8ec9758116"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "b26284154f652b584319e36e674f0547d8bd22f0fd52c48ed705d567ccbadc73"
+		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "ce3b8999d137f986c8f10eb14b5add2bc8a07e8e6b309f078eaba6ce41859205"
+		digest = "5d241c0eab2de3e0ad35f04006289957fd5ee4d846f2ae6c8de12c7101344bff"
 	default:
 		return nil, errors.New("unsupported target")
 	}

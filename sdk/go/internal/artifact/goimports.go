@@ -14,13 +14,13 @@ func Goimports(context *config.ConfigContext) (*string, error) {
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "112f8c42be33bfa5274fcdff2748cd68eae755adbae1cbd70cc012531375d7c1"
+		digest = "29982a2905a452335d880f2873378033621eda6c909fb8f5beec1d0963b4054d"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "6562e6c4c50f955c7d808860b383261446525f1bcfccd1b9ac5f8f58af7d8842"
+		digest = "5566c109c9025bad171bdd071b31be7085d8b1fd9c69e43a22eccfdfb4f6b885"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "66f03633619da58f2378753782ccd00d652a084363758ef1c81eb9212bafa16a"
+		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "e780f99be7bb2efc9aee6a542cf81994a94f17ceaeda9cbd28e41ac5ccb48cb0"
+		digest = "9eb303ffce16aff362edb0b722976d770d14d0ce39c490865b60811408239584"
 	default:
 		return nil, errors.New("unsupported target")
 	}

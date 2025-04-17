@@ -25,7 +25,10 @@ use vorpal_schema::{
     },
 };
 use vorpal_sdk::{
-    artifact::{language::rust::RustBuilder, protoc},
+    artifact::{
+        language::{go::GoBuilder, rust::RustBuilder},
+        protoc,
+    },
     context::ConfigContext,
     system::{get_system_default, get_system_default_str},
 };
@@ -196,6 +199,17 @@ async fn main() -> Result<()> {
             let protoc = protoc::build(&mut config_context).await?;
 
             let mut config_digest = None;
+
+            if language == "go" {
+                let digest = GoBuilder::new(config)
+                    .with_artifacts(vec![protoc.clone()])
+                    .with_build_dir("sdk/go")
+                    .with_includes(vec!["sdk/go"])
+                    .build(&mut config_context)
+                    .await?;
+
+                config_digest = Some(digest);
+            }
 
             if language == "rust" {
                 let digest = RustBuilder::new(config)
