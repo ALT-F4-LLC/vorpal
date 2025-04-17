@@ -152,7 +152,7 @@ func toolchain_digest(context *config.ConfigContext) (*string, error) {
 	case artifactApi.ArtifactSystem_AARCH64_LINUX:
 		digest = "ad490acd52f5b4d5b539df8f565df3a90271225a1ef6256c1027eac0b70cb4d4"
 	case artifactApi.ArtifactSystem_X8664_DARWIN:
-		digest = ""
+		digest = "589c625bd79be3ed8b9d5168c54a889dba971a6e9d9722750c4b4577247ec94e"
 	case artifactApi.ArtifactSystem_X8664_LINUX:
 		digest = "5442c5e085972b7119661da12d03d40fb17770edf8879ab898aee3dafdd1c48c"
 	default:

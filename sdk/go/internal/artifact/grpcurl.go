@@ -18,7 +18,7 @@ func Grpcurl(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = "9066275e1c80caa531b44d9b1ccb01d57bc31945a2a2a533fb8a3db7630d6d7d"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = ""
+		digest = "951378a2abade541f261b64194dfad984876d5d3f0dc51e93868b4d641491969"
 	case artifact.ArtifactSystem_X8664_LINUX:
 		digest = "f648fc548fb7d0eccb0cb9e6f1d3209bbea5615e4a58f5f19da2b9f61be6da8b"
 	default:
