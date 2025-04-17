@@ -34,8 +34,8 @@ async fn main() -> Result<()> {
             gopls,
             grpcurl,
             protoc.clone(),
-            protoc_gen_go,
-            protoc_gen_go_grpc,
+            protoc_gen_go.clone(),
+            protoc_gen_go_grpc.clone(),
             staticcheck,
         ])
         .build(context)

@@ -7,7 +7,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let build_path = format!("cmd/{name}");
 
     GoBuilder::new(name)
-        .with_build_dir(build_path.as_str())
+        .with_build_directory(build_path.as_str())
         .with_source(go_tools(name))
         .build(context)
         .await

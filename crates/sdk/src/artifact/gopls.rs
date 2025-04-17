@@ -5,7 +5,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "gopls";
 
     GoBuilder::new(name)
-        .with_build_dir(name)
+        .with_build_directory(name)
         .with_source(go_tools(name))
         .build(context)
         .await

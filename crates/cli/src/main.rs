@@ -27,7 +27,7 @@ use vorpal_schema::{
 use vorpal_sdk::{
     artifact::{
         language::{go::GoBuilder, rust::RustBuilder},
-        protoc,
+        protoc, protoc_gen_go, protoc_gen_go_grpc,
     },
     context::ConfigContext,
     system::{get_system_default, get_system_default_str},
@@ -196,33 +196,34 @@ async fn main() -> Result<()> {
                 variable.clone(),
             )?;
 
-            let protoc = protoc::build(&mut config_context).await?;
+            let config_digest = match language.as_str() {
+                "go" => {
+                    let protoc = protoc::build(&mut config_context).await?;
+                    let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
+                    let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
 
-            let mut config_digest = None;
+                    GoBuilder::new("vorpal-config")
+                        .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
+                        .with_build_directory("sdk/go")
+                        .with_build_script("make generate")
+                        .with_includes(vec!["crates/schema/api", "makefile", "sdk/go"])
+                        .build(&mut config_context)
+                        .await?
+                }
+                "rust" => {
+                    let protoc = protoc::build(&mut config_context).await?;
 
-            if language == "go" {
-                let digest = GoBuilder::new(config)
-                    .with_artifacts(vec![protoc.clone()])
-                    .with_build_dir("sdk/go")
-                    .with_includes(vec!["sdk/go"])
-                    .build(&mut config_context)
-                    .await?;
+                    RustBuilder::new("vorpal-config")
+                        .with_artifacts(vec![protoc.clone()])
+                        .with_bins(vec!["vorpal-config"])
+                        .with_packages(vec!["crates/config", "crates/schema", "crates/sdk"])
+                        .build(&mut config_context)
+                        .await?
+                }
+                _ => "".to_string(),
+            };
 
-                config_digest = Some(digest);
-            }
-
-            if language == "rust" {
-                let digest = RustBuilder::new(config)
-                    .with_artifacts(vec![protoc])
-                    .with_bins(vec![config])
-                    .with_packages(vec!["crates/config", "crates/schema", "crates/sdk"])
-                    .build(&mut config_context)
-                    .await?;
-
-                config_digest = Some(digest);
-            }
-
-            if config_digest.is_none() {
+            if config_digest.is_empty() {
                 bail!("no config digest found");
             }
 
@@ -239,7 +240,7 @@ async fn main() -> Result<()> {
 
             let config_file_path = format!(
                 "{}/bin/{}",
-                &get_store_path(&config_digest.unwrap()).display(),
+                &get_store_path(&config_digest).display(),
                 config
             );
 

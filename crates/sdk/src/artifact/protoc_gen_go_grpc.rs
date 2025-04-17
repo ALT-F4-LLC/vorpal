@@ -21,7 +21,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let build_dir = format!("grpc-go-{}/cmd/{}", source_version, name);
 
     GoBuilder::new(name)
-        .with_build_dir(build_dir.as_str())
+        .with_build_directory(build_dir.as_str())
         .with_source(source)
         .build(context)
         .await

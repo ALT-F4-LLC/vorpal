@@ -296,15 +296,15 @@ func (a *RustBuilder) WithTests() *RustBuilder {
 	return a
 }
 
-func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
+func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 	// 1. READ CARGO.TOML FILES
 
 	// Get the source path
 
 	sourcePath := "."
 
-	if a.source != nil {
-		sourcePath = *a.source
+	if builder.source != nil {
+		sourcePath = *builder.source
 	}
 
 	// Load root cargo.toml
@@ -337,7 +337,7 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	if sourceCargo.Workspace != nil && len(sourceCargo.Workspace.Members) > 0 {
 		for _, member := range sourceCargo.Workspace.Members {
-			if len(a.packages) > 0 && !slices.Contains(a.packages, member) {
+			if len(builder.packages) > 0 && !slices.Contains(builder.packages, member) {
 				continue
 			}
 
@@ -372,7 +372,7 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 					pkgTargetPaths = append(pkgTargetPaths, pkgTargetPath)
 
-					if len(a.bins) == 0 || slices.Contains(a.bins, bin.Name) {
+					if len(builder.bins) == 0 || slices.Contains(builder.bins, bin.Name) {
 						if !slices.Contains(packagesManifests, pkgCargoPath) {
 							packagesManifests = append(packagesManifests, pkgCargoPath)
 						}
@@ -461,7 +461,7 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 	}
 
 	vendorStepScriptArgs := VendorStepScriptTemplateArgs{
-		Name:        a.name,
+		Name:        builder.name,
 		Packages:    strings.Join(stepScriptPackages, ","),
 		TargetPaths: strings.Join(stepPackagesTargets, " "),
 	}
@@ -479,7 +479,7 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 		vendorStepScriptBuffer.String(),
 	)
 
-	vendorName := fmt.Sprintf("%s-vendor", a.name)
+	vendorName := fmt.Sprintf("%s-vendor", builder.name)
 
 	vendorSource := artifact.NewArtifactSourceBuilder(vendorName, sourcePath).
 		WithIncludes(vendorCargoPaths).
@@ -506,17 +506,17 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	sourceExcludes = append(sourceExcludes, "target")
 
-	if len(a.packages) > 0 {
-		for _, pkg := range a.packages {
+	if len(builder.packages) > 0 {
+		for _, pkg := range builder.packages {
 			sourceIncludes = append(sourceIncludes, pkg)
 		}
 	}
 
-	for _, exclude := range a.excludes {
+	for _, exclude := range builder.excludes {
 		sourceExcludes = append(sourceExcludes, exclude)
 	}
 
-	sourceBuilder := artifact.NewArtifactSourceBuilder(a.name, sourcePath)
+	sourceBuilder := artifact.NewArtifactSourceBuilder(builder.name, sourcePath)
 
 	if len(sourceIncludes) > 0 {
 		sourceBuilder = sourceBuilder.WithIncludes(sourceIncludes)
@@ -526,7 +526,7 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	source := sourceBuilder.Build()
 
-	for _, artifact := range a.artifacts {
+	for _, artifact := range builder.artifacts {
 		stepArtifacts = append(stepArtifacts, artifact)
 	}
 
@@ -541,14 +541,14 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 
 	stepScriptArgs := StepScriptTemplateArgs{
 		BinNames:      stepScriptBinNames,
-		Build:         fmt.Sprintf("%t", a.build),
-		Check:         fmt.Sprintf("%t", a.check),
-		Format:        fmt.Sprintf("%t", a.format),
-		Lint:          fmt.Sprintf("%t", a.lint),
+		Build:         fmt.Sprintf("%t", builder.build),
+		Check:         fmt.Sprintf("%t", builder.check),
+		Format:        fmt.Sprintf("%t", builder.format),
+		Lint:          fmt.Sprintf("%t", builder.lint),
 		ManifestPaths: strings.Join(packagesManifests, " "),
-		Name:          a.name,
+		Name:          builder.name,
 		Packages:      strings.Join(stepScriptPackages, ","),
-		Tests:         fmt.Sprintf("%t", a.tests),
+		Tests:         fmt.Sprintf("%t", builder.tests),
 		Vendor:        artifact.GetEnvKey(vendor),
 	}
 
@@ -566,7 +566,7 @@ func (a *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	return artifact.NewArtifactBuilder(a.name).
+	return artifact.NewArtifactBuilder(builder.name).
 		WithSource(&source).
 		WithStep(step).
 		WithSystem(artifactApi.ArtifactSystem_AARCH64_DARWIN).

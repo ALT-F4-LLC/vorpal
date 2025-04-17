@@ -14,13 +14,13 @@ func Staticcheck(context *config.ConfigContext) (*string, error) {
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "b33f2409ae3c92fe09cb9fdc00b0b1ccba95f673b493f08d7f0c44edf9b3ae06"
+		digest = "cf91f83328ee0338627e8a4f00bc487ee77f8db793fc6655d2660c88641884c7"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "c1a3711365894fe56cb3f4bd2d14dc92961c2b8bcd2c9336e2708162a05176a3"
+		digest = "faa7c723e66d35c085dc4ebb2dfe18eae2b5538a176c55867576d35932e2a138"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "a891626feafc92ae75ace871a4601cb157435bca7e42d83cc786a01f1982cc2b"
+		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "4f1582d57a4acd676af98847bfea6e1716b629691b614027ec9d59841aa0ffe8"
+		digest = "b3740debcd9089b0cbb9a90ecf45e63e8c1182cf877ec448914476d0e2c49d8f"
 	default:
 		return nil, errors.New("unsupported target")
 	}

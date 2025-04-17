@@ -11,8 +11,9 @@ use vorpal_schema::artifact::v0::{
 
 pub struct GoBuilder<'a> {
     artifacts: Vec<String>,
-    build_dir: Option<&'a str>,
+    build_directory: Option<&'a str>,
     build_path: Option<&'a str>,
+    build_scripts: Vec<String>,
     includes: Vec<&'a str>,
     name: &'a str,
     source: Option<ArtifactSource>,
@@ -31,8 +32,7 @@ pub fn get_goos(target: ArtifactSystem) -> String {
 pub fn get_goarch(target: ArtifactSystem) -> String {
     let goarch = match target {
         Aarch64Darwin | Aarch64Linux => "arm64",
-        X8664Darwin => "amd64",
-        X8664Linux => "386",
+        X8664Darwin | X8664Linux => "amd64",
         _ => unreachable!(),
     };
 
@@ -43,8 +43,9 @@ impl<'a> GoBuilder<'a> {
     pub fn new(name: &'a str) -> Self {
         Self {
             artifacts: vec![],
-            build_dir: None,
+            build_directory: None,
             build_path: None,
+            build_scripts: vec![],
             includes: vec![],
             name,
             source: None,
@@ -56,13 +57,20 @@ impl<'a> GoBuilder<'a> {
         self
     }
 
-    pub fn with_build_dir(mut self, build_dir: &'a str) -> Self {
-        self.build_dir = Some(build_dir);
+    pub fn with_build_directory(mut self, directory: &'a str) -> Self {
+        self.build_directory = Some(directory);
         self
     }
 
-    pub fn with_build_path(mut self, build_path: &'a str) -> Self {
-        self.build_path = Some(build_path);
+    pub fn with_build_path(mut self, path: &'a str) -> Self {
+        self.build_path = Some(path);
+        self
+    }
+
+    pub fn with_build_script(mut self, script: &'a str) -> Self {
+        if !self.build_scripts.contains(&script.to_string()) {
+            self.build_scripts.push(script.to_string());
+        }
         self
     }
 
@@ -76,15 +84,8 @@ impl<'a> GoBuilder<'a> {
         self
     }
 
-    pub fn with_artifact(mut self, artifact: String) -> Self {
-        self.artifacts.push(artifact);
-        self
-    }
-
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let go = go::build(context).await?;
-
-        let mut build_dir = format!("./source/{}", self.name);
 
         let source_path = ".";
 
@@ -101,20 +102,35 @@ impl<'a> GoBuilder<'a> {
             source = src;
         }
 
-        if let Some(dir) = self.build_dir {
-            build_dir = format!("{}/{}", build_dir, dir);
+        let source_dir = format!("./source/{}", source.name);
+
+        let mut step_script = formatdoc! {r#"
+            pushd {source_dir}
+
+            mkdir -p $VORPAL_OUTPUT/bin"#,
+        };
+
+        if self.build_scripts.len() > 0 {
+            let build_scripts = self.build_scripts.join("\n");
+
+            step_script = formatdoc! {r#"
+                {step_script}
+
+                {build_scripts}"#,
+            };
         }
 
+        let build_directory = self.build_directory.unwrap_or(source_path);
         let build_path = self.build_path.unwrap_or(source_path);
 
-        let step_script = formatdoc! {"
-            pushd {build_dir}
+        step_script = formatdoc! {r#"
+            {step_script}
 
-            mkdir -p $VORPAL_OUTPUT/bin
+            pushd {build_directory}
 
             go build -o $VORPAL_OUTPUT/bin/{name} {build_path}
 
-            go clean -modcache",
+            go clean -modcache"#,
             name = self.name,
         };
 
