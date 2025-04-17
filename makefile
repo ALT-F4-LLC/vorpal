@@ -95,10 +95,10 @@ vorpal:
 	"target/$(TARGET)/vorpal" artifact --name $(ARTIFACT) $(VORPAL_FLAGS)
 
 vorpal-start:
-	"target/$(TARGET)/vorpal" start
+	"target/$(TARGET)/vorpal" start $(VORPAL_FLAGS)
 
 vorpal-config-start:
-	"$(CONFIG_FILE)" start --artifact "$(ARTIFACT)" --port "50051"
+	"$(CONFIG_FILE)" start --artifact "$(ARTIFACT)" --port "50051" $(VORPAL_FLAGS)
 
 # Lima environment
 

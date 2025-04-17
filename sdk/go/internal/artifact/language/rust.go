@@ -148,13 +148,13 @@ func toolchain_digest(context *config.ConfigContext) (*string, error) {
 
 	switch target {
 	case artifactApi.ArtifactSystem_AARCH64_DARWIN:
-		digest = "84707c7325d3a0cbd8044020a5256b6fd43a79bd837948bb4a7e90d671c919e6"
+		digest = "f9545d85eff0dfbf03b9d1e5b2a3f7a1d45712d50872c532082fbd80fb6b025c"
 	case artifactApi.ArtifactSystem_AARCH64_LINUX:
-		digest = "ad490acd52f5b4d5b539df8f565df3a90271225a1ef6256c1027eac0b70cb4d4"
+		digest = "eeae270e44333123045340ff680ce345a834e327ce3065d30ccc77140fd0f88e"
 	case artifactApi.ArtifactSystem_X8664_DARWIN:
-		digest = "589c625bd79be3ed8b9d5168c54a889dba971a6e9d9722750c4b4577247ec94e"
+		digest = "1953caef74412cf4fa7018db7c38705b20c02918150a056d7e667aabc7595aa7"
 	case artifactApi.ArtifactSystem_X8664_LINUX:
-		digest = "5442c5e085972b7119661da12d03d40fb17770edf8879ab898aee3dafdd1c48c"
+		digest = "aed5914e26e0489f86cf54c97a0af980e7072e91a10ed12fb3c82b83939b1184"
 	default:
 		return nil, errors.New("unsupported target")
 	}
