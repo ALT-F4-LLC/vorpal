@@ -1,4 +1,4 @@
-use crate::artifact::{cargo, clippy, rust_analyzer, rust_src, rust_std, rustc, rustfmt};
+use crate::artifact::{cargo, clippy, rust_src, rust_std, rustc, rustfmt};
 use crate::{
     artifact::{get_env_key, language::rust, step, ArtifactBuilder},
     context::ConfigContext,
@@ -12,21 +12,12 @@ use vorpal_schema::artifact::v0::ArtifactSystem::{
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let cargo = cargo::build(context).await?;
     let clippy = clippy::build(context).await?;
-    let rust_analyzer = rust_analyzer::build(context).await?;
     let rust_src = rust_src::build(context).await?;
     let rust_std = rust_std::build(context).await?;
     let rustc = rustc::build(context).await?;
     let rustfmt = rustfmt::build(context).await?;
 
-    let artifacts = vec![
-        cargo,
-        clippy,
-        rust_analyzer,
-        rust_src,
-        rust_std,
-        rustc,
-        rustfmt,
-    ];
+    let artifacts = vec![cargo, clippy, rust_src, rust_std, rustc, rustfmt];
 
     let mut toolchain_component_paths = vec![];
 
