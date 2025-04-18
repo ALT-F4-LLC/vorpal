@@ -26,6 +26,7 @@ pub mod rust_toolchain;
 pub mod rustc;
 pub mod rustfmt;
 pub mod script;
+pub mod staticcheck;
 pub mod step;
 
 pub struct ArtifactSourceBuilder<'a> {

@@ -4,6 +4,8 @@ set -euo pipefail
 export ENV_PATH="${PWD}/.env"
 readonly SCRIPT_PATH="${PWD}/script"
 
+# TODO: add lima and qemu installation
+
 scripts=("rustup" "protoc")
 
 if [[ "$(uname -s)" == "Linux" ]]; then

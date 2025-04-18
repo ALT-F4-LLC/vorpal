@@ -7,20 +7,20 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
 
-func Goimports(context *config.ConfigContext) (*string, error) {
+func Staticcheck(context *config.ConfigContext) (*string, error) {
 	target := context.GetTarget()
 
 	var digest string
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "aca4873c1116603151fd3179855f1000030e10e0428f6e4f8f326bde7f3e74f9"
+		digest = "cf91f83328ee0338627e8a4f00bc487ee77f8db793fc6655d2660c88641884c7"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "9072f0f63cb2f4aa6f0b16a6122a986b0852f7acfe47e40e4a6ded3bdf1cb909"
+		digest = "faa7c723e66d35c085dc4ebb2dfe18eae2b5538a176c55867576d35932e2a138"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "8aeeaedcec8d0550f80b469197e5a1ae3b801ef2c27382d0a2b6b62779252011"
+		digest = "5a6c598856065cbbc76ae0d276962589bd09f3bec97eb8448370ee3bbe3f7853"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "53a903ec95b4c5c803261d3b74d11bc795990fbf7835fe6a067c8207335cc1f1"
+		digest = "b3740debcd9089b0cbb9a90ecf45e63e8c1182cf877ec448914476d0e2c49d8f"
 	default:
 		return nil, errors.New("unsupported target")
 	}

@@ -14,13 +14,13 @@ func Grpcurl(context *config.ConfigContext) (*string, error) {
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "718ab77ba1f560c9d585e4914fac47d63494c54707a6d25c93a3ee0a9434b092"
+		digest = "aaa487c3dc4092aac62818b332e9569a57f89af773aaa574015e766a692e5670"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "29aad45ba08242e0b3120a34560abc5cc14c5b73e622659b119ab266bb4ea5b8"
+		digest = "3c05329da72f300dc01be7fef11ce7e9e4beb1c300098c9cedcfdecc99d4318b"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "021260395071224bc434fe02afabaedd3cb5ea9fc727c6d17990a4fda5de88ba"
+		digest = "8d0257c581b2021a49a97cbbc2f77891bda0eb0f7d0c4dffd9fe166fa00b1db7"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "d435a3ffead3cf624243cd4d93e5160b04e7e05188e87ed8cb0972230549a116"
+		digest = "7753f7c7187a34e769d9b2d649a58b13a093a00f76c71a632ec797d4e779d0c4"
 	default:
 		return nil, errors.New("unsupported target")
 	}

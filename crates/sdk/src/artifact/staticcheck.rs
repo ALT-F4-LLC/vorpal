@@ -5,23 +5,23 @@ use crate::{
 use anyhow::Result;
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let name = "protoc-gen-go-grpc";
+    let name = "staticcheck";
 
-    let source_digest = "eba0f83ab252cffe2c6209f894c4c8238b2473a403bbdbcb985af25140aac95d";
-
-    let source_version = "1.70.0";
-
+    let source_digest = "e8f40ddbc450bf26d1855916519283f7c997ffedbcb971e2a7b92892650d92b6";
+    let source_version = "2025.1.1";
     let source_path =
-        format!("https://github.com/grpc/grpc-go/archive/refs/tags/v{source_version}.tar.gz");
+        format!("https://github.com/dominikh/go-tools/archive/refs/tags/{source_version}.tar.gz");
 
     let source = ArtifactSourceBuilder::new(name, source_path.as_str())
         .with_digest(source_digest)
         .build();
 
-    let build_dir = format!("grpc-go-{}/cmd/{}", source_version, name);
+    let build_dir = format!("go-tools-{}", source_version);
+    let build_path = format!("cmd/{}/{}.go", name, name);
 
     GoBuilder::new(name)
         .with_build_directory(build_dir.as_str())
+        .with_build_path(build_path.as_str())
         .with_source(source)
         .build(context)
         .await

@@ -8,6 +8,7 @@ VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_DIR := /var/lib/vorpal
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
+LIMA_ARCH := $(ARCH)
 
 ifndef VERBOSE
 .SILENT:
@@ -94,25 +95,26 @@ vorpal:
 	"target/$(TARGET)/vorpal" artifact --name $(ARTIFACT) $(VORPAL_FLAGS)
 
 vorpal-start:
-	"target/$(TARGET)/vorpal" start
+	"target/$(TARGET)/vorpal" start $(VORPAL_FLAGS)
 
 vorpal-config-start:
-	"$(CONFIG_FILE)" start --artifact "$(ARTIFACT)" --port "50051"
+	"$(CONFIG_FILE)" start --artifact "$(ARTIFACT)" --port "50051" $(VORPAL_FLAGS)
 
-# Vagrant environment
+# Lima environment
 
-vagrant-box:
-	packer validate \
-		-var-file=$(WORK_DIR)/.packer/pkrvars/$(OS_TYPE)/fusion-13.pkrvars.hcl \
-		$(WORK_DIR)/.packer
-	packer build \
-		-var-file=$(WORK_DIR)/.packer/pkrvars/$(OS_TYPE)/fusion-13.pkrvars.hcl \
-		$(WORK_DIR)/.packer
-	vagrant box add \
-		--name "altf4llc/debian-bookworm" \
-		--provider "vmware_desktop" \
-		$(WORK_DIR)/packer_debian_vmware_arm64.box
+lima-clean:
+	limactl stop "vorpal-$(LIMA_ARCH)" || true
+	limactl delete "vorpal-$(LIMA_ARCH)" || true
 
-vagrant:
-	vagrant destroy --force || true
-	vagrant up --provider "vmware_desktop"
+lima: lima-clean
+	cat lima.yaml | limactl create --arch "$(LIMA_ARCH)" --cpus "8" --disk "100" --memory "8" --name "vorpal-$(LIMA_ARCH)" -
+	limactl start "vorpal-$(LIMA_ARCH)"
+	limactl shell "vorpal-$(LIMA_ARCH)" $(WORK_DIR)/script/lima.sh install
+	limactl stop "vorpal-$(LIMA_ARCH)"
+	limactl start "vorpal-$(LIMA_ARCH)"
+
+lima-vorpal:
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '$HOME/vorpal/target/debug/vorpal artifact --name $(ARTIFACT)'
+
+lima-vorpal-start:
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '$HOME/vorpal/target/debug/vorpal start'

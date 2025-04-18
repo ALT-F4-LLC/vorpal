@@ -7,20 +7,20 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
 
-func Goimports(context *config.ConfigContext) (*string, error) {
+func RustAnalyzer(context *config.ConfigContext) (*string, error) {
 	target := context.GetTarget()
 
 	var digest string
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "aca4873c1116603151fd3179855f1000030e10e0428f6e4f8f326bde7f3e74f9"
+		digest = "4bd3745cd87cc821da649df3f115cf499344f8dda3c6c7fd9b291a17752d0d88"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "9072f0f63cb2f4aa6f0b16a6122a986b0852f7acfe47e40e4a6ded3bdf1cb909"
+		digest = "4f73ce246976fd7e39d91a91d1b0ffd58c363f3de50c20df081e4174b85a20c7"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "8aeeaedcec8d0550f80b469197e5a1ae3b801ef2c27382d0a2b6b62779252011"
+		digest = "f685e474f491f87616f6643b2c1c5dd9f3fde1eda1a9c16e9c2b3533fe0f52b4"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "53a903ec95b4c5c803261d3b74d11bc795990fbf7835fe6a067c8207335cc1f1"
+		digest = "e56c917b1b3f0b8334df05ea8cbbbeeae3371052a249c1a5a606662469a9a48f"
 	default:
 		return nil, errors.New("unsupported target")
 	}

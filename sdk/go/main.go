@@ -87,6 +87,11 @@ func main() {
 		log.Fatalf("failed to get protoc-gen-go-grpc artifact: %v", err)
 	}
 
+	staticcheck, err := artifact.Staticcheck(context)
+	if err != nil {
+		log.Fatalf("failed to get staticcheck artifact: %v", err)
+	}
+
 	_, err = language.NewRustShellBuilder("vorpal-shell").
 		WithArtifacts([]*string{
 			gh,
@@ -97,6 +102,7 @@ func main() {
 			protoc,
 			protocGenGo,
 			protocGenGoGRPC,
+			staticcheck,
 		}).
 		Build(context)
 	if err != nil {

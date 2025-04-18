@@ -4,7 +4,8 @@ use vorpal_sdk::{
     artifact::{
         gh, go, goimports, gopls, grpcurl,
         language::rust::{RustBuilder, RustShellBuilder},
-        protoc, protoc_gen_go, protoc_gen_go_grpc, ArtifactTaskBuilder, VariableBuilder,
+        protoc, protoc_gen_go, protoc_gen_go_grpc, staticcheck, ArtifactTaskBuilder,
+        VariableBuilder,
     },
     context::get_context,
 };
@@ -23,6 +24,7 @@ async fn main() -> Result<()> {
     let protoc = protoc::build(context).await?;
     let protoc_gen_go = protoc_gen_go::build(context).await?;
     let protoc_gen_go_grpc = protoc_gen_go_grpc::build(context).await?;
+    let staticcheck = staticcheck::build(context).await?;
 
     RustShellBuilder::new("vorpal-shell")
         .with_artifacts(vec![
@@ -32,8 +34,9 @@ async fn main() -> Result<()> {
             gopls,
             grpcurl,
             protoc.clone(),
-            protoc_gen_go,
-            protoc_gen_go_grpc,
+            protoc_gen_go.clone(),
+            protoc_gen_go_grpc.clone(),
+            staticcheck,
         ])
         .build(context)
         .await?;
