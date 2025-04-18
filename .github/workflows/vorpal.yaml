@@ -178,17 +178,12 @@ jobs:
           echo "Worker pid: $WORKER_PID"
           sleep 5
 
-      - run: |
-          ./dist/vorpal --language "rust" artifact --name "vorpal-shell"
-          ./dist/vorpal --language "go" artifact --name "vorpal-shell"
-
-      - run: |
-          ./dist/vorpal --language "rust" artifact --name "vorpal"
-          ./dist/vorpal --language "go" artifact --name "vorpal"
-
-      - run: |
-          ./dist/vorpal --language "rust" artifact --name "vorpal-example"
-          ./dist/vorpal --language "go" artifact --name "vorpal-example"
+      - run: ./dist/vorpal --language "rust" artifact --name "vorpal-shell"
+      - run: ./dist/vorpal --language "rust" artifact --name "vorpal"
+      - run: ./dist/vorpal --language "rust" artifact --name "vorpal-example"
+      - run: ./dist/vorpal --language "go" artifact --name "vorpal-shell"
+      - run: ./dist/vorpal --language "go" artifact --name "vorpal"
+      - run: ./dist/vorpal --language "go" artifact --name "vorpal-example"
 
       - if: always()
         run: |
