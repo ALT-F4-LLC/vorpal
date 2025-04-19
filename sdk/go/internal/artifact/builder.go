@@ -3,10 +3,20 @@ package artifact
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
+	"text/template"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
+
+type ArtifactProcessBuilder struct {
+	Arguments  []string
+	Artifacts  []*string
+	Entrypoint string
+	Name       string
+}
 
 type ArtifactSourceBuilder struct {
 	Digest   *string
@@ -30,6 +40,12 @@ type ArtifactTaskBuilder struct {
 	Script    string
 }
 
+type ArtifactVariableBuilder struct {
+	Encrypt bool
+	Name    string
+	Require bool
+}
+
 type ArtifactBuilder struct {
 	Name    string
 	Sources []*artifact.ArtifactSource
@@ -37,10 +53,127 @@ type ArtifactBuilder struct {
 	Systems []artifact.ArtifactSystem
 }
 
-type VariableBuilder struct {
-	Encrypt bool
-	Name    string
-	Require bool
+type ArtifactProcessScriptTemplateVars struct {
+	Arguments  string
+	Artifacts  string
+	Entrypoint string
+	Name       string
+}
+
+const ArtifactProcessScriptTemplate = `
+mkdir -pv $VORPAL_OUTPUT/bin
+
+cat > $VORPAL_OUTPUT/bin/{{.Name}}-logs << "EOF"
+#!/bin/bash
+set -euo pipefail
+
+if [ -f $VORPAL_OUTPUT/logs.txt ]; then
+    tail -f $VORPAL_OUTPUT/logs.txt
+else
+    echo "No logs found"
+fi
+EOF
+
+chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-logs
+
+cat > $VORPAL_OUTPUT/bin/{{.Name}}-stop << "EOF"
+#!/bin/bash
+set -euo pipefail
+
+if [ -f $VORPAL_OUTPUT/pid ]; then
+    kill $(cat $VORPAL_OUTPUT/pid)
+    rm -rf $VORPAL_OUTPUT/pid
+fi
+EOF
+
+chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-stop
+
+cat > $VORPAL_OUTPUT/bin/{{.Name}}-start << "EOF"
+#!/bin/bash
+set -euo pipefail
+
+export PATH={{.Artifacts}}:$PATH
+
+$VORPAL_OUTPUT/bin/{{.Name}}-stop
+
+echo "Process: {{.Entrypoint}} {{.Arguments}}"
+
+nohup {{.Entrypoint}} {{.Arguments}} > $VORPAL_OUTPUT/logs.txt 2>&1 &
+
+PROCESS_PID=$!
+
+echo "Process ID: $PROCESS_PID"
+
+echo $PROCESS_PID > $VORPAL_OUTPUT/pid
+
+echo "Process commands:"
+echo "- {{.Name}}-logs (tail logs)"
+echo "- {{.Name}}-stop (stop process)"
+echo "- {{.Name}}-start (start process)"
+EOF
+
+chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
+
+func NewArtifactProcessBuilder(name string, entrypoint string) *ArtifactProcessBuilder {
+	return &ArtifactProcessBuilder{
+		Arguments:  []string{},
+		Artifacts:  []*string{},
+		Entrypoint: entrypoint,
+		Name:       name,
+	}
+}
+
+func (a *ArtifactProcessBuilder) WithArguments(arguments []string) *ArtifactProcessBuilder {
+	a.Arguments = arguments
+	return a
+}
+
+func (a *ArtifactProcessBuilder) WithArtifacts(artifacts []*string) *ArtifactProcessBuilder {
+	a.Artifacts = artifacts
+	return a
+}
+
+func (a *ArtifactProcessBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+	arguments := strings.Join(a.Arguments, " ")
+
+	artifacts := []string{}
+
+	for _, artifact := range a.Artifacts {
+		if artifact != nil {
+			artifacts = append(artifacts, fmt.Sprintf("$VORPAL_ARTIFACT_%s/bin", *artifact))
+		}
+	}
+
+	script, err := template.New("script").Parse(ArtifactProcessScriptTemplate)
+	if err != nil {
+		return nil, err
+	}
+
+	var scriptBuffer strings.Builder
+
+	scriptTemplateVars := ArtifactProcessScriptTemplateVars{
+		Arguments:  arguments,
+		Artifacts:  strings.Join(artifacts, ":"),
+		Entrypoint: a.Entrypoint,
+		Name:       a.Name,
+	}
+
+	if err := script.Execute(&scriptBuffer, scriptTemplateVars); err != nil {
+		return nil, err
+	}
+
+	step, err := Shell(ctx, a.Artifacts, []string{}, scriptBuffer.String())
+	if err != nil {
+		return nil, err
+	}
+
+	return NewArtifactBuilder(a.Name).
+		WithStep(step).
+		WithSystem(artifact.ArtifactSystem_AARCH64_DARWIN).
+		WithSystem(artifact.ArtifactSystem_AARCH64_LINUX).
+		WithSystem(artifact.ArtifactSystem_X8664_DARWIN).
+		WithSystem(artifact.ArtifactSystem_X8664_LINUX).
+		Build(ctx)
 }
 
 func NewArtifactSourceBuilder(name, path string) *ArtifactSourceBuilder {
@@ -201,6 +334,34 @@ func (a *ArtifactTaskBuilder) Build(ctx *config.ConfigContext) (*string, error) 
 		Build(ctx)
 }
 
+func NewArtifactVariableBuilder(name string) *ArtifactVariableBuilder {
+	return &ArtifactVariableBuilder{
+		Encrypt: false,
+		Name:    name,
+		Require: false,
+	}
+}
+
+func (v *ArtifactVariableBuilder) WithEncrypt() *ArtifactVariableBuilder {
+	v.Encrypt = true
+	return v
+}
+
+func (v *ArtifactVariableBuilder) WithRequire() *ArtifactVariableBuilder {
+	v.Require = true
+	return v
+}
+
+func (v *ArtifactVariableBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+	variable := ctx.GetVariable(v.Name)
+
+	if v.Require && variable == nil {
+		return nil, fmt.Errorf("variable '%s' is required", v.Name)
+	}
+
+	return variable, nil
+}
+
 func NewArtifactBuilder(name string) *ArtifactBuilder {
 	return &ArtifactBuilder{
 		Name:    name,
@@ -211,16 +372,7 @@ func NewArtifactBuilder(name string) *ArtifactBuilder {
 }
 
 func (a *ArtifactBuilder) WithSource(source *artifact.ArtifactSource) *ArtifactBuilder {
-	exists := false
-
-	for _, s := range a.Sources {
-		if s == source {
-			exists = true
-			break
-		}
-	}
-
-	if !exists {
+	if !slices.Contains(a.Sources, source) {
 		a.Sources = append(a.Sources, source)
 	}
 
@@ -228,16 +380,7 @@ func (a *ArtifactBuilder) WithSource(source *artifact.ArtifactSource) *ArtifactB
 }
 
 func (a *ArtifactBuilder) WithStep(step *artifact.ArtifactStep) *ArtifactBuilder {
-	exists := false
-
-	for _, s := range a.Steps {
-		if s == step {
-			exists = true
-			break
-		}
-	}
-
-	if !exists {
+	if !slices.Contains(a.Steps, step) {
 		a.Steps = append(a.Steps, step)
 	}
 
@@ -245,16 +388,7 @@ func (a *ArtifactBuilder) WithStep(step *artifact.ArtifactStep) *ArtifactBuilder
 }
 
 func (a *ArtifactBuilder) WithSystem(system artifact.ArtifactSystem) *ArtifactBuilder {
-	exists := false
-
-	for _, s := range a.Systems {
-		if s == system {
-			exists = true
-			break
-		}
-	}
-
-	if !exists {
+	if !slices.Contains(a.Systems, system) {
 		a.Systems = append(a.Systems, system)
 	}
 
@@ -281,32 +415,4 @@ func (a *ArtifactBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 
 func GetEnvKey(digest *string) string {
 	return fmt.Sprintf("$VORPAL_ARTIFACT_%s", *digest)
-}
-
-func NewVariableBuilder(name string) *VariableBuilder {
-	return &VariableBuilder{
-		Encrypt: false,
-		Name:    name,
-		Require: false,
-	}
-}
-
-func (v *VariableBuilder) WithEncrypt() *VariableBuilder {
-	v.Encrypt = true
-	return v
-}
-
-func (v *VariableBuilder) WithRequire() *VariableBuilder {
-	v.Require = true
-	return v
-}
-
-func (v *VariableBuilder) Build(ctx *config.ConfigContext) (*string, error) {
-	variable := ctx.GetVariable(v.Name)
-
-	if v.Require && variable == nil {
-		return nil, fmt.Errorf("variable '%s' is required", v.Name)
-	}
-
-	return variable, nil
 }

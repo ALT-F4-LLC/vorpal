@@ -3,6 +3,7 @@ package language
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -15,18 +16,18 @@ type GoBuilder struct {
 	artifacts      []*string
 	buildDirectory *string
 	buildPath      *string
-	buildScripts   []string
 	includes       []string
 	name           string
 	source         *artifactApi.ArtifactSource
+	sourceScripts  []string
 }
 
 type GoScriptTemplateArgs struct {
 	BuildDirectory string
 	BuildPath      string
-	BuildScripts   string
 	Name           string
 	SourceDir      string
+	SourceScripts  string
 }
 
 const GoScriptTemplate = `
@@ -34,13 +35,11 @@ pushd {{.SourceDir}}
 
 mkdir -p $VORPAL_OUTPUT/bin
 
-{{- if .BuildScripts}}
-{{.BuildScripts}}
+{{- if .SourceScripts}}
+{{.SourceScripts}}
 {{- end}}
 
-pushd {{.BuildDirectory}}
-
-go build -o $VORPAL_OUTPUT/bin/{{.Name}} {{.BuildPath}}
+go build -C {{.BuildDirectory}} -o $VORPAL_OUTPUT/bin/{{.Name}} {{.BuildPath}}
 
 go clean -modcache`
 
@@ -79,20 +78,11 @@ func NewGoBuilder(name string) *GoBuilder {
 		artifacts:      []*string{},
 		buildDirectory: nil,
 		buildPath:      nil,
-		buildScripts:   []string{},
+		sourceScripts:  []string{},
 		includes:       []string{},
 		name:           name,
 		source:         nil,
 	}
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
 
 func (b *GoBuilder) WithArtifacts(artifacts []*string) *GoBuilder {
@@ -110,13 +100,6 @@ func (b *GoBuilder) WithBuildPath(path string) *GoBuilder {
 	return b
 }
 
-func (b *GoBuilder) WithBuildScript(script string) *GoBuilder {
-	if !contains(b.buildScripts, script) {
-		b.buildScripts = append(b.buildScripts, script)
-	}
-	return b
-}
-
 func (b *GoBuilder) WithIncludes(includes []string) *GoBuilder {
 	b.includes = includes
 	return b
@@ -124,6 +107,13 @@ func (b *GoBuilder) WithIncludes(includes []string) *GoBuilder {
 
 func (b *GoBuilder) WithSource(source *artifactApi.ArtifactSource) *GoBuilder {
 	b.source = source
+	return b
+}
+
+func (b *GoBuilder) WithSourceScript(script string) *GoBuilder {
+	if !slices.Contains(b.sourceScripts, script) {
+		b.sourceScripts = append(b.sourceScripts, script)
+	}
 	return b
 }
 
@@ -161,17 +151,17 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 		buildPath = *builder.buildPath
 	}
 
-	buildScripts := ""
-	if len(builder.buildScripts) > 0 {
-		buildScripts = strings.Join(builder.buildScripts, "\n")
+	sourceScripts := ""
+	if len(builder.sourceScripts) > 0 {
+		sourceScripts = strings.Join(builder.sourceScripts, "\n")
 	}
 
 	stepScriptData := GoScriptTemplateArgs{
 		BuildDirectory: buildDirectory,
 		BuildPath:      buildPath,
-		BuildScripts:   buildScripts,
 		Name:           builder.name,
 		SourceDir:      fmt.Sprintf("./source/%s", source.Name),
+		SourceScripts:  sourceScripts,
 	}
 
 	tmpl, err := template.New("script").Parse(GoScriptTemplate)

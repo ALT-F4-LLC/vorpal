@@ -77,6 +77,7 @@ pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Ve
 }
 
 pub async fn start(
+    agent: String,
     artifact: String,
     file: String,
     registry: String,
@@ -87,17 +88,23 @@ pub async fn start(
 
     let mut command = process::Command::new(file.clone());
 
-    command.args([
+    let command_port = port.to_string();
+
+    let command_arguments = vec![
         "start",
+        "--agent",
+        &agent,
         "--artifact",
         &artifact,
         "--port",
-        &port.to_string(),
+        &command_port,
         "--registry",
         &registry,
         "--target",
         &target,
-    ]);
+    ];
+
+    command.args(command_arguments);
 
     for var in variable.iter() {
         command.arg("--variable").arg(var);

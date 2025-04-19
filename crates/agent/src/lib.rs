@@ -271,7 +271,7 @@ pub async fn build_source(
     if let Some(hash) = source.digest.clone() {
         if hash != source_digest {
             bail!(
-                "'source.{}.hash' mismatch: {} != {}",
+                "'source.{}.digest' mismatch: {} != {}",
                 source.name,
                 source_digest,
                 hash

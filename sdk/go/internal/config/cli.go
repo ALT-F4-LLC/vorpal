@@ -23,10 +23,10 @@ func newCommand() (*command, error) {
 
 	var startVariable []string
 
-	startAgent := startCmd.String("agent", "localhost:23151", "agent to use")
+	startAgent := startCmd.String("agent", "http://localhost:23151", "agent to use")
 	startArtifact := startCmd.String("artifact", "", "artifact to use")
 	startPort := startCmd.Int("port", 0, "port to listen on")
-	startRegistry := startCmd.String("registry", "localhost:23151", "registry to use")
+	startRegistry := startCmd.String("registry", "http://localhost:23151", "registry to use")
 	startTarget := startCmd.String("target", GetSystemDefaultStr(), "target system")
 	startCmd.Var(newStringSliceValue(&startVariable), "variable", "variables to use (key=value)")
 
