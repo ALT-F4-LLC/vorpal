@@ -18,7 +18,7 @@ func Staticcheck(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_AARCH64_LINUX:
 		digest = "3d8dd1e8d2040415cfda963b56d6acaf888415c697b4c315ca186a88858eab87"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = ""
+		digest = "d81cc5e018b5b65f6f26a17440a317fefd6bfc26a3cd62316bf92d57aafa837f"
 	case artifact.ArtifactSystem_X8664_LINUX:
 		digest = "d88da046d4fdc9833f4577263f0144cdda8e4014627232e2bcf9f9a85889fa0d"
 	default:

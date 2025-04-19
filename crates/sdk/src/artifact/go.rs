@@ -15,7 +15,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let source_digest = match target {
         Aarch64Darwin => "5380e02cdfe2b254af7c3306671fbacc0bfefeb3a9684b502e4af3ad5db917e7",
         Aarch64Linux => "87116daeec496cbc32774c024839ce7a7d0dfced9959fb54527bd55b8890791e",
-        X8664Darwin => "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+        X8664Darwin => "b5903639cc049e527796b8c1330cec3be12ef11d15668c08a1732c03f0cf1dcd",
         X8664Linux => "78181c114c22ddf6413032d5fcc24760a3bee185c35251392fd78691975773aa",
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
