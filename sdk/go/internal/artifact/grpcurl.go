@@ -20,7 +20,7 @@ func Grpcurl(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_X8664_DARWIN:
 		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "22c3ed96cbd3e6fcec8b424e91ecd9f8b332a92e372c159f2edc0ec8f34f6c27"
 	default:
 		return nil, errors.New("unsupported target")
 	}

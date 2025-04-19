@@ -20,7 +20,7 @@ func Nginx(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_X8664_DARWIN:
 		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "19f8c5223fcbc5db0316dedc205505e30e1475e3c35e9178533fba00b5e5006d"
 	default:
 		return nil, errors.New("unsupported target")
 	}

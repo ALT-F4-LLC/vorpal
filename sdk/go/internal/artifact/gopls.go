@@ -20,7 +20,7 @@ func Gopls(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_X8664_DARWIN:
 		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "761fcbb77a80c668982e378e4e9bc5c03183c4e7cc70aa13660176422093aa3c"
 	default:
 		return nil, errors.New("unsupported target")
 	}

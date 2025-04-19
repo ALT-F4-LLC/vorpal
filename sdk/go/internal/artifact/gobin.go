@@ -20,7 +20,7 @@ func GoBin(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_X8664_DARWIN:
 		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "219b84a4fe05827674fc1ca51d738026d1f95f27c2487b6218dfc8e8d7779406"
 	default:
 		return nil, errors.New("unsupported target")
 	}

@@ -20,7 +20,7 @@ func Staticcheck(context *config.ConfigContext) (*string, error) {
 	case artifact.ArtifactSystem_X8664_DARWIN:
 		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = ""
+		digest = "d88da046d4fdc9833f4577263f0144cdda8e4014627232e2bcf9f9a85889fa0d"
 	default:
 		return nil, errors.New("unsupported target")
 	}
