@@ -14,10 +14,10 @@ jobs:
     strategy:
       matrix:
         runner:
-          # - macos-13
+          - macos-13
           - macos-latest
           - ubuntu-latest
-          # - ubuntu-latest-arm64
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -74,10 +74,10 @@ jobs:
     strategy:
       matrix:
         runner:
-          # - macos-13
+          - macos-13
           - macos-latest
           - ubuntu-latest
-          # - ubuntu-latest-arm64
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -113,10 +113,10 @@ jobs:
     strategy:
       matrix:
         runner:
-          # - macos-13
+          - macos-13
           - macos-latest
           - ubuntu-latest
-          # - ubuntu-latest-arm64
+          - ubuntu-latest-arm64
     steps:
       - uses: actions/checkout@v4
 
