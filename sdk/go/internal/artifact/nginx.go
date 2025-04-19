@@ -7,16 +7,16 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
 
-func Staticcheck(context *config.ConfigContext) (*string, error) {
+func Nginx(context *config.ConfigContext) (*string, error) {
 	target := context.GetTarget()
 
 	var digest string
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "d06c462ddccb64f6838276c9bcd987f65411c95d2fd9b7944d070e6014f7c40b"
+		digest = "5a78e58e9dbc4915194b7ce68bcddf4b70e212a81813a66f5f3e47d84332ccfa"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "3d8dd1e8d2040415cfda963b56d6acaf888415c697b4c315ca186a88858eab87"
+		digest = "26a9f79b00db4e79b25511b739bccb2ca34f6374c539a33954c234b53f282d52"
 	case artifact.ArtifactSystem_X8664_DARWIN:
 		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:

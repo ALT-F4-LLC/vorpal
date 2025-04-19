@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 
 	agentApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/agent"
 	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
@@ -125,7 +126,9 @@ func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, er
 
 	// TODO: make this run in parallel
 
-	clientConn, err := grpc.NewClient(c.agent, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	agent := strings.ReplaceAll(c.agent, "http://", "")
+
+	clientConn, err := grpc.NewClient(agent, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +203,9 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 		return &digest, nil
 	}
 
-	clientConn, err := grpc.NewClient(c.agent, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	registry := strings.ReplaceAll(c.registry, "http://", "")
+
+	clientConn, err := grpc.NewClient(registry, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}

@@ -14,13 +14,13 @@ func GoBin(context *config.ConfigContext) (*string, error) {
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "6f024d78f0957297229cb00b74b9544fb2c4708a465a584b1e02dfbe5f71922b"
+		digest = "fcbb57571c180e4db1eade2fb51d047083c44ce6acd97d7611d00d15df2d041d"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "42c82308fb915d08bdec4c9bb9d89f4e96fcaaab5e42af9e7e8137880001d1c6"
+		digest = "18887d4facdc3343a40af15e07f753aaab582fbe1f2c5106dbf13a0c221b14e9"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "ea09f27786bb3eb7d91425c08ac7098b2192c32cbb5c1a2196f5c8e4a9a4d0ff"
+		digest = ""
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "4712252ab9e5e4bde8909f4aa03460b01d7f3b910c8eea51dec89b55391ae71a"
+		digest = ""
 	default:
 		return nil, errors.New("unsupported target")
 	}
