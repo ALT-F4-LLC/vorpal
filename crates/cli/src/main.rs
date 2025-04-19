@@ -188,7 +188,7 @@ async fn main() -> Result<()> {
             // Setup toolchain
 
             let mut config_context = ConfigContext::new(
-                "http://localhost:23151".to_string(),
+                agent.to_string(),
                 config.to_string(),
                 0,
                 registry.to_string(),
@@ -205,8 +205,8 @@ async fn main() -> Result<()> {
                     GoBuilder::new("vorpal-config")
                         .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
                         .with_build_directory("sdk/go")
-                        .with_build_script("make generate")
                         .with_includes(vec!["crates/schema/api", "makefile", "sdk/go"])
+                        .with_source_script("make generate")
                         .build(&mut config_context)
                         .await?
                 }
@@ -252,6 +252,7 @@ async fn main() -> Result<()> {
             }
 
             let (mut config_process, mut config_client) = match config::start(
+                agent.to_string(),
                 artifact_name.to_string(),
                 config_path.display().to_string(),
                 registry.clone(),
@@ -396,7 +397,7 @@ async fn main() -> Result<()> {
             let mut router = Server::builder().add_service(health_service);
 
             if services.contains("agent") {
-                let service = AgentServiceServer::new(AgentServer::new(agent.clone()));
+                let service = AgentServiceServer::new(AgentServer::new(registry.clone()));
 
                 info!("agent service: [::]:{}", port);
 

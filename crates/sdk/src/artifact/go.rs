@@ -13,10 +13,10 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let target = context.get_target();
 
     let source_digest = match target {
-        Aarch64Darwin => "86c352c4ced8830cd92a9c85c2944eaa95ebb1e8908b3f01258962bcc94b9c14",
-        Aarch64Linux => "42cec86acdeb62f23b8a65afaa67c2d8c8818f28d7d3ca55430e10e8027a6234",
-        X8664Darwin => "7bd25bbd5d284b8e03fc1581910a5e620c72c4efe235ab44d1f44c8eaed700a9",
-        X8664Linux => "8fb320a301c0cc9fd168e407e4c4b6c46852d753d278d735aa6cae22f3ce82af",
+        Aarch64Darwin => "5380e02cdfe2b254af7c3306671fbacc0bfefeb3a9684b502e4af3ad5db917e7",
+        Aarch64Linux => "87116daeec496cbc32774c024839ce7a7d0dfced9959fb54527bd55b8890791e",
+        X8664Darwin => "b5903639cc049e527796b8c1330cec3be12ef11d15668c08a1732c03f0cf1dcd",
+        X8664Linux => "78181c114c22ddf6413032d5fcc24760a3bee185c35251392fd78691975773aa",
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
 
@@ -28,7 +28,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         _ => bail!("unsupported {name} system: {}", target.as_str_name()),
     };
 
-    let source_version = "1.23.5";
+    let source_version = "1.24.2";
     let source_path = format!("https://go.dev/dl/go{source_version}.{source_target}.tar.gz");
 
     let source = ArtifactSourceBuilder::new(name, source_path.as_str())

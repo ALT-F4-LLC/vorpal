@@ -14,10 +14,7 @@ function sync {
     --delete \
     --exclude=".env" \
     --exclude=".git" \
-    --exclude=".packer" \
-    --exclude=".vagrant" \
     --exclude="dist" \
-    --exclude="packer_debian_vmware_arm64.box" \
     --exclude="target" \
     "$PWD/." "$HOME/vorpal/."
 

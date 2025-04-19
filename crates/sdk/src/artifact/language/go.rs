@@ -13,10 +13,10 @@ pub struct GoBuilder<'a> {
     artifacts: Vec<String>,
     build_directory: Option<&'a str>,
     build_path: Option<&'a str>,
-    build_scripts: Vec<String>,
     includes: Vec<&'a str>,
     name: &'a str,
     source: Option<ArtifactSource>,
+    source_scripts: Vec<String>,
 }
 
 pub fn get_goos(target: ArtifactSystem) -> String {
@@ -45,10 +45,10 @@ impl<'a> GoBuilder<'a> {
             artifacts: vec![],
             build_directory: None,
             build_path: None,
-            build_scripts: vec![],
             includes: vec![],
             name,
             source: None,
+            source_scripts: vec![],
         }
     }
 
@@ -67,13 +67,6 @@ impl<'a> GoBuilder<'a> {
         self
     }
 
-    pub fn with_build_script(mut self, script: &'a str) -> Self {
-        if !self.build_scripts.contains(&script.to_string()) {
-            self.build_scripts.push(script.to_string());
-        }
-        self
-    }
-
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
         self.includes = includes;
         self
@@ -81,6 +74,13 @@ impl<'a> GoBuilder<'a> {
 
     pub fn with_source(mut self, source: ArtifactSource) -> Self {
         self.source = Some(source);
+        self
+    }
+
+    pub fn with_source_script(mut self, script: &'a str) -> Self {
+        if !self.source_scripts.contains(&script.to_string()) {
+            self.source_scripts.push(script.to_string());
+        }
         self
     }
 
@@ -110,13 +110,13 @@ impl<'a> GoBuilder<'a> {
             mkdir -p $VORPAL_OUTPUT/bin"#,
         };
 
-        if !self.build_scripts.is_empty() {
-            let build_scripts = self.build_scripts.join("\n");
+        if !self.source_scripts.is_empty() {
+            let source_scripts = self.source_scripts.join("\n");
 
             step_script = formatdoc! {r#"
                 {step_script}
 
-                {build_scripts}"#,
+                {source_scripts}"#,
             };
         }
 
@@ -126,9 +126,7 @@ impl<'a> GoBuilder<'a> {
         step_script = formatdoc! {r#"
             {step_script}
 
-            pushd {build_directory}
-
-            go build -o $VORPAL_OUTPUT/bin/{name} {build_path}
+            go build -C {build_directory} -o $VORPAL_OUTPUT/bin/{name} {build_path}
 
             go clean -modcache"#,
             name = self.name,

@@ -92,13 +92,13 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	"target/$(TARGET)/vorpal" artifact --name $(ARTIFACT) $(VORPAL_FLAGS)
+	"target/$(TARGET)/vorpal" artifact --name $(VORPAL_ARTIFACT) $(VORPAL_FLAGS)
 
 vorpal-start:
 	"target/$(TARGET)/vorpal" start $(VORPAL_FLAGS)
 
 vorpal-config-start:
-	"$(CONFIG_FILE)" start --artifact "$(ARTIFACT)" --port "50051" $(VORPAL_FLAGS)
+	"$(CONFIG_FILE)" start --artifact "$(VORPAL_ARTIFACT)" --port "50051" $(VORPAL_FLAGS)
 
 # Lima environment
 
@@ -114,7 +114,7 @@ lima: lima-clean
 	limactl start "vorpal-$(LIMA_ARCH)"
 
 lima-vorpal:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '$HOME/vorpal/target/debug/vorpal artifact --name $(ARTIFACT)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '$HOME/vorpal/target/debug/vorpal artifact --name $(VORPAL_ARTIFACT)'
 
 lima-vorpal-start:
 	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '$HOME/vorpal/target/debug/vorpal start'
