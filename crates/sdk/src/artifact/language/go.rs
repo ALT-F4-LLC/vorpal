@@ -137,9 +137,9 @@ impl<'a> GoBuilder<'a> {
             [vec![go.clone()], self.artifacts].concat(),
             vec![
                 "CGO_ENABLED=0".to_string(),
-                format!("GOARCH={}", get_goarch(context.get_target())),
+                format!("GOARCH={}", get_goarch(context.get_system())),
                 "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
-                format!("GOOS={}", get_goos(context.get_target())),
+                format!("GOOS={}", get_goos(context.get_system())),
                 "GOPATH=$VORPAL_WORKSPACE/go".to_string(),
                 format!("PATH={}/bin", get_env_key(&go)),
             ],

@@ -94,10 +94,10 @@ pub async fn get_context() -> Result<ConfigContext> {
             artifact,
             port,
             registry,
-            target,
+            system,
             variable,
         } => Ok(ConfigContext::new(
-            agent, artifact, port, registry, target, variable,
+            agent, artifact, port, registry, system, variable,
         )?),
     }
 }
@@ -111,28 +111,24 @@ impl ConfigContext {
         system: String,
         variable: Vec<String>,
     ) -> Result<Self> {
-        let store = ConfigContextStore {
-            artifact: HashMap::new(),
-            variable: variable
-                .iter()
-                .map(|v| {
-                    let mut parts = v.split('=');
-                    let name = parts.next().unwrap_or_default();
-                    let value = parts.next().unwrap_or_default();
-                    (name.to_string(), value.to_string())
-                })
-                .collect(),
-        };
-
-        let system = get_system(&system)?;
-
         Ok(Self {
             agent,
             artifact,
             port,
             registry,
-            store,
-            system,
+            store: ConfigContextStore {
+                artifact: HashMap::new(),
+                variable: variable
+                    .iter()
+                    .map(|v| {
+                        let mut parts = v.split('=');
+                        let name = parts.next().unwrap_or_default();
+                        let value = parts.next().unwrap_or_default();
+                        (name.to_string(), value.to_string())
+                    })
+                    .collect(),
+            },
+            system: get_system(&system)?,
         })
     }
 
@@ -258,7 +254,7 @@ impl ConfigContext {
         self.artifact.as_str()
     }
 
-    pub fn get_target(&self) -> ArtifactSystem {
+    pub fn get_system(&self) -> ArtifactSystem {
         self.system
     }
 

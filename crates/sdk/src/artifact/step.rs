@@ -230,11 +230,11 @@ pub async fn shell(
 ) -> Result<ArtifactStep> {
     // Setup target
 
-    let step_target = context.get_target();
+    let step_system = context.get_system();
 
     // Setup step
 
-    let step = match step_target {
+    let step = match step_system {
         Aarch64Darwin | X8664Darwin => bash(
             context,
             artifacts,
@@ -260,7 +260,7 @@ pub async fn shell(
 
         _ => bail!(
             "unsupported shell step system: {}",
-            step_target.as_str_name()
+            step_system.as_str_name()
         ),
     };
 

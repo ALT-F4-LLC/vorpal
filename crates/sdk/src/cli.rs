@@ -25,7 +25,7 @@ pub enum Command {
         registry: String,
 
         #[arg(default_value_t = get_system_default_str(), long)]
-        target: String,
+        system: String,
 
         #[clap(long)]
         variable: Vec<String>,

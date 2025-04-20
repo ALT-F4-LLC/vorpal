@@ -34,7 +34,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         toolchain_component_paths.push(get_env_key(component));
     }
 
-    let toolchain_target = rust::toolchain_target(context.get_target())?;
+    let toolchain_target = rust::toolchain_target(context.get_system())?;
     let toolchain_version = rust::toolchain_version();
 
     let step_script = formatdoc! {"

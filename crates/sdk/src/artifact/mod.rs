@@ -275,7 +275,7 @@ impl ArtifactStepBuilder {
     }
 
     pub fn build(self, context: &mut ConfigContext) -> ArtifactStep {
-        let system = context.get_target();
+        let system = context.get_system();
 
         ArtifactStep {
             arguments: self.arguments.get(&system).unwrap_or(&vec![]).clone(),
@@ -362,7 +362,7 @@ impl<'a> ArtifactBuilder<'a> {
             sources: self.sources,
             steps: self.steps,
             systems: self.systems.into_iter().map(|v| v.into()).collect(),
-            target: context.get_target().into(),
+            target: context.get_system().into(),
             // variables: self.variables,
         };
 
