@@ -182,13 +182,15 @@ async fn main() -> Result<()> {
             // Setup configuration
 
             if config.is_empty() {
-                bail!("no `--config` specified");
+                error!("no `--config` specified");
+                std::process::exit(1);
             }
 
             let config_path = Path::new(&config);
 
             if !config_path.exists() {
-                bail!("config not found: {}", config_path.display());
+                error!("config not found: {}", config_path.display());
+                std::process::exit(1);
             }
 
             let config_data_bytes = read(config_path).await.expect("failed to read config");
@@ -196,21 +198,12 @@ async fn main() -> Result<()> {
             let config: VorpalConfig = from_str(&config_data).expect("failed to parse config");
 
             if config.language.is_none() {
-                bail!("no 'language' specified in Vorpal.yaml");
+                error!("no 'language' specified in Vorpal.yaml");
+                std::process::exit(1);
             }
 
             let config_language = config.language.unwrap();
             let config_name = config.name.unwrap_or_else(|| "vorpal-config".to_string());
-
-            // Setup clients
-
-            let mut client_archive = ArchiveServiceClient::connect(registry.to_owned())
-                .await
-                .expect("failed to connect to registry");
-
-            let mut client_worker = WorkerServiceClient::connect(worker.to_owned())
-                .await
-                .expect("failed to connect to artifact");
 
             // Setup toolchain
 
@@ -276,6 +269,16 @@ async fn main() -> Result<()> {
             if config_digest.is_empty() {
                 bail!("no config digest found");
             }
+
+            // Setup clients
+
+            let mut client_archive = ArchiveServiceClient::connect(registry.to_owned())
+                .await
+                .expect("failed to connect to registry");
+
+            let mut client_worker = WorkerServiceClient::connect(worker.to_owned())
+                .await
+                .expect("failed to connect to artifact");
 
             config::build_artifacts(
                 *artifact_path,

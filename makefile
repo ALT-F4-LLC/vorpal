@@ -5,6 +5,7 @@ WORK_DIR := $(shell pwd)
 CARGO_DIR := $(WORK_DIR)/.cargo
 DIST_DIR := $(WORK_DIR)/dist
 VENDOR_DIR := $(WORK_DIR)/vendor
+VORPAL_ARTIFACT := vorpal
 VORPAL_DIR := /var/lib/vorpal
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
@@ -92,13 +93,13 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	"target/$(TARGET)/vorpal" artifact --name $(VORPAL_ARTIFACT) $(VORPAL_FLAGS)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- artifact --name $(VORPAL_ARTIFACT) $(VORPAL_FLAGS)
 
 vorpal-start:
-	"target/$(TARGET)/vorpal" start $(VORPAL_FLAGS)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- start $(VORPAL_FLAGS)
 
 vorpal-config-start:
-	"$(CONFIG_FILE)" start --artifact "$(VORPAL_ARTIFACT)" --port "50051" $(VORPAL_FLAGS)
+	cargo $(CARGO_FLAGS) run --bin "vorpal-config" -- start --artifact "$(VORPAL_ARTIFACT)" --port "50051" $(VORPAL_FLAGS)
 
 # Lima environment
 

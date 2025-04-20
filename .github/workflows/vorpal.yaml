@@ -196,28 +196,28 @@ jobs:
 
       - run: |
           ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal")
-          if [ "$ARTIFACT" = "$VORPAL_ARTIFACT" ]; then
+          if [ "$ARTIFACT" != "$VORPAL_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_ARTIFACT"
             exit 1
           fi
 
       - run: |
           ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal-process")
-          if [ "$ARTIFACT" = "$VORPAL_PROCESS_ARTIFACT" ]; then
+          if [ "$ARTIFACT" != "$VORPAL_PROCESS_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_PROCESS_ARTIFACT"
             exit 1
           fi
 
       - run: |
           ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal-shell")
-          if [ "$ARTIFACT" = "$VORPAL_SHELL_ARTIFACT" ]; then
+          if [ "$ARTIFACT" != "$VORPAL_SHELL_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_SHELL_ARTIFACT"
             exit 1
           fi
 
       - run: |
           ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal-test")
-          if [ "$ARTIFACT" = "$VORPAL_TEST_ARTIFACT" ]; then
+          if [ "$ARTIFACT" != "$VORPAL_TEST_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_TEST_ARTIFACT"
             exit 1
           fi
