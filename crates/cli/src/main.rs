@@ -205,7 +205,7 @@ async fn main() -> Result<()> {
             let config_language = config.language.unwrap();
             let config_name = config.name.unwrap_or_else(|| "vorpal-config".to_string());
 
-            // Setup toolchain
+            // Build configuration
 
             let mut config_context = ConfigContext::new(
                 agent.to_string(),
@@ -216,9 +216,10 @@ async fn main() -> Result<()> {
                 variable.clone(),
             )?;
 
+            let protoc = protoc::build(&mut config_context).await?;
+
             let config_digest = match config_language.as_str() {
                 "go" => {
-                    let protoc = protoc::build(&mut config_context).await?;
                     let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
                     let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
                     let artifacts = vec![protoc, protoc_gen_go, protoc_gen_go_grpc];
@@ -247,8 +248,6 @@ async fn main() -> Result<()> {
                 }
 
                 "rust" => {
-                    let protoc = protoc::build(&mut config_context).await?;
-
                     let mut builder = RustBuilder::new(&config_name)
                         .with_artifacts(vec![protoc])
                         .with_bins(vec![&config_name]);
@@ -270,8 +269,6 @@ async fn main() -> Result<()> {
                 bail!("no config digest found");
             }
 
-            // Setup clients
-
             let mut client_archive = ArchiveServiceClient::connect(registry.to_owned())
                 .await
                 .expect("failed to connect to registry");
@@ -289,15 +286,15 @@ async fn main() -> Result<()> {
             )
             .await?;
 
-            // Start config
+            // Start configuration
 
-            let config_file_path = format!(
+            let config_file = format!(
                 "{}/bin/{}",
                 &get_store_path(&config_digest).display(),
                 config_name
             );
 
-            let config_path = Path::new(&config_file_path);
+            let config_path = Path::new(&config_file);
 
             if !config_path.exists() {
                 error!("config not found: {}", config_path.display());
