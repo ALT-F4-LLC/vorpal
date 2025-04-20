@@ -14,7 +14,7 @@ type command struct {
 	Artifact string
 	Port     int
 	Registry string
-	Target   artifactApi.ArtifactSystem
+	System   artifactApi.ArtifactSystem
 	Variable map[string]string
 }
 
@@ -27,7 +27,7 @@ func newCommand() (*command, error) {
 	startArtifact := startCmd.String("artifact", "", "artifact to use")
 	startPort := startCmd.Int("port", 0, "port to listen on")
 	startRegistry := startCmd.String("registry", "http://localhost:23151", "registry to use")
-	startTarget := startCmd.String("target", GetSystemDefaultStr(), "target system")
+	startSystem := startCmd.String("system", GetSystemDefaultStr(), "system to use")
 	startCmd.Var(newStringSliceValue(&startVariable), "variable", "variables to use (key=value)")
 
 	switch os.Args[1] {
@@ -50,11 +50,11 @@ func newCommand() (*command, error) {
 			return nil, fmt.Errorf("registry is required")
 		}
 
-		if *startTarget == "" {
-			return nil, fmt.Errorf("target is required")
+		if *startSystem == "" {
+			return nil, fmt.Errorf("system is required")
 		}
 
-		system, err := GetSystem(*startTarget)
+		system, err := GetSystem(*startSystem)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get system: %w", err)
 		}
@@ -79,7 +79,7 @@ func newCommand() (*command, error) {
 			Artifact: *startArtifact,
 			Port:     *startPort,
 			Registry: *startRegistry,
-			Target:   *system,
+			System:   *system,
 			Variable: variable,
 		}, nil
 	default:

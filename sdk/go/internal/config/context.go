@@ -106,7 +106,7 @@ func GetContext() *ConfigContext {
 		port:     cmd.Port,
 		registry: cmd.Registry,
 		store:    store,
-		system:   cmd.Target,
+		system:   cmd.System,
 	}
 }
 

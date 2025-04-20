@@ -2,7 +2,10 @@ use crate::artifact::build;
 use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use console::style;
+use serde::Deserialize;
 use std::{collections::HashMap, path::Path};
+use tokio::fs::read;
+use toml::from_str;
 use tonic::transport::Server;
 use tracing::{error, info, subscriber, warn, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
@@ -45,33 +48,39 @@ mod config;
 #[derive(Subcommand)]
 enum Command {
     Artifact {
-        #[arg(default_value = "vorpal-config", long, short)]
+        #[clap(default_value = "http://localhost:23151", long)]
+        agent: String,
+
+        #[arg(default_value = "Vorpal.toml", long)]
         config: String,
 
-        #[arg(default_value_t = false, long, short)]
+        #[arg(default_value_t = false, long)]
         export: bool,
 
-        #[arg(long, short)]
+        #[arg(long)]
         name: String,
 
-        #[arg(default_value_t = false, long, short)]
+        #[arg(default_value_t = false, long)]
         path: bool,
 
-        #[arg(default_value_t = get_system_default_str(), long, short)]
-        target: String,
+        #[arg(default_value_t = get_system_default_str(), long)]
+        system: String,
 
-        #[arg(long, short)]
+        #[arg(long)]
         variable: Vec<String>,
+
+        #[clap(default_value = "http://localhost:23151", long)]
+        worker: String,
     },
 
     #[clap(subcommand)]
     Keys(CommandKeys),
 
     Start {
-        #[clap(default_value = "23151", long, short)]
+        #[clap(default_value = "23151", long)]
         port: u16,
 
-        #[arg(default_value = "agent,registry,worker", long, short)]
+        #[arg(default_value = "agent,registry,worker", long)]
         services: String,
 
         #[arg(default_value = "local", long)]
@@ -91,37 +100,44 @@ pub enum CommandKeys {
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 pub struct Cli {
-    #[clap(default_value = "http://localhost:23151", long)]
-    agent: String,
-
     #[command(subcommand)]
     command: Command,
 
-    #[arg(default_value_t = get_default_context(), long)]
-    context: String,
-
+    /// Log level
     #[arg(default_value_t = Level::INFO, global = true, long)]
     level: Level,
 
-    #[arg(default_value = "rust", long)]
-    language: String,
-
+    /// Registry address
     #[clap(default_value = "http://localhost:23151", long)]
     registry: String,
-
-    #[clap(default_value = "http://localhost:23151", long)]
-    worker: String,
-}
-
-fn get_default_context() -> String {
-    std::env::current_dir()
-        .unwrap_or_else(|_| Path::new(".").to_path_buf())
-        .to_string_lossy()
-        .to_string()
 }
 
 pub fn get_prefix(name: &str) -> String {
     style(format!("{} |>", name)).bold().to_string()
+}
+
+#[derive(Deserialize)]
+pub struct VorpalConfigGoBuild {
+    pub directory: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct VorpalConfigSource {
+    pub includes: Vec<String>,
+    pub script: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct VorpalConfigBuild {
+    pub directory: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct VorpalConfig {
+    pub build: Option<VorpalConfigBuild>,
+    pub language: Option<String>,
+    pub name: Option<String>,
+    pub source: Option<VorpalConfigSource>,
 }
 
 #[tokio::main]
@@ -129,33 +145,21 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let Cli {
-        agent,
         command,
-        context,
-        language,
         level,
         registry,
-        worker,
     } = cli;
-
-    if context.is_empty() {
-        bail!("no `--context` specified");
-    }
-
-    let context_path = Path::new(&context);
-
-    if !context_path.exists() {
-        bail!("context not found: {}", context_path.display());
-    }
 
     match &command {
         Command::Artifact {
+            agent,
             config,
             export: artifact_export,
             name: artifact_name,
             path: artifact_path,
-            target,
+            system: artifact_system,
             variable,
+            worker,
         } => {
             // Setup logging
 
@@ -175,6 +179,29 @@ async fn main() -> Result<()> {
 
             subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
+            // Setup configuration
+
+            if config.is_empty() {
+                bail!("no `--config` specified");
+            }
+
+            let config_path = Path::new(&config);
+
+            if !config_path.exists() {
+                bail!("config not found: {}", config_path.display());
+            }
+
+            let config_data_bytes = read(config_path).await.expect("failed to read config");
+            let config_data = String::from_utf8_lossy(&config_data_bytes);
+            let config: VorpalConfig = from_str(&config_data).expect("failed to parse config");
+
+            if config.language.is_none() {
+                bail!("no 'language' specified in Vorpal.yaml");
+            }
+
+            let config_language = config.language.unwrap();
+            let config_name = config.name.unwrap_or_else(|| "vorpal-config".to_string());
+
             // Setup clients
 
             let mut client_archive = ArchiveServiceClient::connect(registry.to_owned())
@@ -189,36 +216,59 @@ async fn main() -> Result<()> {
 
             let mut config_context = ConfigContext::new(
                 agent.to_string(),
-                config.to_string(),
+                config_name.to_string(),
                 0,
                 registry.to_string(),
-                target.to_string(),
+                artifact_system.to_string(),
                 variable.clone(),
             )?;
 
-            let config_digest = match language.as_str() {
+            let config_digest = match config_language.as_str() {
                 "go" => {
                     let protoc = protoc::build(&mut config_context).await?;
                     let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
                     let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
+                    let artifacts = vec![protoc, protoc_gen_go, protoc_gen_go_grpc];
 
-                    GoBuilder::new("vorpal-config")
-                        .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
-                        .with_build_directory("sdk/go")
-                        .with_includes(vec!["crates/schema/api", "makefile", "sdk/go"])
-                        .with_source_script("make generate")
-                        .build(&mut config_context)
-                        .await?
+                    let mut builder = GoBuilder::new(&config_name).with_artifacts(artifacts);
+
+                    if let Some(build) = config.build.as_ref() {
+                        if let Some(directory) = build.directory.as_ref() {
+                            builder = builder.with_build_directory(directory);
+                        }
+                    }
+
+                    if let Some(source) = config.source.as_ref() {
+                        if !source.includes.is_empty() {
+                            builder = builder.with_includes(
+                                source.includes.iter().map(|s| s.as_str()).collect(),
+                            );
+                        }
+
+                        if let Some(script) = source.script.as_ref() {
+                            builder = builder.with_source_script(script);
+                        }
+                    }
+
+                    builder.build(&mut config_context).await?
                 }
+
                 "rust" => {
                     let protoc = protoc::build(&mut config_context).await?;
 
-                    RustBuilder::new("vorpal-config")
-                        .with_artifacts(vec![protoc.clone()])
-                        .with_bins(vec!["vorpal-config"])
-                        .with_packages(vec!["crates/config", "crates/schema", "crates/sdk"])
-                        .build(&mut config_context)
-                        .await?
+                    let mut builder = RustBuilder::new(&config_name)
+                        .with_artifacts(vec![protoc])
+                        .with_bins(vec![&config_name]);
+
+                    if let Some(source) = config.source.as_ref() {
+                        if !source.includes.is_empty() {
+                            builder = builder.with_packages(
+                                source.includes.iter().map(|s| s.as_str()).collect(),
+                            );
+                        }
+                    }
+
+                    builder.build(&mut config_context).await?
                 }
                 _ => "".to_string(),
             };
@@ -241,7 +291,7 @@ async fn main() -> Result<()> {
             let config_file_path = format!(
                 "{}/bin/{}",
                 &get_store_path(&config_digest).display(),
-                config
+                config_name
             );
 
             let config_path = Path::new(&config_file_path);
@@ -256,7 +306,7 @@ async fn main() -> Result<()> {
                 artifact_name.to_string(),
                 config_path.display().to_string(),
                 registry.clone(),
-                target.to_string(),
+                artifact_system.to_string(),
                 variable.clone(),
             )
             .await

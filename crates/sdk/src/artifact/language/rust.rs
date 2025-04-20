@@ -36,13 +36,13 @@ fn read_cargo(path: &str) -> Result<RustArtifactCargoToml> {
     Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
 
-pub fn toolchain_target(target: ArtifactSystem) -> Result<String> {
-    let target = match target {
+pub fn toolchain_target(system: ArtifactSystem) -> Result<String> {
+    let target = match system {
         Aarch64Darwin => "aarch64-apple-darwin",
         Aarch64Linux => "aarch64-unknown-linux-gnu",
         X8664Darwin => "x86_64-apple-darwin",
         X8664Linux => "x86_64-unknown-linux-gnu",
-        _ => bail!("unsupported 'rust-toolchain' target: {:?}", target),
+        _ => bail!("unsupported 'rust-toolchain' system: {:?}", system),
     };
 
     Ok(target.to_string())
@@ -88,7 +88,7 @@ impl<'a> RustShellBuilder<'a> {
         let mut artifacts = vec![];
 
         let toolchain = rust_toolchain::build(context).await?;
-        let toolchain_target = toolchain_target(context.get_target())?;
+        let toolchain_target = toolchain_target(context.get_system())?;
         let toolchain_version = toolchain_version();
 
         artifacts.push(toolchain.clone());
@@ -269,7 +269,7 @@ impl<'a> RustBuilder<'a> {
         // Get rust toolchain artifact
 
         let rust_toolchain = rust_toolchain::build(context).await?;
-        let rust_toolchain_target = toolchain_target(context.get_target())?;
+        let rust_toolchain_target = toolchain_target(context.get_system())?;
         let rust_toolchain_version = toolchain_version();
         let rust_toolchain_name = format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
 

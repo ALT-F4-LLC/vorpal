@@ -1,0 +1,4 @@
+language = "rust"
+
+[source]
+includes = ["crates/config", "crates/schema", "crates/sdk"]

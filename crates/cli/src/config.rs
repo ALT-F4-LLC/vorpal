@@ -81,7 +81,7 @@ pub async fn start(
     artifact: String,
     file: String,
     registry: String,
-    target: String,
+    system: String,
     variable: Vec<String>,
 ) -> Result<(Child, ArtifactServiceClient<Channel>)> {
     let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
@@ -100,8 +100,8 @@ pub async fn start(
         &command_port,
         "--registry",
         &registry,
-        "--target",
-        &target,
+        "--system",
+        &system,
     ];
 
     command.args(command_arguments);
