@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"text/template"
 
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact/language"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
 type ReleaseScriptTemplateArgs struct {

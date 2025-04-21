@@ -4,23 +4,23 @@ import (
 	"errors"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-func Goimports(context *config.ConfigContext) (*string, error) {
+func Protoc(context *config.ConfigContext) (*string, error) {
 	target := context.GetTarget()
 
 	var digest string
 
 	switch target {
 	case artifact.ArtifactSystem_AARCH64_DARWIN:
-		digest = "66a42cc7600ef08f1937ff314c36cceec26451630e83b6c2d6a8f93bf7291b59"
+		digest = "8ad451bdcda8f24f4af59ccca23fd71a06975a9d069571f19b9a0d503f8a65c8"
 	case artifact.ArtifactSystem_AARCH64_LINUX:
-		digest = "1d48d6a3d0ff9ffa616e6b152c8aa4ca34f4db49e5a9adfdbb0c987235d3aade"
+		digest = "d0f3c08c81bebdb5a502863c786a03d661e4faad1941e941f705bb076eaff13c"
 	case artifact.ArtifactSystem_X8664_DARWIN:
-		digest = "e5d1d90c5d5bc629a25da5e856c6bf5ddc754a46745718c2a60fe8c404819c52"
+		digest = "2a3d7816b06f1a046cbf8e82c1a94fe71b4fd384726f2064c9e0960ac75dadec"
 	case artifact.ArtifactSystem_X8664_LINUX:
-		digest = "1ad022e6c026105286866402ca348ccddfd2a56926361dd7b82cc8c26de183c1"
+		digest = "c5bded4de6ca52ac5e731e328e22b5dfb957009ed5a553e24ba9fdec4379ba44"
 	default:
 		return nil, errors.New("unsupported target")
 	}

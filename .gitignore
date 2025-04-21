@@ -1,4 +1,3 @@
-*.pb.go
 *.tar.*
 .cargo
 .env

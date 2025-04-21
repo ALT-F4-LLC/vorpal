@@ -4,5 +4,4 @@ language = "go"
 directory = "sdk/go"
 
 [source]
-includes = ["crates/schema/api", "makefile", "sdk/go"]
-script = "make generate"
+includes = ["sdk/go"]
