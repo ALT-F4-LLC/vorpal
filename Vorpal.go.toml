@@ -1,8 +1,7 @@
 language = "go"
 
 [build]
-directory = "sdk/go"
+directory = "sdk/go/cmd/vorpal"
 
 [source]
-includes = ["crates/schema/api", "makefile", "sdk/go"]
-script = "make generate"
+includes = ["sdk/go"]

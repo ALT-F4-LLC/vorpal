@@ -8,7 +8,7 @@ import (
 	"text/template"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
 type ArtifactProcessBuilder struct {

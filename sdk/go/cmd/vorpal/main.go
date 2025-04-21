@@ -3,14 +3,15 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"text/template"
 
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact/language"
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-type ReleaseScriptTemplateArgs struct {
+type releaseScriptArgs struct {
 	Aarch64Darwin string
 	Aarch64Linux  string
 	BranchName    string
@@ -18,7 +19,7 @@ type ReleaseScriptTemplateArgs struct {
 	X8664Linux    string
 }
 
-const ReleaseScriptTemplate = `
+const releaseScript = `
 git clone \
     --branch {{.BranchName}} \
     --depth 1 \
@@ -40,9 +41,12 @@ gh release create \
     --title "nightly" \
     --verify-tag \
     nightly \
-    /var/lib/vorpal/store/{{.Aarch64Darwin}}.tar.zst`
+    {{.Aarch64Darwin}}.tar.zst \
+    {{.Aarch64Linux}}.tar.zst \
+    {{.X8664Darwin}}.tar.zst \
+    {{.X8664Linux}}.tar.zst`
 
-func build(context *config.ConfigContext) (*string, error) {
+func vorpal(context *config.ConfigContext) (*string, error) {
 	protoc, err := artifact.Protoc(context)
 	if err != nil {
 		return nil, err
@@ -65,8 +69,8 @@ func build(context *config.ConfigContext) (*string, error) {
 		Build(context)
 }
 
-func buildProcess(context *config.ConfigContext) (*string, error) {
-	vorpal, err := build(context)
+func vorpalProcess(context *config.ConfigContext) (*string, error) {
+	vorpal, err := vorpal(context)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +89,7 @@ func buildProcess(context *config.ConfigContext) (*string, error) {
 		Build(context)
 }
 
-func buildRelease(context *config.ConfigContext) (*string, error) {
+func vorpalRelease(context *config.ConfigContext) (*string, error) {
 	varAarch64Darwin, err := artifact.
 		NewArtifactVariableBuilder("aarch64-darwin").
 		WithRequire().
@@ -159,14 +163,14 @@ func buildRelease(context *config.ConfigContext) (*string, error) {
 		x8664Linux,
 	}
 
-	scriptTemplate, err := template.New("script").Parse(ReleaseScriptTemplate)
+	scriptTemplate, err := template.New("script").Parse(releaseScript)
 	if err != nil {
 		return nil, err
 	}
 
 	var scriptBuffer bytes.Buffer
 
-	scriptTemplateVars := ReleaseScriptTemplateArgs{
+	scriptTemplateVars := releaseScriptArgs{
 		Aarch64Darwin: *aarch64Darwin,
 		Aarch64Linux:  *aarch64Linux,
 		BranchName:    *varBranchName,
@@ -183,7 +187,7 @@ func buildRelease(context *config.ConfigContext) (*string, error) {
 		Build(context)
 }
 
-func buildShell(context *config.ConfigContext) (*string, error) {
+func vorpalShell(context *config.ConfigContext) (*string, error) {
 	gh, err := artifact.Gh(context)
 	if err != nil {
 		return nil, err
@@ -229,7 +233,7 @@ func buildShell(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	vorpalProcess, err := buildProcess(context)
+	vorpalProcess, err := vorpalProcess(context)
 	if err != nil {
 		return nil, err
 	}
@@ -256,8 +260,8 @@ func buildShell(context *config.ConfigContext) (*string, error) {
 		Build(context)
 }
 
-func buildTest(context *config.ConfigContext) (*string, error) {
-	vorpal, err := build(context)
+func vorpalTest(context *config.ConfigContext) (*string, error) {
+	vorpal, err := vorpal(context)
 	if err != nil {
 		return nil, err
 	}
@@ -267,4 +271,31 @@ func buildTest(context *config.ConfigContext) (*string, error) {
 	return artifact.NewArtifactTaskBuilder("vorpal-test", script).
 		WithArtifacts([]*string{vorpal}).
 		Build(context)
+}
+
+func main() {
+	context := config.GetContext()
+	contextArtifact := context.GetArtifactName()
+
+	var err error
+
+	switch contextArtifact {
+	case "vorpal":
+		_, err = vorpal(context)
+	case "vorpal-process":
+		_, err = vorpalProcess(context)
+	case "vorpal-release":
+		_, err = vorpalRelease(context)
+	case "vorpal-shell":
+		_, err = vorpalShell(context)
+	case "vorpal-test":
+		_, err = vorpalTest(context)
+	default:
+		log.Fatalf("unknown artifact %s", contextArtifact)
+	}
+	if err != nil {
+		log.Fatalf("failed to build %s: %v", contextArtifact, err)
+	}
+
+	context.Run()
 }
