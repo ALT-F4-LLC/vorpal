@@ -2,7 +2,6 @@ package language
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -27,11 +26,6 @@ type RustArtifactCargoTomlBinary struct {
 
 type RustArtifactCargoTomlWorkspace struct {
 	Members []string `toml:"members,omitempty"`
-}
-
-type RustShellBuilder struct {
-	artifacts []*string
-	name      string
 }
 
 type RustBuilder struct {
@@ -141,61 +135,6 @@ for bin_name in ${{"{"}}bin_names{{"["}}@{{"]"}}{{"}"}}; do
     cp -pv ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
 done`
 
-func toolchain_digest(context *config.ConfigContext) (*string, error) {
-	target, err := context.GetTarget()
-	if err != nil {
-		return nil, err
-	}
-
-	var digest string
-
-	switch *target {
-	case api.ArtifactSystem_AARCH64_DARWIN:
-		digest = "84707c7325d3a0cbd8044020a5256b6fd43a79bd837948bb4a7e90d671c919e6"
-	case api.ArtifactSystem_AARCH64_LINUX:
-		digest = "ad490acd52f5b4d5b539df8f565df3a90271225a1ef6256c1027eac0b70cb4d4"
-	case api.ArtifactSystem_X8664_DARWIN:
-		digest = "589c625bd79be3ed8b9d5168c54a889dba971a6e9d9722750c4b4577247ec94e"
-	case api.ArtifactSystem_X8664_LINUX:
-		digest = "5442c5e085972b7119661da12d03d40fb17770edf8879ab898aee3dafdd1c48c"
-	default:
-		return nil, errors.New("unsupported target")
-	}
-
-	return &digest, nil
-}
-
-func toolchain_target(target api.ArtifactSystem) (*string, error) {
-	aarch64Darwin := "aarch64-apple-darwin"
-	aarch64Linux := "aarch64-unknown-linux-gnu"
-	x8664Darwin := "x86_64-apple-darwin"
-	x8664Linux := "x86_64-unknown-linux-gnu"
-
-	switch target {
-	case api.ArtifactSystem_AARCH64_DARWIN:
-		return &aarch64Darwin, nil
-	case api.ArtifactSystem_AARCH64_LINUX:
-		return &aarch64Linux, nil
-	case api.ArtifactSystem_X8664_DARWIN:
-		return &x8664Darwin, nil
-	case api.ArtifactSystem_X8664_LINUX:
-		return &x8664Linux, nil
-	default:
-		return nil, errors.New("unsupported target")
-	}
-}
-
-func toolchain_version() string {
-	return "1.83.0"
-}
-
-func NewRustShellBuilder(name string) *RustShellBuilder {
-	return &RustShellBuilder{
-		artifacts: make([]*string, 0),
-		name:      name,
-	}
-}
-
 func NewRustBuilder(name string) *RustBuilder {
 	return &RustBuilder{
 		artifacts: make([]*string, 0),
@@ -210,53 +149,6 @@ func NewRustBuilder(name string) *RustBuilder {
 		source:    nil,
 		tests:     false,
 	}
-}
-
-func (a *RustShellBuilder) WithArtifacts(artifacts []*string) *RustShellBuilder {
-	a.artifacts = artifacts
-	return a
-}
-
-func (a *RustShellBuilder) Build(context *config.ConfigContext) (*string, error) {
-	artifacts := make([]*string, 0)
-
-	target, err := context.GetTarget()
-	if err != nil {
-		return nil, err
-	}
-
-	toolchain_digest, err := toolchain_digest(context)
-	if err != nil {
-		return nil, err
-	}
-
-	toolchain, err := context.FetchArtifact(*toolchain_digest)
-	if err != nil {
-		return nil, err
-	}
-
-	toolchain_target, err := toolchain_target(*target)
-	if err != nil {
-		return nil, err
-	}
-
-	toolchain_version := toolchain_version()
-
-	artifacts = append(artifacts, toolchain)
-	artifacts = append(artifacts, a.artifacts...)
-
-	environments := []string{
-		fmt.Sprintf(
-			"PATH=%s/toolchains/%s-%s/bin",
-			artifact.GetEnvKey(toolchain),
-			toolchain_version,
-			*toolchain_target,
-		),
-		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(toolchain)),
-		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s-%s", toolchain_version, *toolchain_target),
-	}
-
-	return artifact.ScriptDevshell(context, artifacts, environments, a.name)
 }
 
 func (a *RustBuilder) WithArtifacts(artifacts []*string) *RustBuilder {
@@ -412,39 +304,34 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	// Get rust toolchain artifact
 
-	rust_toolchain_digest, err := toolchain_digest(context)
+	contextTarget, err := context.GetTarget()
 	if err != nil {
 		return nil, err
 	}
 
-	rustToolchain, err := context.FetchArtifact(*rust_toolchain_digest)
+	rustToolchain, err := artifact.RustToolchain(context)
 	if err != nil {
 		return nil, err
 	}
 
-	target, err := context.GetTarget()
+	rustToolchainTarget, err := artifact.RustToolchainTarget(contextTarget)
 	if err != nil {
 		return nil, err
 	}
 
-	rust_toolchain_target, err := toolchain_target(*target)
-	if err != nil {
-		return nil, err
-	}
+	rustToolchainVersion := artifact.RustToolchainVersion()
 
-	rust_toolchain_version := toolchain_version()
-
-	rust_toolchain_name := fmt.Sprintf("%s-%s", rust_toolchain_version, *rust_toolchain_target)
+	rustToolchainName := fmt.Sprintf("%s-%s", rustToolchainVersion, *rustToolchainTarget)
 
 	stepEnvironments := []string{
 		"HOME=$VORPAL_WORKSPACE/home",
 		fmt.Sprintf(
 			"PATH=%s/toolchains/%s/bin",
 			artifact.GetEnvKey(rustToolchain),
-			rust_toolchain_name,
+			rustToolchainName,
 		),
 		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(rustToolchain)),
-		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rust_toolchain_name),
+		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rustToolchainName),
 	}
 
 	// Create vendor artifact

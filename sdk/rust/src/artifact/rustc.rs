@@ -1,9 +1,6 @@
 use crate::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{
-        language::rust::{toolchain_target, toolchain_version},
-        step, ArtifactBuilder, ArtifactSourceBuilder,
-    },
+    artifact::{rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -21,8 +18,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         _ => bail!("unsupported {name} system: {}", system.as_str_name()),
     };
 
-    let source_target = toolchain_target(system)?;
-    let source_version = toolchain_version();
+    let source_target = rust_toolchain::target(system)?;
+    let source_version = rust_toolchain::version();
     let source_path =
         format!("https://static.rust-lang.org/dist/{name}-{source_version}-{source_target}.tar.gz");
 

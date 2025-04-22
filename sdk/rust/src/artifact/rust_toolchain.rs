@@ -1,13 +1,32 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::{
+        ArtifactSystem,
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    },
     artifact::{
-        cargo, clippy, get_env_key, language::rust, rust_analyzer, rust_src, rust_std, rustc,
-        rustfmt, step, ArtifactBuilder,
+        cargo, clippy, get_env_key, rust_analyzer, rust_src, rust_std, rustc, rustfmt, step,
+        ArtifactBuilder,
     },
     context::ConfigContext,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use indoc::formatdoc;
+
+pub fn target(system: ArtifactSystem) -> Result<String> {
+    let target = match system {
+        Aarch64Darwin => "aarch64-apple-darwin",
+        Aarch64Linux => "aarch64-unknown-linux-gnu",
+        X8664Darwin => "x86_64-apple-darwin",
+        X8664Linux => "x86_64-unknown-linux-gnu",
+        _ => bail!("unsupported 'rust-toolchain' system: {:?}", system),
+    };
+
+    Ok(target.to_string())
+}
+
+pub fn version() -> String {
+    "1.83.0".to_string()
+}
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let cargo = cargo::build(context).await?;
@@ -34,8 +53,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         toolchain_component_paths.push(get_env_key(component));
     }
 
-    let toolchain_target = rust::toolchain_target(context.get_system())?;
-    let toolchain_version = rust::toolchain_version();
+    let toolchain_target = target(context.get_system())?;
+    let toolchain_version = version();
 
     let step_script = formatdoc! {"
         toolchain_dir=\"$VORPAL_OUTPUT/toolchains/{toolchain_version}-{toolchain_target}\"

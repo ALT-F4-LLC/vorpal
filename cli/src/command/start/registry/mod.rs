@@ -1,5 +1,5 @@
 use crate::command::store::{notary::get_public_key, paths::get_public_key_path};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use aws_sdk_s3::Client;
 use rsa::{
     pss::{Signature, VerifyingKey},
@@ -10,13 +10,15 @@ use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
 use tracing::error;
-use vorpal_sdk::api::archive::{
-    archive_service_server::ArchiveService, ArchivePullRequest, ArchivePullResponse,
-    ArchivePushRequest, ArchiveResponse,
-};
-use vorpal_sdk::api::artifact::{
-    artifact_service_server::ArtifactService, Artifact, ArtifactRequest, ArtifactResponse,
-    ArtifactsRequest, ArtifactsResponse,
+use vorpal_sdk::api::{
+    archive::{
+        archive_service_server::ArchiveService, ArchivePullRequest, ArchivePullResponse,
+        ArchivePushRequest, ArchiveResponse,
+    },
+    artifact::{
+        artifact_service_server::ArtifactService, Artifact, ArtifactRequest, ArtifactResponse,
+        ArtifactsRequest, ArtifactsResponse,
+    },
 };
 
 mod archive;
@@ -323,7 +325,7 @@ pub async fn backend_archive(
         ServerBackend::Local => Box::new(LocalBackend::new()?),
         ServerBackend::S3 => Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?),
         ServerBackend::Gha => Box::new(GhaBackend::new()?),
-        ServerBackend::Unknown => unreachable!(),
+        ServerBackend::Unknown => bail!("unknown archive backend: {}", registry_backend),
     };
 
     Ok(backend_archive)
@@ -344,7 +346,7 @@ pub async fn backend_artifact(
         ServerBackend::Local => Box::new(LocalBackend::new()?),
         ServerBackend::S3 => Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?),
         ServerBackend::Gha => Box::new(GhaBackend::new()?),
-        ServerBackend::Unknown => unreachable!(),
+        ServerBackend::Unknown => bail!("unknown artifact backend: {}", registry_backend),
     };
 
     Ok(backend_artifact)

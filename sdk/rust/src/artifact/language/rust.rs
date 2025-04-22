@@ -1,9 +1,6 @@
 use crate::{
-    api::artifact::{
-        ArtifactSystem,
-        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    },
-    artifact::{get_env_key, rust_toolchain, script, step, ArtifactBuilder, ArtifactSourceBuilder},
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    artifact::{get_env_key, rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -29,33 +26,6 @@ struct RustArtifactCargoTomlWorkspace {
     members: Option<Vec<String>>,
 }
 
-fn read_cargo(path: &str) -> Result<RustArtifactCargoToml> {
-    let contents = fs::read_to_string(path).expect("Failed to read Cargo.toml");
-
-    Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
-}
-
-pub fn toolchain_target(system: ArtifactSystem) -> Result<String> {
-    let target = match system {
-        Aarch64Darwin => "aarch64-apple-darwin",
-        Aarch64Linux => "aarch64-unknown-linux-gnu",
-        X8664Darwin => "x86_64-apple-darwin",
-        X8664Linux => "x86_64-unknown-linux-gnu",
-        _ => bail!("unsupported 'rust-toolchain' system: {:?}", system),
-    };
-
-    Ok(target.to_string())
-}
-
-pub fn toolchain_version() -> String {
-    "1.83.0".to_string()
-}
-
-pub struct RustShellBuilder<'a> {
-    artifacts: Vec<String>,
-    name: &'a str,
-}
-
 pub struct RustBuilder<'a> {
     artifacts: Vec<String>,
     bins: Vec<String>,
@@ -70,47 +40,10 @@ pub struct RustBuilder<'a> {
     tests: bool,
 }
 
-impl<'a> RustShellBuilder<'a> {
-    pub fn new(name: &'a str) -> Self {
-        Self {
-            artifacts: vec![],
-            name,
-        }
-    }
+fn read_cargo(path: &str) -> Result<RustArtifactCargoToml> {
+    let contents = fs::read_to_string(path).expect("Failed to read Cargo.toml");
 
-    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
-        self.artifacts = artifacts;
-        self
-    }
-
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        let mut artifacts = vec![];
-
-        let toolchain = rust_toolchain::build(context).await?;
-        let toolchain_target = toolchain_target(context.get_system())?;
-        let toolchain_version = toolchain_version();
-
-        artifacts.push(toolchain.clone());
-        artifacts.extend(self.artifacts);
-
-        let environments = vec![
-            format!(
-                "PATH={}/toolchains/{}-{}/bin",
-                get_env_key(&toolchain),
-                toolchain_version,
-                toolchain_target
-            ),
-            format!("RUSTUP_HOME={}", get_env_key(&toolchain)),
-            format!(
-                "RUSTUP_TOOLCHAIN={}-{}",
-                toolchain_version, toolchain_target
-            ),
-        ];
-
-        // Create shell artifact
-
-        script::devshell(context, artifacts, environments, self.name).await
-    }
+    Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
 
 impl<'a> RustBuilder<'a> {
@@ -268,8 +201,8 @@ impl<'a> RustBuilder<'a> {
         // Get rust toolchain artifact
 
         let rust_toolchain = rust_toolchain::build(context).await?;
-        let rust_toolchain_target = toolchain_target(context.get_system())?;
-        let rust_toolchain_version = toolchain_version();
+        let rust_toolchain_target = rust_toolchain::target(context.get_system())?;
+        let rust_toolchain_version = rust_toolchain::version();
         let rust_toolchain_name = format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
 
         // Set environment variables

@@ -6,7 +6,7 @@ use crate::{
     artifact::{get_env_key, go, step, ArtifactBuilder, ArtifactSource, ArtifactSourceBuilder},
     context::ConfigContext,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use indoc::formatdoc;
 
 pub struct GoBuilder<'a> {
@@ -19,24 +19,24 @@ pub struct GoBuilder<'a> {
     source_scripts: Vec<String>,
 }
 
-pub fn get_goos(target: ArtifactSystem) -> String {
+pub fn get_goos(target: ArtifactSystem) -> Result<String> {
     let goos = match target {
         Aarch64Darwin | X8664Darwin => "darwin",
         Aarch64Linux | X8664Linux => "linux",
-        _ => unreachable!(),
+        _ => bail!("unsupported 'go' system: {:?}", target),
     };
 
-    goos.to_string()
+    Ok(goos.to_string())
 }
 
-pub fn get_goarch(target: ArtifactSystem) -> String {
+pub fn get_goarch(target: ArtifactSystem) -> Result<String> {
     let goarch = match target {
         Aarch64Darwin | Aarch64Linux => "arm64",
         X8664Darwin | X8664Linux => "amd64",
-        _ => unreachable!(),
+        _ => bail!("unsupported 'go' system: {:?}", target),
     };
 
-    goarch.to_string()
+    Ok(goarch.to_string())
 }
 
 impl<'a> GoBuilder<'a> {
@@ -132,14 +132,17 @@ impl<'a> GoBuilder<'a> {
             name = self.name,
         };
 
+        let goarch = get_goarch(context.get_system())?;
+        let goos = get_goos(context.get_system())?;
+
         let step = step::shell(
             context,
             [vec![go.clone()], self.artifacts].concat(),
             vec![
                 "CGO_ENABLED=0".to_string(),
-                format!("GOARCH={}", get_goarch(context.get_system())),
+                format!("GOARCH={}", goarch),
                 "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
-                format!("GOOS={}", get_goos(context.get_system())),
+                format!("GOOS={}", goos),
                 "GOPATH=$VORPAL_WORKSPACE/go".to_string(),
                 format!("PATH={}/bin", get_env_key(&go)),
             ],

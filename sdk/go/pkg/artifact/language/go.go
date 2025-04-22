@@ -12,6 +12,14 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
+type GoScriptTemplateArgs struct {
+	BuildDirectory string
+	BuildPath      string
+	Name           string
+	SourceDir      string
+	SourceScripts  string
+}
+
 type GoBuilder struct {
 	artifacts      []*string
 	buildDirectory *string
@@ -20,14 +28,6 @@ type GoBuilder struct {
 	name           string
 	source         *api.ArtifactSource
 	sourceScripts  []string
-}
-
-type GoScriptTemplateArgs struct {
-	BuildDirectory string
-	BuildPath      string
-	Name           string
-	SourceDir      string
-	SourceScripts  string
 }
 
 const GoScriptTemplate = `
@@ -43,7 +43,7 @@ go build -C {{.BuildDirectory}} -o $VORPAL_OUTPUT/bin/{{.Name}} {{.BuildPath}}
 
 go clean -modcache`
 
-func GetGOOS(target api.ArtifactSystem) string {
+func GetGOOS(target api.ArtifactSystem) (*string, error) {
 	var goos string
 
 	switch target {
@@ -52,13 +52,13 @@ func GetGOOS(target api.ArtifactSystem) string {
 	case api.ArtifactSystem_AARCH64_LINUX, api.ArtifactSystem_X8664_LINUX:
 		goos = "linux"
 	default:
-		panic("Unsupported target system")
+		return nil, fmt.Errorf("unsupported target system: %s", target)
 	}
 
-	return goos
+	return &goos, nil
 }
 
-func GetGOARCH(target api.ArtifactSystem) string {
+func GetGOARCH(target api.ArtifactSystem) (*string, error) {
 	var goarch string
 
 	switch target {
@@ -67,10 +67,10 @@ func GetGOARCH(target api.ArtifactSystem) string {
 	case api.ArtifactSystem_X8664_DARWIN, api.ArtifactSystem_X8664_LINUX:
 		goarch = "amd64"
 	default:
-		panic("Unsupported target system")
+		return nil, fmt.Errorf("unsupported target system: %s", target)
 	}
 
-	return goarch
+	return &goarch, nil
 }
 
 func NewGoBuilder(name string) *GoBuilder {
@@ -186,11 +186,21 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 		return nil, err
 	}
 
+	goarch, err := GetGOARCH(*target)
+	if err != nil {
+		return nil, err
+	}
+
+	goos, err := GetGOOS(*target)
+	if err != nil {
+		return nil, err
+	}
+
 	environments := []string{
 		"CGO_ENABLED=0",
-		fmt.Sprintf("GOARCH=%s", GetGOARCH(*target)),
+		fmt.Sprintf("GOARCH=%s", *goarch),
 		"GOCACHE=$VORPAL_WORKSPACE/go/cache",
-		fmt.Sprintf("GOOS=%s", GetGOOS(*target)),
+		fmt.Sprintf("GOOS=%s", *goos),
 		"GOPATH=$VORPAL_WORKSPACE/go",
 		fmt.Sprintf("PATH=%s/bin", artifact.GetEnvKey(goBin)),
 	}
