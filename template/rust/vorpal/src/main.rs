@@ -7,7 +7,7 @@ async fn main() -> Result<()> {
 
     RustBuilder::new("example")
         .with_bins(vec!["example"])
-        .with_packages(vec!["crates/example"])
+        .with_packages(vec!["example"])
         .build(context)
         .await?;
 

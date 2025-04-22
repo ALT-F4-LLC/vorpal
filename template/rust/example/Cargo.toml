@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "vorpal-example"
+name = "example"
 publish = false
 version = "0.1.0"
 

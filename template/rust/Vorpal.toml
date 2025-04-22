@@ -1,4 +1,4 @@
 language = "rust"
 
 [source]
-includes = ["crates/vorpal"]
+includes = ["vorpal"]

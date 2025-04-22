@@ -5,6 +5,7 @@ use tracing::Level;
 use vorpal_sdk::system::get_system_default_str;
 
 mod artifact;
+mod init;
 mod keys;
 mod start;
 mod store;
@@ -46,6 +47,8 @@ pub enum Command {
         #[clap(default_value = "http://localhost:23151", long)]
         worker: String,
     },
+
+    Init {},
 
     #[clap(subcommand)]
     Keys(CommandKeys),
@@ -122,6 +125,8 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
+
+        Command::Init {} => init::run(level).await,
 
         Command::Keys(keys) => match keys {
             CommandKeys::Generate {} => keys::generate().await,

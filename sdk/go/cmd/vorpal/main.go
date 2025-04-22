@@ -57,15 +57,7 @@ func vorpal(context *config.ConfigContext) (*string, error) {
 	return language.NewRustBuilder(name).
 		WithArtifacts([]*string{protoc}).
 		WithBins([]string{name}).
-		WithPackages([]string{
-			"crates/agent",
-			"crates/cli",
-			"crates/registry",
-			"crates/schema",
-			"crates/sdk",
-			"crates/store",
-			"crates/worker",
-		}).
+		WithPackages([]string{"cli", "sdk/rust", "template"}).
 		Build(context)
 }
 
