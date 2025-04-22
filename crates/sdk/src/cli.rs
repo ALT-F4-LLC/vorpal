@@ -19,6 +19,9 @@ pub enum Command {
         artifact: String,
 
         #[clap(long)]
+        artifact_context: String,
+
+        #[clap(long)]
         port: u16,
 
         #[clap(default_value = "http://localhost:23151", long)]

@@ -75,7 +75,7 @@ async fn pull_source(
         .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
     if !source_archive.exists() {
-        send_message(format!("pull: {}", source_digest), tx).await?;
+        send_message(format!("pull source: {}", source_digest), tx).await?;
 
         let request = ArchivePullRequest {
             digest: source_digest.to_string(),
@@ -130,7 +130,7 @@ async fn pull_source(
         return Err(Status::not_found("source archive not found"));
     }
 
-    send_message(format!("unpack: {}", source_digest), tx).await?;
+    send_message(format!("unpack source: {}", source_digest), tx).await?;
 
     let source_workspace_path = source_dir_path.join(&source.name);
 

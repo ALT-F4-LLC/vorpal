@@ -5,11 +5,11 @@ use crate::{
 use anyhow::{bail, Result};
 use clap::Parser;
 use sha256::digest;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 use tonic::{transport::Server, Code::NotFound, Request, Response, Status};
 use tracing::info;
 use vorpal_schema::{
-    agent::v0::agent_service_client::AgentServiceClient,
+    agent::v0::{agent_service_client::AgentServiceClient, PrepareArtifactRequest},
     artifact::v0::{
         artifact_service_client::ArtifactServiceClient,
         artifact_service_server::{ArtifactService, ArtifactServiceServer},
@@ -28,6 +28,7 @@ pub struct ConfigContextStore {
 pub struct ConfigContext {
     agent: String,
     artifact: String,
+    artifact_context: PathBuf,
     port: u16,
     registry: String,
     store: ConfigContextStore,
@@ -92,12 +93,19 @@ pub async fn get_context() -> Result<ConfigContext> {
         Command::Start {
             agent,
             artifact,
+            artifact_context,
             port,
             registry,
             system,
             variable,
         } => Ok(ConfigContext::new(
-            agent, artifact, port, registry, system, variable,
+            agent,
+            artifact,
+            PathBuf::from(artifact_context),
+            port,
+            registry,
+            system,
+            variable,
         )?),
     }
 }
@@ -106,6 +114,7 @@ impl ConfigContext {
     pub fn new(
         agent: String,
         artifact: String,
+        artifact_context: PathBuf,
         port: u16,
         registry: String,
         system: String,
@@ -114,6 +123,7 @@ impl ConfigContext {
         Ok(Self {
             agent,
             artifact,
+            artifact_context,
             port,
             registry,
             store: ConfigContextStore {
@@ -148,8 +158,13 @@ impl ConfigContext {
             .await
             .expect("failed to connect to agent service");
 
+        let request = PrepareArtifactRequest {
+            artifact: Some(artifact.clone()),
+            artifact_context: self.artifact_context.display().to_string(),
+        };
+
         let response = client
-            .prepare_artifact(artifact.clone())
+            .prepare_artifact(request)
             .await
             .expect("failed to prepare artifact");
 

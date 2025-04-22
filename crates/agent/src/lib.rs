@@ -37,6 +37,7 @@ enum ArtifactSourceType {
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 pub async fn build_source(
+    artifact_context: String,
     registry: String,
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
@@ -153,7 +154,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("unpack: {}", http_path)),
+                artifact_output: Some(format!("unpack source: {}", http_path)),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -218,30 +219,19 @@ pub async fn build_source(
     }
 
     if source_type == ArtifactSourceType::Local {
-        let local_path = Path::new(&source.path).to_path_buf();
+        let artifact_context = Path::new(&artifact_context).to_path_buf();
 
-        if !local_path.exists() {
-            bail!("'source.{}.path' not found: {:?}", source.name, source.path);
+        if !artifact_context.exists() {
+            bail!("artifact not found in: {}", artifact_context.display());
         }
 
-        // TODO: make path relevant to the current working directory
-
         let local_files = get_file_paths(
-            &local_path,
+            &artifact_context,
             source.excludes.clone(),
             source.includes.clone(),
         )?;
 
-        // let _ = tx
-        //     .send(Ok(PrepareArtifactResponse {
-        //         artifact: None,
-        //         artifact_digest: None,
-        //         artifact_output: Some(format!("copy: {}", local_path.display())),
-        //     }))
-        //     .await
-        //     .map_err(|_| Status::internal("failed to send response"));
-
-        copy_files(&local_path, local_files, &source_sandbox).await?;
+        copy_files(&artifact_context, local_files, &source_sandbox).await?;
     }
 
     let source_sandbox_files = get_file_paths(
@@ -332,7 +322,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("push: {}", source_digest)),
+                artifact_output: Some(format!("push source: {}", source_digest)),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
