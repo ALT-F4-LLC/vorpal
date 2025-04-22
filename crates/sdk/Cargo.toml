@@ -1,10 +1,11 @@
 [package]
+build = "build.rs"
 description = "Vorpal SDK for building Vorpal configurations."
 edition = "2021"
 license = "Apache-2.0"
 name = "vorpal-sdk"
 repository = "https://github.com/ALT-F4-LLC/vorpal"
-version = "0.1.0"
+version = "0.1.0-alpha"
 
 [dependencies]
 anyhow = { version = "1" }
