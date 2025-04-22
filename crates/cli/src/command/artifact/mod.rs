@@ -160,6 +160,7 @@ pub async fn build(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     agent: &str,
     artifact_config: &str,

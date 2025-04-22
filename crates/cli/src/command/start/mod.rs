@@ -66,7 +66,7 @@ pub async fn run(
 
     if services.contains(&"registry".to_string()) {
         let backend = match registry_backend.as_str() {
-            "gha" => ServerBackend::GHA,
+            "gha" => ServerBackend::Gha,
             "local" => ServerBackend::Local,
             "s3" => ServerBackend::S3,
             _ => ServerBackend::Unknown,

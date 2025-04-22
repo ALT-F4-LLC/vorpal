@@ -37,7 +37,7 @@ pub enum BackendError {
 pub enum ServerBackend {
     #[default]
     Unknown,
-    GHA,
+    Gha,
     Local,
     S3,
 }
@@ -313,7 +313,7 @@ pub async fn get_archive_backend(
     registry_backend_s3_bucket: Option<String>,
 ) -> Result<Box<dyn ArchiveBackend>> {
     let backend = match registry_backend.as_str() {
-        "gha" => ServerBackend::GHA,
+        "gha" => ServerBackend::Gha,
         "local" => ServerBackend::Local,
         "s3" => ServerBackend::S3,
         _ => ServerBackend::Unknown,
@@ -322,7 +322,7 @@ pub async fn get_archive_backend(
     let backend_archive: Box<dyn ArchiveBackend> = match backend {
         ServerBackend::Local => Box::new(LocalBackend::new()?),
         ServerBackend::S3 => Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?),
-        ServerBackend::GHA => Box::new(GhaBackend::new()?),
+        ServerBackend::Gha => Box::new(GhaBackend::new()?),
         ServerBackend::Unknown => unreachable!(),
     };
 
@@ -334,7 +334,7 @@ pub async fn get_artifact_backend(
     registry_backend_s3_bucket: Option<String>,
 ) -> Result<Box<dyn ArtifactBackend>> {
     let backend = match registry_backend {
-        "gha" => ServerBackend::GHA,
+        "gha" => ServerBackend::Gha,
         "local" => ServerBackend::Local,
         "s3" => ServerBackend::S3,
         _ => ServerBackend::Unknown,
@@ -343,7 +343,7 @@ pub async fn get_artifact_backend(
     let backend_artifact: Box<dyn ArtifactBackend> = match backend {
         ServerBackend::Local => Box::new(LocalBackend::new()?),
         ServerBackend::S3 => Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?),
-        ServerBackend::GHA => Box::new(GhaBackend::new()?),
+        ServerBackend::Gha => Box::new(GhaBackend::new()?),
         ServerBackend::Unknown => unreachable!(),
     };
 
