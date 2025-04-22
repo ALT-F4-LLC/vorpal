@@ -154,7 +154,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("unpack: {}", http_path)),
+                artifact_output: Some(format!("unpack source: {}", http_path)),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -322,7 +322,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("push: {}", source_digest)),
+                artifact_output: Some(format!("push source: {}", source_digest)),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
