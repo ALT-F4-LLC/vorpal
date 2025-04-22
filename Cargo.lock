@@ -2148,18 +2148,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "petgraph"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a98c6720655620a521dcc722d0ad66cd8afd5d86e34a89ef691c50b7b24de06"
-dependencies = [
- "fixedbitset",
- "hashbrown",
- "indexmap",
- "serde",
-]
-
-[[package]]
 name = "pin-project"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2292,7 +2280,7 @@ dependencies = [
  "log",
  "multimap",
  "once_cell",
- "petgraph 0.7.1",
+ "petgraph",
  "prettyplease",
  "prost",
  "prost-types",
@@ -3549,7 +3537,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vorpal-cli"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3560,7 +3548,7 @@ dependencies = [
  "filetime",
  "futures-lite",
  "infer",
- "petgraph 0.8.1",
+ "petgraph",
  "port-selector",
  "reqwest",
  "rsa",
@@ -3586,7 +3574,7 @@ dependencies = [
 
 [[package]]
 name = "vorpal-config"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
  "indoc",
@@ -3596,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "vorpal-sdk"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
