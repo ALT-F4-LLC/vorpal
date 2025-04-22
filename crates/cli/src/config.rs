@@ -135,6 +135,11 @@ pub async fn start(
                 }
 
                 if line.starts_with("Error: ") {
+                    let _ = config_process
+                        .kill()
+                        .await
+                        .map_err(|_| anyhow!("failed to kill config server"));
+
                     bail!("{}", line.replace("Error: ", ""));
                 } else {
                     info!("{}", line);
