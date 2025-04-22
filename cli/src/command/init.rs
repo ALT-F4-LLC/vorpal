@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use inquire::{InquireError, Select};
 use std::{collections::BTreeMap, env::current_dir};
 use tokio::fs::{create_dir_all, write};
-use tracing::{info, subscriber, Level};
+use tracing::{info, subscriber, warn, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 
 pub async fn run(level: Level) -> Result<()> {
@@ -106,6 +106,11 @@ pub async fn run(level: Level) -> Result<()> {
                 .expect("failed to create directory");
         }
 
+        if file_path.exists() {
+            warn!("File already exists: {}", path);
+            continue;
+        }
+
         write(file_path, content)
             .await
             .expect("failed to write file");
@@ -113,5 +118,5 @@ pub async fn run(level: Level) -> Result<()> {
         info!("Created file: {}", path);
     }
 
-    return Ok(());
+    Ok(())
 }
