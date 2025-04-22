@@ -10,8 +10,8 @@ import (
 	"net"
 	"strings"
 
-	agentApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/agent"
-	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent"
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -33,7 +33,7 @@ const (
 )
 
 type ConfigContextStore struct {
-	artifact map[string]*artifactApi.Artifact
+	artifact map[string]*artifact.Artifact
 	variable map[string]string
 }
 
@@ -44,11 +44,11 @@ type ConfigContext struct {
 	port            int
 	registry        string
 	store           ConfigContextStore
-	system          artifactApi.ArtifactSystem
+	system          string
 }
 
 type ArtifactServer struct {
-	artifactApi.UnimplementedArtifactServiceServer
+	artifact.UnimplementedArtifactServiceServer
 
 	store ConfigContextStore
 }
@@ -59,7 +59,7 @@ func NewArtifactServer(store ConfigContextStore) *ArtifactServer {
 	}
 }
 
-func (s *ArtifactServer) GetArtifact(ctx context.Context, request *artifactApi.ArtifactRequest) (*artifactApi.Artifact, error) {
+func (s *ArtifactServer) GetArtifact(ctx context.Context, request *artifact.ArtifactRequest) (*artifact.Artifact, error) {
 	if request.Digest == "" {
 		return nil, fmt.Errorf("'digest' is required")
 	}
@@ -72,32 +72,32 @@ func (s *ArtifactServer) GetArtifact(ctx context.Context, request *artifactApi.A
 	return response, nil
 }
 
-func (s *ArtifactServer) GetArtifacts(ctx context.Context, request *artifactApi.ArtifactsRequest) (*artifactApi.ArtifactsResponse, error) {
+func (s *ArtifactServer) GetArtifacts(ctx context.Context, request *artifact.ArtifactsRequest) (*artifact.ArtifactsResponse, error) {
 	digests := make([]string, 0)
 
 	for digest := range s.store.artifact {
 		digests = append(digests, digest)
 	}
 
-	response := &artifactApi.ArtifactsResponse{
+	response := &artifact.ArtifactsResponse{
 		Digests: digests,
 	}
 
 	return response, nil
 }
 
-func (s *ArtifactServer) StoreArtifact(ctx context.Context, request *artifactApi.Artifact) (*artifactApi.ArtifactResponse, error) {
+func (s *ArtifactServer) StoreArtifact(ctx context.Context, request *artifact.Artifact) (*artifact.ArtifactResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
 func GetContext() *ConfigContext {
-	cmd, err := newCommand()
+	cmd, err := NewCommand()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	store := ConfigContextStore{
-		artifact: make(map[string]*artifactApi.Artifact),
+		artifact: make(map[string]*artifact.Artifact),
 		variable: cmd.Variable,
 	}
 
@@ -112,7 +112,7 @@ func GetContext() *ConfigContext {
 	}
 }
 
-func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, error) {
+func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error) {
 	// 1. Setup systems
 
 	artifactJson, err := json.Marshal(artifact)
@@ -128,18 +128,18 @@ func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, er
 
 	// TODO: make this run in parallel
 
-	agent := strings.ReplaceAll(c.agent, "http://", "")
+	agentHost := strings.ReplaceAll(c.agent, "http://", "")
 
-	clientConn, err := grpc.NewClient(agent, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	clientConn, err := grpc.NewClient(agentHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
 
 	defer clientConn.Close()
 
-	client := agentApi.NewAgentServiceClient(clientConn)
+	client := agent.NewAgentServiceClient(clientConn)
 
-	clientReqest := &agentApi.PrepareArtifactRequest{
+	clientReqest := &agent.PrepareArtifactRequest{
 		Artifact:        artifact,
 		ArtifactContext: c.artifactContext,
 	}
@@ -180,12 +180,12 @@ func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, er
 	return &artifactDigest, nil
 }
 
-func fetchArtifacts(client artifactApi.ArtifactServiceClient, digest string, store map[string]*artifactApi.Artifact) error {
+func fetchArtifacts(client artifact.ArtifactServiceClient, digest string, store map[string]*artifact.Artifact) error {
 	if _, ok := store[digest]; ok {
 		return nil
 	}
 
-	clientResponse, err := client.GetArtifact(context.Background(), &artifactApi.ArtifactRequest{Digest: digest})
+	clientResponse, err := client.GetArtifact(context.Background(), &artifact.ArtifactRequest{Digest: digest})
 	if err != nil {
 		return fmt.Errorf("error fetching artifact: %v", err)
 	}
@@ -219,7 +219,7 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 
 	defer clientConn.Close()
 
-	client := artifactApi.NewArtifactServiceClient(clientConn)
+	client := artifact.NewArtifactServiceClient(clientConn)
 
 	err = fetchArtifacts(client, digest, c.store.artifact)
 	if err != nil {
@@ -229,7 +229,7 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 	return &digest, nil
 }
 
-func (c *ConfigContext) GetArtifact(digest string) *artifactApi.Artifact {
+func (c *ConfigContext) GetArtifact(digest string) *artifact.Artifact {
 	return c.store.artifact[digest]
 }
 
@@ -237,8 +237,13 @@ func (c *ConfigContext) GetArtifactName() string {
 	return c.artifact
 }
 
-func (c *ConfigContext) GetTarget() artifactApi.ArtifactSystem {
-	return c.system
+func (c *ConfigContext) GetTarget() (*artifact.ArtifactSystem, error) {
+	system, err := GetSystem(c.system)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system: %w", err)
+	}
+
+	return system, nil
 }
 
 func (c *ConfigContext) GetVariable(name string) *string {
@@ -256,7 +261,7 @@ func (c *ConfigContext) Run() error {
 
 	grpcServer := grpc.NewServer(grpcServerOpts...)
 
-	artifactApi.RegisterArtifactServiceServer(grpcServer, NewArtifactServer(c.store))
+	artifact.RegisterArtifactServiceServer(grpcServer, NewArtifactServer(c.store))
 
 	listenerAddr := fmt.Sprintf("[::]:%d", c.port)
 

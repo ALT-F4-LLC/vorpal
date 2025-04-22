@@ -1,4 +1,5 @@
 use crate::{
+    api::artifact::ArtifactSystem::{Aarch64Linux, X8664Linux},
     artifact::{
         linux_debian,
         linux_vorpal::script::{setup, stage_01, stage_02, stage_03, stage_04, stage_05},
@@ -8,7 +9,6 @@ use crate::{
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::artifact::v0::ArtifactSystem::{Aarch64Linux, X8664Linux};
 
 mod script;
 mod source;

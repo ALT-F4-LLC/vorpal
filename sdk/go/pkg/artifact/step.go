@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/template"
 
-	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
@@ -33,8 +33,8 @@ func Bash(
 	artifacts []*string,
 	environments []string,
 	script *string,
-	systems []artifactApi.ArtifactSystem,
-) (*artifactApi.ArtifactStep, error) {
+	systems []api.ArtifactSystem,
+) (*api.ArtifactStep, error) {
 	stepEnvironments := make([]string, 0)
 
 	stepEntrypoint := "bash"
@@ -87,7 +87,7 @@ func Bash(
 	step = step.WithEnvironments(stepEnvironments, systems)
 	step = step.WithScript(scriptBuffer.String(), systems)
 
-	return step.Build(context), nil
+	return step.Build(context)
 }
 
 func Bwrap(
@@ -97,8 +97,8 @@ func Bwrap(
 	environments []string,
 	rootfs *string,
 	script string,
-	systems []artifactApi.ArtifactSystem,
-) (*artifactApi.ArtifactStep, error) {
+	systems []api.ArtifactSystem,
+) (*api.ArtifactStep, error) {
 	// Setup arguments
 
 	stepArguments := []string{
@@ -240,7 +240,7 @@ func Bwrap(
 	step = step.WithEnvironments([]string{"PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"}, systems)
 	step = step.WithScript(scriptBuffer.String(), systems)
 
-	return step.Build(context), nil
+	return step.Build(context)
 }
 
 func Shell(
@@ -248,29 +248,32 @@ func Shell(
 	artifacts []*string,
 	environments []string,
 	script string,
-) (*artifactApi.ArtifactStep, error) {
-	stepTarget := context.GetTarget()
+) (*api.ArtifactStep, error) {
+	stepTarget, err := context.GetTarget()
+	if err != nil {
+		return nil, err
+	}
 
-	if stepTarget == artifactApi.ArtifactSystem_AARCH64_DARWIN || stepTarget == artifactApi.ArtifactSystem_X8664_DARWIN {
+	if *stepTarget == api.ArtifactSystem_AARCH64_DARWIN || *stepTarget == api.ArtifactSystem_X8664_DARWIN {
 		return Bash(
 			context,
 			artifacts,
 			environments,
 			&script,
-			[]artifactApi.ArtifactSystem{
-				artifactApi.ArtifactSystem_AARCH64_DARWIN,
-				artifactApi.ArtifactSystem_X8664_DARWIN,
+			[]api.ArtifactSystem{
+				api.ArtifactSystem_AARCH64_DARWIN,
+				api.ArtifactSystem_X8664_DARWIN,
 			},
 		)
 	}
 
-	if stepTarget == artifactApi.ArtifactSystem_AARCH64_LINUX || stepTarget == artifactApi.ArtifactSystem_X8664_LINUX {
+	if *stepTarget == api.ArtifactSystem_AARCH64_LINUX || *stepTarget == api.ArtifactSystem_X8664_LINUX {
 		var linux_vorpal_digest string
 
-		switch stepTarget {
-		case artifactApi.ArtifactSystem_AARCH64_LINUX:
+		switch *stepTarget {
+		case api.ArtifactSystem_AARCH64_LINUX:
 			linux_vorpal_digest = "79958083229520a9e8cbf94ed5f6da40c3bf98ae666b3e20c01bc272fd92c2bb"
-		case artifactApi.ArtifactSystem_X8664_LINUX:
+		case api.ArtifactSystem_X8664_LINUX:
 			linux_vorpal_digest = "6787f5abf88580349785c101492445298e0577d192455481e758b56163e5ebde"
 		}
 
@@ -290,9 +293,9 @@ func Shell(
 			environments,
 			linux_vorpal,
 			script,
-			[]artifactApi.ArtifactSystem{
-				artifactApi.ArtifactSystem_AARCH64_LINUX,
-				artifactApi.ArtifactSystem_X8664_LINUX,
+			[]api.ArtifactSystem{
+				api.ArtifactSystem_AARCH64_LINUX,
+				api.ArtifactSystem_X8664_LINUX,
 			},
 		)
 	}
@@ -304,8 +307,8 @@ func Docker(
 	context *config.ConfigContext,
 	arguments []string,
 	artifacts []*string,
-	systems []artifactApi.ArtifactSystem,
-) *artifactApi.ArtifactStep {
+	systems []api.ArtifactSystem,
+) (*api.ArtifactStep, error) {
 	step := NewArtifactStepBuilder()
 
 	step = step.WithArguments(arguments, systems)

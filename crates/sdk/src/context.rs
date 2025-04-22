@@ -1,4 +1,13 @@
 use crate::{
+    api::{
+        agent::{agent_service_client::AgentServiceClient, PrepareArtifactRequest},
+        artifact::{
+            artifact_service_client::ArtifactServiceClient,
+            artifact_service_server::{ArtifactService, ArtifactServiceServer},
+            Artifact, ArtifactRequest, ArtifactResponse, ArtifactSystem, ArtifactsRequest,
+            ArtifactsResponse,
+        },
+    },
     cli::{Cli, Command},
     system::get_system,
 };
@@ -8,15 +17,6 @@ use sha256::digest;
 use std::{collections::HashMap, path::PathBuf};
 use tonic::{transport::Server, Code::NotFound, Request, Response, Status};
 use tracing::info;
-use vorpal_schema::{
-    agent::v0::{agent_service_client::AgentServiceClient, PrepareArtifactRequest},
-    artifact::v0::{
-        artifact_service_client::ArtifactServiceClient,
-        artifact_service_server::{ArtifactService, ArtifactServiceServer},
-        Artifact, ArtifactRequest, ArtifactResponse, ArtifactSystem, ArtifactsRequest,
-        ArtifactsResponse,
-    },
-};
 
 #[derive(Clone)]
 pub struct ConfigContextStore {

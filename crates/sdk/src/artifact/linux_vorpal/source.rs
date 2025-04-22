@@ -1,5 +1,4 @@
-use crate::artifact::ArtifactSourceBuilder;
-use vorpal_schema::artifact::v0::ArtifactSource;
+use crate::{api::artifact::ArtifactSource, artifact::ArtifactSourceBuilder};
 
 pub fn curl(version: &str, digest: &str) -> ArtifactSource {
     let name = "curl";

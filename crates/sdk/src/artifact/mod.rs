@@ -1,11 +1,13 @@
-use crate::context::ConfigContext;
+use crate::{
+    api::artifact::{
+        Artifact, ArtifactSource, ArtifactStep, ArtifactSystem,
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    },
+    context::ConfigContext,
+};
 use anyhow::{anyhow, bail, Result};
 use indoc::formatdoc;
 use std::collections::HashMap;
-use vorpal_schema::artifact::v0::{
-    Artifact, ArtifactSource, ArtifactStep, ArtifactSystem,
-    ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-};
 
 pub mod cargo;
 pub mod clippy;

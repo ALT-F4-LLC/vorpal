@@ -1,13 +1,10 @@
 use crate::{
-    artifact::{get_env_key, linux_vorpal, ArtifactStepBuilder},
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    artifact::{get_env_key, linux_vorpal, ArtifactStep, ArtifactStepBuilder, ArtifactSystem},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
-use vorpal_schema::artifact::v0::{
-    ArtifactStep, ArtifactSystem,
-    ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-};
 
 // TODO: implement amber step
 

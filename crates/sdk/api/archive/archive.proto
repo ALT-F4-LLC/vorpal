@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package vorpal.archive;
+
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/archive";
+
+service ArchiveService {
+    rpc Check(ArchivePullRequest) returns (ArchiveResponse);
+    rpc Pull(ArchivePullRequest) returns (stream ArchivePullResponse);
+    rpc Push(stream ArchivePushRequest) returns (ArchiveResponse);
+}
+
+message ArchivePullRequest {
+    string digest = 1;
+}
+
+message ArchivePushRequest {
+    bytes data = 1;
+    bytes signature = 2;
+    string digest = 3;
+}
+
+message ArchiveResponse {}
+
+message ArchivePullResponse {
+    bytes data = 1;
+}

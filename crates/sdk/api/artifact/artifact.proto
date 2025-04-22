@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package vorpal.artifact;
+
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact";
+
+service ArtifactService {
+    rpc GetArtifact(ArtifactRequest) returns (Artifact);
+    rpc GetArtifacts(ArtifactsRequest) returns (ArtifactsResponse);
+    rpc StoreArtifact(Artifact) returns (ArtifactResponse);
+}
+
+enum ArtifactSystem {
+    UNKNOWN_SYSTEM = 0;
+    AARCH64_DARWIN = 1;
+    AARCH64_LINUX = 2;
+    X8664_DARWIN = 3;
+    X8664_LINUX = 4;
+}
+
+message ArtifactSource {
+    optional string digest = 1;
+    repeated string excludes = 2;
+    repeated string includes = 3;
+    string name = 4;
+    string path = 5;
+}
+
+message ArtifactStep {
+    optional string entrypoint = 1;
+    optional string script = 2;
+    repeated string arguments = 3;
+    repeated string artifacts = 4;
+    repeated string environments = 5;
+}
+
+message Artifact {
+    ArtifactSystem target = 1;
+    repeated ArtifactSource sources = 2;
+    repeated ArtifactStep steps = 3;
+    repeated ArtifactSystem systems = 4;
+    string name = 5;
+}
+
+message ArtifactRequest {
+    string digest = 1;
+}
+
+message ArtifactResponse {
+    string digest = 1;
+}
+
+message ArtifactsRequest {
+    repeated string digests = 1;
+}
+
+message ArtifactsResponse {
+    repeated string digests = 1;
+}

@@ -1,13 +1,13 @@
-use crate::artifact::{cargo, clippy, rust_analyzer, rust_src, rust_std, rustc, rustfmt};
 use crate::{
-    artifact::{get_env_key, language::rust, step, ArtifactBuilder},
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    artifact::{
+        cargo, clippy, get_env_key, language::rust, rust_analyzer, rust_src, rust_std, rustc,
+        rustfmt, step, ArtifactBuilder,
+    },
     context::ConfigContext,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::artifact::v0::ArtifactSystem::{
-    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
-};
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let cargo = cargo::build(context).await?;

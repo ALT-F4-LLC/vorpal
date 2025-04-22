@@ -1,12 +1,10 @@
 use crate::{
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{get_env_key, step, ArtifactBuilder},
     context::ConfigContext,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::artifact::v0::ArtifactSystem::{
-    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
-};
 
 pub async fn devshell<'a>(
     context: &mut ConfigContext,

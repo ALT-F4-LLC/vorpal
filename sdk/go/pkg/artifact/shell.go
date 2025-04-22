@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/template"
 
-	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
@@ -125,10 +125,10 @@ func ScriptDevshell(context *config.ConfigContext, artifacts []*string, environm
 	artifact := NewArtifactBuilder(name)
 
 	artifact = artifact.WithStep(step)
-	artifact = artifact.WithSystem(artifactApi.ArtifactSystem_AARCH64_DARWIN)
-	artifact = artifact.WithSystem(artifactApi.ArtifactSystem_AARCH64_LINUX)
-	artifact = artifact.WithSystem(artifactApi.ArtifactSystem_X8664_DARWIN)
-	artifact = artifact.WithSystem(artifactApi.ArtifactSystem_X8664_LINUX)
+	artifact = artifact.WithSystem(api.ArtifactSystem_AARCH64_DARWIN)
+	artifact = artifact.WithSystem(api.ArtifactSystem_AARCH64_LINUX)
+	artifact = artifact.WithSystem(api.ArtifactSystem_X8664_DARWIN)
+	artifact = artifact.WithSystem(api.ArtifactSystem_X8664_LINUX)
 
 	return artifact.Build(context)
 }

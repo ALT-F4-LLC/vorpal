@@ -1,11 +1,9 @@
 use crate::{
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{language::rust, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::Result;
-use vorpal_schema::artifact::v0::ArtifactSystem::{
-    Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux,
-};
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "rust-src";

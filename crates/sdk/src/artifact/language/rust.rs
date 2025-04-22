@@ -1,17 +1,16 @@
 use crate::{
+    api::artifact::{
+        ArtifactSystem,
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    },
     artifact::{get_env_key, rust_toolchain, script, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use serde::Deserialize;
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 use toml::from_str;
-use vorpal_schema::artifact::v0::{
-    ArtifactSystem,
-    ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-};
 
 #[derive(Debug, Deserialize)]
 struct RustArtifactCargoToml {

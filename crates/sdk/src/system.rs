@@ -1,9 +1,9 @@
-use anyhow::{bail, Result};
-use std::env::consts::{ARCH, OS};
-use vorpal_schema::artifact::v0::{
+use crate::api::artifact::{
     ArtifactSystem,
     ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
 };
+use anyhow::{bail, Result};
+use std::env::consts::{ARCH, OS};
 
 pub fn get_system_default_str() -> String {
     let os = match OS {

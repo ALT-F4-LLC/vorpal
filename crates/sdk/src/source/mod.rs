@@ -1,5 +1,4 @@
-use crate::artifact::ArtifactSourceBuilder;
-use vorpal_schema::artifact::v0::ArtifactSource;
+use crate::{api::artifact::ArtifactSource, artifact::ArtifactSourceBuilder};
 
 pub fn go_tools(name: &str) -> ArtifactSource {
     let source_digest = "b4faf133f053f372cfe8ea3189bf035d19ca1661cb3ac1e7cd34a465de5641c2";

@@ -1,13 +1,13 @@
 use crate::{
-    artifact::{get_env_key, go, step, ArtifactBuilder, ArtifactSourceBuilder},
+    api::artifact::{
+        ArtifactSystem,
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    },
+    artifact::{get_env_key, go, step, ArtifactBuilder, ArtifactSource, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::Result;
 use indoc::formatdoc;
-use vorpal_schema::artifact::v0::{
-    ArtifactSource, ArtifactSystem,
-    ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-};
 
 pub struct GoBuilder<'a> {
     artifacts: Vec<String>,

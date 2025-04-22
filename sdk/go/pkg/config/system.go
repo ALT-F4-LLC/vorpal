@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 )
 
 func GetSystemDefaultStr() string {
@@ -22,17 +22,17 @@ func GetSystemDefaultStr() string {
 	return fmt.Sprintf("%s-%s", goarch, goos)
 }
 
-func GetSystemDefault() (*artifact.ArtifactSystem, error) {
+func GetSystemDefault() (*api.ArtifactSystem, error) {
 	platform := GetSystemDefaultStr()
 
 	return GetSystem(platform)
 }
 
-func GetSystem(system string) (*artifact.ArtifactSystem, error) {
-	aarch64Darwin := artifact.ArtifactSystem_AARCH64_DARWIN
-	aarch64Linux := artifact.ArtifactSystem_AARCH64_LINUX
-	x8664Darwin := artifact.ArtifactSystem_X8664_DARWIN
-	x8664Linux := artifact.ArtifactSystem_X8664_LINUX
+func GetSystem(system string) (*api.ArtifactSystem, error) {
+	aarch64Darwin := api.ArtifactSystem_AARCH64_DARWIN
+	aarch64Linux := api.ArtifactSystem_AARCH64_LINUX
+	x8664Darwin := api.ArtifactSystem_X8664_DARWIN
+	x8664Linux := api.ArtifactSystem_X8664_LINUX
 
 	switch system {
 	case "aarch64-darwin":
