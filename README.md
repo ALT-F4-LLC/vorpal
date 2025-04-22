@@ -27,12 +27,12 @@ async fn main() -> Result<()> {
     let context = &mut get_context().await?;
 
     // 2. Create artifact
-    let example = RustArtifactBuilder::new("example")
+    RustArtifactBuilder::new("example")
         .build(context)
         .await?;
 
     // 3. Run context with artifacts
-    context.run(vec![example]).await
+    context.run().await
 }
 ```
 
@@ -53,7 +53,7 @@ func main() {
     context := config.GetContext()
 
     // 2. Create artifact
-    example, err := language.
+    _, err := language.
         NewRustBuilder("example").
         Build(context)
     if err != nil {
@@ -61,7 +61,7 @@ func main() {
     }
 
     // 3. Run context with artifacts
-    context.Run([]*string{example})
+    context.Run()
 }
 ```
 
@@ -76,10 +76,10 @@ def main():
     context = get_context()
 
     # 2. Create artifact
-    example = rust_artifact(context, "example")
+    rust_artifact(context, "example")
 
     # 3. Run context with artifacts
-    context.run([example])
+    context.run()
 
 if __name__ == "__main__":
     main()
@@ -96,11 +96,11 @@ async function main() {
     const context = await getContext();
 
     // 2. Create artifact
-    const example = await new RustArtifactBuilder('example')
+    await new RustArtifactBuilder('example')
         .build(context);
 
     // 3. Run context with artifacts
-    await context.run([example]);
+    await context.run();
 }
 
 main().catch(console.error);
