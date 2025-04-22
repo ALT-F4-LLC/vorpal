@@ -2,7 +2,7 @@ use crate::build;
 use anyhow::{anyhow, bail, Result};
 use petgraph::{algo::toposort, graphmap::DiGraphMap};
 use port_selector::random_free_port;
-use std::{collections::HashMap, process::Stdio, time::Duration};
+use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process,
@@ -79,16 +79,17 @@ pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Ve
 pub async fn start(
     agent: String,
     artifact: String,
+    artifact_context: PathBuf,
     file: String,
     registry: String,
     system: String,
     variable: Vec<String>,
 ) -> Result<(Child, ArtifactServiceClient<Channel>)> {
-    let port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
+    let command_artifact_context = artifact_context.display().to_string();
+    let command_port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
+    let command_port = command_port.to_string();
 
     let mut command = process::Command::new(file.clone());
-
-    let command_port = port.to_string();
 
     let command_arguments = vec![
         "start",
@@ -96,6 +97,8 @@ pub async fn start(
         &agent,
         "--artifact",
         &artifact,
+        "--artifact-context",
+        &command_artifact_context,
         "--port",
         &command_port,
         "--registry",
@@ -132,11 +135,6 @@ pub async fn start(
                 }
 
                 if line.starts_with("Error: ") {
-                    let _ = config_process
-                        .kill()
-                        .await
-                        .map_err(|_| anyhow!("failed to kill config server"));
-
                     bail!("{}", line.replace("Error: ", ""));
                 } else {
                     info!("{}", line);
@@ -156,7 +154,7 @@ pub async fn start(
         }
     }
 
-    let config_host = format!("http://localhost:{:?}", port);
+    let config_host = format!("http://localhost:{}", command_port);
 
     let mut attempts = 0;
     let max_attempts = 3;

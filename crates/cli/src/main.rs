@@ -3,7 +3,7 @@ use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use console::style;
 use serde::Deserialize;
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, env::current_dir, path::Path};
 use tokio::fs::read;
 use toml::from_str;
 use tonic::transport::Server;
@@ -45,6 +45,13 @@ mod artifact;
 mod build;
 mod config;
 
+fn get_artifact_context_default() -> String {
+    current_dir()
+        .expect("failed to get current directory")
+        .to_string_lossy()
+        .to_string()
+}
+
 #[derive(Subcommand)]
 enum Command {
     Artifact {
@@ -53,6 +60,9 @@ enum Command {
 
         #[arg(default_value = "Vorpal.toml", long)]
         config: String,
+
+        #[arg(default_value_t = get_artifact_context_default(), long)]
+        context: String,
 
         #[arg(default_value_t = false, long)]
         export: bool,
@@ -153,7 +163,8 @@ async fn main() -> Result<()> {
     match &command {
         Command::Artifact {
             agent,
-            config,
+            config: artifact_config,
+            context: artifact_context,
             export: artifact_export,
             name: artifact_name,
             path: artifact_path,
@@ -181,18 +192,32 @@ async fn main() -> Result<()> {
 
             // Setup configuration
 
-            if config.is_empty() {
+            if artifact_config.is_empty() {
                 error!("no `--config` specified");
                 std::process::exit(1);
             }
 
-            let config_path = Path::new(&config);
-
-            if !config_path.exists() {
-                error!("config not found: {}", config_path.display());
+            if artifact_context.is_empty() {
+                error!("no `--context` specified");
                 std::process::exit(1);
             }
 
+            if artifact_name.is_empty() {
+                error!("no `--name` specified");
+                std::process::exit(1);
+            }
+
+            let artifact_context = Path::new(&artifact_context);
+
+            if !artifact_context.exists() {
+                error!(
+                    "artifact 'context' not found: {}",
+                    artifact_context.display()
+                );
+                std::process::exit(1);
+            }
+
+            let config_path = artifact_context.join(artifact_config);
             let config_data_bytes = read(config_path).await.expect("failed to read config");
             let config_data = String::from_utf8_lossy(&config_data_bytes);
             let config: VorpalConfig = from_str(&config_data).expect("failed to parse config");
@@ -203,13 +228,14 @@ async fn main() -> Result<()> {
             }
 
             let config_language = config.language.unwrap();
-            let config_name = config.name.unwrap_or_else(|| "vorpal-config".to_string());
+            let config_name = config.name.unwrap_or_else(|| "vorpal".to_string());
 
             // Build configuration
 
             let mut config_context = ConfigContext::new(
                 agent.to_string(),
                 config_name.to_string(),
+                artifact_context.to_path_buf(),
                 0,
                 registry.to_string(),
                 artifact_system.to_string(),
@@ -304,6 +330,7 @@ async fn main() -> Result<()> {
             let (mut config_process, mut config_client) = match config::start(
                 agent.to_string(),
                 artifact_name.to_string(),
+                artifact_context.to_path_buf(),
                 config_path.display().to_string(),
                 registry.clone(),
                 artifact_system.to_string(),

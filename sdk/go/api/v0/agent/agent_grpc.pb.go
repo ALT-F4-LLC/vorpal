@@ -8,7 +8,6 @@ package agent
 
 import (
 	context "context"
-	artifact "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -27,7 +26,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AgentServiceClient interface {
-	PrepareArtifact(ctx context.Context, in *artifact.Artifact, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PrepareArtifactResponse], error)
+	PrepareArtifact(ctx context.Context, in *PrepareArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PrepareArtifactResponse], error)
 }
 
 type agentServiceClient struct {
@@ -38,13 +37,13 @@ func NewAgentServiceClient(cc grpc.ClientConnInterface) AgentServiceClient {
 	return &agentServiceClient{cc}
 }
 
-func (c *agentServiceClient) PrepareArtifact(ctx context.Context, in *artifact.Artifact, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PrepareArtifactResponse], error) {
+func (c *agentServiceClient) PrepareArtifact(ctx context.Context, in *PrepareArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PrepareArtifactResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[0], AgentService_PrepareArtifact_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[artifact.Artifact, PrepareArtifactResponse]{ClientStream: stream}
+	x := &grpc.GenericClientStream[PrepareArtifactRequest, PrepareArtifactResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -61,7 +60,7 @@ type AgentService_PrepareArtifactClient = grpc.ServerStreamingClient[PrepareArti
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
 type AgentServiceServer interface {
-	PrepareArtifact(*artifact.Artifact, grpc.ServerStreamingServer[PrepareArtifactResponse]) error
+	PrepareArtifact(*PrepareArtifactRequest, grpc.ServerStreamingServer[PrepareArtifactResponse]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -72,7 +71,7 @@ type AgentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentServiceServer struct{}
 
-func (UnimplementedAgentServiceServer) PrepareArtifact(*artifact.Artifact, grpc.ServerStreamingServer[PrepareArtifactResponse]) error {
+func (UnimplementedAgentServiceServer) PrepareArtifact(*PrepareArtifactRequest, grpc.ServerStreamingServer[PrepareArtifactResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method PrepareArtifact not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
@@ -97,11 +96,11 @@ func RegisterAgentServiceServer(s grpc.ServiceRegistrar, srv AgentServiceServer)
 }
 
 func _AgentService_PrepareArtifact_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(artifact.Artifact)
+	m := new(PrepareArtifactRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(AgentServiceServer).PrepareArtifact(m, &grpc.GenericServerStream[artifact.Artifact, PrepareArtifactResponse]{ServerStream: stream})
+	return srv.(AgentServiceServer).PrepareArtifact(m, &grpc.GenericServerStream[PrepareArtifactRequest, PrepareArtifactResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.

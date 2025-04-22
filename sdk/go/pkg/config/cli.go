@@ -10,12 +10,13 @@ import (
 )
 
 type command struct {
-	Agent    string
-	Artifact string
-	Port     int
-	Registry string
-	System   artifactApi.ArtifactSystem
-	Variable map[string]string
+	Agent           string
+	Artifact        string
+	ArtifactContext string
+	Port            int
+	Registry        string
+	System          artifactApi.ArtifactSystem
+	Variable        map[string]string
 }
 
 func newCommand() (*command, error) {
@@ -25,6 +26,7 @@ func newCommand() (*command, error) {
 
 	startAgent := startCmd.String("agent", "http://localhost:23151", "agent to use")
 	startArtifact := startCmd.String("artifact", "", "artifact to use")
+	startArtifactContext := startCmd.String("artifact-context", "", "artifact context to use")
 	startPort := startCmd.Int("port", 0, "port to listen on")
 	startRegistry := startCmd.String("registry", "http://localhost:23151", "registry to use")
 	startSystem := startCmd.String("system", GetSystemDefaultStr(), "system to use")
@@ -35,23 +37,27 @@ func newCommand() (*command, error) {
 		startCmd.Parse(os.Args[2:])
 
 		if *startAgent == "" {
-			return nil, fmt.Errorf("agent is required")
+			return nil, fmt.Errorf("--agent is required")
 		}
 
 		if *startArtifact == "" {
-			return nil, fmt.Errorf("artifact is required")
+			return nil, fmt.Errorf("--artifact is required")
+		}
+
+		if *startArtifactContext == "" {
+			return nil, fmt.Errorf("--artifact-context is required")
 		}
 
 		if *startPort == 0 {
-			return nil, fmt.Errorf("port is required")
+			return nil, fmt.Errorf("--port is required")
 		}
 
 		if *startRegistry == "" {
-			return nil, fmt.Errorf("registry is required")
+			return nil, fmt.Errorf("--registry is required")
 		}
 
 		if *startSystem == "" {
-			return nil, fmt.Errorf("system is required")
+			return nil, fmt.Errorf("--system is required")
 		}
 
 		system, err := GetSystem(*startSystem)
@@ -75,12 +81,13 @@ func newCommand() (*command, error) {
 		}
 
 		return &command{
-			Agent:    *startAgent,
-			Artifact: *startArtifact,
-			Port:     *startPort,
-			Registry: *startRegistry,
-			System:   *system,
-			Variable: variable,
+			Agent:           *startAgent,
+			Artifact:        *startArtifact,
+			ArtifactContext: *startArtifactContext,
+			Port:            *startPort,
+			Registry:        *startRegistry,
+			System:          *system,
+			Variable:        variable,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown command")

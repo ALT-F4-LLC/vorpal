@@ -38,12 +38,13 @@ type ConfigContextStore struct {
 }
 
 type ConfigContext struct {
-	agent    string
-	artifact string
-	port     int
-	registry string
-	store    ConfigContextStore
-	system   artifactApi.ArtifactSystem
+	agent           string
+	artifact        string
+	artifactContext string
+	port            int
+	registry        string
+	store           ConfigContextStore
+	system          artifactApi.ArtifactSystem
 }
 
 type ArtifactServer struct {
@@ -101,12 +102,13 @@ func GetContext() *ConfigContext {
 	}
 
 	return &ConfigContext{
-		agent:    cmd.Agent,
-		artifact: cmd.Artifact,
-		port:     cmd.Port,
-		registry: cmd.Registry,
-		store:    store,
-		system:   cmd.System,
+		agent:           cmd.Agent,
+		artifact:        cmd.Artifact,
+		artifactContext: cmd.ArtifactContext,
+		port:            cmd.Port,
+		registry:        cmd.Registry,
+		store:           store,
+		system:          cmd.System,
 	}
 }
 
@@ -137,7 +139,12 @@ func (c *ConfigContext) AddArtifact(artifact *artifactApi.Artifact) (*string, er
 
 	client := agentApi.NewAgentServiceClient(clientConn)
 
-	clientResponse, err := client.PrepareArtifact(context.Background(), artifact)
+	clientReqest := &agentApi.PrepareArtifactRequest{
+		Artifact:        artifact,
+		ArtifactContext: c.artifactContext,
+	}
+
+	clientResponse, err := client.PrepareArtifact(context.Background(), clientReqest)
 	if err != nil {
 		return nil, fmt.Errorf("error preparing artifact: %v", err)
 	}

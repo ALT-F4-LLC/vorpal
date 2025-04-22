@@ -7,7 +7,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use vorpal_schema::{
     agent::v0::{
         agent_service_server::{AgentService, AgentServiceServer},
-        PrepareArtifactResponse,
+        PrepareArtifactRequest, PrepareArtifactResponse,
     },
     artifact::v0::{Artifact, ArtifactSource},
 };
@@ -26,22 +26,33 @@ impl AgentServer {
 
 async fn prepare_artifact(
     registry: String,
-    request: Request<Artifact>,
+    request: Request<PrepareArtifactRequest>,
     tx: &mpsc::Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<(), Status> {
-    let artifact = request.into_inner();
+    let request = request.into_inner();
+
+    if request.artifact.is_none() {
+        return Err(Status::invalid_argument("'artifact' is required"));
+    }
+
+    let artifact = request.artifact.unwrap();
 
     // TODO: Check if artifact already exists in the registry
 
     let mut artifact_sources = vec![];
 
     for source in artifact.sources.into_iter() {
-        let digest = build_source(registry.clone(), &source, &tx.clone())
-            .await
-            .map_err(|err| Status::internal(format!("{}", err)))?;
+        let source_digest = build_source(
+            request.artifact_context.clone(),
+            registry.clone(),
+            &source,
+            &tx.clone(),
+        )
+        .await
+        .map_err(|err| Status::internal(format!("{}", err)))?;
 
         let source = ArtifactSource {
-            digest: Some(digest.to_string()),
+            digest: Some(source_digest.to_string()),
             excludes: source.excludes,
             includes: source.includes,
             name: source.name,
@@ -89,7 +100,7 @@ impl AgentService for AgentServer {
 
     async fn prepare_artifact(
         &self,
-        request: Request<Artifact>,
+        request: Request<PrepareArtifactRequest>,
     ) -> Result<Response<Self::PrepareArtifactStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
