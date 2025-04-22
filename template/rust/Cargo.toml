@@ -1,0 +1,3 @@
+[workspace]
+members = ["example", "vorpal"]
+resolver = "2"

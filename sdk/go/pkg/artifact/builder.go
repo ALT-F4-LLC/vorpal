@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
@@ -27,11 +27,11 @@ type ArtifactSourceBuilder struct {
 }
 
 type ArtifactStepBuilder struct {
-	Arguments    map[artifact.ArtifactSystem][]string
-	Artifacts    map[artifact.ArtifactSystem][]*string
-	Entrypoint   map[artifact.ArtifactSystem]string
-	Environments map[artifact.ArtifactSystem][]string
-	Script       map[artifact.ArtifactSystem]string
+	Arguments    map[api.ArtifactSystem][]string
+	Artifacts    map[api.ArtifactSystem][]*string
+	Entrypoint   map[api.ArtifactSystem]string
+	Environments map[api.ArtifactSystem][]string
+	Script       map[api.ArtifactSystem]string
 }
 
 type ArtifactTaskBuilder struct {
@@ -48,9 +48,9 @@ type ArtifactVariableBuilder struct {
 
 type ArtifactBuilder struct {
 	Name    string
-	Sources []*artifact.ArtifactSource
-	Steps   []*artifact.ArtifactStep
-	Systems []artifact.ArtifactSystem
+	Sources []*api.ArtifactSource
+	Steps   []*api.ArtifactStep
+	Systems []api.ArtifactSystem
 }
 
 type ArtifactProcessScriptTemplateVars struct {
@@ -169,10 +169,10 @@ func (a *ArtifactProcessBuilder) Build(ctx *config.ConfigContext) (*string, erro
 
 	return NewArtifactBuilder(a.Name).
 		WithStep(step).
-		WithSystem(artifact.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(artifact.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(artifact.ArtifactSystem_X8664_DARWIN).
-		WithSystem(artifact.ArtifactSystem_X8664_LINUX).
+		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
+		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
+		WithSystem(api.ArtifactSystem_X8664_DARWIN).
+		WithSystem(api.ArtifactSystem_X8664_LINUX).
 		Build(ctx)
 }
 
@@ -201,13 +201,13 @@ func (a *ArtifactSourceBuilder) WithIncludes(includes []string) *ArtifactSourceB
 	return a
 }
 
-func (a *ArtifactSourceBuilder) Build() artifact.ArtifactSource {
+func (a *ArtifactSourceBuilder) Build() api.ArtifactSource {
 	var digest *string
 	if a.Digest != nil {
 		digest = a.Digest
 	}
 
-	return artifact.ArtifactSource{
+	return api.ArtifactSource{
 		Digest:   digest,
 		Includes: a.Includes,
 		Excludes: a.Excludes,
@@ -218,59 +218,62 @@ func (a *ArtifactSourceBuilder) Build() artifact.ArtifactSource {
 
 func NewArtifactStepBuilder() *ArtifactStepBuilder {
 	return &ArtifactStepBuilder{
-		Arguments:    make(map[artifact.ArtifactSystem][]string),
-		Artifacts:    make(map[artifact.ArtifactSystem][]*string),
-		Entrypoint:   make(map[artifact.ArtifactSystem]string),
-		Environments: make(map[artifact.ArtifactSystem][]string),
-		Script:       make(map[artifact.ArtifactSystem]string),
+		Arguments:    make(map[api.ArtifactSystem][]string),
+		Artifacts:    make(map[api.ArtifactSystem][]*string),
+		Entrypoint:   make(map[api.ArtifactSystem]string),
+		Environments: make(map[api.ArtifactSystem][]string),
+		Script:       make(map[api.ArtifactSystem]string),
 	}
 }
 
-func (a *ArtifactStepBuilder) WithArguments(arguments []string, systems []artifact.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStepBuilder) WithArguments(arguments []string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
 	for _, system := range systems {
 		a.Arguments[system] = arguments
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithArtifacts(artifacts []*string, systems []artifact.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStepBuilder) WithArtifacts(artifacts []*string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
 	for _, system := range systems {
 		a.Artifacts[system] = artifacts
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithEntrypoint(entrypoint string, systems []artifact.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStepBuilder) WithEntrypoint(entrypoint string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
 	for _, system := range systems {
 		a.Entrypoint[system] = entrypoint
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithEnvironments(environments []string, systems []artifact.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStepBuilder) WithEnvironments(environments []string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
 	for _, system := range systems {
 		a.Environments[system] = environments
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithScript(script string, systems []artifact.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStepBuilder) WithScript(script string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
 	for _, system := range systems {
 		a.Script[system] = script
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) *artifact.ArtifactStep {
-	stepTarget := ctx.GetTarget()
+func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactStep, error) {
+	stepTarget, err := ctx.GetTarget()
+	if err != nil {
+		return nil, err
+	}
 
 	stepArguments := []string{}
-	if args, ok := a.Arguments[stepTarget]; ok {
+	if args, ok := a.Arguments[*stepTarget]; ok {
 		stepArguments = args
 	}
 
 	stepArtifacts := []string{}
-	if arts, ok := a.Artifacts[stepTarget]; ok {
+	if arts, ok := a.Artifacts[*stepTarget]; ok {
 		artifacts := make([]string, len(arts))
 
 		for i, art := range arts {
@@ -283,27 +286,27 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) *artifact.Artifac
 	}
 
 	stepEnvironments := []string{}
-	if envs, ok := a.Environments[stepTarget]; ok {
+	if envs, ok := a.Environments[*stepTarget]; ok {
 		stepEnvironments = envs
 	}
 
 	var stepEntrypoint *string
-	if entry, ok := a.Entrypoint[stepTarget]; ok {
+	if entry, ok := a.Entrypoint[*stepTarget]; ok {
 		stepEntrypoint = &entry
 	}
 
 	var stepScript *string
-	if scr, ok := a.Script[stepTarget]; ok {
+	if scr, ok := a.Script[*stepTarget]; ok {
 		stepScript = &scr
 	}
 
-	return &artifact.ArtifactStep{
+	return &api.ArtifactStep{
 		Arguments:    stepArguments,
 		Artifacts:    stepArtifacts,
 		Entrypoint:   stepEntrypoint,
 		Environments: stepEnvironments,
 		Script:       stepScript,
-	}
+	}, nil
 }
 
 func NewArtifactTaskBuilder(name string, script string) *ArtifactTaskBuilder {
@@ -327,10 +330,10 @@ func (a *ArtifactTaskBuilder) Build(ctx *config.ConfigContext) (*string, error) 
 
 	return NewArtifactBuilder(a.Name).
 		WithStep(step).
-		WithSystem(artifact.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(artifact.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(artifact.ArtifactSystem_X8664_DARWIN).
-		WithSystem(artifact.ArtifactSystem_X8664_LINUX).
+		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
+		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
+		WithSystem(api.ArtifactSystem_X8664_DARWIN).
+		WithSystem(api.ArtifactSystem_X8664_LINUX).
 		Build(ctx)
 }
 
@@ -365,13 +368,13 @@ func (v *ArtifactVariableBuilder) Build(ctx *config.ConfigContext) (*string, err
 func NewArtifactBuilder(name string) *ArtifactBuilder {
 	return &ArtifactBuilder{
 		Name:    name,
-		Sources: []*artifact.ArtifactSource{},
-		Steps:   []*artifact.ArtifactStep{},
-		Systems: []artifact.ArtifactSystem{},
+		Sources: []*api.ArtifactSource{},
+		Steps:   []*api.ArtifactStep{},
+		Systems: []api.ArtifactSystem{},
 	}
 }
 
-func (a *ArtifactBuilder) WithSource(source *artifact.ArtifactSource) *ArtifactBuilder {
+func (a *ArtifactBuilder) WithSource(source *api.ArtifactSource) *ArtifactBuilder {
 	if !slices.Contains(a.Sources, source) {
 		a.Sources = append(a.Sources, source)
 	}
@@ -379,7 +382,7 @@ func (a *ArtifactBuilder) WithSource(source *artifact.ArtifactSource) *ArtifactB
 	return a
 }
 
-func (a *ArtifactBuilder) WithStep(step *artifact.ArtifactStep) *ArtifactBuilder {
+func (a *ArtifactBuilder) WithStep(step *api.ArtifactStep) *ArtifactBuilder {
 	if !slices.Contains(a.Steps, step) {
 		a.Steps = append(a.Steps, step)
 	}
@@ -387,7 +390,7 @@ func (a *ArtifactBuilder) WithStep(step *artifact.ArtifactStep) *ArtifactBuilder
 	return a
 }
 
-func (a *ArtifactBuilder) WithSystem(system artifact.ArtifactSystem) *ArtifactBuilder {
+func (a *ArtifactBuilder) WithSystem(system api.ArtifactSystem) *ArtifactBuilder {
 	if !slices.Contains(a.Systems, system) {
 		a.Systems = append(a.Systems, system)
 	}
@@ -396,14 +399,17 @@ func (a *ArtifactBuilder) WithSystem(system artifact.ArtifactSystem) *ArtifactBu
 }
 
 func (a *ArtifactBuilder) Build(ctx *config.ConfigContext) (*string, error) {
-	artifactTarget := ctx.GetTarget()
+	artifactTarget, err := ctx.GetTarget()
+	if err != nil {
+		return nil, err
+	}
 
-	artifact := artifact.Artifact{
+	artifact := api.Artifact{
 		Name:    a.Name,
 		Sources: a.Sources,
 		Steps:   a.Steps,
 		Systems: a.Systems,
-		Target:  artifactTarget,
+		Target:  *artifactTarget,
 	}
 
 	if len(artifact.Steps) == 0 {

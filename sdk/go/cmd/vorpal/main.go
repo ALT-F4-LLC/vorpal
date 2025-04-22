@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"strings"
 	"text/template"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
@@ -57,15 +58,7 @@ func vorpal(context *config.ConfigContext) (*string, error) {
 	return language.NewRustBuilder(name).
 		WithArtifacts([]*string{protoc}).
 		WithBins([]string{name}).
-		WithPackages([]string{
-			"crates/agent",
-			"crates/cli",
-			"crates/registry",
-			"crates/schema",
-			"crates/sdk",
-			"crates/store",
-			"crates/worker",
-		}).
+		WithPackages([]string{"cli", "sdk/rust", "template"}).
 		Build(context)
 }
 
@@ -188,11 +181,6 @@ func vorpalRelease(context *config.ConfigContext) (*string, error) {
 }
 
 func vorpalShell(context *config.ConfigContext) (*string, error) {
-	gh, err := artifact.Gh(context)
-	if err != nil {
-		return nil, err
-	}
-
 	gobin, err := artifact.GoBin(context)
 	if err != nil {
 		return nil, err
@@ -228,36 +216,80 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
+	rustToolchain, err := artifact.RustToolchain(context)
+	if err != nil {
+		return nil, err
+	}
+
 	staticcheck, err := artifact.Staticcheck(context)
 	if err != nil {
 		return nil, err
 	}
 
-	vorpalProcess, err := vorpalProcess(context)
+	artifacts := []*string{
+		gobin,
+		goimports,
+		gopls,
+		grpcurl,
+		protoc,
+		protocGenGo,
+		protocGenGoGRPC,
+		rustToolchain,
+		staticcheck,
+	}
+
+	contextTarget, err := context.GetTarget()
 	if err != nil {
 		return nil, err
 	}
 
-	nginx, err := artifact.Nginx(context)
+	rustToolchainTarget, err := artifact.RustToolchainTarget(contextTarget)
 	if err != nil {
 		return nil, err
 	}
 
-	return language.NewRustShellBuilder("vorpal-shell").
-		WithArtifacts([]*string{
-			gh,
-			gobin,
-			goimports,
-			gopls,
-			grpcurl,
-			nginx,
-			protoc,
-			protocGenGo,
-			protocGenGoGRPC,
-			staticcheck,
-			vorpalProcess,
-		}).
-		Build(context)
+	rustToolchainName := fmt.Sprintf(
+		"%s-%s",
+		artifact.RustToolchainVersion(),
+		*rustToolchainTarget,
+	)
+
+	rustToolchainPath := fmt.Sprintf(
+		"%s/toolchains/%s/bin",
+		artifact.GetEnvKey(rustToolchain),
+		rustToolchainName,
+	)
+
+	paths := []string{rustToolchainPath}
+
+	for _, art := range artifacts {
+		if art == nil || art == rustToolchain {
+			continue
+		}
+
+		paths = append(paths, fmt.Sprintf("%s/bin", artifact.GetEnvKey(art)))
+	}
+
+	goarch, err := language.GetGOARCH(*contextTarget)
+	if err != nil {
+		return nil, err
+	}
+
+	goos, err := language.GetGOOS(*contextTarget)
+	if err != nil {
+		return nil, err
+	}
+
+	environments := []string{
+		"CGO_ENABLED=0",
+		fmt.Sprintf("GOARCH=%s", *goarch),
+		fmt.Sprintf("GOOS=%s", *goos),
+		fmt.Sprintf("PATH=%s", strings.Join(paths, ":")),
+		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(rustToolchain)),
+		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rustToolchainName),
+	}
+
+	return artifact.ScriptDevshell(context, artifacts, environments, "vorpal-shell")
 }
 
 func vorpalTest(context *config.ConfigContext) (*string, error) {

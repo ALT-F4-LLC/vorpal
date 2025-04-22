@@ -2,4 +2,4 @@ language = "rust"
 name = "vorpal-config"
 
 [source]
-includes = ["crates/config", "crates/schema", "crates/sdk"]
+includes = ["config", "sdk/rust"]

@@ -7,20 +7,10 @@ import (
 	"strings"
 	"text/template"
 
-	artifactApi "github.com/ALT-F4-LLC/vorpal/sdk/go/api/v0/artifact"
+	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
-
-type GoBuilder struct {
-	artifacts      []*string
-	buildDirectory *string
-	buildPath      *string
-	includes       []string
-	name           string
-	source         *artifactApi.ArtifactSource
-	sourceScripts  []string
-}
 
 type GoScriptTemplateArgs struct {
 	BuildDirectory string
@@ -28,6 +18,16 @@ type GoScriptTemplateArgs struct {
 	Name           string
 	SourceDir      string
 	SourceScripts  string
+}
+
+type GoBuilder struct {
+	artifacts      []*string
+	buildDirectory *string
+	buildPath      *string
+	includes       []string
+	name           string
+	source         *api.ArtifactSource
+	sourceScripts  []string
 }
 
 const GoScriptTemplate = `
@@ -43,34 +43,34 @@ go build -C {{.BuildDirectory}} -o $VORPAL_OUTPUT/bin/{{.Name}} {{.BuildPath}}
 
 go clean -modcache`
 
-func GetGOOS(target artifactApi.ArtifactSystem) string {
+func GetGOOS(target api.ArtifactSystem) (*string, error) {
 	var goos string
 
 	switch target {
-	case artifactApi.ArtifactSystem_AARCH64_DARWIN, artifactApi.ArtifactSystem_X8664_DARWIN:
+	case api.ArtifactSystem_AARCH64_DARWIN, api.ArtifactSystem_X8664_DARWIN:
 		goos = "darwin"
-	case artifactApi.ArtifactSystem_AARCH64_LINUX, artifactApi.ArtifactSystem_X8664_LINUX:
+	case api.ArtifactSystem_AARCH64_LINUX, api.ArtifactSystem_X8664_LINUX:
 		goos = "linux"
 	default:
-		panic("Unsupported target system")
+		return nil, fmt.Errorf("unsupported target system: %s", target)
 	}
 
-	return goos
+	return &goos, nil
 }
 
-func GetGOARCH(target artifactApi.ArtifactSystem) string {
+func GetGOARCH(target api.ArtifactSystem) (*string, error) {
 	var goarch string
 
 	switch target {
-	case artifactApi.ArtifactSystem_AARCH64_DARWIN, artifactApi.ArtifactSystem_AARCH64_LINUX:
+	case api.ArtifactSystem_AARCH64_DARWIN, api.ArtifactSystem_AARCH64_LINUX:
 		goarch = "arm64"
-	case artifactApi.ArtifactSystem_X8664_DARWIN, artifactApi.ArtifactSystem_X8664_LINUX:
+	case api.ArtifactSystem_X8664_DARWIN, api.ArtifactSystem_X8664_LINUX:
 		goarch = "amd64"
 	default:
-		panic("Unsupported target system")
+		return nil, fmt.Errorf("unsupported target system: %s", target)
 	}
 
-	return goarch
+	return &goarch, nil
 }
 
 func NewGoBuilder(name string) *GoBuilder {
@@ -105,7 +105,7 @@ func (b *GoBuilder) WithIncludes(includes []string) *GoBuilder {
 	return b
 }
 
-func (b *GoBuilder) WithSource(source *artifactApi.ArtifactSource) *GoBuilder {
+func (b *GoBuilder) WithSource(source *api.ArtifactSource) *GoBuilder {
 	b.source = source
 	return b
 }
@@ -125,7 +125,7 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 
 	sourcePath := "."
 
-	var source *artifactApi.ArtifactSource
+	var source *api.ArtifactSource
 
 	if builder.source != nil {
 		source = builder.source
@@ -181,11 +181,26 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 	artifacts = append(artifacts, goBin)
 	artifacts = append(artifacts, builder.artifacts...)
 
+	target, err := context.GetTarget()
+	if err != nil {
+		return nil, err
+	}
+
+	goarch, err := GetGOARCH(*target)
+	if err != nil {
+		return nil, err
+	}
+
+	goos, err := GetGOOS(*target)
+	if err != nil {
+		return nil, err
+	}
+
 	environments := []string{
 		"CGO_ENABLED=0",
-		fmt.Sprintf("GOARCH=%s", GetGOARCH(context.GetTarget())),
+		fmt.Sprintf("GOARCH=%s", *goarch),
 		"GOCACHE=$VORPAL_WORKSPACE/go/cache",
-		fmt.Sprintf("GOOS=%s", GetGOOS(context.GetTarget())),
+		fmt.Sprintf("GOOS=%s", *goos),
 		"GOPATH=$VORPAL_WORKSPACE/go",
 		fmt.Sprintf("PATH=%s/bin", artifact.GetEnvKey(goBin)),
 	}
@@ -198,9 +213,9 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 	return artifact.NewArtifactBuilder(builder.name).
 		WithSource(source).
 		WithStep(step).
-		WithSystem(artifactApi.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(artifactApi.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(artifactApi.ArtifactSystem_X8664_DARWIN).
-		WithSystem(artifactApi.ArtifactSystem_X8664_LINUX).
+		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
+		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
+		WithSystem(api.ArtifactSystem_X8664_DARWIN).
+		WithSystem(api.ArtifactSystem_X8664_LINUX).
 		Build(context)
 }

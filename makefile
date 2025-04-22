@@ -59,36 +59,36 @@ vendor:
 # Vorpal
 
 generate:
-	rm -rfv sdk/go/api
-	mkdir -pv sdk/go/api
+	rm -rfv sdk/go/pkg/api
+	mkdir -pv sdk/go/pkg/api
 	protoc \
 		--go_opt=paths=source_relative \
-		--go_out=sdk/go/api \
+		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
-		--go-grpc_out=sdk/go/api \
-		--proto_path=crates/schema/api \
-		v0/agent/agent.proto
+		--go-grpc_out=sdk/go/pkg/api \
+		--proto_path=crates/sdk/api \
+		agent/agent.proto
 	protoc \
 		--go_opt=paths=source_relative \
-		--go_out=sdk/go/api \
+		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
-		--go-grpc_out=sdk/go/api \
-		--proto_path=crates/schema/api \
-		v0/artifact/artifact.proto
+		--go-grpc_out=sdk/go/pkg/api \
+		--proto_path=crates/sdk/api \
+		artifact/artifact.proto
 	protoc \
 		--go_opt=paths=source_relative \
-		--go_out=sdk/go/api \
+		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
-		--go-grpc_out=sdk/go/api \
-		--proto_path=crates/schema/api \
-		v0/archive/archive.proto
+		--go-grpc_out=sdk/go/pkg/api \
+		--proto_path=crates/sdk/api \
+		archive/archive.proto
 	protoc \
 		--go_opt=paths=source_relative \
-		--go_out=sdk/go/api \
+		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
-		--go-grpc_out=sdk/go/api \
-		--proto_path=crates/schema/api \
-		v0/worker/worker.proto
+		--go-grpc_out=sdk/go/pkg/api \
+		--proto_path=crates/sdk/api \
+		worker/worker.proto
 
 # Development (with Vorpal)
 

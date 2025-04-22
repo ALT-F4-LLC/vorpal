@@ -1,0 +1,43 @@
+[package]
+edition = "2021"
+name = "vorpal-cli"
+publish = false
+version = "0.1.0-alpha"
+
+[[bin]]
+name = "vorpal"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { version = "1" }
+async-compression = { features = ["all"], version = "0" }
+async_zip = { features = ["deflate", "tokio"], version = "0" }
+aws-config = { version = "1" }
+aws-sdk-s3 = { version = "1" }
+clap = { version = "4" }
+filetime = { version = "0" }
+futures-lite = { version = "2" }
+infer = { version = "0" }
+inquire = { version = "0" }
+petgraph = { version = "0" }
+port-selector = { version = "0" }
+reqwest = { default-features = false, features = ["json", "rustls-tls"], version = "0" }
+rsa = { features = ["sha2"], version = "0" }
+sanitize-filename = { version = "0" }
+serde = { version = "1" }
+serde_json = { version = "1" }
+sha256 = { version = "1" }
+thiserror = { version = "2" }
+tokio = { features = ["process", "rt-multi-thread"], version = "1" }
+tokio-stream = { features = ["io-util"], version = "0" }
+tokio-tar = { version = "0" }
+tokio-util = { features = ["compat"], version = "0" }
+toml = { version = "0" }
+tonic = { version = "0" }
+tonic-health = { version = "0" }
+tracing = { version = "0" }
+tracing-subscriber = { version = "0" }
+url = { version = "2" }
+uuid = { features = ["v7"], version = "1" }
+vorpal-sdk = { path = "../sdk/rust" }
+walkdir = { version = "2" }

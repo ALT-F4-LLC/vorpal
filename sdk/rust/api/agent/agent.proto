@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package vorpal.agent;
+
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent";
+
+import "artifact/artifact.proto";
+
+service AgentService {
+    rpc PrepareArtifact(PrepareArtifactRequest) returns (stream PrepareArtifactResponse) {}
+}
+
+message PrepareArtifactRequest {
+  string artifact_context = 1;
+  vorpal.artifact.Artifact artifact = 2;
+}
+
+message PrepareArtifactResponse {
+  optional string artifact_digest = 1;
+  optional string artifact_output = 2;
+  vorpal.artifact.Artifact artifact = 3;
+}

@@ -1,0 +1,15 @@
+[package]
+edition = "2021"
+name = "vorpal-config"
+publish = false
+version = "0.1.0-alpha"
+
+[[bin]]
+name = "vorpal-config"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { version = "1" }
+indoc = { version = "2" }
+tokio = { features = ["rt-multi-thread"], version = "1" }
+vorpal-sdk = { path = "../sdk/rust" }

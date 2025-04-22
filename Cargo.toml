@@ -1,12 +1,4 @@
 [workspace]
-members = [
-    "crates/agent",
-    "crates/cli",
-    "crates/config",
-    "crates/registry",
-    "crates/schema",
-    "crates/sdk",
-    "crates/store",
-    "crates/worker"
-]
+exclude = ["template/rust"]
+members = ["cli", "config", "sdk/rust"]
 resolver = "2"
