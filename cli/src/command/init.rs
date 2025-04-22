@@ -50,6 +50,7 @@ pub async fn run(level: Level) -> Result<()> {
                 );
 
                 template.insert("go.mod", include_str!("../../../template/go/go.mod"));
+                template.insert("go.sum", include_str!("../../../template/go/go.sum"));
             }
 
             "Rust" => {
