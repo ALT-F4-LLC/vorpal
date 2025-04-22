@@ -2,7 +2,7 @@ use crate::command::{
     start::{
         agent::AgentServer,
         registry::{
-            get_archive_backend, get_artifact_backend, ArchiveServer, ArtifactServer, ServerBackend,
+            backend_archive, backend_artifact, ArchiveServer, ArtifactServer, ServerBackend,
         },
         worker::WorkerServer,
     },
@@ -81,11 +81,10 @@ pub async fn run(
         }
 
         let backend_archive =
-            get_archive_backend(registry_backend.clone(), registry_backend_s3_bucket.clone())
-                .await?;
+            backend_archive(registry_backend.clone(), registry_backend_s3_bucket.clone()).await?;
 
         let backend_artifact =
-            get_artifact_backend(&registry_backend, registry_backend_s3_bucket).await?;
+            backend_artifact(&registry_backend, registry_backend_s3_bucket).await?;
 
         info!("registry service: [::]:{}", port);
 

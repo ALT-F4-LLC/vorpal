@@ -308,7 +308,7 @@ impl ArtifactService for ArtifactServer {
     }
 }
 
-pub async fn get_archive_backend(
+pub async fn backend_archive(
     registry_backend: String,
     registry_backend_s3_bucket: Option<String>,
 ) -> Result<Box<dyn ArchiveBackend>> {
@@ -329,7 +329,7 @@ pub async fn get_archive_backend(
     Ok(backend_archive)
 }
 
-pub async fn get_artifact_backend(
+pub async fn backend_artifact(
     registry_backend: &str,
     registry_backend_s3_bucket: Option<String>,
 ) -> Result<Box<dyn ArtifactBackend>> {
