@@ -1,0 +1,9 @@
+[package]
+edition = "2021"
+name = "vorpal-example"
+publish = false
+version = "0.1.0"
+
+[[bin]]
+name = "example"
+path = "src/main.rs"

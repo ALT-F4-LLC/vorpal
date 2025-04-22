@@ -18,15 +18,7 @@ async fn vorpal(context: &mut ConfigContext) -> Result<String> {
     RustBuilder::new(name)
         .with_artifacts(vec![protoc])
         .with_bins(vec![name])
-        .with_packages(vec![
-            "crates/agent",
-            "crates/cli",
-            "crates/registry",
-            "crates/schema",
-            "crates/sdk",
-            "crates/store",
-            "crates/worker",
-        ])
+        .with_packages(vec!["cli", "sdk/rust"])
         .build(context)
         .await
 }

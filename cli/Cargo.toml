@@ -38,5 +38,5 @@ tracing = { version = "0" }
 tracing-subscriber = { version = "0" }
 url = { version = "2" }
 uuid = { features = ["v7"], version = "1" }
-vorpal-sdk = { path = "../sdk" }
+vorpal-sdk = { path = "../sdk/rust" }
 walkdir = { version = "2" }
