@@ -1,5 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::ArtifactSystem,
     artifact::{get_env_key, rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
@@ -12,6 +12,7 @@ use toml::from_str;
 #[derive(Debug, Deserialize)]
 struct RustArtifactCargoToml {
     bin: Option<Vec<RustArtifactCargoTomlBinary>>,
+    package: Option<RustArtifactCargoTomlPackage>,
     workspace: Option<RustArtifactCargoTomlWorkspace>,
 }
 
@@ -19,6 +20,12 @@ struct RustArtifactCargoToml {
 struct RustArtifactCargoTomlBinary {
     name: String,
     path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RustArtifactCargoTomlPackage {
+    name: String,
+    // version: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,21 +40,23 @@ pub struct RustBuilder<'a> {
     check: bool,
     excludes: Vec<&'a str>,
     format: bool,
+    includes: Vec<&'a str>,
     lint: bool,
     name: &'a str,
     packages: Vec<String>,
     source: Option<String>,
     tests: bool,
+    systems: Vec<ArtifactSystem>,
 }
 
-fn read_cargo(path: &str) -> Result<RustArtifactCargoToml> {
+fn parse_cargo(path: &str) -> Result<RustArtifactCargoToml> {
     let contents = fs::read_to_string(path).expect("Failed to read Cargo.toml");
 
     Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
 
 impl<'a> RustBuilder<'a> {
-    pub fn new(name: &'a str) -> Self {
+    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],
             bins: vec![],
@@ -55,11 +64,13 @@ impl<'a> RustBuilder<'a> {
             check: false,
             excludes: vec![],
             format: false,
+            includes: vec![],
             lint: false,
             name,
             packages: vec![],
             source: None,
             tests: false,
+            systems,
         }
     }
 
@@ -88,6 +99,11 @@ impl<'a> RustBuilder<'a> {
         self
     }
 
+    pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
+        self.includes = includes;
+        self
+    }
+
     pub fn with_lint(mut self, lint: bool) -> Self {
         self.lint = lint;
         self
@@ -109,9 +125,7 @@ impl<'a> RustBuilder<'a> {
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        // 1. READ CARGO.TOML FILES
-
-        // Get the source path
+        // Parse source path
 
         let source_path = match self.source {
             Some(ref source) => Path::new(source),
@@ -120,15 +134,15 @@ impl<'a> RustBuilder<'a> {
 
         if !source_path.exists() {
             bail!(
-                "Artifact `source.{}.path` not found: {:?}",
+                "`source.{}.path` not found: {}",
                 self.name,
-                source_path
+                source_path.display()
             );
         }
 
         let source_path_str = source_path.display().to_string();
 
-        // Load root cargo.toml
+        // Parse cargo.toml
 
         let source_cargo_path = source_path.join("Cargo.toml");
 
@@ -136,7 +150,7 @@ impl<'a> RustBuilder<'a> {
             bail!("Cargo.toml not found: {:?}", source_cargo_path);
         }
 
-        let source_cargo = read_cargo(source_cargo_path.to_str().unwrap())?;
+        let source_cargo = parse_cargo(source_cargo_path.to_str().unwrap())?;
 
         // TODO: implement for non-workspace based projects
 
@@ -150,10 +164,6 @@ impl<'a> RustBuilder<'a> {
         if let Some(workspace) = source_cargo.workspace {
             if let Some(pkgs) = workspace.members {
                 for package in pkgs {
-                    if !self.packages.is_empty() && !self.packages.contains(&package) {
-                        continue;
-                    }
-
                     let package_path = source_path.join(package.clone());
                     let package_cargo_path = package_path.join("Cargo.toml");
 
@@ -161,7 +171,15 @@ impl<'a> RustBuilder<'a> {
                         bail!("Cargo.toml not found: {:?}", package_cargo_path);
                     }
 
-                    let package_cargo = read_cargo(package_cargo_path.to_str().unwrap())?;
+                    let package_cargo = parse_cargo(package_cargo_path.to_str().unwrap())?;
+
+                    if !self.packages.is_empty() {
+                        if let Some(package) = package_cargo.package {
+                            if !self.packages.contains(&package.name) {
+                                continue;
+                            }
+                        }
+                    }
 
                     let mut package_target_paths = vec![];
 
@@ -259,13 +277,15 @@ impl<'a> RustBuilder<'a> {
             target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display())).collect::<Vec<_>>().join(" "),
         };
 
-        let vendor_step = step::shell(
-            context,
-            step_artifacts.clone(),
-            step_environments.clone(),
-            vendor_step_script,
-        )
-        .await?;
+        let vendor_steps = vec![
+            step::shell(
+                context,
+                step_artifacts.clone(),
+                step_environments.clone(),
+                vendor_step_script,
+            )
+            .await?,
+        ];
 
         let vendor_name = format!("{}-vendor", self.name);
 
@@ -274,44 +294,32 @@ impl<'a> RustBuilder<'a> {
                 .with_includes(vendor_cargo_paths.clone())
                 .build();
 
-        let vendor = ArtifactBuilder::new(vendor_name.as_str())
+        let vendor = ArtifactBuilder::new(vendor_name.as_str(), vendor_steps, self.systems.clone())
             .with_source(vendor_source)
-            .with_step(vendor_step)
-            .with_system(Aarch64Darwin)
-            .with_system(Aarch64Linux)
-            .with_system(X8664Darwin)
-            .with_system(X8664Linux)
             .build(context)
             .await?;
 
         step_artifacts.push(vendor.clone());
 
-        // Setup global values
+        // Create source
 
         let mut source_includes = vec![];
         let mut source_excludes = vec!["target".to_string()];
-
-        if !self.packages.is_empty() {
-            for package in self.packages.into_iter() {
-                source_includes.push(package);
-            }
-        }
 
         for exclude in self.excludes {
             source_excludes.push(exclude.to_string());
         }
 
-        let mut source_builder = ArtifactSourceBuilder::new(self.name, source_path_str.as_str());
-
-        if !source_includes.is_empty() {
-            source_builder = source_builder.with_includes(source_includes);
-        } else {
-            source_builder = source_builder.with_excludes(source_excludes);
+        for include in self.includes {
+            source_includes.push(include.to_string());
         }
 
-        let source = source_builder.build();
+        let source = ArtifactSourceBuilder::new(self.name, source_path_str.as_str())
+            .with_includes(source_includes)
+            .with_excludes(source_excludes)
+            .build();
 
-        // Create artifact
+        // Create step
 
         let step_script = formatdoc! {r#"
             mkdir -pv $HOME
@@ -374,21 +382,20 @@ impl<'a> RustBuilder<'a> {
             vendor = get_env_key(&vendor),
         };
 
-        let step = step::shell(
-            context,
-            [step_artifacts.clone(), self.artifacts.clone()].concat(),
-            step_environments,
-            step_script,
-        )
-        .await?;
+        let steps = vec![
+            step::shell(
+                context,
+                [step_artifacts.clone(), self.artifacts.clone()].concat(),
+                step_environments,
+                step_script,
+            )
+            .await?,
+        ];
 
-        ArtifactBuilder::new(self.name)
+        // Create artifact
+
+        ArtifactBuilder::new(self.name, steps, self.systems)
             .with_source(source)
-            .with_step(step)
-            .with_system(Aarch64Darwin)
-            .with_system(Aarch64Linux)
-            .with_system(X8664Darwin)
-            .with_system(X8664Linux)
             .build(context)
             .await
     }

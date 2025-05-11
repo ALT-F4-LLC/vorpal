@@ -143,6 +143,18 @@ impl ConfigContext {
     }
 
     pub async fn add_artifact(&mut self, artifact: &Artifact) -> Result<String> {
+        if artifact.name.is_empty() {
+            bail!("name cannot be empty");
+        }
+
+        if artifact.steps.is_empty() {
+            bail!("steps cannot be empty");
+        }
+
+        if artifact.systems.is_empty() {
+            bail!("systems cannot be empty");
+        }
+
         let artifact_json =
             serde_json::to_vec(artifact).expect("failed to serialize artifact to JSON");
 

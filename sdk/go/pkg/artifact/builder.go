@@ -16,6 +16,7 @@ type ArtifactProcessBuilder struct {
 	Artifacts  []*string
 	Entrypoint string
 	Name       string
+	Systems    []api.ArtifactSystem
 }
 
 type ArtifactSourceBuilder struct {
@@ -38,6 +39,7 @@ type ArtifactTaskBuilder struct {
 	Artifacts []*string
 	Name      string
 	Script    string
+	Systems   []api.ArtifactSystem
 }
 
 type ArtifactVariableBuilder struct {
@@ -114,12 +116,13 @@ EOF
 
 chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
 
-func NewArtifactProcessBuilder(name string, entrypoint string) *ArtifactProcessBuilder {
+func NewArtifactProcessBuilder(name string, entrypoint string, systems []api.ArtifactSystem) *ArtifactProcessBuilder {
 	return &ArtifactProcessBuilder{
 		Arguments:  []string{},
 		Artifacts:  []*string{},
 		Entrypoint: entrypoint,
 		Name:       name,
+		Systems:    []api.ArtifactSystem{},
 	}
 }
 
@@ -167,12 +170,9 @@ func (a *ArtifactProcessBuilder) Build(ctx *config.ConfigContext) (*string, erro
 		return nil, err
 	}
 
-	return NewArtifactBuilder(a.Name).
-		WithStep(step).
-		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(api.ArtifactSystem_X8664_DARWIN).
-		WithSystem(api.ArtifactSystem_X8664_LINUX).
+	steps := []*api.ArtifactStep{step}
+
+	return NewArtifactBuilder(a.Name, steps, a.Systems).
 		Build(ctx)
 }
 
@@ -309,11 +309,12 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactSte
 	}, nil
 }
 
-func NewArtifactTaskBuilder(name string, script string) *ArtifactTaskBuilder {
+func NewArtifactTaskBuilder(name string, script string, systems []api.ArtifactSystem) *ArtifactTaskBuilder {
 	return &ArtifactTaskBuilder{
 		Artifacts: []*string{},
 		Name:      name,
 		Script:    script,
+		Systems:   systems,
 	}
 }
 
@@ -328,12 +329,9 @@ func (a *ArtifactTaskBuilder) Build(ctx *config.ConfigContext) (*string, error) 
 		return nil, err
 	}
 
-	return NewArtifactBuilder(a.Name).
-		WithStep(step).
-		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(api.ArtifactSystem_X8664_DARWIN).
-		WithSystem(api.ArtifactSystem_X8664_LINUX).
+	steps := []*api.ArtifactStep{step}
+
+	return NewArtifactBuilder(a.Name, steps, a.Systems).
 		Build(ctx)
 }
 
@@ -365,12 +363,12 @@ func (v *ArtifactVariableBuilder) Build(ctx *config.ConfigContext) (*string, err
 	return variable, nil
 }
 
-func NewArtifactBuilder(name string) *ArtifactBuilder {
+func NewArtifactBuilder(name string, steps []*api.ArtifactStep, systems []api.ArtifactSystem) *ArtifactBuilder {
 	return &ArtifactBuilder{
 		Name:    name,
 		Sources: []*api.ArtifactSource{},
-		Steps:   []*api.ArtifactStep{},
-		Systems: []api.ArtifactSystem{},
+		Steps:   steps,
+		Systems: systems,
 	}
 }
 

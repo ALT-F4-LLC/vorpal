@@ -28,6 +28,7 @@ type GoBuilder struct {
 	name           string
 	source         *api.ArtifactSource
 	sourceScripts  []string
+	systems        []api.ArtifactSystem
 }
 
 const GoScriptTemplate = `
@@ -73,7 +74,7 @@ func GetGOARCH(target api.ArtifactSystem) (*string, error) {
 	return &goarch, nil
 }
 
-func NewGoBuilder(name string) *GoBuilder {
+func NewGoBuilder(name string, systems []api.ArtifactSystem) *GoBuilder {
 	return &GoBuilder{
 		artifacts:      []*string{},
 		buildDirectory: nil,
@@ -82,6 +83,7 @@ func NewGoBuilder(name string) *GoBuilder {
 		includes:       []string{},
 		name:           name,
 		source:         nil,
+		systems:        systems,
 	}
 }
 
@@ -210,12 +212,9 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 		return nil, err
 	}
 
-	return artifact.NewArtifactBuilder(builder.name).
+	steps := []*api.ArtifactStep{step}
+
+	return artifact.NewArtifactBuilder(builder.name, steps, builder.systems).
 		WithSource(source).
-		WithStep(step).
-		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(api.ArtifactSystem_X8664_DARWIN).
-		WithSystem(api.ArtifactSystem_X8664_LINUX).
 		Build(context)
 }

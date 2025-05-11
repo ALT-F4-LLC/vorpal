@@ -8,7 +8,6 @@ use indoc::formatdoc;
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "gh";
-
     let system = context.get_system();
 
     let source_digest = match system {
@@ -47,15 +46,11 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         chmod +x \"$VORPAL_OUTPUT/bin/gh\"",
     };
 
-    let step = step::shell(context, vec![], vec![], step_script).await?;
+    let steps = vec![step::shell(context, vec![], vec![], step_script).await?];
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    ArtifactBuilder::new(name)
+    ArtifactBuilder::new(name, steps, systems)
         .with_source(source)
-        .with_step(step)
-        .with_system(Aarch64Darwin)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Darwin)
-        .with_system(X8664Linux)
         .build(context)
         .await
 }

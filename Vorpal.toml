@@ -3,3 +3,6 @@ name = "vorpal-config"
 
 [source]
 includes = ["config", "sdk/rust"]
+
+[rust]
+packages = ["vorpal-config", "vorpal-sdk"]

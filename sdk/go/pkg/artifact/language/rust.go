@@ -16,12 +16,17 @@ import (
 
 type RustArtifactCargoToml struct {
 	Bin       []RustArtifactCargoTomlBinary   `toml:"bin,omitempty"`
+	Package   *RustArtifactCargoTomlPackage   `toml:"package,omitempty"`
 	Workspace *RustArtifactCargoTomlWorkspace `toml:"workspace,omitempty"`
 }
 
 type RustArtifactCargoTomlBinary struct {
 	Name string `toml:"name"`
 	Path string `toml:"path"`
+}
+
+type RustArtifactCargoTomlPackage struct {
+	Name string `toml:"name"`
 }
 
 type RustArtifactCargoTomlWorkspace struct {
@@ -35,11 +40,13 @@ type RustBuilder struct {
 	check     bool
 	excludes  []string
 	format    bool
+	includes  []string
 	lint      bool
 	name      string
 	packages  []string
 	source    *string
 	tests     bool
+	systems   []api.ArtifactSystem
 }
 
 type VendorStepScriptTemplateArgs struct {
@@ -135,7 +142,7 @@ for bin_name in ${{"{"}}bin_names{{"["}}@{{"]"}}{{"}"}}; do
     cp -pv ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
 done`
 
-func NewRustBuilder(name string) *RustBuilder {
+func NewRustBuilder(name string, systems []api.ArtifactSystem) *RustBuilder {
 	return &RustBuilder{
 		artifacts: make([]*string, 0),
 		bins:      make([]string, 0),
@@ -143,11 +150,13 @@ func NewRustBuilder(name string) *RustBuilder {
 		check:     false,
 		excludes:  make([]string, 0),
 		format:    false,
+		includes:  make([]string, 0),
 		lint:      false,
 		name:      name,
 		packages:  make([]string, 0),
 		source:    nil,
 		tests:     false,
+		systems:   systems,
 	}
 }
 
@@ -173,6 +182,11 @@ func (a *RustBuilder) WithExcludes(excludes []string) *RustBuilder {
 
 func (a *RustBuilder) WithFormat() *RustBuilder {
 	a.format = true
+	return a
+}
+
+func (a *RustBuilder) WithIncludes(includes []string) *RustBuilder {
+	a.includes = includes
 	return a
 }
 
@@ -237,10 +251,6 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	if sourceCargo.Workspace != nil && len(sourceCargo.Workspace.Members) > 0 {
 		for _, member := range sourceCargo.Workspace.Members {
-			if len(builder.packages) > 0 && !slices.Contains(builder.packages, member) {
-				continue
-			}
-
 			pkg := fmt.Sprintf("%s/%s", sourcePath, member)
 			pkgCargoPath := fmt.Sprintf("%s/Cargo.toml", pkg)
 
@@ -258,6 +268,10 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 			_, pkgCargoErr := toml.Decode(string(pkgCargoData), &pkgCargo)
 			if pkgCargoErr != nil {
 				return nil, pkgCargoErr
+			}
+
+			if len(builder.packages) > 0 && !slices.Contains(builder.packages, pkgCargo.Package.Name) {
+				continue
 			}
 
 			pkgTargetPaths := make([]string, 0)
@@ -385,13 +399,17 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 		WithIncludes(vendorCargoPaths).
 		Build()
 
-	vendor, err := artifact.NewArtifactBuilder(vendorName).
+	vendorSteps := []*api.ArtifactStep{vendorStep}
+
+	systems := []api.ArtifactSystem{
+		api.ArtifactSystem_AARCH64_DARWIN,
+		api.ArtifactSystem_AARCH64_LINUX,
+		api.ArtifactSystem_X8664_DARWIN,
+		api.ArtifactSystem_X8664_LINUX,
+	}
+
+	vendor, err := artifact.NewArtifactBuilder(vendorName, vendorSteps, systems).
 		WithSource(&vendorSource).
-		WithStep(vendorStep).
-		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(api.ArtifactSystem_X8664_DARWIN).
-		WithSystem(api.ArtifactSystem_X8664_LINUX).
 		Build(context)
 	if err != nil {
 		return nil, err
@@ -406,23 +424,17 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	sourceExcludes = append(sourceExcludes, "target")
 
-	if len(builder.packages) > 0 {
-		for _, pkg := range builder.packages {
-			sourceIncludes = append(sourceIncludes, pkg)
-		}
-	}
-
 	for _, exclude := range builder.excludes {
 		sourceExcludes = append(sourceExcludes, exclude)
 	}
 
-	sourceBuilder := artifact.NewArtifactSourceBuilder(builder.name, sourcePath)
-
-	if len(sourceIncludes) > 0 {
-		sourceBuilder = sourceBuilder.WithIncludes(sourceIncludes)
-	} else {
-		sourceBuilder = sourceBuilder.WithExcludes(sourceExcludes)
+	for _, include := range builder.includes {
+		sourceIncludes = append(sourceIncludes, include)
 	}
+
+	sourceBuilder := artifact.NewArtifactSourceBuilder(builder.name, sourcePath).
+		WithIncludes(sourceIncludes).
+		WithExcludes(sourceExcludes)
 
 	source := sourceBuilder.Build()
 
@@ -466,12 +478,9 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 		return nil, err
 	}
 
-	return artifact.NewArtifactBuilder(builder.name).
+	steps := []*api.ArtifactStep{step}
+
+	return artifact.NewArtifactBuilder(builder.name, steps, systems).
 		WithSource(&source).
-		WithStep(step).
-		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(api.ArtifactSystem_X8664_DARWIN).
-		WithSystem(api.ArtifactSystem_X8664_LINUX).
 		Build(context)
 }

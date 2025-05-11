@@ -30,21 +30,26 @@ use vorpal_sdk::{
 mod config;
 
 #[derive(Deserialize)]
-pub struct VorpalConfigSource {
-    pub includes: Vec<String>,
-    pub script: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct VorpalConfigBuild {
+pub struct VorpalConfigGo {
     pub directory: Option<String>,
 }
 
 #[derive(Deserialize)]
+pub struct VorpalConfigRust {
+    pub packages: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub struct VorpalConfigSource {
+    pub includes: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
 pub struct VorpalConfig {
-    pub build: Option<VorpalConfigBuild>,
+    pub go: Option<VorpalConfigGo>,
     pub language: Option<String>,
     pub name: Option<String>,
+    pub rust: Option<VorpalConfigRust>,
     pub source: Option<VorpalConfigSource>,
 }
 
@@ -212,10 +217,7 @@ pub async fn run(
     let artifact_context = Path::new(&artifact_context);
 
     if !artifact_context.exists() {
-        error!(
-            "artifact 'context' not found: {}",
-            artifact_context.display()
-        );
+        error!("'context' not found: {}", artifact_context.display());
         std::process::exit(1);
     }
 
@@ -229,6 +231,10 @@ pub async fn run(
         std::process::exit(1);
     }
 
+    let config_includes = config
+        .source
+        .as_ref()
+        .map_or(vec![], |s| s.includes.clone().unwrap_or_default());
     let config_language = config.language.unwrap();
     let config_name = config.name.unwrap_or_else(|| "vorpal".to_string());
 
@@ -244,50 +250,53 @@ pub async fn run(
         variable.clone(),
     )?;
 
-    let protoc = protoc::build(&mut config_context).await?;
+    let config_system = config_context.get_system();
 
     let config_digest = match config_language.as_str() {
         "go" => {
+            let protoc = protoc::build(&mut config_context).await?;
             let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
             let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
-            let artifacts = vec![protoc, protoc_gen_go, protoc_gen_go_grpc];
 
-            let mut builder = GoBuilder::new(&config_name).with_artifacts(artifacts);
+            let build_path = format!("cmd/{}", config_name);
 
-            if let Some(build) = config.build.as_ref() {
-                if let Some(directory) = build.directory.as_ref() {
-                    builder = builder.with_build_directory(directory);
-                }
+            let build_directory = config
+                .go
+                .as_ref()
+                .and_then(|g| g.directory.as_ref())
+                .unwrap_or(&build_path);
+
+            let mut source_includes = vec![];
+
+            for include in config_includes.iter() {
+                source_includes.push(include.as_str());
             }
 
-            if let Some(source) = config.source.as_ref() {
-                if !source.includes.is_empty() {
-                    builder =
-                        builder.with_includes(source.includes.iter().map(|s| s.as_str()).collect());
-                }
-
-                if let Some(script) = source.script.as_ref() {
-                    builder = builder.with_source_script(script);
-                }
-            }
-
-            builder.build(&mut config_context).await?
+            GoBuilder::new(&config_name, vec![config_system])
+                .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
+                .with_build_directory(build_directory.as_str())
+                .with_includes(source_includes)
+                .build(&mut config_context)
+                .await?
         }
 
         "rust" => {
-            let mut builder = RustBuilder::new(&config_name)
+            let protoc = protoc::build(&mut config_context).await?;
+
+            let config_packages = config
+                .rust
+                .as_ref()
+                .map_or(vec![], |r| r.packages.clone().unwrap_or_default());
+
+            RustBuilder::new(&config_name, vec![config_system])
                 .with_artifacts(vec![protoc])
-                .with_bins(vec![&config_name]);
-
-            if let Some(source) = config.source.as_ref() {
-                if !source.includes.is_empty() {
-                    builder =
-                        builder.with_packages(source.includes.iter().map(|s| s.as_str()).collect());
-                }
-            }
-
-            builder.build(&mut config_context).await?
+                .with_bins(vec![&config_name])
+                .with_includes(config_includes.iter().map(|s| s.as_str()).collect())
+                .with_packages(config_packages.iter().map(|s| s.as_str()).collect())
+                .build(&mut config_context)
+                .await?
         }
+
         _ => "".to_string(),
     };
 
@@ -392,7 +401,9 @@ pub async fn run(
     get_artifacts(&artifact, &artifact_digest, &mut build_store, &config_store).await?;
 
     if artifact_export {
-        let artifacts = build_store.clone().into_values().collect::<Vec<Artifact>>();
+        let mut artifacts = build_store.clone().into_values().collect::<Vec<Artifact>>();
+
+        artifacts.sort_by(|a, b| a.name.cmp(&b.name));
 
         let artifacts_json =
             serde_json::to_string_pretty(&artifacts).expect("failed to serialize artifact");
