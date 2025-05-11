@@ -113,6 +113,18 @@ func GetContext() *ConfigContext {
 }
 
 func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error) {
+	if artifact.Name == "" {
+		return nil, fmt.Errorf("'name' is required")
+	}
+
+	if len(artifact.Steps) == 0 {
+		return nil, fmt.Errorf("'steps' is required")
+	}
+
+	if len(artifact.Systems) == 0 {
+		return nil, fmt.Errorf("'systems' is required")
+	}
+
 	// 1. Setup systems
 
 	artifactJson, err := json.Marshal(artifact)

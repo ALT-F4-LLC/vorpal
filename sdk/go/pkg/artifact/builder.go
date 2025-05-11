@@ -122,7 +122,7 @@ func NewArtifactProcessBuilder(name string, entrypoint string, systems []api.Art
 		Artifacts:  []*string{},
 		Entrypoint: entrypoint,
 		Name:       name,
-		Systems:    []api.ArtifactSystem{},
+		Systems:    systems,
 	}
 }
 
