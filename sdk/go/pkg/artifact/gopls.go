@@ -19,7 +19,7 @@ func Gopls(context *config.ConfigContext) (*string, error) {
 	case api.ArtifactSystem_AARCH64_DARWIN:
 		digest = "6d597686fa68271ef9367eae65aa6cf997e48def78a941a93aea4c96183b457a"
 	case api.ArtifactSystem_AARCH64_LINUX:
-		digest = "2bdbb5ae2632da58df6087b959cf7e6867c2ad534297428de22877de32aea5ca"
+		digest = "72f0beb7b6c4874cb65ff00222dbfe94294c4b003df5299a34ac084a01f25da9"
 	case api.ArtifactSystem_X8664_DARWIN:
 		digest = "e994de43d344c304ab9bcf835965c5c25678b926980420400f6d530faea0185b"
 	case api.ArtifactSystem_X8664_LINUX:

@@ -258,43 +258,42 @@ pub async fn run(
             let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
             let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
 
-            let build_path = format!("cmd/{}", config_name);
-
-            let build_directory = config
-                .go
-                .as_ref()
-                .and_then(|g| g.directory.as_ref())
-                .unwrap_or(&build_path);
-
             let mut source_includes = vec![];
 
             for include in config_includes.iter() {
                 source_includes.push(include.as_str());
             }
 
-            GoBuilder::new(&config_name, vec![config_system])
+            let source_path = format!("{}.go", config_name);
+
+            if source_includes.is_empty() {
+                source_includes = vec![&source_path, "go.mod", "go.sum"];
+            }
+
+            let mut builder = GoBuilder::new(&config_name, vec![config_system])
                 .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
-                .with_build_directory(build_directory.as_str())
-                .with_includes(source_includes)
-                .build(&mut config_context)
-                .await?
+                .with_includes(source_includes);
+
+            if let Some(directory) = config.go.as_ref().and_then(|g| g.directory.as_ref()) {
+                builder = builder.with_build_directory(directory.as_str());
+            }
+
+            builder.build(&mut config_context).await?
         }
 
         "rust" => {
             let protoc = protoc::build(&mut config_context).await?;
 
-            let config_packages = config
-                .rust
-                .as_ref()
-                .map_or(vec![], |r| r.packages.clone().unwrap_or_default());
-
-            RustBuilder::new(&config_name, vec![config_system])
+            let mut builder = RustBuilder::new(&config_name, vec![config_system])
                 .with_artifacts(vec![protoc])
                 .with_bins(vec![&config_name])
-                .with_includes(config_includes.iter().map(|s| s.as_str()).collect())
-                .with_packages(config_packages.iter().map(|s| s.as_str()).collect())
-                .build(&mut config_context)
-                .await?
+                .with_includes(config_includes.iter().map(|s| s.as_str()).collect());
+
+            if let Some(packages) = config.rust.as_ref().and_then(|r| r.packages.as_ref()) {
+                builder = builder.with_packages(packages.iter().map(|s| s.as_str()).collect());
+            }
+
+            builder.build(&mut config_context).await?
         }
 
         _ => "".to_string(),

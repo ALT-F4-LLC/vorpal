@@ -42,7 +42,7 @@ func RustToolchain(context *config.ConfigContext) (*string, error) {
 	case api.ArtifactSystem_AARCH64_DARWIN:
 		digest = "84707c7325d3a0cbd8044020a5256b6fd43a79bd837948bb4a7e90d671c919e6"
 	case api.ArtifactSystem_AARCH64_LINUX:
-		digest = "ad490acd52f5b4d5b539df8f565df3a90271225a1ef6256c1027eac0b70cb4d4"
+		digest = "5f65b48aa55c1522d6e0b1acacf529b0e8c0fdbf1866dea475ed3e85bef9cf87"
 	case api.ArtifactSystem_X8664_DARWIN:
 		digest = "589c625bd79be3ed8b9d5168c54a889dba971a6e9d9722750c4b4577247ec94e"
 	case api.ArtifactSystem_X8664_LINUX:

@@ -19,7 +19,7 @@ func Grpcurl(context *config.ConfigContext) (*string, error) {
 	case api.ArtifactSystem_AARCH64_DARWIN:
 		digest = "292c9b6a2d40fcddf8add7533c96951e0d60d756b4a57c72093ab4be74bb0ce7"
 	case api.ArtifactSystem_AARCH64_LINUX:
-		digest = "109a4ed11d63bf7f9afbd819342ef8e2988873ee146e525d65e7416928855ddf"
+		digest = "1a9c61d9af34ae6d95eb85e63fa49dff18393269b0f266f3a3adf0f68238e2d8"
 	case api.ArtifactSystem_X8664_DARWIN:
 		digest = "b8dacfe7be0747a87bc1278bbb3ff2179702314de3cac74f75ee61047786350b"
 	case api.ArtifactSystem_X8664_LINUX:

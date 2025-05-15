@@ -19,7 +19,7 @@ func Goimports(context *config.ConfigContext) (*string, error) {
 	case api.ArtifactSystem_AARCH64_DARWIN:
 		digest = "66a42cc7600ef08f1937ff314c36cceec26451630e83b6c2d6a8f93bf7291b59"
 	case api.ArtifactSystem_AARCH64_LINUX:
-		digest = "1d48d6a3d0ff9ffa616e6b152c8aa4ca34f4db49e5a9adfdbb0c987235d3aade"
+		digest = "6037ec6f1996846dd7cd4b7754405773a99ea357239e22b52dd305c6d7d9246b"
 	case api.ArtifactSystem_X8664_DARWIN:
 		digest = "e5d1d90c5d5bc629a25da5e856c6bf5ddc754a46745718c2a60fe8c404819c52"
 	case api.ArtifactSystem_X8664_LINUX:

@@ -19,7 +19,7 @@ func Protoc(context *config.ConfigContext) (*string, error) {
 	case api.ArtifactSystem_AARCH64_DARWIN:
 		digest = "8ad451bdcda8f24f4af59ccca23fd71a06975a9d069571f19b9a0d503f8a65c8"
 	case api.ArtifactSystem_AARCH64_LINUX:
-		digest = "d0f3c08c81bebdb5a502863c786a03d661e4faad1941e941f705bb076eaff13c"
+		digest = "56abea3fb5be73d12c5bc75bae48451c6ee625b4d727c905f92d454286d4ea65"
 	case api.ArtifactSystem_X8664_DARWIN:
 		digest = "2a3d7816b06f1a046cbf8e82c1a94fe71b4fd384726f2064c9e0960ac75dadec"
 	case api.ArtifactSystem_X8664_LINUX:

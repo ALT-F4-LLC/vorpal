@@ -19,7 +19,7 @@ func ProtocGenGo(context *config.ConfigContext) (*string, error) {
 	case api.ArtifactSystem_AARCH64_DARWIN:
 		digest = "47a94d59d206be31eef2214418fce60570e7a9a175f96eeab02d1c9c3c7d0ed9"
 	case api.ArtifactSystem_AARCH64_LINUX:
-		digest = "2f7455a7197f272a0647f8ba466eb3abb56898eb8979eea8af49479cce3e1153"
+		digest = "898d6da16c8799e8f1789013d0aa36ae3c76293fe413650d7e63b988d0fc879e"
 	case api.ArtifactSystem_X8664_DARWIN:
 		digest = "c111d8788b4e1109be52b2f4c2ba9ed8c42831ea0e8ed67730fefe61d1b4bd6b"
 	case api.ArtifactSystem_X8664_LINUX:
