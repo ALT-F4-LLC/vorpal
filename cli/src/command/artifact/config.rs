@@ -1,4 +1,4 @@
-use crate::command::{artifact::build, store::paths::get_store_path};
+use crate::command::{artifact::build, store::paths::get_artifact_output_path};
 use anyhow::{anyhow, bail, Result};
 use petgraph::{algo::toposort, graphmap::DiGraphMap};
 use port_selector::random_free_port;
@@ -197,6 +197,7 @@ pub async fn start(
 pub async fn build_artifacts(
     artifact_path: bool,
     artifact_selected: Option<&Artifact>,
+    artifact_selected_alias: Option<String>,
     build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
@@ -217,16 +218,33 @@ pub async fn build_artifacts(
                     }
                 }
 
-                build(artifact, &artifact_digest, client_archive, client_worker).await?;
+                let mut artifact_alias = None;
+
+                if let Some(selected) = artifact_selected {
+                    if selected.name == artifact.name {
+                        artifact_alias = artifact_selected_alias.clone();
+                    }
+                }
+
+                build(
+                    artifact,
+                    artifact_alias,
+                    &artifact_digest,
+                    client_archive,
+                    client_worker,
+                )
+                .await?;
 
                 build_complete.insert(artifact_digest.to_string(), artifact.clone());
 
-                if let Some(artifact_selected) = artifact_selected {
-                    if artifact_selected.name == artifact.name {
+                if let Some(selected) = artifact_selected {
+                    if selected.name == artifact.name {
                         let mut output = artifact_digest.clone();
 
                         if artifact_path {
-                            output = get_store_path(&artifact_digest).display().to_string();
+                            output = get_artifact_output_path(&artifact_digest)
+                                .display()
+                                .to_string();
                         }
 
                         println!("{}", output);

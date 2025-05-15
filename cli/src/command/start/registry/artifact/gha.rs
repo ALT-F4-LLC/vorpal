@@ -1,11 +1,13 @@
-use crate::command::start::registry::{
-    gha::{get_artifact_key, DEFAULT_GHA_CHUNK_SIZE},
-    ArtifactBackend, GhaBackend,
+use crate::command::{
+    start::registry::{
+        gha::{get_artifact_alias_key, get_artifact_config_key, DEFAULT_GHA_CHUNK_SIZE},
+        ArtifactBackend, GhaBackend,
+    },
+    store::paths::{get_artifact_alias_path, get_artifact_config_path, set_timestamps},
 };
 use anyhow::Result;
 use sha256::digest;
-use std::path::Path;
-use tokio::fs::{read, write};
+use tokio::fs::{create_dir_all, read, write};
 use tonic::{async_trait, Status};
 use tracing::info;
 use vorpal_sdk::api::artifact::Artifact;
@@ -13,26 +15,26 @@ use vorpal_sdk::api::artifact::Artifact;
 #[async_trait]
 impl ArtifactBackend for GhaBackend {
     async fn get_artifact(&self, artifact_digest: String) -> Result<Artifact, Status> {
-        let artifact_key = get_artifact_key(&artifact_digest);
-        let artifact_file = format!("/tmp/{}", artifact_key);
-        let artifact_path = Path::new(&artifact_file);
+        let config_path = get_artifact_config_path(&artifact_digest);
 
-        if artifact_path.exists() {
-            let artifact_data = read(&artifact_path)
+        if config_path.exists() {
+            let config_data = read(&config_path)
                 .await
                 .map_err(|err| Status::internal(err.to_string()))?;
 
-            let artifact = serde_json::from_slice::<Artifact>(&artifact_data)
+            let artifact = serde_json::from_slice::<Artifact>(&config_data)
                 .map_err(|err| Status::internal(err.to_string()))?;
 
             return Ok(artifact);
         }
 
-        info!("cache: {}", artifact_key);
+        let config_key = get_artifact_config_key(&artifact_digest);
+
+        info!("cache: {}", config_key);
 
         let cache_entry = &self
             .cache_client
-            .get_cache_entry(&artifact_key, &artifact_digest)
+            .get_cache_entry(&config_key, &artifact_digest)
             .await
             .map_err(|e| {
                 Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
@@ -40,7 +42,7 @@ impl ArtifactBackend for GhaBackend {
 
         if cache_entry.is_none() {
             return Err(Status::not_found(format!(
-                "cache entry not found: {artifact_key}"
+                "cache entry not found: {config_key}"
             )));
         }
 
@@ -57,56 +59,56 @@ impl ArtifactBackend for GhaBackend {
             .await
             .expect("failed to read response");
 
-        write(&artifact_path, &cache_response_bytes)
+        write(&config_path, &cache_response_bytes)
             .await
             .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
 
-        info!("cache written: {:?}", artifact_path);
+        info!("cache written: {:?}", config_path);
 
-        let artifact_data = read(&artifact_path)
+        let config_data = read(&config_path)
             .await
             .map_err(|err| Status::internal(err.to_string()))?;
 
-        let artifact = serde_json::from_slice::<Artifact>(&artifact_data)
+        let artifact = serde_json::from_slice::<Artifact>(&config_data)
             .map_err(|err| Status::internal(err.to_string()))?;
 
         Ok(artifact)
     }
 
-    async fn store_artifact(&self, artifact: &Artifact) -> Result<String, Status> {
-        let artifact_json = serde_json::to_vec(artifact)
+    async fn store_artifact(
+        &self,
+        artifact: Artifact,
+        artifact_alias: Option<String>,
+    ) -> Result<String, Status> {
+        let config_json = serde_json::to_vec(&artifact)
             .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
-        let artifact_digest = digest(&artifact_json);
-        let artifact_key = get_artifact_key(&artifact_digest);
-        let artifact_file = format!("/tmp/{}", artifact_key);
-        let artifact_path = Path::new(&artifact_file);
+        let config_digest = digest(&config_json);
+        let config_path = get_artifact_config_path(&config_digest);
 
-        if !artifact_path.exists() {
-            write(artifact_path, &artifact_json)
+        if !config_path.exists() {
+            write(config_path, &config_json)
                 .await
                 .map_err(|err| Status::internal(format!("failed to write artifact: {:?}", err)))?;
         }
 
-        info!("cache: {}", artifact_key);
+        let config_key = get_artifact_config_key(&config_digest);
+
+        info!("cache: {}", config_key);
 
         let cache_entry = &self
             .cache_client
-            .get_cache_entry(&artifact_key, &artifact_digest)
+            .get_cache_entry(&config_key, &config_digest)
             .await
             .map_err(|e| {
                 Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
             })?;
 
         if cache_entry.is_none() {
-            let cache_size = artifact_json.len() as u64;
+            let cache_size = config_json.len() as u64;
 
             let cache_reserve = &self
                 .cache_client
-                .reserve_cache(
-                    artifact_key.clone(),
-                    artifact_digest.clone(),
-                    Some(cache_size),
-                )
+                .reserve_cache(config_key.clone(), config_digest.clone(), Some(cache_size))
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
@@ -119,11 +121,7 @@ impl ArtifactBackend for GhaBackend {
             info!("cache reserved: {:?}", cache_reserve.cache_id);
 
             self.cache_client
-                .save_cache(
-                    cache_reserve.cache_id,
-                    &artifact_json,
-                    DEFAULT_GHA_CHUNK_SIZE,
-                )
+                .save_cache(cache_reserve.cache_id, &config_json, DEFAULT_GHA_CHUNK_SIZE)
                 .await
                 .map_err(|e| {
                     Status::internal(format!("failed to save cache: {:?}", e.to_string()))
@@ -132,7 +130,72 @@ impl ArtifactBackend for GhaBackend {
             info!("cache saved: {:?}", cache_reserve.cache_id);
         }
 
-        Ok(artifact_digest)
+        if let Some(alias) = artifact_alias {
+            let alias_path = get_artifact_alias_path(&alias).map_err(|err| {
+                Status::internal(format!("failed to get artifact alias path: {:?}", err))
+            })?;
+
+            if let Some(parent) = alias_path.parent() {
+                if !parent.exists() {
+                    create_dir_all(parent).await.map_err(|err| {
+                        Status::internal(format!("failed to create alias dir: {:?}", err))
+                    })?;
+                }
+            }
+
+            write(&alias_path, &config_digest)
+                .await
+                .map_err(|err| Status::internal(format!("failed to write alias: {:?}", err)))?;
+
+            set_timestamps(&alias_path)
+                .await
+                .map_err(|err| Status::internal(format!("failed to sanitize alias: {:?}", err)))?;
+
+            let alias_key = get_artifact_alias_key(&alias).map_err(|err| {
+                Status::internal(format!("failed to get artifact alias key: {:?}", err))
+            })?;
+
+            let cache_entry = &self
+                .cache_client
+                .get_cache_entry(&alias_key, &config_digest)
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("failed to get cache entry: {:?}", e.to_string()))
+                })?;
+
+            if cache_entry.is_none() {
+                let cache_size = config_digest.len() as u64;
+
+                let cache_reserve = &self
+                    .cache_client
+                    .reserve_cache(alias_key.clone(), config_digest.clone(), Some(cache_size))
+                    .await
+                    .map_err(|e| {
+                        Status::internal(format!("failed to reserve cache: {:?}", e.to_string()))
+                    })?;
+
+                if cache_reserve.cache_id == 0 {
+                    return Err(Status::internal("failed to reserve cache returned 0"));
+                }
+
+                info!("cache reserved: {:?}", cache_reserve.cache_id);
+
+                self.cache_client
+                    .save_cache(
+                        cache_reserve.cache_id,
+                        config_digest.as_bytes(),
+                        DEFAULT_GHA_CHUNK_SIZE,
+                    )
+                    .await
+                    .map_err(|e| {
+                        Status::internal(format!("failed to save cache: {:?}", e.to_string()))
+                    })?;
+
+                info!("cache saved: {:?}", cache_reserve.cache_id);
+            }
+        }
+
+        Ok(config_digest)
     }
 
     fn box_clone(&self) -> Box<dyn ArtifactBackend> {

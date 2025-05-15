@@ -2,7 +2,9 @@ use crate::command::{
     artifact::config::{build_artifacts, get_artifacts, start},
     store::{
         archives::unpack_zstd,
-        paths::{get_archive_path, get_file_paths, get_store_path, set_timestamps},
+        paths::{
+            get_artifact_archive_path, get_artifact_output_path, get_file_paths, set_timestamps,
+        },
     },
 };
 use anyhow::{anyhow, bail, Result};
@@ -18,7 +20,7 @@ use vorpal_sdk::{
     api::{
         archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest},
         artifact::{Artifact, ArtifactRequest, ArtifactsRequest},
-        worker::worker_service_client::WorkerServiceClient,
+        worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
         language::{go::GoBuilder, rust::RustBuilder},
@@ -55,13 +57,14 @@ pub struct VorpalConfig {
 
 pub async fn build(
     artifact: &Artifact,
-    artifact_hash: &str,
+    artifact_alias: Option<String>,
+    artifact_digest: &str,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
 ) -> Result<()> {
     // 1. Check artifact
 
-    let artifact_path = get_store_path(artifact_hash);
+    let artifact_path = get_artifact_output_path(artifact_digest);
 
     if artifact_path.exists() {
         return Ok(());
@@ -70,7 +73,7 @@ pub async fn build(
     // 2. Pull
 
     let request_pull = ArchivePullRequest {
-        digest: artifact_hash.to_string(),
+        digest: artifact_digest.to_string(),
     };
 
     match client_archive.pull(request_pull.clone()).await {
@@ -105,7 +108,7 @@ pub async fn build(
             }
 
             if !stream_data.is_empty() {
-                let archive_path = get_archive_path(artifact_hash);
+                let archive_path = get_artifact_archive_path(artifact_digest);
 
                 write(&archive_path, &stream_data)
                     .await
@@ -113,7 +116,7 @@ pub async fn build(
 
                 set_timestamps(&archive_path).await?;
 
-                info!("{} |> unpack: {}", artifact.name, artifact_hash);
+                info!("{} |> unpack: {}", artifact.name, artifact_digest);
 
                 create_dir_all(&artifact_path)
                     .await
@@ -138,8 +141,15 @@ pub async fn build(
 
     // Build
 
+    println!("artifact alias: {:?}", artifact_alias);
+
+    let request = BuildArtifactRequest {
+        artifact: Some(artifact.clone()),
+        artifact_alias,
+    };
+
     let response = client_worker
-        .build_artifact(artifact.clone())
+        .build_artifact(request)
         .await
         .expect("failed to build");
 
@@ -168,6 +178,7 @@ pub async fn build(
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     agent: &str,
+    artifact_alias: Option<String>,
     artifact_config: &str,
     artifact_context: &str,
     artifact_export: bool,
@@ -314,6 +325,7 @@ pub async fn run(
     build_artifacts(
         artifact_path,
         None,
+        None,
         config_context.get_artifact_store(),
         &mut client_archive,
         &mut client_worker,
@@ -324,7 +336,7 @@ pub async fn run(
 
     let config_file = format!(
         "{}/bin/{}",
-        &get_store_path(&config_digest).display(),
+        &get_artifact_output_path(&config_digest).display(),
         config_name
     );
 
@@ -415,6 +427,7 @@ pub async fn run(
     build_artifacts(
         artifact_path,
         Some(&artifact),
+        artifact_alias,
         build_store,
         &mut client_archive,
         &mut client_worker,

@@ -178,10 +178,23 @@ impl CacheClient {
     }
 }
 
-pub fn get_archive_key(hash: &str) -> String {
-    format!("{}.tar.zst", hash)
+pub fn get_artifact_alias_key(alias: &str) -> Result<String> {
+    let alias_parts = alias.split(':').collect::<Vec<&str>>();
+
+    if alias_parts.len() != 2 {
+        return Err(anyhow!("invalid alias format"));
+    }
+
+    let alias_dir = alias_parts[0];
+    let alias_file = alias_parts[1];
+
+    Ok(format!("artifact-alias-{alias_dir}-{alias_file}"))
 }
 
-pub fn get_artifact_key(hash: &str) -> String {
-    format!("{}.json", hash)
+pub fn get_artifact_archive_key(digest: &str) -> String {
+    format!("artifact-archive-{}.tar.zst", digest)
+}
+
+pub fn get_artifact_config_key(digest: &str) -> String {
+    format!("artifact-config-{}.json", digest)
 }

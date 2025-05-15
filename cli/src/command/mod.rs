@@ -23,6 +23,9 @@ pub enum Command {
         #[clap(default_value = "http://localhost:23151", long)]
         agent: String,
 
+        #[arg(long)]
+        alias: Option<String>,
+
         #[arg(default_value = "Vorpal.toml", long)]
         config: String,
 
@@ -101,6 +104,7 @@ pub async fn run() -> Result<()> {
     match &command {
         Command::Artifact {
             agent,
+            alias: artifact_alias,
             config: artifact_config,
             context: artifact_context,
             export: artifact_export,
@@ -112,6 +116,7 @@ pub async fn run() -> Result<()> {
         } => {
             artifact::run(
                 agent,
+                artifact_alias.clone(),
                 artifact_config,
                 artifact_context,
                 *artifact_export,

@@ -5,7 +5,7 @@ use crate::{
             artifact_service_client::ArtifactServiceClient,
             artifact_service_server::{ArtifactService, ArtifactServiceServer},
             Artifact, ArtifactRequest, ArtifactResponse, ArtifactSystem, ArtifactsRequest,
-            ArtifactsResponse,
+            ArtifactsResponse, StoreArtifactRequest,
         },
     },
     cli::{Cli, Command},
@@ -80,7 +80,7 @@ impl ArtifactService for ArtifactServer {
 
     async fn store_artifact(
         &self,
-        _request: Request<Artifact>,
+        _request: Request<StoreArtifactRequest>,
     ) -> Result<Response<ArtifactResponse>, Status> {
         Err(Status::unimplemented("not implemented yet"))
     }

@@ -7,7 +7,7 @@ option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact";
 service ArtifactService {
     rpc GetArtifact(ArtifactRequest) returns (Artifact);
     rpc GetArtifacts(ArtifactsRequest) returns (ArtifactsResponse);
-    rpc StoreArtifact(Artifact) returns (ArtifactResponse);
+    rpc StoreArtifact(StoreArtifactRequest) returns (ArtifactResponse);
 }
 
 enum ArtifactSystem {
@@ -56,4 +56,9 @@ message ArtifactsRequest {
 
 message ArtifactsResponse {
     repeated string digests = 1;
+}
+
+message StoreArtifactRequest {
+  Artifact artifact = 1;
+  optional string artifact_alias = 2;
 }

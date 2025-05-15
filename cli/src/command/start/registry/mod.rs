@@ -1,4 +1,4 @@
-use crate::command::store::{notary::get_public_key, paths::get_public_key_path};
+use crate::command::store::{notary::get_public_key, paths::get_key_public_path};
 use anyhow::{bail, Result};
 use aws_sdk_s3::Client;
 use rsa::{
@@ -17,7 +17,7 @@ use vorpal_sdk::api::{
     },
     artifact::{
         artifact_service_server::ArtifactService, Artifact, ArtifactRequest, ArtifactResponse,
-        ArtifactsRequest, ArtifactsResponse,
+        ArtifactsRequest, ArtifactsResponse, StoreArtifactRequest,
     },
 };
 
@@ -202,7 +202,7 @@ impl ArchiveService for ArchiveServer {
             return Err(Status::invalid_argument("missing `signature` field"));
         }
 
-        let public_key_path = get_public_key_path();
+        let public_key_path = get_key_public_path();
 
         let public_key = get_public_key(public_key_path).await.map_err(|err| {
             Status::internal(format!("failed to get public key: {:?}", err.to_string()))
@@ -245,8 +245,13 @@ impl ArchiveService for ArchiveServer {
 
 #[tonic::async_trait]
 pub trait ArtifactBackend: Send + Sync + 'static {
-    async fn get_artifact(&self, artifact_digest: String) -> Result<Artifact, Status>;
-    async fn store_artifact(&self, artifact: &Artifact) -> Result<String, Status>;
+    async fn get_artifact(&self, digest: String) -> Result<Artifact, Status>;
+
+    async fn store_artifact(
+        &self,
+        artifact: Artifact,
+        artifact_alias: Option<String>,
+    ) -> Result<String, Status>;
 
     /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
     fn box_clone(&self) -> Box<dyn ArtifactBackend>;
@@ -300,11 +305,18 @@ impl ArtifactService for ArtifactServer {
 
     async fn store_artifact(
         &self,
-        request: Request<Artifact>,
+        request: Request<StoreArtifactRequest>,
     ) -> Result<Response<ArtifactResponse>, Status> {
         let request = request.into_inner();
 
-        let digest = self.backend.store_artifact(&request).await?;
+        let artifact = request
+            .artifact
+            .ok_or_else(|| Status::invalid_argument("missing `artifact` field"))?;
+
+        let digest = self
+            .backend
+            .store_artifact(artifact, request.artifact_alias)
+            .await?;
 
         Ok(Response::new(ArtifactResponse { digest }))
     }

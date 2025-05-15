@@ -2,7 +2,7 @@ use crate::command::store::{
     archives::{compress_zstd, unpack_zip},
     hashes::hash_files,
     notary,
-    paths::{copy_files, get_file_paths, get_private_key_path, set_timestamps},
+    paths::{copy_files, get_file_paths, get_key_private_path, set_timestamps},
     temps::{create_sandbox_dir, create_sandbox_file},
 };
 use anyhow::{bail, Result};
@@ -113,7 +113,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("download: {}", http_path)),
+                artifact_output: Some(format!("download source: {}", http_path)),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -297,7 +297,7 @@ pub async fn build_source(
         )
         .await?;
 
-        let private_key_path = get_private_key_path();
+        let private_key_path = get_key_private_path();
 
         if !private_key_path.exists() {
             bail!("Private key not found: {}", private_key_path.display());
