@@ -75,6 +75,7 @@ pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Ve
     Ok(build_order)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn start(
     agent: String,
     artifact: String,

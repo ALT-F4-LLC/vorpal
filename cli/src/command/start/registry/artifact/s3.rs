@@ -99,7 +99,7 @@ impl ArtifactBackend for S3Backend {
             .send()
             .await;
 
-        if !config_head.is_ok() {
+        if config_head.is_err() {
             info!("storing artifact config: {}", config_key);
 
             client
