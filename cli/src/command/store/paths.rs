@@ -3,6 +3,7 @@ use filetime::{set_file_times, set_symlink_file_times, FileTime};
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use uuid::Uuid;
+use vorpal_sdk::api::artifact::ArtifactSystem;
 use walkdir::WalkDir;
 
 // Root paths
@@ -57,14 +58,19 @@ pub fn get_artifact_output_dir_path() -> PathBuf {
     get_artifact_dir_path().join("output")
 }
 
-pub fn get_artifact_alias_path(alias: &str) -> Result<PathBuf> {
+pub fn get_artifact_alias_path(alias: &str, system: ArtifactSystem) -> Result<PathBuf> {
     let alias = alias.split(':').collect::<Vec<&str>>();
 
     if alias.len() != 2 {
         bail!("invalid alias format");
     }
 
-    Ok(get_artifact_alias_dir_path().join(alias[0]).join(alias[1]))
+    let system = system.as_str_name();
+
+    Ok(get_artifact_alias_dir_path()
+        .join(system)
+        .join(alias[0])
+        .join(alias[1]))
 }
 
 pub fn get_artifact_archive_path(digest: &str) -> PathBuf {

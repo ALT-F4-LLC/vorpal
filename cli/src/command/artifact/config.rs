@@ -79,6 +79,7 @@ pub async fn start(
     agent: String,
     artifact: String,
     artifact_context: PathBuf,
+    artifact_lockfile_update: bool,
     file: String,
     registry: String,
     system: String,
@@ -107,6 +108,10 @@ pub async fn start(
     ];
 
     command.args(command_arguments);
+
+    if artifact_lockfile_update {
+        command.arg("--lockfile-update");
+    }
 
     for var in variable.iter() {
         command.arg("--variable").arg(var);
@@ -197,7 +202,7 @@ pub async fn start(
 pub async fn build_artifacts(
     artifact_path: bool,
     artifact_selected: Option<&Artifact>,
-    artifact_selected_alias: Option<String>,
+    artifact_selected_aliases: Vec<String>,
     build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
@@ -218,17 +223,17 @@ pub async fn build_artifacts(
                     }
                 }
 
-                let mut artifact_alias = None;
+                let mut artifact_aliases = vec![];
 
                 if let Some(selected) = artifact_selected {
                     if selected.name == artifact.name {
-                        artifact_alias = artifact_selected_alias.clone();
+                        artifact_aliases = artifact_selected_aliases.clone();
                     }
                 }
 
                 build(
                     artifact,
-                    artifact_alias,
+                    artifact_aliases,
                     &artifact_digest,
                     client_archive,
                     client_worker,

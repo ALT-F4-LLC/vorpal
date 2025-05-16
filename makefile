@@ -66,28 +66,28 @@ generate:
 		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
-		--proto_path=crates/sdk/api \
+		--proto_path=sdk/rust/api \
 		agent/agent.proto
 	protoc \
 		--go_opt=paths=source_relative \
 		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
-		--proto_path=crates/sdk/api \
+		--proto_path=sdk/rust/api \
 		artifact/artifact.proto
 	protoc \
 		--go_opt=paths=source_relative \
 		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
-		--proto_path=crates/sdk/api \
+		--proto_path=sdk/rust/api \
 		archive/archive.proto
 	protoc \
 		--go_opt=paths=source_relative \
 		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
-		--proto_path=crates/sdk/api \
+		--proto_path=sdk/rust/api \
 		worker/worker.proto
 
 # Development (with Vorpal)

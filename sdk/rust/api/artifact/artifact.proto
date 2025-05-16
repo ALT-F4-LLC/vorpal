@@ -6,6 +6,7 @@ option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact";
 
 service ArtifactService {
     rpc GetArtifact(ArtifactRequest) returns (Artifact);
+    rpc GetArtifactAlias(GetArtifactAliasRequest) returns (GetArtifactAliasResponse);
     rpc GetArtifacts(ArtifactsRequest) returns (ArtifactsResponse);
     rpc StoreArtifact(StoreArtifactRequest) returns (ArtifactResponse);
 }
@@ -39,7 +40,8 @@ message Artifact {
     repeated ArtifactSource sources = 2;
     repeated ArtifactStep steps = 3;
     repeated ArtifactSystem systems = 4;
-    string name = 5;
+    repeated string aliases = 5;
+    string name = 6;
 }
 
 message ArtifactRequest {
@@ -58,7 +60,16 @@ message ArtifactsResponse {
     repeated string digests = 1;
 }
 
+message GetArtifactAliasRequest {
+  ArtifactSystem alias_system = 1;
+  string alias = 2;
+}
+
+message GetArtifactAliasResponse {
+    string digest = 1;
+}
+
 message StoreArtifactRequest {
   Artifact artifact = 1;
-  optional string artifact_alias = 2;
+  repeated string artifact_aliases = 2;
 }

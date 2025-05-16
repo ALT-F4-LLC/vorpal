@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent"
@@ -41,10 +42,16 @@ type ConfigContext struct {
 	agent           string
 	artifact        string
 	artifactContext string
+	lockfile        string
+	lockfileUpdate  bool
 	port            int
 	registry        string
 	store           ConfigContextStore
-	system          string
+	system          artifact.ArtifactSystem
+}
+
+type ConfigLockfile struct {
+	Alias map[string]map[string]string `json:"alias"`
 }
 
 type ArtifactServer struct {
@@ -72,6 +79,10 @@ func (s *ArtifactServer) GetArtifact(ctx context.Context, request *artifact.Arti
 	return response, nil
 }
 
+func (s *ArtifactServer) GetArtifactAlias(ctx context.Context, request *artifact.GetArtifactAliasRequest) (*artifact.GetArtifactAliasResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 func (s *ArtifactServer) GetArtifacts(ctx context.Context, request *artifact.ArtifactsRequest) (*artifact.ArtifactsResponse, error) {
 	digests := make([]string, 0)
 
@@ -86,7 +97,7 @@ func (s *ArtifactServer) GetArtifacts(ctx context.Context, request *artifact.Art
 	return response, nil
 }
 
-func (s *ArtifactServer) StoreArtifact(ctx context.Context, request *artifact.Artifact) (*artifact.ArtifactResponse, error) {
+func (s *ArtifactServer) StoreArtifact(ctx context.Context, request *artifact.StoreArtifactRequest) (*artifact.ArtifactResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -101,14 +112,21 @@ func GetContext() *ConfigContext {
 		variable: cmd.Variable,
 	}
 
+	system, err := GetSystem(cmd.System)
+	if err != nil {
+		log.Fatalf("failed to get system: %v", err)
+	}
+
 	return &ConfigContext{
 		agent:           cmd.Agent,
 		artifact:        cmd.Artifact,
 		artifactContext: cmd.ArtifactContext,
+		lockfile:        cmd.Lockfile,
+		lockfileUpdate:  cmd.LockfileUpdate,
 		port:            cmd.Port,
 		registry:        cmd.Registry,
 		store:           store,
-		system:          cmd.System,
+		system:          *system,
 	}
 }
 
@@ -217,9 +235,51 @@ func fetchArtifacts(client artifact.ArtifactServiceClient, digest string, store 
 	return nil
 }
 
-func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
-	if _, ok := c.store.artifact[digest]; ok {
-		return &digest, nil
+func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
+	_, statErr := os.Stat(c.lockfile)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return nil, fmt.Errorf("error checking lockfile: %v", statErr)
+	}
+
+	if os.IsNotExist(statErr) && !c.lockfileUpdate {
+		return nil, fmt.Errorf("lockfile '%s' does not exist -- run with '--lockfile-update'", c.lockfile)
+	}
+
+	if os.IsNotExist(statErr) {
+		lockfileData := ConfigLockfile{
+			Alias: make(map[string]map[string]string),
+		}
+
+		lockfile, err := json.Marshal(lockfileData)
+		if err != nil {
+			return nil, fmt.Errorf("error marshalling lockfile: %v", err)
+		}
+
+		err = os.WriteFile(c.lockfile, lockfile, 0o644)
+		if err != nil {
+			return nil, fmt.Errorf("error writing lockfile: %v", err)
+		}
+	}
+
+	lockfileData, err := os.ReadFile(c.lockfile)
+	if err != nil {
+		return nil, fmt.Errorf("error reading lockfile: %v", err)
+	}
+
+	var lockfile ConfigLockfile
+
+	err = json.Unmarshal(lockfileData, &lockfile)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshalling lockfile: %v", err)
+	}
+
+	if _, ok := lockfile.Alias[c.system.String()]; !ok {
+		lockfile.Alias[c.system.String()] = make(map[string]string)
+	}
+
+	lockfileAliasDigest, ok := lockfile.Alias[c.system.String()][alias]
+	if !ok && !c.lockfileUpdate {
+		return nil, fmt.Errorf("alias '%s' not in lockfile - run with '--lockfile-update'", alias)
 	}
 
 	registry := strings.ReplaceAll(c.registry, "http://", "")
@@ -232,6 +292,40 @@ func (c *ConfigContext) FetchArtifact(digest string) (*string, error) {
 	defer clientConn.Close()
 
 	client := artifact.NewArtifactServiceClient(clientConn)
+
+	if !ok {
+		request := &artifact.GetArtifactAliasRequest{
+			Alias:       alias,
+			AliasSystem: c.system,
+		}
+
+		response, err := client.GetArtifactAlias(context.Background(), request)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching artifact alias: %v", err)
+		}
+
+		lockfileAliasDigest = response.Digest
+
+		if c.lockfileUpdate {
+			lockfile.Alias[c.system.String()][alias] = lockfileAliasDigest
+
+			lockfileData, err := json.Marshal(lockfile)
+			if err != nil {
+				return nil, fmt.Errorf("error marshalling lockfile: %v", err)
+			}
+
+			err = os.WriteFile(c.lockfile, lockfileData, 0o644)
+			if err != nil {
+				return nil, fmt.Errorf("error writing lockfile: %v", err)
+			}
+		}
+	}
+
+	digest := lockfileAliasDigest
+
+	if _, ok := c.store.artifact[digest]; ok {
+		return &digest, nil
+	}
 
 	err = fetchArtifacts(client, digest, c.store.artifact)
 	if err != nil {
@@ -249,13 +343,8 @@ func (c *ConfigContext) GetArtifactName() string {
 	return c.artifact
 }
 
-func (c *ConfigContext) GetTarget() (*artifact.ArtifactSystem, error) {
-	system, err := GetSystem(c.system)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get system: %w", err)
-	}
-
-	return system, nil
+func (c *ConfigContext) GetTarget() artifact.ArtifactSystem {
+	return c.system
 }
 
 func (c *ConfigContext) GetVariable(name string) *string {

@@ -5,7 +5,8 @@ use crate::{
             artifact_service_client::ArtifactServiceClient,
             artifact_service_server::{ArtifactService, ArtifactServiceServer},
             Artifact, ArtifactRequest, ArtifactResponse, ArtifactSystem, ArtifactsRequest,
-            ArtifactsResponse, StoreArtifactRequest,
+            ArtifactsResponse, GetArtifactAliasRequest, GetArtifactAliasResponse,
+            StoreArtifactRequest,
         },
     },
     cli::{Cli, Command},
@@ -65,6 +66,13 @@ impl ArtifactService for ArtifactServer {
         }
 
         Ok(Response::new(artifact.unwrap().clone()))
+    }
+
+    async fn get_artifact_alias(
+        &self,
+        _request: Request<GetArtifactAliasRequest>,
+    ) -> Result<Response<GetArtifactAliasResponse>, Status> {
+        Err(Status::unimplemented("not implemented yet"))
     }
 
     async fn get_artifacts(
@@ -229,42 +237,63 @@ impl ConfigContext {
         Ok(artifact_digest)
     }
 
-    pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
-        if self.store.artifact.contains_key(digest) {
-            return Ok(digest.to_string());
-        }
+    pub async fn fetch_artifact(&mut self, alias: &str) -> Result<String> {
+        // TODO: look in lockfile for artifact version
+
+        // if self.store.artifact.contains_key(digest) {
+        //     return Ok(digest.to_string());
+        // }
 
         let mut client = ArtifactServiceClient::connect(self.registry.clone())
             .await
             .expect("failed to connect to artifact service");
 
-        let request = ArtifactRequest {
-            digest: digest.to_string(),
+        let request = GetArtifactAliasRequest {
+            alias: alias.to_string(),
+            alias_system: self.system.into(),
         };
 
-        match client.get_artifact(request.clone()).await {
+        match client.get_artifact_alias(request.clone()).await {
             Err(status) => {
                 if status.code() != NotFound {
                     bail!("artifact service error: {:?}", status);
                 }
 
-                bail!("artifact not found: {digest}");
+                bail!("artifact alias not found: {alias}");
             }
 
             Ok(response) => {
-                let artifact = response.into_inner();
+                let response = response.into_inner();
 
-                self.store
-                    .artifact
-                    .insert(digest.to_string(), artifact.clone());
+                let request = ArtifactRequest {
+                    digest: response.digest,
+                };
 
-                for step in artifact.steps.iter() {
-                    for artifact_digest in step.artifacts.iter() {
-                        Box::pin(self.fetch_artifact(artifact_digest)).await?;
+                match client.get_artifact(request.clone()).await {
+                    Err(status) => {
+                        if status.code() != NotFound {
+                            bail!("artifact service error: {:?}", status);
+                        }
+
+                        bail!("artifact not found: {}", request.digest);
+                    }
+
+                    Ok(response) => {
+                        let artifact = response.into_inner();
+
+                        self.store
+                            .artifact
+                            .insert(request.digest.clone(), artifact.clone());
+
+                        for step in artifact.steps.iter() {
+                            for artifact_digest in step.artifacts.iter() {
+                                Box::pin(self.fetch_artifact(artifact_digest)).await?;
+                            }
+                        }
+
+                        Ok(request.digest)
                     }
                 }
-
-                Ok(digest.to_string())
             }
         }
     }

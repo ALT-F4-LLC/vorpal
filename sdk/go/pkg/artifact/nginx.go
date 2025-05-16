@@ -8,14 +8,11 @@ import (
 )
 
 func Nginx(context *config.ConfigContext) (*string, error) {
-	target, err := context.GetTarget()
-	if err != nil {
-		return nil, err
-	}
+	system := context.GetTarget()
 
 	var digest string
 
-	switch *target {
+	switch system {
 	case api.ArtifactSystem_AARCH64_DARWIN:
 		digest = "5a78e58e9dbc4915194b7ce68bcddf4b70e212a81813a66f5f3e47d84332ccfa"
 	case api.ArtifactSystem_AARCH64_LINUX:

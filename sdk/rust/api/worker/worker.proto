@@ -11,7 +11,7 @@ service WorkerService {
 }
 
 message BuildArtifactRequest {
-  optional string artifact_alias = 1;
+  repeated string artifact_aliases = 1;
   vorpal.artifact.Artifact artifact = 2;
 }
 

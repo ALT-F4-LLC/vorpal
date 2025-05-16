@@ -384,6 +384,7 @@ async fn prepare_artifact(
     // Store artifact in the registry
 
     let artifact = Artifact {
+        aliases: artifact.aliases,
         name: artifact.name,
         sources: artifact_sources,
         steps: artifact.steps,

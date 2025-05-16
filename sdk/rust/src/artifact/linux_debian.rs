@@ -222,6 +222,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "linux-debian";
 
     ArtifactBuilder::new(name, steps, systems)
+        .with_alias(format!("{name}:latest"))
         .build(context)
         .await
 }

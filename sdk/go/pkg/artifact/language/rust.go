@@ -318,10 +318,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	// Get rust toolchain artifact
 
-	contextTarget, err := context.GetTarget()
-	if err != nil {
-		return nil, err
-	}
+	contextTarget := context.GetTarget()
 
 	rustToolchain, err := artifact.RustToolchain(context)
 	if err != nil {

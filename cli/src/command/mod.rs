@@ -24,7 +24,7 @@ pub enum Command {
         agent: String,
 
         #[arg(long)]
-        alias: Option<String>,
+        alias: Vec<String>,
 
         #[arg(default_value = "Vorpal.toml", long)]
         config: String,
@@ -37,6 +37,9 @@ pub enum Command {
 
         #[arg(long)]
         name: String,
+
+        #[arg(default_value_t = false, long)]
+        lockfile_update: bool,
 
         #[arg(default_value_t = false, long)]
         path: bool,
@@ -104,10 +107,11 @@ pub async fn run() -> Result<()> {
     match &command {
         Command::Artifact {
             agent,
-            alias: artifact_alias,
+            alias: artifact_aliases,
             config: artifact_config,
             context: artifact_context,
             export: artifact_export,
+            lockfile_update: artifact_lockfile_update,
             name: artifact_name,
             path: artifact_path,
             system: artifact_system,
@@ -116,10 +120,11 @@ pub async fn run() -> Result<()> {
         } => {
             artifact::run(
                 agent,
-                artifact_alias.clone(),
+                artifact_aliases.clone(),
                 artifact_config,
                 artifact_context,
                 *artifact_export,
+                *artifact_lockfile_update,
                 artifact_name,
                 *artifact_path,
                 artifact_system,

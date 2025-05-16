@@ -57,7 +57,7 @@ pub struct VorpalConfig {
 
 pub async fn build(
     artifact: &Artifact,
-    artifact_alias: Option<String>,
+    artifact_aliases: Vec<String>,
     artifact_digest: &str,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
@@ -141,11 +141,9 @@ pub async fn build(
 
     // Build
 
-    println!("artifact alias: {:?}", artifact_alias);
-
     let request = BuildArtifactRequest {
         artifact: Some(artifact.clone()),
-        artifact_alias,
+        artifact_aliases,
     };
 
     let response = client_worker
@@ -178,10 +176,11 @@ pub async fn build(
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     agent: &str,
-    artifact_alias: Option<String>,
+    artifact_aliases: Vec<String>,
     artifact_config: &str,
     artifact_context: &str,
     artifact_export: bool,
+    artifact_lockfile_update: bool,
     artifact_name: &str,
     artifact_path: bool,
     artifact_system: &str,
@@ -325,7 +324,7 @@ pub async fn run(
     build_artifacts(
         artifact_path,
         None,
-        None,
+        vec![],
         config_context.get_artifact_store(),
         &mut client_archive,
         &mut client_worker,
@@ -351,6 +350,7 @@ pub async fn run(
         agent.to_string(),
         artifact_name.to_string(),
         artifact_context.to_path_buf(),
+        artifact_lockfile_update,
         config_path.display().to_string(),
         registry.to_string(),
         artifact_system.to_string(),
@@ -427,7 +427,7 @@ pub async fn run(
     build_artifacts(
         artifact_path,
         Some(&artifact),
-        artifact_alias,
+        artifact_aliases,
         build_store,
         &mut client_archive,
         &mut client_worker,

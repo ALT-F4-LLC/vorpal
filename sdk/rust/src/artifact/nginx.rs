@@ -36,6 +36,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
     ArtifactBuilder::new(name, steps, systems)
+        .with_alias(format!("{name}:{source_version}"))
         .with_source(source)
         .build(context)
         .await

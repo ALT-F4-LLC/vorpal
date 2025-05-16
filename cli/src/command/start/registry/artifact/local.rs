@@ -5,7 +5,7 @@ use crate::command::{
 use sha256::digest;
 use tokio::fs::{create_dir_all, read, write};
 use tonic::{async_trait, Status};
-use vorpal_sdk::api::artifact::Artifact;
+use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 
 #[async_trait]
 impl ArtifactBackend for LocalBackend {
@@ -26,10 +26,33 @@ impl ArtifactBackend for LocalBackend {
         Ok(artifact)
     }
 
+    async fn get_artifact_alias(
+        &self,
+        alias: String,
+        alias_system: ArtifactSystem,
+    ) -> Result<String, Status> {
+        let alias_path = get_artifact_alias_path(&alias, alias_system).map_err(|err| {
+            Status::internal(format!("failed to get artifact alias path: {:?}", err))
+        })?;
+
+        if !alias_path.exists() {
+            return Err(Status::not_found("alias not found"));
+        }
+
+        let digest = read(&alias_path)
+            .await
+            .map_err(|err| Status::internal(format!("failed to read alias: {:?}", err)))?;
+
+        let digest = String::from_utf8(digest.to_vec())
+            .map_err(|err| Status::internal(format!("failed to parse alias: {:?}", err)))?;
+
+        Ok(digest)
+    }
+
     async fn store_artifact(
         &self,
         artifact: Artifact,
-        artifact_alias: Option<String>,
+        artifact_aliases: Vec<String>,
     ) -> Result<String, Status> {
         let config_json = serde_json::to_vec(&artifact)
             .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
@@ -46,8 +69,15 @@ impl ArtifactBackend for LocalBackend {
                 .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
         }
 
-        if let Some(alias) = artifact_alias {
-            let alias_path = get_artifact_alias_path(&alias).map_err(|err| {
+        let aliases = [artifact.clone().aliases, artifact_aliases]
+            .concat()
+            .into_iter()
+            .collect::<Vec<String>>();
+
+        let alias_system = artifact.target();
+
+        for alias in aliases {
+            let alias_path = get_artifact_alias_path(&alias, alias_system).map_err(|err| {
                 Status::internal(format!("failed to get artifact alias path: {:?}", err))
             })?;
 

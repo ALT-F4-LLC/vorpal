@@ -17,29 +17,25 @@ use vorpal_sdk::api::{
     },
     artifact::{
         artifact_service_server::ArtifactService, Artifact, ArtifactRequest, ArtifactResponse,
-        ArtifactsRequest, ArtifactsResponse, StoreArtifactRequest,
+        ArtifactSystem, ArtifactsRequest, ArtifactsResponse, GetArtifactAliasRequest,
+        GetArtifactAliasResponse, StoreArtifactRequest,
     },
 };
 
 mod archive;
 mod artifact;
-mod gha;
 mod s3;
 
 #[derive(thiserror::Error, Debug)]
 pub enum BackendError {
     #[error("missing s3 bucket")]
     MissingS3Bucket,
-
-    #[error("failed to create GHA cache client: {0}")]
-    FailedToCreateGhaClient(String),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum ServerBackend {
     #[default]
     Unknown,
-    Gha,
     Local,
     S3,
 }
@@ -47,21 +43,7 @@ pub enum ServerBackend {
 #[derive(Clone, Debug)]
 pub struct LocalBackend;
 
-#[derive(Debug, Clone)]
-pub struct GhaBackend {
-    cache_client: gha::CacheClient,
-}
-
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
-
-impl GhaBackend {
-    pub fn new() -> Result<Self, BackendError> {
-        let cache_client = gha::CacheClient::new()
-            .map_err(|err| BackendError::FailedToCreateGhaClient(err.to_string()))?;
-
-        Ok(Self { cache_client })
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct S3Backend {
@@ -247,10 +229,16 @@ impl ArchiveService for ArchiveServer {
 pub trait ArtifactBackend: Send + Sync + 'static {
     async fn get_artifact(&self, digest: String) -> Result<Artifact, Status>;
 
+    async fn get_artifact_alias(
+        &self,
+        alias: String,
+        alias_system: ArtifactSystem,
+    ) -> Result<String, Status>;
+
     async fn store_artifact(
         &self,
         artifact: Artifact,
-        artifact_alias: Option<String>,
+        artifact_aliases: Vec<String>,
     ) -> Result<String, Status>;
 
     /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
@@ -290,6 +278,26 @@ impl ArtifactService for ArtifactServer {
         Ok(Response::new(artifact))
     }
 
+    async fn get_artifact_alias(
+        &self,
+        request: Request<GetArtifactAliasRequest>,
+    ) -> Result<Response<GetArtifactAliasResponse>, Status> {
+        let request = request.into_inner();
+
+        if request.alias.is_empty() {
+            return Err(Status::invalid_argument("missing `alias` field"));
+        }
+
+        let alias_system = request.alias_system();
+
+        let digest = self
+            .backend
+            .get_artifact_alias(request.alias, alias_system)
+            .await?;
+
+        Ok(Response::new(GetArtifactAliasResponse { digest }))
+    }
+
     async fn get_artifacts(
         &self,
         _request: Request<ArtifactsRequest>,
@@ -315,7 +323,7 @@ impl ArtifactService for ArtifactServer {
 
         let digest = self
             .backend
-            .store_artifact(artifact, request.artifact_alias)
+            .store_artifact(artifact, request.artifact_aliases)
             .await?;
 
         Ok(Response::new(ArtifactResponse { digest }))
@@ -327,7 +335,6 @@ pub async fn backend_archive(
     registry_backend_s3_bucket: Option<String>,
 ) -> Result<Box<dyn ArchiveBackend>> {
     let backend = match registry_backend.as_str() {
-        "gha" => ServerBackend::Gha,
         "local" => ServerBackend::Local,
         "s3" => ServerBackend::S3,
         _ => ServerBackend::Unknown,
@@ -336,7 +343,6 @@ pub async fn backend_archive(
     let backend_archive: Box<dyn ArchiveBackend> = match backend {
         ServerBackend::Local => Box::new(LocalBackend::new()?),
         ServerBackend::S3 => Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?),
-        ServerBackend::Gha => Box::new(GhaBackend::new()?),
         ServerBackend::Unknown => bail!("unknown archive backend: {}", registry_backend),
     };
 
@@ -348,7 +354,6 @@ pub async fn backend_artifact(
     registry_backend_s3_bucket: Option<String>,
 ) -> Result<Box<dyn ArtifactBackend>> {
     let backend = match registry_backend {
-        "gha" => ServerBackend::Gha,
         "local" => ServerBackend::Local,
         "s3" => ServerBackend::S3,
         _ => ServerBackend::Unknown,
@@ -357,7 +362,6 @@ pub async fn backend_artifact(
     let backend_artifact: Box<dyn ArtifactBackend> = match backend {
         ServerBackend::Local => Box::new(LocalBackend::new()?),
         ServerBackend::S3 => Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?),
-        ServerBackend::Gha => Box::new(GhaBackend::new()?),
         ServerBackend::Unknown => bail!("unknown artifact backend: {}", registry_backend),
     };
 

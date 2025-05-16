@@ -183,17 +183,14 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 	artifacts = append(artifacts, goBin)
 	artifacts = append(artifacts, builder.artifacts...)
 
-	target, err := context.GetTarget()
+	system := context.GetTarget()
+
+	goarch, err := GetGOARCH(system)
 	if err != nil {
 		return nil, err
 	}
 
-	goarch, err := GetGOARCH(*target)
-	if err != nil {
-		return nil, err
-	}
-
-	goos, err := GetGOOS(*target)
+	goos, err := GetGOOS(system)
 	if err != nil {
 		return nil, err
 	}

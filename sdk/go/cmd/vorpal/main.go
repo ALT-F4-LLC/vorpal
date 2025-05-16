@@ -261,10 +261,7 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		staticcheck,
 	}
 
-	contextTarget, err := context.GetTarget()
-	if err != nil {
-		return nil, err
-	}
+	contextTarget := context.GetTarget()
 
 	rustToolchainTarget, err := artifact.RustToolchainTarget(contextTarget)
 	if err != nil {
@@ -293,12 +290,12 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		paths = append(paths, fmt.Sprintf("%s/bin", artifact.GetEnvKey(art)))
 	}
 
-	goarch, err := language.GetGOARCH(*contextTarget)
+	goarch, err := language.GetGOARCH(contextTarget)
 	if err != nil {
 		return nil, err
 	}
 
-	goos, err := language.GetGOOS(*contextTarget)
+	goos, err := language.GetGOOS(contextTarget)
 	if err != nil {
 		return nil, err
 	}

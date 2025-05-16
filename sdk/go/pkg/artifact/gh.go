@@ -8,14 +8,11 @@ import (
 )
 
 func Gh(context *config.ConfigContext) (*string, error) {
-	target, err := context.GetTarget()
-	if err != nil {
-		return nil, err
-	}
+	system := context.GetTarget()
 
 	var digest string
 
-	switch *target {
+	switch system {
 	case api.ArtifactSystem_AARCH64_DARWIN:
 		digest = "a038ac34aeef1ac2acabafe4a99312e88bc4a611746d23d14c179b81123aa25e"
 	case api.ArtifactSystem_AARCH64_LINUX:

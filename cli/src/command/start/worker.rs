@@ -556,7 +556,7 @@ async fn build_artifact(
 
         let request = StoreArtifactRequest {
             artifact: Some(artifact),
-            artifact_alias: request.artifact_alias,
+            artifact_aliases: request.artifact_aliases,
         };
 
         client.store_artifact(request).await.map_err(|err| {

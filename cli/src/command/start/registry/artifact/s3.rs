@@ -5,7 +5,7 @@ use crate::command::start::registry::{
 use sha256::digest;
 use tonic::{async_trait, Status};
 use tracing::info;
-use vorpal_sdk::api::artifact::Artifact;
+use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 
 #[async_trait]
 impl ArtifactBackend for S3Backend {
@@ -46,10 +46,43 @@ impl ArtifactBackend for S3Backend {
         Ok(artifact)
     }
 
+    async fn get_artifact_alias(
+        &self,
+        artifact_alias: String,
+        artifact_system: ArtifactSystem,
+    ) -> Result<String, Status> {
+        let client = &self.client;
+        let bucket = &self.bucket;
+
+        let alias_key = get_artifact_alias_key(&artifact_alias, artifact_system.as_str_name())
+            .map_err(|err| {
+                Status::internal(format!("failed to get artifact alias key: {:?}", err))
+            })?;
+
+        let mut alias_stream = client
+            .get_object()
+            .bucket(bucket)
+            .key(&alias_key)
+            .send()
+            .await
+            .map_err(|err| Status::not_found(err.to_string()))?
+            .body;
+
+        let mut alias_digest = String::new();
+
+        while let Some(chunk) = alias_stream.next().await {
+            let alias_chunk = chunk.map_err(|err| Status::internal(err.to_string()))?;
+
+            alias_digest.push_str(&String::from_utf8_lossy(&alias_chunk));
+        }
+
+        Ok(alias_digest)
+    }
+
     async fn store_artifact(
         &self,
         artifact: Artifact,
-        artifact_alias: Option<String>,
+        artifact_aliases: Vec<String>,
     ) -> Result<String, Status> {
         let client = &self.client;
         let bucket = &self.bucket;
@@ -79,8 +112,15 @@ impl ArtifactBackend for S3Backend {
                 .map_err(|err| Status::internal(format!("failed to write config: {:?}", err)))?;
         }
 
-        if let Some(alias) = artifact_alias {
-            let alias_key = get_artifact_alias_key(&alias).map_err(|err| {
+        let aliases = [artifact.clone().aliases, artifact_aliases]
+            .concat()
+            .into_iter()
+            .collect::<Vec<String>>();
+
+        let alias_system = artifact.target().as_str_name();
+
+        for alias in aliases {
+            let alias_key = get_artifact_alias_key(&alias, alias_system).map_err(|err| {
                 Status::internal(format!("failed to get artifact alias key: {:?}", err))
             })?;
 

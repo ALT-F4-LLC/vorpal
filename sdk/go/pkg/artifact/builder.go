@@ -262,18 +262,15 @@ func (a *ArtifactStepBuilder) WithScript(script string, systems []api.ArtifactSy
 }
 
 func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactStep, error) {
-	stepTarget, err := ctx.GetTarget()
-	if err != nil {
-		return nil, err
-	}
+	stepTarget := ctx.GetTarget()
 
 	stepArguments := []string{}
-	if args, ok := a.Arguments[*stepTarget]; ok {
+	if args, ok := a.Arguments[stepTarget]; ok {
 		stepArguments = args
 	}
 
 	stepArtifacts := []string{}
-	if arts, ok := a.Artifacts[*stepTarget]; ok {
+	if arts, ok := a.Artifacts[stepTarget]; ok {
 		artifacts := make([]string, len(arts))
 
 		for i, art := range arts {
@@ -286,17 +283,17 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactSte
 	}
 
 	stepEnvironments := []string{}
-	if envs, ok := a.Environments[*stepTarget]; ok {
+	if envs, ok := a.Environments[stepTarget]; ok {
 		stepEnvironments = envs
 	}
 
 	var stepEntrypoint *string
-	if entry, ok := a.Entrypoint[*stepTarget]; ok {
+	if entry, ok := a.Entrypoint[stepTarget]; ok {
 		stepEntrypoint = &entry
 	}
 
 	var stepScript *string
-	if scr, ok := a.Script[*stepTarget]; ok {
+	if scr, ok := a.Script[stepTarget]; ok {
 		stepScript = &scr
 	}
 
@@ -397,17 +394,12 @@ func (a *ArtifactBuilder) WithSystem(system api.ArtifactSystem) *ArtifactBuilder
 }
 
 func (a *ArtifactBuilder) Build(ctx *config.ConfigContext) (*string, error) {
-	artifactTarget, err := ctx.GetTarget()
-	if err != nil {
-		return nil, err
-	}
-
 	artifact := api.Artifact{
 		Name:    a.Name,
 		Sources: a.Sources,
 		Steps:   a.Steps,
 		Systems: a.Systems,
-		Target:  *artifactTarget,
+		Target:  ctx.GetTarget(),
 	}
 
 	if len(artifact.Steps) == 0 {

@@ -67,6 +67,7 @@ pub struct ArtifactVariableBuilder<'a> {
 }
 
 pub struct ArtifactBuilder<'a> {
+    pub aliases: Vec<String>,
     pub name: &'a str,
     pub sources: Vec<ArtifactSource>,
     pub steps: Vec<ArtifactStep>,
@@ -277,11 +278,19 @@ impl<'a> ArtifactTaskBuilder<'a> {
 impl<'a> ArtifactBuilder<'a> {
     pub fn new(name: &'a str, steps: Vec<ArtifactStep>, systems: Vec<ArtifactSystem>) -> Self {
         Self {
+            aliases: vec![],
             name,
             sources: vec![],
             steps,
             systems,
         }
+    }
+
+    pub fn with_alias(mut self, alias: String) -> Self {
+        if !self.aliases.contains(&alias) {
+            self.aliases.push(alias);
+        }
+        self
     }
 
     pub fn with_source(mut self, source: ArtifactSource) -> Self {
@@ -294,6 +303,7 @@ impl<'a> ArtifactBuilder<'a> {
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let artifact = Artifact {
+            aliases: self.aliases,
             name: self.name.to_string(),
             sources: self.sources,
             steps: self.steps,

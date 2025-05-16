@@ -10,6 +10,7 @@ use anyhow::{bail, Result};
 use indoc::formatdoc;
 
 pub struct GoBuilder<'a> {
+    aliases: Vec<String>,
     artifacts: Vec<String>,
     build_arguments: Vec<String>,
     build_directory: Option<&'a str>,
@@ -44,6 +45,7 @@ pub fn get_goarch(target: ArtifactSystem) -> Result<String> {
 impl<'a> GoBuilder<'a> {
     pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
+            aliases: vec![],
             artifacts: vec![],
             build_arguments: vec![],
             build_directory: None,
@@ -54,6 +56,13 @@ impl<'a> GoBuilder<'a> {
             source_scripts: vec![],
             systems,
         }
+    }
+
+    pub fn with_alias(mut self, alias: String) -> Self {
+        if !self.aliases.contains(&alias) {
+            self.aliases.push(alias);
+        }
+        self
     }
 
     pub fn with_build_arguments(mut self, arguments: Vec<String>) -> Self {
@@ -160,9 +169,12 @@ impl<'a> GoBuilder<'a> {
             .await?,
         ];
 
-        ArtifactBuilder::new(self.name, steps, self.systems)
-            .with_source(source)
-            .build(context)
-            .await
+        let mut builder = ArtifactBuilder::new(self.name, steps, self.systems).with_source(source);
+
+        for alias in self.aliases {
+            builder = builder.with_alias(alias);
+        }
+
+        builder.build(context).await
     }
 }

@@ -442,6 +442,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "linux-vorpal";
 
     ArtifactBuilder::new(name, steps, systems)
+        .with_alias(format!("{name}:latest"))
         .with_source(bash)
         .with_source(binutils)
         .with_source(bison)

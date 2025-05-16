@@ -249,12 +249,9 @@ func Shell(
 	environments []string,
 	script string,
 ) (*api.ArtifactStep, error) {
-	stepTarget, err := context.GetTarget()
-	if err != nil {
-		return nil, err
-	}
+	stepSystem := context.GetTarget()
 
-	if *stepTarget == api.ArtifactSystem_AARCH64_DARWIN || *stepTarget == api.ArtifactSystem_X8664_DARWIN {
+	if stepSystem == api.ArtifactSystem_AARCH64_DARWIN || stepSystem == api.ArtifactSystem_X8664_DARWIN {
 		return Bash(
 			context,
 			artifacts,
@@ -267,10 +264,10 @@ func Shell(
 		)
 	}
 
-	if *stepTarget == api.ArtifactSystem_AARCH64_LINUX || *stepTarget == api.ArtifactSystem_X8664_LINUX {
+	if stepSystem == api.ArtifactSystem_AARCH64_LINUX || stepSystem == api.ArtifactSystem_X8664_LINUX {
 		var linux_vorpal_digest string
 
-		switch *stepTarget {
+		switch stepSystem {
 		case api.ArtifactSystem_AARCH64_LINUX:
 			linux_vorpal_digest = "79958083229520a9e8cbf94ed5f6da40c3bf98ae666b3e20c01bc272fd92c2bb"
 		case api.ArtifactSystem_X8664_LINUX:
@@ -278,7 +275,7 @@ func Shell(
 		}
 
 		if linux_vorpal_digest == "" {
-			return nil, fmt.Errorf("unsupported shell step system: %s", stepTarget)
+			return nil, fmt.Errorf("unsupported shell step system: %s", stepSystem)
 		}
 
 		linux_vorpal, err := context.FetchArtifact(linux_vorpal_digest)
@@ -300,7 +297,7 @@ func Shell(
 		)
 	}
 
-	return nil, fmt.Errorf("unsupported shell step system: %s", stepTarget)
+	return nil, fmt.Errorf("unsupported shell step system: %s", stepSystem)
 }
 
 func Docker(
