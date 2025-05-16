@@ -277,30 +277,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         ncurses_version,
     );
 
-    let step_setup = step::bwrap(
-        context,
-        vec![],
-        vec![],
-        step_environments.clone(),
-        Some(step_rootfs.clone()),
-        step_setup_script,
-        vec![Aarch64Linux, X8664Linux],
-    )
-    .await?;
-
     let step_stage_01_script =
         stage_01::script(binutils_version, gcc_version, glibc_version, linux_version);
-
-    let step_stage_01 = step::bwrap(
-        context,
-        vec![],
-        vec![],
-        step_environments.clone(),
-        Some(step_rootfs.clone()),
-        step_stage_01_script,
-        vec![Aarch64Linux, X8664Linux],
-    )
-    .await?;
 
     let step_stage_02_script = stage_02::script(
         bash_version,
@@ -322,20 +300,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         xz_version,
     );
 
-    let step_stage_02 = step::bwrap(
-        context,
-        vec![],
-        vec![],
-        step_environments.clone(),
-        Some(step_rootfs.clone()),
-        step_stage_02_script,
-        vec![Aarch64Linux, X8664Linux],
-    )
-    .await?;
-
-    // TODO: impove readability with list in list
-
-    let arguments = vec![
+    let bwrap_arguments = vec![
         // mount bin
         "--bind",
         "$VORPAL_OUTPUT/bin",
@@ -384,39 +349,6 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         util_linux_version,
     );
 
-    let step_stage_03 = step::bwrap(
-        context,
-        [
-            arguments.clone(),
-            vec![
-                // mount tools
-                "--bind",
-                "$VORPAL_OUTPUT/tools",
-                "/tools",
-            ],
-        ]
-        .concat(),
-        vec![],
-        step_environments.clone(),
-        None,
-        step_stage_03_script,
-        vec![Aarch64Linux, X8664Linux],
-    )
-    .await?;
-
-    let step_cleanup = step::bwrap(
-        context,
-        vec![],
-        vec![],
-        step_environments.clone(),
-        Some(step_rootfs.clone()),
-        formatdoc! {"
-            rm -rf $VORPAL_OUTPUT/tools",
-        },
-        vec![Aarch64Linux, X8664Linux],
-    )
-    .await?;
-
     let step_stage_04_script = stage_04::script(
         binutils_version,
         gcc_version,
@@ -424,17 +356,6 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         openssl_version,
         zlib_version,
     );
-
-    let step_stage_04 = step::bwrap(
-        context,
-        arguments.clone(),
-        vec![],
-        step_environments.clone(),
-        None,
-        step_stage_04_script,
-        vec![Aarch64Linux, X8664Linux],
-    )
-    .await?;
 
     let step_stage_05_script = stage_05::script(
         curl_version,
@@ -444,20 +365,84 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         unzip_version,
     );
 
-    let step_stage_05 = step::bwrap(
-        context,
-        arguments.clone(),
-        vec![],
-        step_environments.clone(),
-        None,
-        step_stage_05_script,
-        vec![Aarch64Linux, X8664Linux],
-    )
-    .await?;
+    let systems = vec![Aarch64Linux, X8664Linux];
+
+    // TODO: impove readability with list in list
+
+    let steps = vec![
+        step::bwrap(
+            vec![],
+            vec![],
+            step_environments.clone(),
+            Some(step_rootfs.clone()),
+            step_setup_script,
+        )
+        .await?,
+        step::bwrap(
+            vec![],
+            vec![],
+            step_environments.clone(),
+            Some(step_rootfs.clone()),
+            step_stage_01_script,
+        )
+        .await?,
+        step::bwrap(
+            vec![],
+            vec![],
+            step_environments.clone(),
+            Some(step_rootfs.clone()),
+            step_stage_02_script,
+        )
+        .await?,
+        step::bwrap(
+            [
+                bwrap_arguments.clone(),
+                vec![
+                    // mount tools
+                    "--bind",
+                    "$VORPAL_OUTPUT/tools",
+                    "/tools",
+                ],
+            ]
+            .concat(),
+            vec![],
+            step_environments.clone(),
+            None,
+            step_stage_03_script,
+        )
+        .await?,
+        step::bwrap(
+            vec![],
+            vec![],
+            step_environments.clone(),
+            Some(step_rootfs.clone()),
+            formatdoc! {"
+                rm -rf $VORPAL_OUTPUT/tools",
+            },
+        )
+        .await?,
+        step::bwrap(
+            bwrap_arguments.clone(),
+            vec![],
+            step_environments.clone(),
+            None,
+            step_stage_04_script,
+        )
+        .await?,
+        step::bwrap(
+            bwrap_arguments.clone(),
+            vec![],
+            step_environments.clone(),
+            None,
+            step_stage_05_script,
+        )
+        .await?,
+    ];
 
     let name = "linux-vorpal";
 
-    ArtifactBuilder::new(name)
+    ArtifactBuilder::new(name, steps, systems)
+        .with_alias(format!("{name}:latest"))
         .with_source(bash)
         .with_source(binutils)
         .with_source(bison)
@@ -497,15 +482,6 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_source(util_linux)
         .with_source(xz)
         .with_source(zlib)
-        .with_step(step_setup)
-        .with_step(step_stage_01)
-        .with_step(step_stage_02)
-        .with_step(step_stage_03)
-        .with_step(step_cleanup)
-        .with_step(step_stage_04)
-        .with_step(step_stage_05)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Linux)
         .build(context)
         .await
 }

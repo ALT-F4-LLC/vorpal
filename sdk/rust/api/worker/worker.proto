@@ -7,7 +7,12 @@ option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/worker";
 import "artifact/artifact.proto";
 
 service WorkerService {
-    rpc BuildArtifact(vorpal.artifact.Artifact) returns (stream BuildArtifactResponse);
+    rpc BuildArtifact(BuildArtifactRequest) returns (stream BuildArtifactResponse);
+}
+
+message BuildArtifactRequest {
+  repeated string artifact_aliases = 1;
+  vorpal.artifact.Artifact artifact = 2;
 }
 
 message BuildArtifactResponse {

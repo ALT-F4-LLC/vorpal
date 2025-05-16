@@ -1,6 +1,6 @@
 use crate::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{get_env_key, linux_vorpal, ArtifactStep, ArtifactStepBuilder, ArtifactSystem},
+    artifact::{get_env_key, linux_vorpal, ArtifactStep, ArtifactStepBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -8,13 +8,7 @@ use indoc::formatdoc;
 
 // TODO: implement amber step
 
-pub fn bash(
-    context: &mut ConfigContext,
-    artifacts: Vec<String>,
-    environments: Vec<String>,
-    script: String,
-    systems: Vec<ArtifactSystem>,
-) -> ArtifactStep {
+pub fn bash(artifacts: Vec<String>, environments: Vec<String>, script: String) -> ArtifactStep {
     let mut step_environments = vec![];
 
     for environment in environments.iter() {
@@ -50,22 +44,19 @@ pub fn bash(
         {script}
     "};
 
-    ArtifactStepBuilder::new()
-        .with_artifacts(artifacts, systems.clone())
-        .with_entrypoint("bash", systems.clone())
-        .with_environments(step_environments, systems.clone())
-        .with_script(step_script, systems)
-        .build(context)
+    ArtifactStepBuilder::new("bash")
+        .with_artifacts(artifacts)
+        .with_environments(step_environments)
+        .with_script(step_script)
+        .build()
 }
 
 pub async fn bwrap(
-    context: &mut ConfigContext,
     arguments: Vec<&str>,
     artifacts: Vec<String>,
     environments: Vec<String>,
     rootfs: Option<String>,
     script: String,
-    systems: Vec<ArtifactSystem>,
 ) -> Result<ArtifactStep> {
     // Setup arguments
 
@@ -202,19 +193,14 @@ pub async fn bwrap(
 
     // Setup step
 
-    let step = ArtifactStepBuilder::new()
-        .with_arguments(
-            step_arguments.iter().map(|x| x.as_str()).collect(),
-            systems.clone(),
-        )
-        .with_artifacts(step_artifacts, systems.clone())
-        .with_entrypoint("bwrap", systems.clone())
-        .with_environments(
-            vec!["PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()],
-            systems.clone(),
-        )
-        .with_script(step_script, systems)
-        .build(context);
+    let step = ArtifactStepBuilder::new("bwrap")
+        .with_arguments(step_arguments.iter().map(|x| x.as_str()).collect())
+        .with_artifacts(step_artifacts)
+        .with_environments(vec![
+            "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()
+        ])
+        .with_script(step_script)
+        .build();
 
     Ok(step)
 }
@@ -232,51 +218,25 @@ pub async fn shell(
     // Setup step
 
     let step = match step_system {
-        Aarch64Darwin | X8664Darwin => bash(
-            context,
-            artifacts,
-            environments.clone(),
-            script.to_string(),
-            vec![Aarch64Darwin, X8664Darwin],
-        ),
+        Aarch64Darwin | X8664Darwin => bash(artifacts, environments.clone(), script.to_string()),
 
         Aarch64Linux | X8664Linux => {
             let linux_vorpal = linux_vorpal::build(context).await?;
-
-            bwrap(
-                context,
-                vec![],
-                artifacts,
-                environments,
-                Some(linux_vorpal),
-                script,
-                vec![Aarch64Linux, X8664Linux],
-            )
-            .await?
+            bwrap(vec![], artifacts, environments, Some(linux_vorpal), script).await?
         }
 
-        _ => bail!(
-            "unsupported shell step system: {}",
-            step_system.as_str_name()
-        ),
+        _ => bail!("unsupported system: {}", step_system.as_str_name()),
     };
 
     Ok(step)
 }
 
-pub fn docker(
-    context: &mut ConfigContext,
-    arguments: Vec<&str>,
-    artifacts: Vec<String>,
-    systems: Vec<ArtifactSystem>,
-) -> ArtifactStep {
-    ArtifactStepBuilder::new()
-        .with_arguments(arguments, systems.clone())
-        .with_artifacts(artifacts, systems.clone())
-        .with_entrypoint("docker", systems.clone())
-        .with_environments(
-            vec!["PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()],
-            systems.clone(),
-        )
-        .build(context)
+pub fn docker(arguments: Vec<&str>, artifacts: Vec<String>) -> ArtifactStep {
+    ArtifactStepBuilder::new("docker")
+        .with_arguments(arguments)
+        .with_artifacts(artifacts)
+        .with_environments(vec![
+            "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()
+        ])
+        .build()
 }

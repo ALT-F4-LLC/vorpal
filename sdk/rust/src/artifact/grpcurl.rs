@@ -1,4 +1,5 @@
 use crate::{
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{language::go::GoBuilder, protoc, ArtifactSourceBuilder},
     context::ConfigContext,
 };
@@ -19,12 +20,15 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_digest(source_digest)
         .build();
 
-    let build_dir = format!("{}-{}", name, source_version);
+    let build_directory = format!("{}-{}", name, source_version);
     let build_path = format!("cmd/{}/{}.go", name, name);
 
-    GoBuilder::new(name)
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+
+    GoBuilder::new(name, systems)
+        .with_alias(format!("{name}:{source_version}"))
         .with_artifacts(vec![protoc])
-        .with_build_directory(build_dir.as_str())
+        .with_build_directory(build_directory.as_str())
         .with_build_path(build_path.as_str())
         .with_source(source)
         .build(context)

@@ -1,4 +1,0 @@
-language = "rust"
-
-[source]
-includes = ["vorpal"]

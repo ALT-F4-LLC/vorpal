@@ -1,4 +1,4 @@
-use crate::command::{artifact::build, store::paths::get_store_path};
+use crate::command::{artifact::build, store::paths::get_artifact_output_path};
 use anyhow::{anyhow, bail, Result};
 use petgraph::{algo::toposort, graphmap::DiGraphMap};
 use port_selector::random_free_port;
@@ -75,10 +75,12 @@ pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Ve
     Ok(build_order)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn start(
     agent: String,
     artifact: String,
     artifact_context: PathBuf,
+    artifact_lockfile_update: bool,
     file: String,
     registry: String,
     system: String,
@@ -107,6 +109,10 @@ pub async fn start(
     ];
 
     command.args(command_arguments);
+
+    if artifact_lockfile_update {
+        command.arg("--lockfile-update");
+    }
 
     for var in variable.iter() {
         command.arg("--variable").arg(var);
@@ -197,6 +203,7 @@ pub async fn start(
 pub async fn build_artifacts(
     artifact_path: bool,
     artifact_selected: Option<&Artifact>,
+    artifact_selected_aliases: Vec<String>,
     build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
@@ -217,16 +224,33 @@ pub async fn build_artifacts(
                     }
                 }
 
-                build(artifact, &artifact_digest, client_archive, client_worker).await?;
+                let mut artifact_aliases = vec![];
+
+                if let Some(selected) = artifact_selected {
+                    if selected.name == artifact.name {
+                        artifact_aliases = artifact_selected_aliases.clone();
+                    }
+                }
+
+                build(
+                    artifact,
+                    artifact_aliases,
+                    &artifact_digest,
+                    client_archive,
+                    client_worker,
+                )
+                .await?;
 
                 build_complete.insert(artifact_digest.to_string(), artifact.clone());
 
-                if let Some(artifact_selected) = artifact_selected {
-                    if artifact_selected.name == artifact.name {
+                if let Some(selected) = artifact_selected {
+                    if selected.name == artifact.name {
                         let mut output = artifact_digest.clone();
 
                         if artifact_path {
-                            output = get_store_path(&artifact_digest).display().to_string();
+                            output = get_artifact_output_path(&artifact_digest)
+                                .display()
+                                .to_string();
                         }
 
                         println!("{}", output);

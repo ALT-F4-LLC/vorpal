@@ -12,7 +12,7 @@ func main() {
 
 	_, err := language.NewGoBuilder("example").
 		WithBuildDirectory("cmd/example").
-		WithIncludes([]string{"go.mod", "go.sum", "cmd/example"}).
+		WithIncludes([]string{"cmd/example", "go.mod", "go.sum"}).
 		Build(context)
 	if err != nil {
 		log.Fatalf("error building: %v", err)

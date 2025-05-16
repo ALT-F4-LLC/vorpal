@@ -6,7 +6,7 @@ use crate::command::{
         },
         worker::WorkerServer,
     },
-    store::paths::get_public_key_path,
+    store::paths::get_key_public_path,
 };
 use anyhow::{bail, Result};
 use tonic::transport::Server;
@@ -44,7 +44,7 @@ pub async fn run(
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
-    let public_key_path = get_public_key_path();
+    let public_key_path = get_key_public_path();
 
     if !public_key_path.exists() {
         return Err(anyhow::anyhow!(
@@ -66,7 +66,6 @@ pub async fn run(
 
     if services.contains(&"registry".to_string()) {
         let backend = match registry_backend.as_str() {
-            "gha" => ServerBackend::Gha,
             "local" => ServerBackend::Local,
             "s3" => ServerBackend::S3,
             _ => ServerBackend::Unknown,

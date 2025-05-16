@@ -1,4 +1,3 @@
 [workspace]
-exclude = ["template/rust"]
 members = ["cli", "config", "sdk/rust"]
 resolver = "2"

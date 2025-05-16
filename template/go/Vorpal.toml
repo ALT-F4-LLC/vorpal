@@ -1,7 +1,0 @@
-language = "go"
-
-[build]
-directory = "cmd/vorpal"
-
-[source]
-includes = ["cmd/vorpal", "go.mod", "go.sum"]

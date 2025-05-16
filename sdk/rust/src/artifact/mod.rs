@@ -1,13 +1,9 @@
 use crate::{
-    api::artifact::{
-        Artifact, ArtifactSource, ArtifactStep, ArtifactSystem,
-        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    },
+    api::artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactSystem},
     context::ConfigContext,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use indoc::formatdoc;
-use std::collections::HashMap;
 
 pub mod cargo;
 pub mod clippy;
@@ -38,6 +34,7 @@ pub struct ArtifactProcessBuilder<'a> {
     pub artifacts: Vec<String>,
     pub entrypoint: &'a str,
     pub name: &'a str,
+    pub systems: Vec<ArtifactSystem>,
 }
 
 pub struct ArtifactSourceBuilder<'a> {
@@ -48,18 +45,19 @@ pub struct ArtifactSourceBuilder<'a> {
     pub path: &'a str,
 }
 
-pub struct ArtifactStepBuilder {
-    pub arguments: HashMap<ArtifactSystem, Vec<String>>,
-    pub artifacts: HashMap<ArtifactSystem, Vec<String>>,
-    pub entrypoint: HashMap<ArtifactSystem, String>,
-    pub environments: HashMap<ArtifactSystem, Vec<String>>,
-    pub script: HashMap<ArtifactSystem, String>,
+pub struct ArtifactStepBuilder<'a> {
+    pub arguments: Vec<String>,
+    pub artifacts: Vec<String>,
+    pub entrypoint: &'a str,
+    pub environments: Vec<String>,
+    pub script: Option<String>,
 }
 
 pub struct ArtifactTaskBuilder<'a> {
     pub artifacts: Vec<String>,
     pub name: &'a str,
     pub script: String,
+    pub systems: Vec<ArtifactSystem>,
 }
 
 pub struct ArtifactVariableBuilder<'a> {
@@ -69,6 +67,7 @@ pub struct ArtifactVariableBuilder<'a> {
 }
 
 pub struct ArtifactBuilder<'a> {
+    pub aliases: Vec<String>,
     pub name: &'a str,
     pub sources: Vec<ArtifactSource>,
     pub steps: Vec<ArtifactStep>,
@@ -76,12 +75,13 @@ pub struct ArtifactBuilder<'a> {
 }
 
 impl<'a> ArtifactProcessBuilder<'a> {
-    pub fn new(name: &'a str, entrypoint: &'a str) -> Self {
+    pub fn new(name: &'a str, entrypoint: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             arguments: vec![],
             artifacts: vec![],
             entrypoint,
             name,
+            systems,
         }
     }
 
@@ -165,14 +165,9 @@ impl<'a> ArtifactProcessBuilder<'a> {
             name = self.name,
         };
 
-        let step = step::shell(context, self.artifacts, vec![], script).await?;
+        let steps = vec![step::shell(context, self.artifacts, vec![], script).await?];
 
-        ArtifactBuilder::new(self.name)
-            .with_step(step)
-            .with_system(Aarch64Darwin)
-            .with_system(Aarch64Linux)
-            .with_system(X8664Darwin)
-            .with_system(X8664Linux)
+        ArtifactBuilder::new(self.name, steps, self.systems)
             .build(context)
             .await
     }
@@ -214,87 +209,55 @@ impl<'a> ArtifactSourceBuilder<'a> {
     }
 }
 
-impl Default for ArtifactStepBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ArtifactStepBuilder {
-    pub fn new() -> Self {
+impl<'a> ArtifactStepBuilder<'a> {
+    pub fn new(entrypoint: &'a str) -> Self {
         Self {
-            arguments: HashMap::new(),
-            artifacts: HashMap::new(),
-            entrypoint: HashMap::new(),
-            environments: HashMap::new(),
-            script: HashMap::new(),
+            arguments: vec![],
+            artifacts: vec![],
+            entrypoint,
+            environments: vec![],
+            script: None,
         }
     }
 
-    pub fn with_arguments(mut self, arguments: Vec<&str>, systems: Vec<ArtifactSystem>) -> Self {
-        for system in systems {
-            self.arguments
-                .insert(system, arguments.iter().map(|v| v.to_string()).collect());
-        }
-
+    pub fn with_arguments(mut self, arguments: Vec<&str>) -> Self {
+        self.arguments = arguments.iter().map(|v| v.to_string()).collect();
         self
     }
 
-    pub fn with_artifacts(mut self, artifacts: Vec<String>, systems: Vec<ArtifactSystem>) -> Self {
-        for system in systems {
-            self.artifacts.insert(system, artifacts.clone());
-        }
-
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts = artifacts;
         self
     }
 
-    pub fn with_entrypoint(mut self, entrypoint: &str, systems: Vec<ArtifactSystem>) -> Self {
-        for system in systems {
-            self.entrypoint.insert(system, entrypoint.to_string());
-        }
-
+    pub fn with_environments(mut self, environments: Vec<String>) -> Self {
+        self.environments = environments;
         self
     }
 
-    pub fn with_environments(
-        mut self,
-        environments: Vec<String>,
-        systems: Vec<ArtifactSystem>,
-    ) -> Self {
-        for system in systems {
-            self.environments.insert(system, environments.clone());
-        }
-
+    pub fn with_script(mut self, script: String) -> Self {
+        self.script = Some(script);
         self
     }
 
-    pub fn with_script(mut self, script: String, systems: Vec<ArtifactSystem>) -> Self {
-        for system in systems {
-            self.script.insert(system, script.clone());
-        }
-
-        self
-    }
-
-    pub fn build(self, context: &mut ConfigContext) -> ArtifactStep {
-        let system = context.get_system();
-
+    pub fn build(self) -> ArtifactStep {
         ArtifactStep {
-            arguments: self.arguments.get(&system).unwrap_or(&vec![]).clone(),
-            artifacts: self.artifacts.get(&system).unwrap_or(&vec![]).clone(),
-            entrypoint: self.entrypoint.get(&system).cloned(),
-            environments: self.environments.get(&system).unwrap_or(&vec![]).clone(),
-            script: self.script.get(&system).cloned(),
+            arguments: self.arguments,
+            artifacts: self.artifacts,
+            entrypoint: Some(self.entrypoint.to_string()),
+            environments: self.environments,
+            script: self.script,
         }
     }
 }
 
 impl<'a> ArtifactTaskBuilder<'a> {
-    pub fn new(name: &'a str, script: String) -> Self {
+    pub fn new(name: &'a str, script: String, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],
             name,
             script,
+            systems,
         }
     }
 
@@ -304,26 +267,30 @@ impl<'a> ArtifactTaskBuilder<'a> {
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        ArtifactBuilder::new(self.name)
-            .with_step(step::shell(context, self.artifacts, vec![], self.script).await?)
-            .with_system(Aarch64Darwin)
-            .with_system(Aarch64Linux)
-            .with_system(X8664Darwin)
-            .with_system(X8664Linux)
+        let step = step::shell(context, self.artifacts, vec![], self.script).await?;
+
+        ArtifactBuilder::new(self.name, vec![step], self.systems)
             .build(context)
             .await
     }
 }
 
 impl<'a> ArtifactBuilder<'a> {
-    pub fn new(name: &'a str) -> Self {
+    pub fn new(name: &'a str, steps: Vec<ArtifactStep>, systems: Vec<ArtifactSystem>) -> Self {
         Self {
+            aliases: vec![],
             name,
             sources: vec![],
-            steps: vec![],
-            systems: vec![],
-            // variables: vec![],
+            steps,
+            systems,
         }
+    }
+
+    pub fn with_alias(mut self, alias: String) -> Self {
+        if !self.aliases.contains(&alias) {
+            self.aliases.push(alias);
+        }
+        self
     }
 
     pub fn with_source(mut self, source: ArtifactSource) -> Self {
@@ -334,43 +301,15 @@ impl<'a> ArtifactBuilder<'a> {
         self
     }
 
-    pub fn with_step(mut self, step: ArtifactStep) -> Self {
-        if !self.steps.contains(&step) {
-            self.steps.push(step);
-        }
-
-        self
-    }
-
-    pub fn with_system(mut self, system: ArtifactSystem) -> Self {
-        if !self.systems.contains(&system) {
-            self.systems.push(system);
-        }
-
-        self
-    }
-
-    // pub fn with_variable(mut self, variable: ArtifactVariable) -> Self {
-    //     if !self.variables.contains(&variable) {
-    //         self.variables.push(variable);
-    //     }
-    //
-    //     self
-    // }
-
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let artifact = Artifact {
+            aliases: self.aliases,
             name: self.name.to_string(),
             sources: self.sources,
             steps: self.steps,
             systems: self.systems.into_iter().map(|v| v.into()).collect(),
             target: context.get_system().into(),
-            // variables: self.variables,
         };
-
-        if artifact.steps.is_empty() {
-            return Err(anyhow!("must have at least one step"));
-        }
 
         context.add_artifact(&artifact).await
     }

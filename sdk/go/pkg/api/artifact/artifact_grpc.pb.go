@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ArtifactService_GetArtifact_FullMethodName   = "/vorpal.artifact.ArtifactService/GetArtifact"
-	ArtifactService_GetArtifacts_FullMethodName  = "/vorpal.artifact.ArtifactService/GetArtifacts"
-	ArtifactService_StoreArtifact_FullMethodName = "/vorpal.artifact.ArtifactService/StoreArtifact"
+	ArtifactService_GetArtifact_FullMethodName      = "/vorpal.artifact.ArtifactService/GetArtifact"
+	ArtifactService_GetArtifactAlias_FullMethodName = "/vorpal.artifact.ArtifactService/GetArtifactAlias"
+	ArtifactService_GetArtifacts_FullMethodName     = "/vorpal.artifact.ArtifactService/GetArtifacts"
+	ArtifactService_StoreArtifact_FullMethodName    = "/vorpal.artifact.ArtifactService/StoreArtifact"
 )
 
 // ArtifactServiceClient is the client API for ArtifactService service.
@@ -29,8 +30,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ArtifactServiceClient interface {
 	GetArtifact(ctx context.Context, in *ArtifactRequest, opts ...grpc.CallOption) (*Artifact, error)
+	GetArtifactAlias(ctx context.Context, in *GetArtifactAliasRequest, opts ...grpc.CallOption) (*GetArtifactAliasResponse, error)
 	GetArtifacts(ctx context.Context, in *ArtifactsRequest, opts ...grpc.CallOption) (*ArtifactsResponse, error)
-	StoreArtifact(ctx context.Context, in *Artifact, opts ...grpc.CallOption) (*ArtifactResponse, error)
+	StoreArtifact(ctx context.Context, in *StoreArtifactRequest, opts ...grpc.CallOption) (*ArtifactResponse, error)
 }
 
 type artifactServiceClient struct {
@@ -51,6 +53,16 @@ func (c *artifactServiceClient) GetArtifact(ctx context.Context, in *ArtifactReq
 	return out, nil
 }
 
+func (c *artifactServiceClient) GetArtifactAlias(ctx context.Context, in *GetArtifactAliasRequest, opts ...grpc.CallOption) (*GetArtifactAliasResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetArtifactAliasResponse)
+	err := c.cc.Invoke(ctx, ArtifactService_GetArtifactAlias_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *artifactServiceClient) GetArtifacts(ctx context.Context, in *ArtifactsRequest, opts ...grpc.CallOption) (*ArtifactsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ArtifactsResponse)
@@ -61,7 +73,7 @@ func (c *artifactServiceClient) GetArtifacts(ctx context.Context, in *ArtifactsR
 	return out, nil
 }
 
-func (c *artifactServiceClient) StoreArtifact(ctx context.Context, in *Artifact, opts ...grpc.CallOption) (*ArtifactResponse, error) {
+func (c *artifactServiceClient) StoreArtifact(ctx context.Context, in *StoreArtifactRequest, opts ...grpc.CallOption) (*ArtifactResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ArtifactResponse)
 	err := c.cc.Invoke(ctx, ArtifactService_StoreArtifact_FullMethodName, in, out, cOpts...)
@@ -76,8 +88,9 @@ func (c *artifactServiceClient) StoreArtifact(ctx context.Context, in *Artifact,
 // for forward compatibility.
 type ArtifactServiceServer interface {
 	GetArtifact(context.Context, *ArtifactRequest) (*Artifact, error)
+	GetArtifactAlias(context.Context, *GetArtifactAliasRequest) (*GetArtifactAliasResponse, error)
 	GetArtifacts(context.Context, *ArtifactsRequest) (*ArtifactsResponse, error)
-	StoreArtifact(context.Context, *Artifact) (*ArtifactResponse, error)
+	StoreArtifact(context.Context, *StoreArtifactRequest) (*ArtifactResponse, error)
 	mustEmbedUnimplementedArtifactServiceServer()
 }
 
@@ -91,10 +104,13 @@ type UnimplementedArtifactServiceServer struct{}
 func (UnimplementedArtifactServiceServer) GetArtifact(context.Context, *ArtifactRequest) (*Artifact, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetArtifact not implemented")
 }
+func (UnimplementedArtifactServiceServer) GetArtifactAlias(context.Context, *GetArtifactAliasRequest) (*GetArtifactAliasResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetArtifactAlias not implemented")
+}
 func (UnimplementedArtifactServiceServer) GetArtifacts(context.Context, *ArtifactsRequest) (*ArtifactsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetArtifacts not implemented")
 }
-func (UnimplementedArtifactServiceServer) StoreArtifact(context.Context, *Artifact) (*ArtifactResponse, error) {
+func (UnimplementedArtifactServiceServer) StoreArtifact(context.Context, *StoreArtifactRequest) (*ArtifactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StoreArtifact not implemented")
 }
 func (UnimplementedArtifactServiceServer) mustEmbedUnimplementedArtifactServiceServer() {}
@@ -136,6 +152,24 @@ func _ArtifactService_GetArtifact_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ArtifactService_GetArtifactAlias_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetArtifactAliasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ArtifactServiceServer).GetArtifactAlias(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ArtifactService_GetArtifactAlias_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ArtifactServiceServer).GetArtifactAlias(ctx, req.(*GetArtifactAliasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ArtifactService_GetArtifacts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ArtifactsRequest)
 	if err := dec(in); err != nil {
@@ -155,7 +189,7 @@ func _ArtifactService_GetArtifacts_Handler(srv interface{}, ctx context.Context,
 }
 
 func _ArtifactService_StoreArtifact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Artifact)
+	in := new(StoreArtifactRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -167,7 +201,7 @@ func _ArtifactService_StoreArtifact_Handler(srv interface{}, ctx context.Context
 		FullMethod: ArtifactService_StoreArtifact_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ArtifactServiceServer).StoreArtifact(ctx, req.(*Artifact))
+		return srv.(ArtifactServiceServer).StoreArtifact(ctx, req.(*StoreArtifactRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -182,6 +216,10 @@ var ArtifactService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetArtifact",
 			Handler:    _ArtifactService_GetArtifact_Handler,
+		},
+		{
+			MethodName: "GetArtifactAlias",
+			Handler:    _ArtifactService_GetArtifactAlias_Handler,
 		},
 		{
 			MethodName: "GetArtifacts",

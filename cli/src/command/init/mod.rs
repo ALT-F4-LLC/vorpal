@@ -36,53 +36,44 @@ pub async fn run(level: Level) -> Result<()> {
             "Go" => {
                 template.insert(
                     "cmd/example/main.go",
-                    include_str!("../../../template/go/cmd/example/main.go"),
+                    include_str!("template/go/cmd/example/main.go"),
                 );
 
                 template.insert(
                     "cmd/vorpal/main.go",
-                    include_str!("../../../template/go/cmd/vorpal/main.go"),
+                    include_str!("template/go/cmd/vorpal/main.go"),
                 );
 
-                template.insert(
-                    "Vorpal.toml",
-                    include_str!("../../../template/go/Vorpal.toml"),
-                );
+                template.insert("Vorpal.toml", include_str!("template/go/Vorpal.toml"));
 
-                template.insert("go.mod", include_str!("../../../template/go/go.mod"));
-                template.insert("go.sum", include_str!("../../../template/go/go.sum"));
+                template.insert("go.mod", include_str!("template/go/go.mod"));
+                template.insert("go.sum", include_str!("template/go/go.sum"));
             }
 
             "Rust" => {
                 template.insert(
                     "example/src/main.rs",
-                    include_str!("../../../template/rust/example/src/main.rs"),
+                    include_str!("template/rust/example/src/main.rs"),
                 );
 
                 template.insert(
                     "example/Cargo.toml",
-                    include_str!("../../../template/rust/example/Cargo.toml"),
+                    include_str!("template/rust/example/Cargo.toml"),
                 );
 
                 template.insert(
                     "vorpal/src/main.rs",
-                    include_str!("../../../template/rust/vorpal/src/main.rs"),
+                    include_str!("template/rust/vorpal/src/main.rs"),
                 );
 
                 template.insert(
                     "vorpal/Cargo.toml",
-                    include_str!("../../../template/rust/vorpal/Cargo.toml"),
+                    include_str!("template/rust/vorpal/Cargo.toml"),
                 );
 
-                template.insert(
-                    "Cargo.toml",
-                    include_str!("../../../template/rust/Cargo.toml"),
-                );
+                template.insert("Cargo.toml", include_str!("template/rust/Cargo.toml"));
 
-                template.insert(
-                    "Vorpal.toml",
-                    include_str!("../../../template/rust/Vorpal.toml"),
-                );
+                template.insert("Vorpal.toml", include_str!("template/rust/Vorpal.toml"));
             }
 
             _ => bail!("invalid 'language' choice"),

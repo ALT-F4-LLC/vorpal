@@ -8,7 +8,6 @@ package worker
 
 import (
 	context "context"
-	artifact "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -27,7 +26,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type WorkerServiceClient interface {
-	BuildArtifact(ctx context.Context, in *artifact.Artifact, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildArtifactResponse], error)
+	BuildArtifact(ctx context.Context, in *BuildArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildArtifactResponse], error)
 }
 
 type workerServiceClient struct {
@@ -38,13 +37,13 @@ func NewWorkerServiceClient(cc grpc.ClientConnInterface) WorkerServiceClient {
 	return &workerServiceClient{cc}
 }
 
-func (c *workerServiceClient) BuildArtifact(ctx context.Context, in *artifact.Artifact, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildArtifactResponse], error) {
+func (c *workerServiceClient) BuildArtifact(ctx context.Context, in *BuildArtifactRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildArtifactResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &WorkerService_ServiceDesc.Streams[0], WorkerService_BuildArtifact_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[artifact.Artifact, BuildArtifactResponse]{ClientStream: stream}
+	x := &grpc.GenericClientStream[BuildArtifactRequest, BuildArtifactResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -61,7 +60,7 @@ type WorkerService_BuildArtifactClient = grpc.ServerStreamingClient[BuildArtifac
 // All implementations must embed UnimplementedWorkerServiceServer
 // for forward compatibility.
 type WorkerServiceServer interface {
-	BuildArtifact(*artifact.Artifact, grpc.ServerStreamingServer[BuildArtifactResponse]) error
+	BuildArtifact(*BuildArtifactRequest, grpc.ServerStreamingServer[BuildArtifactResponse]) error
 	mustEmbedUnimplementedWorkerServiceServer()
 }
 
@@ -72,7 +71,7 @@ type WorkerServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedWorkerServiceServer struct{}
 
-func (UnimplementedWorkerServiceServer) BuildArtifact(*artifact.Artifact, grpc.ServerStreamingServer[BuildArtifactResponse]) error {
+func (UnimplementedWorkerServiceServer) BuildArtifact(*BuildArtifactRequest, grpc.ServerStreamingServer[BuildArtifactResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method BuildArtifact not implemented")
 }
 func (UnimplementedWorkerServiceServer) mustEmbedUnimplementedWorkerServiceServer() {}
@@ -97,11 +96,11 @@ func RegisterWorkerServiceServer(s grpc.ServiceRegistrar, srv WorkerServiceServe
 }
 
 func _WorkerService_BuildArtifact_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(artifact.Artifact)
+	m := new(BuildArtifactRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(WorkerServiceServer).BuildArtifact(m, &grpc.GenericServerStream[artifact.Artifact, BuildArtifactResponse]{ServerStream: stream})
+	return srv.(WorkerServiceServer).BuildArtifact(m, &grpc.GenericServerStream[BuildArtifactRequest, BuildArtifactResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.

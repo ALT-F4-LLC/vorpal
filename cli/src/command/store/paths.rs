@@ -3,61 +3,105 @@ use filetime::{set_file_times, set_symlink_file_times, FileTime};
 use std::path::{Path, PathBuf};
 use tokio::fs::{copy, create_dir_all, metadata, symlink};
 use uuid::Uuid;
+use vorpal_sdk::api::artifact::ArtifactSystem;
 use walkdir::WalkDir;
 
-// Store paths
+// Root paths
 
 pub fn get_root_dir_path() -> PathBuf {
     Path::new("/var/lib/vorpal").to_path_buf()
 }
 
-pub fn get_key_dir_path() -> PathBuf {
+pub fn get_root_key_dir_path() -> PathBuf {
     get_root_dir_path().join("key")
 }
 
-pub fn get_sandbox_dir_path() -> PathBuf {
+pub fn get_root_sandbox_dir_path() -> PathBuf {
     get_root_dir_path().join("sandbox")
 }
 
-pub fn get_store_dir_path() -> PathBuf {
+pub fn get_root_store_dir_path() -> PathBuf {
     get_root_dir_path().join("store")
 }
 
 // Key paths
 
-pub fn get_private_key_path() -> PathBuf {
-    get_key_dir_path().join("private").with_extension("pem")
+pub fn get_key_private_path() -> PathBuf {
+    get_root_key_dir_path()
+        .join("private")
+        .with_extension("pem")
 }
 
-pub fn get_public_key_path() -> PathBuf {
-    get_key_dir_path().join("public").with_extension("pem")
+pub fn get_key_public_path() -> PathBuf {
+    get_root_key_dir_path().join("public").with_extension("pem")
 }
 
-// Archive paths
+// Artifact paths
 
-pub fn get_archive_path(hash: &str) -> PathBuf {
-    get_store_dir_path().join(hash).with_extension("tar.zst")
+pub fn get_artifact_dir_path() -> PathBuf {
+    get_root_store_dir_path().join("artifact")
 }
 
-// Store paths
-
-pub fn get_store_path(hash: &str) -> PathBuf {
-    get_store_dir_path().join(hash)
+pub fn get_artifact_alias_dir_path() -> PathBuf {
+    get_artifact_dir_path().join("alias")
 }
 
-pub fn get_config_path(hash: &str) -> PathBuf {
-    get_store_dir_path().join(hash).with_extension("json")
+pub fn get_artifact_archive_dir_path() -> PathBuf {
+    get_artifact_dir_path().join("archive")
 }
 
-pub fn get_store_lock_path(hash: &str) -> PathBuf {
-    get_store_dir_path().join(hash).with_extension("lock")
+pub fn get_artifact_config_dir_path() -> PathBuf {
+    get_artifact_dir_path().join("config")
+}
+
+pub fn get_artifact_output_dir_path() -> PathBuf {
+    get_artifact_dir_path().join("output")
+}
+
+pub fn get_artifact_alias_path(alias: &str, system: ArtifactSystem) -> Result<PathBuf> {
+    let alias = alias.split(':').collect::<Vec<&str>>();
+
+    if alias.len() != 2 {
+        bail!("invalid alias format");
+    }
+
+    let system = system.as_str_name();
+
+    Ok(get_artifact_alias_dir_path()
+        .join(system)
+        .join(alias[0])
+        .join(alias[1]))
+}
+
+pub fn get_artifact_archive_path(digest: &str) -> PathBuf {
+    get_artifact_archive_dir_path()
+        .join(digest)
+        .with_extension("tar.zst")
+}
+
+pub fn get_artifact_config_path(digest: &str) -> PathBuf {
+    get_artifact_config_dir_path()
+        .join(digest)
+        .with_extension("json")
+}
+
+pub fn get_artifact_output_path(digest: &str) -> PathBuf {
+    get_artifact_output_dir_path().join(digest)
+}
+
+pub fn get_artifact_output_lock_path(digest: &str) -> PathBuf {
+    get_artifact_output_dir_path()
+        .join(digest)
+        .with_extension("lock.json")
 }
 
 // Temp paths
 
 pub fn get_sandbox_path() -> PathBuf {
-    get_sandbox_dir_path().join(Uuid::now_v7().to_string())
+    get_root_sandbox_dir_path().join(Uuid::now_v7().to_string())
 }
+
+// Functions
 
 pub fn get_file_paths(
     source_path: &PathBuf,
