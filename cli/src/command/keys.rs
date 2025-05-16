@@ -1,6 +1,6 @@
 use crate::command::store::{
     notary::generate_keys,
-    paths::{get_root_key_dir_path, get_key_private_path, get_key_public_path},
+    paths::{get_key_private_path, get_key_public_path, get_root_key_dir_path},
 };
 use anyhow::{bail, Result};
 use tracing::warn;
