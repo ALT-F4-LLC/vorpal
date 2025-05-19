@@ -11,4 +11,4 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 tokio = { features = ["rt-multi-thread"], version = "1" }
-vorpal-sdk = "0.1.0-alpha"
+vorpal-sdk = "0.2.0-alpha"
