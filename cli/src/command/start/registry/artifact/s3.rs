@@ -100,8 +100,6 @@ impl ArtifactBackend for S3Backend {
             .await;
 
         if config_head.is_err() {
-            info!("storing artifact config: {}", config_key);
-
             client
                 .put_object()
                 .bucket(bucket)
