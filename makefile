@@ -66,28 +66,28 @@ generate:
 		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
-		--proto_path=crates/sdk/api \
+		--proto_path=sdk/rust/api \
 		agent/agent.proto
 	protoc \
 		--go_opt=paths=source_relative \
 		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
-		--proto_path=crates/sdk/api \
+		--proto_path=sdk/rust/api \
 		artifact/artifact.proto
 	protoc \
 		--go_opt=paths=source_relative \
 		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
-		--proto_path=crates/sdk/api \
+		--proto_path=sdk/rust/api \
 		archive/archive.proto
 	protoc \
 		--go_opt=paths=source_relative \
 		--go_out=sdk/go/pkg/api \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
-		--proto_path=crates/sdk/api \
+		--proto_path=sdk/rust/api \
 		worker/worker.proto
 
 # Development (with Vorpal)
@@ -114,8 +114,11 @@ lima: lima-clean
 	limactl stop "vorpal-$(LIMA_ARCH)"
 	limactl start "vorpal-$(LIMA_ARCH)"
 
+lima-sync:
+	limactl shell "vorpal-$(LIMA_ARCH)" ./script/lima.sh sync
+
 lima-vorpal:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '$HOME/vorpal/target/debug/vorpal artifact --name $(VORPAL_ARTIFACT)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal artifact --name $(VORPAL_ARTIFACT) $(VORPAL_FLAGS)'
 
 lima-vorpal-start:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '$HOME/vorpal/target/debug/vorpal start'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal start $(VORPAL_FLAGS)'

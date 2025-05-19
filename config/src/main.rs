@@ -1,6 +1,10 @@
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use vorpal_sdk::{
+    api::artifact::{
+        ArtifactSystem,
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    },
     artifact::{
         get_env_key, gh, go, goimports, gopls, grpcurl,
         language::go::{get_goarch, get_goos},
@@ -11,25 +15,25 @@ use vorpal_sdk::{
     context::{get_context, ConfigContext},
 };
 
-async fn vorpal(context: &mut ConfigContext) -> Result<String> {
-    let protoc = protoc::build(context).await?;
+const SYSTEMS: [ArtifactSystem; 4] = [Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
+async fn vorpal(context: &mut ConfigContext) -> Result<String> {
     let name = "vorpal";
 
-    RustBuilder::new(name)
-        .with_artifacts(vec![protoc])
+    RustBuilder::new(name, SYSTEMS.to_vec())
+        .with_artifacts(vec![protoc::build(context).await?])
         .with_bins(vec![name])
-        .with_packages(vec!["cli", "sdk/rust", "template"])
+        .with_includes(vec!["cli", "sdk/rust"])
+        .with_packages(vec!["vorpal-cli", "vorpal-sdk"])
         .build(context)
         .await
 }
 
 async fn vorpal_process(context: &mut ConfigContext) -> Result<String> {
     let vorpal = vorpal(context).await?;
-
     let entrypoint = format!("{}/bin/vorpal", get_env_key(&vorpal));
 
-    ArtifactProcessBuilder::new("vorpal-process", entrypoint.as_str())
+    ArtifactProcessBuilder::new("vorpal-process", entrypoint.as_str(), SYSTEMS.to_vec())
         .with_arguments(vec![
             "--registry",
             "http://localhost:50051",
@@ -45,36 +49,51 @@ async fn vorpal_process(context: &mut ConfigContext) -> Result<String> {
 async fn vorpal_release(context: &mut ConfigContext) -> Result<String> {
     let aarch64_darwin = ArtifactVariableBuilder::new("aarch64-darwin")
         .with_require()
-        .build(context)?
-        .unwrap();
+        .build(context)?;
+
+    if aarch64_darwin.is_none() {
+        bail!("aarch64-darwin artifact is required for vorpal release");
+    }
 
     let aarch64_linux = ArtifactVariableBuilder::new("aarch64-linux")
         .with_require()
-        .build(context)?
-        .unwrap();
+        .build(context)?;
+
+    if aarch64_linux.is_none() {
+        bail!("aarch64-linux artifact is required for vorpal release");
+    }
 
     let branch_name = ArtifactVariableBuilder::new("branch-name")
         .with_require()
-        .build(context)?
-        .unwrap();
+        .build(context)?;
+
+    if branch_name.is_none() {
+        bail!("branch-name artifact is required for vorpal release");
+    }
 
     let x8664_darwin = ArtifactVariableBuilder::new("x8664-darwin")
         .with_require()
-        .build(context)?
-        .unwrap();
+        .build(context)?;
+
+    if x8664_darwin.is_none() {
+        bail!("x8664-darwin artifact is required for vorpal release");
+    }
 
     let x8664_linux = ArtifactVariableBuilder::new("x8664-linux")
         .with_require()
-        .build(context)?
-        .unwrap();
+        .build(context)?;
+
+    if x8664_linux.is_none() {
+        bail!("x8664-linux artifact is required for vorpal release");
+    }
 
     // Fetch artifacts
 
-    let aarch64_darwin = context.fetch_artifact(&aarch64_darwin).await?;
-    let aarch64_linux = context.fetch_artifact(&aarch64_linux).await?;
+    let aarch64_darwin = context.fetch_artifact(&aarch64_darwin.unwrap()).await?;
+    let aarch64_linux = context.fetch_artifact(&aarch64_linux.unwrap()).await?;
     let gh = gh::build(context).await?;
-    let x8664_darwin = context.fetch_artifact(&x8664_darwin).await?;
-    let x8664_linux = context.fetch_artifact(&x8664_linux).await?;
+    let x8664_darwin = context.fetch_artifact(&x8664_darwin.unwrap()).await?;
+    let x8664_linux = context.fetch_artifact(&x8664_linux.unwrap()).await?;
 
     let artifacts = vec![
         aarch64_darwin.clone(),
@@ -112,11 +131,12 @@ async fn vorpal_release(context: &mut ConfigContext) -> Result<String> {
             {x8664_linux}.tar.zst"#,
         aarch64_darwin = get_env_key(&aarch64_darwin),
         aarch64_linux = get_env_key(&aarch64_linux),
+        branch_name = branch_name.unwrap(),
         x8664_darwin = get_env_key(&x8664_darwin),
         x8664_linux = get_env_key(&x8664_linux),
     };
 
-    ArtifactTaskBuilder::new("vorpal-release", script)
+    ArtifactTaskBuilder::new("vorpal-release", script, SYSTEMS.to_vec())
         .with_artifacts(artifacts)
         .build(context)
         .await
@@ -179,15 +199,21 @@ async fn vorpal_shell(context: &mut ConfigContext) -> Result<String> {
         format!("RUSTUP_TOOLCHAIN={}", rust_toolchain_name),
     ];
 
-    script::devshell(context, artifacts, environments, "vorpal-shell").await
+    script::devshell(
+        context,
+        artifacts,
+        environments,
+        "vorpal-shell",
+        SYSTEMS.to_vec(),
+    )
+    .await
 }
 
 async fn vorpal_test(context: &mut ConfigContext) -> Result<String> {
     let vorpal = vorpal(context).await?;
-
     let script = format!("{}/bin/vorpal --version", get_env_key(&vorpal));
 
-    ArtifactTaskBuilder::new("vorpal-test", script)
+    ArtifactTaskBuilder::new("vorpal-test", script, SYSTEMS.to_vec())
         .with_artifacts(vec![vorpal])
         .build(context)
         .await

@@ -1,4 +1,4 @@
-use crate::command::start::registry::{s3::get_archive_key, ArchiveBackend, S3Backend};
+use crate::command::start::registry::{s3::get_artifact_archive_key, ArchiveBackend, S3Backend};
 use tokio::sync::mpsc;
 use tonic::{async_trait, Status};
 use vorpal_sdk::api::archive::{ArchivePullRequest, ArchivePullResponse, ArchivePushRequest};
@@ -9,12 +9,12 @@ impl ArchiveBackend for S3Backend {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let request_key = get_archive_key(&request.digest);
+        let archive_key = get_artifact_archive_key(&request.digest);
 
         client
             .head_object()
             .bucket(bucket.clone())
-            .key(request_key.clone())
+            .key(archive_key.clone())
             .send()
             .await
             .map_err(|err| Status::not_found(err.to_string()))?;
@@ -30,12 +30,12 @@ impl ArchiveBackend for S3Backend {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let request_key = get_archive_key(&request.digest);
+        let archive_key = get_artifact_archive_key(&request.digest);
 
         client
             .head_object()
             .bucket(bucket.clone())
-            .key(request_key.clone())
+            .key(archive_key.clone())
             .send()
             .await
             .map_err(|err| Status::not_found(err.to_string()))?;
@@ -43,7 +43,7 @@ impl ArchiveBackend for S3Backend {
         let mut archive_stream = client
             .get_object()
             .bucket(bucket)
-            .key(request_key)
+            .key(archive_key)
             .send()
             .await
             .map_err(|err| Status::internal(err.to_string()))?
@@ -66,22 +66,22 @@ impl ArchiveBackend for S3Backend {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let request_key = get_archive_key(&request.digest);
-        let request_head = client
+        let archive_key = get_artifact_archive_key(&request.digest);
+        let archive_head = client
             .head_object()
             .bucket(bucket)
-            .key(&request_key)
+            .key(&archive_key)
             .send()
             .await;
 
-        if request_head.is_ok() {
+        if archive_head.is_ok() {
             return Ok(());
         }
 
         client
             .put_object()
             .bucket(bucket)
-            .key(request_key)
+            .key(archive_key)
             .body(request.data.clone().into())
             .send()
             .await

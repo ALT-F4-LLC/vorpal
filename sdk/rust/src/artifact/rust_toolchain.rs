@@ -91,14 +91,12 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         component_paths = toolchain_component_paths.join(" "),
     };
 
-    let step = step::shell(context, artifacts, vec![], step_script).await?;
+    let steps = vec![step::shell(context, artifacts, vec![], step_script).await?];
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let name = "rust-toolchain";
 
-    ArtifactBuilder::new("rust-toolchain")
-        .with_step(step)
-        .with_system(Aarch64Darwin)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Darwin)
-        .with_system(X8664Linux)
+    ArtifactBuilder::new(name, steps, systems)
+        .with_alias(format!("{name}:{toolchain_version}"))
         .build(context)
         .await
 }

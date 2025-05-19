@@ -1,5 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::ArtifactSystem,
     artifact::{get_env_key, step, ArtifactBuilder},
     context::ConfigContext,
 };
@@ -11,6 +11,7 @@ pub async fn devshell<'a>(
     artifacts: Vec<String>,
     environments: Vec<String>,
     name: &'a str,
+    systems: Vec<ArtifactSystem>,
 ) -> Result<String> {
     let mut envs_backup = vec![
         "export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"".to_string(),
@@ -96,14 +97,9 @@ pub async fn devshell<'a>(
         unsets = envs_unset.join("\n"),
     };
 
-    let step = step::shell(context, artifacts, vec![], step_script).await?;
+    let steps = vec![step::shell(context, artifacts, vec![], step_script).await?];
 
-    ArtifactBuilder::new(name)
-        .with_step(step)
-        .with_system(Aarch64Darwin)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Darwin)
-        .with_system(X8664Linux)
+    ArtifactBuilder::new(name, steps, systems)
         .build(context)
         .await
 }

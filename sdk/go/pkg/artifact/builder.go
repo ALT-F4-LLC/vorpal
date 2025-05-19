@@ -16,6 +16,7 @@ type ArtifactProcessBuilder struct {
 	Artifacts  []*string
 	Entrypoint string
 	Name       string
+	Systems    []api.ArtifactSystem
 }
 
 type ArtifactSourceBuilder struct {
@@ -38,6 +39,7 @@ type ArtifactTaskBuilder struct {
 	Artifacts []*string
 	Name      string
 	Script    string
+	Systems   []api.ArtifactSystem
 }
 
 type ArtifactVariableBuilder struct {
@@ -114,12 +116,13 @@ EOF
 
 chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
 
-func NewArtifactProcessBuilder(name string, entrypoint string) *ArtifactProcessBuilder {
+func NewArtifactProcessBuilder(name string, entrypoint string, systems []api.ArtifactSystem) *ArtifactProcessBuilder {
 	return &ArtifactProcessBuilder{
 		Arguments:  []string{},
 		Artifacts:  []*string{},
 		Entrypoint: entrypoint,
 		Name:       name,
+		Systems:    systems,
 	}
 }
 
@@ -167,12 +170,9 @@ func (a *ArtifactProcessBuilder) Build(ctx *config.ConfigContext) (*string, erro
 		return nil, err
 	}
 
-	return NewArtifactBuilder(a.Name).
-		WithStep(step).
-		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(api.ArtifactSystem_X8664_DARWIN).
-		WithSystem(api.ArtifactSystem_X8664_LINUX).
+	steps := []*api.ArtifactStep{step}
+
+	return NewArtifactBuilder(a.Name, steps, a.Systems).
 		Build(ctx)
 }
 
@@ -262,18 +262,15 @@ func (a *ArtifactStepBuilder) WithScript(script string, systems []api.ArtifactSy
 }
 
 func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactStep, error) {
-	stepTarget, err := ctx.GetTarget()
-	if err != nil {
-		return nil, err
-	}
+	stepTarget := ctx.GetTarget()
 
 	stepArguments := []string{}
-	if args, ok := a.Arguments[*stepTarget]; ok {
+	if args, ok := a.Arguments[stepTarget]; ok {
 		stepArguments = args
 	}
 
 	stepArtifacts := []string{}
-	if arts, ok := a.Artifacts[*stepTarget]; ok {
+	if arts, ok := a.Artifacts[stepTarget]; ok {
 		artifacts := make([]string, len(arts))
 
 		for i, art := range arts {
@@ -286,17 +283,17 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactSte
 	}
 
 	stepEnvironments := []string{}
-	if envs, ok := a.Environments[*stepTarget]; ok {
+	if envs, ok := a.Environments[stepTarget]; ok {
 		stepEnvironments = envs
 	}
 
 	var stepEntrypoint *string
-	if entry, ok := a.Entrypoint[*stepTarget]; ok {
+	if entry, ok := a.Entrypoint[stepTarget]; ok {
 		stepEntrypoint = &entry
 	}
 
 	var stepScript *string
-	if scr, ok := a.Script[*stepTarget]; ok {
+	if scr, ok := a.Script[stepTarget]; ok {
 		stepScript = &scr
 	}
 
@@ -309,11 +306,12 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactSte
 	}, nil
 }
 
-func NewArtifactTaskBuilder(name string, script string) *ArtifactTaskBuilder {
+func NewArtifactTaskBuilder(name string, script string, systems []api.ArtifactSystem) *ArtifactTaskBuilder {
 	return &ArtifactTaskBuilder{
 		Artifacts: []*string{},
 		Name:      name,
 		Script:    script,
+		Systems:   systems,
 	}
 }
 
@@ -328,12 +326,9 @@ func (a *ArtifactTaskBuilder) Build(ctx *config.ConfigContext) (*string, error) 
 		return nil, err
 	}
 
-	return NewArtifactBuilder(a.Name).
-		WithStep(step).
-		WithSystem(api.ArtifactSystem_AARCH64_DARWIN).
-		WithSystem(api.ArtifactSystem_AARCH64_LINUX).
-		WithSystem(api.ArtifactSystem_X8664_DARWIN).
-		WithSystem(api.ArtifactSystem_X8664_LINUX).
+	steps := []*api.ArtifactStep{step}
+
+	return NewArtifactBuilder(a.Name, steps, a.Systems).
 		Build(ctx)
 }
 
@@ -365,12 +360,12 @@ func (v *ArtifactVariableBuilder) Build(ctx *config.ConfigContext) (*string, err
 	return variable, nil
 }
 
-func NewArtifactBuilder(name string) *ArtifactBuilder {
+func NewArtifactBuilder(name string, steps []*api.ArtifactStep, systems []api.ArtifactSystem) *ArtifactBuilder {
 	return &ArtifactBuilder{
 		Name:    name,
 		Sources: []*api.ArtifactSource{},
-		Steps:   []*api.ArtifactStep{},
-		Systems: []api.ArtifactSystem{},
+		Steps:   steps,
+		Systems: systems,
 	}
 }
 
@@ -399,17 +394,12 @@ func (a *ArtifactBuilder) WithSystem(system api.ArtifactSystem) *ArtifactBuilder
 }
 
 func (a *ArtifactBuilder) Build(ctx *config.ConfigContext) (*string, error) {
-	artifactTarget, err := ctx.GetTarget()
-	if err != nil {
-		return nil, err
-	}
-
 	artifact := api.Artifact{
 		Name:    a.Name,
 		Sources: a.Sources,
 		Steps:   a.Steps,
 		Systems: a.Systems,
-		Target:  *artifactTarget,
+		Target:  ctx.GetTarget(),
 	}
 
 	if len(artifact.Steps) == 0 {

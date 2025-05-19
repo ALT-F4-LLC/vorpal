@@ -8,7 +8,6 @@ use indoc::formatdoc;
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "protoc-gen-go";
-
     let system = context.get_system();
 
     let source_digest = match system {
@@ -28,7 +27,6 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     };
 
     let source_version = "1.36.3";
-
     let source_path = format!("https://github.com/protocolbuffers/protobuf-go/releases/download/v{source_version}/protoc-gen-go.v{source_version}.{source_target}.tar.gz");
 
     let source = ArtifactSourceBuilder::new(name, source_path.as_str())
@@ -43,15 +41,12 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         chmod +x \"$VORPAL_OUTPUT/bin/protoc-gen-go\"",
     };
 
-    let step = step::shell(context, vec![], vec![], step_script).await?;
+    let steps = vec![step::shell(context, vec![], vec![], step_script).await?];
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    ArtifactBuilder::new(name)
+    ArtifactBuilder::new(name, steps, systems)
+        .with_alias(format!("{name}:{source_version}"))
         .with_source(source)
-        .with_step(step)
-        .with_system(Aarch64Darwin)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Darwin)
-        .with_system(X8664Linux)
         .build(context)
         .await
 }

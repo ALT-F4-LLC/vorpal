@@ -1,7 +1,7 @@
 language = "go"
 
-[build]
-directory = "sdk/go/cmd/vorpal"
-
 [source]
-includes = ["sdk/go"]
+includes = ["sdk/go", "Vorpal.lock"]
+
+[go]
+directory = "sdk/go/cmd/vorpal"

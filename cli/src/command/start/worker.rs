@@ -2,8 +2,8 @@ use crate::command::store::{
     archives::{compress_zstd, unpack_zstd},
     notary,
     paths::{
-        get_archive_path, get_file_paths, get_private_key_path, get_store_lock_path,
-        get_store_path, set_timestamps,
+        get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
+        get_file_paths, get_key_private_path, set_timestamps,
     },
     temps::{create_sandbox_dir, create_sandbox_file},
 };
@@ -28,10 +28,12 @@ use vorpal_sdk::{
             archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
         },
         artifact::{
-            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactSource,
-            ArtifactSystem,
+            artifact_service_client::ArtifactServiceClient, ArtifactSource, ArtifactSystem,
+            StoreArtifactRequest,
         },
-        worker::{worker_service_server::WorkerService, BuildArtifactResponse},
+        worker::{
+            worker_service_server::WorkerService, BuildArtifactRequest, BuildArtifactResponse,
+        },
     },
     system::get_system_default,
 };
@@ -68,7 +70,7 @@ async fn pull_source(
     }
 
     let source_digest = source.digest.as_ref().unwrap();
-    let source_archive = get_archive_path(source_digest);
+    let source_archive = get_artifact_archive_path(source_digest);
 
     let mut client = ArchiveServiceClient::connect(registry.to_string())
         .await
@@ -188,7 +190,7 @@ async fn run_step(
     let mut paths = vec![];
 
     for artifact in step_artifacts.iter() {
-        let path = get_store_path(artifact);
+        let path = get_artifact_output_path(artifact);
 
         if !path.exists() {
             return Err(Status::internal("artifact not found"));
@@ -211,7 +213,7 @@ async fn run_step(
         format!(
             "VORPAL_ARTIFACT_{}={}",
             artifact_hash,
-            get_store_path(artifact_hash).display()
+            get_artifact_output_path(artifact_hash).display()
         ),
         format!("VORPAL_OUTPUT={}", artifact_path.display()),
         format!("VORPAL_WORKSPACE={}", workspace_path.display()),
@@ -358,10 +360,14 @@ async fn send_message(
 }
 
 async fn build_artifact(
-    artifact: Artifact,
+    request: BuildArtifactRequest,
     registry: String,
     tx: Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
+    let artifact = request
+        .artifact
+        .ok_or_else(|| Status::invalid_argument("artifact is missing"))?;
+
     if artifact.name.is_empty() {
         return Err(Status::invalid_argument("artifact 'name' is missing"));
     }
@@ -394,23 +400,23 @@ async fn build_artifact(
 
     // Check if artifact exists
 
-    let artifact_path = get_store_path(&artifact_digest);
+    let artifact_output_path = get_artifact_output_path(&artifact_digest);
 
-    if artifact_path.exists() {
+    if artifact_output_path.exists() {
         return Err(Status::already_exists("artifact exists"));
     }
 
     // Check if artifact is locked
 
-    let artifact_lock = get_store_lock_path(&artifact_digest);
+    let artifact_output_lock = get_artifact_output_lock_path(&artifact_digest);
 
-    if artifact_lock.exists() {
+    if artifact_output_lock.exists() {
         return Err(Status::already_exists("artifact is locked"));
     }
 
     // Create lock file
 
-    if let Err(err) = write(&artifact_lock, artifact_json).await {
+    if let Err(err) = write(&artifact_output_lock, artifact_json).await {
         return Err(Status::internal(format!(
             "failed to create lock file: {:?}",
             err
@@ -440,7 +446,7 @@ async fn build_artifact(
 
     // Run steps
 
-    if let Err(err) = create_dir_all(&artifact_path).await {
+    if let Err(err) = create_dir_all(&artifact_output_path).await {
         return Err(Status::internal(format!(
             "failed to create artifact path: {:?}",
             err
@@ -450,7 +456,7 @@ async fn build_artifact(
     for step in artifact.steps.iter() {
         if let Err(err) = run_step(
             &artifact_digest,
-            &artifact_path,
+            &artifact_output_path,
             step.arguments.clone(),
             step.artifacts.clone(),
             step.entrypoint.clone(),
@@ -465,7 +471,7 @@ async fn build_artifact(
         }
     }
 
-    let artifact_path_files = get_file_paths(&artifact_path, vec![], vec![])
+    let artifact_path_files = get_file_paths(&artifact_output_path, vec![], vec![])
         .map_err(|err| Status::internal(format!("failed to get output files: {:?}", err)))?;
 
     if artifact_path_files.len() > 1 {
@@ -488,8 +494,12 @@ async fn build_artifact(
             Status::internal(format!("failed to create artifact archive: {:?}", err))
         })?;
 
-        if let Err(err) =
-            compress_zstd(&artifact_path, &artifact_path_files, &artifact_archive).await
+        if let Err(err) = compress_zstd(
+            &artifact_output_path,
+            &artifact_path_files,
+            &artifact_archive,
+        )
+        .await
         {
             return Err(Status::internal(format!(
                 "failed to compress artifact: {:?}",
@@ -507,7 +517,7 @@ async fn build_artifact(
             Status::internal(format!("failed to read artifact archive: {:?}", err))
         })?;
 
-        let private_key_path = get_private_key_path();
+        let private_key_path = get_key_private_path();
 
         if !private_key_path.exists() {
             return Err(Status::internal("private key not found"));
@@ -544,12 +554,14 @@ async fn build_artifact(
             .await
             .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
-        client
-            .store_artifact(artifact.clone())
-            .await
-            .map_err(|err| {
-                Status::internal(format!("failed to store artifact in registry: {:?}", err))
-            })?;
+        let request = StoreArtifactRequest {
+            artifact: Some(artifact),
+            artifact_aliases: request.artifact_aliases,
+        };
+
+        client.store_artifact(request).await.map_err(|err| {
+            Status::internal(format!("failed to store artifact in registry: {:?}", err))
+        })?;
 
         // Remove artifact archive
 
@@ -560,7 +572,7 @@ async fn build_artifact(
             )));
         }
     } else {
-        remove_dir_all(&artifact_path).await.map_err(|err| {
+        remove_dir_all(&artifact_output_path).await.map_err(|err| {
             Status::internal(format!("failed to remove artifact path: {:?}", err))
         })?;
     }
@@ -576,7 +588,7 @@ async fn build_artifact(
 
     // Remove lock file
 
-    if let Err(err) = remove_file(&artifact_lock).await {
+    if let Err(err) = remove_file(&artifact_output_lock).await {
         return Err(Status::internal(format!(
             "failed to remove lock file: {:?}",
             err
@@ -585,13 +597,14 @@ async fn build_artifact(
 
     Ok(())
 }
+
 #[tonic::async_trait]
 impl WorkerService for WorkerServer {
     type BuildArtifactStream = ReceiverStream<Result<BuildArtifactResponse, Status>>;
 
     async fn build_artifact(
         &self,
-        request: Request<Artifact>,
+        request: Request<BuildArtifactRequest>,
     ) -> Result<Response<Self::BuildArtifactStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 

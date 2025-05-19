@@ -249,12 +249,9 @@ func Shell(
 	environments []string,
 	script string,
 ) (*api.ArtifactStep, error) {
-	stepTarget, err := context.GetTarget()
-	if err != nil {
-		return nil, err
-	}
+	stepSystem := context.GetTarget()
 
-	if *stepTarget == api.ArtifactSystem_AARCH64_DARWIN || *stepTarget == api.ArtifactSystem_X8664_DARWIN {
+	if stepSystem == api.ArtifactSystem_AARCH64_DARWIN || stepSystem == api.ArtifactSystem_X8664_DARWIN {
 		return Bash(
 			context,
 			artifacts,
@@ -267,21 +264,8 @@ func Shell(
 		)
 	}
 
-	if *stepTarget == api.ArtifactSystem_AARCH64_LINUX || *stepTarget == api.ArtifactSystem_X8664_LINUX {
-		var linux_vorpal_digest string
-
-		switch *stepTarget {
-		case api.ArtifactSystem_AARCH64_LINUX:
-			linux_vorpal_digest = "79958083229520a9e8cbf94ed5f6da40c3bf98ae666b3e20c01bc272fd92c2bb"
-		case api.ArtifactSystem_X8664_LINUX:
-			linux_vorpal_digest = "6787f5abf88580349785c101492445298e0577d192455481e758b56163e5ebde"
-		}
-
-		if linux_vorpal_digest == "" {
-			return nil, fmt.Errorf("unsupported shell step system: %s", stepTarget)
-		}
-
-		linux_vorpal, err := context.FetchArtifact(linux_vorpal_digest)
+	if stepSystem == api.ArtifactSystem_AARCH64_LINUX || stepSystem == api.ArtifactSystem_X8664_LINUX {
+		linux_vorpal, err := context.FetchArtifact("linux-vorpal:latest")
 		if err != nil {
 			return nil, err
 		}
@@ -300,7 +284,7 @@ func Shell(
 		)
 	}
 
-	return nil, fmt.Errorf("unsupported shell step system: %s", stepTarget)
+	return nil, fmt.Errorf("unsupported shell step system: %s", stepSystem)
 }
 
 func Docker(

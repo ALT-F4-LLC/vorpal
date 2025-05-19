@@ -1,5 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::ArtifactSystem::{Aarch64Linux, X8664Linux},
     artifact::{get_env_key, step, ArtifactBuilder},
     context::ConfigContext,
 };
@@ -155,8 +155,9 @@ fn generate_dockerfile() -> String {
 }
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let dockerfile_step = step::bash(
-        context,
+    let systems = vec![Aarch64Linux, X8664Linux];
+
+    let steps = vec![step::bash(
         vec![],
         vec![],
         formatdoc! {"
@@ -170,100 +171,58 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             dockerfile = generate_dockerfile(),
             version_script = generate_version_script(),
         },
-        vec![Aarch64Linux, X8664Linux],
-    );
+    )];
 
-    let dockerfile = ArtifactBuilder::new("linux-debian-dockerfile")
-        .with_step(dockerfile_step)
-        .with_system(Aarch64Darwin)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Darwin)
-        .with_system(X8664Linux)
+    let dockerfile = ArtifactBuilder::new("linux-debian-dockerfile", steps, systems.clone())
         .build(context)
         .await?;
 
-    let dockerfile_image = format!("altf4llc/debin:{}", dockerfile);
+    let image = format!("altf4llc/debin:{}", dockerfile);
 
-    let step_build = step::docker(
-        context,
-        vec![
-            "buildx",
-            "build",
-            "--progress=plain",
-            format!("--tag={}", dockerfile_image).as_str(),
-            &get_env_key(&dockerfile),
-        ],
-        vec![dockerfile.clone()],
-        vec![Aarch64Linux, X8664Linux],
-    );
+    let steps = vec![
+        step::docker(
+            vec![
+                "buildx",
+                "build",
+                "--progress=plain",
+                format!("--tag={}", image).as_str(),
+                &get_env_key(&dockerfile),
+            ],
+            vec![dockerfile.clone()],
+        ),
+        step::docker(
+            vec!["container", "create", "--name", &dockerfile, &image],
+            vec![],
+        ),
+        step::docker(
+            vec![
+                "container",
+                "export",
+                "--output",
+                "$VORPAL_WORKSPACE/debian.tar",
+                &dockerfile,
+            ],
+            vec![],
+        ),
+        step::bash(
+            vec![],
+            vec![],
+            formatdoc! {"
+                ## extract files
+                tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
 
-    let step_create = step::docker(
-        context,
-        vec![
-            "container",
-            "create",
-            "--name",
-            &dockerfile,
-            &dockerfile_image,
-        ],
-        vec![],
-        vec![Aarch64Linux, X8664Linux],
-    );
-
-    let step_export = step::docker(
-        context,
-        vec![
-            "container",
-            "export",
-            "--output",
-            "$VORPAL_WORKSPACE/debian.tar",
-            &dockerfile,
-        ],
-        vec![],
-        vec![Aarch64Linux, X8664Linux],
-    );
-
-    let step_extract = step::bash(
-        context,
-        vec![],
-        vec![],
-        formatdoc! {"
-            ## extract files
-            tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
-
-            ## patch files
-            echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
-        "},
-        vec![Aarch64Linux, X8664Linux],
-    );
-
-    let step_stop = step::docker(
-        context,
-        vec!["container", "stop", &dockerfile],
-        vec![],
-        vec![Aarch64Linux, X8664Linux],
-    );
-
-    let step_cleanup = step::docker(
-        context,
-        vec!["container", "rm", "--force", &dockerfile],
-        vec![],
-        vec![Aarch64Linux, X8664Linux],
-    );
+                ## patch files
+                echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
+            "},
+        ),
+        step::docker(vec!["container", "stop", &dockerfile], vec![]),
+        step::docker(vec!["container", "rm", "--force", &dockerfile], vec![]),
+    ];
 
     let name = "linux-debian";
 
-    ArtifactBuilder::new(name)
-        .with_step(step_build)
-        .with_step(step_create)
-        .with_step(step_export)
-        .with_step(step_extract)
-        .with_step(step_stop)
-        .with_step(step_cleanup)
-        .with_system(Aarch64Darwin)
-        .with_system(Aarch64Linux)
-        .with_system(X8664Darwin)
-        .with_system(X8664Linux)
+    ArtifactBuilder::new(name, steps, systems)
+        .with_alias(format!("{name}:latest"))
         .build(context)
         .await
 }

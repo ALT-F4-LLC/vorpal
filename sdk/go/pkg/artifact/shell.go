@@ -40,7 +40,7 @@ mkdir -pv $VORPAL_OUTPUT/bin
 
 cp -prv bin "$VORPAL_OUTPUT"`
 
-func ScriptDevshell(context *config.ConfigContext, artifacts []*string, environments []string, name string) (*string, error) {
+func ScriptDevshell(context *config.ConfigContext, artifacts []*string, environments []string, name string, systems []api.ArtifactSystem) (*string, error) {
 	backups := []string{
 		"export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"",
 		"export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"",
@@ -122,13 +122,9 @@ func ScriptDevshell(context *config.ConfigContext, artifacts []*string, environm
 		return nil, err
 	}
 
-	artifact := NewArtifactBuilder(name)
+	steps := []*api.ArtifactStep{step}
 
-	artifact = artifact.WithStep(step)
-	artifact = artifact.WithSystem(api.ArtifactSystem_AARCH64_DARWIN)
-	artifact = artifact.WithSystem(api.ArtifactSystem_AARCH64_LINUX)
-	artifact = artifact.WithSystem(api.ArtifactSystem_X8664_DARWIN)
-	artifact = artifact.WithSystem(api.ArtifactSystem_X8664_LINUX)
+	artifact := NewArtifactBuilder(name, steps, systems)
 
 	return artifact.Build(context)
 }
