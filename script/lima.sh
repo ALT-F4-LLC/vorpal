@@ -30,6 +30,7 @@ function install {
 
     sudo rm -rf /var/lib/vorpal
     sudo mkdir -pv /var/lib/vorpal/{key,sandbox,store}
+    sudo mkdir -pv /var/lib/vorpal/store/artifact/{alias,archive,config,output}
     sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
 
     pushd "$HOME/vorpal"
