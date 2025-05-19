@@ -4,7 +4,6 @@ use crate::command::start::registry::{
 };
 use sha256::digest;
 use tonic::{async_trait, Status};
-use tracing::info;
 use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 
 #[async_trait]
