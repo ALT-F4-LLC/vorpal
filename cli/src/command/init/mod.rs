@@ -43,28 +43,9 @@ pub async fn run(level: Level) -> Result<()> {
             }
 
             "Rust" => {
-                template.insert(
-                    "example/src/main.rs",
-                    include_str!("template/rust/example/src/main.rs"),
-                );
-
-                template.insert(
-                    "example/Cargo.toml",
-                    include_str!("template/rust/example/Cargo.toml"),
-                );
-
-                template.insert(
-                    "vorpal/src/main.rs",
-                    include_str!("template/rust/vorpal/src/main.rs"),
-                );
-
-                template.insert(
-                    "vorpal/Cargo.toml",
-                    include_str!("template/rust/vorpal/Cargo.toml"),
-                );
-
+                template.insert("src/main.rs", include_str!("template/rust/src/main.rs"));
+                template.insert("src/vorpal.rs", include_str!("template/rust/src/vorpal.rs"));
                 template.insert("Cargo.toml", include_str!("template/rust/Cargo.toml"));
-
                 template.insert("Vorpal.toml", include_str!("template/rust/Vorpal.toml"));
             }
 

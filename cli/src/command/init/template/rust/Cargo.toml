@@ -1,3 +1,13 @@
-[workspace]
-members = ["example", "vorpal"]
-resolver = "2"
+[package]
+edition = "2021"
+name = "example"
+version = "0.1.0"
+
+[[bin]]
+name = "vorpal"
+path = "src/vorpal.rs"
+
+[dependencies]
+anyhow = "1"
+tokio = { features = ["rt-multi-thread"], version = "1" }
+vorpal-sdk = "0.2.0-alpha"

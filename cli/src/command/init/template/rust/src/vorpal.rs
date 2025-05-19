@@ -16,8 +16,8 @@ async fn main() -> Result<()> {
 
     RustBuilder::new("example", SYSTEMS.to_vec())
         .with_bins(vec!["example"])
-        .with_includes(vec!["example", "Cargo.lock", "Cargo.toml"])
-        .with_packages(vec!["example"])
+        .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
+        // .with_packages(vec!["example"])
         .build(context)
         .await?;
 
