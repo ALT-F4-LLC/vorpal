@@ -10,4 +10,4 @@ path = "src/vorpal.rs"
 [dependencies]
 anyhow = "1"
 tokio = { features = ["rt-multi-thread"], version = "1" }
-vorpal-sdk = "0.2.0-alpha"
+vorpal-sdk = { git = "https://github.com/ALT-F4-LLC/vorpal.git", branch = "feature/update-sdks" }

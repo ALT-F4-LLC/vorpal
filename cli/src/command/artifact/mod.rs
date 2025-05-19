@@ -38,6 +38,7 @@ pub struct VorpalConfigGo {
 
 #[derive(Deserialize)]
 pub struct VorpalConfigRust {
+    pub bin: Option<String>,
     pub packages: Option<Vec<String>>,
 }
 
@@ -241,10 +242,6 @@ pub async fn run(
         std::process::exit(1);
     }
 
-    let config_includes = config
-        .source
-        .as_ref()
-        .map_or(vec![], |s| s.includes.clone().unwrap_or_default());
     let config_language = config.language.unwrap();
     let config_name = config.name.unwrap_or_else(|| "vorpal".to_string());
 
@@ -268,21 +265,17 @@ pub async fn run(
             let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
             let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
 
-            let mut source_includes = vec![];
-
-            for include in config_includes.iter() {
-                source_includes.push(include.as_str());
-            }
-
             let source_path = format!("{}.go", config_name);
 
-            if source_includes.is_empty() {
-                source_includes = vec![&source_path, "go.mod", "go.sum"];
+            let mut includes = vec![&source_path, "go.mod", "go.sum"];
+
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             }
 
             let mut builder = GoBuilder::new(&config_name, vec![config_system])
                 .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
-                .with_includes(source_includes);
+                .with_includes(includes);
 
             if let Some(directory) = config.go.as_ref().and_then(|g| g.directory.as_ref()) {
                 builder = builder.with_build_directory(directory.as_str());
@@ -294,16 +287,30 @@ pub async fn run(
         "rust" => {
             let protoc = protoc::build(&mut config_context).await?;
 
-            let mut builder = RustBuilder::new(&config_name, vec![config_system])
-                .with_artifacts(vec![protoc])
-                .with_bins(vec![&config_name])
-                .with_includes(config_includes.iter().map(|s| s.as_str()).collect());
+            let mut bins = vec![config_name.as_str()];
+            let bin_path = format!("src/{}.rs", config_name);
+            let mut includes = vec![&bin_path, "Cargo.toml", "Cargo.lock"];
+            let mut packages = vec![];
 
-            if let Some(packages) = config.rust.as_ref().and_then(|r| r.packages.as_ref()) {
-                builder = builder.with_packages(packages.iter().map(|s| s.as_str()).collect());
+            if let Some(b) = config.rust.as_ref().and_then(|r| r.bin.as_ref()) {
+                bins = vec![b.as_str()];
             }
 
-            builder.build(&mut config_context).await?
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+            }
+
+            if let Some(p) = config.rust.as_ref().and_then(|r| r.packages.as_ref()) {
+                packages = p.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+            }
+
+            RustBuilder::new(&config_name, vec![config_system])
+                .with_artifacts(vec![protoc])
+                .with_bins(bins)
+                .with_includes(includes)
+                .with_packages(packages)
+                .build(&mut config_context)
+                .await?
         }
 
         _ => "".to_string(),

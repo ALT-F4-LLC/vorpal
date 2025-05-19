@@ -152,8 +152,6 @@ impl<'a> RustBuilder<'a> {
 
         let source_cargo = parse_cargo(source_cargo_path.to_str().unwrap())?;
 
-        // TODO: implement for non-workspace based projects
-
         // Get list of bin targets
 
         let mut packages = vec![];
@@ -162,9 +160,9 @@ impl<'a> RustBuilder<'a> {
         let mut packages_targets = vec![];
 
         if let Some(workspace) = source_cargo.workspace {
-            if let Some(pkgs) = workspace.members {
-                for package in pkgs {
-                    let package_path = source_path.join(package.clone());
+            if let Some(members) = workspace.members {
+                for member in members {
+                    let package_path = source_path.join(member.clone());
                     let package_cargo_path = package_path.join("Cargo.toml");
 
                     if !package_cargo_path.exists() {
@@ -207,7 +205,7 @@ impl<'a> RustBuilder<'a> {
                         packages_targets.push(member_target_path);
                     }
 
-                    packages.push(package);
+                    packages.push(member);
                 }
             }
         }
@@ -249,32 +247,49 @@ impl<'a> RustBuilder<'a> {
             vendor_cargo_paths.push(format!("{}/Cargo.toml", package));
         }
 
-        let vendor_step_script = formatdoc! {r#"
+        let mut vendor_step_script = formatdoc! {r#"
             mkdir -pv $HOME
 
-            pushd ./source/{name}-vendor
+            pushd ./source/{name}-vendor"#,
+            name = self.name,
+        };
 
-            cat > Cargo.toml << "EOF"
-            [workspace]
-            members = [{packages}]
-            resolver = "2"
-            EOF
+        if packages.len() > 0 {
+            vendor_step_script = formatdoc! {r#"
+                {vendor_step_script}
 
-            target_paths=({target_paths})
+                cat > Cargo.toml << "EOF"
+                [workspace]
+                members = [{packages}]
+                resolver = "2"
+                EOF
 
-            for target_path in ${{target_paths[@]}}; do
-                mkdir -pv $(dirname ${{target_path}})
-                touch ${{target_path}}
-            done
+                target_paths=({target_paths})
+
+                for target_path in ${{target_paths[@]}}; do
+                    mkdir -pv $(dirname ${{target_path}})
+                    touch ${{target_path}}
+                done"#,
+                packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+                target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display())).collect::<Vec<_>>().join(" "),
+            };
+        } else {
+            vendor_step_script = formatdoc! {r#"
+                {vendor_step_script}
+
+                mkdir -pv src
+                touch src/main.rs"#,
+            };
+        }
+
+        vendor_step_script = formatdoc! {r#"
+            {vendor_step_script}
 
             mkdir -pv $VORPAL_OUTPUT/vendor
 
             cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
             echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml"#,
-            name = self.name,
-            packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-            target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display())).collect::<Vec<_>>().join(" "),
         };
 
         let vendor_steps = vec![
