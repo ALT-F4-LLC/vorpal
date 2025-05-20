@@ -254,7 +254,7 @@ impl<'a> RustBuilder<'a> {
             name = self.name,
         };
 
-        if packages.len() > 0 {
+        if !packages.is_empty() {
             vendor_step_script = formatdoc! {r#"
                 {vendor_step_script}
 
