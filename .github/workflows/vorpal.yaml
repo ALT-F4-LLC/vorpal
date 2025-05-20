@@ -223,7 +223,7 @@ jobs:
             exit 1
           fi
 
-      - if: always()
+      - if: ${{ !cancelled() }}
         run: |
           cat ./dist/worker_output.log || true
           kill $WORKER_PID || true
