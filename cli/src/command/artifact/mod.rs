@@ -19,7 +19,10 @@ use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::{
     api::{
         archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest},
-        artifact::{Artifact, ArtifactRequest, ArtifactsRequest},
+        artifact::{
+            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
+            ArtifactsRequest,
+        },
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
@@ -38,6 +41,7 @@ pub struct VorpalConfigGo {
 
 #[derive(Deserialize)]
 pub struct VorpalConfigRust {
+    pub bin: Option<String>,
     pub packages: Option<Vec<String>>,
 }
 
@@ -241,10 +245,6 @@ pub async fn run(
         std::process::exit(1);
     }
 
-    let config_includes = config
-        .source
-        .as_ref()
-        .map_or(vec![], |s| s.includes.clone().unwrap_or_default());
     let config_language = config.language.unwrap();
     let config_name = config.name.unwrap_or_else(|| "vorpal".to_string());
 
@@ -268,21 +268,17 @@ pub async fn run(
             let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
             let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
 
-            let mut source_includes = vec![];
-
-            for include in config_includes.iter() {
-                source_includes.push(include.as_str());
-            }
-
             let source_path = format!("{}.go", config_name);
 
-            if source_includes.is_empty() {
-                source_includes = vec![&source_path, "go.mod", "go.sum"];
+            let mut includes = vec![&source_path, "go.mod", "go.sum"];
+
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             }
 
             let mut builder = GoBuilder::new(&config_name, vec![config_system])
                 .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
-                .with_includes(source_includes);
+                .with_includes(includes);
 
             if let Some(directory) = config.go.as_ref().and_then(|g| g.directory.as_ref()) {
                 builder = builder.with_build_directory(directory.as_str());
@@ -292,18 +288,29 @@ pub async fn run(
         }
 
         "rust" => {
-            let protoc = protoc::build(&mut config_context).await?;
+            let mut bins = vec![config_name.as_str()];
+            let bin_path = format!("src/{}.rs", config_name);
+            let mut includes = vec![&bin_path, "Cargo.toml", "Cargo.lock"];
+            let mut packages = vec![];
 
-            let mut builder = RustBuilder::new(&config_name, vec![config_system])
-                .with_artifacts(vec![protoc])
-                .with_bins(vec![&config_name])
-                .with_includes(config_includes.iter().map(|s| s.as_str()).collect());
-
-            if let Some(packages) = config.rust.as_ref().and_then(|r| r.packages.as_ref()) {
-                builder = builder.with_packages(packages.iter().map(|s| s.as_str()).collect());
+            if let Some(b) = config.rust.as_ref().and_then(|r| r.bin.as_ref()) {
+                bins = vec![b.as_str()];
             }
 
-            builder.build(&mut config_context).await?
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+            }
+
+            if let Some(p) = config.rust.as_ref().and_then(|r| r.packages.as_ref()) {
+                packages = p.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+            }
+
+            RustBuilder::new(&config_name, vec![config_system])
+                .with_bins(bins)
+                .with_includes(includes)
+                .with_packages(packages)
+                .build(&mut config_context)
+                .await?
         }
 
         _ => "".to_string(),
@@ -412,14 +419,9 @@ pub async fn run(
     get_artifacts(&artifact, &artifact_digest, &mut build_store, &config_store).await?;
 
     if artifact_export {
-        let mut artifacts = build_store.clone().into_values().collect::<Vec<Artifact>>();
+        let export = serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
 
-        artifacts.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let artifacts_json =
-            serde_json::to_string_pretty(&artifacts).expect("failed to serialize artifact");
-
-        println!("{}", artifacts_json);
+        println!("{}", export);
 
         return Ok(());
     }
@@ -433,6 +435,41 @@ pub async fn run(
         &mut client_worker,
     )
     .await?;
+
+    Ok(())
+}
+
+pub async fn inspect(digest: &str, level: Level, registry: &str) -> Result<()> {
+    let subscriber_writer = std::io::stderr.with_max_level(level);
+
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(level)
+        .with_target(false)
+        .with_writer(subscriber_writer)
+        .without_time()
+        .finish();
+
+    subscriber::set_global_default(subscriber).expect("setting default subscriber");
+
+    let mut client = ArtifactServiceClient::connect(registry.to_owned())
+        .await
+        .expect("failed to connect to registry");
+
+    let request = ArtifactRequest {
+        digest: digest.to_string(),
+    };
+
+    let response = client
+        .get_artifact(request)
+        .await
+        .expect("failed to get artifact");
+
+    let artifact = response.into_inner();
+
+    let artifact_data =
+        serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
+
+    println!("{}", artifact_data);
 
     Ok(())
 }

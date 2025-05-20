@@ -72,7 +72,7 @@ const VendorStepScriptTemplate = `
 mkdir -pv $HOME
 
 pushd ./source/{{.Name}}-vendor
-
+{{if .Packages}}
 cat > Cargo.toml << "EOF"
 [workspace]
 members = [{{.Packages}}]
@@ -85,7 +85,10 @@ for target_path in ${{"{"}}target_paths{{"["}}@{{"]"}}{{"}"}}; do
     mkdir -pv $(dirname ${{"{"}}target_path{{"}"}})
     touch ${{"{"}}target_path{{"}"}}
 done
-
+{{else}}
+mkdir -pv src
+touch src/main.rs
+{{end}}
 mkdir -pv $VORPAL_OUTPUT/vendor
 
 cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
@@ -101,13 +104,13 @@ mkdir -pv .cargo
 mkdir -pv $VORPAL_OUTPUT/bin
 
 ln -sv {{.Vendor}}/config.toml .cargo/config.toml
-
+{{if .Packages}}
 cat > Cargo.toml << "EOF"
 [workspace]
 members = [{{.Packages}}]
 resolver = "2"
 EOF
-
+{{end}}
 bin_names=({{.BinNames}})
 manifest_paths=({{.ManifestPaths}})
 
@@ -211,6 +214,11 @@ func (a *RustBuilder) WithTests() *RustBuilder {
 }
 
 func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
+	protoc, err := artifact.Protoc(context)
+	if err != nil {
+		return nil, err
+	}
+
 	// 1. READ CARGO.TOML FILES
 
 	// Get the source path
@@ -251,44 +259,44 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	if sourceCargo.Workspace != nil && len(sourceCargo.Workspace.Members) > 0 {
 		for _, member := range sourceCargo.Workspace.Members {
-			pkg := fmt.Sprintf("%s/%s", sourcePath, member)
-			pkgCargoPath := fmt.Sprintf("%s/Cargo.toml", pkg)
+			packagePath := fmt.Sprintf("%s/%s", sourcePath, member)
+			packageCargoPath := fmt.Sprintf("%s/Cargo.toml", packagePath)
 
-			if _, err := os.Stat(pkgCargoPath); err != nil {
+			if _, err := os.Stat(packageCargoPath); err != nil {
 				return nil, err
 			}
 
-			pkgCargoData, err := os.ReadFile(pkgCargoPath)
+			packageCargoData, err := os.ReadFile(packageCargoPath)
 			if err != nil {
 				return nil, err
 			}
 
-			var pkgCargo RustArtifactCargoToml
+			var packageCargo RustArtifactCargoToml
 
-			_, pkgCargoErr := toml.Decode(string(pkgCargoData), &pkgCargo)
+			_, pkgCargoErr := toml.Decode(string(packageCargoData), &packageCargo)
 			if pkgCargoErr != nil {
 				return nil, pkgCargoErr
 			}
 
-			if len(builder.packages) > 0 && !slices.Contains(builder.packages, pkgCargo.Package.Name) {
+			if len(builder.packages) > 0 && !slices.Contains(builder.packages, packageCargo.Package.Name) {
 				continue
 			}
 
-			pkgTargetPaths := make([]string, 0)
+			packageTargetPaths := make([]string, 0)
 
-			if pkgCargo.Bin != nil && len(pkgCargo.Bin) > 0 {
-				for _, bin := range pkgCargo.Bin {
-					pkgTargetPath := fmt.Sprintf("%s/%s", pkg, bin.Path)
+			if packageCargo.Bin != nil && len(packageCargo.Bin) > 0 {
+				for _, bin := range packageCargo.Bin {
+					packageTargetPath := fmt.Sprintf("%s/%s", packagePath, bin.Path)
 
-					if _, err := os.Stat(pkgTargetPath); err != nil {
+					if _, err := os.Stat(packageTargetPath); err != nil {
 						return nil, err
 					}
 
-					pkgTargetPaths = append(pkgTargetPaths, pkgTargetPath)
+					packageTargetPaths = append(packageTargetPaths, packageTargetPath)
 
 					if len(builder.bins) == 0 || slices.Contains(builder.bins, bin.Name) {
-						if !slices.Contains(packagesManifests, pkgCargoPath) {
-							packagesManifests = append(packagesManifests, pkgCargoPath)
+						if !slices.Contains(packagesManifests, packageCargoPath) {
+							packagesManifests = append(packagesManifests, packageCargoPath)
 						}
 
 						packagesBinNames = append(packagesBinNames, bin.Name)
@@ -296,17 +304,17 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 				}
 			}
 
-			if len(pkgTargetPaths) == 0 {
-				pkgTargetPath := fmt.Sprintf("%s/src/lib.rs", pkg)
+			if len(packageTargetPaths) == 0 {
+				packageTargetPath := fmt.Sprintf("%s/src/lib.rs", packagePath)
 
-				if _, err := os.Stat(pkgTargetPath); err != nil {
+				if _, err := os.Stat(packageTargetPath); err != nil {
 					return nil, err
 				}
 
-				pkgTargetPaths = append(pkgTargetPaths, pkgTargetPath)
+				packageTargetPaths = append(packageTargetPaths, packageTargetPath)
 			}
 
-			for _, memberTargetPath := range pkgTargetPaths {
+			for _, memberTargetPath := range packageTargetPaths {
 				packagesTargets = append(packagesTargets, memberTargetPath)
 			}
 
@@ -331,7 +339,6 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 	}
 
 	rustToolchainVersion := artifact.RustToolchainVersion()
-
 	rustToolchainName := fmt.Sprintf("%s-%s", rustToolchainVersion, *rustToolchainTarget)
 
 	stepEnvironments := []string{
@@ -413,6 +420,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 	}
 
 	stepArtifacts = append(stepArtifacts, vendor)
+	stepArtifacts = append(stepArtifacts, protoc)
 
 	// TODO: implement artifact for 'check` to pre-bake the vendor cache
 
@@ -446,10 +454,16 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	var stepScriptBuffer bytes.Buffer
 
-	stepScriptBinNames := strings.Join(packagesBinNames, " ")
+	if len(packagesBinNames) == 0 {
+		packagesBinNames = []string{builder.name}
+	}
+
+	if len(packagesManifests) == 0 {
+		packagesManifests = []string{sourceCargoPath}
+	}
 
 	stepScriptArgs := StepScriptTemplateArgs{
-		BinNames:      stepScriptBinNames,
+		BinNames:      strings.Join(packagesBinNames, " "),
 		Build:         fmt.Sprintf("%t", builder.build),
 		Check:         fmt.Sprintf("%t", builder.check),
 		Format:        fmt.Sprintf("%t", builder.format),

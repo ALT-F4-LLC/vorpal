@@ -59,6 +59,11 @@ pub enum Command {
     #[clap(subcommand)]
     Keys(CommandKeys),
 
+    Inspect {
+        #[arg(long)]
+        digest: String,
+    },
+
     Start {
         #[clap(default_value = "23151", long)]
         port: u16,
@@ -137,6 +142,8 @@ pub async fn run() -> Result<()> {
         }
 
         Command::Init {} => init::run(level).await,
+
+        Command::Inspect { digest } => artifact::inspect(digest, level, &registry).await,
 
         Command::Keys(keys) => match keys {
             CommandKeys::Generate {} => keys::generate().await,

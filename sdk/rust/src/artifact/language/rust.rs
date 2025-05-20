@@ -1,6 +1,6 @@
 use crate::{
     api::artifact::ArtifactSystem,
-    artifact::{get_env_key, rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
+    artifact::{get_env_key, protoc, rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -125,6 +125,8 @@ impl<'a> RustBuilder<'a> {
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let protoc = protoc::build(context).await?;
+
         // Parse source path
 
         let source_path = match self.source {
@@ -152,8 +154,6 @@ impl<'a> RustBuilder<'a> {
 
         let source_cargo = parse_cargo(source_cargo_path.to_str().unwrap())?;
 
-        // TODO: implement for non-workspace based projects
-
         // Get list of bin targets
 
         let mut packages = vec![];
@@ -162,9 +162,9 @@ impl<'a> RustBuilder<'a> {
         let mut packages_targets = vec![];
 
         if let Some(workspace) = source_cargo.workspace {
-            if let Some(pkgs) = workspace.members {
-                for package in pkgs {
-                    let package_path = source_path.join(package.clone());
+            if let Some(members) = workspace.members {
+                for member in members {
+                    let package_path = source_path.join(member.clone());
                     let package_cargo_path = package_path.join("Cargo.toml");
 
                     if !package_cargo_path.exists() {
@@ -207,12 +207,10 @@ impl<'a> RustBuilder<'a> {
                         packages_targets.push(member_target_path);
                     }
 
-                    packages.push(package);
+                    packages.push(member);
                 }
             }
         }
-
-        // TODO: if no workspaces found then check source cargo
 
         // 2. CREATE ARTIFACTS
 
@@ -249,32 +247,49 @@ impl<'a> RustBuilder<'a> {
             vendor_cargo_paths.push(format!("{}/Cargo.toml", package));
         }
 
-        let vendor_step_script = formatdoc! {r#"
+        let mut vendor_step_script = formatdoc! {r#"
             mkdir -pv $HOME
 
-            pushd ./source/{name}-vendor
+            pushd ./source/{name}-vendor"#,
+            name = self.name,
+        };
 
-            cat > Cargo.toml << "EOF"
-            [workspace]
-            members = [{packages}]
-            resolver = "2"
-            EOF
+        if !packages.is_empty() {
+            vendor_step_script = formatdoc! {r#"
+                {vendor_step_script}
 
-            target_paths=({target_paths})
+                cat > Cargo.toml << "EOF"
+                [workspace]
+                members = [{packages}]
+                resolver = "2"
+                EOF
 
-            for target_path in ${{target_paths[@]}}; do
-                mkdir -pv $(dirname ${{target_path}})
-                touch ${{target_path}}
-            done
+                target_paths=({target_paths})
+
+                for target_path in ${{target_paths[@]}}; do
+                    mkdir -pv $(dirname ${{target_path}})
+                    touch ${{target_path}}
+                done"#,
+                packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+                target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display())).collect::<Vec<_>>().join(" "),
+            };
+        } else {
+            vendor_step_script = formatdoc! {r#"
+                {vendor_step_script}
+
+                mkdir -pv src
+                touch src/main.rs"#,
+            };
+        }
+
+        vendor_step_script = formatdoc! {r#"
+            {vendor_step_script}
 
             mkdir -pv $VORPAL_OUTPUT/vendor
 
             cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
             echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml"#,
-            name = self.name,
-            packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-            target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display())).collect::<Vec<_>>().join(" "),
         };
 
         let vendor_steps = vec![
@@ -300,6 +315,7 @@ impl<'a> RustBuilder<'a> {
             .await?;
 
         step_artifacts.push(vendor.clone());
+        step_artifacts.push(protoc);
 
         // Create source
 
@@ -321,7 +337,7 @@ impl<'a> RustBuilder<'a> {
 
         // Create step
 
-        let step_script = formatdoc! {r#"
+        let mut step_script = formatdoc! {r#"
             mkdir -pv $HOME
 
             pushd ./source/{name}
@@ -329,13 +345,34 @@ impl<'a> RustBuilder<'a> {
             mkdir -pv .cargo
             mkdir -pv $VORPAL_OUTPUT/bin
 
-            ln -sv {vendor}/config.toml .cargo/config.toml
+            ln -sv {vendor}/config.toml .cargo/config.toml"#,
+            name = self.name,
+            vendor = get_env_key(&vendor),
+        };
 
-            cat > Cargo.toml << "EOF"
-            [workspace]
-            members = [{packages}]
-            resolver = "2"
-            EOF
+        if !self.packages.is_empty() {
+            step_script = formatdoc! {r#"
+                {step_script}
+
+                cat > Cargo.toml << "EOF"
+                [workspace]
+                members = [{packages}]
+                resolver = "2"
+                EOF"#,
+                packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+            };
+        }
+
+        if packages_bin_names.is_empty() {
+            packages_bin_names.push(self.name.to_string());
+        }
+
+        if packages_manifests.is_empty() {
+            packages_manifests.push(source_cargo_path.display().to_string());
+        }
+
+        step_script = formatdoc! {r#"
+            {step_script}
 
             bin_names=({bin_names})
             manifest_paths=({manifest_paths})
@@ -377,9 +414,6 @@ impl<'a> RustBuilder<'a> {
             enable_lint = if self.lint { "true" } else { "false" },
             enable_tests = if self.tests { "true" } else { "false" },
             manifest_paths = packages_manifests.join(" "),
-            name = self.name,
-            packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-            vendor = get_env_key(&vendor),
         };
 
         let steps = vec![

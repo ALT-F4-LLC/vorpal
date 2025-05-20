@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-	"strings"
 	"text/template"
 
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -49,11 +48,6 @@ gh release create \
     {{.X8664Linux}}.tar.zst`
 
 func vorpal(context *config.ConfigContext) (*string, error) {
-	protoc, err := artifact.Protoc(context)
-	if err != nil {
-		return nil, err
-	}
-
 	name := "vorpal"
 
 	systems := []api.ArtifactSystem{
@@ -64,7 +58,6 @@ func vorpal(context *config.ConfigContext) (*string, error) {
 	}
 
 	return language.NewRustBuilder(name, systems).
-		WithArtifacts([]*string{protoc}).
 		WithBins([]string{name}).
 		WithIncludes([]string{"cli", "sdk/rust"}).
 		WithPackages([]string{"vorpal-cli", "vorpal-sdk"}).
@@ -280,16 +273,6 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		rustToolchainName,
 	)
 
-	paths := []string{rustToolchainPath}
-
-	for _, art := range artifacts {
-		if art == nil || art == rustToolchain {
-			continue
-		}
-
-		paths = append(paths, fmt.Sprintf("%s/bin", artifact.GetEnvKey(art)))
-	}
-
 	goarch, err := language.GetGOARCH(contextTarget)
 	if err != nil {
 		return nil, err
@@ -304,7 +287,7 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		"CGO_ENABLED=0",
 		fmt.Sprintf("GOARCH=%s", *goarch),
 		fmt.Sprintf("GOOS=%s", *goos),
-		fmt.Sprintf("PATH=%s", strings.Join(paths, ":")),
+		fmt.Sprintf("PATH=%s", rustToolchainPath),
 		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(rustToolchain)),
 		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rustToolchainName),
 	}

@@ -21,7 +21,6 @@ async fn vorpal(context: &mut ConfigContext) -> Result<String> {
     let name = "vorpal";
 
     RustBuilder::new(name, SYSTEMS.to_vec())
-        .with_artifacts(vec![protoc::build(context).await?])
         .with_bins(vec![name])
         .with_includes(vec!["cli", "sdk/rust"])
         .with_packages(vec!["vorpal-cli", "vorpal-sdk"])
@@ -177,16 +176,6 @@ async fn vorpal_shell(context: &mut ConfigContext) -> Result<String> {
         rust_toolchain_name
     );
 
-    let mut paths = vec![rust_toolchain_path];
-
-    for artifact in artifacts.iter() {
-        if *artifact == rust_toolchain {
-            continue;
-        }
-
-        paths.push(format!("{}/bin", get_env_key(artifact)));
-    }
-
     let goarch = get_goarch(context.get_system())?;
     let goos = get_goos(context.get_system())?;
 
@@ -194,7 +183,7 @@ async fn vorpal_shell(context: &mut ConfigContext) -> Result<String> {
         "CGO_ENABLED=0".to_string(),
         format!("GOARCH={}", goarch),
         format!("GOOS={}", goos),
-        format!("PATH={}", paths.join(":")),
+        format!("PATH={}", rust_toolchain_path),
         format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
         format!("RUSTUP_TOOLCHAIN={}", rust_toolchain_name),
     ];

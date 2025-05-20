@@ -9,5 +9,8 @@
         "extends": [
             "schedule:weekly"
         ]
-    }
+    },
+    "ignorePaths": [
+        "cli/src/command/init/template/**"
+    ]
 }
