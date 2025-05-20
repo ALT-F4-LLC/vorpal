@@ -285,8 +285,6 @@ pub async fn run(
         }
 
         "rust" => {
-            let protoc = protoc::build(&mut config_context).await?;
-
             let mut bins = vec![config_name.as_str()];
             let bin_path = format!("src/{}.rs", config_name);
             let mut includes = vec![&bin_path, "Cargo.toml", "Cargo.lock"];
@@ -305,7 +303,6 @@ pub async fn run(
             }
 
             RustBuilder::new(&config_name, vec![config_system])
-                .with_artifacts(vec![protoc])
                 .with_bins(bins)
                 .with_includes(includes)
                 .with_packages(packages)
