@@ -1,6 +1,6 @@
 use crate::{
     api::artifact::ArtifactSystem,
-    artifact::{get_env_key, rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
+    artifact::{get_env_key, protoc, rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -125,6 +125,8 @@ impl<'a> RustBuilder<'a> {
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let protoc = protoc::build(context).await?;
+
         // Parse source path
 
         let source_path = match self.source {
@@ -315,6 +317,7 @@ impl<'a> RustBuilder<'a> {
             .await?;
 
         step_artifacts.push(vendor.clone());
+        step_artifacts.push(protoc);
 
         // Create source
 
