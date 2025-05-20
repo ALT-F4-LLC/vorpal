@@ -212,8 +212,6 @@ impl<'a> RustBuilder<'a> {
             }
         }
 
-        // TODO: if no workspaces found then check source cargo
-
         // 2. CREATE ARTIFACTS
 
         // Get rust toolchain artifact

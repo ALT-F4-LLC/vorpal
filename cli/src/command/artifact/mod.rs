@@ -19,7 +19,10 @@ use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::{
     api::{
         archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest},
-        artifact::{Artifact, ArtifactRequest, ArtifactsRequest},
+        artifact::{
+            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
+            ArtifactsRequest,
+        },
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
@@ -416,14 +419,9 @@ pub async fn run(
     get_artifacts(&artifact, &artifact_digest, &mut build_store, &config_store).await?;
 
     if artifact_export {
-        let mut artifacts = build_store.clone().into_values().collect::<Vec<Artifact>>();
+        let export = serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
 
-        artifacts.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let artifacts_json =
-            serde_json::to_string_pretty(&artifacts).expect("failed to serialize artifact");
-
-        println!("{}", artifacts_json);
+        println!("{}", export);
 
         return Ok(());
     }
@@ -437,6 +435,41 @@ pub async fn run(
         &mut client_worker,
     )
     .await?;
+
+    Ok(())
+}
+
+pub async fn inspect(digest: &str, level: Level, registry: &str) -> Result<()> {
+    let subscriber_writer = std::io::stderr.with_max_level(level);
+
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(level)
+        .with_target(false)
+        .with_writer(subscriber_writer)
+        .without_time()
+        .finish();
+
+    subscriber::set_global_default(subscriber).expect("setting default subscriber");
+
+    let mut client = ArtifactServiceClient::connect(registry.to_owned())
+        .await
+        .expect("failed to connect to registry");
+
+    let request = ArtifactRequest {
+        digest: digest.to_string(),
+    };
+
+    let response = client
+        .get_artifact(request)
+        .await
+        .expect("failed to get artifact");
+
+    let artifact = response.into_inner();
+
+    let artifact_data =
+        serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
+
+    println!("{}", artifact_data);
 
     Ok(())
 }
