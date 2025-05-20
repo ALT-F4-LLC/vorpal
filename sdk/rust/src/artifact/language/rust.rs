@@ -336,7 +336,7 @@ impl<'a> RustBuilder<'a> {
 
         // Create step
 
-        let step_script = formatdoc! {r#"
+        let mut step_script = formatdoc! {r#"
             mkdir -pv $HOME
 
             pushd ./source/{name}
@@ -344,13 +344,34 @@ impl<'a> RustBuilder<'a> {
             mkdir -pv .cargo
             mkdir -pv $VORPAL_OUTPUT/bin
 
-            ln -sv {vendor}/config.toml .cargo/config.toml
+            ln -sv {vendor}/config.toml .cargo/config.toml"#,
+            name = self.name,
+            vendor = get_env_key(&vendor),
+        };
 
-            cat > Cargo.toml << "EOF"
-            [workspace]
-            members = [{packages}]
-            resolver = "2"
-            EOF
+        if !self.packages.is_empty() {
+            step_script = formatdoc! {r#"
+                {step_script}
+
+                cat > Cargo.toml << "EOF"
+                [workspace]
+                members = [{packages}]
+                resolver = "2"
+                EOF"#,
+                packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+            };
+        }
+
+        if packages_bin_names.is_empty() {
+            packages_bin_names.push(self.name.to_string());
+        }
+
+        if packages_manifests.is_empty() {
+            packages_manifests.push(source_cargo_path.display().to_string());
+        }
+
+        step_script = formatdoc! {r#"
+            {step_script}
 
             bin_names=({bin_names})
             manifest_paths=({manifest_paths})
@@ -392,9 +413,6 @@ impl<'a> RustBuilder<'a> {
             enable_lint = if self.lint { "true" } else { "false" },
             enable_tests = if self.tests { "true" } else { "false" },
             manifest_paths = packages_manifests.join(" "),
-            name = self.name,
-            packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-            vendor = get_env_key(&vendor),
         };
 
         let steps = vec![
