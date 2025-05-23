@@ -49,7 +49,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     );
 
     let curl_cacert =
-        source::curl_cacert("74e20ed700e895a3b5f58dbcad2b20f98f041e167d50686cda66b6337af6aa21");
+        source::curl_cacert("7f5218a225d0451ff8bd0b57d8a4c63b1c4ba52a6a8887cd2700cc3aef9431c1");
 
     let diffutils_version = "3.10";
     let diffutils = source::gnu_xz(
