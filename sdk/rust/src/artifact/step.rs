@@ -1,5 +1,8 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    api::artifact::{
+        ArtifactStepSecret,
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    },
     artifact::{get_env_key, linux_vorpal, ArtifactStep, ArtifactStepBuilder},
     context::ConfigContext,
 };
@@ -8,7 +11,12 @@ use indoc::formatdoc;
 
 // TODO: implement amber step
 
-pub fn bash(artifacts: Vec<String>, environments: Vec<String>, script: String) -> ArtifactStep {
+pub fn bash(
+    artifacts: Vec<String>,
+    environments: Vec<String>,
+    secrets: Vec<ArtifactStepSecret>,
+    script: String,
+) -> ArtifactStep {
     let mut step_environments = vec![];
 
     for environment in environments.iter() {
@@ -47,6 +55,7 @@ pub fn bash(artifacts: Vec<String>, environments: Vec<String>, script: String) -
     ArtifactStepBuilder::new("bash")
         .with_artifacts(artifacts)
         .with_environments(step_environments)
+        .with_secrets(secrets)
         .with_script(step_script)
         .build()
 }
@@ -56,6 +65,7 @@ pub async fn bwrap(
     artifacts: Vec<String>,
     environments: Vec<String>,
     rootfs: Option<String>,
+    secrets: Vec<ArtifactStepSecret>,
     script: String,
 ) -> Result<ArtifactStep> {
     // Setup arguments
@@ -199,6 +209,7 @@ pub async fn bwrap(
         .with_environments(vec![
             "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin".to_string()
         ])
+        .with_secrets(secrets)
         .with_script(step_script)
         .build();
 
@@ -210,6 +221,7 @@ pub async fn shell(
     artifacts: Vec<String>,
     environments: Vec<String>,
     script: String,
+    secrets: Vec<ArtifactStepSecret>,
 ) -> Result<ArtifactStep> {
     // Setup target
 
@@ -218,11 +230,22 @@ pub async fn shell(
     // Setup step
 
     let step = match step_system {
-        Aarch64Darwin | X8664Darwin => bash(artifacts, environments.clone(), script.to_string()),
+        Aarch64Darwin | X8664Darwin => {
+            bash(artifacts, environments.clone(), secrets, script.to_string())
+        }
 
         Aarch64Linux | X8664Linux => {
             let linux_vorpal = linux_vorpal::build(context).await?;
-            bwrap(vec![], artifacts, environments, Some(linux_vorpal), script).await?
+
+            bwrap(
+                vec![],
+                artifacts,
+                environments,
+                Some(linux_vorpal),
+                secrets,
+                script,
+            )
+            .await?
         }
 
         _ => bail!("unsupported system: {}", step_system.as_str_name()),
@@ -230,6 +253,8 @@ pub async fn shell(
 
     Ok(step)
 }
+
+// TODO: Add support for secrets with docker step
 
 pub fn docker(arguments: Vec<&str>, artifacts: Vec<String>) -> ArtifactStep {
     ArtifactStepBuilder::new("docker")

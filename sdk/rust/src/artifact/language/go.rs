@@ -3,7 +3,10 @@ use crate::{
         ArtifactSystem,
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
-    artifact::{get_env_key, go, step, ArtifactBuilder, ArtifactSource, ArtifactSourceBuilder},
+    artifact::{
+        get_env_key, go, step, ArtifactBuilder, ArtifactSource, ArtifactSourceBuilder,
+        ArtifactStepSecret,
+    },
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -17,6 +20,7 @@ pub struct GoBuilder<'a> {
     build_path: Option<&'a str>,
     includes: Vec<&'a str>,
     name: &'a str,
+    secrets: Vec<ArtifactStepSecret>,
     source: Option<ArtifactSource>,
     source_scripts: Vec<String>,
     systems: Vec<ArtifactSystem>,
@@ -52,6 +56,7 @@ impl<'a> GoBuilder<'a> {
             build_path: None,
             includes: vec![],
             name,
+            secrets: vec![],
             source: None,
             source_scripts: vec![],
             systems,
@@ -87,6 +92,15 @@ impl<'a> GoBuilder<'a> {
 
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
         self.includes = includes;
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(String, String)>) -> Self {
+        for (name, value) in secrets {
+            if !self.secrets.iter().any(|s| s.name == name) {
+                self.secrets.push(ArtifactStepSecret { name, value });
+            }
+        }
         self
     }
 
@@ -165,16 +179,15 @@ impl<'a> GoBuilder<'a> {
                     format!("PATH={}/bin", get_env_key(&go)),
                 ],
                 step_script,
+                self.secrets,
             )
             .await?,
         ];
 
-        let mut builder = ArtifactBuilder::new(self.name, steps, self.systems).with_source(source);
-
-        for alias in self.aliases {
-            builder = builder.with_alias(alias);
-        }
-
-        builder.build(context).await
+        ArtifactBuilder::new(self.name, steps, self.systems)
+            .with_aliases(self.aliases)
+            .with_sources(vec![source])
+            .build(context)
+            .await
     }
 }

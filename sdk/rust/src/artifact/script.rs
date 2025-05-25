@@ -1,5 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem,
+    api::artifact::{ArtifactStepSecret, ArtifactSystem},
     artifact::{get_env_key, step, ArtifactBuilder},
     context::ConfigContext,
 };
@@ -11,6 +11,7 @@ pub async fn devshell<'a>(
     artifacts: Vec<String>,
     environments: Vec<String>,
     name: &'a str,
+    secrets: Vec<ArtifactStepSecret>,
     systems: Vec<ArtifactSystem>,
 ) -> Result<String> {
     let mut envs_backup = vec![
@@ -97,7 +98,7 @@ pub async fn devshell<'a>(
         unsets = envs_unset.join("\n"),
     };
 
-    let steps = vec![step::shell(context, artifacts, vec![], step_script).await?];
+    let steps = vec![step::shell(context, artifacts, vec![], step_script, secrets).await?];
 
     ArtifactBuilder::new(name, steps, systems)
         .build(context)

@@ -26,6 +26,7 @@ type GoBuilder struct {
 	buildPath      *string
 	includes       []string
 	name           string
+	secrets        []*api.ArtifactStepSecret
 	source         *api.ArtifactSource
 	sourceScripts  []string
 	systems        []api.ArtifactSystem
@@ -82,6 +83,7 @@ func NewGoBuilder(name string, systems []api.ArtifactSystem) *GoBuilder {
 		sourceScripts:  []string{},
 		includes:       []string{},
 		name:           name,
+		secrets:        []*api.ArtifactStepSecret{},
 		source:         nil,
 		systems:        systems,
 	}
@@ -104,6 +106,23 @@ func (b *GoBuilder) WithBuildPath(path string) *GoBuilder {
 
 func (b *GoBuilder) WithIncludes(includes []string) *GoBuilder {
 	b.includes = includes
+	return b
+}
+
+func (b *GoBuilder) WithSecrets(secrets map[string]string) *GoBuilder {
+	for name, value := range secrets {
+		secret := &api.ArtifactStepSecret{
+			Name:  name,
+			Value: value,
+		}
+
+		if slices.ContainsFunc(b.secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
+			continue
+		}
+
+		b.secrets = append(b.secrets, secret)
+	}
+
 	return b
 }
 
@@ -204,7 +223,9 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 		fmt.Sprintf("PATH=%s/bin", artifact.GetEnvKey(goBin)),
 	}
 
-	step, err := artifact.Shell(context, artifacts, environments, stepScript)
+	sources := []*api.ArtifactSource{source}
+
+	step, err := artifact.Shell(context, artifacts, environments, stepScript, builder.secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +233,6 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 	steps := []*api.ArtifactStep{step}
 
 	return artifact.NewArtifactBuilder(builder.name, steps, builder.systems).
-		WithSource(source).
+		WithSources(sources).
 		Build(context)
 }

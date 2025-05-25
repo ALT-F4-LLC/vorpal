@@ -375,6 +375,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             vec![],
             step_environments.clone(),
             Some(step_rootfs.clone()),
+            vec![],
             step_setup_script,
         )
         .await?,
@@ -383,6 +384,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             vec![],
             step_environments.clone(),
             Some(step_rootfs.clone()),
+            vec![],
             step_stage_01_script,
         )
         .await?,
@@ -391,6 +393,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             vec![],
             step_environments.clone(),
             Some(step_rootfs.clone()),
+            vec![],
             step_stage_02_script,
         )
         .await?,
@@ -408,6 +411,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             vec![],
             step_environments.clone(),
             None,
+            vec![],
             step_stage_03_script,
         )
         .await?,
@@ -416,6 +420,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             vec![],
             step_environments.clone(),
             Some(step_rootfs.clone()),
+            vec![],
             formatdoc! {"
                 rm -rf $VORPAL_OUTPUT/tools",
             },
@@ -426,6 +431,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             vec![],
             step_environments.clone(),
             None,
+            vec![],
             step_stage_04_script,
         )
         .await?,
@@ -434,6 +440,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
             vec![],
             step_environments.clone(),
             None,
+            vec![],
             step_stage_05_script,
         )
         .await?,
@@ -442,46 +449,48 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "linux-vorpal";
 
     ArtifactBuilder::new(name, steps, systems)
-        .with_alias(format!("{name}:latest"))
-        .with_source(bash)
-        .with_source(binutils)
-        .with_source(bison)
-        .with_source(coreutils)
-        .with_source(curl)
-        .with_source(curl_cacert)
-        .with_source(diffutils)
-        .with_source(file)
-        .with_source(findutils)
-        .with_source(gawk)
-        .with_source(gcc)
-        .with_source(gettext)
-        .with_source(glibc)
-        .with_source(glibc_patch)
-        .with_source(gmp)
-        .with_source(grep)
-        .with_source(gzip)
-        .with_source(libidn2)
-        .with_source(libpsl)
-        .with_source(libunistring)
-        .with_source(linux)
-        .with_source(m4)
-        .with_source(make)
-        .with_source(mpc)
-        .with_source(mpfr)
-        .with_source(ncurses)
-        .with_source(openssl)
-        .with_source(patch)
-        .with_source(perl)
-        .with_source(python)
-        .with_source(sed)
-        .with_source(tar)
-        .with_source(texinfo)
-        .with_source(unzip)
-        .with_source(unzip_patch_fixes)
-        .with_source(unzip_patch_gcc14)
-        .with_source(util_linux)
-        .with_source(xz)
-        .with_source(zlib)
+        .with_aliases(vec![format!("{name}:latest")])
+        .with_sources(vec![
+            bash,
+            binutils,
+            bison,
+            coreutils,
+            curl,
+            curl_cacert,
+            diffutils,
+            file,
+            findutils,
+            gawk,
+            gcc,
+            gettext,
+            glibc,
+            glibc_patch,
+            gmp,
+            grep,
+            gzip,
+            libidn2,
+            libpsl,
+            libunistring,
+            linux,
+            m4,
+            make,
+            mpc,
+            mpfr,
+            ncurses,
+            openssl,
+            patch,
+            perl,
+            python,
+            sed,
+            tar,
+            texinfo,
+            unzip,
+            unzip_patch_fixes,
+            unzip_patch_gcc14,
+            util_linux,
+            xz,
+            zlib,
+        ])
         .build(context)
         .await
 }

@@ -27,12 +27,18 @@ message ArtifactSource {
     string path = 5;
 }
 
+message ArtifactStepSecret {
+    string name = 1;
+    string value = 2;
+}
+
 message ArtifactStep {
     optional string entrypoint = 1;
     optional string script = 2;
-    repeated string arguments = 3;
-    repeated string artifacts = 4;
-    repeated string environments = 5;
+    repeated ArtifactStepSecret secrets = 3;
+    repeated string arguments = 4;
+    repeated string artifacts = 5;
+    repeated string environments = 6;
 }
 
 message Artifact {

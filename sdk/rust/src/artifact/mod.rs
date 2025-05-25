@@ -1,5 +1,5 @@
 use crate::{
-    api::artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactSystem},
+    api::artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactStepSecret, ArtifactSystem},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -29,11 +29,17 @@ pub mod script;
 pub mod staticcheck;
 pub mod step;
 
+pub struct ArtifactArgumentBuilder<'a> {
+    pub name: &'a str,
+    pub require: bool,
+}
+
 pub struct ArtifactProcessBuilder<'a> {
     pub arguments: Vec<String>,
     pub artifacts: Vec<String>,
     pub entrypoint: &'a str,
     pub name: &'a str,
+    pub secrets: Vec<ArtifactStepSecret>,
     pub systems: Vec<ArtifactSystem>,
 }
 
@@ -50,20 +56,16 @@ pub struct ArtifactStepBuilder<'a> {
     pub artifacts: Vec<String>,
     pub entrypoint: &'a str,
     pub environments: Vec<String>,
+    pub secrets: Vec<ArtifactStepSecret>,
     pub script: Option<String>,
 }
 
 pub struct ArtifactTaskBuilder<'a> {
     pub artifacts: Vec<String>,
     pub name: &'a str,
+    pub secrets: Vec<ArtifactStepSecret>,
     pub script: String,
     pub systems: Vec<ArtifactSystem>,
-}
-
-pub struct ArtifactVariableBuilder<'a> {
-    pub encrypt: bool,
-    pub name: &'a str,
-    pub require: bool,
 }
 
 pub struct ArtifactBuilder<'a> {
@@ -74,6 +76,30 @@ pub struct ArtifactBuilder<'a> {
     pub systems: Vec<ArtifactSystem>,
 }
 
+impl<'a> ArtifactArgumentBuilder<'a> {
+    pub fn new(name: &'a str) -> Self {
+        Self {
+            name,
+            require: false,
+        }
+    }
+
+    pub fn with_require(mut self) -> Self {
+        self.require = true;
+        self
+    }
+
+    pub fn build(self, context: &mut ConfigContext) -> Result<Option<String>> {
+        let variable = context.get_variable(self.name);
+
+        if self.require && variable.is_none() {
+            bail!("variable '{}' is required", self.name)
+        }
+
+        Ok(variable)
+    }
+}
+
 impl<'a> ArtifactProcessBuilder<'a> {
     pub fn new(name: &'a str, entrypoint: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
@@ -81,6 +107,7 @@ impl<'a> ArtifactProcessBuilder<'a> {
             artifacts: vec![],
             entrypoint,
             name,
+            secrets: vec![],
             systems,
         }
     }
@@ -91,7 +118,24 @@ impl<'a> ArtifactProcessBuilder<'a> {
     }
 
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
-        self.artifacts = artifacts;
+        for artifact in artifacts {
+            if !self.artifacts.contains(&artifact) {
+                self.artifacts.push(artifact);
+            }
+        }
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
+        for (name, value) in secrets {
+            if !self.secrets.iter().any(|s| s.name == name) {
+                self.secrets.push(ArtifactStepSecret {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                });
+            }
+        }
+
         self
     }
 
@@ -165,9 +209,9 @@ impl<'a> ArtifactProcessBuilder<'a> {
             name = self.name,
         };
 
-        let steps = vec![step::shell(context, self.artifacts, vec![], script).await?];
+        let step = step::shell(context, self.artifacts, vec![], script, self.secrets).await?;
 
-        ArtifactBuilder::new(self.name, steps, self.systems)
+        ArtifactBuilder::new(self.name, vec![step], self.systems)
             .build(context)
             .await
     }
@@ -216,6 +260,7 @@ impl<'a> ArtifactStepBuilder<'a> {
             artifacts: vec![],
             entrypoint,
             environments: vec![],
+            secrets: vec![],
             script: None,
         }
     }
@@ -235,6 +280,15 @@ impl<'a> ArtifactStepBuilder<'a> {
         self
     }
 
+    pub fn with_secrets(mut self, secrets: Vec<ArtifactStepSecret>) -> Self {
+        for secret in secrets {
+            if !self.secrets.iter().any(|s| s.name == secret.name) {
+                self.secrets.push(secret);
+            }
+        }
+        self
+    }
+
     pub fn with_script(mut self, script: String) -> Self {
         self.script = Some(script);
         self
@@ -246,6 +300,7 @@ impl<'a> ArtifactStepBuilder<'a> {
             artifacts: self.artifacts,
             entrypoint: Some(self.entrypoint.to_string()),
             environments: self.environments,
+            secrets: self.secrets,
             script: self.script,
         }
     }
@@ -256,18 +311,37 @@ impl<'a> ArtifactTaskBuilder<'a> {
         Self {
             artifacts: vec![],
             name,
+            secrets: vec![],
             script,
             systems,
         }
     }
 
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
-        self.artifacts = artifacts;
+        for artifact in artifacts {
+            if !self.artifacts.contains(&artifact) {
+                self.artifacts.push(artifact);
+            }
+        }
+
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
+        for (name, value) in secrets {
+            if !self.secrets.iter().any(|s| s.name == name) {
+                self.secrets.push(ArtifactStepSecret {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                });
+            }
+        }
+
         self
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        let step = step::shell(context, self.artifacts, vec![], self.script).await?;
+        let step = step::shell(context, self.artifacts, vec![], self.script, self.secrets).await?;
 
         ArtifactBuilder::new(self.name, vec![step], self.systems)
             .build(context)
@@ -286,16 +360,20 @@ impl<'a> ArtifactBuilder<'a> {
         }
     }
 
-    pub fn with_alias(mut self, alias: String) -> Self {
-        if !self.aliases.contains(&alias) {
-            self.aliases.push(alias);
+    pub fn with_aliases(mut self, aliases: Vec<String>) -> Self {
+        for alias in aliases {
+            if !self.aliases.contains(&alias) {
+                self.aliases.push(alias);
+            }
         }
         self
     }
 
-    pub fn with_source(mut self, source: ArtifactSource) -> Self {
-        if !self.sources.contains(&source) {
-            self.sources.push(source);
+    pub fn with_sources(mut self, sources: Vec<ArtifactSource>) -> Self {
+        for source in sources {
+            if !self.sources.iter().any(|s| s.name == source.name) {
+                self.sources.push(source);
+            }
         }
 
         self
@@ -312,36 +390,6 @@ impl<'a> ArtifactBuilder<'a> {
         };
 
         context.add_artifact(&artifact).await
-    }
-}
-
-impl<'a> ArtifactVariableBuilder<'a> {
-    pub fn new(name: &'a str) -> Self {
-        Self {
-            encrypt: false,
-            name,
-            require: false,
-        }
-    }
-
-    pub fn with_encrypt(mut self) -> Self {
-        self.encrypt = true;
-        self
-    }
-
-    pub fn with_require(mut self) -> Self {
-        self.require = true;
-        self
-    }
-
-    pub fn build(self, context: &mut ConfigContext) -> Result<Option<String>> {
-        let variable = context.get_variable(self.name);
-
-        if self.require && variable.is_none() {
-            bail!("variable '{}' is required", self.name)
-        }
-
-        Ok(variable)
     }
 }
 

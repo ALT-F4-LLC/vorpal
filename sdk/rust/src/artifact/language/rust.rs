@@ -1,5 +1,5 @@
 use crate::{
-    api::artifact::ArtifactSystem,
+    api::artifact::{ArtifactStepSecret, ArtifactSystem},
     artifact::{get_env_key, protoc, rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
     context::ConfigContext,
 };
@@ -44,6 +44,7 @@ pub struct RustBuilder<'a> {
     lint: bool,
     name: &'a str,
     packages: Vec<String>,
+    secrets: Vec<ArtifactStepSecret>,
     source: Option<String>,
     tests: bool,
     systems: Vec<ArtifactSystem>,
@@ -68,6 +69,7 @@ impl<'a> RustBuilder<'a> {
             lint: false,
             name,
             packages: vec![],
+            secrets: vec![],
             source: None,
             tests: false,
             systems,
@@ -111,6 +113,19 @@ impl<'a> RustBuilder<'a> {
 
     pub fn with_packages(mut self, packages: Vec<&'a str>) -> Self {
         self.packages = packages.iter().map(|s| s.to_string()).collect();
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
+        for (name, value) in secrets {
+            if !self.secrets.iter().any(|s| s.name == name) {
+                self.secrets.push(ArtifactStepSecret {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                });
+            }
+        }
+
         self
     }
 
@@ -298,6 +313,7 @@ impl<'a> RustBuilder<'a> {
                 step_artifacts.clone(),
                 step_environments.clone(),
                 vendor_step_script,
+                self.secrets.clone(),
             )
             .await?,
         ];
@@ -310,7 +326,7 @@ impl<'a> RustBuilder<'a> {
                 .build();
 
         let vendor = ArtifactBuilder::new(vendor_name.as_str(), vendor_steps, self.systems.clone())
-            .with_source(vendor_source)
+            .with_sources(vec![vendor_source])
             .build(context)
             .await?;
 
@@ -422,6 +438,7 @@ impl<'a> RustBuilder<'a> {
                 [step_artifacts.clone(), self.artifacts.clone()].concat(),
                 step_environments,
                 step_script,
+                self.secrets,
             )
             .await?,
         ];
@@ -429,7 +446,7 @@ impl<'a> RustBuilder<'a> {
         // Create artifact
 
         ArtifactBuilder::new(self.name, steps, self.systems)
-            .with_source(source)
+            .with_sources(vec![source])
             .build(context)
             .await
     }

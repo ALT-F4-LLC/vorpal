@@ -11,11 +11,17 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
+type ArtifactArgumentBuilder struct {
+	Name    string
+	Require bool
+}
+
 type ArtifactProcessBuilder struct {
 	Arguments  []string
 	Artifacts  []*string
 	Entrypoint string
 	Name       string
+	Secrets    []*api.ArtifactStepSecret
 	Systems    []api.ArtifactSystem
 }
 
@@ -32,6 +38,7 @@ type ArtifactStepBuilder struct {
 	Artifacts    map[api.ArtifactSystem][]*string
 	Entrypoint   map[api.ArtifactSystem]string
 	Environments map[api.ArtifactSystem][]string
+	Secrets      map[api.ArtifactSystem][]*api.ArtifactStepSecret
 	Script       map[api.ArtifactSystem]string
 }
 
@@ -39,16 +46,12 @@ type ArtifactTaskBuilder struct {
 	Artifacts []*string
 	Name      string
 	Script    string
+	Secrets   []*api.ArtifactStepSecret
 	Systems   []api.ArtifactSystem
 }
 
-type ArtifactVariableBuilder struct {
-	Encrypt bool
-	Name    string
-	Require bool
-}
-
 type ArtifactBuilder struct {
+	Aliases []string
 	Name    string
 	Sources []*api.ArtifactSource
 	Steps   []*api.ArtifactStep
@@ -116,12 +119,35 @@ EOF
 
 chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
 
+func NewArtifactArgumentBuilder(name string) *ArtifactArgumentBuilder {
+	return &ArtifactArgumentBuilder{
+		Name:    name,
+		Require: false,
+	}
+}
+
+func (v *ArtifactArgumentBuilder) WithRequire() *ArtifactArgumentBuilder {
+	v.Require = true
+	return v
+}
+
+func (v *ArtifactArgumentBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+	variable := ctx.GetVariable(v.Name)
+
+	if v.Require && variable == nil {
+		return nil, fmt.Errorf("variable '%s' is required", v.Name)
+	}
+
+	return variable, nil
+}
+
 func NewArtifactProcessBuilder(name string, entrypoint string, systems []api.ArtifactSystem) *ArtifactProcessBuilder {
 	return &ArtifactProcessBuilder{
 		Arguments:  []string{},
 		Artifacts:  []*string{},
 		Entrypoint: entrypoint,
 		Name:       name,
+		Secrets:    []*api.ArtifactStepSecret{},
 		Systems:    systems,
 	}
 }
@@ -132,7 +158,20 @@ func (a *ArtifactProcessBuilder) WithArguments(arguments []string) *ArtifactProc
 }
 
 func (a *ArtifactProcessBuilder) WithArtifacts(artifacts []*string) *ArtifactProcessBuilder {
-	a.Artifacts = artifacts
+	for _, artifact := range artifacts {
+		if artifact != nil && !slices.Contains(a.Artifacts, artifact) {
+			a.Artifacts = append(a.Artifacts, artifact)
+		}
+	}
+	return a
+}
+
+func (a *ArtifactProcessBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *ArtifactProcessBuilder {
+	for _, secret := range secrets {
+		if !slices.Contains(a.Secrets, secret) {
+			a.Secrets = append(a.Secrets, secret)
+		}
+	}
 	return a
 }
 
@@ -165,7 +204,7 @@ func (a *ArtifactProcessBuilder) Build(ctx *config.ConfigContext) (*string, erro
 		return nil, err
 	}
 
-	step, err := Shell(ctx, a.Artifacts, []string{}, scriptBuffer.String())
+	step, err := Shell(ctx, a.Artifacts, []string{}, scriptBuffer.String(), a.Secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +261,7 @@ func NewArtifactStepBuilder() *ArtifactStepBuilder {
 		Artifacts:    make(map[api.ArtifactSystem][]*string),
 		Entrypoint:   make(map[api.ArtifactSystem]string),
 		Environments: make(map[api.ArtifactSystem][]string),
+		Secrets:      make(map[api.ArtifactSystem][]*api.ArtifactStepSecret),
 		Script:       make(map[api.ArtifactSystem]string),
 	}
 }
@@ -261,6 +301,16 @@ func (a *ArtifactStepBuilder) WithScript(script string, systems []api.ArtifactSy
 	return a
 }
 
+func (a *ArtifactStepBuilder) WithSecrets(secrets []*api.ArtifactStepSecret, systems []api.ArtifactSystem) *ArtifactStepBuilder {
+	for _, system := range systems {
+		if _, ok := a.Secrets[system]; !ok {
+			a.Secrets[system] = []*api.ArtifactStepSecret{}
+		}
+		a.Secrets[system] = append(a.Secrets[system], secrets...)
+	}
+	return a
+}
+
 func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactStep, error) {
 	stepTarget := ctx.GetTarget()
 
@@ -292,6 +342,11 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactSte
 		stepEntrypoint = &entry
 	}
 
+	var stepSecrets []*api.ArtifactStepSecret
+	if secrets, ok := a.Secrets[stepTarget]; ok {
+		stepSecrets = secrets
+	}
+
 	var stepScript *string
 	if scr, ok := a.Script[stepTarget]; ok {
 		stepScript = &scr
@@ -302,6 +357,7 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactSte
 		Artifacts:    stepArtifacts,
 		Entrypoint:   stepEntrypoint,
 		Environments: stepEnvironments,
+		Secrets:      stepSecrets,
 		Script:       stepScript,
 	}, nil
 }
@@ -310,6 +366,7 @@ func NewArtifactTaskBuilder(name string, script string, systems []api.ArtifactSy
 	return &ArtifactTaskBuilder{
 		Artifacts: []*string{},
 		Name:      name,
+		Secrets:   []*api.ArtifactStepSecret{},
 		Script:    script,
 		Systems:   systems,
 	}
@@ -320,8 +377,17 @@ func (a *ArtifactTaskBuilder) WithArtifacts(artifacts []*string) *ArtifactTaskBu
 	return a
 }
 
+func (a *ArtifactTaskBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *ArtifactTaskBuilder {
+	for _, secret := range secrets {
+		if !slices.Contains(a.Secrets, secret) {
+			a.Secrets = append(a.Secrets, secret)
+		}
+	}
+	return a
+}
+
 func (a *ArtifactTaskBuilder) Build(ctx *config.ConfigContext) (*string, error) {
-	step, err := Shell(ctx, a.Artifacts, []string{}, a.Script)
+	step, err := Shell(ctx, a.Artifacts, []string{}, a.Script, a.Secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -332,36 +398,9 @@ func (a *ArtifactTaskBuilder) Build(ctx *config.ConfigContext) (*string, error) 
 		Build(ctx)
 }
 
-func NewArtifactVariableBuilder(name string) *ArtifactVariableBuilder {
-	return &ArtifactVariableBuilder{
-		Encrypt: false,
-		Name:    name,
-		Require: false,
-	}
-}
-
-func (v *ArtifactVariableBuilder) WithEncrypt() *ArtifactVariableBuilder {
-	v.Encrypt = true
-	return v
-}
-
-func (v *ArtifactVariableBuilder) WithRequire() *ArtifactVariableBuilder {
-	v.Require = true
-	return v
-}
-
-func (v *ArtifactVariableBuilder) Build(ctx *config.ConfigContext) (*string, error) {
-	variable := ctx.GetVariable(v.Name)
-
-	if v.Require && variable == nil {
-		return nil, fmt.Errorf("variable '%s' is required", v.Name)
-	}
-
-	return variable, nil
-}
-
 func NewArtifactBuilder(name string, steps []*api.ArtifactStep, systems []api.ArtifactSystem) *ArtifactBuilder {
 	return &ArtifactBuilder{
+		Aliases: []string{},
 		Name:    name,
 		Sources: []*api.ArtifactSource{},
 		Steps:   steps,
@@ -369,9 +408,21 @@ func NewArtifactBuilder(name string, steps []*api.ArtifactStep, systems []api.Ar
 	}
 }
 
-func (a *ArtifactBuilder) WithSource(source *api.ArtifactSource) *ArtifactBuilder {
-	if !slices.Contains(a.Sources, source) {
-		a.Sources = append(a.Sources, source)
+func (a *ArtifactBuilder) WithAliases(aliases []string) *ArtifactBuilder {
+	for _, alias := range aliases {
+		if !slices.Contains(a.Aliases, alias) {
+			a.Aliases = append(a.Aliases, alias)
+		}
+	}
+
+	return a
+}
+
+func (a *ArtifactBuilder) WithSources(source []*api.ArtifactSource) *ArtifactBuilder {
+	for _, s := range source {
+		if s != nil && !slices.Contains(a.Sources, s) {
+			a.Sources = append(a.Sources, s)
+		}
 	}
 
 	return a

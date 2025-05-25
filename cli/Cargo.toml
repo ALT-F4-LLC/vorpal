@@ -14,6 +14,7 @@ async-compression = { features = ["all"], version = "0" }
 async_zip = { features = ["deflate", "tokio"], version = "0" }
 aws-config = { version = "1" }
 aws-sdk-s3 = { version = "1" }
+base64 = { version = "0" }
 clap = { version = "4" }
 filetime = { version = "0" }
 futures-lite = { version = "2" }

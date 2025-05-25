@@ -28,8 +28,8 @@ use vorpal_sdk::{
             archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
         },
         artifact::{
-            artifact_service_client::ArtifactServiceClient, ArtifactSource, ArtifactSystem,
-            StoreArtifactRequest,
+            artifact_service_client::ArtifactServiceClient, ArtifactSource, ArtifactStep,
+            ArtifactSystem, StoreArtifactRequest,
         },
         worker::{
             worker_service_server::WorkerService, BuildArtifactRequest, BuildArtifactResponse,
@@ -171,15 +171,10 @@ fn expand_env(text: &str, envs: &[&String]) -> String {
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_step(
     artifact_hash: &str,
     artifact_path: &Path,
-    step_arguments: Vec<String>,
-    step_artifacts: Vec<String>,
-    step_entrypoint: Option<String>,
-    step_environments: Vec<String>,
-    step_script: Option<String>,
+    step: ArtifactStep,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
     workspace_path: &Path,
 ) -> Result<(), Status> {
@@ -189,7 +184,7 @@ async fn run_step(
 
     let mut paths = vec![];
 
-    for artifact in step_artifacts.iter() {
+    for artifact in step.artifacts.iter() {
         let path = get_artifact_output_path(artifact);
 
         if !path.exists() {
@@ -221,7 +216,23 @@ async fn run_step(
 
     // Add all custom environment variables
 
-    environments.extend(step_environments);
+    environments.extend(step.environments);
+
+    // Add all secrets as environment variables
+
+    let private_key_path = get_key_private_path();
+
+    if !private_key_path.exists() {
+        return Err(Status::internal("private key not found"));
+    }
+
+    for secret in step.secrets.into_iter() {
+        let value = notary::decrypt(private_key_path.clone(), secret.value)
+            .await
+            .map_err(|err| Status::internal(format!("failed to decrypt secret: {:?}", err)))?;
+
+        environments.push(format!("{}={}", secret.name, value));
+    }
 
     // Sort environment variables by key length
 
@@ -238,7 +249,7 @@ async fn run_step(
 
     let mut script_path = None;
 
-    if let Some(script) = step_script {
+    if let Some(script) = step.script {
         let script = expand_env(&script, &vorpal_envs);
 
         let path = workspace_path.join("script.sh");
@@ -258,7 +269,8 @@ async fn run_step(
 
     // Setup entrypoint
 
-    let entrypoint = step_entrypoint
+    let entrypoint = step
+        .entrypoint
         .or_else(|| script_path.as_ref().map(|path| path.display().to_string()))
         .ok_or_else(|| Status::invalid_argument("entrypoint is missing"))?;
 
@@ -282,7 +294,7 @@ async fn run_step(
     // Setup arguments
 
     if !entrypoint.is_empty() {
-        for arg in step_arguments.iter() {
+        for arg in step.arguments.iter() {
             let arg = expand_env(arg, &vorpal_envs);
             command.arg(arg);
         }
@@ -457,11 +469,7 @@ async fn build_artifact(
         if let Err(err) = run_step(
             &artifact_digest,
             &artifact_output_path,
-            step.arguments.clone(),
-            step.artifacts.clone(),
-            step.entrypoint.clone(),
-            step.environments.clone(),
-            step.script.clone(),
+            step.clone(),
             &tx,
             &workspace_path,
         )

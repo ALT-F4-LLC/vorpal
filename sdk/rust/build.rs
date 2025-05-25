@@ -5,6 +5,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
+            "vorpal.artifact.ArtifactStepSecret",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
             "vorpal.artifact.ArtifactStep",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )

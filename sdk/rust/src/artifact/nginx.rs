@@ -32,12 +32,12 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         ln -svf $VORPAL_OUTPUT/sbin/nginx $VORPAL_OUTPUT/bin/nginx",
     };
 
-    let steps = vec![step::shell(context, vec![], vec![], step_script).await?];
+    let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
     ArtifactBuilder::new(name, steps, systems)
-        .with_alias(format!("{name}:{source_version}"))
-        .with_source(source)
+        .with_aliases(vec![format!("{name}:{source_version}")])
+        .with_sources(vec![source])
         .build(context)
         .await
 }
