@@ -42,12 +42,3 @@ url = { version = "2" }
 uuid = { features = ["v7"], version = "1" }
 vorpal-sdk = { path = "../sdk/rust" }
 walkdir = { version = "2" }
-
-[lints.clippy]
-complexity = { level = "deny", priority = -1 }
-correctness = { level = "deny", priority = -1 }
-mod_module_files = "forbid"
-pedantic = { level = "warn", priority = -1 }
-perf = { level = "deny", priority = -1 }
-style = { level = "deny", priority = -1 }
-suspicious = { level = "deny", priority = -1 }
