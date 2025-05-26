@@ -1,4 +1,4 @@
-use crate::system::get_system_default_str;
+use crate::artifact::system::get_system_default_str;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]

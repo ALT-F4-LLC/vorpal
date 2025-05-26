@@ -26,8 +26,10 @@ pub mod rust_toolchain;
 pub mod rustc;
 pub mod rustfmt;
 pub mod script;
+pub mod source;
 pub mod staticcheck;
 pub mod step;
+pub mod system;
 
 pub struct ArtifactArgumentBuilder<'a> {
     pub name: &'a str,

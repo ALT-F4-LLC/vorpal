@@ -9,8 +9,8 @@ use crate::{
             StoreArtifactRequest,
         },
     },
+    artifact::system::get_system,
     cli::{Cli, Command},
-    system::get_system,
 };
 use anyhow::{bail, Result};
 use clap::Parser;

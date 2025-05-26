@@ -35,7 +35,7 @@ use vorpal_sdk::{
             worker_service_server::WorkerService, BuildArtifactRequest, BuildArtifactResponse,
         },
     },
-    system::get_system_default,
+    artifact::system::get_system_default,
 };
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
