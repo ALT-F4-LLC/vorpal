@@ -2,7 +2,9 @@ use crate::command::store::{
     archives::{compress_zstd, unpack_zip},
     hashes::hash_files,
     notary,
-    paths::{copy_files, get_file_paths, get_key_private_path, set_timestamps},
+    paths::{
+        copy_files, get_file_paths, get_key_private_path, get_key_public_path, set_timestamps,
+    },
     temps::{create_sandbox_dir, create_sandbox_file},
 };
 use anyhow::{bail, Result};
@@ -22,7 +24,7 @@ use vorpal_sdk::api::{
     archive::{
         archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
     },
-    artifact::{Artifact, ArtifactSource},
+    artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactStepSecret},
 };
 
 #[derive(PartialEq)]
@@ -356,6 +358,34 @@ async fn prepare_artifact(
 
     // TODO: Check if artifact already exists in the registry
 
+    let public_key_path = get_key_public_path();
+
+    let mut artifact_steps = vec![];
+
+    for step in artifact.steps.iter() {
+        let mut secrets = vec![];
+
+        for secret in step.secrets.iter() {
+            let value = notary::encrypt(public_key_path.clone(), secret.value.clone())
+                .await
+                .map_err(|err| Status::internal(format!("failed to encrypt secret: {}", err)))?;
+
+            secrets.push(ArtifactStepSecret {
+                name: secret.name.clone(),
+                value,
+            });
+        }
+
+        artifact_steps.push(ArtifactStep {
+            arguments: step.arguments.clone(),
+            artifacts: step.artifacts.clone(),
+            entrypoint: step.entrypoint.clone(),
+            environments: step.environments.clone(),
+            script: step.script.clone(),
+            secrets,
+        });
+    }
+
     let mut artifact_sources = vec![];
 
     for source in artifact.sources.into_iter() {
@@ -387,10 +417,9 @@ async fn prepare_artifact(
         aliases: artifact.aliases,
         name: artifact.name,
         sources: artifact_sources,
-        steps: artifact.steps,
+        steps: artifact_steps,
         systems: artifact.systems,
         target: artifact.target,
-        // variables: artifact.variables,
     };
 
     let artifact_json =

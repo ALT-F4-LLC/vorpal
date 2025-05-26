@@ -33,6 +33,7 @@ func Bash(
 	artifacts []*string,
 	environments []string,
 	script *string,
+	secrets []*api.ArtifactStepSecret,
 	systems []api.ArtifactSystem,
 ) (*api.ArtifactStep, error) {
 	stepEnvironments := make([]string, 0)
@@ -86,6 +87,7 @@ func Bash(
 	step = step.WithEntrypoint(stepEntrypoint, systems)
 	step = step.WithEnvironments(stepEnvironments, systems)
 	step = step.WithScript(scriptBuffer.String(), systems)
+	step = step.WithSecrets(secrets, systems)
 
 	return step.Build(context)
 }
@@ -97,6 +99,7 @@ func Bwrap(
 	environments []string,
 	rootfs *string,
 	script string,
+	secrets []*api.ArtifactStepSecret,
 	systems []api.ArtifactSystem,
 ) (*api.ArtifactStep, error) {
 	// Setup arguments
@@ -239,6 +242,7 @@ func Bwrap(
 	step = step.WithEntrypoint("bwrap", systems)
 	step = step.WithEnvironments([]string{"PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"}, systems)
 	step = step.WithScript(scriptBuffer.String(), systems)
+	step = step.WithSecrets(secrets, systems)
 
 	return step.Build(context)
 }
@@ -248,6 +252,7 @@ func Shell(
 	artifacts []*string,
 	environments []string,
 	script string,
+	secrets []*api.ArtifactStepSecret,
 ) (*api.ArtifactStep, error) {
 	stepSystem := context.GetTarget()
 
@@ -257,6 +262,7 @@ func Shell(
 			artifacts,
 			environments,
 			&script,
+			secrets,
 			[]api.ArtifactSystem{
 				api.ArtifactSystem_AARCH64_DARWIN,
 				api.ArtifactSystem_X8664_DARWIN,
@@ -277,6 +283,7 @@ func Shell(
 			environments,
 			linux_vorpal,
 			script,
+			secrets,
 			[]api.ArtifactSystem{
 				api.ArtifactSystem_AARCH64_LINUX,
 				api.ArtifactSystem_X8664_LINUX,
@@ -286,6 +293,8 @@ func Shell(
 
 	return nil, fmt.Errorf("unsupported shell step system: %s", stepSystem)
 }
+
+// TODO: Add support for secrets with docker step
 
 func Docker(
 	context *config.ConfigContext,

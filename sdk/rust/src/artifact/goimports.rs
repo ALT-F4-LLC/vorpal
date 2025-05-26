@@ -1,8 +1,7 @@
 use crate::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::language::go::GoBuilder,
+    artifact::{language::go::GoBuilder, source::go_tools},
     context::ConfigContext,
-    source::go_tools,
 };
 use anyhow::Result;
 

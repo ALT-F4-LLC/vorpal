@@ -44,6 +44,7 @@ type RustBuilder struct {
 	lint      bool
 	name      string
 	packages  []string
+	secrets   []*api.ArtifactStepSecret
 	source    *string
 	tests     bool
 	systems   []api.ArtifactSystem
@@ -157,6 +158,7 @@ func NewRustBuilder(name string, systems []api.ArtifactSystem) *RustBuilder {
 		lint:      false,
 		name:      name,
 		packages:  make([]string, 0),
+		secrets:   make([]*api.ArtifactStepSecret, 0),
 		source:    nil,
 		tests:     false,
 		systems:   systems,
@@ -200,6 +202,23 @@ func (a *RustBuilder) WithLint() *RustBuilder {
 
 func (a *RustBuilder) WithPackages(packages []string) *RustBuilder {
 	a.packages = packages
+	return a
+}
+
+func (a *RustBuilder) WithSecrets(secrets map[string]string) *RustBuilder {
+	for name, value := range secrets {
+		secret := &api.ArtifactStepSecret{
+			Name:  name,
+			Value: value,
+		}
+
+		if slices.ContainsFunc(a.secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
+			continue
+		}
+
+		a.secrets = append(a.secrets, secret)
+	}
+
 	return a
 }
 
@@ -395,6 +414,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 		stepArtifacts,
 		stepEnvironments,
 		vendorStepScriptBuffer.String(),
+		builder.secrets,
 	)
 
 	vendorName := fmt.Sprintf("%s-vendor", builder.name)
@@ -412,8 +432,10 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 		api.ArtifactSystem_X8664_LINUX,
 	}
 
+	vendorSources := []*api.ArtifactSource{&vendorSource}
+
 	vendor, err := artifact.NewArtifactBuilder(vendorName, vendorSteps, systems).
-		WithSource(&vendorSource).
+		WithSources(vendorSources).
 		Build(context)
 	if err != nil {
 		return nil, err
@@ -446,6 +468,8 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 	for _, artifact := range builder.artifacts {
 		stepArtifacts = append(stepArtifacts, artifact)
 	}
+
+	sources := []*api.ArtifactSource{&source}
 
 	stepScript, err := template.New("script").Parse(StepScriptTemplate)
 	if err != nil {
@@ -484,6 +508,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 		stepArtifacts,
 		stepEnvironments,
 		stepScriptBuffer.String(),
+		builder.secrets,
 	)
 	if err != nil {
 		return nil, err
@@ -492,6 +517,6 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 	steps := []*api.ArtifactStep{step}
 
 	return artifact.NewArtifactBuilder(builder.name, steps, systems).
-		WithSource(&source).
+		WithSources(sources).
 		Build(context)
 }

@@ -1,11 +1,12 @@
 use anyhow::Result;
+use base64::{engine::general_purpose, Engine};
 use rsa::pss::SigningKey;
 use rsa::sha2::Sha256;
 use rsa::signature::RandomizedSigner;
 use rsa::signature::SignatureEncoding;
 use rsa::{
     pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding},
-    rand_core,
+    rand_core, Pkcs1v15Encrypt,
 };
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use std::path::PathBuf;
@@ -13,7 +14,7 @@ use tokio::fs;
 use tokio::fs::create_dir_all;
 use tracing::warn;
 
-const BITS: usize = 2048;
+const BITS: usize = 4096;
 
 pub async fn generate_keys(
     key_path: PathBuf,
@@ -89,4 +90,32 @@ pub async fn sign(private_key_path: PathBuf, source_data: &[u8]) -> Result<Box<[
     let signature_bytes = signature.to_bytes();
 
     Ok(signature_bytes)
+}
+
+pub async fn encrypt(public_key_path: PathBuf, data: String) -> Result<String> {
+    let public_key = get_public_key(public_key_path).await?;
+
+    let mut rng = rand_core::OsRng;
+
+    let data_encrypted = public_key
+        .encrypt(&mut rng, Pkcs1v15Encrypt, data.as_bytes())
+        .expect("failed to encrypt");
+
+    let data_encoded = general_purpose::STANDARD.encode(&data_encrypted);
+
+    Ok(data_encoded)
+}
+
+pub async fn decrypt(private_key_path: PathBuf, data_encoded: String) -> Result<String> {
+    let private_key = get_private_key(private_key_path).await?;
+
+    let data_encrypted = general_purpose::STANDARD
+        .decode(data_encoded)
+        .expect("failed to decode base64 data");
+
+    let decrypted = private_key
+        .decrypt(Pkcs1v15Encrypt, &data_encrypted)
+        .expect("failed to decrypt");
+
+    Ok(String::from_utf8(decrypted)?)
 }

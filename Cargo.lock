@@ -3688,6 +3688,7 @@ dependencies = [
  "async_zip",
  "aws-config",
  "aws-sdk-s3",
+ "base64 0.21.7",
  "clap",
  "filetime",
  "futures-lite",

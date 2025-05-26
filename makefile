@@ -10,6 +10,9 @@ VORPAL_DIR := /var/lib/vorpal
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
 LIMA_ARCH := $(ARCH)
+LIMA_CPUS := 8
+LIMA_DISK := 100
+LIMA_MEMORY := 8
 
 ifndef VERBOSE
 .SILENT:
@@ -108,7 +111,7 @@ lima-clean:
 	limactl delete "vorpal-$(LIMA_ARCH)" || true
 
 lima: lima-clean
-	cat lima.yaml | limactl create --arch "$(LIMA_ARCH)" --cpus "8" --disk "100" --memory "8" --name "vorpal-$(LIMA_ARCH)" -
+	cat lima.yaml | limactl create --arch "$(LIMA_ARCH)" --cpus "$(LIMA_CPUS)" --disk "$(LIMA_DISK)" --memory "$(LIMA_MEMORY)" --name "vorpal-$(LIMA_ARCH)" -
 	limactl start "vorpal-$(LIMA_ARCH)"
 	limactl shell "vorpal-$(LIMA_ARCH)" $(WORK_DIR)/script/lima.sh install
 	limactl stop "vorpal-$(LIMA_ARCH)"
@@ -118,7 +121,7 @@ lima-sync:
 	limactl shell "vorpal-$(LIMA_ARCH)" ./script/lima.sh sync
 
 lima-vorpal:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal artifact --name $(VORPAL_ARTIFACT) $(VORPAL_FLAGS)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal artifact --name $(VORPAL_ARTIFACT) $(VORPAL_FLAGS)'
 
 lima-vorpal-start:
 	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal start $(VORPAL_FLAGS)'

@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::env::current_dir;
 use tracing::Level;
-use vorpal_sdk::system::get_system_default_str;
+use vorpal_sdk::artifact::system::get_system_default_str;
 
 mod artifact;
 mod init;

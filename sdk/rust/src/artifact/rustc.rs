@@ -27,11 +27,11 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .build();
 
     let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}/.\" \"$VORPAL_OUTPUT\"");
-    let steps = vec![step::shell(context, vec![], vec![], step_script).await?];
+    let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
     ArtifactBuilder::new(name, steps, systems)
-        .with_source(source)
+        .with_sources(vec![source])
         .build(context)
         .await
 }

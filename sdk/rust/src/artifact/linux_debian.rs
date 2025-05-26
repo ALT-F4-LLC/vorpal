@@ -160,6 +160,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let steps = vec![step::bash(
         vec![],
         vec![],
+        vec![],
         formatdoc! {"
             cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"
             {version_script}
@@ -207,6 +208,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         step::bash(
             vec![],
             vec![],
+            vec![],
             formatdoc! {"
                 ## extract files
                 tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
@@ -222,7 +224,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "linux-debian";
 
     ArtifactBuilder::new(name, steps, systems)
-        .with_alias(format!("{name}:latest"))
+        .with_aliases(vec![format!("{name}:latest")])
         .build(context)
         .await
 }

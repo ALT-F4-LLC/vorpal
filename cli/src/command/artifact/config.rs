@@ -146,9 +146,9 @@ pub async fn start(
                         .map_err(|_| anyhow!("failed to kill config server"));
 
                     bail!("{}", line.replace("Error: ", ""));
-                } else {
-                    info!("{}", line);
                 }
+
+                info!("{}", line);
             }
 
             Some(Err(err)) => {

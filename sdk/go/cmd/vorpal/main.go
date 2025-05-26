@@ -93,7 +93,7 @@ func vorpalProcess(context *config.ConfigContext) (*string, error) {
 
 func vorpalRelease(context *config.ConfigContext) (*string, error) {
 	varAarch64Darwin, err := artifact.
-		NewArtifactVariableBuilder("aarch64-darwin").
+		NewArtifactArgumentBuilder("aarch64-darwin").
 		WithRequire().
 		Build(context)
 	if err != nil {
@@ -101,7 +101,7 @@ func vorpalRelease(context *config.ConfigContext) (*string, error) {
 	}
 
 	varAarch64Linux, err := artifact.
-		NewArtifactVariableBuilder("aarch64-linux").
+		NewArtifactArgumentBuilder("aarch64-linux").
 		WithRequire().
 		Build(context)
 	if err != nil {
@@ -109,7 +109,7 @@ func vorpalRelease(context *config.ConfigContext) (*string, error) {
 	}
 
 	varBranchName, err := artifact.
-		NewArtifactVariableBuilder("branch-name").
+		NewArtifactArgumentBuilder("branch-name").
 		WithRequire().
 		Build(context)
 	if err != nil {
@@ -117,7 +117,7 @@ func vorpalRelease(context *config.ConfigContext) (*string, error) {
 	}
 
 	varX8664Darwin, err := artifact.
-		NewArtifactVariableBuilder("x8664-darwin").
+		NewArtifactArgumentBuilder("x8664-darwin").
 		WithRequire().
 		Build(context)
 	if err != nil {
@@ -125,7 +125,7 @@ func vorpalRelease(context *config.ConfigContext) (*string, error) {
 	}
 
 	varX8664Linux, err := artifact.
-		NewArtifactVariableBuilder("x8664-linux").
+		NewArtifactArgumentBuilder("x8664-linux").
 		WithRequire().
 		Build(context)
 	if err != nil {
@@ -299,7 +299,7 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		api.ArtifactSystem_X8664_LINUX,
 	}
 
-	return artifact.ScriptDevshell(context, artifacts, environments, "vorpal-shell", systems)
+	return artifact.ScriptDevshell(context, artifacts, environments, "vorpal-shell", nil, systems)
 }
 
 func vorpalTest(context *config.ConfigContext) (*string, error) {

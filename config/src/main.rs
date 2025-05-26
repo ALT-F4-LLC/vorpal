@@ -10,7 +10,7 @@ use vorpal_sdk::{
         language::go::{get_goarch, get_goos},
         language::rust::RustBuilder,
         protoc, protoc_gen_go, protoc_gen_go_grpc, rust_toolchain, script, staticcheck,
-        ArtifactProcessBuilder, ArtifactTaskBuilder, ArtifactVariableBuilder,
+        ArtifactArgumentBuilder, ArtifactProcessBuilder, ArtifactTaskBuilder,
     },
     context::{get_context, ConfigContext},
 };
@@ -46,45 +46,25 @@ async fn vorpal_process(context: &mut ConfigContext) -> Result<String> {
 }
 
 async fn vorpal_release(context: &mut ConfigContext) -> Result<String> {
-    let aarch64_darwin = ArtifactVariableBuilder::new("aarch64-darwin")
+    let aarch64_darwin = ArtifactArgumentBuilder::new("aarch64-darwin")
         .with_require()
         .build(context)?;
 
-    if aarch64_darwin.is_none() {
-        bail!("aarch64-darwin artifact is required for vorpal release");
-    }
-
-    let aarch64_linux = ArtifactVariableBuilder::new("aarch64-linux")
+    let aarch64_linux = ArtifactArgumentBuilder::new("aarch64-linux")
         .with_require()
         .build(context)?;
 
-    if aarch64_linux.is_none() {
-        bail!("aarch64-linux artifact is required for vorpal release");
-    }
-
-    let branch_name = ArtifactVariableBuilder::new("branch-name")
+    let branch_name = ArtifactArgumentBuilder::new("branch-name")
         .with_require()
         .build(context)?;
 
-    if branch_name.is_none() {
-        bail!("branch-name artifact is required for vorpal release");
-    }
-
-    let x8664_darwin = ArtifactVariableBuilder::new("x8664-darwin")
+    let x8664_darwin = ArtifactArgumentBuilder::new("x8664-darwin")
         .with_require()
         .build(context)?;
 
-    if x8664_darwin.is_none() {
-        bail!("x8664-darwin artifact is required for vorpal release");
-    }
-
-    let x8664_linux = ArtifactVariableBuilder::new("x8664-linux")
+    let x8664_linux = ArtifactArgumentBuilder::new("x8664-linux")
         .with_require()
         .build(context)?;
-
-    if x8664_linux.is_none() {
-        bail!("x8664-linux artifact is required for vorpal release");
-    }
 
     // Fetch artifacts
 
@@ -193,6 +173,7 @@ async fn vorpal_shell(context: &mut ConfigContext) -> Result<String> {
         artifacts,
         environments,
         "vorpal-shell",
+        vec![],
         SYSTEMS.to_vec(),
     )
     .await
