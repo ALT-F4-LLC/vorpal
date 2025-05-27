@@ -1,4 +1,4 @@
-use crate::command::{artifact::build, store::paths::get_artifact_output_path};
+use crate::command::artifact::build;
 use anyhow::{anyhow, bail, Result};
 use petgraph::{algo::toposort, graphmap::DiGraphMap};
 use port_selector::random_free_port;
@@ -12,8 +12,8 @@ use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tonic::transport::Channel;
 use tracing::{info, warn};
 use vorpal_sdk::api::{
-    archive::archive_service_client::ArchiveServiceClient,
-    artifact::{artifact_service_client::ArtifactServiceClient, Artifact},
+    archive::archive_service_client::ArchiveServiceClient, artifact::Artifact,
+    context::context_service_client::ContextServiceClient,
     worker::worker_service_client::WorkerServiceClient,
 };
 
@@ -85,7 +85,7 @@ pub async fn start(
     registry: String,
     system: String,
     variable: Vec<String>,
-) -> Result<(Child, ArtifactServiceClient<Channel>)> {
+) -> Result<(Child, ContextServiceClient<Channel>)> {
     let command_artifact_context = artifact_context.display().to_string();
     let command_port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
     let command_port = command_port.to_string();
@@ -135,7 +135,7 @@ pub async fn start(
     loop {
         match stdio_merged.next().await {
             Some(Ok(line)) => {
-                if line.contains("artifact service:") {
+                if line.contains("context service:") {
                     break;
                 }
 
@@ -173,7 +173,7 @@ pub async fn start(
     let config_client = loop {
         attempts += 1;
 
-        match ArtifactServiceClient::connect(config_host.clone()).await {
+        match ContextServiceClient::connect(config_host.clone()).await {
             Ok(srv) => break srv,
             Err(e) => {
                 if attempts >= max_attempts {
@@ -186,7 +186,7 @@ pub async fn start(
                 }
 
                 warn!(
-                    "config connection {}/{} failed, retry in {} ms...",
+                    "context client {}/{} failed, retry in {} ms...",
                     attempts,
                     max_attempts,
                     max_wait_time.as_millis()
@@ -201,7 +201,6 @@ pub async fn start(
 }
 
 pub async fn build_artifacts(
-    artifact_path: bool,
     artifact_selected: Option<&Artifact>,
     artifact_selected_aliases: Vec<String>,
     build_store: HashMap<String, Artifact>,
@@ -242,20 +241,6 @@ pub async fn build_artifacts(
                 .await?;
 
                 build_complete.insert(artifact_digest.to_string(), artifact.clone());
-
-                if let Some(selected) = artifact_selected {
-                    if selected.name == artifact.name {
-                        let mut output = artifact_digest.clone();
-
-                        if artifact_path {
-                            output = get_artifact_output_path(&artifact_digest)
-                                .display()
-                                .to_string();
-                        }
-
-                        println!("{}", output);
-                    }
-                }
             }
         }
     }

@@ -6,7 +6,7 @@ use crate::{
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 use serde::Deserialize;
-use std::{fs, path::Path};
+use std::fs::read_to_string;
 use toml::from_str;
 
 #[derive(Debug, Deserialize)]
@@ -51,7 +51,7 @@ pub struct RustBuilder<'a> {
 }
 
 fn parse_cargo(path: &str) -> Result<RustArtifactCargoToml> {
-    let contents = fs::read_to_string(path).expect("Failed to read Cargo.toml");
+    let contents = read_to_string(path).expect("Failed to read Cargo.toml");
 
     Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
@@ -144,24 +144,22 @@ impl<'a> RustBuilder<'a> {
 
         // Parse source path
 
+        let context_path = context.get_artifact_context_path();
+
         let source_path = match self.source {
-            Some(ref source) => Path::new(source),
-            None => Path::new("."),
+            Some(ref source) => source,
+            None => ".",
         };
 
-        if !source_path.exists() {
-            bail!(
-                "`source.{}.path` not found: {}",
-                self.name,
-                source_path.display()
-            );
-        }
+        let context_path_source = context_path.join(source_path);
 
-        let source_path_str = source_path.display().to_string();
+        if !context_path_source.exists() {
+            bail!("`source.{}.path` not found: {}", self.name, source_path);
+        }
 
         // Parse cargo.toml
 
-        let source_cargo_path = source_path.join("Cargo.toml");
+        let source_cargo_path = context_path_source.join("Cargo.toml");
 
         if !source_cargo_path.exists() {
             bail!("Cargo.toml not found: {:?}", source_cargo_path);
@@ -179,7 +177,7 @@ impl<'a> RustBuilder<'a> {
         if let Some(workspace) = source_cargo.workspace {
             if let Some(members) = workspace.members {
                 for member in members {
-                    let package_path = source_path.join(member.clone());
+                    let package_path = context_path_source.join(member.clone());
                     let package_cargo_path = package_path.join("Cargo.toml");
 
                     if !package_cargo_path.exists() {
@@ -189,7 +187,7 @@ impl<'a> RustBuilder<'a> {
                     let package_cargo = parse_cargo(package_cargo_path.to_str().unwrap())?;
 
                     if !self.packages.is_empty() {
-                        if let Some(package) = package_cargo.package {
+                        if let Some(ref package) = package_cargo.package {
                             if !self.packages.contains(&package.name) {
                                 continue;
                             }
@@ -320,10 +318,9 @@ impl<'a> RustBuilder<'a> {
 
         let vendor_name = format!("{}-vendor", self.name);
 
-        let vendor_source =
-            ArtifactSourceBuilder::new(vendor_name.as_str(), source_path_str.as_str())
-                .with_includes(vendor_cargo_paths.clone())
-                .build();
+        let vendor_source = ArtifactSourceBuilder::new(vendor_name.as_str(), source_path)
+            .with_includes(vendor_cargo_paths.clone())
+            .build();
 
         let vendor = ArtifactBuilder::new(vendor_name.as_str(), vendor_steps, self.systems.clone())
             .with_sources(vec![vendor_source])
@@ -346,7 +343,7 @@ impl<'a> RustBuilder<'a> {
             source_includes.push(include.to_string());
         }
 
-        let source = ArtifactSourceBuilder::new(self.name, source_path_str.as_str())
+        let source = ArtifactSourceBuilder::new(self.name, source_path)
             .with_includes(source_includes)
             .with_excludes(source_excludes)
             .build();

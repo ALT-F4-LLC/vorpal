@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"os"
 	"text/template"
 
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -196,7 +197,7 @@ func vorpalRelease(context *config.ConfigContext) (*string, error) {
 		Build(context)
 }
 
-func vorpalShell(context *config.ConfigContext) (*string, error) {
+func vorpalDevenv(context *config.ConfigContext) (*string, error) {
 	gobin, err := artifact.GoBin(context)
 	if err != nil {
 		return nil, err
@@ -299,7 +300,7 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		api.ArtifactSystem_X8664_LINUX,
 	}
 
-	return artifact.ScriptDevshell(context, artifacts, environments, "vorpal-shell", nil, systems)
+	return artifact.ScriptDevenv(context, artifacts, environments, "vorpal-shell", nil, systems)
 }
 
 func vorpalTest(context *config.ConfigContext) (*string, error) {
@@ -322,6 +323,40 @@ func vorpalTest(context *config.ConfigContext) (*string, error) {
 		Build(context)
 }
 
+func vorpalUserenv(context *config.ConfigContext) (*string, error) {
+	vorpal, err := vorpal(context)
+	if err != nil {
+		return nil, err
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	artifacts := []*string{vorpal}
+
+	systems := []api.ArtifactSystem{
+		api.ArtifactSystem_AARCH64_DARWIN,
+		api.ArtifactSystem_AARCH64_LINUX,
+		api.ArtifactSystem_X8664_DARWIN,
+		api.ArtifactSystem_X8664_LINUX,
+	}
+
+	symlinks := map[string]string{}
+
+	symlinks[fmt.Sprintf("/var/lib/vorpal/store/artifact/output/%s/bin/vorpal", *vorpal)] = fmt.Sprintf("%s/.vorpal/bin/vorpal", homeDir)
+
+	return artifact.ScriptUserenv(
+		context,
+		artifacts,
+		nil,
+		"vorpal-userenv",
+		symlinks,
+		systems,
+	)
+}
+
 func main() {
 	context := config.GetContext()
 	contextArtifact := context.GetArtifactName()
@@ -331,14 +366,16 @@ func main() {
 	switch contextArtifact {
 	case "vorpal":
 		_, err = vorpal(context)
+	case "vorpal-devenv":
+		_, err = vorpalDevenv(context)
 	case "vorpal-process":
 		_, err = vorpalProcess(context)
 	case "vorpal-release":
 		_, err = vorpalRelease(context)
-	case "vorpal-shell":
-		_, err = vorpalShell(context)
 	case "vorpal-test":
 		_, err = vorpalTest(context)
+	case "vorpal-userenv":
+		_, err = vorpalUserenv(context)
 	default:
 		log.Fatalf("unknown artifact %s", contextArtifact)
 	}

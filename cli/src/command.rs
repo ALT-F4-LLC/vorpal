@@ -6,6 +6,7 @@ use vorpal_sdk::artifact::system::get_system_default_str;
 
 mod artifact;
 mod init;
+mod inspect;
 mod keys;
 mod start;
 mod store;
@@ -143,7 +144,7 @@ pub async fn run() -> Result<()> {
 
         Command::Init {} => init::run(level).await,
 
-        Command::Inspect { digest } => artifact::inspect(digest, level, &registry).await,
+        Command::Inspect { digest } => inspect::run(digest, level, &registry).await,
 
         Command::Keys(keys) => match keys {
             CommandKeys::Generate {} => keys::generate().await,

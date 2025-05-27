@@ -9,9 +9,15 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Result};
 use serde::Deserialize;
-use std::{collections::HashMap, path::Path};
-use tokio::fs::read;
-use tokio::fs::{create_dir_all, write};
+use std::{
+    collections::HashMap,
+    path::Path,
+    process::{exit, Stdio},
+};
+use tokio::{
+    fs::{create_dir_all, read, write},
+    process::Command,
+};
 use toml::from_str;
 use tonic::{transport::Channel, Code};
 use tracing::{error, info, subscriber, Level};
@@ -19,10 +25,7 @@ use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::{
     api::{
         archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest},
-        artifact::{
-            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
-            ArtifactsRequest,
-        },
+        artifact::{Artifact, ArtifactRequest, ArtifactsRequest},
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
@@ -169,7 +172,7 @@ pub async fn build(
 
             Err(err) => {
                 error!("{} |> {}", &artifact.name, err.message());
-                std::process::exit(1);
+                exit(1);
             }
         };
     }
@@ -215,24 +218,24 @@ pub async fn run(
 
     if artifact_config.is_empty() {
         error!("no `--config` specified");
-        std::process::exit(1);
+        exit(1);
     }
 
     if artifact_context.is_empty() {
         error!("no `--context` specified");
-        std::process::exit(1);
+        exit(1);
     }
 
     if artifact_name.is_empty() {
         error!("no `--name` specified");
-        std::process::exit(1);
+        exit(1);
     }
 
     let artifact_context = Path::new(&artifact_context);
 
     if !artifact_context.exists() {
         error!("'context' not found: {}", artifact_context.display());
-        std::process::exit(1);
+        exit(1);
     }
 
     let config_path = artifact_context.join(artifact_config);
@@ -242,7 +245,7 @@ pub async fn run(
 
     if config.language.is_none() {
         error!("no 'language' specified in Vorpal.yaml");
-        std::process::exit(1);
+        exit(1);
     }
 
     let config_language = config.language.unwrap();
@@ -329,7 +332,6 @@ pub async fn run(
         .expect("failed to connect to artifact");
 
     build_artifacts(
-        artifact_path,
         None,
         vec![],
         config_context.get_artifact_store(),
@@ -350,7 +352,7 @@ pub async fn run(
 
     if !config_path.exists() {
         error!("config not found: {}", config_path.display());
-        std::process::exit(1);
+        exit(1);
     }
 
     let (mut config_process, mut config_client) = match start(
@@ -368,27 +370,27 @@ pub async fn run(
         Ok(res) => res,
         Err(error) => {
             error!("{}", error);
-            std::process::exit(1);
+            exit(1);
         }
     };
 
     // Populate artifacts
 
-    let config_response = match config_client
+    let config_artifacts_response = match config_client
         .get_artifacts(ArtifactsRequest { digests: vec![] })
         .await
     {
         Ok(res) => res,
         Err(error) => {
             error!("failed to get config: {}", error);
-            std::process::exit(1);
+            exit(1);
         }
     };
 
-    let config_response = config_response.into_inner();
-    let mut config_store = HashMap::<String, Artifact>::new();
+    let config_artifacts_response = config_artifacts_response.into_inner();
+    let mut config_artifacts_store = HashMap::<String, Artifact>::new();
 
-    for digest in config_response.digests.into_iter() {
+    for digest in config_artifacts_response.digests.into_iter() {
         let request = ArtifactRequest {
             digest: digest.clone(),
         };
@@ -397,18 +399,18 @@ pub async fn run(
             Ok(res) => res,
             Err(error) => {
                 error!("failed to get artifact: {}", error);
-                std::process::exit(1);
+                exit(1);
             }
         };
 
         let artifact = response.into_inner();
 
-        config_store.insert(digest, artifact);
+        config_artifacts_store.insert(digest, artifact);
     }
 
     config_process.kill().await?;
 
-    let (artifact_digest, artifact) = config_store
+    let (artifact_digest, artifact) = config_artifacts_store
         .clone()
         .into_iter()
         .find(|(_, val)| val.name == *artifact_name)
@@ -416,7 +418,13 @@ pub async fn run(
 
     let mut build_store = HashMap::<String, Artifact>::new();
 
-    get_artifacts(&artifact, &artifact_digest, &mut build_store, &config_store).await?;
+    get_artifacts(
+        &artifact,
+        &artifact_digest,
+        &mut build_store,
+        &config_artifacts_store,
+    )
+    .await?;
 
     if artifact_export {
         let export = serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
@@ -427,7 +435,6 @@ pub async fn run(
     }
 
     build_artifacts(
-        artifact_path,
         Some(&artifact),
         artifact_aliases,
         build_store,
@@ -436,40 +443,16 @@ pub async fn run(
     )
     .await?;
 
-    Ok(())
-}
+    // TODO: explore running post scripts
 
-pub async fn inspect(digest: &str, level: Level, registry: &str) -> Result<()> {
-    let subscriber_writer = std::io::stderr.with_max_level(level);
+    let artifact_output_path = get_artifact_output_path(&artifact_digest);
+    let mut output = artifact_digest.clone();
 
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
-        .with_target(false)
-        .with_writer(subscriber_writer)
-        .without_time()
-        .finish();
+    if artifact_path {
+        output = artifact_output_path.display().to_string();
+    }
 
-    subscriber::set_global_default(subscriber).expect("setting default subscriber");
-
-    let mut client = ArtifactServiceClient::connect(registry.to_owned())
-        .await
-        .expect("failed to connect to registry");
-
-    let request = ArtifactRequest {
-        digest: digest.to_string(),
-    };
-
-    let response = client
-        .get_artifact(request)
-        .await
-        .expect("failed to get artifact");
-
-    let artifact = response.into_inner();
-
-    let artifact_data =
-        serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
-
-    println!("{}", artifact_data);
+    println!("{output}");
 
     Ok(())
 }

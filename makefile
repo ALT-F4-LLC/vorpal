@@ -91,6 +91,13 @@ generate:
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=sdk/go/pkg/api \
 		--proto_path=sdk/rust/api \
+		context/context.proto
+	protoc \
+		--go_opt=paths=source_relative \
+		--go_out=sdk/go/pkg/api \
+		--go-grpc_opt=paths=source_relative \
+		--go-grpc_out=sdk/go/pkg/api \
+		--proto_path=sdk/rust/api \
 		worker/worker.proto
 
 # Development (with Vorpal)
