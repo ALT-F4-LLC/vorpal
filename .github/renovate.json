@@ -11,6 +11,6 @@
         ]
     },
     "ignorePaths": [
-        "cli/src/command/init/template/**"
+        "cli/src/command/template/**"
     ]
 }
