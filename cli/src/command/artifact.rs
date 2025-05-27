@@ -9,15 +9,8 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Result};
 use serde::Deserialize;
-use std::{
-    collections::HashMap,
-    path::Path,
-    process::{exit, Stdio},
-};
-use tokio::{
-    fs::{create_dir_all, read, write},
-    process::Command,
-};
+use std::{collections::HashMap, path::Path, process::exit};
+use tokio::fs::{create_dir_all, read, write};
 use toml::from_str;
 use tonic::{transport::Channel, Code};
 use tracing::{error, info, subscriber, Level};

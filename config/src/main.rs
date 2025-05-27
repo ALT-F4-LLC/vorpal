@@ -194,7 +194,7 @@ async fn vorpal_test(context: &mut ConfigContext) -> Result<String> {
 async fn vorpal_userenv(context: &mut ConfigContext) -> Result<String> {
     let vorpal = vorpal(context).await?;
 
-    let home_dir = std::env::home_dir();
+    let home_dir = home::home_dir();
 
     if home_dir.is_none() {
         bail!("home directory not found");
