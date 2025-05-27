@@ -5,7 +5,7 @@ go 1.23.5
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/google/uuid v1.6.0
-	google.golang.org/grpc v1.72.1
+	google.golang.org/grpc v1.72.2
 	google.golang.org/protobuf v1.36.6
 )
 
