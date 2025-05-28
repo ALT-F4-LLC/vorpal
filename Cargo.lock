@@ -3748,6 +3748,7 @@ name = "vorpal-config"
 version = "0.1.0-alpha"
 dependencies = [
  "anyhow",
+ "home",
  "indoc",
  "tokio",
  "vorpal-sdk",

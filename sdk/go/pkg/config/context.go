@@ -13,24 +13,9 @@ import (
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+	apiContext "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-)
-
-type ArtifactSource struct {
-	Excludes []string
-	Hash     *string
-	Includes []string
-	Path     string
-}
-
-type ArtifactSourceKind string
-
-const (
-	ArtifactSourceKind_GIT     ArtifactSourceKind = "GIT"
-	ArtifactSourceKind_HTTP    ArtifactSourceKind = "HTTP"
-	ArtifactSourceKind_LOCAL   ArtifactSourceKind = "LOCAL"
-	ArtifactSourceKind_UNKNOWN ArtifactSourceKind = "UNKNOWN"
 )
 
 type ConfigContextStore struct {
@@ -54,19 +39,19 @@ type ConfigLockfile struct {
 	Alias map[string]map[string]string `json:"alias"`
 }
 
-type ArtifactServer struct {
-	artifact.UnimplementedArtifactServiceServer
+type ConfigServer struct {
+	apiContext.UnimplementedContextServiceServer
 
 	store ConfigContextStore
 }
 
-func NewArtifactServer(store ConfigContextStore) *ArtifactServer {
-	return &ArtifactServer{
+func NewConfigServer(store ConfigContextStore) *ConfigServer {
+	return &ConfigServer{
 		store: store,
 	}
 }
 
-func (s *ArtifactServer) GetArtifact(ctx context.Context, request *artifact.ArtifactRequest) (*artifact.Artifact, error) {
+func (s *ConfigServer) GetArtifact(ctx context.Context, request *artifact.ArtifactRequest) (*artifact.Artifact, error) {
 	if request.Digest == "" {
 		return nil, fmt.Errorf("'digest' is required")
 	}
@@ -79,11 +64,7 @@ func (s *ArtifactServer) GetArtifact(ctx context.Context, request *artifact.Arti
 	return response, nil
 }
 
-func (s *ArtifactServer) GetArtifactAlias(ctx context.Context, request *artifact.GetArtifactAliasRequest) (*artifact.GetArtifactAliasResponse, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (s *ArtifactServer) GetArtifacts(ctx context.Context, request *artifact.ArtifactsRequest) (*artifact.ArtifactsResponse, error) {
+func (s *ConfigServer) GetArtifacts(ctx context.Context, request *artifact.ArtifactsRequest) (*artifact.ArtifactsResponse, error) {
 	digests := make([]string, 0)
 
 	for digest := range s.store.artifact {
@@ -95,10 +76,6 @@ func (s *ArtifactServer) GetArtifacts(ctx context.Context, request *artifact.Art
 	}
 
 	return response, nil
-}
-
-func (s *ArtifactServer) StoreArtifact(ctx context.Context, request *artifact.StoreArtifactRequest) (*artifact.ArtifactResponse, error) {
-	return nil, fmt.Errorf("not implemented")
 }
 
 func GetContext() *ConfigContext {
@@ -339,6 +316,10 @@ func (c *ConfigContext) GetArtifact(digest string) *artifact.Artifact {
 	return c.store.artifact[digest]
 }
 
+func (c *ConfigContext) GetArtifactContextPath() string {
+	return c.artifactContext
+}
+
 func (c *ConfigContext) GetArtifactName() string {
 	return c.artifact
 }
@@ -362,7 +343,7 @@ func (c *ConfigContext) Run() error {
 
 	grpcServer := grpc.NewServer(grpcServerOpts...)
 
-	artifact.RegisterArtifactServiceServer(grpcServer, NewArtifactServer(c.store))
+	apiContext.RegisterContextServiceServer(grpcServer, NewConfigServer(c.store))
 
 	listenerAddr := fmt.Sprintf("[::]:%d", c.port)
 
@@ -371,7 +352,7 @@ func (c *ConfigContext) Run() error {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	log.Printf("artifact service: %s", listenerAddr)
+	log.Printf("context service: %s", listenerAddr)
 
 	err = grpcServer.Serve(listener)
 	if err != nil {

@@ -25,6 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "agent/agent.proto",
                 "archive/archive.proto",
                 "artifact/artifact.proto",
+                "context/context.proto",
                 "worker/worker.proto",
             ],
             &["api"],

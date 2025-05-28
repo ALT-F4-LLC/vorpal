@@ -2,12 +2,10 @@ use crate::{
     api::{
         agent::{agent_service_client::AgentServiceClient, PrepareArtifactRequest},
         artifact::{
-            artifact_service_client::ArtifactServiceClient,
-            artifact_service_server::{ArtifactService, ArtifactServiceServer},
-            Artifact, ArtifactRequest, ArtifactResponse, ArtifactSystem, ArtifactsRequest,
-            ArtifactsResponse, GetArtifactAliasRequest, GetArtifactAliasResponse,
-            StoreArtifactRequest,
+            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
+            ArtifactSystem, ArtifactsRequest, ArtifactsResponse, GetArtifactAliasRequest,
         },
+        context::context_service_server::{ContextService, ContextServiceServer},
     },
     artifact::system::get_system,
     cli::{Cli, Command},
@@ -37,18 +35,18 @@ pub struct ConfigContext {
 }
 
 #[derive(Clone)]
-pub struct ArtifactServer {
+pub struct ConfigServer {
     pub store: ConfigContextStore,
 }
 
-impl ArtifactServer {
+impl ConfigServer {
     pub fn new(store: ConfigContextStore) -> Self {
         Self { store }
     }
 }
 
 #[tonic::async_trait]
-impl ArtifactService for ArtifactServer {
+impl ContextService for ConfigServer {
     async fn get_artifact(
         &self,
         request: Request<ArtifactRequest>,
@@ -68,13 +66,6 @@ impl ArtifactService for ArtifactServer {
         Ok(Response::new(artifact.unwrap().clone()))
     }
 
-    async fn get_artifact_alias(
-        &self,
-        _request: Request<GetArtifactAliasRequest>,
-    ) -> Result<Response<GetArtifactAliasResponse>, Status> {
-        Err(Status::unimplemented("not implemented yet"))
-    }
-
     async fn get_artifacts(
         &self,
         _: tonic::Request<ArtifactsRequest>,
@@ -84,13 +75,6 @@ impl ArtifactService for ArtifactServer {
         };
 
         Ok(Response::new(response))
-    }
-
-    async fn store_artifact(
-        &self,
-        _request: Request<StoreArtifactRequest>,
-    ) -> Result<Response<ArtifactResponse>, Status> {
-        Err(Status::unimplemented("not implemented yet"))
     }
 }
 
@@ -306,6 +290,10 @@ impl ConfigContext {
         self.store.artifact.get(digest).cloned()
     }
 
+    pub fn get_artifact_context_path(&self) -> &PathBuf {
+        &self.artifact_context
+    }
+
     pub fn get_artifact_name(&self) -> &str {
         self.artifact.as_str()
     }
@@ -319,12 +307,12 @@ impl ConfigContext {
     }
 
     pub async fn run(&self) -> Result<()> {
-        let service = ArtifactServiceServer::new(ArtifactServer::new(self.store.clone()));
+        let service = ContextServiceServer::new(ConfigServer::new(self.store.clone()));
 
         let service_addr_str = format!("[::]:{}", self.port);
         let service_addr = service_addr_str.parse().expect("failed to parse address");
 
-        println!("artifact service: {}", service_addr_str);
+        println!("context service: {}", service_addr_str);
 
         Server::builder()
             .add_service(service)

@@ -9,7 +9,7 @@ use rsa::{
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
-use tracing::error;
+use tracing::{error, info};
 use vorpal_sdk::api::{
     archive::{
         archive_service_server::ArchiveService, ArchivePullRequest, ArchivePullResponse,
@@ -119,6 +119,8 @@ impl ArchiveService for ArchiveServer {
 
         self.backend.check(&req).await?;
 
+        info!("registry |> archive check: {}", req.digest);
+
         Ok(Response::new(ArchiveResponse {}))
     }
 
@@ -149,6 +151,8 @@ impl ArchiveService for ArchiveServer {
                     error!("failed to send store error: {:?}", err);
                 }
             }
+
+            info!("registry |> archive pull: {}", request.digest);
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -210,19 +214,10 @@ impl ArchiveService for ArchiveServer {
 
         self.backend.push(&request).await?;
 
+        info!("registry |> archive push: {}", request.digest);
+
         Ok(Response::new(ArchiveResponse {}))
     }
-
-    // async fn put_config_artifact(
-    //     &self,
-    //     request: Request<Artifact>,
-    // ) -> Result<Response<RegistryPutResponse>, Status> {
-    //     let request = request.into_inner();
-    //
-    //     self.backend.put_artifact(&request).await?;
-    //
-    //     Ok(Response::new(RegistryPutResponse {}))
-    // }
 }
 
 #[tonic::async_trait]
@@ -275,6 +270,8 @@ impl ArtifactService for ArtifactServer {
 
         let artifact = self.backend.get_artifact(request.digest).await?;
 
+        info!("registry |> artifact get: {:?}", artifact);
+
         Ok(Response::new(artifact))
     }
 
@@ -292,8 +289,10 @@ impl ArtifactService for ArtifactServer {
 
         let digest = self
             .backend
-            .get_artifact_alias(request.alias, alias_system)
+            .get_artifact_alias(request.alias.clone(), alias_system)
             .await?;
+
+        info!("artifact alias |> get: {} -> {}", request.alias, digest);
 
         Ok(Response::new(GetArtifactAliasResponse { digest }))
     }
@@ -325,6 +324,8 @@ impl ArtifactService for ArtifactServer {
             .backend
             .store_artifact(artifact, request.artifact_aliases)
             .await?;
+
+        info!("registry |> artifact store: {}", digest);
 
         Ok(Response::new(ArtifactResponse { digest }))
     }

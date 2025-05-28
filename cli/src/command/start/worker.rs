@@ -21,7 +21,7 @@ use tokio_stream::{
     StreamExt,
 };
 use tonic::{Code::NotFound, Request, Response, Status};
-use tracing::error;
+use tracing::{error, info};
 use vorpal_sdk::{
     api::{
         archive::{
@@ -388,9 +388,6 @@ async fn build_artifact(
         return Err(Status::invalid_argument("artifact 'steps' are missing"));
     }
 
-    let artifact_json = serde_json::to_string(&artifact)
-        .map_err(|err| Status::internal(format!("artifact failed to serialize: {:?}", err)))?;
-
     let artifact_target = ArtifactSystem::try_from(artifact.target).map_err(|err| {
         Status::invalid_argument(format!("artifact failed to parse target: {:?}", err))
     })?;
@@ -408,6 +405,11 @@ async fn build_artifact(
         ));
     }
 
+    // Calculate artifact digest
+
+    let artifact_json = serde_json::to_string(&artifact)
+        .map_err(|err| Status::internal(format!("artifact failed to serialize: {:?}", err)))?;
+
     let artifact_digest = digest(artifact_json.as_bytes());
 
     // Check if artifact exists
@@ -415,6 +417,7 @@ async fn build_artifact(
     let artifact_output_path = get_artifact_output_path(&artifact_digest);
 
     if artifact_output_path.exists() {
+        error!("worker |> artifact already exists: {}", artifact_digest);
         return Err(Status::already_exists("artifact exists"));
     }
 
@@ -423,12 +426,14 @@ async fn build_artifact(
     let artifact_output_lock = get_artifact_output_lock_path(&artifact_digest);
 
     if artifact_output_lock.exists() {
+        error!("worker |> artifact is locked: {}", artifact_digest);
         return Err(Status::already_exists("artifact is locked"));
     }
 
     // Create lock file
 
     if let Err(err) = write(&artifact_output_lock, artifact_json).await {
+        error!("worker |> failed to create lock file: {:?}", err);
         return Err(Status::internal(format!(
             "failed to create lock file: {:?}",
             err
@@ -444,6 +449,7 @@ async fn build_artifact(
     let workspace_source_path = workspace_path.join("source");
 
     if let Err(err) = create_dir_all(&workspace_source_path).await {
+        error!("worker |> failed to create source path: {:?}", err);
         return Err(Status::internal(format!(
             "failed to create source path: {:?}",
             err
@@ -454,11 +460,19 @@ async fn build_artifact(
 
     for source in artifact.sources.iter() {
         pull_source(&registry, source, &tx, &workspace_source_path).await?;
+
+        let source_digest = source
+            .digest
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("source 'digest' is missing"))?;
+
+        info!("worker |> pull source: {}", source_digest);
     }
 
     // Run steps
 
     if let Err(err) = create_dir_all(&artifact_output_path).await {
+        error!("worker |> failed to create artifact path: {:?}", err);
         return Err(Status::internal(format!(
             "failed to create artifact path: {:?}",
             err
@@ -475,6 +489,7 @@ async fn build_artifact(
         )
         .await
         {
+            error!("worker |> failed to run step: {:?}", err);
             return Err(Status::internal(err.message()));
         }
     }
@@ -489,6 +504,7 @@ async fn build_artifact(
 
         for path in artifact_path_files.iter() {
             if let Err(err) = set_timestamps(path).await {
+                error!("worker |> failed to sanitize output files: {:?}", err);
                 return Err(Status::internal(format!(
                     "failed to sanitize output files: {:?}",
                     err
@@ -509,6 +525,7 @@ async fn build_artifact(
         )
         .await
         {
+            error!("worker |> failed to compress artifact: {:?}", err);
             return Err(Status::internal(format!(
                 "failed to compress artifact: {:?}",
                 err
@@ -550,6 +567,7 @@ async fn build_artifact(
             .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
 
         if let Err(err) = client.push(tokio_stream::iter(request_stream)).await {
+            error!("worker |> failed to push artifact: {:?}", err);
             return Err(Status::internal(format!(
                 "failed to push artifact: {:?}",
                 err
@@ -574,6 +592,7 @@ async fn build_artifact(
         // Remove artifact archive
 
         if let Err(err) = remove_file(&artifact_archive).await {
+            error!("worker |> failed to remove artifact archive: {:?}", err);
             return Err(Status::internal(format!(
                 "failed to remove artifact archive: {:?}",
                 err
@@ -588,6 +607,7 @@ async fn build_artifact(
     // Remove workspace
 
     if let Err(err) = remove_dir_all(workspace_path).await {
+        error!("worker |> failed to remove workspace: {:?}", err);
         return Err(Status::internal(format!(
             "failed to remove workspace: {:?}",
             err
@@ -597,11 +617,14 @@ async fn build_artifact(
     // Remove lock file
 
     if let Err(err) = remove_file(&artifact_output_lock).await {
+        error!("worker |> failed to remove lock file: {:?}", err);
         return Err(Status::internal(format!(
             "failed to remove lock file: {:?}",
             err
         )));
     }
+
+    info!("worker |> build artifact: {}", artifact_digest);
 
     Ok(())
 }

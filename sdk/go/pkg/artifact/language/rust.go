@@ -146,6 +146,14 @@ for bin_name in ${{"{"}}bin_names{{"["}}@{{"]"}}{{"}"}}; do
     cp -pv ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
 done`
 
+func stripPrefix(path, prefix string) string {
+	if strings.HasPrefix(path, prefix) {
+		return path[len(prefix)+1:]
+	}
+
+	return path
+}
+
 func NewRustBuilder(name string, systems []api.ArtifactSystem) *RustBuilder {
 	return &RustBuilder{
 		artifacts: make([]*string, 0),
@@ -238,9 +246,9 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 		return nil, err
 	}
 
-	// 1. READ CARGO.TOML FILES
+	// Parse source path
 
-	// Get the source path
+	contextPath := context.GetArtifactContextPath()
 
 	sourcePath := "."
 
@@ -248,9 +256,19 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 		sourcePath = *builder.source
 	}
 
+	contextPathSource := fmt.Sprintf("%s/%s", contextPath, sourcePath)
+
+	if _, err := os.Stat(contextPathSource); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("source path %s does not exist", contextPathSource)
+		}
+
+		return nil, fmt.Errorf("error checking source path %s: %v", contextPathSource, err)
+	}
+
 	// Load root cargo.toml
 
-	sourceCargoPath := fmt.Sprintf("%s/Cargo.toml", sourcePath)
+	sourceCargoPath := fmt.Sprintf("%s/Cargo.toml", contextPathSource)
 
 	if _, err := os.Stat(sourceCargoPath); err != nil {
 		if os.IsNotExist(err) {
@@ -278,7 +296,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	if sourceCargo.Workspace != nil && len(sourceCargo.Workspace.Members) > 0 {
 		for _, member := range sourceCargo.Workspace.Members {
-			packagePath := fmt.Sprintf("%s/%s", sourcePath, member)
+			packagePath := fmt.Sprintf("%s/%s", contextPathSource, member)
 			packageCargoPath := fmt.Sprintf("%s/Cargo.toml", packagePath)
 
 			if _, err := os.Stat(packageCargoPath); err != nil {
@@ -334,7 +352,9 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 			}
 
 			for _, memberTargetPath := range packageTargetPaths {
-				packagesTargets = append(packagesTargets, memberTargetPath)
+				memberTargetPathRelative := stripPrefix(memberTargetPath, contextPathSource)
+
+				packagesTargets = append(packagesTargets, memberTargetPathRelative)
 			}
 
 			packages = append(packages, member)

@@ -18,6 +18,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
 use tonic::{Code, Request, Response, Status};
+use tracing::info;
 use url::Url;
 use vorpal_sdk::api::{
     agent::{agent_service_server::AgentService, PrepareArtifactRequest, PrepareArtifactResponse},
@@ -407,6 +408,8 @@ async fn prepare_artifact(
         };
 
         artifact_sources.push(source);
+
+        info!("agent |> prepare artifact source: {}", source_digest);
     }
 
     // TODO: explore using combined sources digest for the artifact
@@ -429,7 +432,7 @@ async fn prepare_artifact(
 
     let artifact_response = PrepareArtifactResponse {
         artifact: Some(artifact),
-        artifact_digest: Some(artifact_digest),
+        artifact_digest: Some(artifact_digest.clone()),
         artifact_output: None,
     };
 
@@ -437,6 +440,8 @@ async fn prepare_artifact(
         .send(Ok(artifact_response))
         .await
         .map_err(|_| Status::internal("failed to send response"));
+
+    info!("agent |> prepare artifact: {}", artifact_digest);
 
     Ok(())
 }

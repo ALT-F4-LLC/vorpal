@@ -42,7 +42,7 @@ sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
 
 # Generate a new keypair
 echo -e "|> Generating a new keypair..."
-"$INSTALL_DIR/bin/vorpal" keys generate
+"$INSTALL_DIR/bin/vorpal" system keys generate
 
 # Setup LaunchAgent for macOS
 if [[ $INSTALL_OS == "darwin" ]]; then

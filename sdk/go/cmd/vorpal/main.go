@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"os"
 	"text/template"
 
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -47,17 +48,17 @@ gh release create \
     {{.X8664Darwin}}.tar.zst \
     {{.X8664Linux}}.tar.zst`
 
+var SYSTEMS = []api.ArtifactSystem{
+	api.ArtifactSystem_AARCH64_DARWIN,
+	api.ArtifactSystem_AARCH64_LINUX,
+	api.ArtifactSystem_X8664_DARWIN,
+	api.ArtifactSystem_X8664_LINUX,
+}
+
 func vorpal(context *config.ConfigContext) (*string, error) {
 	name := "vorpal"
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return language.NewRustBuilder(name, systems).
+	return language.NewRustBuilder(name, SYSTEMS).
 		WithBins([]string{name}).
 		WithIncludes([]string{"cli", "sdk/rust"}).
 		WithPackages([]string{"vorpal-cli", "vorpal-sdk"}).
@@ -72,14 +73,7 @@ func vorpalProcess(context *config.ConfigContext) (*string, error) {
 
 	entrypoint := fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(vorpal))
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return artifact.NewArtifactProcessBuilder("vorpal-process", entrypoint, systems).
+	return artifact.NewArtifactProcessBuilder("vorpal-process", entrypoint, SYSTEMS).
 		WithArguments([]string{
 			"--registry",
 			"http://localhost:50051",
@@ -184,19 +178,12 @@ func vorpalRelease(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return artifact.NewArtifactTaskBuilder("vorpal-release", scriptBuffer.String(), systems).
+	return artifact.NewArtifactTaskBuilder("vorpal-release", scriptBuffer.String(), SYSTEMS).
 		WithArtifacts(artifacts).
 		Build(context)
 }
 
-func vorpalShell(context *config.ConfigContext) (*string, error) {
+func vorpalDevenv(context *config.ConfigContext) (*string, error) {
 	gobin, err := artifact.GoBin(context)
 	if err != nil {
 		return nil, err
@@ -232,11 +219,6 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	rustToolchain, err := artifact.RustToolchain(context)
-	if err != nil {
-		return nil, err
-	}
-
 	staticcheck, err := artifact.Staticcheck(context)
 	if err != nil {
 		return nil, err
@@ -250,28 +232,10 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		protoc,
 		protocGenGo,
 		protocGenGoGRPC,
-		rustToolchain,
 		staticcheck,
 	}
 
 	contextTarget := context.GetTarget()
-
-	rustToolchainTarget, err := artifact.RustToolchainTarget(contextTarget)
-	if err != nil {
-		return nil, err
-	}
-
-	rustToolchainName := fmt.Sprintf(
-		"%s-%s",
-		artifact.RustToolchainVersion(),
-		*rustToolchainTarget,
-	)
-
-	rustToolchainPath := fmt.Sprintf(
-		"%s/toolchains/%s/bin",
-		artifact.GetEnvKey(rustToolchain),
-		rustToolchainName,
-	)
 
 	goarch, err := language.GetGOARCH(contextTarget)
 	if err != nil {
@@ -287,19 +251,9 @@ func vorpalShell(context *config.ConfigContext) (*string, error) {
 		"CGO_ENABLED=0",
 		fmt.Sprintf("GOARCH=%s", *goarch),
 		fmt.Sprintf("GOOS=%s", *goos),
-		fmt.Sprintf("PATH=%s", rustToolchainPath),
-		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(rustToolchain)),
-		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rustToolchainName),
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return artifact.ScriptDevshell(context, artifacts, environments, "vorpal-shell", nil, systems)
+	return artifact.ScriptDevenv(context, artifacts, environments, "vorpal-devenv", nil, SYSTEMS)
 }
 
 func vorpalTest(context *config.ConfigContext) (*string, error) {
@@ -310,16 +264,36 @@ func vorpalTest(context *config.ConfigContext) (*string, error) {
 
 	script := fmt.Sprintf("\n%s/bin/vorpal --version", artifact.GetEnvKey(vorpal))
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return artifact.NewArtifactTaskBuilder("vorpal-test", script, systems).
+	return artifact.NewArtifactTaskBuilder("vorpal-test", script, SYSTEMS).
 		WithArtifacts([]*string{vorpal}).
 		Build(context)
+}
+
+func vorpalUserenv(context *config.ConfigContext) (*string, error) {
+	vorpal, err := vorpal(context)
+	if err != nil {
+		return nil, err
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	artifacts := []*string{vorpal}
+
+	symlinks := map[string]string{}
+
+	symlinks[fmt.Sprintf("/var/lib/vorpal/store/artifact/output/%s/bin/vorpal", *vorpal)] = fmt.Sprintf("%s/.vorpal/bin/vorpal", homeDir)
+
+	return artifact.ScriptUserenv(
+		context,
+		artifacts,
+		nil,
+		"vorpal-userenv",
+		symlinks,
+		SYSTEMS,
+	)
 }
 
 func main() {
@@ -331,14 +305,16 @@ func main() {
 	switch contextArtifact {
 	case "vorpal":
 		_, err = vorpal(context)
+	case "vorpal-devenv":
+		_, err = vorpalDevenv(context)
 	case "vorpal-process":
 		_, err = vorpalProcess(context)
 	case "vorpal-release":
 		_, err = vorpalRelease(context)
-	case "vorpal-shell":
-		_, err = vorpalShell(context)
 	case "vorpal-test":
 		_, err = vorpalTest(context)
+	case "vorpal-userenv":
+		_, err = vorpalUserenv(context)
 	default:
 		log.Fatalf("unknown artifact %s", contextArtifact)
 	}

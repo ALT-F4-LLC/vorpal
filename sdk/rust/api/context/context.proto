@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package vorpal.context;
+
+option go_package = "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/context";
+
+import "artifact/artifact.proto";
+
+service ContextService {
+    rpc GetArtifact(vorpal.artifact.ArtifactRequest) returns (vorpal.artifact.Artifact);
+    rpc GetArtifacts(vorpal.artifact.ArtifactsRequest) returns (vorpal.artifact.ArtifactsResponse);
+}

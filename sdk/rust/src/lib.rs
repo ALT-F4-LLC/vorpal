@@ -11,6 +11,10 @@ pub mod api {
         tonic::include_proto!("vorpal.artifact");
     }
 
+    pub mod context {
+        tonic::include_proto!("vorpal.context");
+    }
+
     pub mod worker {
         tonic::include_proto!("vorpal.worker");
     }

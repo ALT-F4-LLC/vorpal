@@ -10,8 +10,7 @@ use crate::command::{
 };
 use anyhow::{bail, Result};
 use tonic::transport::Server;
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::info;
 use vorpal_sdk::api::{
     agent::agent_service_server::AgentServiceServer,
     archive::archive_service_server::ArchiveServiceServer,
@@ -24,31 +23,17 @@ mod registry;
 mod worker;
 
 pub async fn run(
-    level: Level,
     port: u16,
     registry: String,
     registry_backend: String,
     registry_backend_s3_bucket: Option<String>,
     services: Vec<String>,
 ) -> Result<()> {
-    let mut subscriber = FmtSubscriber::builder()
-        .with_target(false)
-        .without_time()
-        .with_max_level(level);
-
-    if [Level::DEBUG, Level::TRACE].contains(&level) {
-        subscriber = subscriber.with_file(true).with_line_number(true);
-    }
-
-    let subscriber = subscriber.finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
-
     let public_key_path = get_key_public_path();
 
     if !public_key_path.exists() {
         return Err(anyhow::anyhow!(
-            "public key not found - run 'vorpal keys generate' or copy from agent"
+            "public key not found - run 'vorpal system keys generate' or copy from agent"
         ));
     }
 
@@ -59,7 +44,7 @@ pub async fn run(
     if services.contains(&"agent".to_string()) {
         let service = AgentServiceServer::new(AgentServer::new(registry.clone()));
 
-        info!("agent service: [::]:{}", port);
+        info!("agent |> service: [::]:{}", port);
 
         router = router.add_service(service);
     }
@@ -85,7 +70,7 @@ pub async fn run(
         let backend_artifact =
             backend_artifact(&registry_backend, registry_backend_s3_bucket).await?;
 
-        info!("registry service: [::]:{}", port);
+        info!("registry |> service: [::]:{}", port);
 
         router = router.add_service(ArchiveServiceServer::new(ArchiveServer::new(
             backend_archive,
@@ -99,7 +84,7 @@ pub async fn run(
     if services.contains(&"worker".to_string()) {
         let service = WorkerServiceServer::new(WorkerServer::new(registry.to_owned()));
 
-        info!("worker service: [::]:{}", port);
+        info!("worker |> service: [::]:{}", port);
 
         router = router.add_service(service);
     }

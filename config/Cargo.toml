@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { version = "1" }
+home = { version = "0" }
 indoc = { version = "2" }
 tokio = { features = ["rt-multi-thread"], version = "1" }
 vorpal-sdk = { path = "../sdk/rust" }

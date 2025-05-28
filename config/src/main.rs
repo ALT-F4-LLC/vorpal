@@ -9,8 +9,8 @@ use vorpal_sdk::{
         get_env_key, gh, go, goimports, gopls, grpcurl,
         language::go::{get_goarch, get_goos},
         language::rust::RustBuilder,
-        protoc, protoc_gen_go, protoc_gen_go_grpc, rust_toolchain, script, staticcheck,
-        ArtifactArgumentBuilder, ArtifactProcessBuilder, ArtifactTaskBuilder,
+        protoc, protoc_gen_go, protoc_gen_go_grpc, script, staticcheck, ArtifactArgumentBuilder,
+        ArtifactProcessBuilder, ArtifactTaskBuilder,
     },
     context::{get_context, ConfigContext},
 };
@@ -20,12 +20,55 @@ const SYSTEMS: [ArtifactSystem; 4] = [Aarch64Darwin, Aarch64Linux, X8664Darwin, 
 async fn vorpal(context: &mut ConfigContext) -> Result<String> {
     let name = "vorpal";
 
-    RustBuilder::new(name, SYSTEMS.to_vec())
+    let digest = RustBuilder::new(name, SYSTEMS.to_vec())
         .with_bins(vec![name])
         .with_includes(vec!["cli", "sdk/rust"])
         .with_packages(vec!["vorpal-cli", "vorpal-sdk"])
         .build(context)
-        .await
+        .await?;
+
+    Ok(digest)
+}
+
+async fn vorpal_devenv(context: &mut ConfigContext) -> Result<String> {
+    let go = go::build(context).await?;
+    let goimports = goimports::build(context).await?;
+    let gopls = gopls::build(context).await?;
+    let grpcurl = grpcurl::build(context).await?;
+    let protoc = protoc::build(context).await?;
+    let protoc_gen_go = protoc_gen_go::build(context).await?;
+    let protoc_gen_go_grpc = protoc_gen_go_grpc::build(context).await?;
+    let staticcheck = staticcheck::build(context).await?;
+
+    let artifacts = vec![
+        go,
+        goimports,
+        gopls,
+        grpcurl,
+        protoc,
+        protoc_gen_go,
+        protoc_gen_go_grpc,
+        staticcheck,
+    ];
+
+    let goarch = get_goarch(context.get_system())?;
+    let goos = get_goos(context.get_system())?;
+
+    let environments = vec![
+        "CGO_ENABLED=0".to_string(),
+        format!("GOARCH={}", goarch),
+        format!("GOOS={}", goos),
+    ];
+
+    script::devenv(
+        context,
+        artifacts,
+        environments,
+        "vorpal-devenv",
+        vec![],
+        SYSTEMS.to_vec(),
+    )
+    .await
 }
 
 async fn vorpal_process(context: &mut ConfigContext) -> Result<String> {
@@ -121,64 +164,6 @@ async fn vorpal_release(context: &mut ConfigContext) -> Result<String> {
         .await
 }
 
-async fn vorpal_shell(context: &mut ConfigContext) -> Result<String> {
-    let go = go::build(context).await?;
-    let goimports = goimports::build(context).await?;
-    let gopls = gopls::build(context).await?;
-    let grpcurl = grpcurl::build(context).await?;
-    let protoc = protoc::build(context).await?;
-    let protoc_gen_go = protoc_gen_go::build(context).await?;
-    let protoc_gen_go_grpc = protoc_gen_go_grpc::build(context).await?;
-    let rust_toolchain = rust_toolchain::build(context).await?;
-    let staticcheck = staticcheck::build(context).await?;
-
-    let artifacts = vec![
-        go,
-        goimports,
-        gopls,
-        grpcurl,
-        protoc,
-        protoc_gen_go,
-        protoc_gen_go_grpc,
-        rust_toolchain.clone(),
-        staticcheck,
-    ];
-
-    let rust_toolchain_name = format!(
-        "{}-{}",
-        rust_toolchain::version(),
-        rust_toolchain::target(context.get_system())?,
-    );
-
-    let rust_toolchain_path = format!(
-        "{}/toolchains/{}/bin",
-        get_env_key(&rust_toolchain),
-        rust_toolchain_name
-    );
-
-    let goarch = get_goarch(context.get_system())?;
-    let goos = get_goos(context.get_system())?;
-
-    let environments = vec![
-        "CGO_ENABLED=0".to_string(),
-        format!("GOARCH={}", goarch),
-        format!("GOOS={}", goos),
-        format!("PATH={}", rust_toolchain_path),
-        format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
-        format!("RUSTUP_TOOLCHAIN={}", rust_toolchain_name),
-    ];
-
-    script::devshell(
-        context,
-        artifacts,
-        environments,
-        "vorpal-shell",
-        vec![],
-        SYSTEMS.to_vec(),
-    )
-    .await
-}
-
 async fn vorpal_test(context: &mut ConfigContext) -> Result<String> {
     let vorpal = vorpal(context).await?;
     let script = format!("{}/bin/vorpal --version", get_env_key(&vorpal));
@@ -189,6 +174,31 @@ async fn vorpal_test(context: &mut ConfigContext) -> Result<String> {
         .await
 }
 
+async fn vorpal_userenv(context: &mut ConfigContext) -> Result<String> {
+    let vorpal = vorpal(context).await?;
+
+    let home_dir = home::home_dir();
+
+    if home_dir.is_none() {
+        bail!("home directory not found");
+    }
+
+    let home_dir = home_dir.unwrap();
+
+    script::userenv(
+        context,
+        vec![vorpal.clone()],
+        vec![],
+        "vorpal-userenv",
+        vec![(
+            format!("/var/lib/vorpal/store/artifact/output/{vorpal}/bin/vorpal"),
+            format!("{}/.vorpal/bin/vorpal", home_dir.display()),
+        )],
+        SYSTEMS.to_vec(),
+    )
+    .await
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let context = &mut get_context().await?;
@@ -196,10 +206,11 @@ async fn main() -> Result<()> {
 
     match context_artifact {
         "vorpal" => vorpal(context).await?,
+        "vorpal-devenv" => vorpal_devenv(context).await?,
         "vorpal-process" => vorpal_process(context).await?,
         "vorpal-release" => vorpal_release(context).await?,
-        "vorpal-shell" => vorpal_shell(context).await?,
         "vorpal-test" => vorpal_test(context).await?,
+        "vorpal-userenv" => vorpal_userenv(context).await?,
         _ => bail!("unknown artifact: {}", context_artifact),
     };
 
