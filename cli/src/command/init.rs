@@ -2,28 +2,9 @@ use anyhow::{bail, Result};
 use inquire::{InquireError, Select};
 use std::{collections::BTreeMap, env::current_dir};
 use tokio::fs::{create_dir_all, write};
-use tracing::{info, subscriber, warn, Level};
-use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
+use tracing::{info, warn};
 
-pub async fn run(level: Level) -> Result<()> {
-    // Setup logging
-
-    let subscriber_writer = std::io::stderr.with_max_level(level);
-
-    let mut subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
-        .with_target(false)
-        .with_writer(subscriber_writer)
-        .without_time();
-
-    if [Level::DEBUG, Level::TRACE].contains(&level) {
-        subscriber = subscriber.with_file(true).with_line_number(true);
-    }
-
-    let subscriber = subscriber.finish();
-
-    subscriber::set_global_default(subscriber).expect("setting default subscriber");
-
+pub async fn run() -> Result<()> {
     let options: Vec<&str> = vec!["Go", "Rust"];
 
     let answer: Result<&str, InquireError> =

@@ -160,9 +160,7 @@ pub async fn run() -> Result<()> {
 
     match &command {
         Command::Artifact(artifact) => match artifact {
-            CommandArtifact::Inspect { digest } => {
-                artifact::inspect::run(digest, level, &registry).await
-            }
+            CommandArtifact::Inspect { digest } => artifact::inspect::run(digest, &registry).await,
 
             CommandArtifact::Make {
                 agent,
@@ -197,7 +195,7 @@ pub async fn run() -> Result<()> {
             }
         },
 
-        Command::Init {} => init::run(level).await,
+        Command::Init {} => init::run().await,
 
         Command::System(system) => match system {
             CommandSystem::Keys(keys) => match keys {

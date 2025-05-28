@@ -1,20 +1,7 @@
 use anyhow::Result;
-use tracing::{subscriber, Level};
-use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::api::artifact::{artifact_service_client::ArtifactServiceClient, ArtifactRequest};
 
-pub async fn run(digest: &str, level: Level, registry: &str) -> Result<()> {
-    let subscriber_writer = std::io::stderr.with_max_level(level);
-
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
-        .with_target(false)
-        .with_writer(subscriber_writer)
-        .without_time()
-        .finish();
-
-    subscriber::set_global_default(subscriber).expect("setting default subscriber");
-
+pub async fn run(digest: &str, registry: &str) -> Result<()> {
     let mut client = ArtifactServiceClient::connect(registry.to_owned())
         .await
         .expect("failed to connect to registry");
