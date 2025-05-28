@@ -35,7 +35,7 @@ function install {
 
     pushd "$HOME/vorpal"
 
-    ./target/debug/vorpal keys generate
+    ./target/debug/vorpal system keys generate
 
     popd
 }

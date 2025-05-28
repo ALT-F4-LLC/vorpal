@@ -1,7 +1,7 @@
-use crate::command::artifact::build;
 use anyhow::{anyhow, bail, Result};
 use petgraph::{algo::toposort, graphmap::DiGraphMap};
 use port_selector::random_free_port;
+use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -11,11 +11,32 @@ use tokio::{
 use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tonic::transport::Channel;
 use tracing::{info, warn};
-use vorpal_sdk::api::{
-    archive::archive_service_client::ArchiveServiceClient, artifact::Artifact,
-    context::context_service_client::ContextServiceClient,
-    worker::worker_service_client::WorkerServiceClient,
-};
+use vorpal_sdk::api::{artifact::Artifact, context::context_service_client::ContextServiceClient};
+
+#[derive(Deserialize)]
+pub struct VorpalConfigGo {
+    pub directory: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct VorpalConfigRust {
+    pub bin: Option<String>,
+    pub packages: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub struct VorpalConfigSource {
+    pub includes: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub struct VorpalConfig {
+    pub go: Option<VorpalConfigGo>,
+    pub language: Option<String>,
+    pub name: Option<String>,
+    pub rust: Option<VorpalConfigRust>,
+    pub source: Option<VorpalConfigSource>,
+}
 
 pub async fn get_artifacts(
     artifact: &Artifact,
@@ -198,52 +219,4 @@ pub async fn start(
     };
 
     Ok((config_process, config_client))
-}
-
-pub async fn build_artifacts(
-    artifact_selected: Option<&Artifact>,
-    artifact_selected_aliases: Vec<String>,
-    build_store: HashMap<String, Artifact>,
-    client_archive: &mut ArchiveServiceClient<Channel>,
-    client_worker: &mut WorkerServiceClient<Channel>,
-) -> Result<()> {
-    let artifact_order = get_order(&build_store).await?;
-    let mut build_complete = HashMap::<String, Artifact>::new();
-
-    for artifact_digest in artifact_order {
-        match build_store.get(&artifact_digest) {
-            None => bail!("artifact 'config' not found: {}", artifact_digest),
-
-            Some(artifact) => {
-                for step in artifact.steps.iter() {
-                    for hash in step.artifacts.iter() {
-                        if !build_complete.contains_key(hash) {
-                            bail!("artifact 'build' not found: {}", hash);
-                        }
-                    }
-                }
-
-                let mut artifact_aliases = vec![];
-
-                if let Some(selected) = artifact_selected {
-                    if selected.name == artifact.name {
-                        artifact_aliases = artifact_selected_aliases.clone();
-                    }
-                }
-
-                build(
-                    artifact,
-                    artifact_aliases,
-                    &artifact_digest,
-                    client_archive,
-                    client_worker,
-                )
-                .await?;
-
-                build_complete.insert(artifact_digest.to_string(), artifact.clone());
-            }
-        }
-    }
-
-    Ok(())
 }

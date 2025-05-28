@@ -216,8 +216,13 @@ impl<'a> RustBuilder<'a> {
                         package_target_paths.push(package_path.join("src/lib.rs"));
                     }
 
-                    for member_target_path in package_target_paths {
-                        packages_targets.push(member_target_path);
+                    for member_target_path in package_target_paths.iter() {
+                        let member_target_path_relative = member_target_path
+                            .strip_prefix(&context_path_source)
+                            .unwrap_or(&member_target_path)
+                            .to_path_buf();
+
+                        packages_targets.push(member_target_path_relative);
                     }
 
                     packages.push(member);

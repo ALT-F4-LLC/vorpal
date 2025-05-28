@@ -157,7 +157,7 @@ jobs:
           tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
-      - run: ./dist/vorpal keys generate
+      - run: ./dist/vorpal system keys generate
 
       - uses: actions/github-script@v7
         with:
@@ -180,55 +180,55 @@ jobs:
           sleep 5
 
       - run: |
-          VORPAL_ARTIFACT=$(dist/vorpal artifact --name "vorpal")
+          VORPAL_ARTIFACT=$(dist/vorpal artifact make "vorpal")
           echo "VORPAL_ARTIFACT=$VORPAL_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_DEVENV_ARTIFACT=$(dist/vorpal artifact --name "vorpal-devenv")
+          VORPAL_DEVENV_ARTIFACT=$(dist/vorpal artifact make "vorpal-devenv")
           echo "VORPAL_DEVENV_ARTIFACT=$VORPAL_DEVENV_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_PROCESS_ARTIFACT=$(dist/vorpal artifact --name "vorpal-process")
+          VORPAL_PROCESS_ARTIFACT=$(dist/vorpal artifact make "vorpal-process")
           echo "VORPAL_PROCESS_ARTIFACT=$VORPAL_PROCESS_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_TEST_ARTIFACT=$(dist/vorpal artifact --name "vorpal-test")
+          VORPAL_TEST_ARTIFACT=$(dist/vorpal artifact make "vorpal-test")
           echo "VORPAL_TEST_ARTIFACT=$VORPAL_TEST_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_USERENV_ARTIFACT=$(dist/vorpal artifact --name "vorpal-userenv")
+          VORPAL_USERENV_ARTIFACT=$(dist/vorpal artifact make "vorpal-userenv")
           echo "VORPAL_USERENV_ARTIFACT=$VORPAL_USERENV_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal")
+          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal")
           if [ "$ARTIFACT" != "$VORPAL_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_ARTIFACT"
             exit 1
           fi
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal-devenv")
+          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal-devenv")
           if [ "$ARTIFACT" != "$VORPAL_DEVENV_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_DEVENV_ARTIFACT"
             exit 1
           fi
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal-process")
+          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal-process")
           if [ "$ARTIFACT" != "$VORPAL_PROCESS_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_PROCESS_ARTIFACT"
             exit 1
           fi
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal-test")
+          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal-test")
           if [ "$ARTIFACT" != "$VORPAL_TEST_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_TEST_ARTIFACT"
             exit 1
           fi
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact --config "Vorpal.go.toml" --name "vorpal-userenv")
+          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal-userenv")
           if [ "$ARTIFACT" != "$VORPAL_USERENV_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_USERENV_ARTIFACT"
             exit 1

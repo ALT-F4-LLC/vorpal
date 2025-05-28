@@ -48,17 +48,17 @@ gh release create \
     {{.X8664Darwin}}.tar.zst \
     {{.X8664Linux}}.tar.zst`
 
+var SYSTEMS = []api.ArtifactSystem{
+	api.ArtifactSystem_AARCH64_DARWIN,
+	api.ArtifactSystem_AARCH64_LINUX,
+	api.ArtifactSystem_X8664_DARWIN,
+	api.ArtifactSystem_X8664_LINUX,
+}
+
 func vorpal(context *config.ConfigContext) (*string, error) {
 	name := "vorpal"
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return language.NewRustBuilder(name, systems).
+	return language.NewRustBuilder(name, SYSTEMS).
 		WithBins([]string{name}).
 		WithIncludes([]string{"cli", "sdk/rust"}).
 		WithPackages([]string{"vorpal-cli", "vorpal-sdk"}).
@@ -73,14 +73,7 @@ func vorpalProcess(context *config.ConfigContext) (*string, error) {
 
 	entrypoint := fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(vorpal))
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return artifact.NewArtifactProcessBuilder("vorpal-process", entrypoint, systems).
+	return artifact.NewArtifactProcessBuilder("vorpal-process", entrypoint, SYSTEMS).
 		WithArguments([]string{
 			"--registry",
 			"http://localhost:50051",
@@ -185,14 +178,7 @@ func vorpalRelease(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return artifact.NewArtifactTaskBuilder("vorpal-release", scriptBuffer.String(), systems).
+	return artifact.NewArtifactTaskBuilder("vorpal-release", scriptBuffer.String(), SYSTEMS).
 		WithArtifacts(artifacts).
 		Build(context)
 }
@@ -293,14 +279,7 @@ func vorpalDevenv(context *config.ConfigContext) (*string, error) {
 		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rustToolchainName),
 	}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return artifact.ScriptDevenv(context, artifacts, environments, "vorpal-shell", nil, systems)
+	return artifact.ScriptDevenv(context, artifacts, environments, "vorpal-shell", nil, SYSTEMS)
 }
 
 func vorpalTest(context *config.ConfigContext) (*string, error) {
@@ -311,14 +290,7 @@ func vorpalTest(context *config.ConfigContext) (*string, error) {
 
 	script := fmt.Sprintf("\n%s/bin/vorpal --version", artifact.GetEnvKey(vorpal))
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
-	return artifact.NewArtifactTaskBuilder("vorpal-test", script, systems).
+	return artifact.NewArtifactTaskBuilder("vorpal-test", script, SYSTEMS).
 		WithArtifacts([]*string{vorpal}).
 		Build(context)
 }
@@ -336,13 +308,6 @@ func vorpalUserenv(context *config.ConfigContext) (*string, error) {
 
 	artifacts := []*string{vorpal}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
 	symlinks := map[string]string{}
 
 	symlinks[fmt.Sprintf("/var/lib/vorpal/store/artifact/output/%s/bin/vorpal", *vorpal)] = fmt.Sprintf("%s/.vorpal/bin/vorpal", homeDir)
@@ -353,7 +318,7 @@ func vorpalUserenv(context *config.ConfigContext) (*string, error) {
 		nil,
 		"vorpal-userenv",
 		symlinks,
-		systems,
+		SYSTEMS,
 	)
 }
 

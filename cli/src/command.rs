@@ -2,14 +2,14 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::env::current_dir;
 use tracing::Level;
+use tracing_subscriber::FmtSubscriber;
 use vorpal_sdk::artifact::system::get_system_default_str;
 
 mod artifact;
 mod init;
-mod inspect;
-mod keys;
 mod start;
 mod store;
+mod system;
 
 fn default_artifact_context() -> String {
     current_dir()
@@ -19,8 +19,13 @@ fn default_artifact_context() -> String {
 }
 
 #[derive(Subcommand)]
-pub enum Command {
-    Artifact {
+pub enum CommandArtifact {
+    Inspect {
+        /// Artifact digest to inspect
+        digest: String,
+    },
+
+    Make {
         #[clap(default_value = "http://localhost:23151", long)]
         agent: String,
 
@@ -36,7 +41,7 @@ pub enum Command {
         #[arg(default_value_t = false, long)]
         export: bool,
 
-        #[arg(long)]
+        /// Artifact name
         name: String,
 
         #[arg(default_value_t = false, long)]
@@ -44,6 +49,9 @@ pub enum Command {
 
         #[arg(default_value_t = false, long)]
         path: bool,
+
+        #[arg(default_value_t = false, long)]
+        rebuild: bool,
 
         #[arg(default_value_t = get_system_default_str(), long)]
         system: String,
@@ -55,15 +63,41 @@ pub enum Command {
         worker: String,
     },
 
-    Init {},
+    Prune {
+        #[arg(default_value_t = true, long)]
+        all: bool,
 
-    #[clap(subcommand)]
-    Keys(CommandKeys),
-
-    Inspect {
         #[arg(long)]
-        digest: String,
+        aliases: bool,
+
+        #[arg(long)]
+        archives: bool,
+
+        #[arg(long)]
+        configs: bool,
+
+        #[arg(long)]
+        outputs: bool,
     },
+}
+
+#[derive(Subcommand)]
+pub enum CommandSystemKeys {
+    Generate {},
+}
+
+#[derive(Subcommand)]
+pub enum CommandSystem {
+    #[clap(subcommand)]
+    Keys(CommandSystemKeys),
+}
+
+#[derive(Subcommand)]
+pub enum Command {
+    #[clap(subcommand)]
+    Artifact(CommandArtifact),
+
+    Init {},
 
     Start {
         #[clap(default_value = "23151", long)]
@@ -78,11 +112,9 @@ pub enum Command {
         #[arg(long)]
         registry_backend_s3_bucket: Option<String>,
     },
-}
 
-#[derive(Subcommand)]
-pub enum CommandKeys {
-    Generate {},
+    #[clap(subcommand)]
+    System(CommandSystem),
 }
 
 #[derive(Parser)]
@@ -101,6 +133,21 @@ struct Cli {
     registry: String,
 }
 
+fn setup_logging(level: Level) {
+    let mut subscriber = FmtSubscriber::builder()
+        .with_target(false)
+        .without_time()
+        .with_max_level(level);
+
+    if [Level::DEBUG, Level::TRACE].contains(&level) {
+        subscriber = subscriber.with_file(true).with_line_number(true);
+    }
+
+    let subscriber = subscriber.finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
+}
+
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
 
@@ -110,44 +157,61 @@ pub async fn run() -> Result<()> {
         registry,
     } = cli;
 
+    setup_logging(level);
+
     match &command {
-        Command::Artifact {
-            agent,
-            alias: artifact_aliases,
-            config: artifact_config,
-            context: artifact_context,
-            export: artifact_export,
-            lockfile_update: artifact_lockfile_update,
-            name: artifact_name,
-            path: artifact_path,
-            system: artifact_system,
-            variable,
-            worker,
-        } => {
-            artifact::run(
+        Command::Artifact(artifact) => match artifact {
+            CommandArtifact::Inspect { digest } => {
+                artifact::inspect::run(digest, level, &registry).await
+            }
+
+            CommandArtifact::Make {
                 agent,
-                artifact_aliases.clone(),
-                artifact_config,
-                artifact_context,
-                *artifact_export,
-                *artifact_lockfile_update,
-                artifact_name,
-                *artifact_path,
-                artifact_system,
-                level,
-                &registry,
-                variable.clone(),
+                alias: artifact_aliases,
+                config: artifact_config,
+                context: artifact_context,
+                export: artifact_export,
+                lockfile_update: artifact_lockfile_update,
+                name: artifact_name,
+                path: artifact_path,
+                rebuild: artifact_rebuild,
+                system: artifact_system,
+                variable,
                 worker,
-            )
-            .await
-        }
+            } => {
+                artifact::make::run(
+                    agent,
+                    artifact_aliases.clone(),
+                    artifact_config,
+                    artifact_context,
+                    *artifact_export,
+                    *artifact_lockfile_update,
+                    artifact_name,
+                    *artifact_path,
+                    *artifact_rebuild,
+                    artifact_system,
+                    &registry,
+                    variable.clone(),
+                    worker,
+                )
+                .await
+            }
+
+            CommandArtifact::Prune {
+                aliases,
+                all,
+                archives,
+                configs,
+                outputs,
+            } => artifact::prune::run(*aliases, *all, *archives, *configs, *outputs).await,
+        },
 
         Command::Init {} => init::run(level).await,
 
-        Command::Inspect { digest } => inspect::run(digest, level, &registry).await,
-
-        Command::Keys(keys) => match keys {
-            CommandKeys::Generate {} => keys::generate().await,
+        Command::System(system) => match system {
+            CommandSystem::Keys(keys) => match keys {
+                CommandSystemKeys::Generate {} => system::keys::generate().await,
+            },
         },
 
         Command::Start {
@@ -157,7 +221,6 @@ pub async fn run() -> Result<()> {
             services,
         } => {
             start::run(
-                level,
                 *port,
                 registry.clone(),
                 registry_backend.clone(),

@@ -17,9 +17,15 @@ Examples of building a Rust application in multiple languages:
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
+    api::artifact::{
+        ArtifactSystem,
+        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    },
     artifact::language::rust::RustArtifactBuilder,
     context::get_context,
 };
+
+const SYSTEMS: [ArtifactSystem; 4] = [Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,7 +33,7 @@ async fn main() -> Result<()> {
     let context = &mut get_context().await?;
 
     // 2. Create artifact
-    RustArtifactBuilder::new("example")
+    RustArtifactBuilder::new("example", SYSTEMS.to_vec())
         .build(context)
         .await?;
 
@@ -44,9 +50,17 @@ package main
 import (
     "log"
 
+	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
 )
+
+var SYSTEMS = []artifact.ArtifactSystem{
+	artifact.ArtifactSystem_AARCH64_DARWIN,
+	artifact.ArtifactSystem_AARCH64_LINUX,
+	artifact.ArtifactSystem_X8664_DARWIN,
+	artifact.ArtifactSystem_X8664_LINUX,
+}
 
 func main() {
     // 1. Get context
@@ -54,7 +68,7 @@ func main() {
 
     // 2. Create artifact
     _, err := language.
-        NewRustBuilder("example").
+        NewRustBuilder("example", SYSTEMS).
         Build(context)
     if err != nil {
         log.Fatalf("failed to build artifact: %v", err)
@@ -69,14 +83,22 @@ func main() {
 
 ```python
 from vorpal_sdk.config import get_context
-from vorpal_sdk.config.artifact.language.rust import rust_artifact
+from vorpal_sdk.api.artifact import ArtifactSystem
+from vorpal_sdk.config.artifact.language.rust import RustArtifactBuilder
+
+SYSTEMS = [
+    ArtifactSystem.AARCH64_DARWIN,
+    ArtifactSystem.AARCH64_LINUX,
+    ArtifactSystem.X8664_DARWIN,
+    ArtifactSystem.X8664_LINUX,
+]
 
 def main():
     # 1. Get context
     context = get_context()
 
     # 2. Create artifact
-    rust_artifact(context, "example")
+    RustArtifactBuilder("example", SYSTEMS).build(context)
 
     # 3. Run context with artifacts
     context.run()
@@ -89,14 +111,22 @@ if __name__ == "__main__":
 
 ```typescript
 import { getContext } from '@vorpal/sdk';
+import { ArtifactSystem } from '@vorpal/sdk/api/artifact';
 import { RustArtifactBuilder } from '@vorpal/sdk/config/artifact/language/rust';
+
+const SYSTEMS = [
+    ArtifactSystem.AARCH64_DARWIN,
+    ArtifactSystem.AARCH64_LINUX,
+    ArtifactSystem.X8664_DARWIN,
+    ArtifactSystem.X8664_LINUX,
+];
 
 async function main() {
     // 1. Get context
     const context = await getContext();
 
     // 2. Create artifact
-    await new RustArtifactBuilder('example')
+    await new RustArtifactBuilder('example', SYSTEMS)
         .build(context);
 
     // 3. Run context with artifacts
@@ -121,27 +151,31 @@ Vorpal uses `artifacts` to describe every aspect of your software in the languag
 
 ```rust
 Artifact {
-    // name of artifact
+    // required: name of artifact
     name: "example".to_string(),
 
-    // source paths for artifact
+    // optional: named aliases
+    aliases: vec![],
+
+    // optional: source paths for artifact
     sources: vec![
         ArtifactSource {
-            name: "example", // required, unique per source
-            excludes: vec![], // optional, to remove files
-            hash: None, // optional, to track changes
-            includes: vec![], // optional, to only use files
-            path: ".", // required, relative location to context
+            name: "example", // required: unique per source
+            path: ".", // required: relative location to context
+            excludes: vec![], // optional: to remove files
+            hash: None, // optional: to track changes
+            includes: vec![], // optional: to only use files
         }
     ],
 
-    // steps of artifact (in order)
+    // required: steps of artifact (in order)
     steps: vec![
         ArtifactStep {
             entrypoint: Some("/bin/bash"), // required, host path for command (can be artifact)
             arguments: vec![], // optional, arguments for entrypoint
             artifacts: vec![], // optional, artifacts included in step
             environments: vec![], // optional, environment variables for step
+            secrets: vec![], // optional, secrets to be added to environment
             script: Some("echo \"hello, world!\" > $VORPAL_OUTPUT/hello_world.txt"), // optional, script passed to executor
         },
     ],
@@ -293,7 +327,7 @@ bash ./script/install.sh
 3. Generate keys for Vorpal:
 
 ```bash
-./target/debug/vorpal keys generate
+./target/debug/vorpal system keys generate
 ```
 
 4. Start services for Vorpal:
@@ -305,7 +339,7 @@ bash ./script/install.sh
 5. Build with Vorpal:
 
 ```bash
-./target/debug/vorpal artifact --name "vorpal"
+./target/debug/vorpal artifact make "vorpal"
 ```
 
 The entire stack of has now been tested by building itself.

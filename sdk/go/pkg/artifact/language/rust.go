@@ -146,6 +146,14 @@ for bin_name in ${{"{"}}bin_names{{"["}}@{{"]"}}{{"}"}}; do
     cp -pv ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
 done`
 
+func stripPrefix(path, prefix string) string {
+	if strings.HasPrefix(path, prefix) {
+		return path[len(prefix)+1:]
+	}
+
+	return path
+}
+
 func NewRustBuilder(name string, systems []api.ArtifactSystem) *RustBuilder {
 	return &RustBuilder{
 		artifacts: make([]*string, 0),
@@ -344,7 +352,9 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 			}
 
 			for _, memberTargetPath := range packageTargetPaths {
-				packagesTargets = append(packagesTargets, memberTargetPath)
+				memberTargetPathRelative := stripPrefix(memberTargetPath, contextPathSource)
+
+				packagesTargets = append(packagesTargets, memberTargetPathRelative)
 			}
 
 			packages = append(packages, member)
