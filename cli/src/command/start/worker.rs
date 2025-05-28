@@ -468,7 +468,7 @@ async fn build_artifact(
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("source 'digest' is missing"))?;
 
-        info!("worker |> pulled source: {}", source_digest);
+        info!("worker |> pull source: {}", source_digest);
     }
 
     // Run steps
