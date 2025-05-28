@@ -219,7 +219,7 @@ impl<'a> RustBuilder<'a> {
                     for member_target_path in package_target_paths.iter() {
                         let member_target_path_relative = member_target_path
                             .strip_prefix(&context_path_source)
-                            .unwrap_or(&member_target_path)
+                            .unwrap_or(member_target_path)
                             .to_path_buf();
 
                         packages_targets.push(member_target_path_relative);
