@@ -409,7 +409,7 @@ async fn prepare_artifact(
 
         artifact_sources.push(source);
 
-        info!("agent |> prepare artifact: {}", source_digest);
+        info!("agent |> prepare artifact source: {}", source_digest);
     }
 
     // TODO: explore using combined sources digest for the artifact

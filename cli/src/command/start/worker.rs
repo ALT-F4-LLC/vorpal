@@ -412,8 +412,6 @@ async fn build_artifact(
 
     let artifact_digest = digest(artifact_json.as_bytes());
 
-    info!("worker |> build start: {}", artifact_digest);
-
     // Check if artifact exists
 
     let artifact_output_path = get_artifact_output_path(&artifact_digest);
@@ -626,7 +624,7 @@ async fn build_artifact(
         )));
     }
 
-    info!("worker |> build finish: {}", artifact_digest);
+    info!("worker |> build artifact: {}", artifact_digest);
 
     Ok(())
 }

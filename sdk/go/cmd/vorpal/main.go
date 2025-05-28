@@ -251,7 +251,6 @@ func vorpalDevenv(context *config.ConfigContext) (*string, error) {
 		"CGO_ENABLED=0",
 		fmt.Sprintf("GOARCH=%s", *goarch),
 		fmt.Sprintf("GOOS=%s", *goos),
-		fmt.Sprintf("PATH=%s", rustToolchainPath),
 	}
 
 	return artifact.ScriptDevenv(context, artifacts, environments, "vorpal-devenv", nil, SYSTEMS)
