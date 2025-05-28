@@ -103,10 +103,10 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- artifact make $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" artifact make --agent "http://localhost:23152" --worker "http://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- start $(VORPAL_FLAGS)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" start --port "23152" $(VORPAL_FLAGS)
 
 vorpal-config-start:
 	cargo $(CARGO_FLAGS) run --bin "vorpal-config" -- start --artifact "$(VORPAL_ARTIFACT)" --port "50051" $(VORPAL_FLAGS)

@@ -9,8 +9,8 @@ use vorpal_sdk::{
         get_env_key, gh, go, goimports, gopls, grpcurl,
         language::go::{get_goarch, get_goos},
         language::rust::RustBuilder,
-        protoc, protoc_gen_go, protoc_gen_go_grpc, rust_toolchain, script, staticcheck,
-        ArtifactArgumentBuilder, ArtifactProcessBuilder, ArtifactTaskBuilder,
+        protoc, protoc_gen_go, protoc_gen_go_grpc, script, staticcheck, ArtifactArgumentBuilder,
+        ArtifactProcessBuilder, ArtifactTaskBuilder,
     },
     context::{get_context, ConfigContext},
 };
@@ -38,7 +38,6 @@ async fn vorpal_devenv(context: &mut ConfigContext) -> Result<String> {
     let protoc = protoc::build(context).await?;
     let protoc_gen_go = protoc_gen_go::build(context).await?;
     let protoc_gen_go_grpc = protoc_gen_go_grpc::build(context).await?;
-    let rust_toolchain = rust_toolchain::build(context).await?;
     let staticcheck = staticcheck::build(context).await?;
 
     let artifacts = vec![
@@ -49,21 +48,8 @@ async fn vorpal_devenv(context: &mut ConfigContext) -> Result<String> {
         protoc,
         protoc_gen_go,
         protoc_gen_go_grpc,
-        rust_toolchain.clone(),
         staticcheck,
     ];
-
-    let rust_toolchain_name = format!(
-        "{}-{}",
-        rust_toolchain::version(),
-        rust_toolchain::target(context.get_system())?,
-    );
-
-    let rust_toolchain_path = format!(
-        "{}/toolchains/{}/bin",
-        get_env_key(&rust_toolchain),
-        rust_toolchain_name
-    );
 
     let goarch = get_goarch(context.get_system())?;
     let goos = get_goos(context.get_system())?;
@@ -72,9 +58,6 @@ async fn vorpal_devenv(context: &mut ConfigContext) -> Result<String> {
         "CGO_ENABLED=0".to_string(),
         format!("GOARCH={}", goarch),
         format!("GOOS={}", goos),
-        format!("PATH={}", rust_toolchain_path),
-        format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
-        format!("RUSTUP_TOOLCHAIN={}", rust_toolchain_name),
     ];
 
     script::devenv(

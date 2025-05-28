@@ -219,11 +219,6 @@ func vorpalDevenv(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	rustToolchain, err := artifact.RustToolchain(context)
-	if err != nil {
-		return nil, err
-	}
-
 	staticcheck, err := artifact.Staticcheck(context)
 	if err != nil {
 		return nil, err
@@ -237,28 +232,10 @@ func vorpalDevenv(context *config.ConfigContext) (*string, error) {
 		protoc,
 		protocGenGo,
 		protocGenGoGRPC,
-		rustToolchain,
 		staticcheck,
 	}
 
 	contextTarget := context.GetTarget()
-
-	rustToolchainTarget, err := artifact.RustToolchainTarget(contextTarget)
-	if err != nil {
-		return nil, err
-	}
-
-	rustToolchainName := fmt.Sprintf(
-		"%s-%s",
-		artifact.RustToolchainVersion(),
-		*rustToolchainTarget,
-	)
-
-	rustToolchainPath := fmt.Sprintf(
-		"%s/toolchains/%s/bin",
-		artifact.GetEnvKey(rustToolchain),
-		rustToolchainName,
-	)
 
 	goarch, err := language.GetGOARCH(contextTarget)
 	if err != nil {
@@ -275,11 +252,9 @@ func vorpalDevenv(context *config.ConfigContext) (*string, error) {
 		fmt.Sprintf("GOARCH=%s", *goarch),
 		fmt.Sprintf("GOOS=%s", *goos),
 		fmt.Sprintf("PATH=%s", rustToolchainPath),
-		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(rustToolchain)),
-		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rustToolchainName),
 	}
 
-	return artifact.ScriptDevenv(context, artifacts, environments, "vorpal-shell", nil, SYSTEMS)
+	return artifact.ScriptDevenv(context, artifacts, environments, "vorpal-devenv", nil, SYSTEMS)
 }
 
 func vorpalTest(context *config.ConfigContext) (*string, error) {
