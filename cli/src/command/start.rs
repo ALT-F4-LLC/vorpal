@@ -44,7 +44,7 @@ pub async fn run(
     if services.contains(&"agent".to_string()) {
         let service = AgentServiceServer::new(AgentServer::new(registry.clone()));
 
-        info!("agent service: [::]:{}", port);
+        info!("agent |> service: [::]:{}", port);
 
         router = router.add_service(service);
     }
@@ -70,7 +70,7 @@ pub async fn run(
         let backend_artifact =
             backend_artifact(&registry_backend, registry_backend_s3_bucket).await?;
 
-        info!("registry service: [::]:{}", port);
+        info!("registry |> service: [::]:{}", port);
 
         router = router.add_service(ArchiveServiceServer::new(ArchiveServer::new(
             backend_archive,
@@ -84,7 +84,7 @@ pub async fn run(
     if services.contains(&"worker".to_string()) {
         let service = WorkerServiceServer::new(WorkerServer::new(registry.to_owned()));
 
-        info!("worker service: [::]:{}", port);
+        info!("worker |> service: [::]:{}", port);
 
         router = router.add_service(service);
     }
