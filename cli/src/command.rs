@@ -62,9 +62,20 @@ pub enum CommandArtifact {
         #[clap(default_value = "http://localhost:23151", long)]
         worker: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum CommandSystemKeys {
+    Generate {},
+}
+
+#[derive(Subcommand)]
+pub enum CommandSystem {
+    #[clap(subcommand)]
+    Keys(CommandSystemKeys),
 
     Prune {
-        #[arg(default_value_t = true, long)]
+        #[arg(default_value_t = false, long)]
         all: bool,
 
         #[arg(long)]
@@ -79,17 +90,6 @@ pub enum CommandArtifact {
         #[arg(long)]
         outputs: bool,
     },
-}
-
-#[derive(Subcommand)]
-pub enum CommandSystemKeys {
-    Generate {},
-}
-
-#[derive(Subcommand)]
-pub enum CommandSystem {
-    #[clap(subcommand)]
-    Keys(CommandSystemKeys),
 }
 
 #[derive(Subcommand)]
@@ -196,14 +196,6 @@ pub async fn run() -> Result<()> {
                 )
                 .await
             }
-
-            CommandArtifact::Prune {
-                aliases,
-                all,
-                archives,
-                configs,
-                outputs,
-            } => artifact::prune::run(*aliases, *all, *archives, *configs, *outputs).await,
         },
 
         Command::Init {} => init::run(level).await,
@@ -212,6 +204,14 @@ pub async fn run() -> Result<()> {
             CommandSystem::Keys(keys) => match keys {
                 CommandSystemKeys::Generate {} => system::keys::generate().await,
             },
+
+            CommandSystem::Prune {
+                aliases,
+                all,
+                archives,
+                configs,
+                outputs,
+            } => system::prune::run(*aliases, *all, *archives, *configs, *outputs).await,
         },
 
         Command::Start {
