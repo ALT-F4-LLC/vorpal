@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::env::current_dir;
-use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
+use tracing::{subscriber, Level};
+use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::artifact::system::get_system_default_str;
 
 mod artifact;
@@ -133,21 +133,6 @@ struct Cli {
     registry: String,
 }
 
-fn setup_logging(level: Level) {
-    let mut subscriber = FmtSubscriber::builder()
-        .with_target(false)
-        .without_time()
-        .with_max_level(level);
-
-    if [Level::DEBUG, Level::TRACE].contains(&level) {
-        subscriber = subscriber.with_file(true).with_line_number(true);
-    }
-
-    let subscriber = subscriber.finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber");
-}
-
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
 
@@ -157,7 +142,21 @@ pub async fn run() -> Result<()> {
         registry,
     } = cli;
 
-    setup_logging(level);
+    let subscriber_writer = std::io::stderr.with_max_level(level);
+
+    let mut subscriber = FmtSubscriber::builder()
+        .with_max_level(level)
+        .with_target(false)
+        .with_writer(subscriber_writer)
+        .without_time();
+
+    if [Level::DEBUG, Level::TRACE].contains(&level) {
+        subscriber = subscriber.with_file(true).with_line_number(true);
+    }
+
+    let subscriber = subscriber.finish();
+
+    subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     match &command {
         Command::Artifact(artifact) => match artifact {
