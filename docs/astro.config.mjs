@@ -4,6 +4,8 @@ import starlight from '@astrojs/starlight';
 
 // https://astro.build/config
 export default defineConfig({
+  site: 'https://alt-f4-llc.github.io',
+  base: 'vorpal',
 	integrations: [
 		starlight({
 			title: 'Vorpal',
