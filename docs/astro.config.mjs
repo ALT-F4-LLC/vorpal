@@ -9,6 +9,9 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Vorpal',
+      editLink: {
+        baseUrl: 'https://github.com/withastro/starlight/edit/main/docs/',
+      },
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/ALT-F4-LLC/vorpal' }],
 			sidebar: [
 				{

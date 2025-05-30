@@ -18,19 +18,27 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Next steps
+## Features
 
 <CardGrid>
-	<Card title="Update content" icon="pencil">
-		Edit `src/content/docs/index.mdx` to see this page change.
+	<Card title="Reproducible builds" icon="puzzle">
+		Thanks to the sandboxed nature of artifacts in Vorpal, builds are entirely
+    reproducible from the get-go. Be rid of pesky _works on my machine!_
+    problems.
 	</Card>
-	<Card title="Add new content" icon="add-document">
-		Add Markdown or MDX files to `src/content/docs` to create new pages.
+	<Card title="Ship your code" icon="rocket">
+		Vorpal provides a registry component that can be used to ship code
+    throughout your infrastructure, whether that's the public registry, or your
+    own securely self-hosted one.
 	</Card>
-	<Card title="Configure your site" icon="setting">
-		Edit your `sidebar` and other config in `astro.config.mjs`.
+	<Card title="Secrets supported!" icon="setting">
+		Vorpal comes with powerful build-time secrets injection out of the box. Use
+    the official implementation or a third-party one for whatever secrets
+    platform you use.
 	</Card>
-	<Card title="Read the docs" icon="open-book">
-		Learn more in [the Starlight Docs](https://starlight.astro.build/).
+	<Card title="Verify everything" icon="approve-check-circle">
+		Built with attestations & signing in mind, Vorpal provides the ability to
+    verify the source and artifacts of your builds came from a trusted host, and
+    was not tampered with.
 	</Card>
 </CardGrid>
