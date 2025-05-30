@@ -1,4 +1,4 @@
-name: vorpal
+name: docs
 
 on:
   pull_request:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: withastro/action@v3
+        with:
+          package-manager: bun
 
   deploy:
     needs: build
