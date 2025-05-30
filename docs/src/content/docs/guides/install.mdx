@@ -1,14 +1,31 @@
 ---
-title: Installing Vorpal
+title: Installation
 description: A guide telling you how to go about installing Vorpal.
 ---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+<Aside>
+Eventually, Vorpal will have an installation script that will handle this for
+you! Keep an eye on our GitHub
+</Aside>
 
 This guide will walk you through installing Vorpal.
 
 ## Prerequisites
 
-- Bubblewrap
-- Docker and the `buildx` plugin
+<Tabs>
+  <TabItem label="Linux">    
+    - [Bubblewrap](https://github.com/containers/bubblewrap)
+    - [Docker](https://docs.docker.com/get-started/get-docker/) and the `buildx` plugin
+    - `curl`
+  </TabItem>
+
+  <TabItem label="macOS">
+    - [Bubblewrap](https://github.com/containers/bubblewrap)
+    - [Docker](https://docs.docker.com/get-started/get-docker/) and the `buildx` plugin
+  </TabItem>
+</Tabs>
 
 ## Setting up the `/var/lib/vorpal` directory
 
@@ -48,3 +65,17 @@ rm vorpal.tar.gz
 ### From source
 
 TODO
+
+## Post-install
+
+Now you've installed Vorpal, the last step to perform is to create some
+cryptographic keys to sign your artifacts & sources with. **This is required.**
+If you do not run this, you will not be able to use the tool.
+
+To create the keys, just run the following:
+
+```bash
+vorpal system keys generate
+```
+
+That's it! You're ready to manage your software lifecycle with Vorpal.
