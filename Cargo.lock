@@ -2245,18 +2245,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "petgraph"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a98c6720655620a521dcc722d0ad66cd8afd5d86e34a89ef691c50b7b24de06"
-dependencies = [
- "fixedbitset",
- "hashbrown",
- "indexmap",
- "serde",
-]
-
-[[package]]
 name = "pin-project"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2398,7 +2386,7 @@ dependencies = [
  "log",
  "multimap",
  "once_cell",
- "petgraph 0.7.1",
+ "petgraph",
  "prettyplease",
  "prost",
  "prost-types",
@@ -3719,7 +3707,7 @@ dependencies = [
  "futures-lite",
  "infer",
  "inquire",
- "petgraph 0.8.1",
+ "petgraph",
  "port-selector",
  "reqwest",
  "rsa",
