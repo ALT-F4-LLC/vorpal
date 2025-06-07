@@ -6,6 +6,7 @@ CARGO_DIR := $(WORK_DIR)/.cargo
 DIST_DIR := $(WORK_DIR)/dist
 VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_ARTIFACT := vorpal
+VORPAL_CONTEXT := .
 VORPAL_DIR := /var/lib/vorpal
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
@@ -103,10 +104,10 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" artifact make --agent "http://localhost:23152" --worker "http://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" artifact make --agent "http://localhost:23152" --worker "http://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT) $(VORPAL_CONTEXT)
 
 vorpal-start:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" start --port "23152" $(VORPAL_FLAGS)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" services start --port "23152" $(VORPAL_FLAGS)
 
 vorpal-config-start:
 	cargo $(CARGO_FLAGS) run --bin "vorpal-config" -- start --artifact "$(VORPAL_ARTIFACT)" --port "50051" $(VORPAL_FLAGS)
@@ -128,7 +129,7 @@ lima-sync:
 	limactl shell "vorpal-$(LIMA_ARCH)" ./script/lima.sh sync
 
 lima-vorpal:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal artifact make $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal artifact make $(VORPAL_FLAGS) $(VORPAL_ARTIFACT) $(VORPAL_CONTEXT)'
 
 lima-vorpal-start:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal start $(VORPAL_FLAGS)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal services start $(VORPAL_FLAGS)'

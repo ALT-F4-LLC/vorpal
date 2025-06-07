@@ -1,7 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use petgraph::{algo::toposort, graphmap::DiGraphMap};
 use port_selector::random_free_port;
-use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -12,31 +11,6 @@ use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tonic::transport::Channel;
 use tracing::{info, warn};
 use vorpal_sdk::api::{artifact::Artifact, context::context_service_client::ContextServiceClient};
-
-#[derive(Deserialize)]
-pub struct VorpalConfigGo {
-    pub directory: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct VorpalConfigRust {
-    pub bin: Option<String>,
-    pub packages: Option<Vec<String>>,
-}
-
-#[derive(Deserialize)]
-pub struct VorpalConfigSource {
-    pub includes: Option<Vec<String>>,
-}
-
-#[derive(Deserialize)]
-pub struct VorpalConfig {
-    pub go: Option<VorpalConfigGo>,
-    pub language: Option<String>,
-    pub name: Option<String>,
-    pub rust: Option<VorpalConfigRust>,
-    pub source: Option<VorpalConfigSource>,
-}
 
 pub async fn get_artifacts(
     artifact: &Artifact,
@@ -98,35 +72,35 @@ pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Ve
 
 #[allow(clippy::too_many_arguments)]
 pub async fn start(
-    agent: String,
-    artifact: String,
     artifact_context: PathBuf,
     artifact_lockfile_update: bool,
-    file: String,
-    registry: String,
-    system: String,
-    variable: Vec<String>,
+    artifact_name: String,
+    artifact_system: String,
+    artifact_variable: Vec<String>,
+    config_file: String,
+    service_agent: String,
+    service_registry: String,
 ) -> Result<(Child, ContextServiceClient<Channel>)> {
     let command_artifact_context = artifact_context.display().to_string();
     let command_port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
     let command_port = command_port.to_string();
 
-    let mut command = process::Command::new(file.clone());
+    let mut command = process::Command::new(config_file.clone());
 
     let command_arguments = vec![
         "start",
         "--agent",
-        &agent,
+        &service_agent,
         "--artifact",
-        &artifact,
+        &artifact_name,
         "--artifact-context",
         &command_artifact_context,
         "--port",
         &command_port,
         "--registry",
-        &registry,
+        &service_registry,
         "--system",
-        &system,
+        &artifact_system,
     ];
 
     command.args(command_arguments);
@@ -135,7 +109,7 @@ pub async fn start(
         command.arg("--lockfile-update");
     }
 
-    for var in variable.iter() {
+    for var in artifact_variable.iter() {
         command.arg("--variable").arg(var);
     }
 
