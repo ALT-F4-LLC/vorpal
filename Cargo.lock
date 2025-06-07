@@ -3714,7 +3714,7 @@ dependencies = [
  "infer",
  "inquire",
  "path-clean",
- "petgraph 0.8.1",
+ "petgraph",
  "port-selector",
  "reqwest",
  "rsa",
