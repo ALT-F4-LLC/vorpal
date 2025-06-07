@@ -170,7 +170,7 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          ./dist/vorpal start \
+          ./dist/vorpal services start \
             --registry-backend "s3" \
             --registry-backend-s3-bucket "altf4llc-vorpal-registry" \
             > ./dist/worker_output.log 2>&1 &
