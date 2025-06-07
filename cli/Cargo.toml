@@ -20,6 +20,7 @@ filetime = { version = "0" }
 futures-lite = { version = "2" }
 infer = { version = "0" }
 inquire = { version = "0" }
+path-clean = { version = "1" }
 petgraph = { version = "0" }
 port-selector = { version = "0" }
 reqwest = { default-features = false, features = ["json", "rustls-tls"], version = "0" }

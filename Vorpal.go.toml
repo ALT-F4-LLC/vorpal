@@ -1,7 +1,8 @@
+[config]
 language = "go"
 
-[source]
+[config.source]
 includes = ["sdk/go"]
 
-[go]
+[config.source.go]
 directory = "sdk/go/cmd/vorpal"
