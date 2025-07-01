@@ -12,6 +12,13 @@ Vorpal uses declarative "bring-your-own-language" configurations to build softwa
 
 Examples of building a Rust application in multiple languages:
 
+## Install
+
+```
+curl -fsSL https://github.com/ALT-F4-LLC/vorpal/blob/main/script/install.sh -o install.sh
+sh install.sh
+```
+
 ### Rust
 
 ```rust

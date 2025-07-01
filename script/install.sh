@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+## TODO: Support installing only specific components (registry, worker, etc.)
+
 # Environment variables
 INSTALL_ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')
 INSTALL_DIR="$HOME/.vorpal"
@@ -48,7 +50,7 @@ echo -e "|> Generating a new keypair..."
 if [[ $INSTALL_OS == "darwin" ]]; then
 echo -e "|> Setting up LaunchAgent for macOS..."
 
-cat <<EOF > "com.altf4llc.vorpal.plist"
+cat <<EOF > "$HOME/Library/LaunchAgents/com.altf4llc.vorpal.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
 "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -76,16 +78,32 @@ cat <<EOF > "com.altf4llc.vorpal.plist"
 </plist>
 EOF
 
-# Move the plist file to the LaunchAgents directory
-mv com.altf4llc.vorpal.plist ~/Library/LaunchAgents/
-chmod 644 ~/Library/LaunchAgents/com.altf4llc.vorpal.plist
-
-echo -e "|> Starting Vorpal service..."
-
 launchctl unload "$HOME/Library/LaunchAgents/com.altf4llc.vorpal.plist"
 launchctl load "$HOME/Library/LaunchAgents/com.altf4llc.vorpal.plist"
-
-echo -e "|> Vorpal service(s) started"
 fi
 
-## TODO: implement Linux service setup
+# Setup systemd service for Linux
+if [[ $INSTALL_OS == "linux" ]]; then
+echo -e "|> Setting up systemd service for Linux..."
+
+cat <<EOF | sudo tee /etc/systemd/system/vorpal.service
+[Unit]
+Description=Vorpal
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${INSTALL_DIR}/bin/vorpal start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable vorpal.service
+sudo systemctl start vorpal.service
+fi
+
+echo -e "|> Vorpal installed and started."

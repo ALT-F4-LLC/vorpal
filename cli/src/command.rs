@@ -2,7 +2,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use path_clean::PathClean;
 use serde::Deserialize;
-use std::{env::current_dir, path::PathBuf, process::exit};
+use std::{
+    env::{current_dir, var},
+    path::PathBuf,
+    process::exit,
+};
 use tokio::fs::read;
 use toml::from_str;
 use tracing::{error, subscriber, Level};
@@ -17,6 +21,149 @@ mod system;
 
 fn get_default_address() -> String {
     "http://localhost:23151".to_string()
+}
+
+async fn load_vorpal_toml(path: PathBuf) -> Option<VorpalToml> {
+    if !path.exists() {
+        return None;
+    }
+
+    match read(&path).await {
+        Ok(toml_data_bytes) => {
+            let toml_data_str = String::from_utf8_lossy(&toml_data_bytes);
+            match from_str::<VorpalToml>(&toml_data_str) {
+                Ok(toml) => Some(toml),
+                Err(e) => {
+                    error!("Failed to parse config at {}: {}", path.display(), e);
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to read config at {}: {}", path.display(), e);
+            None
+        }
+    }
+}
+
+fn get_home_config_path() -> Option<PathBuf> {
+    var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".vorpal").join("Vorpal.toml"))
+}
+
+fn merge_configs(
+    home_config: Option<VorpalToml>,
+    project_config: Option<VorpalToml>,
+) -> Option<VorpalToml> {
+    match (home_config, project_config) {
+        (None, None) => None,
+        (Some(home), None) => Some(home),
+        (None, Some(project)) => Some(project),
+        (Some(home), Some(project)) => {
+            // Project config takes precedence over home config
+            let merged_config = match (home.config, project.config) {
+                (None, None) => None,
+                (Some(home_cfg), None) => Some(home_cfg),
+                (None, Some(project_cfg)) => Some(project_cfg),
+                (Some(home_cfg), Some(project_cfg)) => Some(VorpalTomlConfig {
+                    language: project_cfg.language.or(home_cfg.language),
+                    name: project_cfg.name.or(home_cfg.name),
+                    source: merge_config_sources(home_cfg.source, project_cfg.source),
+                }),
+            };
+
+            Some(VorpalToml {
+                config: merged_config,
+                registry: project.registry.or(home.registry),
+            })
+        }
+    }
+}
+
+fn merge_config_sources(
+    home_source: Option<VorpalTomlConfigSource>,
+    project_source: Option<VorpalTomlConfigSource>,
+) -> Option<VorpalTomlConfigSource> {
+    match (home_source, project_source) {
+        (None, None) => None,
+        (Some(home), None) => Some(home),
+        (None, Some(project)) => Some(project),
+        (Some(home), Some(project)) => Some(VorpalTomlConfigSource {
+            go: merge_go_configs(home.go, project.go),
+            includes: merge_includes(home.includes, project.includes),
+            rust: merge_rust_configs(home.rust, project.rust),
+        }),
+    }
+}
+
+fn merge_go_configs(
+    home_go: Option<VorpalTomlConfigSourceGo>,
+    project_go: Option<VorpalTomlConfigSourceGo>,
+) -> Option<VorpalTomlConfigSourceGo> {
+    match (home_go, project_go) {
+        (None, None) => None,
+        (Some(home), None) => Some(home),
+        (None, Some(project)) => Some(project),
+        (Some(home), Some(project)) => Some(VorpalTomlConfigSourceGo {
+            directory: project.directory.or(home.directory),
+        }),
+    }
+}
+
+fn merge_rust_configs(
+    home_rust: Option<VorpalConfigSourceRust>,
+    project_rust: Option<VorpalConfigSourceRust>,
+) -> Option<VorpalConfigSourceRust> {
+    match (home_rust, project_rust) {
+        (None, None) => None,
+        (Some(home), None) => Some(home),
+        (None, Some(project)) => Some(project),
+        (Some(home), Some(project)) => Some(VorpalConfigSourceRust {
+            bin: project.bin.or(home.bin),
+            packages: merge_packages(home.packages, project.packages),
+        }),
+    }
+}
+
+fn merge_includes(
+    home_includes: Option<Vec<String>>,
+    project_includes: Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    match (home_includes, project_includes) {
+        (None, None) => None,
+        (Some(home), None) => Some(home),
+        (None, Some(project)) => Some(project),
+        (Some(mut home), Some(project)) => {
+            // Combine includes, with project includes taking precedence for duplicates
+            for include in project {
+                if !home.contains(&include) {
+                    home.push(include);
+                }
+            }
+            Some(home)
+        }
+    }
+}
+
+fn merge_packages(
+    home_packages: Option<Vec<String>>,
+    project_packages: Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    match (home_packages, project_packages) {
+        (None, None) => None,
+        (Some(home), None) => Some(home),
+        (None, Some(project)) => Some(project),
+        (Some(mut home), Some(project)) => {
+            // Combine packages, with project packages taking precedence for duplicates
+            for package in project {
+                if !home.contains(&package) {
+                    home.push(package);
+                }
+            }
+            Some(home)
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -138,8 +285,8 @@ struct Cli {
     level: Level,
 
     /// Registry address
-    #[arg(default_value_t = get_default_address(), long)]
-    registry: String,
+    #[arg(long)]
+    registry: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -170,6 +317,7 @@ struct VorpalTomlConfig {
 #[derive(Clone, Debug, Deserialize)]
 struct VorpalToml {
     config: Option<VorpalTomlConfig>,
+    registry: Option<String>,
 }
 
 pub async fn run() -> Result<()> {
@@ -178,7 +326,7 @@ pub async fn run() -> Result<()> {
     let Cli {
         command,
         level,
-        registry,
+        registry: cli_registry,
     } = cli;
 
     // Set up tracing subscriber
@@ -203,7 +351,23 @@ pub async fn run() -> Result<()> {
         Command::Artifact(artifact) => match artifact {
             CommandArtifact::Init {} => init::run().await,
 
-            CommandArtifact::Inspect { digest } => artifact::inspect::run(digest, &registry).await,
+            CommandArtifact::Inspect { digest } => {
+                let mut registry = get_default_address();
+
+                if let Some(home_path) = get_home_config_path() {
+                    if let Some(home_config) = load_vorpal_toml(home_path).await {
+                        if let Some(home_registry) = home_config.registry {
+                            registry = home_registry;
+                        }
+                    }
+                }
+
+                if let Some(r) = cli_registry {
+                    registry = r;
+                }
+
+                artifact::inspect::run(digest, &registry).await
+            }
 
             CommandArtifact::Make {
                 agent,
@@ -225,7 +389,6 @@ pub async fn run() -> Result<()> {
                 }
 
                 // Set default configuration
-
                 let mut config_language = "rust".to_string();
                 let mut config_name = "vorpal".to_string();
                 let mut config_source_go_directory = None;
@@ -233,7 +396,12 @@ pub async fn run() -> Result<()> {
                 let mut config_source_rust_bin = None;
                 let mut config_source_rust_packages = None;
 
-                // Load configuration values
+                // Load configuration values from home and project
+                let home_config = if let Some(home_path) = get_home_config_path() {
+                    load_vorpal_toml(home_path).await
+                } else {
+                    None
+                };
 
                 let config_absolute_path = match config.is_absolute() {
                     true => config.to_path_buf(),
@@ -244,15 +412,30 @@ pub async fn run() -> Result<()> {
                 }
                 .clean();
 
-                if config_absolute_path.exists() {
-                    let toml_data_bytes = read(config_absolute_path)
-                        .await
-                        .expect("failed to read config");
-                    let toml_data_str = String::from_utf8_lossy(&toml_data_bytes);
-                    let toml: VorpalToml =
-                        from_str(&toml_data_str).expect("failed to parse config");
+                let project_config = load_vorpal_toml(config_absolute_path).await;
 
-                    if let Some(config) = toml.config {
+                // Determine final registry value
+                let mut registry = get_default_address();
+
+                if let Some(ref hc) = home_config {
+                    if let Some(ref r) = hc.registry {
+                        registry = r.clone();
+                    }
+                }
+
+                if let Some(ref pc) = project_config {
+                    if let Some(ref r) = pc.registry {
+                        registry = r.clone();
+                    }
+                }
+
+                if let Some(ref r) = cli_registry {
+                    registry = r.clone();
+                }
+
+                // Merge configurations (project overrides home)
+                if let Some(merged_toml) = merge_configs(home_config, project_config) {
+                    if let Some(config) = merged_toml.config {
                         if let Some(language) = config.language {
                             config_language = language;
                         }
@@ -339,6 +522,20 @@ pub async fn run() -> Result<()> {
                 registry_backend_s3_bucket,
                 services,
             } => {
+                let mut registry = get_default_address();
+
+                if let Some(home_path) = get_home_config_path() {
+                    if let Some(home_config) = load_vorpal_toml(home_path).await {
+                        if let Some(home_registry) = home_config.registry {
+                            registry = home_registry;
+                        }
+                    }
+                }
+
+                if let Some(r) = cli_registry {
+                    registry = r;
+                }
+
                 start::run(
                     *port,
                     registry,
