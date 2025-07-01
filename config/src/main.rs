@@ -24,6 +24,7 @@ async fn vorpal(context: &mut ConfigContext) -> Result<String> {
         .with_bins(vec![name])
         .with_includes(vec!["cli", "sdk/rust"])
         .with_packages(vec!["vorpal-cli", "vorpal-sdk"])
+        .with_tests(true)
         .build(context)
         .await?;
 
