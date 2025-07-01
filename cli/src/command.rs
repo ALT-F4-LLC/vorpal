@@ -562,3 +562,329 @@ pub async fn run() -> Result<()> {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use tempfile::TempDir;
+    use tokio::fs::write;
+
+    fn create_home_config() -> VorpalToml {
+        VorpalToml {
+            config: Some(VorpalTomlConfig {
+                language: Some("go".to_string()),
+                name: Some("home-app".to_string()),
+                source: Some(VorpalTomlConfigSource {
+                    go: Some(VorpalTomlConfigSourceGo {
+                        directory: Some("home-go".to_string()),
+                    }),
+                    includes: Some(vec!["home-include1".to_string(), "shared".to_string()]),
+                    rust: Some(VorpalConfigSourceRust {
+                        bin: Some("home-bin".to_string()),
+                        packages: Some(vec!["home-pkg1".to_string()]),
+                    }),
+                }),
+            }),
+            registry: Some("http://home-registry:8080".to_string()),
+        }
+    }
+
+    fn create_project_config() -> VorpalToml {
+        VorpalToml {
+            config: Some(VorpalTomlConfig {
+                language: Some("rust".to_string()),
+                name: Some("project-app".to_string()),
+                source: Some(VorpalTomlConfigSource {
+                    go: Some(VorpalTomlConfigSourceGo {
+                        directory: Some("project-go".to_string()),
+                    }),
+                    includes: Some(vec!["project-include1".to_string(), "shared".to_string()]),
+                    rust: Some(VorpalConfigSourceRust {
+                        bin: Some("project-bin".to_string()),
+                        packages: Some(vec!["project-pkg1".to_string()]),
+                    }),
+                }),
+            }),
+            registry: Some("http://project-registry:8080".to_string()),
+        }
+    }
+
+    #[test]
+    fn test_get_home_config_path() {
+        let original_home = env::var("HOME");
+
+        env::set_var("HOME", "/test/home");
+
+        let path = get_home_config_path();
+
+        assert_eq!(path, Some(PathBuf::from("/test/home/.vorpal/Vorpal.toml")));
+
+        env::remove_var("HOME");
+
+        let path = get_home_config_path();
+
+        assert_eq!(path, None);
+
+        // Restore original HOME if it existed
+        if let Ok(home) = original_home {
+            env::set_var("HOME", home);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_vorpal_toml_nonexistent_file() {
+        let path = PathBuf::from("/nonexistent/path/Vorpal.toml");
+        let result = load_vorpal_toml(path).await;
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_load_vorpal_toml_valid_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("Vorpal.toml");
+        let toml_content = r#"registry = "http://test-registry:8080"
+
+[config]
+language = "rust"
+name = "test-app"
+
+[config.source]
+includes = ["src", "tests"]
+
+[config.source.rust]
+bin = "test-bin"
+packages = ["pkg1", "pkg2"]
+"#;
+
+        write(&config_path, toml_content).await.unwrap();
+
+        let result = load_vorpal_toml(config_path).await;
+
+        assert!(result.is_some());
+
+        let config = result.unwrap();
+
+        assert_eq!(
+            config.registry,
+            Some("http://test-registry:8080".to_string())
+        );
+
+        assert!(config.config.is_some());
+
+        let config_section = config.config.unwrap();
+
+        assert_eq!(config_section.language, Some("rust".to_string()));
+        assert_eq!(config_section.name, Some("test-app".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_load_vorpal_toml_invalid_toml() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("Vorpal.toml");
+        let invalid_toml = "invalid toml content [[[";
+
+        write(&config_path, invalid_toml).await.unwrap();
+
+        let result = load_vorpal_toml(config_path).await;
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_merge_configs_both_none() {
+        let result = merge_configs(None, None);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_merge_configs_home_only() {
+        let home_config = create_home_config();
+        let result = merge_configs(Some(home_config.clone()), None);
+
+        assert!(result.is_some());
+
+        let merged = result.unwrap();
+
+        assert_eq!(merged.registry, home_config.registry);
+        assert_eq!(merged.config.unwrap().language, Some("go".to_string()));
+    }
+
+    #[test]
+    fn test_merge_configs_project_only() {
+        let project_config = create_project_config();
+        let result = merge_configs(None, Some(project_config.clone()));
+
+        assert!(result.is_some());
+
+        let merged = result.unwrap();
+
+        assert_eq!(merged.registry, project_config.registry);
+        assert_eq!(merged.config.unwrap().language, Some("rust".to_string()));
+    }
+
+    #[test]
+    fn test_merge_configs_project_overrides_home() {
+        let home_config = create_home_config();
+        let project_config = create_project_config();
+        let result = merge_configs(Some(home_config), Some(project_config));
+
+        assert!(result.is_some());
+
+        let merged = result.unwrap();
+
+        // Project registry should override home registry
+        assert_eq!(
+            merged.registry,
+            Some("http://project-registry:8080".to_string())
+        );
+
+        let config = merged.config.unwrap();
+
+        // Project values should override home values
+        assert_eq!(config.language, Some("rust".to_string()));
+        assert_eq!(config.name, Some("project-app".to_string()));
+
+        let source = config.source.unwrap();
+
+        // Go directory should be from project
+        assert_eq!(source.go.unwrap().directory, Some("project-go".to_string()));
+
+        // Rust bin should be from project
+        let rust_config = source.rust.unwrap();
+
+        assert_eq!(rust_config.bin, Some("project-bin".to_string()));
+
+        // Includes should contain both home and project values
+        let includes = source.includes.unwrap();
+
+        assert!(includes.contains(&"home-include1".to_string()));
+        assert!(includes.contains(&"project-include1".to_string()));
+        assert!(includes.contains(&"shared".to_string()));
+
+        assert_eq!(includes.len(), 3); // No duplicates of "shared"
+    }
+
+    #[test]
+    fn test_merge_configs_partial_home_config() {
+        let home_config = VorpalToml {
+            config: Some(VorpalTomlConfig {
+                language: Some("go".to_string()),
+                name: None,
+                source: None,
+            }),
+            registry: Some("http://home-registry:8080".to_string()),
+        };
+
+        let project_config = VorpalToml {
+            config: Some(VorpalTomlConfig {
+                language: None,
+                name: Some("project-app".to_string()),
+                source: Some(VorpalTomlConfigSource {
+                    go: None,
+                    includes: Some(vec!["project-include".to_string()]),
+                    rust: None,
+                }),
+            }),
+            registry: None,
+        };
+
+        let result = merge_configs(Some(home_config), Some(project_config));
+
+        assert!(result.is_some());
+
+        let merged = result.unwrap();
+
+        assert_eq!(
+            merged.registry,
+            Some("http://home-registry:8080".to_string())
+        );
+
+        let config = merged.config.unwrap();
+
+        assert_eq!(config.language, Some("go".to_string())); // From home
+        assert_eq!(config.name, Some("project-app".to_string())); // From project
+
+        let source = config.source.unwrap();
+
+        assert_eq!(source.includes, Some(vec!["project-include".to_string()]));
+    }
+
+    #[test]
+    fn test_merge_includes_combines_without_duplicates() {
+        let home_includes = Some(vec!["home1".to_string(), "shared".to_string()]);
+        let project_includes = Some(vec!["project1".to_string(), "shared".to_string()]);
+        let result = merge_includes(home_includes, project_includes);
+
+        assert!(result.is_some());
+
+        let merged = result.unwrap();
+
+        assert_eq!(merged.len(), 3);
+
+        assert!(merged.contains(&"home1".to_string()));
+        assert!(merged.contains(&"project1".to_string()));
+        assert!(merged.contains(&"shared".to_string()));
+    }
+
+    #[test]
+    fn test_merge_packages_combines_without_duplicates() {
+        let home_packages = Some(vec!["home-pkg".to_string(), "shared-pkg".to_string()]);
+        let project_packages = Some(vec!["project-pkg".to_string(), "shared-pkg".to_string()]);
+        let result = merge_packages(home_packages, project_packages);
+
+        assert!(result.is_some());
+
+        let merged = result.unwrap();
+
+        assert_eq!(merged.len(), 3);
+
+        assert!(merged.contains(&"home-pkg".to_string()));
+        assert!(merged.contains(&"project-pkg".to_string()));
+        assert!(merged.contains(&"shared-pkg".to_string()));
+    }
+
+    #[test]
+    fn test_merge_go_configs_project_overrides() {
+        let home_go = Some(VorpalTomlConfigSourceGo {
+            directory: Some("home-dir".to_string()),
+        });
+
+        let project_go = Some(VorpalTomlConfigSourceGo {
+            directory: Some("project-dir".to_string()),
+        });
+
+        let result = merge_go_configs(home_go, project_go);
+
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().directory, Some("project-dir".to_string()));
+    }
+
+    #[test]
+    fn test_merge_rust_configs_project_overrides() {
+        let home_rust = Some(VorpalConfigSourceRust {
+            bin: Some("home-bin".to_string()),
+            packages: Some(vec!["home-pkg".to_string()]),
+        });
+
+        let project_rust = Some(VorpalConfigSourceRust {
+            bin: Some("project-bin".to_string()),
+            packages: Some(vec!["project-pkg".to_string()]),
+        });
+
+        let result = merge_rust_configs(home_rust, project_rust);
+
+        assert!(result.is_some());
+
+        let merged = result.unwrap();
+
+        assert_eq!(merged.bin, Some("project-bin".to_string()));
+        assert_eq!(
+            merged.packages,
+            Some(vec!["home-pkg".to_string(), "project-pkg".to_string()])
+        );
+    }
+}
+

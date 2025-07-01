@@ -43,3 +43,6 @@ url = { version = "2" }
 uuid = { features = ["v7"], version = "1" }
 vorpal-sdk = { path = "../sdk/rust" }
 walkdir = { version = "2" }
+
+[dev-dependencies]
+tempfile = "3"
