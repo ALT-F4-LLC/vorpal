@@ -318,5 +318,6 @@ jobs:
           if ! pgrep -x "vorpal" > /dev/null
           then
             echo "Vorpal service not running."
+            cat vorpal_output.log
             exit 1
           fi

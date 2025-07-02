@@ -37,6 +37,16 @@ runs:
         rm "${RELEASE_ASSET}"
         chmod +x vorpal
         echo "${PWD}" >> $GITHUB_PATH
+    - name: Setup Vorpal Directories
+      shell: bash
+      run: |
+        sudo mkdir -pv /var/lib/vorpal/{key,sandbox,store}
+        sudo mkdir -pv /var/lib/vorpal/store/artifact/{alias,archive,config,output}
+        sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
+    - name: Generate Vorpal Keys
+      shell: bash
+      run: vorpal system keys generate
     - name: Start Vorpal
       shell: bash
-      run: vorpal services start &
+      run: |
+        vorpal services start > vorpal_output.log 2>&1 &
