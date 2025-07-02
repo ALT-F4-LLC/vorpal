@@ -1,0 +1,42 @@
+name: 'Set up Vorpal'
+description: 'Downloads and sets up the Vorpal binary, and starts the service.'
+inputs:
+  version:
+    description: 'The version of Vorpal to install (e.g., v0.1.0).'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Install Vorpal
+      shell: bash
+      run: |
+        set -e
+        OS=""
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          OS="linux"
+        elif [[ "${{ runner.os }}" == "macOS" ]]; then
+          OS="darwin"
+        else
+          echo "Unsupported OS: ${{ runner.os }}"
+          exit 1
+        fi
+        ARCH=""
+        if [[ "${{ runner.arch }}" == "X64" ]]; then
+          ARCH="x86_64"
+        elif [[ "${{ runner.arch }}" == "ARM64" ]]; then
+          ARCH="aarch64"
+        else
+          echo "Unsupported architecture: ${{ runner.arch }}"
+          exit 1
+        fi
+        RELEASE_ASSET="vorpal-${ARCH}-${OS}.tar.gz"
+        RELEASE_URL="https://github.com/ALT-F4-LLC/vorpal/releases/download/${{ inputs.version }}/${RELEASE_ASSET}"
+        echo "Downloading from ${RELEASE_URL}"
+        curl -sSL -o "${RELEASE_ASSET}" "${RELEASE_URL}"
+        tar -xzf "${RELEASE_ASSET}"
+        rm "${RELEASE_ASSET}"
+        chmod +x vorpal
+        echo "${PWD}" >> $GITHUB_PATH
+    - name: Start Vorpal
+      shell: bash
+      run: vorpal start &

@@ -302,3 +302,21 @@ jobs:
             dist/aarch64-linux/vorpal-aarch64-linux
             dist/x86_64-darwin/vorpal-x86_64-darwin
             dist/x86_64-linux/vorpal-x86_64-linux
+
+  test-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-vorpal
+        with:
+          version: nightly
+      - run: vorpal --version
+      - name: Verify vorpal service is running
+        shell: bash
+        run: |
+          sleep 5
+          if ! pgrep -x "vorpal" > /dev/null
+          then
+            echo "Vorpal service not running."
+            exit 1
+          fi
