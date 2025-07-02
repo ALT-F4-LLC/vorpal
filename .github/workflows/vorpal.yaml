@@ -304,12 +304,22 @@ jobs:
             dist/x86_64-linux/vorpal-x86_64-linux
 
   test-action:
+    needs:
+      - package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vorpal-dist-x86_64-linux
+      - run: |
+          mkdir -pv ./dist
+          tar -xzvf ./vorpal-x86_64-linux.tar.gz -C ./dist
+          rm -rf ./vorpal-x86_64-linux.tar.gz
       - uses: ./.github/actions/setup-vorpal
         with:
-          version: nightly
+          use-local-build: true
       - run: vorpal --version
       - name: Verify vorpal service is running
         shell: bash

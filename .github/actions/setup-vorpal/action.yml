@@ -3,7 +3,11 @@ description: 'Downloads and sets up the Vorpal binary, and starts the service.'
 inputs:
   version:
     description: 'The version of Vorpal to install (e.g., v0.1.0).'
-    required: true
+    required: false
+  use-local-build:
+    description: 'Use a pre-built binary from the workspace.'
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -11,32 +15,42 @@ runs:
       shell: bash
       run: |
         set -e
-        OS=""
-        if [[ "${{ runner.os }}" == "Linux" ]]; then
-          OS="linux"
-        elif [[ "${{ runner.os }}" == "macOS" ]]; then
-          OS="darwin"
+        if [[ "${{ inputs.use-local-build }}" == "true" ]]; then
+          echo "Using local build of vorpal"
+          chmod +x ./dist/vorpal
+          echo "${PWD}/dist" >> $GITHUB_PATH
         else
-          echo "Unsupported OS: ${{ runner.os }}"
-          exit 1
+          if [[ -z "${{ inputs.version }}" ]]; then
+            echo "Error: 'version' input is required when 'use-local-build' is false."
+            exit 1
+          fi
+          OS=""
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            OS="linux"
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            OS="darwin"
+          else
+            echo "Unsupported OS: ${{ runner.os }}"
+            exit 1
+          fi
+          ARCH=""
+          if [[ "${{ runner.arch }}" == "X64" ]]; then
+            ARCH="x86_64"
+          elif [[ "${{ runner.arch }}" == "ARM64" ]]; then
+            ARCH="aarch64"
+          else
+            echo "Unsupported architecture: ${{ runner.arch }}"
+            exit 1
+          fi
+          RELEASE_ASSET="vorpal-${ARCH}-${OS}.tar.gz"
+          RELEASE_URL="https://github.com/ALT-F4-LLC/vorpal/releases/download/${{ inputs.version }}/${RELEASE_ASSET}"
+          echo "Downloading from ${RELEASE_URL}"
+          curl -sSL -o "${RELEASE_ASSET}" "${RELEASE_URL}"
+          tar -xzf "${RELEASE_ASSET}"
+          rm "${RELEASE_ASSET}"
+          chmod +x vorpal
+          echo "${PWD}" >> $GITHUB_PATH
         fi
-        ARCH=""
-        if [[ "${{ runner.arch }}" == "X64" ]]; then
-          ARCH="x86_64"
-        elif [[ "${{ runner.arch }}" == "ARM64" ]]; then
-          ARCH="aarch64"
-        else
-          echo "Unsupported architecture: ${{ runner.arch }}"
-          exit 1
-        fi
-        RELEASE_ASSET="vorpal-${ARCH}-${OS}.tar.gz"
-        RELEASE_URL="https://github.com/ALT-F4-LLC/vorpal/releases/download/${{ inputs.version }}/${RELEASE_ASSET}"
-        echo "Downloading from ${RELEASE_URL}"
-        curl -sSL -o "${RELEASE_ASSET}" "${RELEASE_URL}"
-        tar -xzf "${RELEASE_ASSET}"
-        rm "${RELEASE_ASSET}"
-        chmod +x vorpal
-        echo "${PWD}" >> $GITHUB_PATH
     - name: Setup Vorpal Directories
       shell: bash
       run: |
