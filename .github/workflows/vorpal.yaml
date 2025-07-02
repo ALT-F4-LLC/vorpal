@@ -329,6 +329,11 @@ jobs:
           if ! pgrep -x "vorpal" > /dev/null
           then
             echo "Vorpal service not running."
-            cat vorpal_output.log
             exit 1
           fi
+      - name: Display service logs
+        if: always()
+        shell: bash
+        run: |
+          echo "Displaying vorpal_output.log:"
+          cat vorpal_output.log
