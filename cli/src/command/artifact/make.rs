@@ -1,5 +1,5 @@
 use crate::command::{
-    artifact::config::{get_artifacts, get_order, start, VorpalConfig},
+    artifact::config::{get_artifacts, get_order, start},
     store::{
         archives::unpack_zstd,
         paths::{
@@ -7,11 +7,15 @@ use crate::command::{
             get_file_paths, set_timestamps,
         },
     },
+    VorpalTomlConfigSource,
 };
 use anyhow::{anyhow, bail, Result};
-use std::{collections::HashMap, path::Path, process::exit};
-use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
-use toml::from_str;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    process::exit,
+};
+use tokio::fs::{create_dir_all, remove_dir_all, remove_file, write};
 use tonic::{transport::Channel, Code};
 use tracing::{error, info};
 use vorpal_sdk::{
@@ -193,80 +197,62 @@ async fn build_artifacts(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct RunArgsArtifact {
+    pub aliases: Vec<String>,
+    pub context: PathBuf,
+    pub export: bool,
+    pub lockfile_update: bool,
+    pub name: String,
+    pub path: bool,
+    pub rebuild: bool,
+    pub system: String,
+    pub variable: Vec<String>,
+}
+
+pub struct RunArgsConfig {
+    pub context: PathBuf,
+    pub language: String,
+    pub name: String,
+    pub source: Option<VorpalTomlConfigSource>,
+}
+
+pub struct RunArgsService {
+    pub agent: String,
+    pub registry: String,
+    pub worker: String,
+}
+
 pub async fn run(
-    agent: &str,
-    artifact_aliases: Vec<String>,
-    artifact_config: &str,
-    artifact_context: &str,
-    artifact_export: bool,
-    artifact_lockfile_update: bool,
-    artifact_name: &str,
-    artifact_path: bool,
-    artifact_rebuild: bool,
-    artifact_system: &str,
-    registry: &str,
-    variable: Vec<String>,
-    worker: &str,
+    artifact: RunArgsArtifact,
+    config: RunArgsConfig,
+    service: RunArgsService,
 ) -> Result<()> {
-    // Setup configuration
-
-    if artifact_config.is_empty() {
-        error!("no `--config` specified");
-        exit(1);
-    }
-
-    if artifact_context.is_empty() {
-        error!("no `--context` specified");
-        exit(1);
-    }
-
-    if artifact_name.is_empty() {
-        error!("no `--name` specified");
-        exit(1);
-    }
-
-    let artifact_context = Path::new(&artifact_context);
-
-    if !artifact_context.exists() {
-        error!("'context' not found: {}", artifact_context.display());
-        exit(1);
-    }
-
-    let config_path = artifact_context.join(artifact_config);
-    let config_data_bytes = read(config_path).await.expect("failed to read config");
-    let config_data = String::from_utf8_lossy(&config_data_bytes);
-    let config: VorpalConfig = from_str(&config_data).expect("failed to parse config");
-
-    if config.language.is_none() {
-        error!("no 'language' specified in Vorpal.yaml");
-        exit(1);
-    }
-
-    let config_language = config.language.unwrap();
-    let config_name = config.name.unwrap_or_else(|| "vorpal".to_string());
-
     // Build configuration
 
+    let artifact_system = &artifact.system;
+    let config_name = &config.name;
+    let service_agent = &service.agent;
+    let service_registry = &service.registry;
+
     let mut config_context = ConfigContext::new(
-        agent.to_string(),
+        service_agent.to_string(),
         config_name.to_string(),
-        artifact_context.to_path_buf(),
+        config.context.to_path_buf(),
         0,
-        registry.to_string(),
+        service_registry.to_string(),
         artifact_system.to_string(),
-        variable.clone(),
+        artifact.variable.clone(),
     )?;
 
     let config_system = config_context.get_system();
 
-    let config_digest = match config_language.as_str() {
+    let config_digest = match config.language.as_str() {
         "go" => {
             let protoc = protoc::build(&mut config_context).await?;
             let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
             let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
 
-            let source_path = format!("{}.go", config_name);
+            let source_path = format!("{}.go", config.name);
 
             let mut includes = vec![&source_path, "go.mod", "go.sum"];
 
@@ -274,37 +260,44 @@ pub async fn run(
                 includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             }
 
-            let mut builder = GoBuilder::new(&config_name, vec![config_system])
+            let mut builder = GoBuilder::new(&config.name, vec![config_system])
                 .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
                 .with_includes(includes);
 
-            if let Some(directory) = config.go.as_ref().and_then(|g| g.directory.as_ref()) {
-                builder = builder.with_build_directory(directory.as_str());
+            if let Some(directory) = config
+                .source
+                .as_ref()
+                .and_then(|s| s.go.as_ref())
+                .and_then(|g| g.directory.as_ref())
+            {
+                builder = builder.with_build_directory(directory);
             }
 
             builder.build(&mut config_context).await?
         }
 
         "rust" => {
-            let mut bins = vec![config_name.as_str()];
+            let mut bins = vec![config_name];
             let bin_path = format!("src/{}.rs", config_name);
             let mut includes = vec![&bin_path, "Cargo.toml", "Cargo.lock"];
             let mut packages = vec![];
 
-            if let Some(b) = config.rust.as_ref().and_then(|r| r.bin.as_ref()) {
-                bins = vec![b.as_str()];
+            if let Some(b) = config.source.as_ref().and_then(|s| s.rust.as_ref()) {
+                if let Some(bin) = b.bin.as_ref() {
+                    bins = vec![bin];
+                }
+
+                if let Some(p) = b.packages.as_ref() {
+                    packages = p.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+                }
             }
 
             if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
                 includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             }
 
-            if let Some(p) = config.rust.as_ref().and_then(|r| r.packages.as_ref()) {
-                packages = p.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
-            }
-
-            RustBuilder::new(&config_name, vec![config_system])
-                .with_bins(bins)
+            RustBuilder::new(&config.name, vec![config_system])
+                .with_bins(bins.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
                 .with_includes(includes)
                 .with_packages(packages)
                 .build(&mut config_context)
@@ -318,11 +311,11 @@ pub async fn run(
         bail!("no config digest found");
     }
 
-    let mut client_archive = ArchiveServiceClient::connect(registry.to_owned())
+    let mut client_archive = ArchiveServiceClient::connect(service.registry.to_owned())
         .await
         .expect("failed to connect to registry");
 
-    let mut client_worker = WorkerServiceClient::connect(worker.to_owned())
+    let mut client_worker = WorkerServiceClient::connect(service.worker.to_owned())
         .await
         .expect("failed to connect to artifact");
 
@@ -340,25 +333,25 @@ pub async fn run(
     let config_file = format!(
         "{}/bin/{}",
         &get_artifact_output_path(&config_digest).display(),
-        config_name
+        &config.name
     );
 
-    let config_path = Path::new(&config_file);
+    let config_file = Path::new(&config_file);
 
-    if !config_path.exists() {
-        error!("config not found: {}", config_path.display());
+    if !config_file.exists() {
+        error!("config not found: {}", config_file.display());
         exit(1);
     }
 
     let (mut config_process, mut config_client) = match start(
-        agent.to_string(),
-        artifact_name.to_string(),
-        artifact_context.to_path_buf(),
-        artifact_lockfile_update,
-        config_path.display().to_string(),
-        registry.to_string(),
-        artifact_system.to_string(),
-        variable.clone(),
+        artifact.context.to_path_buf(),
+        artifact.lockfile_update,
+        artifact.name.to_string(),
+        artifact.system.to_string(),
+        artifact.variable.clone(),
+        config_file.display().to_string(),
+        service.agent.to_string(),
+        service.registry.to_string(),
     )
     .await
     {
@@ -405,14 +398,14 @@ pub async fn run(
 
     config_process.kill().await?;
 
-    let (artifact_digest, artifact) = config_artifacts_store
+    let (selected_artifact_digest, selected_artifact) = config_artifacts_store
         .clone()
         .into_iter()
-        .find(|(_, val)| val.name == *artifact_name)
-        .ok_or_else(|| anyhow!("selected 'artifact' not found: {}", artifact_name))?;
+        .find(|(_, val)| val.name == artifact.name)
+        .ok_or_else(|| anyhow!("selected 'artifact' not found: {}", artifact.name))?;
 
-    if artifact_rebuild {
-        let artifact_output_lock_path = get_artifact_output_lock_path(&artifact_digest);
+    if artifact.rebuild {
+        let artifact_output_lock_path = get_artifact_output_lock_path(&selected_artifact_digest);
 
         if artifact_output_lock_path.exists() {
             remove_file(&artifact_output_lock_path)
@@ -420,7 +413,7 @@ pub async fn run(
                 .expect("failed to remove artifact lock file");
         }
 
-        let artifact_output_path = get_artifact_output_path(&artifact_digest);
+        let artifact_output_path = get_artifact_output_path(&selected_artifact_digest);
 
         if artifact_output_path.exists() {
             remove_dir_all(&artifact_output_path)
@@ -428,21 +421,22 @@ pub async fn run(
                 .expect("failed to remove artifact path");
         }
 
-        info!("rebuilding artifact: {}", artifact.name);
+        info!("rebuilding artifact: {}", selected_artifact.name);
     }
 
     let mut build_store = HashMap::<String, Artifact>::new();
 
     get_artifacts(
-        &artifact,
-        &artifact_digest,
+        &selected_artifact,
+        &selected_artifact_digest,
         &mut build_store,
         &config_artifacts_store,
     )
     .await?;
 
-    if artifact_export {
-        let export = serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
+    if artifact.export {
+        let export =
+            serde_json::to_string_pretty(&selected_artifact).expect("failed to serialize artifact");
 
         println!("{}", export);
 
@@ -450,8 +444,8 @@ pub async fn run(
     }
 
     build_artifacts(
-        Some(&artifact),
-        artifact_aliases,
+        Some(&selected_artifact),
+        artifact.aliases,
         build_store,
         &mut client_archive,
         &mut client_worker,
@@ -460,10 +454,10 @@ pub async fn run(
 
     // TODO: explore running post scripts
 
-    let artifact_output_path = get_artifact_output_path(&artifact_digest);
-    let mut output = artifact_digest.clone();
+    let artifact_output_path = get_artifact_output_path(&selected_artifact_digest);
+    let mut output = selected_artifact_digest.clone();
 
-    if artifact_path {
+    if artifact.path {
         output = artifact_output_path.display().to_string();
     }
 

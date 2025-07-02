@@ -6,7 +6,7 @@ readonly SCRIPT_PATH="${PWD}/script"
 
 # TODO: add lima and qemu installation
 
-scripts=("rustup" "protoc")
+scripts=("amber" "rustup" "protoc")
 
 if [[ "$(uname -s)" == "Linux" ]]; then
     . /etc/os-release

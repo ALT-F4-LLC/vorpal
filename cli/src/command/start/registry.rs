@@ -268,9 +268,9 @@ impl ArtifactService for ArtifactServer {
             return Err(Status::invalid_argument("missing `digest` field"));
         }
 
-        let artifact = self.backend.get_artifact(request.digest).await?;
+        let artifact = self.backend.get_artifact(request.digest.clone()).await?;
 
-        info!("registry |> artifact get: {:?}", artifact);
+        info!("registry |> artifact get: {}", request.digest);
 
         Ok(Response::new(artifact))
     }
