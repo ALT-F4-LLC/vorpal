@@ -39,4 +39,4 @@ runs:
         echo "${PWD}" >> $GITHUB_PATH
     - name: Start Vorpal
       shell: bash
-      run: vorpal start &
+      run: vorpal services start &
