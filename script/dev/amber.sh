@@ -49,11 +49,20 @@ curl -L -o "${TEMP_FILE}" "${AMBER_URL}"
 
 tar -xf "${TEMP_FILE}" -C "${1}/bin"
 
-# Move amber binary from extracted directory to bin root
-mv "${1}/bin/amber-${AMBER_TARGET}/amber" "${1}/bin/amber"
-
-# Clean up extracted directory
-rm -rf "${1}/bin/amber-${AMBER_TARGET}"
+# Handle different archive structures
+if [[ "${AMBER_TARGET}" == "aarch64-unknown-linux-gnu" ]]; then
+    # This archive contains the binary directly, no subdirectory
+    # Binary should already be extracted to ${1}/bin/amber
+    if [[ ! -f "${1}/bin/amber" ]]; then
+        echo "Error: amber binary not found after extraction"
+        exit 1
+    fi
+else
+    # Other archives contain the binary in a subdirectory
+    mv "${1}/bin/amber-${AMBER_TARGET}/amber" "${1}/bin/amber"
+    # Clean up extracted directory
+    rm -rf "${1}/bin/amber-${AMBER_TARGET}"
+fi
 
 rm "${TEMP_FILE}"
 
