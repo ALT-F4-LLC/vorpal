@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AMBER_URL="https://github.com/amber-lang/amber/releases/download/0.4.0-alpha/amber-aarch64-apple-darwin.tar.xz"
-TEMP_FILE="/tmp/amber-aarch64-apple-darwin.tar.xz"
-
 export PATH="${1}/bin:${PATH}"
 
 if [[ -f "${1}/bin/amber" ]]; then
@@ -11,15 +8,52 @@ if [[ -f "${1}/bin/amber" ]]; then
     exit 0
 fi
 
+# Detect architecture and OS
+ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
+OS="$(uname | tr '[:upper:]' '[:lower:]')"
+
+# Map architecture and OS to amber release naming
+case "${ARCH}" in
+    "x86_64")
+        AMBER_ARCH="x86_64"
+        ;;
+    "arm64"|"aarch64")
+        AMBER_ARCH="aarch64"
+        ;;
+    *)
+        echo "Unsupported architecture: ${ARCH}"
+        exit 1
+        ;;
+esac
+
+case "${OS}" in
+    "darwin")
+        AMBER_OS="apple-darwin"
+        ;;
+    "linux")
+        AMBER_OS="unknown-linux-gnu"
+        ;;
+    *)
+        echo "Unsupported OS: ${OS}"
+        exit 1
+        ;;
+esac
+
+# Build the download URL and filenames
+AMBER_TARGET="${AMBER_ARCH}-${AMBER_OS}"
+AMBER_URL="https://github.com/amber-lang/amber/releases/download/0.4.0-alpha/amber-${AMBER_TARGET}.tar.xz"
+TEMP_FILE="/tmp/amber-${AMBER_TARGET}.tar.xz"
+
+echo "Downloading amber for ${AMBER_TARGET}"
 curl -L -o "${TEMP_FILE}" "${AMBER_URL}"
 
 tar -xf "${TEMP_FILE}" -C "${1}/bin"
 
 # Move amber binary from extracted directory to bin root
-mv "${1}/bin/amber-aarch64-apple-darwin/amber" "${1}/bin/amber"
+mv "${1}/bin/amber-${AMBER_TARGET}/amber" "${1}/bin/amber"
 
 # Clean up extracted directory
-rm -rf "${1}/bin/amber-aarch64-apple-darwin"
+rm -rf "${1}/bin/amber-${AMBER_TARGET}"
 
 rm "${TEMP_FILE}"
 

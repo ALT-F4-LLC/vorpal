@@ -140,11 +140,6 @@ jobs:
           sudo systemctl restart apparmor.service
 
       - run: |
-          sudo mkdir -pv /var/lib/vorpal/{key,sandbox,store}
-          sudo mkdir -pv /var/lib/vorpal/store/artifact/{alias,archive,config,output}
-          sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
-
-      - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
@@ -157,78 +152,66 @@ jobs:
           tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
-      - run: ./dist/vorpal system keys generate
-
-      - uses: actions/github-script@v7
+      - uses: ./.github/actions/setup-vorpal
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - env:
+          registry-backend: s3
+          registry-backend-s3-bucket: altf4llc-vorpal-registry
+          use-local-build: true
+        env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: |
-          ./dist/vorpal services start \
-            --registry-backend "s3" \
-            --registry-backend-s3-bucket "altf4llc-vorpal-registry" \
-            > ./dist/worker_output.log 2>&1 &
-          WORKER_PID=$(echo $!)
-          echo "WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
-          echo "Worker pid: $WORKER_PID"
-          sleep 5
 
       - run: |
-          VORPAL_ARTIFACT=$(dist/vorpal artifact make "vorpal" .)
+          VORPAL_ARTIFACT=$(vorpal artifact make "vorpal" .)
           echo "VORPAL_ARTIFACT=$VORPAL_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_DEVENV_ARTIFACT=$(dist/vorpal artifact make "vorpal-devenv" .)
+          VORPAL_DEVENV_ARTIFACT=$(vorpal artifact make "vorpal-devenv" .)
           echo "VORPAL_DEVENV_ARTIFACT=$VORPAL_DEVENV_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_PROCESS_ARTIFACT=$(dist/vorpal artifact make "vorpal-process" .)
+          VORPAL_PROCESS_ARTIFACT=$(vorpal artifact make "vorpal-process" .)
           echo "VORPAL_PROCESS_ARTIFACT=$VORPAL_PROCESS_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_TEST_ARTIFACT=$(dist/vorpal artifact make "vorpal-test" .)
+          VORPAL_TEST_ARTIFACT=$(vorpal artifact make "vorpal-test" .)
           echo "VORPAL_TEST_ARTIFACT=$VORPAL_TEST_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_USERENV_ARTIFACT=$(dist/vorpal artifact make "vorpal-userenv" .)
+          VORPAL_USERENV_ARTIFACT=$(vorpal artifact make "vorpal-userenv" .)
           echo "VORPAL_USERENV_ARTIFACT=$VORPAL_USERENV_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal" .)
+          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal" .)
           if [ "$ARTIFACT" != "$VORPAL_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_ARTIFACT"
             exit 1
           fi
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal-devenv" .)
+          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal-devenv" .)
           if [ "$ARTIFACT" != "$VORPAL_DEVENV_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_DEVENV_ARTIFACT"
             exit 1
           fi
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal-process" .)
+          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal-process" .)
           if [ "$ARTIFACT" != "$VORPAL_PROCESS_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_PROCESS_ARTIFACT"
             exit 1
           fi
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal-test" .)
+          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal-test" .)
           if [ "$ARTIFACT" != "$VORPAL_TEST_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_TEST_ARTIFACT"
             exit 1
           fi
 
       - run: |
-          ARTIFACT=$(dist/vorpal artifact make --config "Vorpal.go.toml" "vorpal-userenv" .)
+          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal-userenv" .)
           if [ "$ARTIFACT" != "$VORPAL_USERENV_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_USERENV_ARTIFACT"
             exit 1
@@ -303,37 +286,3 @@ jobs:
             dist/aarch64-linux/vorpal-aarch64-linux
             dist/x86_64-darwin/vorpal-x86_64-darwin
             dist/x86_64-linux/vorpal-x86_64-linux
-
-  test-action:
-    needs:
-      - package
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: vorpal-dist-x86_64-linux
-      - run: |
-          mkdir -pv ./dist
-          tar -xzvf ./vorpal-x86_64-linux.tar.gz -C ./dist
-          rm -rf ./vorpal-x86_64-linux.tar.gz
-      - uses: ./.github/actions/setup-vorpal
-        with:
-          use-local-build: true
-      - run: vorpal --version
-      - name: Verify vorpal service is running
-        shell: bash
-        run: |
-          sleep 5
-          if ! pgrep -x "vorpal" > /dev/null
-          then
-            echo "Vorpal service not running."
-            exit 1
-          fi
-      - name: Display service logs
-        if: always()
-        shell: bash
-        run: |
-          echo "Displaying vorpal_output.log:"
-          cat vorpal_output.log

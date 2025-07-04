@@ -8,6 +8,21 @@ inputs:
     description: 'Use a pre-built binary from the workspace.'
     required: false
     default: 'false'
+  registry-backend:
+    description: 'Registry backend to use (local, s3).'
+    required: false
+    default: 'local'
+  registry-backend-s3-bucket:
+    description: 'S3 bucket name for s3 backend.'
+    required: false
+  port:
+    description: 'Port for vorpal services.'
+    required: false
+    default: '23151'
+  services:
+    description: 'Services to start (comma-separated).'
+    required: false
+    default: 'agent,registry,worker'
 runs:
   using: "composite"
   steps:
@@ -15,16 +30,21 @@ runs:
       shell: bash
       run: |
         set -e
+
         if [[ "${{ inputs.use-local-build }}" == "true" ]]; then
           echo "Using local build of vorpal"
+
           chmod +x ./dist/vorpal
+
           echo "${PWD}/dist" >> $GITHUB_PATH
         else
           if [[ -z "${{ inputs.version }}" ]]; then
             echo "Error: 'version' input is required when 'use-local-build' is false."
             exit 1
           fi
+
           OS=""
+
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             OS="linux"
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
@@ -33,7 +53,9 @@ runs:
             echo "Unsupported OS: ${{ runner.os }}"
             exit 1
           fi
+
           ARCH=""
+
           if [[ "${{ runner.arch }}" == "X64" ]]; then
             ARCH="x86_64"
           elif [[ "${{ runner.arch }}" == "ARM64" ]]; then
@@ -42,25 +64,52 @@ runs:
             echo "Unsupported architecture: ${{ runner.arch }}"
             exit 1
           fi
+
           RELEASE_ASSET="vorpal-${ARCH}-${OS}.tar.gz"
           RELEASE_URL="https://github.com/ALT-F4-LLC/vorpal/releases/download/${{ inputs.version }}/${RELEASE_ASSET}"
+
           echo "Downloading from ${RELEASE_URL}"
+
           curl -sSL -o "${RELEASE_ASSET}" "${RELEASE_URL}"
           tar -xzf "${RELEASE_ASSET}"
+
           rm "${RELEASE_ASSET}"
+
           chmod +x vorpal
+
           echo "${PWD}" >> $GITHUB_PATH
         fi
+
     - name: Setup Vorpal Directories
       shell: bash
       run: |
         sudo mkdir -pv /var/lib/vorpal/{key,sandbox,store}
         sudo mkdir -pv /var/lib/vorpal/store/artifact/{alias,archive,config,output}
         sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
+
     - name: Generate Vorpal Keys
       shell: bash
       run: vorpal system keys generate
+
     - name: Start Vorpal
       shell: bash
       run: |
-        vorpal services start > vorpal_output.log 2>&1 &
+        set -e
+
+        # Build the command with all parameters
+        CMD="vorpal services start"
+        CMD="$CMD --port ${{ inputs.port }}"
+        CMD="$CMD --services ${{ inputs.services }}"
+        CMD="$CMD --registry-backend ${{ inputs.registry-backend }}"
+
+        # Add S3 bucket if S3 backend is specified
+        if [[ "${{ inputs.registry-backend }}" == "s3" ]]; then
+          if [[ -z "${{ inputs.registry-backend-s3-bucket }}" ]]; then
+            echo "Error: registry-backend-s3-bucket is required when using s3 backend"
+            exit 1
+          fi
+          CMD="$CMD --registry-backend-s3-bucket ${{ inputs.registry-backend-s3-bucket }}"
+        fi
+
+        echo "Starting vorpal with command: $CMD"
+        $CMD > /tmp/vorpal_output.log 2>&1 &
