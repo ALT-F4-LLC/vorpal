@@ -115,6 +115,7 @@ runs:
 
         $CMD > /tmp/vorpal_output.log 2>&1 &
         VORPAL_PID=$!
+        sleep 5
 
         # Check if the process is still running
         if ! kill -0 "$VORPAL_PID" 2>/dev/null; then
@@ -126,3 +127,10 @@ runs:
 
         echo "Vorpal service is running (PID: $VORPAL_PID)"
         cat /tmp/vorpal_output.log
+
+    - name: Show Vorpal Logs (Post-run)
+      if: always()
+      shell: bash
+      run: |
+        echo "=== Vorpal Service Logs ==="
+        cat /tmp/vorpal_output.log || echo "No logs found"
