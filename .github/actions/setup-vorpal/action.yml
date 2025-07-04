@@ -112,4 +112,17 @@ runs:
         fi
 
         echo "Starting vorpal with command: $CMD"
+
         $CMD > /tmp/vorpal_output.log 2>&1 &
+        VORPAL_PID=$!
+
+        # Check if the process is still running
+        if ! kill -0 "$VORPAL_PID" 2>/dev/null; then
+          echo "Error: Vorpal service failed to start"
+          echo "Service output:"
+          cat /tmp/vorpal_output.log
+          exit 1
+        fi
+
+        echo "Vorpal service is running (PID: $VORPAL_PID)"
+        cat /tmp/vorpal_output.log
