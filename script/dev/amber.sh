@@ -15,6 +15,12 @@ curl -L -o "${TEMP_FILE}" "${AMBER_URL}"
 
 tar -xf "${TEMP_FILE}" -C "${1}/bin"
 
+# Move amber binary from extracted directory to bin root
+mv "${1}/bin/amber-aarch64-apple-darwin/amber" "${1}/bin/amber"
+
+# Clean up extracted directory
+rm -rf "${1}/bin/amber-aarch64-apple-darwin"
+
 rm "${TEMP_FILE}"
 
-# chmod +x "${1}/bin/amber"
+chmod +x "${1}/bin/amber"
