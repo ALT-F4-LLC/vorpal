@@ -27621,8 +27621,20 @@ async function installVorpal(version, useLocalBuild) {
 async function setupVorpalDirectories() {
     core.info('Setting up Vorpal directories...');
 
-    await exec.exec('sudo', ['mkdir', '-pv', '/var/lib/vorpal/{key,sandbox,store}']);
-    await exec.exec('sudo', ['mkdir', '-pv', '/var/lib/vorpal/store/artifact/{alias,archive,config,output}']);
+    // Create directories using a loop since brace expansion doesn't work with exec.exec
+    const directories = [
+        '/var/lib/vorpal/key',
+        '/var/lib/vorpal/sandbox',
+        '/var/lib/vorpal/store',
+        '/var/lib/vorpal/store/artifact/alias',
+        '/var/lib/vorpal/store/artifact/archive',
+        '/var/lib/vorpal/store/artifact/config',
+        '/var/lib/vorpal/store/artifact/output'
+    ];
+
+    for (const dir of directories) {
+        await exec.exec('sudo', ['mkdir', '-pv', dir]);
+    }
 
     // Get current user and group dynamically
     const uid = process.getuid();
