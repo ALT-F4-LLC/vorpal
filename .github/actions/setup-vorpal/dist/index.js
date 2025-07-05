@@ -27557,6 +27557,7 @@ module.exports = parseParams
 var __webpack_exports__ = {};
 const core = __nccwpck_require__(7484);
 const exec = __nccwpck_require__(5236);
+const { spawn } = __nccwpck_require__(5317);
 const fs = __nccwpck_require__(9896);
 const path = __nccwpck_require__(6928);
 
@@ -27656,7 +27657,7 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
     core.info(`Starting vorpal with command: ${command}`);
 
     // Start the service in background
-    const child = exec.spawn('vorpal', args, {
+    const child = spawn('vorpal', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true
     });

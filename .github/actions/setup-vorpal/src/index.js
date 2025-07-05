@@ -1,5 +1,6 @@
 const core = require('@actions/core');
 const exec = require('@actions/exec');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -99,7 +100,7 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
     core.info(`Starting vorpal with command: ${command}`);
 
     // Start the service in background
-    const child = exec.spawn('vorpal', args, {
+    const child = spawn('vorpal', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true
     });
