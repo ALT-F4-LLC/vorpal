@@ -66,7 +66,13 @@ async function setupVorpalDirectories() {
 
     await exec.exec('sudo', ['mkdir', '-pv', '/var/lib/vorpal/{key,sandbox,store}']);
     await exec.exec('sudo', ['mkdir', '-pv', '/var/lib/vorpal/store/artifact/{alias,archive,config,output}']);
-    await exec.exec('sudo', ['chown', '-R', `${process.getuid()}:${process.getgid()}`, '/var/lib/vorpal']);
+
+    // Get current user and group dynamically
+    const uid = process.getuid();
+    const gid = process.getgid();
+
+    core.info(`Setting ownership to ${uid}:${gid}`);
+    await exec.exec('sudo', ['chown', '-R', `${uid}:${gid}`, '/var/lib/vorpal']);
 }
 
 async function generateVorpalKeys() {
