@@ -163,6 +163,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - run: |
+          ls -alh /var/lib/vorpal
+          ls -alh /var/lib/vorpal/key
+          ls -alh /var/lib/vorpal/sandbox
+          ls -alh /var/lib/vorpal/store
+          ls -alh /var/lib/vorpal/store/artifact
+          ls -alh /var/lib/vorpal/store/artifact/alias
+          ls -alh /var/lib/vorpal/store/artifact/archive
+          ls -alh /var/lib/vorpal/store/artifact/config
+          ls -alh /var/lib/vorpal/store/artifact/output
+
+      - run: |
           VORPAL_ARTIFACT=$(vorpal artifact make "vorpal" .)
           echo "VORPAL_ARTIFACT=$VORPAL_ARTIFACT" >> $GITHUB_ENV
 
