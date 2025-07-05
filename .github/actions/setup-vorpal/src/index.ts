@@ -13,7 +13,7 @@ interface VorpalInputs {
   version: string;
 }
 
-async function run(): Promise<void> {
+export async function run(): Promise<void> {
   try {
     // Get inputs
     const inputs: VorpalInputs = {
@@ -47,7 +47,7 @@ async function run(): Promise<void> {
   }
 }
 
-async function installVorpal(
+export async function installVorpal(
   version: string,
   useLocalBuild: boolean,
 ): Promise<void> {
@@ -80,7 +80,7 @@ async function installVorpal(
   }
 }
 
-async function setupVorpalDirectories(): Promise<void> {
+export async function setupVorpalDirectories(): Promise<void> {
   core.info("Setting up Vorpal directories...");
 
   // Create directories using a loop since brace expansion doesn't work with exec.exec
@@ -112,12 +112,12 @@ async function setupVorpalDirectories(): Promise<void> {
   await exec.exec("sudo", ["chown", "-R", `${uid}:${gid}`, "/var/lib/vorpal"]);
 }
 
-async function generateVorpalKeys(): Promise<void> {
+export async function generateVorpalKeys(): Promise<void> {
   core.info("Generating Vorpal keys...");
   await exec.exec("vorpal", ["system", "keys", "generate"]);
 }
 
-async function startVorpal(
+export async function startVorpal(
   registryBackend: string,
   registryBackendS3Bucket: string,
   port: string,

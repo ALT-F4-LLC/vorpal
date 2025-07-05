@@ -27406,4 +27406,6 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
     }
 }
 run();
+
+export { generateVorpalKeys, installVorpal, run, setupVorpalDirectories, startVorpal };
 //# sourceMappingURL=index.js.map

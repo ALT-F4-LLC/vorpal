@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import * as fs from "fs";
 
-async function cleanup(): Promise<void> {
+export async function cleanup(): Promise<void> {
   try {
     core.info("=== Vorpal Service Cleanup ===");
 
