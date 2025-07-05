@@ -72,6 +72,7 @@ async function setupVorpalDirectories() {
     const gid = process.getgid();
 
     core.info(`Setting ownership to ${uid}:${gid}`);
+
     await exec.exec('sudo', ['chown', '-R', `${uid}:${gid}`, '/var/lib/vorpal']);
 }
 
@@ -98,6 +99,22 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
             throw new Error('registry-backend-s3-bucket is required when using s3 backend');
         }
 
+        // Check for required AWS environment variables
+        const awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID;
+        const awsDefaultRegion = process.env.AWS_DEFAULT_REGION;
+        const awsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+
+        if (!awsAccessKeyId) {
+            throw new Error('AWS_ACCESS_KEY_ID environment variable is required when using s3 backend');
+        }
+        if (!awsDefaultRegion) {
+            throw new Error('AWS_DEFAULT_REGION environment variable is required when using s3 backend');
+        }
+        if (!awsSecretAccessKey) {
+            throw new Error('AWS_SECRET_ACCESS_KEY environment variable is required when using s3 backend');
+        }
+
+        core.info('AWS credentials validated for S3 backend');
         args.push('--registry-backend-s3-bucket', registryBackendS3Bucket);
     }
 
@@ -109,9 +126,20 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
     const logFile = '/tmp/vorpal_output.log';
     const logFd = fs.openSync(logFile, 'w');
 
+    // Prepare environment variables for the process
+    const env = { ...process.env };
+
+    // Ensure AWS credentials are passed to the process when using S3 backend
+    if (registryBackend === 's3') {
+        env.AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+        env.AWS_DEFAULT_REGION = process.env.AWS_DEFAULT_REGION;
+        env.AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+    }
+
     const child = spawn('vorpal', args, {
         stdio: ['ignore', logFd, logFd],
-        detached: true
+        detached: true,
+        env: env
     });
 
     // Detach the process from the parent
@@ -126,9 +154,11 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
     // Check if process is still running
     if (child.killed || child.exitCode !== null) {
         const logs = fs.readFileSync(logFile, 'utf8');
+
         core.error('Vorpal service failed to start');
         core.error('Service output:');
         core.error(logs);
+
         throw new Error('Vorpal service failed to start');
     }
 
@@ -142,6 +172,7 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
 
     if (fs.existsSync(logFile)) {
         const logs = fs.readFileSync(logFile, 'utf8');
+
         core.info('Initial service logs:');
         core.info(logs);
     }
