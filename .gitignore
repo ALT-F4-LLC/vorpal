@@ -1,7 +1,7 @@
 *.tar.*
 .cargo
 .env
-dist
+/dist
 target
 vendor
 vorpal-*-*
