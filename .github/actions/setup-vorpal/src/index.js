@@ -100,23 +100,23 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
     core.info(`Starting vorpal with command: ${command}`);
 
     // Start the service in background
-    const child = spawn('vorpal', args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true
-    });
-
-    // Write logs to file
     const logFile = '/tmp/vorpal_output.log';
     const logStream = fs.createWriteStream(logFile);
 
-    child.stdout.pipe(logStream);
-    child.stderr.pipe(logStream);
+    const child = spawn('vorpal', args, {
+        stdio: ['ignore', logStream, logStream],
+        detached: true
+    });
+
+    // Detach the process from the parent
+    child.unref();
 
     // Give it a moment to start
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Check if process is still running
     if (child.killed || child.exitCode !== null) {
+        logStream.end();
         const logs = fs.readFileSync(logFile, 'utf8');
         core.error('Vorpal service failed to start');
         core.error('Service output:');
@@ -130,10 +130,14 @@ async function startVorpal(registryBackend, registryBackendS3Bucket, port, servi
     core.saveState('vorpal-pid', child.pid);
 
     // Show initial logs
-    const logs = fs.readFileSync(logFile, 'utf8');
+    logStream.end();
+    await new Promise(resolve => setTimeout(resolve, 500)); // Wait for file to be written
 
-    core.info('Initial service logs:');
-    core.info(logs);
+    if (fs.existsSync(logFile)) {
+        const logs = fs.readFileSync(logFile, 'utf8');
+        core.info('Initial service logs:');
+        core.info(logs);
+    }
 }
 
 run();
