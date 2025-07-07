@@ -159,7 +159,7 @@ pub async fn start(
         }
     }
 
-    let config_host = format!("http://localhost:{}", command_port);
+    let config_host = format!("http://localhost:{command_port}");
 
     let mut attempts = 0;
     let max_attempts = 3;

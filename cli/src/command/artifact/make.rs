@@ -278,7 +278,7 @@ pub async fn run(
 
         "rust" => {
             let mut bins = vec![config_name];
-            let bin_path = format!("src/{}.rs", config_name);
+            let bin_path = format!("src/{config_name}.rs");
             let mut includes = vec![&bin_path, "Cargo.toml", "Cargo.lock"];
             let mut packages = vec![];
 
@@ -438,7 +438,7 @@ pub async fn run(
         let export =
             serde_json::to_string_pretty(&selected_artifact).expect("failed to serialize artifact");
 
-        println!("{}", export);
+        println!("{export}");
 
         return Ok(());
     }

@@ -41,7 +41,7 @@ impl ArchiveBackend for LocalBackend {
                 data: chunk.to_vec(),
             }))
             .await
-            .map_err(|err| Status::internal(format!("failed to send store chunk: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to send store chunk: {err}")))?;
         }
 
         Ok(())
@@ -51,13 +51,13 @@ impl ArchiveBackend for LocalBackend {
         let request_path = get_artifact_archive_path(&request.digest);
 
         if !request_path.exists() {
-            write(&request_path, &request.data).await.map_err(|err| {
-                Status::internal(format!("failed to write store path: {:?}", err))
-            })?;
+            write(&request_path, &request.data)
+                .await
+                .map_err(|err| Status::internal(format!("failed to write store path: {err}")))?;
 
             set_timestamps(&request_path)
                 .await
-                .map_err(|err| Status::internal(format!("failed to sanitize path: {:?}", err)))?;
+                .map_err(|err| Status::internal(format!("failed to sanitize path: {err}")))?;
         }
 
         Ok(())

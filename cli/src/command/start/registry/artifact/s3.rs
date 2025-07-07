@@ -40,7 +40,7 @@ impl ArtifactBackend for S3Backend {
         }
 
         let artifact: Artifact = serde_json::from_str(&artifact_json)
-            .map_err(|err| Status::internal(format!("failed to parse artifact: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to parse artifact: {err}")))?;
 
         Ok(artifact)
     }
@@ -54,9 +54,7 @@ impl ArtifactBackend for S3Backend {
         let bucket = &self.bucket;
 
         let alias_key = get_artifact_alias_key(&artifact_alias, artifact_system.as_str_name())
-            .map_err(|err| {
-                Status::internal(format!("failed to get artifact alias key: {:?}", err))
-            })?;
+            .map_err(|err| Status::internal(format!("failed to get artifact alias key: {err}")))?;
 
         let mut alias_stream = client
             .get_object()
@@ -87,7 +85,7 @@ impl ArtifactBackend for S3Backend {
         let bucket = &self.bucket;
 
         let config_json = serde_json::to_vec(&artifact)
-            .map_err(|err| Status::internal(format!("failed to serialize artifact: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to serialize artifact: {err}")))?;
         let config_digest = digest(&config_json);
         let config_key = get_artifact_config_key(&config_digest);
 
@@ -106,7 +104,7 @@ impl ArtifactBackend for S3Backend {
                 .body(config_json.into())
                 .send()
                 .await
-                .map_err(|err| Status::internal(format!("failed to write config: {:?}", err)))?;
+                .map_err(|err| Status::internal(format!("failed to write config: {err}")))?;
         }
 
         let aliases = [artifact.clone().aliases, artifact_aliases]
@@ -118,7 +116,7 @@ impl ArtifactBackend for S3Backend {
 
         for alias in aliases {
             let alias_key = get_artifact_alias_key(&alias, alias_system).map_err(|err| {
-                Status::internal(format!("failed to get artifact alias key: {:?}", err))
+                Status::internal(format!("failed to get artifact alias key: {err}"))
             })?;
 
             let alias_data = config_digest.as_bytes().to_vec();
@@ -130,7 +128,7 @@ impl ArtifactBackend for S3Backend {
                 .body(alias_data.into())
                 .send()
                 .await
-                .map_err(|err| Status::internal(format!("failed to write alias: {:?}", err)))?;
+                .map_err(|err| Status::internal(format!("failed to write alias: {err}")))?;
         }
 
         Ok(config_digest)

@@ -46,7 +46,7 @@ pub async fn build_source(
 ) -> Result<String> {
     let mut client = ArchiveServiceClient::connect(registry.to_owned())
         .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {err:?}")))?;
 
     if let Some(digest) = &source.digest {
         let request = ArchivePullRequest {
@@ -116,7 +116,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("download source: {}", http_path)),
+                artifact_output: Some(format!("download source: {http_path}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -141,7 +141,7 @@ pub async fn build_source(
         if kind.is_none() {
             let source_file_name = http_path
                 .path_segments()
-                .and_then(|segments| segments.last())
+                .and_then(|mut segments| segments.next_back())
                 .and_then(|name| if name.is_empty() { None } else { Some(name) })
                 .unwrap_or(&source.name);
 
@@ -156,7 +156,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("unpack source: {}", http_path)),
+                artifact_output: Some(format!("unpack source: {http_path}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -288,7 +288,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("pack source: {}", source_digest)),
+                artifact_output: Some(format!("pack source: {source_digest}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -324,7 +324,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("push source: {}", source_digest)),
+                artifact_output: Some(format!("push source: {source_digest}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -369,7 +369,7 @@ async fn prepare_artifact(
         for secret in step.secrets.iter() {
             let value = notary::encrypt(public_key_path.clone(), secret.value.clone())
                 .await
-                .map_err(|err| Status::internal(format!("failed to encrypt secret: {}", err)))?;
+                .map_err(|err| Status::internal(format!("failed to encrypt secret: {err}")))?;
 
             secrets.push(ArtifactStepSecret {
                 name: secret.name.clone(),
@@ -397,7 +397,7 @@ async fn prepare_artifact(
             &tx.clone(),
         )
         .await
-        .map_err(|err| Status::internal(format!("{}", err)))?;
+        .map_err(|err| Status::internal(format!("{err}")))?;
 
         let source = ArtifactSource {
             digest: Some(source_digest.to_string()),
@@ -426,7 +426,7 @@ async fn prepare_artifact(
     };
 
     let artifact_json =
-        serde_json::to_vec(&artifact).map_err(|err| Status::internal(format!("{}", err)))?;
+        serde_json::to_vec(&artifact).map_err(|err| Status::internal(format!("{err}")))?;
 
     let artifact_digest = digest(artifact_json);
 
