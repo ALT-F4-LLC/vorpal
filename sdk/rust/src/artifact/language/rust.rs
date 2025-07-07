@@ -237,7 +237,7 @@ impl<'a> RustBuilder<'a> {
         let rust_toolchain = rust_toolchain::build(context).await?;
         let rust_toolchain_target = rust_toolchain::target(context.get_system())?;
         let rust_toolchain_version = rust_toolchain::version();
-        let rust_toolchain_name = format!("{}-{}", rust_toolchain_version, rust_toolchain_target);
+        let rust_toolchain_name = format!("{rust_toolchain_version}-{rust_toolchain_target}");
 
         // Set environment variables
 
@@ -262,7 +262,7 @@ impl<'a> RustBuilder<'a> {
         let mut vendor_cargo_paths = vec!["Cargo.toml".to_string(), "Cargo.lock".to_string()];
 
         for package in packages.iter() {
-            vendor_cargo_paths.push(format!("{}/Cargo.toml", package));
+            vendor_cargo_paths.push(format!("{package}/Cargo.toml"));
         }
 
         let mut vendor_step_script = formatdoc! {r#"
@@ -288,7 +288,7 @@ impl<'a> RustBuilder<'a> {
                     mkdir -pv $(dirname ${{target_path}})
                     touch ${{target_path}}
                 done"#,
-                packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+                packages = packages.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(","),
                 target_paths = packages_targets.iter().map(|s| format!("\"{}\"", s.display())).collect::<Vec<_>>().join(" "),
             };
         } else {
@@ -377,7 +377,7 @@ impl<'a> RustBuilder<'a> {
                 members = [{packages}]
                 resolver = "2"
                 EOF"#,
-                packages = packages.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+                packages = packages.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(","),
             };
         }
 

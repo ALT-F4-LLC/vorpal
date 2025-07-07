@@ -312,7 +312,7 @@ impl ConfigContext {
         let service_addr_str = format!("[::]:{}", self.port);
         let service_addr = service_addr_str.parse().expect("failed to parse address");
 
-        println!("context service: {}", service_addr_str);
+        println!("context service: {service_addr_str}");
 
         Server::builder()
             .add_service(service)

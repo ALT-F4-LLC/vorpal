@@ -74,10 +74,10 @@ async fn pull_source(
 
     let mut client = ArchiveServiceClient::connect(registry.to_string())
         .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
 
     if !source_archive.exists() {
-        send_message(format!("pull source: {}", source_digest), tx).await?;
+        send_message(format!("pull source: {source_digest}"), tx).await?;
 
         let request = ArchivePullRequest {
             digest: source_digest.to_string(),
@@ -87,8 +87,7 @@ async fn pull_source(
             Err(status) => {
                 if status.code() != NotFound {
                     return Err(Status::internal(format!(
-                        "failed to pull source archive: {:?}",
-                        status
+                        "failed to pull source archive: {status:?}"
                     )));
                 }
 
@@ -118,11 +117,11 @@ async fn pull_source(
                 write(&source_archive, &response_data)
                     .await
                     .map_err(|err| {
-                        Status::internal(format!("failed to write store path: {:?}", err))
+                        Status::internal(format!("failed to write store path: {err}"))
                     })?;
 
                 set_timestamps(&source_archive).await.map_err(|err| {
-                    Status::internal(format!("failed to set source timestamps: {:?}", err))
+                    Status::internal(format!("failed to set source timestamps: {err}"))
                 })?;
             }
         }
@@ -132,32 +131,29 @@ async fn pull_source(
         return Err(Status::not_found("source archive not found"));
     }
 
-    send_message(format!("unpack source: {}", source_digest), tx).await?;
+    send_message(format!("unpack source: {source_digest}"), tx).await?;
 
     let source_workspace_path = source_dir_path.join(&source.name);
 
     if let Err(err) = create_dir_all(&source_workspace_path).await {
         return Err(Status::internal(format!(
-            "failed to create source path: {:?}",
-            err
+            "failed to create source path: {err:?}"
         )));
     }
 
     if let Err(err) = unpack_zstd(&source_workspace_path, &source_archive).await {
         return Err(Status::internal(format!(
-            "failed to unpack source archive: {:?}",
-            err
+            "failed to unpack source archive: {err:?}"
         )));
     }
 
     let source_workspace_files = get_file_paths(&source_workspace_path, vec![], vec![])
-        .map_err(|err| Status::internal(format!("failed to get source files: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("failed to get source files: {err}")))?;
 
     for path in source_workspace_files.iter() {
         if let Err(err) = set_timestamps(path).await {
             return Err(Status::internal(format!(
-                "failed to sanitize output files: {:?}",
-                err
+                "failed to sanitize output files: {err:?}"
             )));
         }
     }
@@ -193,7 +189,7 @@ async fn run_step(
 
         let path_str = path.display().to_string();
 
-        environments.push(format!("VORPAL_ARTIFACT_{}={}", artifact, path_str));
+        environments.push(format!("VORPAL_ARTIFACT_{artifact}={path_str}"));
 
         paths.push(path_str);
     }
@@ -201,7 +197,7 @@ async fn run_step(
     // Add default environment variables
 
     if !paths.is_empty() {
-        paths.push(format!("VORPAL_ARTIFACTS={}", paths.join(" ")))
+        environments.push(format!("VORPAL_ARTIFACTS={}", paths.join(" ")))
     }
 
     environments.extend([
@@ -229,7 +225,7 @@ async fn run_step(
     for secret in step.secrets.into_iter() {
         let value = notary::decrypt(private_key_path.clone(), secret.value)
             .await
-            .map_err(|err| Status::internal(format!("failed to decrypt secret: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to decrypt secret: {err}")))?;
 
         environments.push(format!("{}={}", secret.name, value));
     }
@@ -256,13 +252,11 @@ async fn run_step(
 
         write(&path, script)
             .await
-            .map_err(|err| Status::internal(format!("failed to write script: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to write script: {err}")))?;
 
         set_permissions(&path, Permissions::from_mode(0o755))
             .await
-            .map_err(|err| {
-                Status::internal(format!("failed to set script permissions: {:?}", err))
-            })?;
+            .map_err(|err| Status::internal(format!("failed to set script permissions: {err}")))?;
 
         script_path = Some(path);
     }
@@ -310,7 +304,7 @@ async fn run_step(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|err| Status::internal(format!("failed to spawn sandbox: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("failed to spawn sandbox: {err}")))?;
 
     let stdout = child
         .stdout
@@ -330,20 +324,20 @@ async fn run_step(
     let mut last_line = "".to_string();
 
     while let Some(line) = stdio_merged.next().await {
-        let output = line
-            .map_err(|err| Status::internal(format!("failed to read sandbox output: {:?}", err)))?;
+        let output =
+            line.map_err(|err| Status::internal(format!("failed to read sandbox output: {err}")))?;
 
         last_line = output.clone();
 
         tx.send(Ok(BuildArtifactResponse { output }))
             .await
-            .map_err(|err| Status::internal(format!("failed to send sandbox output: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to send sandbox output: {err}")))?;
     }
 
     let status = child
         .wait()
         .await
-        .map_err(|err| Status::internal(format!("failed to wait for sandbox: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("failed to wait for sandbox: {err}")))?;
 
     if !status.success() {
         return Err(Status::internal(last_line.to_string()));
@@ -389,7 +383,7 @@ async fn build_artifact(
     }
 
     let artifact_target = ArtifactSystem::try_from(artifact.target).map_err(|err| {
-        Status::invalid_argument(format!("artifact failed to parse target: {:?}", err))
+        Status::invalid_argument(format!("artifact failed to parse target: {err}"))
     })?;
 
     if artifact_target == ArtifactSystem::UnknownSystem {
@@ -397,7 +391,7 @@ async fn build_artifact(
     }
 
     let worker_target = get_system_default()
-        .map_err(|err| Status::internal(format!("worker failed to get target: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("worker failed to get target: {err}")))?;
 
     if artifact_target != worker_target {
         return Err(Status::invalid_argument(
@@ -408,7 +402,7 @@ async fn build_artifact(
     // Calculate artifact digest
 
     let artifact_json = serde_json::to_string(&artifact)
-        .map_err(|err| Status::internal(format!("artifact failed to serialize: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("artifact failed to serialize: {err}")))?;
 
     let artifact_digest = digest(artifact_json.as_bytes());
 
@@ -435,8 +429,7 @@ async fn build_artifact(
     if let Err(err) = write(&artifact_output_lock, artifact_json).await {
         error!("worker |> failed to create lock file: {:?}", err);
         return Err(Status::internal(format!(
-            "failed to create lock file: {:?}",
-            err
+            "failed to create lock file: {err:?}"
         )));
     }
 
@@ -444,15 +437,14 @@ async fn build_artifact(
 
     let workspace_path = create_sandbox_dir()
         .await
-        .map_err(|err| Status::internal(format!("failed to create workspace: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("failed to create workspace: {err}")))?;
 
     let workspace_source_path = workspace_path.join("source");
 
     if let Err(err) = create_dir_all(&workspace_source_path).await {
         error!("worker |> failed to create source path: {:?}", err);
         return Err(Status::internal(format!(
-            "failed to create source path: {:?}",
-            err
+            "failed to create source path: {err:?}"
         )));
     }
 
@@ -474,8 +466,7 @@ async fn build_artifact(
     if let Err(err) = create_dir_all(&artifact_output_path).await {
         error!("worker |> failed to create artifact path: {:?}", err);
         return Err(Status::internal(format!(
-            "failed to create artifact path: {:?}",
-            err
+            "failed to create artifact path: {err:?}"
         )));
     }
 
@@ -495,10 +486,10 @@ async fn build_artifact(
     }
 
     let artifact_path_files = get_file_paths(&artifact_output_path, vec![], vec![])
-        .map_err(|err| Status::internal(format!("failed to get output files: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("failed to get output files: {err}")))?;
 
     if artifact_path_files.len() > 1 {
-        send_message(format!("pack: {}", artifact_digest), &tx).await?;
+        send_message(format!("pack: {artifact_digest}"), &tx).await?;
 
         // Sanitize files
 
@@ -506,17 +497,16 @@ async fn build_artifact(
             if let Err(err) = set_timestamps(path).await {
                 error!("worker |> failed to sanitize output files: {:?}", err);
                 return Err(Status::internal(format!(
-                    "failed to sanitize output files: {:?}",
-                    err
+                    "failed to sanitize output files: {err:?}"
                 )));
             }
         }
 
         // Create archive
 
-        let artifact_archive = create_sandbox_file(Some("tar.zst")).await.map_err(|err| {
-            Status::internal(format!("failed to create artifact archive: {:?}", err))
-        })?;
+        let artifact_archive = create_sandbox_file(Some("tar.zst"))
+            .await
+            .map_err(|err| Status::internal(format!("failed to create artifact archive: {err}")))?;
 
         if let Err(err) = compress_zstd(
             &artifact_output_path,
@@ -527,8 +517,7 @@ async fn build_artifact(
         {
             error!("worker |> failed to compress artifact: {:?}", err);
             return Err(Status::internal(format!(
-                "failed to compress artifact: {:?}",
-                err
+                "failed to compress artifact: {err:?}"
             )));
         }
 
@@ -536,11 +525,11 @@ async fn build_artifact(
 
         // Upload archive
 
-        send_message(format!("push: {}", artifact_digest), &tx).await?;
+        send_message(format!("push: {artifact_digest}"), &tx).await?;
 
-        let artifact_data = read(&artifact_archive).await.map_err(|err| {
-            Status::internal(format!("failed to read artifact archive: {:?}", err))
-        })?;
+        let artifact_data = read(&artifact_archive)
+            .await
+            .map_err(|err| Status::internal(format!("failed to read artifact archive: {err}")))?;
 
         let private_key_path = get_key_private_path();
 
@@ -550,7 +539,7 @@ async fn build_artifact(
 
         let artifact_signature = notary::sign(private_key_path, &artifact_data)
             .await
-            .map_err(|err| Status::internal(format!("failed to sign artifact: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to sign artifact: {err}")))?;
 
         let mut request_stream = vec![];
 
@@ -564,13 +553,12 @@ async fn build_artifact(
 
         let mut client = ArchiveServiceClient::connect(registry.clone())
             .await
-            .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
 
         if let Err(err) = client.push(tokio_stream::iter(request_stream)).await {
             error!("worker |> failed to push artifact: {:?}", err);
             return Err(Status::internal(format!(
-                "failed to push artifact: {:?}",
-                err
+                "failed to push artifact: {err:?}"
             )));
         }
 
@@ -578,7 +566,7 @@ async fn build_artifact(
 
         let mut client = ArtifactServiceClient::connect(registry)
             .await
-            .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
 
         let request = StoreArtifactRequest {
             artifact: Some(artifact),
@@ -586,7 +574,7 @@ async fn build_artifact(
         };
 
         client.store_artifact(request).await.map_err(|err| {
-            Status::internal(format!("failed to store artifact in registry: {:?}", err))
+            Status::internal(format!("failed to store artifact in registry: {err}"))
         })?;
 
         // Remove artifact archive
@@ -594,14 +582,13 @@ async fn build_artifact(
         if let Err(err) = remove_file(&artifact_archive).await {
             error!("worker |> failed to remove artifact archive: {:?}", err);
             return Err(Status::internal(format!(
-                "failed to remove artifact archive: {:?}",
-                err
+                "failed to remove artifact archive: {err:?}"
             )));
         }
     } else {
-        remove_dir_all(&artifact_output_path).await.map_err(|err| {
-            Status::internal(format!("failed to remove artifact path: {:?}", err))
-        })?;
+        remove_dir_all(&artifact_output_path)
+            .await
+            .map_err(|err| Status::internal(format!("failed to remove artifact path: {err}")))?;
     }
 
     // Remove workspace
@@ -609,8 +596,7 @@ async fn build_artifact(
     if let Err(err) = remove_dir_all(workspace_path).await {
         error!("worker |> failed to remove workspace: {:?}", err);
         return Err(Status::internal(format!(
-            "failed to remove workspace: {:?}",
-            err
+            "failed to remove workspace: {err:?}"
         )));
     }
 
@@ -619,8 +605,7 @@ async fn build_artifact(
     if let Err(err) = remove_file(&artifact_output_lock).await {
         error!("worker |> failed to remove lock file: {:?}", err);
         return Err(Status::internal(format!(
-            "failed to remove lock file: {:?}",
-            err
+            "failed to remove lock file: {err:?}"
         )));
     }
 

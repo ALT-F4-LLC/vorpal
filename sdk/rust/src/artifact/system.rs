@@ -11,7 +11,7 @@ pub fn get_system_default_str() -> String {
         _ => OS,
     };
 
-    format!("{}-{}", ARCH, os)
+    format!("{ARCH}-{os}")
 }
 
 pub fn get_system_default() -> Result<ArtifactSystem> {

@@ -16,8 +16,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .with_digest(source_digest)
         .build();
 
-    let build_directory = format!("go-tools-{}", source_version);
-    let build_path = format!("cmd/{}/{}.go", name, name);
+    let build_directory = format!("go-tools-{source_version}");
+    let build_path = format!("cmd/{name}/{name}.go");
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
     GoBuilder::new(name, systems)

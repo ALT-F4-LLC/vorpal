@@ -56,7 +56,7 @@ impl ArchiveBackend for S3Backend {
                 data: archive_chunk.to_vec(),
             }))
             .await
-            .map_err(|err| Status::internal(format!("failed to send store chunk: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to send store chunk: {err}")))?;
         }
 
         Ok(())
@@ -85,7 +85,7 @@ impl ArchiveBackend for S3Backend {
             .body(request.data.clone().into())
             .send()
             .await
-            .map_err(|err| Status::internal(format!("failed to write store path: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to write store path: {err}")))?;
 
         Ok(())
     }

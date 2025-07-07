@@ -7,7 +7,7 @@ use anyhow::Result;
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "rust-src";
-    let source_digest = "5f0adbae49a5442bf3389f7798cbacba92a94b7fefe7810ce00d1356a861d305";
+    let source_digest = "6f372ce2bdea75fa36b96e07d7e4e8e52694ce1e98e0c3bcba0382045f85c793";
     let source_version = rust_toolchain::version();
     let source_path = format!("https://static.rust-lang.org/dist/rust-src-{source_version}.tar.gz");
 

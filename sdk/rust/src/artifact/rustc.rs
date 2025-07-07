@@ -10,10 +10,10 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let system = context.get_system();
 
     let source_digest = match system {
-        Aarch64Darwin => "d022dd6d61a7039c12834f90a0a5410c884bfb9ef1e38b085ad4d3f59a5bf04a",
-        Aarch64Linux => "f5e5eac428b2a62ffc14324e3a6e171fb3032921f24973b27959834e456388b1",
-        X8664Darwin => "7d8dd34a8b5286dfc66c05bcf2e0a1c1007315e4493911d8f83e973da3edb913",
-        X8664Linux => "fb18b7bb9dd94a5eeb445af1e4dd636836b6034f5dc731d534548bf5f9cb3d6f",
+        Aarch64Darwin => "89c0ce9067b44a8af6339c2f9fb1a17832d28954ed3b248464c5a89bff1c15e1",
+        Aarch64Linux => "0000000000000000000000000000000000000000000000000000000000000000",
+        X8664Darwin => "0000000000000000000000000000000000000000000000000000000000000000",
+        X8664Linux => "0000000000000000000000000000000000000000000000000000000000000000",
         _ => bail!("unsupported {name} system: {}", system.as_str_name()),
     };
 

@@ -190,19 +190,18 @@ impl ArchiveService for ArchiveServer {
 
         let public_key_path = get_key_public_path();
 
-        let public_key = get_public_key(public_key_path).await.map_err(|err| {
-            Status::internal(format!("failed to get public key: {:?}", err.to_string()))
-        })?;
+        let public_key = get_public_key(public_key_path)
+            .await
+            .map_err(|err| Status::internal(format!("failed to get public key: {err}")))?;
 
         let data_signature = Signature::try_from(request_signature.as_slice())
-            .map_err(|err| Status::internal(format!("failed to parse signature: {:?}", err)))?;
+            .map_err(|err| Status::internal(format!("failed to parse signature: {err}")))?;
 
         let verifying_key = VerifyingKey::<Sha256>::new(public_key);
 
         if let Err(msg) = verifying_key.verify(&request_data, &data_signature) {
             return Err(Status::invalid_argument(format!(
-                "invalid data signature: {:?}",
-                msg
+                "invalid data signature: {msg:?}"
             )));
         }
 

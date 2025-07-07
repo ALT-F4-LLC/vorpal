@@ -43,7 +43,7 @@ pub fn bash(
         }
     }
 
-    step_environments.push(format!("PATH={}", step_path));
+    step_environments.push(format!("PATH={step_path}"));
 
     let step_script = formatdoc! {"
         #!/bin/bash
@@ -165,7 +165,7 @@ pub async fn bwrap(
 
     if let Some(path) = environments.iter().find(|x| x.starts_with("PATH=")) {
         if let Some(path_value) = path.split('=').nth(1) {
-            step_path = format!("{}:{}", path_value, step_path);
+            step_path = format!("{path_value}:{step_path}");
         }
     }
 
