@@ -9,11 +9,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "clippy";
     let system = context.get_system();
 
-    let source_digest = match system {
-        Aarch64Darwin => "c5985d915abea2dc70ad7a3dce1f01710337c4eb2f64f17fd7872cca9adb5875",
-        Aarch64Linux => "0000000000000000000000000000000000000000000000000000000000000000",
-        X8664Darwin => "8b5d65e5d312bc792cef078892ca9807e5fec075f3a7e219738def275584ff53",
-        X8664Linux => "0000000000000000000000000000000000000000000000000000000000000000",
+    match system {
+        Aarch64Darwin | Aarch64Linux | X8664Darwin | X8664Linux => {}
         _ => bail!("unsupported {name} system: {}", system.as_str_name()),
     };
 
@@ -22,9 +19,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let source_path =
         format!("https://static.rust-lang.org/dist/{name}-{source_version}-{source_target}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name, source_path.as_str())
-        .with_digest(source_digest)
-        .build();
+    let source = ArtifactSourceBuilder::new(name, source_path.as_str()).build();
 
     let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}-preview/.\" \"$VORPAL_OUTPUT\"");
     let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];

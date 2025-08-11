@@ -14,6 +14,7 @@ use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::artifact::system::get_system_default_str;
 
 mod artifact;
+mod lock;
 mod init;
 mod start;
 mod store;
@@ -195,6 +196,14 @@ pub enum CommandArtifact {
         #[arg(default_value_t = false, long)]
         export: bool,
 
+        /// Fail if lock would change
+        #[arg(default_value_t = false, long)]
+        locked: bool,
+
+        /// Do not use network; rely on cache/lock
+        #[arg(default_value_t = false, long)]
+        offline: bool,
+
         #[arg(default_value_t = false, long)]
         lockfile_update: bool,
 
@@ -265,6 +274,9 @@ pub enum CommandSystem {
 pub enum Command {
     #[clap(subcommand)]
     Artifact(CommandArtifact),
+
+    #[clap(subcommand)]
+    Lock(lock::CommandLock),
 
     #[clap(subcommand)]
     Services(CommandServices),
@@ -375,6 +387,8 @@ pub async fn run() -> Result<()> {
                 config,
                 context,
                 export,
+                locked,
+                offline,
                 lockfile_update,
                 name,
                 path,
@@ -481,6 +495,8 @@ pub async fn run() -> Result<()> {
                     aliases: alias.clone(),
                     context: context_absolute_path.clone(),
                     export: *export,
+                    locked: *locked,
+                    offline: *offline,
                     lockfile_update: *lockfile_update,
                     name: name.clone(),
                     path: *path,
@@ -514,6 +530,25 @@ pub async fn run() -> Result<()> {
                 artifact::make::run(artifact_args, config_args, service_args).await
             }
         },
+
+        Command::Lock(lock_cmd) => {
+            // Determine registry similar to other commands
+            let mut registry = get_default_address();
+
+            if let Some(home_path) = get_home_config_path() {
+                if let Some(home_config) = load_vorpal_toml(home_path).await {
+                    if let Some(home_registry) = home_config.registry {
+                        registry = home_registry;
+                    }
+                }
+            }
+
+            if let Some(r) = cli_registry.clone() {
+                registry = r;
+            }
+
+            lock::run(lock_cmd, &registry).await
+        }
 
         Command::Services(services) => match services {
             CommandServices::Start {

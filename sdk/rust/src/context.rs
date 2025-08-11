@@ -9,6 +9,7 @@ use crate::{
     },
     artifact::system::get_system,
     cli::{Cli, Command},
+    lock::{load as load_lockfile, Lockfile},
 };
 use anyhow::{bail, Result};
 use clap::Parser;
@@ -28,6 +29,8 @@ pub struct ConfigContext {
     agent: String,
     artifact: String,
     artifact_context: PathBuf,
+    lock: Option<Lockfile>,
+    lockfile_update: bool,
     port: u16,
     registry: String,
     store: ConfigContextStore,
@@ -90,6 +93,7 @@ pub async fn get_context() -> Result<ConfigContext> {
             registry,
             system,
             variable,
+            lockfile_update,
         } => Ok(ConfigContext::new(
             agent,
             artifact,
@@ -97,6 +101,7 @@ pub async fn get_context() -> Result<ConfigContext> {
             port,
             registry,
             system,
+            lockfile_update,
             variable,
         )?),
     }
@@ -110,12 +115,16 @@ impl ConfigContext {
         port: u16,
         registry: String,
         system: String,
+        lockfile_update: bool,
         variable: Vec<String>,
     ) -> Result<Self> {
+        let lock = load_lockfile(&artifact_context.join("Vorpal.lock"))?;
         Ok(Self {
             agent,
             artifact,
             artifact_context,
+            lock,
+            lockfile_update,
             port,
             registry,
             store: ConfigContextStore {
@@ -134,6 +143,49 @@ impl ConfigContext {
         })
     }
 
+    fn hydrate_sources_from_lock(&self, artifact: &mut Artifact) {
+        let Some(lock) = &self.lock else {
+            return;
+        };
+
+        for src in artifact.sources.iter_mut() {
+            if src.digest.is_some() {
+                continue;
+            }
+
+            // Only hydrate remote sources from lockfile; local paths should
+            // be re-hashed so lockfile can reflect source lifecycle changes.
+            let is_http = src.path.starts_with("http://") || src.path.starts_with("https://");
+            if !is_http {
+                continue;
+            }
+
+            for s in &lock.sources {
+                if s.name != src.name {
+                    continue;
+                }
+
+                if let Some(art) = &s.artifact {
+                    if art != &artifact.name {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+
+                let path_match = false; // never match local paths; we skip above
+                let url_match = s.url.as_deref() == Some(src.path.as_str());
+
+                if path_match || url_match {
+                    if !s.digest.is_empty() {
+                        src.digest = Some(s.digest.clone());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn add_artifact(&mut self, artifact: &Artifact) -> Result<String> {
         if artifact.name.is_empty() {
             bail!("name cannot be empty");
@@ -147,8 +199,14 @@ impl ConfigContext {
             bail!("systems cannot be empty");
         }
 
-        let artifact_json =
-            serde_json::to_vec(artifact).expect("failed to serialize artifact to JSON");
+        // Prepare a local copy hydrated from lockfile with known digests (when not updating)
+        let mut artifact_to_prepare = artifact.clone();
+        if !self.lockfile_update {
+            self.hydrate_sources_from_lock(&mut artifact_to_prepare);
+        }
+
+        let artifact_json = serde_json::to_vec(&artifact_to_prepare)
+            .expect("failed to serialize artifact to JSON");
 
         let artifact_digest = digest(artifact_json);
 
@@ -163,7 +221,7 @@ impl ConfigContext {
             .expect("failed to connect to agent service");
 
         let request = PrepareArtifactRequest {
-            artifact: Some(artifact.clone()),
+            artifact: Some(artifact_to_prepare.clone()),
             artifact_context: self.artifact_context.display().to_string(),
         };
 
@@ -228,9 +286,46 @@ impl ConfigContext {
         //     return Ok(digest.to_string());
         // }
 
+        fn is_hex_digest(s: &str) -> bool {
+            s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
+        }
+
         let mut client = ArtifactServiceClient::connect(self.registry.clone())
             .await
             .expect("failed to connect to artifact service");
+
+        // Treat 64-hex strings as direct digests; otherwise resolve via alias
+        if is_hex_digest(alias) {
+            let request = ArtifactRequest {
+                digest: alias.to_string(),
+            };
+
+            match client.get_artifact(request.clone()).await {
+                Err(status) => {
+                    if status.code() != NotFound {
+                        bail!("artifact service error: {:?}", status);
+                    }
+
+                    bail!("artifact not found: {}", request.digest);
+                }
+
+                Ok(response) => {
+                    let artifact = response.into_inner();
+
+                    self.store
+                        .artifact
+                        .insert(request.digest.clone(), artifact.clone());
+
+                    for step in artifact.steps.iter() {
+                        for dep in step.artifacts.iter() {
+                            Box::pin(self.fetch_artifact(dep)).await?;
+                        }
+                    }
+
+                    return Ok(request.digest);
+                }
+            }
+        }
 
         let request = GetArtifactAliasRequest {
             alias: alias.to_string(),

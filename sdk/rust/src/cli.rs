@@ -32,5 +32,8 @@ pub enum Command {
 
         #[clap(long)]
         variable: Vec<String>,
+
+        #[clap(long, default_value_t = false)]
+        lockfile_update: bool,
     },
 }

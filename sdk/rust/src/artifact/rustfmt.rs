@@ -9,11 +9,8 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "rustfmt";
     let system = context.get_system();
 
-    let source_digest = match system {
-        Aarch64Darwin => "b121c6ab08198d82852bddf1298635c17a85edc2b0c4e964fc0e1c30ca68beaf",
-        Aarch64Linux => "0000000000000000000000000000000000000000000000000000000000000000",
-        X8664Darwin => "0000000000000000000000000000000000000000000000000000000000000000",
-        X8664Linux => "0000000000000000000000000000000000000000000000000000000000000000",
+    match system {
+        Aarch64Darwin | Aarch64Linux | X8664Darwin | X8664Linux => {}
         _ => bail!("unsupported {name} system: {}", system.as_str_name()),
     };
 
@@ -22,9 +19,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let source_path =
         format!("https://static.rust-lang.org/dist/{name}-{source_version}-{source_target}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name, source_path.as_str())
-        .with_digest(source_digest)
-        .build();
+    let source = ArtifactSourceBuilder::new(name, source_path.as_str()).build();
 
     let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}-preview/.\" \"$VORPAL_OUTPUT\"");
     let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];

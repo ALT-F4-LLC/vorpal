@@ -7,13 +7,10 @@ use anyhow::Result;
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "rust-src";
-    let source_digest = "6f372ce2bdea75fa36b96e07d7e4e8e52694ce1e98e0c3bcba0382045f85c793";
     let source_version = rust_toolchain::version();
     let source_path = format!("https://static.rust-lang.org/dist/rust-src-{source_version}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name, source_path.as_str())
-        .with_digest(source_digest)
-        .build();
+    let source = ArtifactSourceBuilder::new(name, source_path.as_str()).build();
 
     let step_script =
         format!("cp -prv \"./source/{name}/{name}-{source_version}/{name}/.\" \"$VORPAL_OUTPUT\"");

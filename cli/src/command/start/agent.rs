@@ -90,21 +90,8 @@ pub async fn build_source(
     let source_sandbox = create_sandbox_dir().await?;
 
     if source_type == ArtifactSourceType::Http {
-        if source.digest.is_none() {
-            bail!(
-                "'source.{}.hash' required for remote sources: {:?}",
-                source.name,
-                source.path
-            );
-        }
-
-        if source.digest.is_some() && source.digest.clone().unwrap() == "" {
-            bail!(
-                "'source.{}.hash' empty for remote sources: {:?}",
-                source.name,
-                source.path
-            );
-        }
+        // If a digest is provided, we'll later verify it matches the computed digest
+        // from the downloaded content. If not provided, proceed and compute it.
 
         let http_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
 
@@ -211,12 +198,12 @@ pub async fn build_source(
 
                 _ => {
                     bail!(
-                        "'source.{}.path' unsupported mime-type detected: {:?}",
-                        source.name,
-                        source.path
-                    );
-                }
-            }
+                "'source.{}.path' unsupported mime-type detected: {:?}",
+                source.name,
+                source.path
+            );
+        }
+    }
         }
     }
 

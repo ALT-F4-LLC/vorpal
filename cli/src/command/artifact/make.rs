@@ -18,6 +18,7 @@ use std::{
 use tokio::fs::{create_dir_all, remove_dir_all, remove_file, write};
 use tonic::{transport::Channel, Code};
 use tracing::{error, info};
+use crate::command::lock::{load_lock, save_lock, LockArtifact, LockSource, Lockfile};
 use vorpal_sdk::{
     api::{
         archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest},
@@ -37,6 +38,7 @@ async fn build(
     artifact_digest: &str,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
+    offline: bool,
 ) -> Result<()> {
     // 1. Check artifact
 
@@ -52,7 +54,8 @@ async fn build(
         digest: artifact_digest.to_string(),
     };
 
-    match client_archive.pull(request_pull.clone()).await {
+    if !offline {
+        match client_archive.pull(request_pull.clone()).await {
         Err(status) => {
             if status.code() != Code::NotFound {
                 bail!("registry pull error: {:?}", status);
@@ -113,6 +116,7 @@ async fn build(
                 return Ok(());
             }
         }
+    }
     };
 
     // Build
@@ -155,6 +159,7 @@ async fn build_artifacts(
     build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
+    offline: bool,
 ) -> Result<()> {
     let artifact_order = get_order(&build_store).await?;
     let mut build_complete = HashMap::<String, Artifact>::new();
@@ -186,6 +191,7 @@ async fn build_artifacts(
                     &artifact_digest,
                     client_archive,
                     client_worker,
+                    offline,
                 )
                 .await?;
 
@@ -201,6 +207,8 @@ pub struct RunArgsArtifact {
     pub aliases: Vec<String>,
     pub context: PathBuf,
     pub export: bool,
+    pub locked: bool,
+    pub offline: bool,
     pub lockfile_update: bool,
     pub name: String,
     pub path: bool,
@@ -241,6 +249,7 @@ pub async fn run(
         0,
         service_registry.to_string(),
         artifact_system.to_string(),
+        artifact.lockfile_update,
         artifact.variable.clone(),
     )?;
 
@@ -325,6 +334,7 @@ pub async fn run(
         config_context.get_artifact_store(),
         &mut client_archive,
         &mut client_worker,
+        artifact.offline,
     )
     .await?;
 
@@ -434,6 +444,147 @@ pub async fn run(
     )
     .await?;
 
+    // Update Vorpal.lock
+    let lock_path = artifact.context.join("Vorpal.lock");
+
+    let mut new_lock = Lockfile { lockfile: 1, sources: vec![], artifacts: vec![] };
+
+    for (digest, art) in build_store.iter() {
+        let deps = art
+            .steps
+            .iter()
+            .flat_map(|s| s.artifacts.clone())
+            .collect::<Vec<String>>();
+
+        let systems = art
+            .systems
+            .iter()
+            .map(|s| {
+                vorpal_sdk::api::artifact::ArtifactSystem::from_i32(*s)
+                    .map(|v| v.as_str_name().to_string())
+                    .unwrap_or_else(|| s.to_string())
+            })
+            .collect::<Vec<String>>();
+
+        // Policy: only lock artifacts that do not include local sources
+        let has_local_source = art.sources.iter().any(|src| {
+            let is_http = src.path.starts_with("http://") || src.path.starts_with("https://");
+            !is_http
+        });
+
+        if !has_local_source {
+            new_lock.artifacts.push(LockArtifact {
+                name: art.name.clone(),
+                digest: digest.clone(),
+                aliases: art.aliases.clone(),
+                systems,
+                deps,
+            });
+        }
+
+        // Capture sources discovered during build
+        for src in art.sources.iter() {
+            let (kind, path, url) = if src.path.starts_with("http://") || src.path.starts_with("https://") {
+                ("http".to_string(), None, Some(src.path.clone()))
+            } else {
+                ("local".to_string(), Some(src.path.clone()), None)
+            };
+
+            let digest = src.digest.clone().unwrap_or_default();
+
+            new_lock.sources.push(LockSource {
+                name: src.name.clone(),
+                kind,
+                path,
+                url,
+                includes: src.includes.clone(),
+                excludes: src.excludes.clone(),
+                digest,
+                rev: None,
+                artifact: Some(art.name.clone()),
+            });
+        }
+    }
+
+    // Sort for deterministic output
+    new_lock.artifacts.sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+    new_lock.sources.sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+
+    // Policy: do not track local sources in Vorpal.lock
+    // Build a filtered copy that excludes local sources for comparison and persistence
+    let mut new_lock_remote_only = Lockfile {
+        lockfile: new_lock.lockfile,
+        artifacts: new_lock.artifacts.clone(),
+        sources: new_lock
+            .sources
+            .iter()
+            .filter(|s| s.kind != "local")
+            .cloned()
+            .collect(),
+    };
+    new_lock_remote_only
+        .sources
+        .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+
+    let mut lock_status = "unchanged".to_string();
+
+    if let Some(existing) = load_lock(&lock_path).await? {
+        let mut ex = existing.clone();
+        ex.artifacts
+            .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+
+        // Filter existing sources to non-local for comparison
+        let mut ex_remote_only = Lockfile {
+            lockfile: ex.lockfile,
+            artifacts: ex.artifacts.clone(),
+            sources: ex
+                .sources
+                .into_iter()
+                .filter(|s| s.kind != "local")
+                .collect(),
+        };
+        ex_remote_only
+            .sources
+            .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+
+        let changed =
+            ex_remote_only.artifacts != new_lock_remote_only.artifacts
+                || ex_remote_only.sources != new_lock_remote_only.sources;
+
+        if changed && artifact.locked {
+            bail!("Vorpal.lock would change; run 'make vorpal-update' to refresh");
+        }
+
+        if changed || artifact.lockfile_update {
+            // Persist remote-only view
+            save_lock(&lock_path, &new_lock_remote_only).await?;
+            lock_status = "updated".to_string();
+            info!("updated lockfile: {}", lock_path.display());
+        }
+    } else {
+        if artifact.locked {
+            bail!("Vorpal.lock missing; run 'make vorpal-update' to create it");
+        }
+        // Persist remote-only view for new lockfile
+        save_lock(&lock_path, &new_lock_remote_only).await?;
+        lock_status = "created".to_string();
+        info!("created lockfile: {}", lock_path.display());
+    }
+
+    // Mode banner
+    let mode = if artifact.lockfile_update {
+        "update"
+    } else if artifact.locked && artifact.offline {
+        "ensure-offline"
+    } else if artifact.locked {
+        "ensure"
+    } else if artifact.offline {
+        "offline"
+    } else {
+        "default"
+    };
+    info!("mode: {}, lock: {}", mode, lock_status);
+
     if artifact.export {
         let export =
             serde_json::to_string_pretty(&selected_artifact).expect("failed to serialize artifact");
@@ -449,6 +600,7 @@ pub async fn run(
         build_store,
         &mut client_archive,
         &mut client_worker,
+        artifact.offline,
     )
     .await?;
 

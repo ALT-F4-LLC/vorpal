@@ -8,14 +8,11 @@ use indoc::formatdoc;
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "nginx";
-    let source_digest = "35764d85e27eac8e8c9eebfe6c5a593224ef63fdd1f2ea0916bf8b4d2335acc0";
     let source_version = "1.27.5";
     let source_path =
         format!("https://github.com/nginx/nginx/archive/refs/tags/release-{source_version}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name, source_path.as_str())
-        .with_digest(source_digest)
-        .build();
+    let source = ArtifactSourceBuilder::new(name, source_path.as_str()).build();
 
     let step_script = formatdoc! {"
         mkdir -pv \"$VORPAL_OUTPUT/bin\"

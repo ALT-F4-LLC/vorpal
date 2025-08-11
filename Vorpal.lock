@@ -1,0 +1,136 @@
+lockfile = 1
+
+[[sources]]
+name = "cargo"
+type = "http"
+url = "https://static.rust-lang.org/dist/cargo-1.88.0-aarch64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "7288c982cdf90e7bff441cda961ad8bb71ca011c8c14671a01f78703f19156a7"
+artifact = "cargo"
+
+[[sources]]
+name = "clippy"
+type = "http"
+url = "https://static.rust-lang.org/dist/clippy-1.88.0-aarch64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "c5985d915abea2dc70ad7a3dce1f01710337c4eb2f64f17fd7872cca9adb5875"
+artifact = "clippy"
+
+[[sources]]
+name = "protoc"
+type = "http"
+url = "https://github.com/protocolbuffers/protobuf/releases/download/v25.4/protoc-25.4-osx-aarch_64.zip"
+includes = []
+excludes = []
+digest = "d105abb1c1d2c024f29df884f0592f1307984d63aeb10f0e61ccb94aee2c2feb"
+artifact = "protoc"
+
+[[sources]]
+name = "rust-analyzer"
+type = "http"
+url = "https://static.rust-lang.org/dist/rust-analyzer-1.88.0-aarch64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "b233955ae4c8cee649044d779044a8bec377df8d65bb0f3f75bd683454d8fe48"
+artifact = "rust-analyzer"
+
+[[sources]]
+name = "rust-src"
+type = "http"
+url = "https://static.rust-lang.org/dist/rust-src-1.88.0.tar.gz"
+includes = []
+excludes = []
+digest = "6f372ce2bdea75fa36b96e07d7e4e8e52694ce1e98e0c3bcba0382045f85c793"
+artifact = "rust-src"
+
+[[sources]]
+name = "rust-std"
+type = "http"
+url = "https://static.rust-lang.org/dist/rust-std-1.88.0-aarch64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "ca60c70d35523073dc1f912cfcbd8c547daa02bcf5a51e100098a1fdede288ef"
+artifact = "rust-std"
+
+[[sources]]
+name = "rustc"
+type = "http"
+url = "https://static.rust-lang.org/dist/rustc-1.88.0-aarch64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "89c0ce9067b44a8af6339c2f9fb1a17832d28954ed3b248464c5a89bff1c15e1"
+artifact = "rustc"
+
+[[sources]]
+name = "rustfmt"
+type = "http"
+url = "https://static.rust-lang.org/dist/rustfmt-1.88.0-aarch64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "b121c6ab08198d82852bddf1298635c17a85edc2b0c4e964fc0e1c30ca68beaf"
+artifact = "rustfmt"
+
+[[artifacts]]
+name = "cargo"
+digest = "8c591dc360151eb0360a6f5cfe9db59a56811de068e8d6d97f3e0f7432ac6f67"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = []
+
+[[artifacts]]
+name = "clippy"
+digest = "a41792bb64c19cc593ccc8795ad4fcaed4114b82c13fd5b15fb42a055c187724"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = []
+
+[[artifacts]]
+name = "protoc"
+digest = "479292d7c896a7379c8218a6671093f80c7d9af40cb4c13499e35398d26f4f56"
+aliases = ["protoc:25.4"]
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = []
+
+[[artifacts]]
+name = "rust-analyzer"
+digest = "9ecc9c95ac5f381a9c1bd15d7744c57f36a144220fb57909e15f9da1ff41da4d"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = []
+
+[[artifacts]]
+name = "rust-src"
+digest = "262870257c3f29e0aaf1e85e6e79ab5086eea7db65b238e7c1c7f285a4183b54"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = []
+
+[[artifacts]]
+name = "rust-std"
+digest = "a27b1acd622641369bca2ba1e206557f0c823d86e7b2dc0da90c5bcce5f3e0c7"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = []
+
+[[artifacts]]
+name = "rust-toolchain"
+digest = "1a499b8f5ca6c4cb9fbd02d80ab3ef69cbc267b7709da65f04d983fcb8c37aeb"
+aliases = ["rust-toolchain:1.88.0"]
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = ["8c591dc360151eb0360a6f5cfe9db59a56811de068e8d6d97f3e0f7432ac6f67", "a41792bb64c19cc593ccc8795ad4fcaed4114b82c13fd5b15fb42a055c187724", "9ecc9c95ac5f381a9c1bd15d7744c57f36a144220fb57909e15f9da1ff41da4d", "262870257c3f29e0aaf1e85e6e79ab5086eea7db65b238e7c1c7f285a4183b54", "a27b1acd622641369bca2ba1e206557f0c823d86e7b2dc0da90c5bcce5f3e0c7", "d59e4df26f8778e9e0cb3e29183cd4ff95d3f03b0a3478d8d513e35b03553c9d", "f66be7a8271bee87c32a8b835c41263b5298c1c5cbb1f9d791f23f0a63de6442"]
+
+[[artifacts]]
+name = "rustc"
+digest = "d59e4df26f8778e9e0cb3e29183cd4ff95d3f03b0a3478d8d513e35b03553c9d"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = []
+
+[[artifacts]]
+name = "rustfmt"
+digest = "f66be7a8271bee87c32a8b835c41263b5298c1c5cbb1f9d791f23f0a63de6442"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = []
