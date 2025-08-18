@@ -14,8 +14,8 @@ use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::artifact::system::get_system_default_str;
 
 mod artifact;
-mod lock;
 mod init;
+mod lock;
 mod start;
 mod store;
 mod system;

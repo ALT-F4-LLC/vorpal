@@ -134,3 +134,17 @@ digest = "f66be7a8271bee87c32a8b835c41263b5298c1c5cbb1f9d791f23f0a63de6442"
 aliases = []
 systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
 deps = []
+
+[[artifacts]]
+name = "vorpal"
+digest = "2c6c7e565c756b5bbbfad98204f1b2d05c761da46f3801acedbde809003fc0c3"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = ["1a499b8f5ca6c4cb9fbd02d80ab3ef69cbc267b7709da65f04d983fcb8c37aeb", "7f95863620517c3a45712f048507ba4692ae302b7d365c92406ff42cdd088b74", "479292d7c896a7379c8218a6671093f80c7d9af40cb4c13499e35398d26f4f56"]
+
+[[artifacts]]
+name = "vorpal-vendor"
+digest = "7f95863620517c3a45712f048507ba4692ae302b7d365c92406ff42cdd088b74"
+aliases = []
+systems = ["AARCH64_DARWIN", "AARCH64_LINUX", "X8664_DARWIN", "X8664_LINUX"]
+deps = ["1a499b8f5ca6c4cb9fbd02d80ab3ef69cbc267b7709da65f04d983fcb8c37aeb"]

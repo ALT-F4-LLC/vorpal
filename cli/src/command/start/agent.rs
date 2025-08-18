@@ -1,3 +1,4 @@
+use crate::command::lock::{load_lock, save_lock, LockSource, Lockfile};
 use crate::command::store::{
     archives::{compress_zstd, unpack_zip},
     hashes::hash_files,
@@ -18,7 +19,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
 use tonic::{Code, Request, Response, Status};
-use tracing::info;
+use tracing::debug;
 use url::Url;
 use vorpal_sdk::api::{
     agent::{agent_service_server::AgentService, PrepareArtifactRequest, PrepareArtifactResponse},
@@ -198,12 +199,12 @@ pub async fn build_source(
 
                 _ => {
                     bail!(
-                "'source.{}.path' unsupported mime-type detected: {:?}",
-                source.name,
-                source.path
-            );
-        }
-    }
+                        "'source.{}.path' unsupported mime-type detected: {:?}",
+                        source.name,
+                        source.path
+                    );
+                }
+            }
         }
     }
 
@@ -396,7 +397,58 @@ async fn prepare_artifact(
 
         artifact_sources.push(source);
 
-        info!("agent |> prepare artifact source: {}", source_digest);
+        debug!("agent |> prepare artifact source: {}", source_digest);
+
+        // Upsert remote source into Vorpal.lock immediately after preparation
+        let is_http = artifact_sources
+            .last()
+            .map(|s| s.path.starts_with("http://") || s.path.starts_with("https://"))
+            .unwrap_or(false);
+
+        if is_http {
+            let lock_path = Path::new(&request.artifact_context).join("Vorpal.lock");
+            let mut lock = match load_lock(&lock_path).await.unwrap_or(None) {
+                Some(l) => l,
+                None => Lockfile {
+                    lockfile: 1,
+                    sources: vec![],
+                    artifacts: vec![],
+                },
+            };
+
+            let last = artifact_sources.last().unwrap();
+
+            // Upsert by (artifact name + source name + url)
+            if let Some(existing) = lock.sources.iter_mut().find(|s| {
+                s.kind == "http"
+                    && s.name == last.name
+                    && s.artifact.as_deref() == Some(artifact.name.as_str())
+                    && s.url.as_deref() == Some(last.path.as_str())
+            }) {
+                existing.digest = last.digest.clone().unwrap_or_default();
+                existing.includes = last.includes.clone();
+                existing.excludes = last.excludes.clone();
+            } else {
+                lock.sources.push(LockSource {
+                    name: last.name.clone(),
+                    kind: "http".to_string(),
+                    path: None,
+                    url: Some(last.path.clone()),
+                    includes: last.includes.clone(),
+                    excludes: last.excludes.clone(),
+                    digest: last.digest.clone().unwrap_or_default(),
+                    rev: None,
+                    artifact: Some(artifact.name.clone()),
+                });
+            }
+
+            lock.sources.retain(|s| s.kind != "local");
+            lock.sources
+                .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+
+            // Best-effort save; ignore failures to avoid breaking the build
+            let _ = save_lock(&lock_path, &lock).await;
+        }
     }
 
     // TODO: explore using combined sources digest for the artifact
@@ -428,7 +480,7 @@ async fn prepare_artifact(
         .await
         .map_err(|_| Status::internal("failed to send response"));
 
-    info!("agent |> prepare artifact: {}", artifact_digest);
+    debug!("agent |> prepare artifact: {}", artifact_digest);
 
     Ok(())
 }

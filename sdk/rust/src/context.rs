@@ -9,7 +9,7 @@ use crate::{
     },
     artifact::system::get_system,
     cli::{Cli, Command},
-    lock::{load as load_lockfile, Lockfile},
+    lock::{load as load_lockfile, save as save_lockfile, Lockfile},
 };
 use anyhow::{bail, Result};
 use clap::Parser;
@@ -199,14 +199,13 @@ impl ConfigContext {
             bail!("systems cannot be empty");
         }
 
-        // Prepare a local copy hydrated from lockfile with known digests (when not updating)
+        // Prepare a local copy hydrated from lockfile with known remote digests
+        // Hydration helps resume interrupted runs and avoid re-downloading prepared sources.
         let mut artifact_to_prepare = artifact.clone();
-        if !self.lockfile_update {
-            self.hydrate_sources_from_lock(&mut artifact_to_prepare);
-        }
+        self.hydrate_sources_from_lock(&mut artifact_to_prepare);
 
-        let artifact_json = serde_json::to_vec(&artifact_to_prepare)
-            .expect("failed to serialize artifact to JSON");
+        let artifact_json =
+            serde_json::to_vec(&artifact_to_prepare).expect("failed to serialize artifact to JSON");
 
         let artifact_digest = digest(artifact_json);
 
@@ -275,6 +274,8 @@ impl ConfigContext {
                 .artifact
                 .insert(artifact_digest.clone(), artifact.clone());
         }
+
+        // Agent now handles per-source lock updates; CLI finalizes lockfile at end
 
         Ok(artifact_digest)
     }
@@ -399,6 +400,130 @@ impl ConfigContext {
 
     pub fn get_variable(&self, name: &str) -> Option<String> {
         self.store.variable.get(name).cloned()
+    }
+
+    fn persist_remote_sources_for_artifact(&self, artifact: &Artifact) -> Result<()> {
+        let lock_path = self.artifact_context.join("Vorpal.lock");
+
+        let mut lock = match crate::lock::load(&lock_path)? {
+            Some(l) => l,
+            None => Lockfile {
+                lockfile: 1,
+                sources: vec![],
+                artifacts: vec![],
+            },
+        };
+
+        for src in &artifact.sources {
+            let is_http = src.path.starts_with("http://") || src.path.starts_with("https://");
+            if !is_http {
+                continue;
+            }
+
+            let digest = match &src.digest {
+                Some(d) if !d.is_empty() => d.clone(),
+                _ => continue,
+            };
+
+            let key_name = src.name.clone();
+            let key_url = src.path.clone();
+            let artifact_name = artifact.name.clone();
+
+            if let Some(existing) = lock.sources.iter_mut().find(|s| {
+                s.kind == "http"
+                    && s.name == key_name
+                    && s.artifact.as_deref() == Some(artifact_name.as_str())
+                    && s.url.as_deref() == Some(key_url.as_str())
+            }) {
+                existing.digest = digest.clone();
+                existing.includes = src.includes.clone();
+                existing.excludes = src.excludes.clone();
+            } else {
+                lock.sources.push(crate::lock::LockSource {
+                    name: key_name,
+                    kind: "http".to_string(),
+                    path: None,
+                    url: Some(key_url),
+                    includes: src.includes.clone(),
+                    excludes: src.excludes.clone(),
+                    digest,
+                    rev: None,
+                    artifact: Some(artifact_name),
+                });
+            }
+        }
+
+        // Policy: persist only remote sources
+        lock.sources.retain(|s| s.kind != "local");
+        lock.sources
+            .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+
+        save_lockfile(&lock_path, &lock)?;
+        Ok(())
+    }
+
+    fn persist_artifact_if_remote_only(
+        &self,
+        artifact: &Artifact,
+        artifact_digest: &str,
+    ) -> Result<()> {
+        // Only persist artifacts composed solely of remote sources
+        let has_local_source = artifact.sources.iter().any(|src| {
+            let is_http = src.path.starts_with("http://") || src.path.starts_with("https://");
+            !is_http
+        });
+
+        if has_local_source {
+            return Ok(());
+        }
+
+        let lock_path = self.artifact_context.join("Vorpal.lock");
+
+        let mut lock = match crate::lock::load(&lock_path)? {
+            Some(l) => l,
+            None => Lockfile {
+                lockfile: 1,
+                sources: vec![],
+                artifacts: vec![],
+            },
+        };
+
+        let deps = artifact
+            .steps
+            .iter()
+            .flat_map(|s| s.artifacts.clone())
+            .collect::<Vec<String>>();
+
+        let systems = artifact
+            .systems
+            .iter()
+            .map(|s| {
+                ArtifactSystem::from_i32(*s)
+                    .map(|v| v.as_str_name().to_string())
+                    .unwrap_or_else(|| s.to_string())
+            })
+            .collect::<Vec<String>>();
+
+        if let Some(existing) = lock.artifacts.iter_mut().find(|a| a.name == artifact.name) {
+            existing.digest = artifact_digest.to_string();
+            existing.aliases = artifact.aliases.clone();
+            existing.systems = systems;
+            existing.deps = deps;
+        } else {
+            lock.artifacts.push(crate::lock::LockArtifact {
+                name: artifact.name.clone(),
+                digest: artifact_digest.to_string(),
+                aliases: artifact.aliases.clone(),
+                systems,
+                deps,
+            });
+        }
+
+        lock.artifacts
+            .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+
+        save_lockfile(&lock_path, &lock)?;
+        Ok(())
     }
 
     pub async fn run(&self) -> Result<()> {

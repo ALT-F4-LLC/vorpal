@@ -117,7 +117,7 @@ pub fn unzip_patch_gcc14(version: &str, _digest: &str) -> ArtifactSource {
 pub fn unzip(version: &str, _digest: &str) -> ArtifactSource {
     let name = "unzip";
     let version = version.replace(".", "");
-    let path = format!("https://cfhcable.dl.sourceforge.net/project/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip{version}.tar.gz?viasf=1");
+    let path = format!("https://cytranet-dal.dl.sourceforge.net/project/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip{version}.tar.gz?viasf=1");
 
     ArtifactSourceBuilder::new(name, path.as_str()).build()
 }

@@ -14,7 +14,7 @@ Examples of building a Rust application in multiple languages:
 
 ## Make Targets and Modes
 
-- `make vorpal`: Ensure mode (reproduce from `Vorpal.lock`; does not modify lock). Fails fast if the lock would change and suggests `make vorpal-update`.
+- `make vorpal`: Ensure mode (reproduce from `Vorpal.lock`; appends missing remote/toolchain entries as they complete to enable resume). Fails if existing locked entries would change.
 - `make vorpal-update`: Update mode (re-resolve remote sources and write `Vorpal.lock`).
 - `make vorpal-offline`: Offline ensure (no network; uses only local cache; fails if any locked digest is missing locally).
 - `make vorpal-verify`: Verify lock (checks remote digests exist in the registry).

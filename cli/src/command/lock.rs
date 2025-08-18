@@ -1,13 +1,11 @@
+use crate::command::store::{hashes::hash_files, paths::get_file_paths};
 use anyhow::{bail, Result};
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs::{read, write};
-use crate::command::store::{hashes::hash_files, paths::get_file_paths};
 use tonic::Code::NotFound;
-use vorpal_sdk::api::archive::{
-    archive_service_client::ArchiveServiceClient, ArchivePullRequest,
-};
+use vorpal_sdk::api::archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest};
 
 #[derive(Subcommand)]
 pub enum CommandLock {
