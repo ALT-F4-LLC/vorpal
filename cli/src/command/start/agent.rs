@@ -360,11 +360,7 @@ pub async fn build_source(
     Ok(source_digest)
 }
 
-async fn verify_lockfile_agent(
-    context_path: &str,
-    registry: &str,
-    artifact_name: &str,
-) -> Result<bool, Status> {
+async fn verify_lockfile_agent(context_path: &str, artifact_name: &str) -> Result<bool, Status> {
     let context = Path::new(context_path);
     let lock_path = context.join("Vorpal.lock");
 
@@ -375,12 +371,40 @@ async fn verify_lockfile_agent(
     };
 
     // Check if artifact entry exists in lockfile
-    let artifact_exists = lock.artifacts.iter().any(|a| a.name == artifact_name);
-    if !artifact_exists {
+    let artifact_entry = lock.artifacts.iter().find(|a| a.name == artifact_name);
+    let Some(artifact_entry) = artifact_entry else {
         return Ok(false); // Artifact not in lockfile, proceed with processing
+    };
+
+    // Check if artifact output exists and contains files
+    let artifact_output_path =
+        crate::command::store::paths::get_artifact_output_path(&artifact_entry.digest);
+    info!(
+        "agent |> checking artifact output path: {}",
+        artifact_output_path.display()
+    );
+
+    if !artifact_output_path.exists() {
+        info!("agent |> artifact output path does not exist, rebuilding");
+        return Ok(false); // Artifact output doesn't exist, need to rebuild
     }
 
-    // Verify local sources by rehashing inputs
+    // Check if the directory has any contents (not just an empty directory)
+    match tokio::fs::read_dir(&artifact_output_path).await {
+        Ok(mut entries) => {
+            if entries.next_entry().await.unwrap_or(None).is_none() {
+                info!("agent |> artifact output directory is empty, rebuilding");
+                return Ok(false); // Directory exists but is empty, need to rebuild
+            }
+            info!("agent |> artifact output directory has contents, treating as locked");
+        }
+        Err(_) => {
+            info!("agent |> cannot read artifact output directory, rebuilding");
+            return Ok(false); // Can't read directory, need to rebuild
+        }
+    }
+
+    // Verify local sources only - remote sources will be re-downloaded as needed during processing
     let mut mismatches = vec![];
 
     for src in lock.sources.iter().filter(|s| s.kind == "local") {
@@ -413,45 +437,6 @@ async fn verify_lockfile_agent(
         }
     }
 
-    // Verify remote sources exist in registry by digest
-    let mut client = match ArchiveServiceClient::connect(registry.to_string()).await {
-        Ok(c) => c,
-        Err(e) => {
-            return Err(Status::internal(format!(
-                "Failed to connect to registry: {e}"
-            )))
-        }
-    };
-
-    for src in lock.sources.iter().filter(|s| s.kind == "http") {
-        if src.digest.is_empty() {
-            mismatches.push(format!("{}: missing digest in lockfile", src.name));
-            continue;
-        }
-
-        let req = ArchivePullRequest {
-            digest: src.digest.clone(),
-        };
-
-        match client.check(req).await {
-            Ok(_) => {}
-            Err(status) => {
-                if status.code() == Code::NotFound {
-                    mismatches.push(format!(
-                        "{}: digest not present in registry: {}",
-                        src.name, src.digest
-                    ));
-                } else {
-                    mismatches.push(format!(
-                        "{}: registry error: {}",
-                        src.name,
-                        status.message()
-                    ));
-                }
-            }
-        }
-    }
-
     if !mismatches.is_empty() {
         return Err(Status::failed_precondition(format!(
             "Lockfile verification failed: {}",
@@ -459,7 +444,7 @@ async fn verify_lockfile_agent(
         )));
     }
 
-    Ok(true) // Lockfile verified successfully
+    Ok(true) // Lockfile verified successfully - artifact output exists and local sources match
 }
 
 async fn prepare_artifact(
@@ -479,7 +464,7 @@ async fn prepare_artifact(
     // Handle lockfile logic based on update_mode
     if !request.update_mode {
         // Not in update mode - check if artifact is locked and verified
-        match verify_lockfile_agent(&request.artifact_context, &registry, &artifact.name).await {
+        match verify_lockfile_agent(&request.artifact_context, &artifact.name).await {
             Ok(true) => {
                 // Lockfile verified - artifact already exists and is locked
                 info!("agent |> artifact locked: {}", artifact.name);
@@ -499,7 +484,7 @@ async fn prepare_artifact(
                 let artifact_response = PrepareArtifactResponse {
                     artifact: Some(artifact),
                     artifact_digest,
-                    artifact_output: Some("locked".to_string()),
+                    artifact_output: None,
                 };
                 let _ = tx.send(Ok(artifact_response)).await;
                 return Ok(());
@@ -618,12 +603,8 @@ async fn prepare_artifact(
                 });
             }
 
-            // Remove only sources belonging to the current artifact being built
-            // This preserves sources from other artifacts in the lockfile
-            lock.sources.retain(|s| {
-                // Keep sources that don't belong to this artifact
-                s.artifact.as_deref() != Some(artifact.name.as_str())
-            });
+            // Don't remove any sources here - we just added/updated the current one above
+            // Let the CLI handle source pruning in coordinated fashion
 
             lock.sources
                 .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
