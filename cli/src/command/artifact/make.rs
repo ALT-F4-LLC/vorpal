@@ -32,6 +32,14 @@ use vorpal_sdk::{
     context::ConfigContext,
 };
 
+/// Check if an artifact name is a root configuration artifact.
+/// Root configuration artifacts are defined in the configuration and should be excluded from lockfile.
+fn is_root_config_artifact(name: &str, config_artifacts: &HashMap<String, Artifact>) -> bool {
+    config_artifacts
+        .values()
+        .any(|artifact| artifact.name == name)
+}
+
 async fn build(
     artifact: &Artifact,
     artifact_aliases: Vec<String>,
@@ -161,6 +169,7 @@ async fn build_artifacts(
     client_worker: &mut WorkerServiceClient<Channel>,
     offline: bool,
     lock_path: &Path,
+    config_artifacts: &HashMap<String, Artifact>,
 ) -> Result<()> {
     let artifact_order = get_order(&build_store).await?;
     let mut build_complete = HashMap::<String, Artifact>::new();
@@ -199,7 +208,8 @@ async fn build_artifacts(
                 build_complete.insert(artifact_digest.to_string(), artifact.clone());
 
                 // Incrementally append artifact entry to Vorpal.lock if missing (agent handles sources)
-                upsert_artifact_lock_entry(lock_path, artifact, &artifact_digest).await?;
+                upsert_artifact_lock_entry(lock_path, artifact, &artifact_digest, config_artifacts)
+                    .await?;
             }
         }
     }
@@ -207,7 +217,17 @@ async fn build_artifacts(
     Ok(())
 }
 
-async fn upsert_artifact_lock_entry(lock_path: &Path, art: &Artifact, digest: &str) -> Result<()> {
+async fn upsert_artifact_lock_entry(
+    lock_path: &Path,
+    art: &Artifact,
+    digest: &str,
+    config_artifacts: &HashMap<String, Artifact>,
+) -> Result<()> {
+    // Skip root configuration artifacts - they should not be stored in lockfile
+    if is_root_config_artifact(&art.name, config_artifacts) {
+        return Ok(());
+    }
+
     let mut lock = match load_lock(lock_path).await? {
         Some(l) => l,
         None => Lockfile {
@@ -388,6 +408,14 @@ pub async fn run(
 
     // Build config dependencies first to ensure config binary exists
     let config_store = config_context.get_artifact_store();
+
+    // Create a temporary config artifacts map from config_store for filtering
+    // The config_store contains CLI-injected config artifacts that should be excluded from lockfile
+    let config_store_artifacts: HashMap<String, Artifact> = config_store
+        .values()
+        .map(|artifact| (artifact.name.clone(), artifact.clone()))
+        .collect();
+
     build_artifacts(
         None,
         vec![],
@@ -396,6 +424,7 @@ pub async fn run(
         &mut client_worker,
         artifact.offline,
         &lock_path,
+        &config_store_artifacts, // Use config_store artifacts for filtering CLI-injected config artifacts
     )
     .await?;
 
@@ -536,7 +565,7 @@ pub async fn run(
             !is_http
         });
 
-        if !has_local_source {
+        if !has_local_source && !is_root_config_artifact(&art.name, &config_artifacts_store) {
             new_lock.artifacts.push(LockArtifact {
                 name: art.name.clone(),
                 digest: digest.clone(),
@@ -618,9 +647,15 @@ pub async fn run(
         pruned_sources.sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
         // Compose lock to save: merge existing artifacts with new ones, pruned sources
-        let mut merged_artifacts = ex.artifacts.clone();
+        // Filter out root configuration artifacts from existing artifacts
+        let mut merged_artifacts: Vec<_> = ex
+            .artifacts
+            .iter()
+            .filter(|a| !is_root_config_artifact(&a.name, &config_artifacts_store))
+            .cloned()
+            .collect();
 
-        // Update or add artifacts from the current build
+        // Update or add artifacts from the current build (excluding root config artifacts)
         for new_artifact in &new_lock.artifacts {
             if let Some(existing_idx) = merged_artifacts
                 .iter()
@@ -629,7 +664,7 @@ pub async fn run(
                 // Update existing artifact
                 merged_artifacts[existing_idx] = new_artifact.clone();
             } else {
-                // Add new artifact
+                // Add new artifact (root config artifacts are already filtered out during new_lock creation)
                 merged_artifacts.push(new_artifact.clone());
             }
         }
@@ -734,6 +769,7 @@ pub async fn run(
         &mut client_worker,
         artifact.offline,
         &lock_path,
+        &config_artifacts_store,
     )
     .await?;
 

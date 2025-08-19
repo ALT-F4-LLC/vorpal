@@ -111,14 +111,6 @@ vorpal-update:
 	# Update mode: refresh inputs and write Vorpal.lock
 	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" artifact make --agent "http://localhost:23152" --worker "http://localhost:23152" --update $(VORPAL_FLAGS) $(VORPAL_ARTIFACT) $(VORPAL_CONTEXT)
 
-vorpal-offline:
-	# Offline ensure: no network; fail if missing cache
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" artifact make --agent "http://localhost:23152" --worker "http://localhost:23152" --offline $(VORPAL_FLAGS) $(VORPAL_ARTIFACT) $(VORPAL_CONTEXT)
-
-vorpal-verify:
-	# Verify local sources against lockfile and registry presence (local-only for now)
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- lock verify $(VORPAL_CONTEXT)
-
 vorpal-start:
 	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" services start --port "23152" $(VORPAL_FLAGS)
 
