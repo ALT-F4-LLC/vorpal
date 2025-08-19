@@ -1,4 +1,4 @@
-use crate::command::lock::{load_lock, save_lock, LockSource, Lockfile};
+use crate::command::lock::{load_lock, LockSource, Lockfile};
 use crate::command::store::{
     archives::{compress_zstd, unpack_zip},
     hashes::hash_files,
@@ -12,14 +12,18 @@ use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use sha256::digest;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::{
     fs::{read, remove_dir_all, remove_file, write},
-    sync::mpsc::{channel, Sender},
+    sync::{
+        mpsc::{channel, Sender},
+        Mutex,
+    },
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
 use tonic::{Code, Request, Response, Status};
-use tracing::debug;
+use tracing::info;
 use url::Url;
 use vorpal_sdk::api::{
     agent::{agent_service_server::AgentService, PrepareArtifactRequest, PrepareArtifactResponse},
@@ -44,10 +48,32 @@ pub async fn build_source(
     registry: String,
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
+    source_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
 ) -> Result<String> {
     let mut client = ArchiveServiceClient::connect(registry.to_owned())
         .await
         .map_err(|err| Status::internal(format!("failed to connect to registry: {err:?}")))?;
+
+    // Determine source type early for caching decisions
+    let source_type = match &source.path {
+        s if Path::new(s).exists() => ArtifactSourceType::Local,
+        s if s.starts_with("git") => ArtifactSourceType::Git,
+        s if s.starts_with("http") => ArtifactSourceType::Http,
+        _ => ArtifactSourceType::Unknown,
+    };
+
+    // For remote sources (HTTP), check cache first and return early if found
+    if source_type == ArtifactSourceType::Http {
+        let cached_digest = {
+            let cache = source_cache.lock().await;
+            cache.get(&source.path).cloned()
+        };
+        
+        if let Some(cached_digest) = cached_digest {
+            info!("agent |> source cached: {} -> {}", source.name, cached_digest);
+            return Ok(cached_digest);
+        }
+    }
 
     if let Some(digest) = &source.digest {
         let request = ArchivePullRequest {
@@ -68,13 +94,6 @@ pub async fn build_source(
     }
 
     // 2. Build source
-
-    let source_type = match &source.path {
-        s if Path::new(s).exists() => ArtifactSourceType::Local,
-        s if s.starts_with("git") => ArtifactSourceType::Git,
-        s if s.starts_with("http") => ArtifactSourceType::Http,
-        _ => ArtifactSourceType::Unknown,
-    };
 
     if source_type == ArtifactSourceType::Git {
         bail!("'source.{}.path' git not supported", source.name);
@@ -329,13 +348,122 @@ pub async fn build_source(
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
 
+    // Cache the digest for remote sources
+    if source_type == ArtifactSourceType::Http {
+        let mut cache = source_cache.lock().await;
+        cache.insert(source.path.clone(), source_digest.clone());
+    }
+
     Ok(source_digest)
+}
+
+async fn verify_lockfile_agent(
+    context_path: &str,
+    registry: &str,
+    artifact_name: &str,
+) -> Result<bool, Status> {
+    let context = Path::new(context_path);
+    let lock_path = context.join("Vorpal.lock");
+
+    let lock = match load_lock(&lock_path).await {
+        Ok(Some(l)) => l,
+        Ok(None) => return Ok(false), // No lockfile exists, proceed with processing
+        Err(e) => return Err(Status::internal(format!("Failed to load lockfile: {e}"))),
+    };
+
+    // Check if artifact entry exists in lockfile
+    let artifact_exists = lock.artifacts.iter().any(|a| a.name == artifact_name);
+    if !artifact_exists {
+        return Ok(false); // Artifact not in lockfile, proceed with processing
+    }
+
+    // Verify local sources by rehashing inputs
+    let mut mismatches = vec![];
+
+    for src in lock.sources.iter().filter(|s| s.kind == "local") {
+        let Some(path) = &src.path else { continue };
+        let includes = src.includes.clone();
+        let excludes = src.excludes.clone();
+
+        let abs = context.join(path);
+        let files = match get_file_paths(&abs, excludes, includes) {
+            Ok(f) => f,
+            Err(e) => {
+                mismatches.push(format!("{}: enumerate error: {}", src.name, e));
+                continue;
+            }
+        };
+
+        let digest = match hash_files(files) {
+            Ok(d) => d,
+            Err(e) => {
+                mismatches.push(format!("{}: hash error: {}", src.name, e));
+                continue;
+            }
+        };
+
+        if digest != src.digest {
+            mismatches.push(format!(
+                "{}: digest mismatch: {} != {}",
+                src.name, src.digest, digest
+            ));
+        }
+    }
+
+    // Verify remote sources exist in registry by digest
+    let mut client = match ArchiveServiceClient::connect(registry.to_string()).await {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(Status::internal(format!(
+                "Failed to connect to registry: {e}"
+            )))
+        }
+    };
+
+    for src in lock.sources.iter().filter(|s| s.kind == "http") {
+        if src.digest.is_empty() {
+            mismatches.push(format!("{}: missing digest in lockfile", src.name));
+            continue;
+        }
+
+        let req = ArchivePullRequest {
+            digest: src.digest.clone(),
+        };
+
+        match client.check(req).await {
+            Ok(_) => {}
+            Err(status) => {
+                if status.code() == Code::NotFound {
+                    mismatches.push(format!(
+                        "{}: digest not present in registry: {}",
+                        src.name, src.digest
+                    ));
+                } else {
+                    mismatches.push(format!(
+                        "{}: registry error: {}",
+                        src.name,
+                        status.message()
+                    ));
+                }
+            }
+        }
+    }
+
+    if !mismatches.is_empty() {
+        return Err(Status::failed_precondition(format!(
+            "Lockfile verification failed: {}",
+            mismatches.join("; ")
+        )));
+    }
+
+    Ok(true) // Lockfile verified successfully
 }
 
 async fn prepare_artifact(
     registry: String,
     request: Request<PrepareArtifactRequest>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
+    source_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
 ) -> Result<(), Status> {
     let request = request.into_inner();
 
@@ -344,6 +472,50 @@ async fn prepare_artifact(
     }
 
     let artifact = request.artifact.unwrap();
+
+    // Handle lockfile logic based on update_mode
+    if !request.update_mode {
+        // Not in update mode - check if artifact is locked and verified
+        match verify_lockfile_agent(&request.artifact_context, &registry, &artifact.name).await {
+            Ok(true) => {
+                // Lockfile verified - artifact already exists and is locked
+                info!("agent |> artifact locked: {}", artifact.name);
+
+                // Look up artifact digest from lockfile
+                let context = Path::new(&request.artifact_context);
+                let lock_path = context.join("Vorpal.lock");
+                let artifact_digest = match load_lock(&lock_path).await {
+                    Ok(Some(lock)) => lock
+                        .artifacts
+                        .iter()
+                        .find(|a| a.name == artifact.name)
+                        .map(|a| a.digest.clone()),
+                    _ => None,
+                };
+
+                let artifact_response = PrepareArtifactResponse {
+                    artifact: Some(artifact),
+                    artifact_digest,
+                    artifact_output: Some("locked".to_string()),
+                };
+                let _ = tx.send(Ok(artifact_response)).await;
+                return Ok(());
+            }
+            Ok(false) => {
+                // No lockfile or artifact not in lockfile - proceed with processing
+                info!(
+                    "agent |> artifact not locked, processing: {}",
+                    artifact.name
+                );
+            }
+            Err(e) => {
+                // Lockfile verification failed
+                return Err(e);
+            }
+        }
+    } else {
+        info!("agent |> update mode, processing: {}", artifact.name);
+    }
 
     // TODO: Check if artifact already exists in the registry
 
@@ -383,6 +555,7 @@ async fn prepare_artifact(
             registry.clone(),
             &source,
             &tx.clone(),
+            source_cache.clone(),
         )
         .await
         .map_err(|err| Status::internal(format!("{err}")))?;
@@ -397,7 +570,7 @@ async fn prepare_artifact(
 
         artifact_sources.push(source);
 
-        debug!("agent |> prepare artifact source: {}", source_digest);
+        info!("agent |> prepare artifact source: {}", source_digest);
 
         // Upsert remote source into Vorpal.lock immediately after preparation
         let is_http = artifact_sources
@@ -446,8 +619,13 @@ async fn prepare_artifact(
             lock.sources
                 .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
-            // Best-effort save; ignore failures to avoid breaking the build
-            let _ = save_lock(&lock_path, &lock).await;
+            // Save lockfile with proper coordination and error handling
+            // Non-fatal: log error but don't break the build
+            if let Err(e) = crate::command::lock::save_lock_coordinated(&lock_path, &lock).await {
+                tracing::warn!("Failed to update lockfile {}: {}", lock_path.display(), e);
+            } else {
+                tracing::info!("Updated lockfile with sources: {}", lock_path.display());
+            }
         }
     }
 
@@ -480,19 +658,23 @@ async fn prepare_artifact(
         .await
         .map_err(|_| Status::internal("failed to send response"));
 
-    debug!("agent |> prepare artifact: {}", artifact_digest);
+    info!("agent |> prepare artifact: {}", artifact_digest);
 
     Ok(())
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AgentServer {
     pub registry: String,
+    pub source_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
 impl AgentServer {
     pub fn new(registry: String) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            source_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }
     }
 }
 
@@ -508,8 +690,9 @@ impl AgentService for AgentServer {
 
         let registry = self.registry.clone();
 
+        let source_cache = self.source_cache.clone();
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(registry, request, &tx).await {
+            if let Err(err) = prepare_artifact(registry, request, &tx, source_cache).await {
                 let _ = tx.send(Err(err)).await;
             }
         });

@@ -13,6 +13,7 @@ service AgentService {
 message PrepareArtifactRequest {
   string artifact_context = 1;
   vorpal.artifact.Artifact artifact = 2;
+  bool update_mode = 3;
 }
 
 message PrepareArtifactResponse {

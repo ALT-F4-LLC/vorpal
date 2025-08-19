@@ -30,6 +30,7 @@ pub struct ConfigContext {
     artifact: String,
     artifact_context: PathBuf,
     lock: Option<Lockfile>,
+    #[allow(dead_code)]
     lockfile_update: bool,
     port: u16,
     registry: String,
@@ -108,6 +109,7 @@ pub async fn get_context() -> Result<ConfigContext> {
 }
 
 impl ConfigContext {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         agent: String,
         artifact: String,
@@ -176,11 +178,9 @@ impl ConfigContext {
                 let path_match = false; // never match local paths; we skip above
                 let url_match = s.url.as_deref() == Some(src.path.as_str());
 
-                if path_match || url_match {
-                    if !s.digest.is_empty() {
-                        src.digest = Some(s.digest.clone());
-                        break;
-                    }
+                if (path_match || url_match) && !s.digest.is_empty() {
+                    src.digest = Some(s.digest.clone());
+                    break;
                 }
             }
         }
@@ -202,6 +202,7 @@ impl ConfigContext {
         // Prepare a local copy hydrated from lockfile with known remote digests
         // Hydration helps resume interrupted runs and avoid re-downloading prepared sources.
         let mut artifact_to_prepare = artifact.clone();
+
         self.hydrate_sources_from_lock(&mut artifact_to_prepare);
 
         let artifact_json =
@@ -222,6 +223,7 @@ impl ConfigContext {
         let request = PrepareArtifactRequest {
             artifact: Some(artifact_to_prepare.clone()),
             artifact_context: self.artifact_context.display().to_string(),
+            update_mode: self.lockfile_update,
         };
 
         let response = client
@@ -269,13 +271,9 @@ impl ConfigContext {
         let artifact = response_artifact.unwrap();
         let artifact_digest = response_artifact_digest.unwrap();
 
-        if !self.store.artifact.contains_key(&artifact_digest) {
-            self.store
-                .artifact
-                .insert(artifact_digest.clone(), artifact.clone());
-        }
-
-        // Agent now handles per-source lock updates; CLI finalizes lockfile at end
+        self.store
+            .artifact
+            .insert(artifact_digest.clone(), artifact.clone());
 
         Ok(artifact_digest)
     }
@@ -402,6 +400,7 @@ impl ConfigContext {
         self.store.variable.get(name).cloned()
     }
 
+    #[allow(dead_code)]
     fn persist_remote_sources_for_artifact(&self, artifact: &Artifact) -> Result<()> {
         let lock_path = self.artifact_context.join("Vorpal.lock");
 
@@ -462,6 +461,7 @@ impl ConfigContext {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn persist_artifact_if_remote_only(
         &self,
         artifact: &Artifact,
@@ -498,9 +498,9 @@ impl ConfigContext {
             .systems
             .iter()
             .map(|s| {
-                ArtifactSystem::from_i32(*s)
+                ArtifactSystem::try_from(*s)
                     .map(|v| v.as_str_name().to_string())
-                    .unwrap_or_else(|| s.to_string())
+                    .unwrap_or_else(|_| s.to_string())
             })
             .collect::<Vec<String>>();
 

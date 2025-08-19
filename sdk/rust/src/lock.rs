@@ -55,8 +55,48 @@ pub fn load(path: &Path) -> Result<Option<Lockfile>> {
 }
 
 pub fn save(path: &Path, lock: &Lockfile) -> Result<()> {
-    let text = toml::to_string(lock)?;
-    fs::write(path, text.as_bytes())?;
+    atomic_save(path, lock)
+}
+
+/// Atomically save lockfile with proper error handling and backup
+pub fn atomic_save(path: &Path, lock: &Lockfile) -> Result<()> {
+    use std::fs;
+
+    // Create temporary file path
+    let temp_path = path.with_extension("tmp");
+    let backup_path = path.with_extension("backup");
+
+    // 1. Serialize lockfile
+    let text = toml::to_string_pretty(lock)?;
+
+    // 2. Write to temporary file first
+    fs::write(&temp_path, text.as_bytes()).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to write temporary lockfile {}: {}",
+            temp_path.display(),
+            e
+        )
+    })?;
+
+    // 3. Create backup of existing file if it exists
+    if path.exists() {
+        fs::copy(path, &backup_path).map_err(|e| {
+            anyhow::anyhow!("Failed to create backup {}: {}", backup_path.display(), e)
+        })?;
+    }
+
+    // 4. Atomically replace the original file
+    fs::rename(&temp_path, path).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to atomically update lockfile {}: {}",
+            path.display(),
+            e
+        )
+    })?;
+
+    // 5. Remove backup on success (ignore errors)
+    let _ = fs::remove_file(&backup_path);
+
     Ok(())
 }
 
@@ -91,10 +131,8 @@ pub fn find_source_digest(
         let path_match = !is_http && s.path.as_deref() == Some(source_path);
         let url_match = is_http && s.url.as_deref() == Some(source_path);
 
-        if path_match || url_match {
-            if !s.digest.is_empty() {
-                return Some(s.digest.clone());
-            }
+        if (path_match || url_match) && !s.digest.is_empty() {
+            return Some(s.digest.clone());
         }
     }
 

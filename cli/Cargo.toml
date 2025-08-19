@@ -15,6 +15,7 @@ async_zip = { version = "0.0.17", features = ["deflate", "tokio"] }
 aws-config = { version = "1.8.1" }
 aws-sdk-s3 = { version = "1.96.0" }
 base64 = { version = "0.22.1" }
+chrono = { version = "0.4.41", features = ["serde"] }
 clap = { version = "4.5.40" }
 filetime = { version = "0.2.25" }
 futures-lite = { version = "2.6.0" }

@@ -9,7 +9,7 @@ use rsa::{
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{debug, error};
+use tracing::{error, info};
 use vorpal_sdk::api::{
     archive::{
         archive_service_server::ArchiveService, ArchivePullRequest, ArchivePullResponse,
@@ -119,7 +119,7 @@ impl ArchiveService for ArchiveServer {
 
         self.backend.check(&req).await?;
 
-        debug!("registry |> archive check: {}", req.digest);
+        info!("registry |> archive check: {}", req.digest);
 
         Ok(Response::new(ArchiveResponse {}))
     }
@@ -152,7 +152,7 @@ impl ArchiveService for ArchiveServer {
                 }
             }
 
-            debug!("registry |> archive pull: {}", request.digest);
+            info!("registry |> archive pull: {}", request.digest);
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -213,7 +213,7 @@ impl ArchiveService for ArchiveServer {
 
         self.backend.push(&request).await?;
 
-        debug!("registry |> archive push: {}", request.digest);
+        info!("registry |> archive push: {}", request.digest);
 
         Ok(Response::new(ArchiveResponse {}))
     }
@@ -269,7 +269,7 @@ impl ArtifactService for ArtifactServer {
 
         let artifact = self.backend.get_artifact(request.digest.clone()).await?;
 
-        debug!("registry |> artifact get: {}", request.digest);
+        info!("registry |> artifact get: {}", request.digest);
 
         Ok(Response::new(artifact))
     }
@@ -291,7 +291,7 @@ impl ArtifactService for ArtifactServer {
             .get_artifact_alias(request.alias.clone(), alias_system)
             .await?;
 
-        debug!("artifact alias |> get: {} -> {}", request.alias, digest);
+        info!("artifact alias |> get: {} -> {}", request.alias, digest);
 
         Ok(Response::new(GetArtifactAliasResponse { digest }))
     }
@@ -324,7 +324,7 @@ impl ArtifactService for ArtifactServer {
             .store_artifact(artifact, request.artifact_aliases)
             .await?;
 
-        debug!("registry |> artifact store: {}", digest);
+        info!("registry |> artifact store: {}", digest);
 
         Ok(Response::new(ArtifactResponse { digest }))
     }

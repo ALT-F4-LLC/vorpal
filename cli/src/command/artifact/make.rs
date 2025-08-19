@@ -1,4 +1,4 @@
-use crate::command::lock::{load_lock, save_lock, LockArtifact, LockSource, Lockfile};
+use crate::command::lock::{load_lock, LockArtifact, LockSource, Lockfile};
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
     store::{
@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::fs::{create_dir_all, remove_dir_all, remove_file, write};
 use tonic::{transport::Channel, Code};
-use tracing::{debug, error};
+use tracing::{error, info};
 use vorpal_sdk::{
     api::{
         archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest},
@@ -95,7 +95,7 @@ async fn build(
 
                     set_timestamps(&archive_path).await?;
 
-                    debug!("{} |> unpack: {}", artifact.name, artifact_digest);
+                    info!("{} |> unpack: {}", artifact.name, artifact_digest);
 
                     create_dir_all(&artifact_path)
                         .await
@@ -137,7 +137,7 @@ async fn build(
         match stream.message().await {
             Ok(Some(response)) => {
                 if !response.output.is_empty() {
-                    debug!("{} |> {}", &artifact.name, response.output);
+                    info!("{} |> {}", &artifact.name, response.output);
                 }
             }
 
@@ -232,9 +232,9 @@ async fn upsert_artifact_lock_entry(lock_path: &Path, art: &Artifact, digest: &s
         .systems
         .iter()
         .map(|s| {
-            vorpal_sdk::api::artifact::ArtifactSystem::from_i32(*s)
+            vorpal_sdk::api::artifact::ArtifactSystem::try_from(*s)
                 .map(|v| v.as_str_name().to_string())
-                .unwrap_or_else(|| s.to_string())
+                .unwrap_or_else(|_| s.to_string())
         })
         .collect::<Vec<String>>();
 
@@ -249,7 +249,7 @@ async fn upsert_artifact_lock_entry(lock_path: &Path, art: &Artifact, digest: &s
     lock.artifacts
         .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
-    save_lock(lock_path, &lock).await?;
+    crate::command::lock::save_lock_coordinated(lock_path, &lock).await?;
     Ok(())
 }
 
@@ -257,14 +257,14 @@ pub struct RunArgsArtifact {
     pub aliases: Vec<String>,
     pub context: PathBuf,
     pub export: bool,
-    pub locked: bool,
     pub offline: bool,
-    pub lockfile_update: bool,
+    pub update: bool,
     pub name: String,
     pub path: bool,
     pub rebuild: bool,
     pub system: String,
     pub variable: Vec<String>,
+    pub verify: bool,
 }
 
 pub struct RunArgsConfig {
@@ -285,6 +285,11 @@ pub async fn run(
     config: RunArgsConfig,
     service: RunArgsService,
 ) -> Result<()> {
+    // If verify flag is set, delegate to agent for verification
+    if artifact.verify {
+        bail!("--verify functionality moved to agent; use normal build process");
+    }
+
     // Build configuration
 
     let artifact_system = &artifact.system;
@@ -299,7 +304,7 @@ pub async fn run(
         0,
         service_registry.to_string(),
         artifact_system.to_string(),
-        artifact.lockfile_update,
+        artifact.update,
         artifact.variable.clone(),
     )?;
 
@@ -381,10 +386,12 @@ pub async fn run(
         .await
         .expect("failed to connect to artifact");
 
+    // Build config dependencies first to ensure config binary exists
+    let config_store = config_context.get_artifact_store();
     build_artifacts(
         None,
         vec![],
-        config_context.get_artifact_store(),
+        config_store,
         &mut client_archive,
         &mut client_worker,
         artifact.offline,
@@ -409,7 +416,7 @@ pub async fn run(
 
     let (mut config_process, mut config_client) = match start(
         artifact.context.to_path_buf(),
-        artifact.lockfile_update,
+        artifact.update,
         artifact.name.to_string(),
         artifact.system.to_string(),
         artifact.variable.clone(),
@@ -485,7 +492,7 @@ pub async fn run(
                 .expect("failed to remove artifact path");
         }
 
-        debug!("rebuilding artifact: {}", selected_artifact.name);
+        info!("rebuilding artifact: {}", selected_artifact.name);
     }
 
     let mut build_store = HashMap::<String, Artifact>::new();
@@ -517,9 +524,9 @@ pub async fn run(
             .systems
             .iter()
             .map(|s| {
-                vorpal_sdk::api::artifact::ArtifactSystem::from_i32(*s)
+                vorpal_sdk::api::artifact::ArtifactSystem::try_from(*s)
                     .map(|v| v.as_str_name().to_string())
-                    .unwrap_or_else(|| s.to_string())
+                    .unwrap_or_else(|_| s.to_string())
             })
             .collect::<Vec<String>>();
 
@@ -611,7 +618,7 @@ pub async fn run(
         pruned_sources.sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
         // Compose lock to save: updated artifacts, pruned sources
-        let mut lock_to_save = Lockfile {
+        let lock_to_save = Lockfile {
             lockfile: ex.lockfile,
             artifacts: new_lock.artifacts.clone(),
             sources: pruned_sources,
@@ -619,7 +626,6 @@ pub async fn run(
 
         // Determine changes: artifacts vs sources separately
         // Locked policy: allow append-only changes to artifacts; modifying/removing existing entries fails.
-        let mut artifacts_changed = false;
         let mut artifacts_append_only_ok = true;
         use std::collections::HashMap;
         let mut ex_art_by_name: HashMap<&str, &LockArtifact> = HashMap::new();
@@ -637,7 +643,7 @@ pub async fn run(
             }
         }
         // If the new set differs at all, it's a change; may still be allowed if append-only
-        artifacts_changed = ex.artifacts != lock_to_save.artifacts;
+        let artifacts_changed = ex.artifacts != lock_to_save.artifacts;
         let sources_changed = ex.sources != lock_to_save.sources;
 
         // In locked mode, check if the changes are acceptable:
@@ -667,37 +673,33 @@ pub async fn run(
             }
         });
 
-        if artifacts_changed && artifact.locked && !artifacts_append_only_ok && !acceptable_changes
+        if artifacts_changed && !artifact.update && !artifacts_append_only_ok && !acceptable_changes
         {
-            bail!("Vorpal.lock would change; run 'make vorpal-update' to refresh");
+            bail!("Vorpal.lock would change; run with --update to refresh");
         }
 
-        if artifacts_changed || sources_changed || artifact.lockfile_update {
-            save_lock(&lock_path, &lock_to_save).await?;
+        if artifacts_changed || sources_changed || artifact.update {
+            crate::command::lock::save_lock_coordinated(&lock_path, &lock_to_save).await?;
             lock_status = "updated".to_string();
-            debug!("updated lockfile: {}", lock_path.display());
+            info!("updated lockfile: {}", lock_path.display());
         }
     } else {
         // First run bootstrap: create minimal lockfile with artifacts; sources are agent-managed
         // Create minimal lockfile with artifacts; sources will be added by agent during runs
-        save_lock(&lock_path, &new_lock).await?;
+        crate::command::lock::save_lock_coordinated(&lock_path, &new_lock).await?;
         lock_status = "created".to_string();
-        debug!("created lockfile: {}", lock_path.display());
+        info!("created lockfile: {}", lock_path.display());
     }
 
     // Mode banner
-    let mode = if artifact.lockfile_update {
+    let mode = if artifact.update {
         "update"
-    } else if artifact.locked && artifact.offline {
-        "ensure-offline"
-    } else if artifact.locked {
-        "ensure"
     } else if artifact.offline {
-        "offline"
+        "ensure-offline"
     } else {
-        "default"
+        "ensure"
     };
-    debug!("mode: {}, lock: {}", mode, lock_status);
+    info!("mode: {}, lock: {}", mode, lock_status);
 
     if artifact.export {
         let export =

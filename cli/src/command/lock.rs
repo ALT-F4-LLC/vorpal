@@ -1,37 +1,9 @@
-use crate::command::store::{hashes::hash_files, paths::get_file_paths};
-use anyhow::{bail, Result};
-use clap::Subcommand;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tokio::fs::{read, write};
-use tonic::Code::NotFound;
-use vorpal_sdk::api::archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest};
-
-#[derive(Subcommand)]
-pub enum CommandLock {
-    /// Generate or refresh Vorpal.lock without building
-    Generate {
-        /// Project root (where Vorpal.toml lives)
-        #[arg(default_value = ".")]
-        context: PathBuf,
-    },
-
-    /// Verify Vorpal.lock against local cache/inputs
-    Verify {
-        #[arg(default_value = ".")]
-        context: PathBuf,
-    },
-
-    /// Update specific lock entries (by name) or all
-    Update {
-        #[arg(default_value = ".")]
-        context: PathBuf,
-
-        /// Optional source or artifact name to refresh
-        #[arg(long)]
-        name: Option<String>,
-    },
-}
+use std::time::Duration;
+use tokio::fs::{read, write, OpenOptions};
+use tokio::time::timeout;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Lockfile {
@@ -85,124 +57,117 @@ pub async fn load_lock(path: &Path) -> Result<Option<Lockfile>> {
     Ok(Some(lock))
 }
 
-pub async fn save_lock(path: &Path, lock: &Lockfile) -> Result<()> {
-    let text = toml::to_string(lock)?;
-    write(path, text.as_bytes()).await?;
+/// Atomically save lockfile with proper error handling and backup
+pub async fn atomic_save_lock(path: &Path, lock: &Lockfile) -> Result<()> {
+    use tokio::fs::{copy, remove_file, rename};
+
+    // Create temporary file path
+    let temp_path = path.with_extension("tmp");
+    let backup_path = path.with_extension("backup");
+
+    // 1. Serialize lockfile
+    let text = toml::to_string_pretty(lock)?;
+
+    // 2. Write to temporary file first
+    write(&temp_path, text.as_bytes()).await.map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to write temporary lockfile {}: {}",
+            temp_path.display(),
+            e
+        )
+    })?;
+
+    // 3. Create backup of existing file if it exists
+    if path.exists() {
+        copy(path, &backup_path).await.map_err(|e| {
+            anyhow::anyhow!("Failed to create backup {}: {}", backup_path.display(), e)
+        })?;
+    }
+
+    // 4. Atomically replace the original file
+    rename(&temp_path, path).await.map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to atomically update lockfile {}: {}",
+            path.display(),
+            e
+        )
+    })?;
+
+    // 5. Remove backup on success (ignore errors)
+    let _ = remove_file(&backup_path).await;
+
     Ok(())
 }
 
-pub async fn run(cmd: &CommandLock, registry: &str) -> Result<()> {
-    match cmd {
-        CommandLock::Generate { context } => generate(context).await,
-        CommandLock::Verify { context } => verify(context, registry).await,
-        CommandLock::Update { context, name } => update(context, name.clone()).await,
+/// File-based lock manager for coordinating lockfile access between processes
+pub struct LockfileManager {
+    _lock_file: Option<tokio::fs::File>,
+    lock_path: PathBuf,
+}
+
+impl LockfileManager {
+    /// Acquire exclusive lock on lockfile with timeout
+    pub async fn acquire(lockfile_path: &Path) -> Result<Self> {
+        let lock_path = lockfile_path.with_extension("vorpal_lock");
+
+        // Simple file-based locking: try to create lock file
+        // This is a basic implementation - in production we'd want proper file locking
+        let acquire_operation = async {
+            // Try to create lock file exclusively
+            let file = OpenOptions::new()
+                .create_new(true) // Fail if file already exists
+                .write(true)
+                .open(&lock_path)
+                .await
+                .map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        anyhow::anyhow!("Lockfile is currently in use by another process")
+                    } else {
+                        anyhow::anyhow!("Failed to acquire lock: {}", e)
+                    }
+                })?;
+
+            // Write process info to lock file for debugging
+            let lock_info = format!(
+                "pid:{}\ntime:{}\n",
+                std::process::id(),
+                chrono::Utc::now().to_rfc3339()
+            );
+
+            tokio::fs::write(&lock_path, lock_info).await?;
+
+            anyhow::Ok(Self {
+                _lock_file: Some(file),
+                lock_path,
+            })
+        };
+
+        // 30 second timeout for lock acquisition
+        timeout(Duration::from_secs(30), acquire_operation)
+            .await
+            .map_err(|_| anyhow::anyhow!("Timeout waiting for lockfile lock"))?
+    }
+
+    /// Perform locked operation with automatic cleanup
+    pub async fn with_lock<F, T>(lockfile_path: &Path, operation: F) -> Result<T>
+    where
+        F: std::future::Future<Output = Result<T>>,
+    {
+        let _lock = Self::acquire(lockfile_path).await?;
+        operation.await
     }
 }
 
-async fn generate(context: &PathBuf) -> Result<()> {
-    let lock_path = Path::new(context).join("Vorpal.lock");
-
-    // Initialize minimal lockfile if missing; future work populates content.
-    if load_lock(&lock_path).await?.is_none() {
-        let lock = Lockfile {
-            lockfile: 1,
-            sources: vec![],
-            artifacts: vec![],
-        };
-        save_lock(&lock_path, &lock).await?;
-        println!("created: {}", lock_path.display());
-    } else {
-        println!("ok: {}", lock_path.display());
-    }
-
-    Ok(())
-}
-
-async fn verify(context: &PathBuf, registry: &str) -> Result<()> {
-    let lock_path = Path::new(context).join("Vorpal.lock");
-    let Some(lock) = load_lock(&lock_path).await? else {
-        bail!("missing: {}", lock_path.display());
-    };
-
-    // Verify local sources by rehashing inputs
-    let mut mismatches = vec![];
-
-    for src in lock.sources.iter().filter(|s| s.kind == "local") {
-        let Some(path) = &src.path else { continue };
-        let includes = src.includes.clone();
-        let excludes = src.excludes.clone();
-
-        let abs = Path::new(context).join(path);
-        let files = match get_file_paths(&abs, excludes, includes) {
-            Ok(f) => f,
-            Err(e) => {
-                mismatches.push(format!("{}: enumerate error: {}", src.name, e));
-                continue;
-            }
-        };
-
-        let digest = match hash_files(files) {
-            Ok(d) => d,
-            Err(e) => {
-                mismatches.push(format!("{}: hash error: {}", src.name, e));
-                continue;
-            }
-        };
-
-        if digest != src.digest {
-            mismatches.push(format!(
-                "{}: digest mismatch: {} != {}",
-                src.name, src.digest, digest
-            ));
+impl Drop for LockfileManager {
+    fn drop(&mut self) {
+        // Clean up lock file on drop (best effort)
+        if self.lock_path.exists() {
+            let _ = std::fs::remove_file(&self.lock_path);
         }
-    }
-
-    // Verify remote sources exist in registry by digest
-    let mut client = ArchiveServiceClient::connect(registry.to_string())
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to connect to registry: {e}"))?;
-
-    for src in lock.sources.iter().filter(|s| s.kind == "http") {
-        if src.digest.is_empty() {
-            mismatches.push(format!("{}: missing digest in lockfile", src.name));
-            continue;
-        }
-
-        let req = ArchivePullRequest {
-            digest: src.digest.clone(),
-        };
-
-        match client.check(req).await {
-            Ok(_) => {}
-            Err(status) => {
-                if status.code() == NotFound {
-                    mismatches.push(format!(
-                        "{}: digest not present in registry: {}",
-                        src.name, src.digest
-                    ));
-                } else {
-                    mismatches.push(format!(
-                        "{}: registry error: {}",
-                        src.name,
-                        status.message()
-                    ));
-                }
-            }
-        }
-    }
-
-    if mismatches.is_empty() {
-        println!("verified: {}", lock_path.display());
-        Ok(())
-    } else {
-        for m in mismatches {
-            eprintln!("lock verify: {}", m);
-        }
-        bail!("verification failed: {}", lock_path.display());
     }
 }
 
-async fn update(context: &PathBuf, _name: Option<String>) -> Result<()> {
-    // For now, ensure file exists; hook for future selective refresh.
-    generate(context).await
+/// Thread-safe lockfile save with coordination
+pub async fn save_lock_coordinated(path: &Path, lock: &Lockfile) -> Result<()> {
+    LockfileManager::with_lock(path, async { atomic_save_lock(path, lock).await }).await
 }
