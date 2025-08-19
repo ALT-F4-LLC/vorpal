@@ -617,10 +617,26 @@ pub async fn run(
 
         pruned_sources.sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
-        // Compose lock to save: updated artifacts, pruned sources
+        // Compose lock to save: merge existing artifacts with new ones, pruned sources
+        let mut merged_artifacts = ex.artifacts.clone();
+
+        // Update or add artifacts from the current build
+        for new_artifact in &new_lock.artifacts {
+            if let Some(existing_idx) = merged_artifacts
+                .iter()
+                .position(|a| a.name == new_artifact.name)
+            {
+                // Update existing artifact
+                merged_artifacts[existing_idx] = new_artifact.clone();
+            } else {
+                // Add new artifact
+                merged_artifacts.push(new_artifact.clone());
+            }
+        }
+
         let lock_to_save = Lockfile {
             lockfile: ex.lockfile,
-            artifacts: new_lock.artifacts.clone(),
+            artifacts: merged_artifacts,
             sources: pruned_sources,
         };
 

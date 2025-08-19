@@ -68,9 +68,12 @@ pub async fn build_source(
             let cache = source_cache.lock().await;
             cache.get(&source.path).cloned()
         };
-        
+
         if let Some(cached_digest) = cached_digest {
-            info!("agent |> source cached: {} -> {}", source.name, cached_digest);
+            info!(
+                "agent |> source cached: {} -> {}",
+                source.name, cached_digest
+            );
             return Ok(cached_digest);
         }
     }
@@ -615,7 +618,13 @@ async fn prepare_artifact(
                 });
             }
 
-            lock.sources.retain(|s| s.kind != "local");
+            // Remove only sources belonging to the current artifact being built
+            // This preserves sources from other artifacts in the lockfile
+            lock.sources.retain(|s| {
+                // Keep sources that don't belong to this artifact
+                s.artifact.as_deref() != Some(artifact.name.as_str())
+            });
+
             lock.sources
                 .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
