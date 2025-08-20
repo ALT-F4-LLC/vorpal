@@ -29,7 +29,7 @@ pub struct LockSource {
     #[serde(default)]
     pub rev: Option<String>,
     #[serde(default)]
-    pub artifact: Option<String>,
+    pub platform: String, // Single platform where this source is used (e.g., "aarch64-darwin", "aarch64-linux")
 }
 
 pub async fn load_lock(path: &Path) -> Result<Option<Lockfile>> {
@@ -156,4 +156,17 @@ impl Drop for LockfileManager {
 /// Thread-safe lockfile save with coordination
 pub async fn save_lock_coordinated(path: &Path, lock: &Lockfile) -> Result<()> {
     LockfileManager::with_lock(path, async { atomic_save_lock(path, lock).await }).await
+}
+
+/// Convert ArtifactSystem enum to platform string
+pub fn artifact_system_to_platform(system: i32) -> String {
+    use vorpal_sdk::api::artifact::ArtifactSystem;
+
+    match ArtifactSystem::try_from(system).unwrap_or(ArtifactSystem::UnknownSystem) {
+        ArtifactSystem::Aarch64Darwin => "aarch64-darwin".to_string(),
+        ArtifactSystem::Aarch64Linux => "aarch64-linux".to_string(),
+        ArtifactSystem::X8664Darwin => "x86_64-darwin".to_string(),
+        ArtifactSystem::X8664Linux => "x86_64-linux".to_string(),
+        ArtifactSystem::UnknownSystem => "unknown".to_string(),
+    }
 }

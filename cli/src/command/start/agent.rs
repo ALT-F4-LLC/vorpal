@@ -386,20 +386,23 @@ async fn prepare_artifact(
 
     let mut artifact_sources = vec![];
 
+    // Get target platform for this artifact
+    let target_platform = crate::command::lock::artifact_system_to_platform(artifact.target.into());
+
     for mut source in artifact.sources.into_iter() {
         // Hydrate source digest from lockfile if available
         if let Some(ref lock) = lockfile {
             if let Some(lock_source) = lock.sources.iter().find(|s| {
                 s.name == source.name
-                    && s.artifact.as_deref() == Some(artifact.name.as_str())
                     && ((s.kind == "http" && s.url.as_deref() == Some(source.path.as_str()))
                         || (s.kind == "local" && s.path.as_deref() == Some(source.path.as_str())))
+                    && s.platform == target_platform
             }) {
                 if !lock_source.digest.is_empty() {
                     source.digest = Some(lock_source.digest.clone());
                     info!(
-                        "agent |> hydrated source digest from lockfile: {} -> {}",
-                        source.name, lock_source.digest
+                        "agent |> hydrated source digest from lockfile: {} ({}) -> {}",
+                        source.name, target_platform, lock_source.digest
                     );
                 }
             }
@@ -451,12 +454,12 @@ async fn prepare_artifact(
             let last = artifact_sources.last().unwrap();
             let mut lockfile_modified = false;
 
-            // Upsert source entry
+            // Upsert source entry by (name, url, platform) - platform-specific entries
             if let Some(existing) = lock.sources.iter_mut().find(|s| {
                 s.kind == "http"
                     && s.name == last.name
-                    && s.artifact.as_deref() == Some(artifact.name.as_str())
                     && s.url.as_deref() == Some(last.path.as_str())
+                    && s.platform == target_platform
             }) {
                 let new_digest = last.digest.clone().unwrap_or_default();
                 let new_includes = &last.includes;
@@ -473,7 +476,7 @@ async fn prepare_artifact(
                     lockfile_modified = true;
                 }
             } else {
-                // Adding new source entry
+                // Adding new platform-specific source entry
                 lock.sources.push(crate::command::lock::LockSource {
                     name: last.name.clone(),
                     kind: "http".to_string(),
@@ -483,7 +486,7 @@ async fn prepare_artifact(
                     excludes: last.excludes.clone(),
                     digest: last.digest.clone().unwrap_or_default(),
                     rev: None,
-                    artifact: Some(artifact.name.clone()),
+                    platform: target_platform.clone(),
                 });
                 lockfile_modified = true;
             }
