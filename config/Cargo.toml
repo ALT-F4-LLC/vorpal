@@ -9,8 +9,8 @@ name = "vorpal-config"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = { version = "1" }
-home = { version = "0" }
-indoc = { version = "2" }
-tokio = { features = ["rt-multi-thread"], version = "1" }
+anyhow = { version = "1.0.98" }
+home = { version = "0.5.11" }
+indoc = { version = "2.0.6" }
+tokio = { version = "1.46.1", features = ["rt-multi-thread"] }
 vorpal-sdk = { path = "../sdk/rust" }
