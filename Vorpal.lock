@@ -2,18 +2,18 @@ lockfile = 1
 
 [[sources]]
 name = "cargo"
-path = "https://static.rust-lang.org/dist/cargo-1.88.0-aarch64-apple-darwin.tar.gz"
+path = "https://static.rust-lang.org/dist/cargo-1.89.0-aarch64-apple-darwin.tar.gz"
 includes = []
 excludes = []
-digest = "7288c982cdf90e7bff441cda961ad8bb71ca011c8c14671a01f78703f19156a7"
+digest = "7d1c4502f6bf524ec48b8eb5efc1b07f72b1d69c30ae93a5b042bf6bf57a14a1"
 platform = "aarch64-darwin"
 
 [[sources]]
 name = "clippy"
-path = "https://static.rust-lang.org/dist/clippy-1.88.0-aarch64-apple-darwin.tar.gz"
+path = "https://static.rust-lang.org/dist/clippy-1.89.0-aarch64-apple-darwin.tar.gz"
 includes = []
 excludes = []
-digest = "c5985d915abea2dc70ad7a3dce1f01710337c4eb2f64f17fd7872cca9adb5875"
+digest = "67c1c94ce876d9086ce8ca6d13f31df1c6113229278bdbb0ff6de2cd7ef3a4de"
 platform = "aarch64-darwin"
 
 [[sources]]
@@ -74,42 +74,42 @@ platform = "aarch64-darwin"
 
 [[sources]]
 name = "rust-analyzer"
-path = "https://static.rust-lang.org/dist/rust-analyzer-1.88.0-aarch64-apple-darwin.tar.gz"
+path = "https://static.rust-lang.org/dist/rust-analyzer-1.89.0-aarch64-apple-darwin.tar.gz"
 includes = []
 excludes = []
-digest = "b233955ae4c8cee649044d779044a8bec377df8d65bb0f3f75bd683454d8fe48"
+digest = "bdacf7a56e68f16781550b581d3fab39df89f5ad2a1019741489c1ee651849e6"
 platform = "aarch64-darwin"
 
 [[sources]]
 name = "rust-src"
-path = "https://static.rust-lang.org/dist/rust-src-1.88.0.tar.gz"
+path = "https://static.rust-lang.org/dist/rust-src-1.89.0.tar.gz"
 includes = []
 excludes = []
-digest = "6f372ce2bdea75fa36b96e07d7e4e8e52694ce1e98e0c3bcba0382045f85c793"
+digest = "aedb6a3777ffe9665a4f619066bb49840e9fe81119b7f105b9f03792d5d337c6"
 platform = "aarch64-darwin"
 
 [[sources]]
 name = "rust-std"
-path = "https://static.rust-lang.org/dist/rust-std-1.88.0-aarch64-apple-darwin.tar.gz"
+path = "https://static.rust-lang.org/dist/rust-std-1.89.0-aarch64-apple-darwin.tar.gz"
 includes = []
 excludes = []
-digest = "ca60c70d35523073dc1f912cfcbd8c547daa02bcf5a51e100098a1fdede288ef"
+digest = "e3b376ad76bdb4bd1202ceb30e11b27f0fb68afb3b4b70bd832dfb49e0872adc"
 platform = "aarch64-darwin"
 
 [[sources]]
 name = "rustc"
-path = "https://static.rust-lang.org/dist/rustc-1.88.0-aarch64-apple-darwin.tar.gz"
+path = "https://static.rust-lang.org/dist/rustc-1.89.0-aarch64-apple-darwin.tar.gz"
 includes = []
 excludes = []
-digest = "89c0ce9067b44a8af6339c2f9fb1a17832d28954ed3b248464c5a89bff1c15e1"
+digest = "17066000a01f87d67f18ca241471cb3935b3612d3e358a4350360c5b0e9f1f35"
 platform = "aarch64-darwin"
 
 [[sources]]
 name = "rustfmt"
-path = "https://static.rust-lang.org/dist/rustfmt-1.88.0-aarch64-apple-darwin.tar.gz"
+path = "https://static.rust-lang.org/dist/rustfmt-1.89.0-aarch64-apple-darwin.tar.gz"
 includes = []
 excludes = []
-digest = "b121c6ab08198d82852bddf1298635c17a85edc2b0c4e964fc0e1c30ca68beaf"
+digest = "752b960aaf6106256aab29996697a858ed9e04dc3da46440195d4e403cfb918b"
 platform = "aarch64-darwin"
 
 [[sources]]
