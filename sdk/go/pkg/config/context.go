@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent"
@@ -27,16 +26,11 @@ type ConfigContext struct {
 	agent           string
 	artifact        string
 	artifactContext string
-	lockfile        string
 	port            int
 	registry        string
 	store           ConfigContextStore
 	system          artifact.ArtifactSystem
 	update          bool
-}
-
-type ConfigLockfile struct {
-	Alias map[string]map[string]string `json:"alias"`
 }
 
 type ConfigServer struct {
@@ -98,7 +92,6 @@ func GetContext() *ConfigContext {
 		agent:           cmd.Agent,
 		artifact:        cmd.Artifact,
 		artifactContext: cmd.ArtifactContext,
-		lockfile:        cmd.Lockfile,
 		port:            cmd.Port,
 		registry:        cmd.Registry,
 		store:           store,
@@ -213,52 +206,7 @@ func fetchArtifacts(client artifact.ArtifactServiceClient, digest string, store 
 }
 
 func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
-	_, statErr := os.Stat(c.lockfile)
-	if statErr != nil && !os.IsNotExist(statErr) {
-		return nil, fmt.Errorf("error checking lockfile: %v", statErr)
-	}
-
-	if os.IsNotExist(statErr) && !c.update {
-		return nil, fmt.Errorf("lockfile '%s' does not exist -- run with '--update'", c.lockfile)
-	}
-
-	if os.IsNotExist(statErr) {
-		lockfileData := ConfigLockfile{
-			Alias: make(map[string]map[string]string),
-		}
-
-		lockfile, err := json.Marshal(lockfileData)
-		if err != nil {
-			return nil, fmt.Errorf("error marshalling lockfile: %v", err)
-		}
-
-		err = os.WriteFile(c.lockfile, lockfile, 0o644)
-		if err != nil {
-			return nil, fmt.Errorf("error writing lockfile: %v", err)
-		}
-	}
-
-	lockfileData, err := os.ReadFile(c.lockfile)
-	if err != nil {
-		return nil, fmt.Errorf("error reading lockfile: %v", err)
-	}
-
-	var lockfile ConfigLockfile
-
-	err = json.Unmarshal(lockfileData, &lockfile)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling lockfile: %v", err)
-	}
-
-	if _, ok := lockfile.Alias[c.system.String()]; !ok {
-		lockfile.Alias[c.system.String()] = make(map[string]string)
-	}
-
-	lockfileAliasDigest, ok := lockfile.Alias[c.system.String()][alias]
-	if !ok && !c.update {
-		return nil, fmt.Errorf("alias '%s' not in lockfile - run with '--update'", alias)
-	}
-
+	// Simplified artifact fetching - agent handles all lockfile operations
 	registry := strings.ReplaceAll(c.registry, "http://", "")
 
 	clientConn, err := grpc.NewClient(registry, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -270,35 +218,17 @@ func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
 
 	client := artifact.NewArtifactServiceClient(clientConn)
 
-	if !ok {
-		request := &artifact.GetArtifactAliasRequest{
-			Alias:       alias,
-			AliasSystem: c.system,
-		}
-
-		response, err := client.GetArtifactAlias(context.Background(), request)
-		if err != nil {
-			return nil, fmt.Errorf("error fetching artifact alias: %v", err)
-		}
-
-		lockfileAliasDigest = response.Digest
-
-		if c.update {
-			lockfile.Alias[c.system.String()][alias] = lockfileAliasDigest
-
-			lockfileData, err := json.Marshal(lockfile)
-			if err != nil {
-				return nil, fmt.Errorf("error marshalling lockfile: %v", err)
-			}
-
-			err = os.WriteFile(c.lockfile, lockfileData, 0o644)
-			if err != nil {
-				return nil, fmt.Errorf("error writing lockfile: %v", err)
-			}
-		}
+	request := &artifact.GetArtifactAliasRequest{
+		Alias:       alias,
+		AliasSystem: c.system,
 	}
 
-	digest := lockfileAliasDigest
+	response, err := client.GetArtifactAlias(context.Background(), request)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching artifact alias: %v", err)
+	}
+
+	digest := response.Digest
 
 	if _, ok := c.store.artifact[digest]; ok {
 		return &digest, nil
