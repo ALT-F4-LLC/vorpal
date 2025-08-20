@@ -40,6 +40,7 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 pub async fn build_source(
     artifact_context: String,
+    artifact_update: bool,
     registry: String,
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
@@ -248,13 +249,13 @@ pub async fn build_source(
 
     let source_digest = hash_files(source_sandbox_files.clone())?;
 
-    if let Some(hash) = source.digest.clone() {
-        if hash != source_digest {
+    if let Some(digest) = source.digest.clone() {
+        if !artifact_update && source_digest != digest {
             bail!(
                 "'source.{}.digest' mismatch: {} != {}",
                 source.name,
                 source_digest,
-                hash
+                digest
             );
         }
     }
@@ -392,14 +393,64 @@ async fn prepare_artifact(
     for mut source in artifact.sources.into_iter() {
         // Hydrate source digest from lockfile if available
         if let Some(ref lock) = lockfile {
-            if let Some(lock_source) = lock.sources.iter().find(|s| {
-                s.name == source.name
-                    && ((s.kind == "http" && s.url.as_deref() == Some(source.path.as_str()))
-                        || (s.kind == "local" && s.path.as_deref() == Some(source.path.as_str())))
-                    && s.platform == target_platform
-            }) {
-                if !lock_source.digest.is_empty() {
+            if let Some(lock_source) = lock
+                .sources
+                .iter()
+                .find(|s| s.name == source.name && s.platform == target_platform)
+            {
+                let mut source_changed = false;
+
+                if source.includes != lock_source.includes {
+                    source_changed = true;
+                }
+
+                if source.excludes != lock_source.excludes {
+                    source_changed = true;
+                }
+
+                info!(
+                    "agent |> comparing paths: {:?} vs {:?}",
+                    source.path, lock_source.path
+                );
+
+                if source.path != lock_source.path {
+                    source_changed = true;
+                }
+
+                if !request.artifact_update {
+                    // Check if source path changed in lockfile
+
+                    if source_changed {
+                        println!(
+                            "SOURCE CHANGED: {:?} -> {:?}",
+                            source.path, lock_source.path
+                        );
+
+                        return Err(Status::failed_precondition(format!(
+                            "source '{}' changed in lockfile: {:?} -> {:?}",
+                            source.name, source.path, lock_source.path
+                        )));
+                    }
+
+                    // Checks if digests match configuration
+
+                    if let Some(source_digest) = source.digest.as_ref() {
+                        if lock_source.digest != *source_digest {
+                            return Err(Status::failed_precondition(format!(
+                                "source '{}' digest changed in lockfile: {:?} -> {:?}",
+                                source.name,
+                                source.digest.as_ref().unwrap(),
+                                lock_source.digest
+                            )));
+                        }
+                    }
+                }
+
+                // Check if digest exists in lockfile
+
+                if !lock_source.digest.is_empty() && !source_changed {
                     source.digest = Some(lock_source.digest.clone());
+
                     info!(
                         "agent |> hydrated source digest from lockfile: {} ({}) -> {}",
                         source.name, target_platform, lock_source.digest
@@ -407,8 +458,10 @@ async fn prepare_artifact(
                 }
             }
         }
+
         let source_digest = build_source(
             request.artifact_context.clone(),
+            request.artifact_update,
             registry.clone(),
             &source,
             &tx.clone(),
@@ -455,39 +508,40 @@ async fn prepare_artifact(
             let mut lockfile_modified = false;
 
             // Upsert source entry by (name, url, platform) - platform-specific entries
-            if let Some(existing) = lock.sources.iter_mut().find(|s| {
-                s.kind == "http"
-                    && s.name == last.name
-                    && s.url.as_deref() == Some(last.path.as_str())
-                    && s.platform == target_platform
-            }) {
+            if let Some(existing) = lock
+                .sources
+                .iter_mut()
+                .find(|s| s.name == last.name && s.platform == target_platform)
+            {
                 let new_digest = last.digest.clone().unwrap_or_default();
                 let new_includes = &last.includes;
                 let new_excludes = &last.excludes;
+                let new_path = &last.path.clone();
 
                 // Check if any fields actually changed
                 if existing.digest != new_digest
                     || existing.includes != *new_includes
                     || existing.excludes != *new_excludes
+                    || existing.path != *new_path
                 {
                     existing.digest = new_digest;
-                    existing.includes = new_includes.clone();
                     existing.excludes = new_excludes.clone();
+                    existing.includes = new_includes.clone();
+                    existing.path = new_path.clone();
+
                     lockfile_modified = true;
                 }
             } else {
                 // Adding new platform-specific source entry
                 lock.sources.push(crate::command::lock::LockSource {
-                    name: last.name.clone(),
-                    kind: "http".to_string(),
-                    path: None,
-                    url: Some(last.path.clone()),
-                    includes: last.includes.clone(),
-                    excludes: last.excludes.clone(),
                     digest: last.digest.clone().unwrap_or_default(),
-                    rev: None,
+                    excludes: last.excludes.clone(),
+                    includes: last.includes.clone(),
+                    name: last.name.clone(),
+                    path: last.path.clone(),
                     platform: target_platform.clone(),
                 });
+
                 lockfile_modified = true;
             }
 

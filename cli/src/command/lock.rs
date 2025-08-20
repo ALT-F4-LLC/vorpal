@@ -15,19 +15,13 @@ pub struct Lockfile {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LockSource {
     pub name: String,
-    #[serde(rename = "type")]
-    pub kind: String, // local|http|git
     #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub url: Option<String>,
+    pub path: String,
     #[serde(default)]
     pub includes: Vec<String>,
     #[serde(default)]
     pub excludes: Vec<String>,
     pub digest: String,
-    #[serde(default)]
-    pub rev: Option<String>,
     #[serde(default)]
     pub platform: String, // Single platform where this source is used (e.g., "aarch64-darwin", "aarch64-linux")
 }
