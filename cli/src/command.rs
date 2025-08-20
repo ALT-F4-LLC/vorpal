@@ -196,13 +196,6 @@ pub enum CommandArtifact {
         #[arg(default_value_t = false, long)]
         export: bool,
 
-        /// Do not use network; rely on cache/lock
-        #[arg(default_value_t = false, long)]
-        offline: bool,
-
-        #[arg(default_value_t = false, long)]
-        update: bool,
-
         #[arg(default_value_t = false, long)]
         path: bool,
 
@@ -212,12 +205,11 @@ pub enum CommandArtifact {
         #[arg(default_value_t = get_system_default_str(), long)]
         system: String,
 
+        #[arg(default_value_t = false, long)]
+        update: bool,
+
         #[arg(long)]
         variable: Vec<String>,
-
-        /// Verify Vorpal.lock against local cache/inputs
-        #[arg(default_value_t = false, long)]
-        verify: bool,
 
         /// Worker address
         #[arg(default_value_t = get_default_address(), long)]
@@ -384,14 +376,12 @@ pub async fn run() -> Result<()> {
                 config,
                 context,
                 export,
-                offline,
                 update,
                 name,
                 path,
                 rebuild,
                 system,
                 variable,
-                verify,
                 worker,
             } => {
                 if name.is_empty() {
@@ -492,14 +482,12 @@ pub async fn run() -> Result<()> {
                     aliases: alias.clone(),
                     context: context_absolute_path.clone(),
                     export: *export,
-                    offline: *offline,
-                    update: *update,
                     name: name.clone(),
                     path: *path,
                     rebuild: *rebuild,
                     system: system.clone(),
+                    update: *update,
                     variable: variable.clone(),
-                    verify: *verify,
                 };
 
                 let config_args = artifact::make::RunArgsConfig {

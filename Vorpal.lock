@@ -1,5 +1,4 @@
 lockfile = 1
-artifacts = []
 
 [[sources]]
 name = "cargo"

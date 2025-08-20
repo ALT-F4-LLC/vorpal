@@ -1,6 +1,6 @@
-use crate::command::lock::{load_lock, LockArtifact, LockSource, Lockfile};
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
+    lock::{load_lock, save_lock_coordinated, LockSource, Lockfile},
     store::{
         archives::unpack_zstd,
         paths::{
@@ -32,12 +32,29 @@ use vorpal_sdk::{
     context::ConfigContext,
 };
 
-/// Check if an artifact name is a root configuration artifact.
-/// Root configuration artifacts are defined in the configuration and should be excluded from lockfile.
-fn is_root_config_artifact(name: &str, config_artifacts: &HashMap<String, Artifact>) -> bool {
-    config_artifacts
-        .values()
-        .any(|artifact| artifact.name == name)
+pub struct RunArgsArtifact {
+    pub aliases: Vec<String>,
+    pub context: PathBuf,
+    pub export: bool,
+    pub name: String,
+    pub path: bool,
+    pub rebuild: bool,
+    pub system: String,
+    pub update: bool,
+    pub variable: Vec<String>,
+}
+
+pub struct RunArgsConfig {
+    pub context: PathBuf,
+    pub language: String,
+    pub name: String,
+    pub source: Option<VorpalTomlConfigSource>,
+}
+
+pub struct RunArgsService {
+    pub agent: String,
+    pub registry: String,
+    pub worker: String,
 }
 
 async fn build(
@@ -46,7 +63,6 @@ async fn build(
     artifact_digest: &str,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
-    offline: bool,
 ) -> Result<()> {
     // 1. Check artifact
 
@@ -62,67 +78,65 @@ async fn build(
         digest: artifact_digest.to_string(),
     };
 
-    if !offline {
-        match client_archive.pull(request_pull.clone()).await {
-            Err(status) => {
-                if status.code() != Code::NotFound {
-                    bail!("registry pull error: {:?}", status);
+    match client_archive.pull(request_pull.clone()).await {
+        Err(status) => {
+            if status.code() != Code::NotFound {
+                bail!("registry pull error: {:?}", status);
+            }
+        }
+
+        Ok(response) => {
+            let mut stream = response.into_inner();
+            let mut stream_data = Vec::new();
+
+            loop {
+                match stream.message().await {
+                    Ok(Some(chunk)) => {
+                        if !chunk.data.is_empty() {
+                            stream_data.extend_from_slice(&chunk.data);
+                        }
+                    }
+
+                    Ok(None) => break,
+
+                    Err(status) => {
+                        if status.code() != Code::NotFound {
+                            bail!("registry stream error: {:?}", status);
+                        }
+
+                        break;
+                    }
                 }
             }
 
-            Ok(response) => {
-                let mut stream = response.into_inner();
-                let mut stream_data = Vec::new();
+            if !stream_data.is_empty() {
+                let archive_path = get_artifact_archive_path(artifact_digest);
 
-                loop {
-                    match stream.message().await {
-                        Ok(Some(chunk)) => {
-                            if !chunk.data.is_empty() {
-                                stream_data.extend_from_slice(&chunk.data);
-                            }
-                        }
+                write(&archive_path, &stream_data)
+                    .await
+                    .expect("failed to write archive");
 
-                        Ok(None) => break,
+                set_timestamps(&archive_path).await?;
 
-                        Err(status) => {
-                            if status.code() != Code::NotFound {
-                                bail!("registry stream error: {:?}", status);
-                            }
+                info!("{} |> unpack: {}", artifact.name, artifact_digest);
 
-                            break;
-                        }
-                    }
+                create_dir_all(&artifact_path)
+                    .await
+                    .expect("failed to create artifact path");
+
+                unpack_zstd(&artifact_path, &archive_path).await?;
+
+                let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
+
+                if artifact_files.is_empty() {
+                    bail!("Artifact files not found: {:?}", artifact_path);
                 }
 
-                if !stream_data.is_empty() {
-                    let archive_path = get_artifact_archive_path(artifact_digest);
-
-                    write(&archive_path, &stream_data)
-                        .await
-                        .expect("failed to write archive");
-
-                    set_timestamps(&archive_path).await?;
-
-                    info!("{} |> unpack: {}", artifact.name, artifact_digest);
-
-                    create_dir_all(&artifact_path)
-                        .await
-                        .expect("failed to create artifact path");
-
-                    unpack_zstd(&artifact_path, &archive_path).await?;
-
-                    let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
-
-                    if artifact_files.is_empty() {
-                        bail!("Artifact files not found: {:?}", artifact_path);
-                    }
-
-                    for artifact_files in &artifact_files {
-                        set_timestamps(artifact_files).await?;
-                    }
-
-                    return Ok(());
+                for artifact_files in &artifact_files {
+                    set_timestamps(artifact_files).await?;
                 }
+
+                return Ok(());
             }
         }
     };
@@ -167,9 +181,6 @@ async fn build_artifacts(
     build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
-    offline: bool,
-    lock_path: &Path,
-    config_artifacts: &HashMap<String, Artifact>,
 ) -> Result<()> {
     let artifact_order = get_order(&build_store).await?;
     let mut build_complete = HashMap::<String, Artifact>::new();
@@ -201,15 +212,12 @@ async fn build_artifacts(
                     &artifact_digest,
                     client_archive,
                     client_worker,
-                    offline,
                 )
                 .await?;
 
                 build_complete.insert(artifact_digest.to_string(), artifact.clone());
 
-                // Incrementally append artifact entry to Vorpal.lock if missing (agent handles sources)
-                upsert_artifact_lock_entry(lock_path, artifact, &artifact_digest, config_artifacts)
-                    .await?;
+                // Sources are managed by the agent, no artifact entries needed
             }
         }
     }
@@ -217,99 +225,11 @@ async fn build_artifacts(
     Ok(())
 }
 
-async fn upsert_artifact_lock_entry(
-    lock_path: &Path,
-    art: &Artifact,
-    digest: &str,
-    config_artifacts: &HashMap<String, Artifact>,
-) -> Result<()> {
-    // Skip root configuration artifacts - they should not be stored in lockfile
-    if is_root_config_artifact(&art.name, config_artifacts) {
-        return Ok(());
-    }
-
-    let mut lock = match load_lock(lock_path).await? {
-        Some(l) => l,
-        None => Lockfile {
-            lockfile: 1,
-            sources: vec![],
-            artifacts: vec![],
-        },
-    };
-
-    // If an entry with the same name already exists, do not modify it here (append-only semantics)
-    if lock.artifacts.iter().any(|a| a.name == art.name) {
-        return Ok(());
-    }
-
-    let deps = art
-        .steps
-        .iter()
-        .flat_map(|s| s.artifacts.clone())
-        .collect::<Vec<String>>();
-
-    let systems = art
-        .systems
-        .iter()
-        .map(|s| {
-            vorpal_sdk::api::artifact::ArtifactSystem::try_from(*s)
-                .map(|v| v.as_str_name().to_string())
-                .unwrap_or_else(|_| s.to_string())
-        })
-        .collect::<Vec<String>>();
-
-    lock.artifacts.push(LockArtifact {
-        name: art.name.clone(),
-        digest: digest.to_string(),
-        aliases: art.aliases.clone(),
-        systems,
-        deps,
-    });
-
-    lock.artifacts
-        .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
-
-    crate::command::lock::save_lock_coordinated(lock_path, &lock).await?;
-    Ok(())
-}
-
-pub struct RunArgsArtifact {
-    pub aliases: Vec<String>,
-    pub context: PathBuf,
-    pub export: bool,
-    pub offline: bool,
-    pub update: bool,
-    pub name: String,
-    pub path: bool,
-    pub rebuild: bool,
-    pub system: String,
-    pub variable: Vec<String>,
-    pub verify: bool,
-}
-
-pub struct RunArgsConfig {
-    pub context: PathBuf,
-    pub language: String,
-    pub name: String,
-    pub source: Option<VorpalTomlConfigSource>,
-}
-
-pub struct RunArgsService {
-    pub agent: String,
-    pub registry: String,
-    pub worker: String,
-}
-
 pub async fn run(
     artifact: RunArgsArtifact,
     config: RunArgsConfig,
     service: RunArgsService,
 ) -> Result<()> {
-    // If verify flag is set, delegate to agent for verification
-    if artifact.verify {
-        bail!("--verify functionality moved to agent; use normal build process");
-    }
-
     // Build configuration
 
     let artifact_system = &artifact.system;
@@ -409,22 +329,12 @@ pub async fn run(
     // Build config dependencies first to ensure config binary exists
     let config_store = config_context.get_artifact_store();
 
-    // Create a temporary config artifacts map from config_store for filtering
-    // The config_store contains CLI-injected config artifacts that should be excluded from lockfile
-    let config_store_artifacts: HashMap<String, Artifact> = config_store
-        .values()
-        .map(|artifact| (artifact.name.clone(), artifact.clone()))
-        .collect();
-
     build_artifacts(
         None,
         vec![],
         config_store,
         &mut client_archive,
         &mut client_worker,
-        artifact.offline,
-        &lock_path,
-        &config_store_artifacts, // Use config_store artifacts for filtering CLI-injected config artifacts
     )
     .await?;
 
@@ -534,61 +444,16 @@ pub async fn run(
     )
     .await?;
 
-    // Update Vorpal.lock (artifacts only); sources are agent-managed mid-run
-
-    let mut new_lock = Lockfile {
+    // Initialize lockfile structure - sources are managed by agent during build
+    let new_lock = Lockfile {
         lockfile: 1,
         sources: vec![],
-        artifacts: vec![],
     };
-
-    for (digest, art) in build_store.iter() {
-        let deps = art
-            .steps
-            .iter()
-            .flat_map(|s| s.artifacts.clone())
-            .collect::<Vec<String>>();
-
-        let systems = art
-            .systems
-            .iter()
-            .map(|s| {
-                vorpal_sdk::api::artifact::ArtifactSystem::try_from(*s)
-                    .map(|v| v.as_str_name().to_string())
-                    .unwrap_or_else(|_| s.to_string())
-            })
-            .collect::<Vec<String>>();
-
-        // Policy: only lock artifacts that do not include local sources
-        let has_local_source = art.sources.iter().any(|src| {
-            let is_http = src.path.starts_with("http://") || src.path.starts_with("https://");
-            !is_http
-        });
-
-        if !has_local_source && !is_root_config_artifact(&art.name, &config_artifacts_store) {
-            new_lock.artifacts.push(LockArtifact {
-                name: art.name.clone(),
-                digest: digest.clone(),
-                aliases: art.aliases.clone(),
-                systems,
-                deps,
-            });
-        }
-
-        // Do not persist sources here; agent updates Vorpal.lock per source as they finish
-    }
-
-    // Sort artifacts for deterministic output
-    new_lock
-        .artifacts
-        .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
     let mut lock_status = "unchanged".to_string();
 
     if let Some(existing) = load_lock(&lock_path).await? {
-        let mut ex = existing.clone();
-        ex.artifacts
-            .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+        let ex = existing.clone();
 
         // Build expected remote sources set from this run (artifact, name, url)
         let expected_sources: std::collections::HashSet<(String, String, String)> = build_store
@@ -602,19 +467,24 @@ pub async fn run(
             })
             .collect();
 
-        // Determine current system string
-        let current_system = new_lock
-            .artifacts
-            .iter()
-            .find(|a| a.name == selected_artifact.name)
-            .and_then(|a| a.systems.first().cloned())
-            .unwrap_or_else(|| config_system.as_str_name().to_string());
+        // Determine current system string from config
+        let current_system = config_system.as_str_name().to_string();
 
-        // Map artifact name -> systems for filtering
-        let systems_by_artifact: std::collections::HashMap<String, Vec<String>> = new_lock
-            .artifacts
-            .iter()
-            .map(|a| (a.name.clone(), a.systems.clone()))
+        // Build systems map from build_store for source filtering
+        let systems_by_artifact: std::collections::HashMap<String, Vec<String>> = build_store
+            .values()
+            .map(|art| {
+                let systems = art
+                    .systems
+                    .iter()
+                    .map(|s| {
+                        vorpal_sdk::api::artifact::ArtifactSystem::try_from(*s)
+                            .map(|v| v.as_str_name().to_string())
+                            .unwrap_or_else(|_| s.to_string())
+                    })
+                    .collect();
+                (art.name.clone(), systems)
+            })
             .collect();
 
         // Prune existing sources only for current system: keep others intact
@@ -646,110 +516,34 @@ pub async fn run(
 
         pruned_sources.sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
-        // Compose lock to save: merge existing artifacts with new ones, pruned sources
-        // Filter out root configuration artifacts from existing artifacts
-        let mut merged_artifacts: Vec<_> = ex
-            .artifacts
-            .iter()
-            .filter(|a| !is_root_config_artifact(&a.name, &config_artifacts_store))
-            .cloned()
-            .collect();
-
-        // Update or add artifacts from the current build (excluding root config artifacts)
-        for new_artifact in &new_lock.artifacts {
-            if let Some(existing_idx) = merged_artifacts
-                .iter()
-                .position(|a| a.name == new_artifact.name)
-            {
-                // Update existing artifact
-                merged_artifacts[existing_idx] = new_artifact.clone();
-            } else {
-                // Add new artifact (root config artifacts are already filtered out during new_lock creation)
-                merged_artifacts.push(new_artifact.clone());
-            }
-        }
-
+        // Lockfile only contains sources now
         let lock_to_save = Lockfile {
             lockfile: ex.lockfile,
-            artifacts: merged_artifacts,
             sources: pruned_sources,
         };
 
-        // Determine changes: artifacts vs sources separately
-        // Locked policy: allow append-only changes to artifacts; modifying/removing existing entries fails.
-        let mut artifacts_append_only_ok = true;
-        use std::collections::HashMap;
-        let mut ex_art_by_name: HashMap<&str, &LockArtifact> = HashMap::new();
-        for a in &ex.artifacts {
-            ex_art_by_name.insert(a.name.as_str(), a);
-        }
-        // All existing artifacts must be present identically in the new set
-        for a in &ex.artifacts {
-            if let Some(n) = lock_to_save.artifacts.iter().find(|na| na.name == a.name) {
-                if n != a {
-                    artifacts_append_only_ok = false; // digest/aliases/systems/deps changed
-                }
-            } else {
-                artifacts_append_only_ok = false; // removal
-            }
-        }
-        // If the new set differs at all, it's a change; may still be allowed if append-only
-        let artifacts_changed = ex.artifacts != lock_to_save.artifacts;
+        // Determine if sources changed
         let sources_changed = ex.sources != lock_to_save.sources;
 
-        // In locked mode, check if the changes are acceptable:
-        // 1. All existing artifacts that should be locked are preserved identically
-        // 2. Only artifacts with local sources (which shouldn't be locked) can be removed
-        let acceptable_changes = ex.artifacts.iter().all(|existing| {
-            // Check if this artifact should be locked (doesn't have local sources)
-            // We need to find the artifact definition to check its sources
-            let should_be_locked = build_store.iter().any(|(_, art)| {
-                art.name == existing.name
-                    && !art.sources.iter().any(|src| {
-                        let is_http =
-                            src.path.starts_with("http://") || src.path.starts_with("https://");
-                        !is_http
-                    })
-            });
+        // Sources can be updated freely as they represent current build requirements
+        // No append-only restriction needed for sources
 
-            if should_be_locked {
-                // This artifact should be locked, so it must be preserved identically
-                lock_to_save
-                    .artifacts
-                    .iter()
-                    .any(|new| new.name == existing.name && new == existing)
-            } else {
-                // This artifact has local sources and can be removed from lockfile
-                true
-            }
-        });
-
-        if artifacts_changed && !artifact.update && !artifacts_append_only_ok && !acceptable_changes
-        {
-            bail!("Vorpal.lock would change; run with --update to refresh");
-        }
-
-        if artifacts_changed || sources_changed || artifact.update {
-            crate::command::lock::save_lock_coordinated(&lock_path, &lock_to_save).await?;
+        if sources_changed || artifact.update {
+            save_lock_coordinated(&lock_path, &lock_to_save).await?;
             lock_status = "updated".to_string();
             info!("updated lockfile: {}", lock_path.display());
         }
     } else {
-        // First run bootstrap: create minimal lockfile with artifacts; sources are agent-managed
-        // Create minimal lockfile with artifacts; sources will be added by agent during runs
-        crate::command::lock::save_lock_coordinated(&lock_path, &new_lock).await?;
+        // First run bootstrap: create minimal lockfile; sources are agent-managed
+        // Sources will be added by agent during runs
+        save_lock_coordinated(&lock_path, &new_lock).await?;
         lock_status = "created".to_string();
         info!("created lockfile: {}", lock_path.display());
     }
 
     // Mode banner
-    let mode = if artifact.update {
-        "update"
-    } else if artifact.offline {
-        "ensure-offline"
-    } else {
-        "ensure"
-    };
+    let mode = if artifact.update { "update" } else { "lock" };
+
     info!("mode: {}, lock: {}", mode, lock_status);
 
     if artifact.export {
@@ -767,9 +561,6 @@ pub async fn run(
         build_store,
         &mut client_archive,
         &mut client_worker,
-        artifact.offline,
-        &lock_path,
-        &config_artifacts_store,
     )
     .await?;
 

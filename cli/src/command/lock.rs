@@ -10,8 +10,6 @@ pub struct Lockfile {
     pub lockfile: u32,
     #[serde(default)]
     pub sources: Vec<LockSource>,
-    #[serde(default)]
-    pub artifacts: Vec<LockArtifact>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -32,18 +30,6 @@ pub struct LockSource {
     pub rev: Option<String>,
     #[serde(default)]
     pub artifact: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct LockArtifact {
-    pub name: String,
-    pub digest: String,
-    #[serde(default)]
-    pub aliases: Vec<String>,
-    #[serde(default)]
-    pub systems: Vec<String>,
-    #[serde(default)]
-    pub deps: Vec<String>,
 }
 
 pub async fn load_lock(path: &Path) -> Result<Option<Lockfile>> {
