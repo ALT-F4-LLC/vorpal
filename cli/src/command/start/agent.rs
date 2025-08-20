@@ -387,7 +387,7 @@ async fn prepare_artifact(
     let mut artifact_sources = vec![];
 
     // Get target platform for this artifact
-    let target_platform = crate::command::lock::artifact_system_to_platform(artifact.target.into());
+    let target_platform = crate::command::lock::artifact_system_to_platform(artifact.target);
 
     for mut source in artifact.sources.into_iter() {
         // Hydrate source digest from lockfile if available
