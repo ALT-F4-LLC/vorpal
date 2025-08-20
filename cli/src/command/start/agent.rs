@@ -1,4 +1,3 @@
-use crate::command::lock::{load_lock, LockSource, Lockfile};
 use crate::command::store::{
     archives::{compress_zstd, unpack_zip},
     hashes::hash_files,
@@ -439,10 +438,17 @@ async fn prepare_artifact(
             .unwrap_or(false);
 
         if is_http {
+            // Agent handles lockfile internally using the existing CLI lock module
+            // This keeps lockfile logic centralized in one place
             let lock_path = Path::new(&request.artifact_context).join("Vorpal.lock");
-            let mut lock = match load_lock(&lock_path).await.unwrap_or(None) {
+
+            // Load existing lockfile or create new one
+            let mut lock = match crate::command::lock::load_lock(&lock_path)
+                .await
+                .unwrap_or(None)
+            {
                 Some(l) => l,
-                None => Lockfile {
+                None => crate::command::lock::Lockfile {
                     lockfile: 1,
                     sources: vec![],
                 },
@@ -450,7 +456,7 @@ async fn prepare_artifact(
 
             let last = artifact_sources.last().unwrap();
 
-            // Upsert by (artifact name + source name + url)
+            // Upsert source entry
             if let Some(existing) = lock.sources.iter_mut().find(|s| {
                 s.kind == "http"
                     && s.name == last.name
@@ -461,7 +467,7 @@ async fn prepare_artifact(
                 existing.includes = last.includes.clone();
                 existing.excludes = last.excludes.clone();
             } else {
-                lock.sources.push(LockSource {
+                lock.sources.push(crate::command::lock::LockSource {
                     name: last.name.clone(),
                     kind: "http".to_string(),
                     path: None,
@@ -474,18 +480,14 @@ async fn prepare_artifact(
                 });
             }
 
-            // Don't remove any sources here - we just added/updated the current one above
-            // Let the CLI handle source pruning in coordinated fashion
-
             lock.sources
                 .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
-            // Save lockfile with proper coordination and error handling
-            // Non-fatal: log error but don't break the build
+            // Save lockfile - non-fatal if it fails
             if let Err(e) = crate::command::lock::save_lock_coordinated(&lock_path, &lock).await {
                 tracing::warn!("Failed to update lockfile {}: {}", lock_path.display(), e);
             } else {
-                tracing::info!("Updated lockfile with sources: {}", lock_path.display());
+                tracing::info!("Updated lockfile with source: {}", last.name);
             }
         }
     }

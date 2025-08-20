@@ -1,6 +1,5 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
-    lock::{load_lock, save_lock_coordinated, LockSource, Lockfile},
     store::{
         archives::unpack_zstd,
         paths::{
@@ -316,7 +315,6 @@ pub async fn run(
     }
 
     // Prepare lock path early for incremental artifact updates
-    let lock_path = artifact.context.join("Vorpal.lock");
 
     let mut client_archive = ArchiveServiceClient::connect(service.registry.to_owned())
         .await
@@ -444,107 +442,10 @@ pub async fn run(
     )
     .await?;
 
-    // Initialize lockfile structure - sources are managed by agent during build
-    let new_lock = Lockfile {
-        lockfile: 1,
-        sources: vec![],
-    };
-
-    let mut lock_status = "unchanged".to_string();
-
-    if let Some(existing) = load_lock(&lock_path).await? {
-        let ex = existing.clone();
-
-        // Build expected remote sources set from this run (artifact, name, url)
-        let expected_sources: std::collections::HashSet<(String, String, String)> = build_store
-            .iter()
-            .flat_map(|(_, art)| {
-                art.sources
-                    .iter()
-                    .filter(|s| s.path.starts_with("http://") || s.path.starts_with("https://"))
-                    .map(|s| (art.name.clone(), s.name.clone(), s.path.clone()))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-
-        // Determine current system string from config
-        let current_system = config_system.as_str_name().to_string();
-
-        // Build systems map from build_store for source filtering
-        let systems_by_artifact: std::collections::HashMap<String, Vec<String>> = build_store
-            .values()
-            .map(|art| {
-                let systems = art
-                    .systems
-                    .iter()
-                    .map(|s| {
-                        vorpal_sdk::api::artifact::ArtifactSystem::try_from(*s)
-                            .map(|v| v.as_str_name().to_string())
-                            .unwrap_or_else(|_| s.to_string())
-                    })
-                    .collect();
-                (art.name.clone(), systems)
-            })
-            .collect();
-
-        // Prune existing sources only for current system: keep others intact
-        // Work on a cloned copy of sources to avoid moving out of `ex`
-        let mut pruned_sources: Vec<LockSource> = ex
-            .sources
-            .clone()
-            .into_iter()
-            .filter(|s| s.kind != "local")
-            .filter(|s| {
-                // Sources without artifact binding are kept
-                let Some(art) = &s.artifact else { return true };
-                // If artifact isn't part of this run's artifacts, keep it
-                let Some(art_systems) = systems_by_artifact.get(art) else {
-                    return true;
-                };
-                // If this artifact does not target current system, keep it
-                if !art_systems.contains(&current_system) {
-                    return true;
-                }
-                // If this source is expected for current run, keep it; else prune
-                expected_sources.contains(&(
-                    art.clone(),
-                    s.name.clone(),
-                    s.url.clone().unwrap_or_default(),
-                ))
-            })
-            .collect();
-
-        pruned_sources.sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
-
-        // Lockfile only contains sources now
-        let lock_to_save = Lockfile {
-            lockfile: ex.lockfile,
-            sources: pruned_sources,
-        };
-
-        // Determine if sources changed
-        let sources_changed = ex.sources != lock_to_save.sources;
-
-        // Sources can be updated freely as they represent current build requirements
-        // No append-only restriction needed for sources
-
-        if sources_changed || artifact.update {
-            save_lock_coordinated(&lock_path, &lock_to_save).await?;
-            lock_status = "updated".to_string();
-            info!("updated lockfile: {}", lock_path.display());
-        }
-    } else {
-        // First run bootstrap: create minimal lockfile; sources are agent-managed
-        // Sources will be added by agent during runs
-        save_lock_coordinated(&lock_path, &new_lock).await?;
-        lock_status = "created".to_string();
-        info!("created lockfile: {}", lock_path.display());
-    }
-
-    // Mode banner
+    // Agent handles all lockfile operations internally
     let mode = if artifact.update { "update" } else { "lock" };
 
-    info!("mode: {}, lock: {}", mode, lock_status);
+    info!("mode: {}", mode);
 
     if artifact.export {
         let export =
