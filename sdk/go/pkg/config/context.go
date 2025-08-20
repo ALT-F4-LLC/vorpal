@@ -28,11 +28,11 @@ type ConfigContext struct {
 	artifact        string
 	artifactContext string
 	lockfile        string
-	lockfileUpdate  bool
 	port            int
 	registry        string
 	store           ConfigContextStore
 	system          artifact.ArtifactSystem
+	update          bool
 }
 
 type ConfigLockfile struct {
@@ -99,11 +99,11 @@ func GetContext() *ConfigContext {
 		artifact:        cmd.Artifact,
 		artifactContext: cmd.ArtifactContext,
 		lockfile:        cmd.Lockfile,
-		lockfileUpdate:  cmd.LockfileUpdate,
 		port:            cmd.Port,
 		registry:        cmd.Registry,
 		store:           store,
 		system:          *system,
+		update:          cmd.Update,
 	}
 }
 
@@ -218,8 +218,8 @@ func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
 		return nil, fmt.Errorf("error checking lockfile: %v", statErr)
 	}
 
-	if os.IsNotExist(statErr) && !c.lockfileUpdate {
-		return nil, fmt.Errorf("lockfile '%s' does not exist -- run with '--lockfile-update'", c.lockfile)
+	if os.IsNotExist(statErr) && !c.update {
+		return nil, fmt.Errorf("lockfile '%s' does not exist -- run with '--update'", c.lockfile)
 	}
 
 	if os.IsNotExist(statErr) {
@@ -255,8 +255,8 @@ func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
 	}
 
 	lockfileAliasDigest, ok := lockfile.Alias[c.system.String()][alias]
-	if !ok && !c.lockfileUpdate {
-		return nil, fmt.Errorf("alias '%s' not in lockfile - run with '--lockfile-update'", alias)
+	if !ok && !c.update {
+		return nil, fmt.Errorf("alias '%s' not in lockfile - run with '--update'", alias)
 	}
 
 	registry := strings.ReplaceAll(c.registry, "http://", "")
@@ -283,7 +283,7 @@ func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
 
 		lockfileAliasDigest = response.Digest
 
-		if c.lockfileUpdate {
+		if c.update {
 			lockfile.Alias[c.system.String()][alias] = lockfileAliasDigest
 
 			lockfileData, err := json.Marshal(lockfile)

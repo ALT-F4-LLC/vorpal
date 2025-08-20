@@ -30,12 +30,11 @@ pub struct ConfigContext {
     artifact: String,
     artifact_context: PathBuf,
     lock: Option<Lockfile>,
-    #[allow(dead_code)]
-    lockfile_update: bool,
     port: u16,
     registry: String,
     store: ConfigContextStore,
     system: ArtifactSystem,
+    update: bool,
 }
 
 #[derive(Clone)]
@@ -94,7 +93,7 @@ pub async fn get_context() -> Result<ConfigContext> {
             registry,
             system,
             variable,
-            lockfile_update,
+            update,
         } => Ok(ConfigContext::new(
             agent,
             artifact,
@@ -102,7 +101,7 @@ pub async fn get_context() -> Result<ConfigContext> {
             port,
             registry,
             system,
-            lockfile_update,
+            update,
             variable,
         )?),
     }
@@ -117,16 +116,17 @@ impl ConfigContext {
         port: u16,
         registry: String,
         system: String,
-        lockfile_update: bool,
+        update: bool,
         variable: Vec<String>,
     ) -> Result<Self> {
         let lock = load_lockfile(&artifact_context.join("Vorpal.lock"))?;
+
         Ok(Self {
             agent,
             artifact,
             artifact_context,
             lock,
-            lockfile_update,
+            update,
             port,
             registry,
             store: ConfigContextStore {
@@ -223,7 +223,7 @@ impl ConfigContext {
         let request = PrepareArtifactRequest {
             artifact: Some(artifact_to_prepare.clone()),
             artifact_context: self.artifact_context.display().to_string(),
-            update_mode: self.lockfile_update,
+            update_mode: self.update,
         };
 
         let response = client

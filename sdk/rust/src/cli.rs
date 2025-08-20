@@ -30,10 +30,10 @@ pub enum Command {
         #[arg(default_value_t = get_system_default_str(), long)]
         system: String,
 
+        #[clap(long, default_value_t = false)]
+        update: bool,
+
         #[clap(long)]
         variable: Vec<String>,
-
-        #[clap(long, default_value_t = false)]
-        lockfile_update: bool,
     },
 }

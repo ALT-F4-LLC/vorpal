@@ -47,8 +47,8 @@ pub async fn build_source(
     artifact_context: String,
     registry: String,
     source: &ArtifactSource,
-    tx: &Sender<Result<PrepareArtifactResponse, Status>>,
     source_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
+    tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
     let mut client = ArchiveServiceClient::connect(registry.to_owned())
         .await
@@ -363,8 +363,8 @@ pub async fn build_source(
 async fn prepare_artifact(
     registry: String,
     request: Request<PrepareArtifactRequest>,
-    tx: &Sender<Result<PrepareArtifactResponse, Status>>,
     source_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
+    tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     let request = request.into_inner();
 
@@ -414,8 +414,8 @@ async fn prepare_artifact(
             request.artifact_context.clone(),
             registry.clone(),
             &source,
-            &tx.clone(),
             source_cache.clone(),
+            &tx.clone(),
         )
         .await
         .map_err(|err| Status::internal(format!("{err}")))?;
@@ -552,8 +552,9 @@ impl AgentService for AgentServer {
         let registry = self.registry.clone();
 
         let source_cache = self.source_cache.clone();
+
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(registry, request, &tx, source_cache).await {
+            if let Err(err) = prepare_artifact(registry, request, source_cache, &tx).await {
                 let _ = tx.send(Err(err)).await;
             }
         });

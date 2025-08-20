@@ -355,9 +355,9 @@ pub async fn run(
 
     let (mut config_process, mut config_client) = match start(
         artifact.context.to_path_buf(),
-        artifact.update,
         artifact.name.to_string(),
         artifact.system.to_string(),
+        artifact.update,
         artifact.variable.clone(),
         config_file.display().to_string(),
         service.agent.to_string(),
