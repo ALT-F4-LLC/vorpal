@@ -11,9 +11,9 @@ service AgentService {
 }
 
 message PrepareArtifactRequest {
-  string artifact_context = 1;
-  vorpal.artifact.Artifact artifact = 2;
-  bool update_mode = 3;
+  bool artifact_update = 1;
+  string artifact_context = 2;
+  vorpal.artifact.Artifact artifact = 3;
 }
 
 message PrepareArtifactResponse {
