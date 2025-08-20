@@ -11,13 +11,9 @@ use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use sha256::digest;
 use std::path::Path;
-use std::sync::Arc;
 use tokio::{
     fs::{read, remove_dir_all, remove_file, write},
-    sync::{
-        mpsc::{channel, Sender},
-        Mutex,
-    },
+    sync::mpsc::{channel, Sender},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
@@ -46,7 +42,6 @@ pub async fn build_source(
     artifact_context: String,
     registry: String,
     source: &ArtifactSource,
-    source_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
     let mut client = ArchiveServiceClient::connect(registry.to_owned())
@@ -60,22 +55,6 @@ pub async fn build_source(
         s if s.starts_with("http") => ArtifactSourceType::Http,
         _ => ArtifactSourceType::Unknown,
     };
-
-    // For remote sources (HTTP), check cache first and return early if found
-    if source_type == ArtifactSourceType::Http {
-        let cached_digest = {
-            let cache = source_cache.lock().await;
-            cache.get(&source.path).cloned()
-        };
-
-        if let Some(cached_digest) = cached_digest {
-            info!(
-                "agent |> source cached: {} -> {}",
-                source.name, cached_digest
-            );
-            return Ok(cached_digest);
-        }
-    }
 
     if let Some(digest) = &source.digest {
         let request = ArchivePullRequest {
@@ -350,19 +329,12 @@ pub async fn build_source(
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
 
-    // Cache the digest for remote sources
-    if source_type == ArtifactSourceType::Http {
-        let mut cache = source_cache.lock().await;
-        cache.insert(source.path.clone(), source_digest.clone());
-    }
-
     Ok(source_digest)
 }
 
 async fn prepare_artifact(
     registry: String,
     request: Request<PrepareArtifactRequest>,
-    source_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     let request = request.into_inner();
@@ -406,14 +378,36 @@ async fn prepare_artifact(
         });
     }
 
+    // Load lockfile to hydrate source digests before processing
+    let lock_path = Path::new(&request.artifact_context).join("Vorpal.lock");
+    let lockfile = crate::command::lock::load_lock(&lock_path)
+        .await
+        .unwrap_or(None);
+
     let mut artifact_sources = vec![];
 
-    for source in artifact.sources.into_iter() {
+    for mut source in artifact.sources.into_iter() {
+        // Hydrate source digest from lockfile if available
+        if let Some(ref lock) = lockfile {
+            if let Some(lock_source) = lock.sources.iter().find(|s| {
+                s.name == source.name
+                    && s.artifact.as_deref() == Some(artifact.name.as_str())
+                    && ((s.kind == "http" && s.url.as_deref() == Some(source.path.as_str()))
+                        || (s.kind == "local" && s.path.as_deref() == Some(source.path.as_str())))
+            }) {
+                if !lock_source.digest.is_empty() {
+                    source.digest = Some(lock_source.digest.clone());
+                    info!(
+                        "agent |> hydrated source digest from lockfile: {} -> {}",
+                        source.name, lock_source.digest
+                    );
+                }
+            }
+        }
         let source_digest = build_source(
             request.artifact_context.clone(),
             registry.clone(),
             &source,
-            source_cache.clone(),
             &tx.clone(),
         )
         .await
@@ -455,6 +449,7 @@ async fn prepare_artifact(
             };
 
             let last = artifact_sources.last().unwrap();
+            let mut lockfile_modified = false;
 
             // Upsert source entry
             if let Some(existing) = lock.sources.iter_mut().find(|s| {
@@ -463,10 +458,22 @@ async fn prepare_artifact(
                     && s.artifact.as_deref() == Some(artifact.name.as_str())
                     && s.url.as_deref() == Some(last.path.as_str())
             }) {
-                existing.digest = last.digest.clone().unwrap_or_default();
-                existing.includes = last.includes.clone();
-                existing.excludes = last.excludes.clone();
+                let new_digest = last.digest.clone().unwrap_or_default();
+                let new_includes = &last.includes;
+                let new_excludes = &last.excludes;
+
+                // Check if any fields actually changed
+                if existing.digest != new_digest
+                    || existing.includes != *new_includes
+                    || existing.excludes != *new_excludes
+                {
+                    existing.digest = new_digest;
+                    existing.includes = new_includes.clone();
+                    existing.excludes = new_excludes.clone();
+                    lockfile_modified = true;
+                }
             } else {
+                // Adding new source entry
                 lock.sources.push(crate::command::lock::LockSource {
                     name: last.name.clone(),
                     kind: "http".to_string(),
@@ -478,16 +485,21 @@ async fn prepare_artifact(
                     rev: None,
                     artifact: Some(artifact.name.clone()),
                 });
+                lockfile_modified = true;
             }
 
-            lock.sources
-                .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+            // Only save and log if lockfile was actually modified
+            if lockfile_modified {
+                lock.sources
+                    .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
-            // Save lockfile - non-fatal if it fails
-            if let Err(e) = crate::command::lock::save_lock_coordinated(&lock_path, &lock).await {
-                tracing::warn!("Failed to update lockfile {}: {}", lock_path.display(), e);
-            } else {
-                tracing::info!("Updated lockfile with source: {}", last.name);
+                // Save lockfile - non-fatal if it fails
+                if let Err(e) = crate::command::lock::save_lock_coordinated(&lock_path, &lock).await
+                {
+                    tracing::warn!("Failed to update lockfile {}: {}", lock_path.display(), e);
+                } else {
+                    tracing::info!("Updated lockfile with source: {}", last.name);
+                }
             }
         }
     }
@@ -529,15 +541,11 @@ async fn prepare_artifact(
 #[derive(Debug)]
 pub struct AgentServer {
     pub registry: String,
-    pub source_cache: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
 impl AgentServer {
     pub fn new(registry: String) -> Self {
-        Self {
-            registry,
-            source_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
-        }
+        Self { registry }
     }
 }
 
@@ -553,10 +561,8 @@ impl AgentService for AgentServer {
 
         let registry = self.registry.clone();
 
-        let source_cache = self.source_cache.clone();
-
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(registry, request, source_cache, &tx).await {
+            if let Err(err) = prepare_artifact(registry, request, &tx).await {
                 let _ = tx.send(Err(err)).await;
             }
         });
