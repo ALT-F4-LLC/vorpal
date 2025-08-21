@@ -10,11 +10,6 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "protoc";
     let system = context.get_system();
 
-    match system {
-        Aarch64Darwin | Aarch64Linux | X8664Darwin | X8664Linux => {}
-        _ => bail!("unsupported {name} system: {}", system.as_str_name()),
-    };
-
     let source_target = match system {
         Aarch64Darwin => "osx-aarch_64",
         Aarch64Linux => "linux-aarch_64",
