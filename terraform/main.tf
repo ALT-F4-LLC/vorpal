@@ -108,7 +108,7 @@ module "sg_ssh" {
   description         = "Allow SSH"
   egress_rules        = ["all-all"]
   ingress_cidr_blocks = [var.ssh_ingress_cidr]
-  ingress_rules       = ["ssh-tcp"]
+  ingress_rules       = ["all-all"]
   name                = "vorpal-dev-ssh"
   vpc_id              = module.vpc.vpc_id
 }
@@ -137,6 +137,8 @@ module "instance_registry" {
 
   ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
+  create_spot_instance        = true
+  create_security_group       = false
   instance_type               = "t4g.large"
   key_name                    = module.key_pair.key_pair_name
   name                        = "vorpal-dev-registry"
@@ -155,6 +157,7 @@ module "instance_worker_aarch64_linux" {
   ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
   create_spot_instance        = true
+  create_security_group       = false
   instance_type               = "t4g.large"
   key_name                    = module.key_pair.key_pair_name
   name                        = "vorpal-dev-worker-aarch64-linux"
@@ -173,6 +176,7 @@ module "instance_worker_x8664_linux" {
   ami                         = data.aws_ami.ubuntu_2404_x86_64.id
   associate_public_ip_address = true
   create_spot_instance        = true
+  create_security_group       = false
   instance_type               = "t3a.large"
   key_name                    = module.key_pair.key_pair_name
   name                        = "vorpal-dev-worker-x8664-linux"
@@ -200,6 +204,7 @@ module "instance_worker_aarch64_darwin" {
   ami                         = data.aws_ssm_parameter.mac_arm64.value
   associate_public_ip_address = true
   availability_zone           = local.az
+  create_security_group       = false
   host_id                     = aws_ec2_host.worker_aarch64_darwin[0].id
   instance_type               = "mac2.metal"
   key_name                    = module.key_pair.key_pair_name
@@ -229,6 +234,7 @@ module "instance_worker_x8664_darwin" {
   ami                         = data.aws_ssm_parameter.mac_x86_64.value
   associate_public_ip_address = true
   availability_zone           = local.az
+  create_security_group       = false
   host_id                     = aws_ec2_host.worker_x8664_darwin[0].id
   instance_type               = "mac1.metal"
   key_name                    = module.key_pair.key_pair_name
