@@ -1,11 +1,74 @@
 data "aws_availability_zones" "available" {}
 
-data "aws_ssm_parameter" "al2023_arm64" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64"
+# Ubuntu 24.04 (Noble) AMIs via aws_ami lookup requiring gp3 volumes (Canonical owner)
+data "aws_ami" "ubuntu_2404_arm64" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["arm64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  filter {
+    name   = "root-device-type"
+    values = ["ebs"]
+  }
+
+  filter {
+    name   = "block-device-mapping.volume-type"
+    values = ["gp3"]
+  }
+
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
 }
 
-data "aws_ssm_parameter" "al2023_x86_64" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64"
+data "aws_ami" "ubuntu_2404_x86_64" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  filter {
+    name   = "root-device-type"
+    values = ["ebs"]
+  }
+
+  filter {
+    name   = "block-device-mapping.volume-type"
+    values = ["gp3"]
+  }
+
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
 }
 
 data "aws_ssm_parameter" "mac_arm64" {
@@ -72,7 +135,7 @@ module "instance_registry" {
   source  = "terraform-aws-modules/ec2-instance/aws"
   version = "6.0.2"
 
-  ami                         = data.aws_ssm_parameter.al2023_arm64.value
+  ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
   instance_type               = "t4g.small"
   key_name                    = module.key_pair.key_pair_name
@@ -85,7 +148,7 @@ module "instance_worker_aarch64_linux" {
   source  = "terraform-aws-modules/ec2-instance/aws"
   version = "6.0.2"
 
-  ami                         = data.aws_ssm_parameter.al2023_arm64.value
+  ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
   create_spot_instance        = true
   instance_type               = "t4g.small"
@@ -99,7 +162,7 @@ module "instance_worker_x8664_linux" {
   source  = "terraform-aws-modules/ec2-instance/aws"
   version = "6.0.2"
 
-  ami                         = data.aws_ssm_parameter.al2023_x86_64.value
+  ami                         = data.aws_ami.ubuntu_2404_x86_64.id
   associate_public_ip_address = true
   create_spot_instance        = true
   instance_type               = "t3.small"
