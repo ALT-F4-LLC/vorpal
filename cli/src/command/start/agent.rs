@@ -1,11 +1,14 @@
-use crate::command::store::{
-    archives::{compress_zstd, unpack_zip},
-    hashes::hash_files,
-    notary,
-    paths::{
-        copy_files, get_file_paths, get_key_private_path, get_key_public_path, set_timestamps,
+use crate::command::{
+    lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
+    store::{
+        archives::{compress_zstd, unpack_zip},
+        hashes::get_source_digest,
+        notary,
+        paths::{
+            copy_files, get_file_paths, get_key_private_path, get_key_public_path, set_timestamps,
+        },
+        temps::{create_sandbox_dir, create_sandbox_file},
     },
-    temps::{create_sandbox_dir, create_sandbox_file},
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
@@ -18,7 +21,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
 use tonic::{Code, Request, Response, Status};
-use tracing::info;
+use tracing::{info, warn};
 use url::Url;
 use vorpal_sdk::api::{
     agent::{agent_service_server::AgentService, PrepareArtifactRequest, PrepareArtifactResponse},
@@ -40,13 +43,29 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 pub async fn build_source(
     artifact_context: String,
+    artifact_update: bool,
     registry: String,
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
+    let source_type = match &source.path {
+        s if Path::new(s).exists() => ArtifactSourceType::Local,
+        s if s.starts_with("git") => ArtifactSourceType::Git,
+        s if s.starts_with("http") => ArtifactSourceType::Http,
+        _ => ArtifactSourceType::Unknown,
+    };
+
+    if source_type == ArtifactSourceType::Unknown {
+        bail!(
+            "'source.{}.path' unknown kind: {:?}",
+            source.name,
+            source.path
+        );
+    }
+
     let mut client = ArchiveServiceClient::connect(registry.to_owned())
         .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {:?}", err)))?;
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {err:?}")))?;
 
     if let Some(digest) = &source.digest {
         let request = ArchivePullRequest {
@@ -68,43 +87,15 @@ pub async fn build_source(
 
     // 2. Build source
 
-    let source_type = match &source.path {
-        s if Path::new(s).exists() => ArtifactSourceType::Local,
-        s if s.starts_with("git") => ArtifactSourceType::Git,
-        s if s.starts_with("http") => ArtifactSourceType::Http,
-        _ => ArtifactSourceType::Unknown,
-    };
-
     if source_type == ArtifactSourceType::Git {
         bail!("'source.{}.path' git not supported", source.name);
-    }
-
-    if source_type == ArtifactSourceType::Unknown {
-        bail!(
-            "'source.{}.path' unknown kind: {:?}",
-            source.name,
-            source.path
-        );
     }
 
     let source_sandbox = create_sandbox_dir().await?;
 
     if source_type == ArtifactSourceType::Http {
-        if source.digest.is_none() {
-            bail!(
-                "'source.{}.hash' required for remote sources: {:?}",
-                source.name,
-                source.path
-            );
-        }
-
-        if source.digest.is_some() && source.digest.clone().unwrap() == "" {
-            bail!(
-                "'source.{}.hash' empty for remote sources: {:?}",
-                source.name,
-                source.path
-            );
-        }
+        // If a digest is provided, we'll later verify it matches the computed digest
+        // from the downloaded content. If not provided, proceed and compute it.
 
         let http_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
 
@@ -116,7 +107,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("download source: {}", http_path)),
+                artifact_output: Some(format!("download source: {http_path}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -141,7 +132,7 @@ pub async fn build_source(
         if kind.is_none() {
             let source_file_name = http_path
                 .path_segments()
-                .and_then(|segments| segments.last())
+                .and_then(|mut segments| segments.next_back())
                 .and_then(|name| if name.is_empty() { None } else { Some(name) })
                 .unwrap_or(&source.name);
 
@@ -156,7 +147,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("unpack source: {}", http_path)),
+                artifact_output: Some(format!("unpack source: {http_path}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -258,15 +249,22 @@ pub async fn build_source(
 
     // 4. Hash files
 
-    let source_digest = hash_files(source_sandbox_files.clone())?;
+    let source_digest = get_source_digest(source_sandbox_files.clone())?;
 
-    if let Some(hash) = source.digest.clone() {
-        if hash != source_digest {
+    if let Some(digest) = source.digest.clone() {
+        if !artifact_update && source_digest != digest {
             bail!(
                 "'source.{}.digest' mismatch: {} != {}",
                 source.name,
                 source_digest,
-                hash
+                digest
+            );
+        }
+
+        if source_digest == digest {
+            info!(
+                "agent |> verified source: {} ({})",
+                source.name, source_digest
             );
         }
     }
@@ -288,7 +286,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("pack source: {}", source_digest)),
+                artifact_output: Some(format!("pack source: {source_digest}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -324,7 +322,7 @@ pub async fn build_source(
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("push source: {}", source_digest)),
+                artifact_output: Some(format!("push source: {source_digest}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
@@ -369,7 +367,7 @@ async fn prepare_artifact(
         for secret in step.secrets.iter() {
             let value = notary::encrypt(public_key_path.clone(), secret.value.clone())
                 .await
-                .map_err(|err| Status::internal(format!("failed to encrypt secret: {}", err)))?;
+                .map_err(|err| Status::internal(format!("failed to encrypt secret: {err}")))?;
 
             secrets.push(ArtifactStepSecret {
                 name: secret.name.clone(),
@@ -387,17 +385,81 @@ async fn prepare_artifact(
         });
     }
 
+    // Load lockfile to hydrate source digests before processing
+    let lock_path = Path::new(&request.artifact_context).join("Vorpal.lock");
+    let lock_file = load_lock(&lock_path).await.unwrap_or(None);
+
     let mut artifact_sources = vec![];
 
-    for source in artifact.sources.into_iter() {
+    let target_platform = artifact_system_to_platform(artifact.target);
+
+    for mut source in artifact.sources.into_iter() {
+        if let Some(ref lock) = lock_file {
+            if let Some(lock_source) = lock
+                .sources
+                .iter()
+                .find(|s| s.name == source.name && s.platform == target_platform)
+            {
+                let mut source_changed = false;
+
+                if source.includes != lock_source.includes {
+                    source_changed = true;
+                }
+
+                if source.excludes != lock_source.excludes {
+                    source_changed = true;
+                }
+
+                if source.path != lock_source.path {
+                    source_changed = true;
+                }
+
+                if !request.artifact_update {
+                    // Check if source path changed in lockfile
+
+                    if source_changed {
+                        return Err(Status::failed_precondition(format!(
+                            "source '{}' changed in lockfile: {:?} -> {:?}",
+                            source.name, source.path, lock_source.path
+                        )));
+                    }
+
+                    // Checks if digests match configuration
+
+                    if let Some(source_digest) = source.digest.as_ref() {
+                        if lock_source.digest != *source_digest {
+                            return Err(Status::failed_precondition(format!(
+                                "source '{}' digest changed in lockfile: {:?} -> {:?}",
+                                source.name,
+                                source.digest.as_ref().unwrap(),
+                                lock_source.digest
+                            )));
+                        }
+                    }
+                }
+
+                // Check if digest exists in lockfile
+
+                if !lock_source.digest.is_empty() && !source_changed {
+                    source.digest = Some(lock_source.digest.clone());
+
+                    info!(
+                        "agent |> hydrated source: {} ({}) -> {}",
+                        source.name, target_platform, lock_source.digest
+                    );
+                }
+            }
+        }
+
         let source_digest = build_source(
             request.artifact_context.clone(),
+            request.artifact_update,
             registry.clone(),
             &source,
             &tx.clone(),
         )
         .await
-        .map_err(|err| Status::internal(format!("{}", err)))?;
+        .map_err(|err| Status::internal(format!("{err}")))?;
 
         let source = ArtifactSource {
             digest: Some(source_digest.to_string()),
@@ -409,7 +471,72 @@ async fn prepare_artifact(
 
         artifact_sources.push(source);
 
-        info!("agent |> prepare artifact source: {}", source_digest);
+        // Upsert remote source into Vorpal.lock immediately after preparation
+
+        let is_http = artifact_sources
+            .last()
+            .map(|s| s.path.starts_with("http://") || s.path.starts_with("https://"))
+            .unwrap_or(false);
+
+        if is_http {
+            let mut lock = match load_lock(&lock_path).await.unwrap_or(None) {
+                Some(l) => l,
+                None => Lockfile {
+                    lockfile: 1,
+                    sources: vec![],
+                },
+            };
+
+            let last = artifact_sources.last().unwrap();
+            let mut lockfile_modified = false;
+
+            // Upsert source entry by (name, platform)
+            if let Some(existing) = lock
+                .sources
+                .iter_mut()
+                .find(|s| s.name == last.name && s.platform == target_platform)
+            {
+                let new_digest = last.digest.clone().unwrap_or_default();
+                let new_excludes = &last.excludes;
+                let new_includes = &last.includes;
+                let new_path = &last.path.clone();
+
+                if existing.digest != new_digest
+                    || existing.includes != *new_includes
+                    || existing.excludes != *new_excludes
+                    || existing.path != *new_path
+                {
+                    existing.digest = new_digest;
+                    existing.excludes = new_excludes.clone();
+                    existing.includes = new_includes.clone();
+                    existing.path = new_path.clone();
+
+                    lockfile_modified = true;
+                }
+            } else {
+                lock.sources.push(LockSource {
+                    digest: last.digest.clone().unwrap_or_default(),
+                    excludes: last.excludes.clone(),
+                    includes: last.includes.clone(),
+                    name: last.name.clone(),
+                    path: last.path.clone(),
+                    platform: target_platform.clone(),
+                });
+
+                lockfile_modified = true;
+            }
+
+            if lockfile_modified {
+                lock.sources
+                    .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
+
+                if let Err(e) = save_lock(&lock_path, &lock).await {
+                    warn!("Failed to update lockfile {}: {}", lock_path.display(), e);
+                } else {
+                    info!("Updated lockfile with source: {}", last.name);
+                }
+            }
+        }
     }
 
     // TODO: explore using combined sources digest for the artifact
@@ -426,12 +553,12 @@ async fn prepare_artifact(
     };
 
     let artifact_json =
-        serde_json::to_vec(&artifact).map_err(|err| Status::internal(format!("{}", err)))?;
+        serde_json::to_vec(&artifact).map_err(|err| Status::internal(format!("{err}")))?;
 
     let artifact_digest = digest(artifact_json);
 
     let artifact_response = PrepareArtifactResponse {
-        artifact: Some(artifact),
+        artifact: Some(artifact.clone()),
         artifact_digest: Some(artifact_digest.clone()),
         artifact_output: None,
     };
@@ -441,12 +568,15 @@ async fn prepare_artifact(
         .await
         .map_err(|_| Status::internal("failed to send response"));
 
-    info!("agent |> prepare artifact: {}", artifact_digest);
+    info!(
+        "agent |> prepared artifact: {} ({})",
+        artifact.name, artifact_digest
+    );
 
     Ok(())
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AgentServer {
     pub registry: String,
 }

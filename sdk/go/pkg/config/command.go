@@ -11,8 +11,7 @@ type command struct {
 	Agent           string
 	Artifact        string
 	ArtifactContext string
-	Lockfile        string
-	LockfileUpdate  bool
+	Update          bool
 	Port            int
 	Registry        string
 	System          string
@@ -27,12 +26,11 @@ func NewCommand() (*command, error) {
 	startAgent := startCmd.String("agent", "http://localhost:23151", "agent to use")
 	startArtifact := startCmd.String("artifact", "", "artifact to use")
 	startArtifactContext := startCmd.String("artifact-context", "", "artifact context to use")
-	startLockfile := startCmd.String("lockfile", "Vorpal.lock", "lockfile to use")
-	startLockfileUpdate := startCmd.Bool("lockfile-update", false, "update lockfile")
+	startCmd.Var(newStringSliceValue(&startVariable), "variable", "variables to use (key=value)")
 	startPort := startCmd.Int("port", 0, "port to listen on")
 	startRegistry := startCmd.String("registry", "http://localhost:23151", "registry to use")
 	startSystem := startCmd.String("system", GetSystemDefaultStr(), "system to use")
-	startCmd.Var(newStringSliceValue(&startVariable), "variable", "variables to use (key=value)")
+	startUpdate := startCmd.Bool("update", false, "update lockfile")
 
 	switch os.Args[1] {
 	case "start":
@@ -50,9 +48,6 @@ func NewCommand() (*command, error) {
 			return nil, fmt.Errorf("--artifact-context is required")
 		}
 
-		if *startLockfile == "" {
-			return nil, fmt.Errorf("--lockfile is required")
-		}
 
 		if *startPort == 0 {
 			return nil, fmt.Errorf("--port is required")
@@ -85,11 +80,10 @@ func NewCommand() (*command, error) {
 			Agent:           *startAgent,
 			Artifact:        *startArtifact,
 			ArtifactContext: *startArtifactContext,
-			Lockfile:        *startLockfile,
-			LockfileUpdate:  *startLockfileUpdate,
 			Port:            *startPort,
 			Registry:        *startRegistry,
 			System:          *startSystem,
+			Update:          *startUpdate,
 			Variable:        variable,
 		}, nil
 	default:

@@ -204,7 +204,7 @@ impl<'a> ArtifactProcessBuilder<'a> {
             artifacts = self
                 .artifacts
                 .iter()
-                .map(|v| format!("$VORPAL_ARTIFACT_{}/bin", v))
+                .map(|v| format!("$VORPAL_ARTIFACT_{v}/bin"))
                 .collect::<Vec<String>>()
                 .join(":"),
             entrypoint = self.entrypoint,
@@ -396,5 +396,5 @@ impl<'a> ArtifactBuilder<'a> {
 }
 
 pub fn get_env_key(digest: &String) -> String {
-    format!("$VORPAL_ARTIFACT_{}", digest)
+    format!("$VORPAL_ARTIFACT_{digest}")
 }

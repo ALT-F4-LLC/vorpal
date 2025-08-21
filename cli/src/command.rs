@@ -15,6 +15,7 @@ use vorpal_sdk::artifact::system::get_system_default_str;
 
 mod artifact;
 mod init;
+mod lock;
 mod start;
 mod store;
 mod system;
@@ -196,9 +197,6 @@ pub enum CommandArtifact {
         export: bool,
 
         #[arg(default_value_t = false, long)]
-        lockfile_update: bool,
-
-        #[arg(default_value_t = false, long)]
         path: bool,
 
         #[arg(default_value_t = false, long)]
@@ -206,6 +204,9 @@ pub enum CommandArtifact {
 
         #[arg(default_value_t = get_system_default_str(), long)]
         system: String,
+
+        #[arg(default_value_t = false, long)]
+        update: bool,
 
         #[arg(long)]
         variable: Vec<String>,
@@ -375,7 +376,7 @@ pub async fn run() -> Result<()> {
                 config,
                 context,
                 export,
-                lockfile_update,
+                update,
                 name,
                 path,
                 rebuild,
@@ -481,11 +482,11 @@ pub async fn run() -> Result<()> {
                     aliases: alias.clone(),
                     context: context_absolute_path.clone(),
                     export: *export,
-                    lockfile_update: *lockfile_update,
                     name: name.clone(),
                     path: *path,
                     rebuild: *rebuild,
                     system: system.clone(),
+                    update: *update,
                     variable: variable.clone(),
                 };
 

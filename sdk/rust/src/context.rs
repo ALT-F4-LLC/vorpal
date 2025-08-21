@@ -32,6 +32,7 @@ pub struct ConfigContext {
     registry: String,
     store: ConfigContextStore,
     system: ArtifactSystem,
+    update: bool,
 }
 
 #[derive(Clone)]
@@ -90,6 +91,7 @@ pub async fn get_context() -> Result<ConfigContext> {
             registry,
             system,
             variable,
+            update,
         } => Ok(ConfigContext::new(
             agent,
             artifact,
@@ -97,12 +99,14 @@ pub async fn get_context() -> Result<ConfigContext> {
             port,
             registry,
             system,
+            update,
             variable,
         )?),
     }
 }
 
 impl ConfigContext {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         agent: String,
         artifact: String,
@@ -110,12 +114,14 @@ impl ConfigContext {
         port: u16,
         registry: String,
         system: String,
+        update: bool,
         variable: Vec<String>,
     ) -> Result<Self> {
         Ok(Self {
             agent,
             artifact,
             artifact_context,
+            update,
             port,
             registry,
             store: ConfigContextStore {
@@ -147,8 +153,9 @@ impl ConfigContext {
             bail!("systems cannot be empty");
         }
 
+        // Send raw sources to agent - agent will handle all lockfile operations
         let artifact_json =
-            serde_json::to_vec(artifact).expect("failed to serialize artifact to JSON");
+            serde_json::to_vec(&artifact).expect("failed to serialize artifact to JSON");
 
         let artifact_digest = digest(artifact_json);
 
@@ -165,6 +172,7 @@ impl ConfigContext {
         let request = PrepareArtifactRequest {
             artifact: Some(artifact.clone()),
             artifact_context: self.artifact_context.display().to_string(),
+            artifact_update: self.update,
         };
 
         let response = client
@@ -212,11 +220,9 @@ impl ConfigContext {
         let artifact = response_artifact.unwrap();
         let artifact_digest = response_artifact_digest.unwrap();
 
-        if !self.store.artifact.contains_key(&artifact_digest) {
-            self.store
-                .artifact
-                .insert(artifact_digest.clone(), artifact.clone());
-        }
+        self.store
+            .artifact
+            .insert(artifact_digest.clone(), artifact.clone());
 
         Ok(artifact_digest)
     }
@@ -228,9 +234,46 @@ impl ConfigContext {
         //     return Ok(digest.to_string());
         // }
 
+        fn is_hex_digest(s: &str) -> bool {
+            s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
+        }
+
         let mut client = ArtifactServiceClient::connect(self.registry.clone())
             .await
             .expect("failed to connect to artifact service");
+
+        // Treat 64-hex strings as direct digests; otherwise resolve via alias
+        if is_hex_digest(alias) {
+            let request = ArtifactRequest {
+                digest: alias.to_string(),
+            };
+
+            match client.get_artifact(request.clone()).await {
+                Err(status) => {
+                    if status.code() != NotFound {
+                        bail!("artifact service error: {:?}", status);
+                    }
+
+                    bail!("artifact not found: {}", request.digest);
+                }
+
+                Ok(response) => {
+                    let artifact = response.into_inner();
+
+                    self.store
+                        .artifact
+                        .insert(request.digest.clone(), artifact.clone());
+
+                    for step in artifact.steps.iter() {
+                        for dep in step.artifacts.iter() {
+                            Box::pin(self.fetch_artifact(dep)).await?;
+                        }
+                    }
+
+                    return Ok(request.digest);
+                }
+            }
+        }
 
         let request = GetArtifactAliasRequest {
             alias: alias.to_string(),
@@ -312,7 +355,7 @@ impl ConfigContext {
         let service_addr_str = format!("[::]:{}", self.port);
         let service_addr = service_addr_str.parse().expect("failed to parse address");
 
-        println!("context service: {}", service_addr_str);
+        println!("context service: {service_addr_str}");
 
         Server::builder()
             .add_service(service)

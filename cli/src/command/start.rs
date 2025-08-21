@@ -89,7 +89,7 @@ pub async fn run(
         router = router.add_service(service);
     }
 
-    let address = format!("[::]:{}", port)
+    let address = format!("[::]:{port}")
         .parse()
         .expect("failed to parse address");
 

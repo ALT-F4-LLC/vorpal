@@ -1,5 +1,5 @@
 [toolchain]
 auto_self_update = "disable"
-channel = "1.83.0"
+channel = "1.89.0"
 components = [ "clippy", "rust-analyzer", "rustfmt" ]
 profile = "minimal"

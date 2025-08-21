@@ -5,22 +5,22 @@ edition = "2021"
 license = "Apache-2.0"
 name = "vorpal-sdk"
 repository = "https://github.com/ALT-F4-LLC/vorpal"
-version = "0.3.0-alpha"
+version = "0.4.0-alpha"
 
 [dependencies]
-anyhow = { version = "1" }
-clap = { features = ["derive"], version = "4" }
-indoc = { version = "2" }
-prost = { version = "0" }
-serde = { features = ["serde_derive"], version = "1" }
-serde_json = { version = "1" }
-sha256 = { version = "1" }
-toml = { version = "0" }
-tonic = { version = "0" }
-tracing = { version = "0" }
+anyhow = { version = "1.0.98" }
+clap = { version = "4.5.40", features = ["derive"] }
+indoc = { version = "2.0.6" }
+prost = { version = "0.13.5" }
+serde = { version = "1.0.219", features = ["serde_derive"] }
+serde_json = { version = "1.0.140" }
+sha256 = { version = "1.6.0" }
+toml = { version = "0.8.23" }
+tonic = { version = "0.13.1" }
+tracing = { version = "0.1.41" }
 
 [build-dependencies]
-tonic-build = { version = "0" }
+tonic-build = { version = "0.13.1" }
 
 [package.metadata.cargo-machete]
 ignored = ["prost", "serde", "tonic-build"]

@@ -20,7 +20,7 @@ pub async fn run(digest: &str, registry: &str) -> Result<()> {
     let artifact_data =
         serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
 
-    println!("{}", artifact_data);
+    println!("{artifact_data}");
 
     Ok(())
 }

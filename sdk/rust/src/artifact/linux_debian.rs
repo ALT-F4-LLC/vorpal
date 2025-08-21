@@ -178,7 +178,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         .build(context)
         .await?;
 
-    let image = format!("altf4llc/debin:{}", dockerfile);
+    let image = format!("altf4llc/debin:{dockerfile}");
 
     let steps = vec![
         step::docker(
@@ -186,7 +186,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
                 "buildx",
                 "build",
                 "--progress=plain",
-                format!("--tag={}", image).as_str(),
+                format!("--tag={image}").as_str(),
                 &get_env_key(&dockerfile),
             ],
             vec![dockerfile.clone()],

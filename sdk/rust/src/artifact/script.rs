@@ -6,11 +6,11 @@ use crate::{
 use anyhow::Result;
 use indoc::formatdoc;
 
-pub async fn devenv<'a>(
+pub async fn devenv(
     context: &mut ConfigContext,
     artifacts: Vec<String>,
     environments: Vec<String>,
-    name: &'a str,
+    name: &str,
     secrets: Vec<ArtifactStepSecret>,
     systems: Vec<ArtifactSystem>,
 ) -> Result<String> {
@@ -44,10 +44,10 @@ pub async fn devenv<'a>(
             continue;
         }
 
-        envs_backup.push(format!("export VORPAL_SHELL_BACKUP_{}=\"${}\"", key, key));
-        envs_export.push(format!("export {}", env));
-        envs_restore.push(format!("export {}=\"$VORPAL_SHELL_BACKUP_{}\"", key, key));
-        envs_unset.push(format!("unset VORPAL_SHELL_BACKUP_{}", key));
+        envs_backup.push(format!("export VORPAL_SHELL_BACKUP_{key}=\"${key}\""));
+        envs_export.push(format!("export {env}"));
+        envs_restore.push(format!("export {key}=\"$VORPAL_SHELL_BACKUP_{key}\""));
+        envs_unset.push(format!("unset VORPAL_SHELL_BACKUP_{key}"));
     }
 
     // Setup path
@@ -105,11 +105,11 @@ pub async fn devenv<'a>(
         .await
 }
 
-pub async fn userenv<'a>(
+pub async fn userenv(
     context: &mut ConfigContext,
     artifacts: Vec<String>,
     environments: Vec<String>,
-    name: &'a str,
+    name: &str,
     symlinks: Vec<(String, String)>,
     systems: Vec<ArtifactSystem>,
 ) -> Result<String> {

@@ -73,9 +73,9 @@ pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Ve
 #[allow(clippy::too_many_arguments)]
 pub async fn start(
     artifact_context: PathBuf,
-    artifact_lockfile_update: bool,
     artifact_name: String,
     artifact_system: String,
+    artifact_update: bool,
     artifact_variable: Vec<String>,
     config_file: String,
     service_agent: String,
@@ -105,8 +105,8 @@ pub async fn start(
 
     command.args(command_arguments);
 
-    if artifact_lockfile_update {
-        command.arg("--lockfile-update");
+    if artifact_update {
+        command.arg("--update");
     }
 
     for var in artifact_variable.iter() {
@@ -159,7 +159,7 @@ pub async fn start(
         }
     }
 
-    let config_host = format!("http://localhost:{}", command_port);
+    let config_host = format!("http://localhost:{command_port}");
 
     let mut attempts = 0;
     let max_attempts = 3;

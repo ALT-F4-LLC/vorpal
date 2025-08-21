@@ -31,6 +31,31 @@ use vorpal_sdk::{
     context::ConfigContext,
 };
 
+pub struct RunArgsArtifact {
+    pub aliases: Vec<String>,
+    pub context: PathBuf,
+    pub export: bool,
+    pub name: String,
+    pub path: bool,
+    pub rebuild: bool,
+    pub system: String,
+    pub update: bool,
+    pub variable: Vec<String>,
+}
+
+pub struct RunArgsConfig {
+    pub context: PathBuf,
+    pub language: String,
+    pub name: String,
+    pub source: Option<VorpalTomlConfigSource>,
+}
+
+pub struct RunArgsService {
+    pub agent: String,
+    pub registry: String,
+    pub worker: String,
+}
+
 async fn build(
     artifact: &Artifact,
     artifact_aliases: Vec<String>,
@@ -190,36 +215,13 @@ async fn build_artifacts(
                 .await?;
 
                 build_complete.insert(artifact_digest.to_string(), artifact.clone());
+
+                // Sources are managed by the agent, no artifact entries needed
             }
         }
     }
 
     Ok(())
-}
-
-pub struct RunArgsArtifact {
-    pub aliases: Vec<String>,
-    pub context: PathBuf,
-    pub export: bool,
-    pub lockfile_update: bool,
-    pub name: String,
-    pub path: bool,
-    pub rebuild: bool,
-    pub system: String,
-    pub variable: Vec<String>,
-}
-
-pub struct RunArgsConfig {
-    pub context: PathBuf,
-    pub language: String,
-    pub name: String,
-    pub source: Option<VorpalTomlConfigSource>,
-}
-
-pub struct RunArgsService {
-    pub agent: String,
-    pub registry: String,
-    pub worker: String,
 }
 
 pub async fn run(
@@ -241,6 +243,7 @@ pub async fn run(
         0,
         service_registry.to_string(),
         artifact_system.to_string(),
+        artifact.update,
         artifact.variable.clone(),
     )?;
 
@@ -278,7 +281,7 @@ pub async fn run(
 
         "rust" => {
             let mut bins = vec![config_name];
-            let bin_path = format!("src/{}.rs", config_name);
+            let bin_path = format!("src/{config_name}.rs");
             let mut includes = vec![&bin_path, "Cargo.toml", "Cargo.lock"];
             let mut packages = vec![];
 
@@ -311,6 +314,8 @@ pub async fn run(
         bail!("no config digest found");
     }
 
+    // Prepare lock path early for incremental artifact updates
+
     let mut client_archive = ArchiveServiceClient::connect(service.registry.to_owned())
         .await
         .expect("failed to connect to registry");
@@ -319,10 +324,13 @@ pub async fn run(
         .await
         .expect("failed to connect to artifact");
 
+    // Build config dependencies first to ensure config binary exists
+    let config_store = config_context.get_artifact_store();
+
     build_artifacts(
         None,
         vec![],
-        config_context.get_artifact_store(),
+        config_store,
         &mut client_archive,
         &mut client_worker,
     )
@@ -345,9 +353,9 @@ pub async fn run(
 
     let (mut config_process, mut config_client) = match start(
         artifact.context.to_path_buf(),
-        artifact.lockfile_update,
         artifact.name.to_string(),
         artifact.system.to_string(),
+        artifact.update,
         artifact.variable.clone(),
         config_file.display().to_string(),
         service.agent.to_string(),
@@ -434,11 +442,16 @@ pub async fn run(
     )
     .await?;
 
+    // Agent handles all lockfile operations internally
+    let mode = if artifact.update { "update" } else { "lock" };
+
+    info!("mode: {}", mode);
+
     if artifact.export {
         let export =
             serde_json::to_string_pretty(&selected_artifact).expect("failed to serialize artifact");
 
-        println!("{}", export);
+        println!("{export}");
 
         return Ok(());
     }

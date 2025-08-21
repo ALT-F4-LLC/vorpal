@@ -25,7 +25,7 @@ pub fn target(system: ArtifactSystem) -> Result<String> {
 }
 
 pub fn version() -> String {
-    "1.83.0".to_string()
+    "1.89.0".to_string()
 }
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
