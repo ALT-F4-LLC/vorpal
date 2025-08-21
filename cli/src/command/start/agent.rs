@@ -1,11 +1,14 @@
-use crate::command::store::{
-    archives::{compress_zstd, unpack_zip},
-    hashes::hash_files,
-    notary,
-    paths::{
-        copy_files, get_file_paths, get_key_private_path, get_key_public_path, set_timestamps,
+use crate::command::{
+    lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
+    store::{
+        archives::{compress_zstd, unpack_zip},
+        hashes::get_source_digest,
+        notary,
+        paths::{
+            copy_files, get_file_paths, get_key_private_path, get_key_public_path, set_timestamps,
+        },
+        temps::{create_sandbox_dir, create_sandbox_file},
     },
-    temps::{create_sandbox_dir, create_sandbox_file},
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
@@ -18,7 +21,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
 use tonic::{Code, Request, Response, Status};
-use tracing::info;
+use tracing::{info, warn};
 use url::Url;
 use vorpal_sdk::api::{
     agent::{agent_service_server::AgentService, PrepareArtifactRequest, PrepareArtifactResponse},
@@ -45,17 +48,24 @@ pub async fn build_source(
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
-    let mut client = ArchiveServiceClient::connect(registry.to_owned())
-        .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {err:?}")))?;
-
-    // Determine source type early for caching decisions
     let source_type = match &source.path {
         s if Path::new(s).exists() => ArtifactSourceType::Local,
         s if s.starts_with("git") => ArtifactSourceType::Git,
         s if s.starts_with("http") => ArtifactSourceType::Http,
         _ => ArtifactSourceType::Unknown,
     };
+
+    if source_type == ArtifactSourceType::Unknown {
+        bail!(
+            "'source.{}.path' unknown kind: {:?}",
+            source.name,
+            source.path
+        );
+    }
+
+    let mut client = ArchiveServiceClient::connect(registry.to_owned())
+        .await
+        .map_err(|err| Status::internal(format!("failed to connect to registry: {err:?}")))?;
 
     if let Some(digest) = &source.digest {
         let request = ArchivePullRequest {
@@ -79,14 +89,6 @@ pub async fn build_source(
 
     if source_type == ArtifactSourceType::Git {
         bail!("'source.{}.path' git not supported", source.name);
-    }
-
-    if source_type == ArtifactSourceType::Unknown {
-        bail!(
-            "'source.{}.path' unknown kind: {:?}",
-            source.name,
-            source.path
-        );
     }
 
     let source_sandbox = create_sandbox_dir().await?;
@@ -247,7 +249,7 @@ pub async fn build_source(
 
     // 4. Hash files
 
-    let source_digest = hash_files(source_sandbox_files.clone())?;
+    let source_digest = get_source_digest(source_sandbox_files.clone())?;
 
     if let Some(digest) = source.digest.clone() {
         if !artifact_update && source_digest != digest {
@@ -256,6 +258,13 @@ pub async fn build_source(
                 source.name,
                 source_digest,
                 digest
+            );
+        }
+
+        if source_digest == digest {
+            info!(
+                "agent |> verified source: {} ({})",
+                source.name, source_digest
             );
         }
     }
@@ -346,9 +355,6 @@ async fn prepare_artifact(
 
     let artifact = request.artifact.unwrap();
 
-    // No artifact locking - always proceed with normal processing
-    info!("agent |> processing artifact: {}", artifact.name);
-
     // TODO: Check if artifact already exists in the registry
 
     let public_key_path = get_key_public_path();
@@ -381,18 +387,14 @@ async fn prepare_artifact(
 
     // Load lockfile to hydrate source digests before processing
     let lock_path = Path::new(&request.artifact_context).join("Vorpal.lock");
-    let lockfile = crate::command::lock::load_lock(&lock_path)
-        .await
-        .unwrap_or(None);
+    let lock_file = load_lock(&lock_path).await.unwrap_or(None);
 
     let mut artifact_sources = vec![];
 
-    // Get target platform for this artifact
-    let target_platform = crate::command::lock::artifact_system_to_platform(artifact.target);
+    let target_platform = artifact_system_to_platform(artifact.target);
 
     for mut source in artifact.sources.into_iter() {
-        // Hydrate source digest from lockfile if available
-        if let Some(ref lock) = lockfile {
+        if let Some(ref lock) = lock_file {
             if let Some(lock_source) = lock
                 .sources
                 .iter()
@@ -408,11 +410,6 @@ async fn prepare_artifact(
                     source_changed = true;
                 }
 
-                info!(
-                    "agent |> comparing paths: {:?} vs {:?}",
-                    source.path, lock_source.path
-                );
-
                 if source.path != lock_source.path {
                     source_changed = true;
                 }
@@ -421,11 +418,6 @@ async fn prepare_artifact(
                     // Check if source path changed in lockfile
 
                     if source_changed {
-                        println!(
-                            "SOURCE CHANGED: {:?} -> {:?}",
-                            source.path, lock_source.path
-                        );
-
                         return Err(Status::failed_precondition(format!(
                             "source '{}' changed in lockfile: {:?} -> {:?}",
                             source.name, source.path, lock_source.path
@@ -452,7 +444,7 @@ async fn prepare_artifact(
                     source.digest = Some(lock_source.digest.clone());
 
                     info!(
-                        "agent |> hydrated source digest from lockfile: {} ({}) -> {}",
+                        "agent |> hydrated source: {} ({}) -> {}",
                         source.name, target_platform, lock_source.digest
                     );
                 }
@@ -479,26 +471,17 @@ async fn prepare_artifact(
 
         artifact_sources.push(source);
 
-        info!("agent |> prepare artifact source: {}", source_digest);
-
         // Upsert remote source into Vorpal.lock immediately after preparation
+
         let is_http = artifact_sources
             .last()
             .map(|s| s.path.starts_with("http://") || s.path.starts_with("https://"))
             .unwrap_or(false);
 
         if is_http {
-            // Agent handles lockfile internally using the existing CLI lock module
-            // This keeps lockfile logic centralized in one place
-            let lock_path = Path::new(&request.artifact_context).join("Vorpal.lock");
-
-            // Load existing lockfile or create new one
-            let mut lock = match crate::command::lock::load_lock(&lock_path)
-                .await
-                .unwrap_or(None)
-            {
+            let mut lock = match load_lock(&lock_path).await.unwrap_or(None) {
                 Some(l) => l,
-                None => crate::command::lock::Lockfile {
+                None => Lockfile {
                     lockfile: 1,
                     sources: vec![],
                 },
@@ -507,18 +490,17 @@ async fn prepare_artifact(
             let last = artifact_sources.last().unwrap();
             let mut lockfile_modified = false;
 
-            // Upsert source entry by (name, url, platform) - platform-specific entries
+            // Upsert source entry by (name, platform)
             if let Some(existing) = lock
                 .sources
                 .iter_mut()
                 .find(|s| s.name == last.name && s.platform == target_platform)
             {
                 let new_digest = last.digest.clone().unwrap_or_default();
-                let new_includes = &last.includes;
                 let new_excludes = &last.excludes;
+                let new_includes = &last.includes;
                 let new_path = &last.path.clone();
 
-                // Check if any fields actually changed
                 if existing.digest != new_digest
                     || existing.includes != *new_includes
                     || existing.excludes != *new_excludes
@@ -532,8 +514,7 @@ async fn prepare_artifact(
                     lockfile_modified = true;
                 }
             } else {
-                // Adding new platform-specific source entry
-                lock.sources.push(crate::command::lock::LockSource {
+                lock.sources.push(LockSource {
                     digest: last.digest.clone().unwrap_or_default(),
                     excludes: last.excludes.clone(),
                     includes: last.includes.clone(),
@@ -545,17 +526,14 @@ async fn prepare_artifact(
                 lockfile_modified = true;
             }
 
-            // Only save and log if lockfile was actually modified
             if lockfile_modified {
                 lock.sources
                     .sort_by(|a, b| a.name.cmp(&b.name).then(a.digest.cmp(&b.digest)));
 
-                // Save lockfile - non-fatal if it fails
-                if let Err(e) = crate::command::lock::save_lock_coordinated(&lock_path, &lock).await
-                {
-                    tracing::warn!("Failed to update lockfile {}: {}", lock_path.display(), e);
+                if let Err(e) = save_lock(&lock_path, &lock).await {
+                    warn!("Failed to update lockfile {}: {}", lock_path.display(), e);
                 } else {
-                    tracing::info!("Updated lockfile with source: {}", last.name);
+                    info!("Updated lockfile with source: {}", last.name);
                 }
             }
         }
@@ -580,7 +558,7 @@ async fn prepare_artifact(
     let artifact_digest = digest(artifact_json);
 
     let artifact_response = PrepareArtifactResponse {
-        artifact: Some(artifact),
+        artifact: Some(artifact.clone()),
         artifact_digest: Some(artifact_digest.clone()),
         artifact_output: None,
     };
@@ -590,7 +568,10 @@ async fn prepare_artifact(
         .await
         .map_err(|_| Status::internal("failed to send response"));
 
-    info!("agent |> prepare artifact: {}", artifact_digest);
+    info!(
+        "agent |> prepared artifact: {} ({})",
+        artifact.name, artifact_digest
+    );
 
     Ok(())
 }

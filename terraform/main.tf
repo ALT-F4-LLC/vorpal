@@ -138,7 +138,6 @@ module "instance_registry" {
 
   ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
-  create_spot_instance        = true
   create_security_group       = false
   instance_type               = "t4g.large"
   key_name                    = module.key_pair.key_pair_name
@@ -157,7 +156,6 @@ module "instance_worker_aarch64_linux" {
 
   ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
-  create_spot_instance        = true
   create_security_group       = false
   instance_type               = "t4g.large"
   key_name                    = module.key_pair.key_pair_name
@@ -176,7 +174,6 @@ module "instance_worker_x8664_linux" {
 
   ami                         = data.aws_ami.ubuntu_2404_x86_64.id
   associate_public_ip_address = true
-  create_spot_instance        = true
   create_security_group       = false
   instance_type               = "t3a.large"
   key_name                    = module.key_pair.key_pair_name
