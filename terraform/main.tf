@@ -137,11 +137,15 @@ module "instance_registry" {
 
   ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
-  instance_type               = "t4g.small"
+  instance_type               = "t4g.large"
   key_name                    = module.key_pair.key_pair_name
   name                        = "vorpal-dev-registry"
   subnet_id                   = module.vpc.public_subnets[0]
   vpc_security_group_ids      = [module.sg_ssh.security_group_id]
+
+  root_block_device = {
+    size = 100
+  }
 }
 
 module "instance_worker_aarch64_linux" {
@@ -151,11 +155,15 @@ module "instance_worker_aarch64_linux" {
   ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
   create_spot_instance        = true
-  instance_type               = "t4g.small"
+  instance_type               = "t4g.large"
   key_name                    = module.key_pair.key_pair_name
   name                        = "vorpal-dev-worker-aarch64-linux"
   subnet_id                   = module.vpc.public_subnets[0]
   vpc_security_group_ids      = [module.sg_ssh.security_group_id]
+
+  root_block_device = {
+    size = 100
+  }
 }
 
 module "instance_worker_x8664_linux" {
@@ -165,11 +173,15 @@ module "instance_worker_x8664_linux" {
   ami                         = data.aws_ami.ubuntu_2404_x86_64.id
   associate_public_ip_address = true
   create_spot_instance        = true
-  instance_type               = "t3.small"
+  instance_type               = "t3a.large"
   key_name                    = module.key_pair.key_pair_name
   name                        = "vorpal-dev-worker-x8664-linux"
   subnet_id                   = module.vpc.public_subnets[0]
   vpc_security_group_ids      = [module.sg_ssh.security_group_id]
+
+  root_block_device = {
+    size = 100
+  }
 }
 
 resource "aws_ec2_host" "worker_aarch64_darwin" {
@@ -196,6 +208,9 @@ module "instance_worker_aarch64_darwin" {
   tenancy                     = "host"
   vpc_security_group_ids      = [module.sg_ssh.security_group_id]
 
+  root_block_device = {
+    size = 100
+  }
 }
 
 resource "aws_ec2_host" "worker_x8664_darwin" {
@@ -221,4 +236,8 @@ module "instance_worker_x8664_darwin" {
   subnet_id                   = module.vpc.public_subnets[0]
   tenancy                     = "host"
   vpc_security_group_ids      = [module.sg_ssh.security_group_id]
+
+  root_block_device = {
+    size = 100
+  }
 }
