@@ -109,6 +109,7 @@ module "sg_ssh" {
   egress_rules        = ["all-all"]
   ingress_cidr_blocks = [var.ssh_ingress_cidr]
   ingress_rules       = ["all-all"]
+  ingress_with_self   = [{ rule = "all-all" }]
   name                = "vorpal-dev-ssh"
   vpc_id              = module.vpc.vpc_id
 }
