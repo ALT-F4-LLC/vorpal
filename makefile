@@ -104,11 +104,9 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	# Default: ensure mode (reproduce from lockfile; no changes)
 	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" artifact make --agent "http://localhost:23152" --worker "http://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT) $(VORPAL_CONTEXT)
 
 vorpal-update:
-	# Update mode: refresh inputs and write Vorpal.lock
 	cargo $(CARGO_FLAGS) run --bin "vorpal" -- --registry "http://localhost:23152" artifact make --agent "http://localhost:23152" --worker "http://localhost:23152" --update $(VORPAL_FLAGS) $(VORPAL_ARTIFACT) $(VORPAL_CONTEXT)
 
 vorpal-start:
