@@ -78,7 +78,7 @@ async fn vorpal_process(context: &mut ConfigContext) -> Result<String> {
     ArtifactProcessBuilder::new("vorpal-process", entrypoint.as_str(), SYSTEMS.to_vec())
         .with_arguments(vec![
             "--registry",
-            "http://localhost:50051",
+            "https://localhost:50051",
             "start",
             "--port",
             "50051",

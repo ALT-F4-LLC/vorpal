@@ -1,11 +1,5 @@
-use crate::command::store::{notary::get_public_key, paths::get_key_public_path};
 use anyhow::{bail, Result};
 use aws_sdk_s3::Client;
-use rsa::{
-    pss::{Signature, VerifyingKey},
-    sha2::Sha256,
-    signature::Verifier,
-};
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
@@ -164,7 +158,6 @@ impl ArchiveService for ArchiveServer {
     ) -> Result<Response<ArchiveResponse>, Status> {
         let mut request_data: Vec<u8> = vec![];
         let mut request_digest = None;
-        let mut request_signature = vec![];
         let mut request_stream = request.into_inner();
 
         while let Some(request) = request_stream.next().await {
@@ -173,7 +166,6 @@ impl ArchiveService for ArchiveServer {
             request_data.extend_from_slice(&request.data);
 
             request_digest = Some(request.digest);
-            request_signature = request.signature;
         }
 
         if request_data.is_empty() {
@@ -184,31 +176,9 @@ impl ArchiveService for ArchiveServer {
             return Err(Status::invalid_argument("missing `digest` field"));
         };
 
-        if request_signature.is_empty() {
-            return Err(Status::invalid_argument("missing `signature` field"));
-        }
-
-        let public_key_path = get_key_public_path();
-
-        let public_key = get_public_key(public_key_path)
-            .await
-            .map_err(|err| Status::internal(format!("failed to get public key: {err}")))?;
-
-        let data_signature = Signature::try_from(request_signature.as_slice())
-            .map_err(|err| Status::internal(format!("failed to parse signature: {err}")))?;
-
-        let verifying_key = VerifyingKey::<Sha256>::new(public_key);
-
-        if let Err(msg) = verifying_key.verify(&request_data, &data_signature) {
-            return Err(Status::invalid_argument(format!(
-                "invalid data signature: {msg:?}"
-            )));
-        }
-
         let request = ArchivePushRequest {
             digest: request_digest,
             data: request_data,
-            signature: request_signature,
         };
 
         self.backend.push(&request).await?;

@@ -26,14 +26,30 @@ pub fn get_root_store_dir_path() -> PathBuf {
 
 // Key paths
 
-pub fn get_key_private_path() -> PathBuf {
+pub fn get_key_ca_path() -> PathBuf {
+    get_root_key_dir_path().join("ca").with_extension("pem")
+}
+
+pub fn get_key_ca_key_path() -> PathBuf {
+    get_root_key_dir_path().join("ca").with_extension("key.pem")
+}
+
+pub fn get_key_service_path() -> PathBuf {
     get_root_key_dir_path()
-        .join("private")
+        .join("service")
         .with_extension("pem")
 }
 
-pub fn get_key_public_path() -> PathBuf {
-    get_root_key_dir_path().join("public").with_extension("pem")
+pub fn get_key_service_key_path() -> PathBuf {
+    get_root_key_dir_path()
+        .join("service")
+        .with_extension("key.pem")
+}
+
+pub fn get_key_service_public_path() -> PathBuf {
+    get_root_key_dir_path()
+        .join("service")
+        .with_extension("public.pem")
 }
 
 // Artifact paths

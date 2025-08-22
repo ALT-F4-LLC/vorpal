@@ -3,11 +3,12 @@ use crate::command::store::{
     notary,
     paths::{
         get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
-        get_file_paths, get_key_private_path, set_timestamps,
+        get_file_paths, get_key_ca_path, get_key_service_key_path, set_timestamps,
     },
     temps::{create_sandbox_dir, create_sandbox_file},
 };
 use anyhow::Result;
+use http::uri::{InvalidUri, Uri};
 use sha256::digest;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio};
 use tokio::{
@@ -20,7 +21,11 @@ use tokio_stream::{
     wrappers::{LinesStream, ReceiverStream},
     StreamExt,
 };
-use tonic::{Code::NotFound, Request, Response, Status};
+use tonic::{
+    transport::{Certificate, Channel, ClientTlsConfig},
+    Code::NotFound,
+    Request, Response, Status,
+};
 use tracing::{error, info};
 use vorpal_sdk::{
     api::{
@@ -52,7 +57,7 @@ impl WorkerServer {
 }
 
 async fn pull_source(
-    registry: &str,
+    client_archive: &mut ArchiveServiceClient<Channel>,
     source: &ArtifactSource,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
     source_dir_path: &Path,
@@ -72,10 +77,6 @@ async fn pull_source(
     let source_digest = source.digest.as_ref().unwrap();
     let source_archive = get_artifact_archive_path(source_digest);
 
-    let mut client = ArchiveServiceClient::connect(registry.to_string())
-        .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
-
     if !source_archive.exists() {
         send_message(format!("pull source: {source_digest}"), tx).await?;
 
@@ -83,7 +84,7 @@ async fn pull_source(
             digest: source_digest.to_string(),
         };
 
-        match client.pull(request).await {
+        match client_archive.pull(request).await {
             Err(status) => {
                 if status.code() != NotFound {
                     return Err(Status::internal(format!(
@@ -160,6 +161,7 @@ async fn pull_source(
 
     Ok(())
 }
+
 fn expand_env(text: &str, envs: &[&String]) -> String {
     envs.iter().fold(text.to_string(), |acc, e| {
         let e = e.split('=').collect::<Vec<&str>>();
@@ -216,7 +218,7 @@ async fn run_step(
 
     // Add all secrets as environment variables
 
-    let private_key_path = get_key_private_path();
+    let private_key_path = get_key_service_key_path();
 
     if !private_key_path.exists() {
         return Err(Status::internal("private key not found"));
@@ -448,10 +450,44 @@ async fn build_artifact(
         )));
     }
 
+    let client_ca_pem_path = get_key_ca_path();
+
+    if !client_ca_pem_path.exists() {
+        error!(
+            "worker |> ca certificate not found: {:?}",
+            client_ca_pem_path
+        );
+        return Err(Status::internal("ca certificate not found"));
+    }
+
+    let client_ca_pem = read(client_ca_pem_path).await?;
+    let client_ca = Certificate::from_pem(client_ca_pem);
+
+    let client_tls = ClientTlsConfig::new()
+        .ca_certificate(client_ca)
+        .domain_name("localhost");
+
+    let client_uri = registry
+        .parse::<Uri>()
+        .map_err(|e: InvalidUri| Status::invalid_argument(format!("invalid registry uri: {e}")))?;
+
+    let client_archive_channel = Channel::builder(client_uri.clone())
+        .tls_config(client_tls.clone())
+        .map_err(|err| {
+            Status::internal(format!("failed to create archive client tls config: {err}"))
+        })?
+        .connect()
+        .await
+        .map_err(|err| {
+            Status::internal(format!("failed to create archive client channel: {err}"))
+        })?;
+
+    let mut client_archive = ArchiveServiceClient::new(client_archive_channel);
+
     // Pull sources
 
     for source in artifact.sources.iter() {
-        pull_source(&registry, source, &tx, &workspace_source_path).await?;
+        pull_source(&mut client_archive, source, &tx, &workspace_source_path).await?;
 
         let source_digest = source
             .digest
@@ -531,31 +567,19 @@ async fn build_artifact(
             .await
             .map_err(|err| Status::internal(format!("failed to read artifact archive: {err}")))?;
 
-        let private_key_path = get_key_private_path();
-
-        if !private_key_path.exists() {
-            return Err(Status::internal("private key not found"));
-        }
-
-        let artifact_signature = notary::sign(private_key_path, &artifact_data)
-            .await
-            .map_err(|err| Status::internal(format!("failed to sign artifact: {err}")))?;
-
         let mut request_stream = vec![];
 
         for chunk in artifact_data.chunks(DEFAULT_CHUNKS_SIZE) {
             request_stream.push(ArchivePushRequest {
                 data: chunk.to_vec(),
                 digest: artifact_digest.clone(),
-                signature: artifact_signature.clone().to_vec(),
             });
         }
 
-        let mut client = ArchiveServiceClient::connect(registry.clone())
+        if let Err(err) = client_archive
+            .push(tokio_stream::iter(request_stream))
             .await
-            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
-
-        if let Err(err) = client.push(tokio_stream::iter(request_stream)).await {
+        {
             error!("worker |> failed to push artifact: {:?}", err);
             return Err(Status::internal(format!(
                 "failed to push artifact: {err:?}"
@@ -564,18 +588,32 @@ async fn build_artifact(
 
         // Store artifact in registry
 
-        let mut client = ArtifactServiceClient::connect(registry)
+        let client_artifact_channel = Channel::builder(client_uri)
+            .tls_config(client_tls.clone())
+            .map_err(|err| {
+                Status::internal(format!(
+                    "failed to create artifact client tls config: {err}"
+                ))
+            })?
+            .connect()
             .await
-            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
+            .map_err(|err| {
+                Status::internal(format!("failed to create artifact client channel: {err}"))
+            })?;
+
+        let mut client_artifact = ArtifactServiceClient::new(client_artifact_channel);
 
         let request = StoreArtifactRequest {
             artifact: Some(artifact),
             artifact_aliases: request.artifact_aliases,
         };
 
-        client.store_artifact(request).await.map_err(|err| {
-            Status::internal(format!("failed to store artifact in registry: {err}"))
-        })?;
+        client_artifact
+            .store_artifact(request)
+            .await
+            .map_err(|err| {
+                Status::internal(format!("failed to store artifact in registry: {err}"))
+            })?;
 
         // Remove artifact archive
 

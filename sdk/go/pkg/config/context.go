@@ -128,7 +128,7 @@ func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error
 
 	// TODO: make this run in parallel
 
-	agentHost := strings.ReplaceAll(c.agent, "http://", "")
+	agentHost := strings.ReplaceAll(c.agent, "https://", "")
 
 	clientConn, err := grpc.NewClient(agentHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -207,7 +207,7 @@ func fetchArtifacts(client artifact.ArtifactServiceClient, digest string, store 
 
 func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
 	// Simplified artifact fetching - agent handles all lockfile operations
-	registry := strings.ReplaceAll(c.registry, "http://", "")
+	registry := strings.ReplaceAll(c.registry, "https://", "")
 
 	clientConn, err := grpc.NewClient(registry, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {

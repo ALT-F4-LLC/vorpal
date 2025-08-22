@@ -16,8 +16,7 @@ message ArchivePullRequest {
 
 message ArchivePushRequest {
     bytes data = 1;
-    bytes signature = 2;
-    string digest = 3;
+    string digest = 2;
 }
 
 message ArchiveResponse {}

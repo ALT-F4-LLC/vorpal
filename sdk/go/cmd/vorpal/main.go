@@ -76,7 +76,7 @@ func vorpalProcess(context *config.ConfigContext) (*string, error) {
 	return artifact.NewArtifactProcessBuilder("vorpal-process", entrypoint, SYSTEMS).
 		WithArguments([]string{
 			"--registry",
-			"http://localhost:50051",
+			"https://localhost:50051",
 			"start",
 			"--port",
 			"50051",

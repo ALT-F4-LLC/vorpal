@@ -12,9 +12,15 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use clap::Parser;
+use http::uri::{InvalidUri, Uri};
 use sha256::digest;
 use std::{collections::HashMap, path::PathBuf};
-use tonic::{transport::Server, Code::NotFound, Request, Response, Status};
+use tokio::fs::read;
+use tonic::{
+    transport::{Certificate, Channel, ClientTlsConfig, Server},
+    Code::NotFound,
+    Request, Response, Status,
+};
 use tracing::info;
 
 #[derive(Clone)]
@@ -25,11 +31,11 @@ pub struct ConfigContextStore {
 
 #[derive(Clone)]
 pub struct ConfigContext {
-    agent: String,
     artifact: String,
     artifact_context: PathBuf,
+    client_agent: AgentServiceClient<Channel>,
+    client_artifact: ArtifactServiceClient<Channel>,
     port: u16,
-    registry: String,
     store: ConfigContextStore,
     system: ArtifactSystem,
     update: bool,
@@ -92,38 +98,70 @@ pub async fn get_context() -> Result<ConfigContext> {
             system,
             variable,
             update,
-        } => Ok(ConfigContext::new(
-            agent,
-            artifact,
-            PathBuf::from(artifact_context),
-            port,
-            registry,
-            system,
-            update,
-            variable,
-        )?),
+        } => {
+            let service_ca_pem = read("/var/lib/vorpal/key/ca.pem")
+                .await
+                .expect("failed to read CA certificate");
+
+            let service_ca = Certificate::from_pem(service_ca_pem);
+
+            let service_tls = ClientTlsConfig::new()
+                .ca_certificate(service_ca)
+                .domain_name("localhost");
+
+            let client_agent_uri = agent
+                .parse::<Uri>()
+                .map_err(|e: InvalidUri| anyhow::anyhow!("invalid agent address: {}", e))?;
+
+            let client_agent_channel = Channel::builder(client_agent_uri)
+                .tls_config(service_tls.clone())?
+                .connect()
+                .await?;
+
+            let client_registry_uri = registry
+                .parse::<Uri>()
+                .map_err(|e: InvalidUri| anyhow::anyhow!("invalid artifact address: {}", e))?;
+
+            let client_registry_channel = Channel::builder(client_registry_uri)
+                .tls_config(service_tls)?
+                .connect()
+                .await?;
+
+            let client_agent = AgentServiceClient::new(client_agent_channel);
+            let client_artifact = ArtifactServiceClient::new(client_registry_channel);
+
+            Ok(ConfigContext::new(
+                artifact,
+                PathBuf::from(artifact_context),
+                client_agent,
+                client_artifact,
+                port,
+                system,
+                update,
+                variable,
+            )?)
+        }
     }
 }
 
 impl ConfigContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        agent: String,
         artifact: String,
         artifact_context: PathBuf,
+        client_agent: AgentServiceClient<Channel>,
+        client_artifact: ArtifactServiceClient<Channel>,
         port: u16,
-        registry: String,
         system: String,
         update: bool,
         variable: Vec<String>,
     ) -> Result<Self> {
         Ok(Self {
-            agent,
             artifact,
             artifact_context,
-            update,
+            client_agent,
+            client_artifact,
             port,
-            registry,
             store: ConfigContextStore {
                 artifact: HashMap::new(),
                 variable: variable
@@ -137,6 +175,7 @@ impl ConfigContext {
                     .collect(),
             },
             system: get_system(&system)?,
+            update,
         })
     }
 
@@ -165,17 +204,14 @@ impl ConfigContext {
 
         // TODO: make this run in parallel
 
-        let mut client = AgentServiceClient::connect(self.agent.clone())
-            .await
-            .expect("failed to connect to agent service");
-
         let request = PrepareArtifactRequest {
             artifact: Some(artifact.clone()),
             artifact_context: self.artifact_context.display().to_string(),
             artifact_update: self.update,
         };
 
-        let response = client
+        let response = self
+            .client_agent
             .prepare_artifact(request)
             .await
             .expect("failed to prepare artifact");
@@ -238,17 +274,13 @@ impl ConfigContext {
             s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
         }
 
-        let mut client = ArtifactServiceClient::connect(self.registry.clone())
-            .await
-            .expect("failed to connect to artifact service");
-
         // Treat 64-hex strings as direct digests; otherwise resolve via alias
         if is_hex_digest(alias) {
             let request = ArtifactRequest {
                 digest: alias.to_string(),
             };
 
-            match client.get_artifact(request.clone()).await {
+            match self.client_artifact.get_artifact(request.clone()).await {
                 Err(status) => {
                     if status.code() != NotFound {
                         bail!("artifact service error: {:?}", status);
@@ -280,7 +312,11 @@ impl ConfigContext {
             alias_system: self.system.into(),
         };
 
-        match client.get_artifact_alias(request.clone()).await {
+        match self
+            .client_artifact
+            .get_artifact_alias(request.clone())
+            .await
+        {
             Err(status) => {
                 if status.code() != NotFound {
                     bail!("artifact service error: {:?}", status);
@@ -296,7 +332,7 @@ impl ConfigContext {
                     digest: response.digest,
                 };
 
-                match client.get_artifact(request.clone()).await {
+                match self.client_artifact.get_artifact(request.clone()).await {
                     Err(status) => {
                         if status.code() != NotFound {
                             bail!("artifact service error: {:?}", status);

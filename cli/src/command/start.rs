@@ -6,10 +6,11 @@ use crate::command::{
         },
         worker::WorkerServer,
     },
-    store::paths::get_key_public_path,
+    store::paths::{get_key_service_key_path, get_key_service_path},
 };
 use anyhow::{bail, Result};
-use tonic::transport::Server;
+use tokio::fs::read_to_string;
+use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tracing::info;
 use vorpal_sdk::api::{
     agent::agent_service_server::AgentServiceServer,
@@ -29,17 +30,37 @@ pub async fn run(
     registry_backend_s3_bucket: Option<String>,
     services: Vec<String>,
 ) -> Result<()> {
-    let public_key_path = get_key_public_path();
+    let cert_path = get_key_service_path();
 
-    if !public_key_path.exists() {
+    if !cert_path.exists() {
         return Err(anyhow::anyhow!(
             "public key not found - run 'vorpal system keys generate' or copy from agent"
         ));
     }
 
+    let private_key_path = get_key_service_key_path();
+
+    if !private_key_path.exists() {
+        return Err(anyhow::anyhow!(
+            "private key not found - run 'vorpal system keys generate' or copy from agent"
+        ));
+    }
+
+    let cert = read_to_string(cert_path)
+        .await
+        .expect("failed to read public key");
+
+    let key = read_to_string(private_key_path)
+        .await
+        .expect("failed to read private key");
+
+    let identity = Identity::from_pem(cert, key);
+
     let (_, health_service) = tonic_health::server::health_reporter();
 
-    let mut router = Server::builder().add_service(health_service);
+    let mut router = Server::builder()
+        .tls_config(ServerTlsConfig::new().identity(identity))?
+        .add_service(health_service);
 
     if services.contains(&"agent".to_string()) {
         let service = AgentServiceServer::new(AgentServer::new(registry.clone()));
