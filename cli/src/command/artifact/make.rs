@@ -47,7 +47,7 @@ pub struct RunArgsArtifact {
     pub path: bool,
     pub rebuild: bool,
     pub system: String,
-    pub update: bool,
+    pub unlock: bool,
     pub variable: Vec<String>,
 }
 
@@ -279,7 +279,7 @@ pub async fn run(
         client_artifact,
         0,
         artifact.system.to_string(),
-        artifact.update,
+        artifact.unlock,
         artifact.variable.clone(),
     )?;
 
@@ -407,7 +407,7 @@ pub async fn run(
         artifact.context.to_path_buf(),
         artifact.name.to_string(),
         artifact.system.to_string(),
-        artifact.update,
+        artifact.unlock,
         artifact.variable.clone(),
         config_file.display().to_string(),
         service.agent.to_string(),
@@ -495,7 +495,11 @@ pub async fn run(
     .await?;
 
     // Agent handles all lockfile operations internally
-    let mode = if artifact.update { "update" } else { "lock" };
+    let mode = if artifact.unlock {
+        "unlocked"
+    } else {
+        "locked"
+    };
 
     info!("mode: {}", mode);
 

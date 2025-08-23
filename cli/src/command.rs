@@ -207,7 +207,7 @@ pub enum CommandArtifact {
         system: String,
 
         #[arg(default_value_t = false, long)]
-        update: bool,
+        unlock: bool,
 
         #[arg(long)]
         variable: Vec<String>,
@@ -384,11 +384,11 @@ pub async fn run() -> Result<()> {
                 config,
                 context,
                 export,
-                update,
                 name,
                 path,
                 rebuild,
                 system,
+                unlock,
                 variable,
                 worker,
             } => {
@@ -494,7 +494,7 @@ pub async fn run() -> Result<()> {
                     path: *path,
                     rebuild: *rebuild,
                     system: system.clone(),
-                    update: *update,
+                    unlock: *unlock,
                     variable: variable.clone(),
                 };
 

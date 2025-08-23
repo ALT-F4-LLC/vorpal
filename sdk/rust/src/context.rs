@@ -38,7 +38,7 @@ pub struct ConfigContext {
     port: u16,
     store: ConfigContextStore,
     system: ArtifactSystem,
-    update: bool,
+    unlock: bool,
 }
 
 #[derive(Clone)]
@@ -97,7 +97,7 @@ pub async fn get_context() -> Result<ConfigContext> {
             registry,
             system,
             variable,
-            update,
+            unlock,
         } => {
             let service_ca_pem = read("/var/lib/vorpal/key/ca.pem")
                 .await
@@ -137,7 +137,7 @@ pub async fn get_context() -> Result<ConfigContext> {
                 client_artifact,
                 port,
                 system,
-                update,
+                unlock,
                 variable,
             )?)
         }
@@ -153,7 +153,7 @@ impl ConfigContext {
         client_artifact: ArtifactServiceClient<Channel>,
         port: u16,
         system: String,
-        update: bool,
+        unlock: bool,
         variable: Vec<String>,
     ) -> Result<Self> {
         Ok(Self {
@@ -175,7 +175,7 @@ impl ConfigContext {
                     .collect(),
             },
             system: get_system(&system)?,
-            update,
+            unlock,
         })
     }
 
@@ -207,7 +207,7 @@ impl ConfigContext {
         let request = PrepareArtifactRequest {
             artifact: Some(artifact.clone()),
             artifact_context: self.artifact_context.display().to_string(),
-            artifact_update: self.update,
+            artifact_unlock: self.unlock,
         };
 
         let response = self

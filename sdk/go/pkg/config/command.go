@@ -11,10 +11,10 @@ type command struct {
 	Agent           string
 	Artifact        string
 	ArtifactContext string
-	Update          bool
 	Port            int
 	Registry        string
 	System          string
+	Unlock          bool
 	Variable        map[string]string
 }
 
@@ -30,7 +30,7 @@ func NewCommand() (*command, error) {
 	startPort := startCmd.Int("port", 0, "port to listen on")
 	startRegistry := startCmd.String("registry", "https://localhost:23151", "registry to use")
 	startSystem := startCmd.String("system", GetSystemDefaultStr(), "system to use")
-	startUpdate := startCmd.Bool("update", false, "update lockfile")
+	startUnlock := startCmd.Bool("unlock", false, "unlock lockfile")
 
 	switch os.Args[1] {
 	case "start":
@@ -47,7 +47,6 @@ func NewCommand() (*command, error) {
 		if *startArtifactContext == "" {
 			return nil, fmt.Errorf("--artifact-context is required")
 		}
-
 
 		if *startPort == 0 {
 			return nil, fmt.Errorf("--port is required")
@@ -83,7 +82,7 @@ func NewCommand() (*command, error) {
 			Port:            *startPort,
 			Registry:        *startRegistry,
 			System:          *startSystem,
-			Update:          *startUpdate,
+			Unlock:          *startUnlock,
 			Variable:        variable,
 		}, nil
 	default:

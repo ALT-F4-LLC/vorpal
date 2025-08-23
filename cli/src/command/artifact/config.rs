@@ -75,7 +75,7 @@ pub async fn start(
     artifact_context: PathBuf,
     artifact_name: String,
     artifact_system: String,
-    artifact_update: bool,
+    artifact_unlock: bool,
     artifact_variable: Vec<String>,
     config_file: String,
     service_agent: String,
@@ -105,8 +105,8 @@ pub async fn start(
 
     command.args(command_arguments);
 
-    if artifact_update {
-        command.arg("--update");
+    if artifact_unlock {
+        command.arg("--unlock");
     }
 
     for var in artifact_variable.iter() {

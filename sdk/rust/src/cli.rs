@@ -31,7 +31,7 @@ pub enum Command {
         system: String,
 
         #[clap(long, default_value_t = false)]
-        update: bool,
+        unlock: bool,
 
         #[clap(long)]
         variable: Vec<String>,

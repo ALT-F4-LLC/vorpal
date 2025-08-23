@@ -48,7 +48,7 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 pub async fn build_source(
     artifact_context: String,
-    artifact_update: bool,
+    artifact_unlock: bool,
     mut client_archive: ArchiveServiceClient<Channel>,
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
@@ -253,7 +253,7 @@ pub async fn build_source(
     let source_digest = get_source_digest(source_sandbox_files.clone())?;
 
     if let Some(digest) = source.digest.clone() {
-        if !artifact_update && source_digest != digest {
+        if !artifact_unlock && source_digest != digest {
             bail!(
                 "'source.{}.digest' mismatch: {} != {}",
                 source.name,
@@ -398,47 +398,26 @@ async fn prepare_artifact(
                 .iter()
                 .find(|s| s.name == source.name && s.platform == target_platform)
             {
-                let mut source_changed = false;
+                let changed_digest =
+                    source.digest.is_some() && source.digest.clone().unwrap() != lock_source.digest;
 
-                if source.includes != lock_source.includes {
-                    source_changed = true;
+                let changed_includes = source.includes != lock_source.includes;
+
+                let changed_excludes = source.excludes != lock_source.excludes;
+
+                let changed_path = source.path != lock_source.path;
+
+                let changed_source =
+                    changed_digest || changed_includes || changed_excludes || changed_path;
+
+                if changed_source && !request.artifact_unlock {
+                    return Err(Status::failed_precondition(format!(
+                        "source '{}' changed - use '--unlock' to update",
+                        source.name
+                    )));
                 }
 
-                if source.excludes != lock_source.excludes {
-                    source_changed = true;
-                }
-
-                if source.path != lock_source.path {
-                    source_changed = true;
-                }
-
-                if !request.artifact_update {
-                    // Check if source path changed in lockfile
-
-                    if source_changed {
-                        return Err(Status::failed_precondition(format!(
-                            "source '{}' changed in lockfile: {:?} -> {:?}",
-                            source.name, source.path, lock_source.path
-                        )));
-                    }
-
-                    // Checks if digests match configuration
-
-                    if let Some(source_digest) = source.digest.as_ref() {
-                        if lock_source.digest != *source_digest {
-                            return Err(Status::failed_precondition(format!(
-                                "source '{}' digest changed in lockfile: {:?} -> {:?}",
-                                source.name,
-                                source.digest.as_ref().unwrap(),
-                                lock_source.digest
-                            )));
-                        }
-                    }
-                }
-
-                // Check if digest exists in lockfile
-
-                if !lock_source.digest.is_empty() && !source_changed {
+                if !changed_source && !lock_source.digest.is_empty() {
                     source.digest = Some(lock_source.digest.clone());
 
                     info!(
@@ -483,7 +462,7 @@ async fn prepare_artifact(
 
         let source_digest = build_source(
             request.artifact_context.clone(),
-            request.artifact_update,
+            request.artifact_unlock,
             client_archive,
             &source,
             &tx.clone(),
@@ -526,26 +505,26 @@ async fn prepare_artifact(
                 .iter_mut()
                 .find(|s| s.name == last.name && s.platform == target_platform)
             {
-                let new_digest = last.digest.clone().unwrap_or_default();
-                let new_excludes = &last.excludes;
-                let new_includes = &last.includes;
-                let new_path = &last.path.clone();
+                let next_digest = source_digest.clone();
+                let next_excludes = &last.excludes;
+                let next_includes = &last.includes;
+                let next_path = &last.path.clone();
 
-                if existing.digest != new_digest
-                    || existing.includes != *new_includes
-                    || existing.excludes != *new_excludes
-                    || existing.path != *new_path
+                if existing.digest != next_digest
+                    || existing.includes != *next_includes
+                    || existing.excludes != *next_excludes
+                    || existing.path != *next_path
                 {
-                    existing.digest = new_digest;
-                    existing.excludes = new_excludes.clone();
-                    existing.includes = new_includes.clone();
-                    existing.path = new_path.clone();
+                    existing.digest = next_digest;
+                    existing.excludes = next_excludes.clone();
+                    existing.includes = next_includes.clone();
+                    existing.path = next_path.clone();
 
                     lockfile_modified = true;
                 }
             } else {
                 lock.sources.push(LockSource {
-                    digest: last.digest.clone().unwrap_or_default(),
+                    digest: source_digest.clone(),
                     excludes: last.excludes.clone(),
                     includes: last.includes.clone(),
                     name: last.name.clone(),
