@@ -11,7 +11,7 @@ version = "0.4.0-alpha"
 anyhow = { version = "1.0.98" }
 clap = { version = "4.5.40", features = ["derive"] }
 indoc = { version = "2.0.6" }
-prost = { version = "0.13.5" }
+prost = { version = "0.14.0" }
 serde = { version = "1.0.219", features = ["serde_derive"] }
 serde_json = { version = "1.0.140" }
 sha256 = { version = "1.6.0" }
