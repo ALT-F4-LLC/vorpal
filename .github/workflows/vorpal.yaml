@@ -19,7 +19,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/cache/restore@v4
         with:
@@ -50,7 +50,7 @@ jobs:
       - vendor
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/cache/restore@v4
         with:
@@ -79,7 +79,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/cache/restore@v4
         with:
@@ -118,7 +118,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - if: contains(matrix.runner, 'ubuntu')
         run: |
@@ -233,7 +233,7 @@ jobs:
       packages: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - run: git fetch --tags
 
