@@ -1,5 +1,6 @@
 use crate::command::{
     lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
+    start::auth,
     store::{
         archives::{compress_zstd, unpack_zip},
         hashes::get_source_digest,
@@ -23,6 +24,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
 use tonic::{
+    metadata::MetadataValue,
     transport::{Certificate, Channel, ClientTlsConfig},
     Code, Request, Response, Status,
 };
@@ -49,10 +51,51 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 pub async fn build_source(
     artifact_context: String,
     artifact_unlock: bool,
-    mut client_archive: ArchiveServiceClient<Channel>,
+    registry: String,
+    service_secret: String,
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
+    // Create authenticated archive client first
+    let ca_pem_path = get_key_ca_path();
+
+    if !ca_pem_path.exists() {
+        bail!("CA certificate not found: {}", ca_pem_path.display());
+    }
+
+    let service_ca_pem = read(ca_pem_path)
+        .await
+        .expect("failed to read CA certificate");
+
+    let service_ca = Certificate::from_pem(service_ca_pem);
+
+    let service_tls = ClientTlsConfig::new()
+        .ca_certificate(service_ca)
+        .domain_name("localhost");
+
+    let service_uri = registry
+        .parse::<Uri>()
+        .map_err(|e: InvalidUri| anyhow::anyhow!("failed to parse registry URI: {}", e))?;
+
+    let channel = Channel::builder(service_uri)
+        .tls_config(service_tls)
+        .map_err(|e| anyhow::anyhow!("failed to create tls config: {}", e))?
+        .connect()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to connect to registry: {}", e))?;
+
+    let auth_header: MetadataValue<_> = service_secret
+        .parse()
+        .map_err(|e| anyhow::anyhow!("failed to parse service secret: {}", e))?;
+
+    // Create client with authorization interceptor
+    let mut client_archive =
+        ArchiveServiceClient::with_interceptor(channel, move |mut req: Request<()>| {
+            req.metadata_mut()
+                .insert("authorization", auth_header.clone());
+            Ok(req)
+        });
+
     let source_type = match &source.path {
         s if Path::new(s).exists() => ArtifactSourceType::Local,
         s if s.starts_with("git") => ArtifactSourceType::Git,
@@ -343,6 +386,7 @@ pub async fn build_source(
 async fn prepare_artifact(
     registry: String,
     request: Request<PrepareArtifactRequest>,
+    service_secret: String,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     let request = request.into_inner();
@@ -428,42 +472,11 @@ async fn prepare_artifact(
             }
         }
 
-        let ca_pem_path = get_key_ca_path();
-
-        if !ca_pem_path.exists() {
-            return Err(Status::internal(format!(
-                "CA certificate not found: {}",
-                ca_pem_path.display()
-            )));
-        }
-
-        let service_ca_pem = read(ca_pem_path)
-            .await
-            .expect("failed to read CA certificate");
-
-        let service_ca = Certificate::from_pem(service_ca_pem);
-
-        let service_tls = ClientTlsConfig::new()
-            .ca_certificate(service_ca)
-            .domain_name("localhost");
-
-        let service_uri = registry.parse::<Uri>().map_err(|e: InvalidUri| {
-            Status::internal(format!("failed to parse registry URI: {}", e))
-        })?;
-
-        let channel = Channel::builder(service_uri)
-            .tls_config(service_tls)
-            .map_err(|e| Status::internal(format!("failed to create tls config: {}", e)))?
-            .connect()
-            .await
-            .map_err(|e| Status::internal(format!("failed to connect to registry: {}", e)))?;
-
-        let client_archive = ArchiveServiceClient::new(channel);
-
         let source_digest = build_source(
             request.artifact_context.clone(),
             request.artifact_unlock,
-            client_archive,
+            registry.clone(),
+            service_secret.clone(),
             &source,
             &tx.clone(),
         )
@@ -609,7 +622,21 @@ impl AgentService for AgentServer {
         let registry = self.registry.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(registry, request, &tx).await {
+            // Load service secret for authentication
+            let service_secret = match auth::load_service_secret().await {
+                Ok(secret) => secret,
+                Err(e) => {
+                    let _ = tx
+                        .send(Err(Status::internal(format!(
+                            "failed to load service secret: {}",
+                            e
+                        ))))
+                        .await;
+                    return;
+                }
+            };
+
+            if let Err(err) = prepare_artifact(registry, request, service_secret, &tx).await {
                 let _ = tx.send(Err(err)).await;
             }
         });

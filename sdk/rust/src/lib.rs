@@ -21,5 +21,6 @@ pub mod api {
 }
 
 pub mod artifact;
+pub mod auth;
 pub mod cli;
 pub mod context;

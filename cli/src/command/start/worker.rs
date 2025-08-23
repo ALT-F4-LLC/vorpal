@@ -1,14 +1,17 @@
-use crate::command::store::{
-    archives::{compress_zstd, unpack_zstd},
-    notary,
-    paths::{
-        get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
-        get_file_paths, get_key_ca_path, get_key_service_key_path, set_timestamps,
+use crate::command::{
+    start::auth,
+    store::{
+        archives::{compress_zstd, unpack_zstd},
+        notary,
+        paths::{
+            get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
+            get_file_paths, get_key_ca_path, get_key_service_key_path, set_timestamps,
+        },
+        temps::{create_sandbox_dir, create_sandbox_file},
     },
-    temps::{create_sandbox_dir, create_sandbox_file},
 };
 use anyhow::Result;
-use http::uri::{InvalidUri, Uri};
+use http::uri::Uri;
 use sha256::digest;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio};
 use tokio::{
@@ -22,6 +25,7 @@ use tokio_stream::{
     StreamExt,
 };
 use tonic::{
+    metadata::MetadataValue,
     transport::{Certificate, Channel, ClientTlsConfig},
     Code::NotFound,
     Request, Response, Status,
@@ -57,10 +61,11 @@ impl WorkerServer {
 }
 
 async fn pull_source(
-    client_archive: &mut ArchiveServiceClient<Channel>,
+    registry: String,
+    service_secret: String,
     source: &ArtifactSource,
-    tx: &Sender<Result<BuildArtifactResponse, Status>>,
     source_dir_path: &Path,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     if source.digest.is_none() {
         return Err(Status::invalid_argument(
@@ -73,6 +78,55 @@ async fn pull_source(
             "artifact source 'name' is missing",
         ));
     }
+
+    // Create authenticated archive client
+    let ca_pem_path = get_key_ca_path();
+
+    if !ca_pem_path.exists() {
+        return Err(Status::internal(format!(
+            "CA certificate not found: {}",
+            ca_pem_path.display()
+        )));
+    }
+
+    let service_ca_pem = read(ca_pem_path)
+        .await
+        .map_err(|e| Status::internal(format!("failed to read CA certificate: {}", e)))?;
+
+    let service_ca = Certificate::from_pem(service_ca_pem);
+
+    let service_tls = ClientTlsConfig::new()
+        .ca_certificate(service_ca)
+        .domain_name("localhost");
+
+    let client_uri = registry
+        .parse::<Uri>()
+        .map_err(|e| Status::invalid_argument(format!("invalid registry uri: {e}")))?;
+
+    let client_archive_channel = Channel::builder(client_uri)
+        .tls_config(service_tls)
+        .map_err(|err| {
+            Status::internal(format!("failed to create archive client tls config: {err}"))
+        })?
+        .connect()
+        .await
+        .map_err(|err| {
+            Status::internal(format!("failed to create archive client channel: {err}"))
+        })?;
+
+    let auth_header: MetadataValue<_> = service_secret
+        .parse()
+        .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
+
+    // Create client with authorization interceptor
+    let mut client_archive = ArchiveServiceClient::with_interceptor(
+        client_archive_channel,
+        move |mut req: Request<()>| {
+            req.metadata_mut()
+                .insert("authorization", auth_header.clone());
+            Ok(req)
+        },
+    );
 
     let source_digest = source.digest.as_ref().unwrap();
     let source_archive = get_artifact_archive_path(source_digest);
@@ -370,6 +424,7 @@ async fn send_message(
 async fn build_artifact(
     request: BuildArtifactRequest,
     registry: String,
+    service_secret: String,
     tx: Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     let artifact = request
@@ -450,44 +505,17 @@ async fn build_artifact(
         )));
     }
 
-    let client_ca_pem_path = get_key_ca_path();
-
-    if !client_ca_pem_path.exists() {
-        error!(
-            "worker |> ca certificate not found: {:?}",
-            client_ca_pem_path
-        );
-        return Err(Status::internal("ca certificate not found"));
-    }
-
-    let client_ca_pem = read(client_ca_pem_path).await?;
-    let client_ca = Certificate::from_pem(client_ca_pem);
-
-    let client_tls = ClientTlsConfig::new()
-        .ca_certificate(client_ca)
-        .domain_name("localhost");
-
-    let client_uri = registry
-        .parse::<Uri>()
-        .map_err(|e: InvalidUri| Status::invalid_argument(format!("invalid registry uri: {e}")))?;
-
-    let client_archive_channel = Channel::builder(client_uri.clone())
-        .tls_config(client_tls.clone())
-        .map_err(|err| {
-            Status::internal(format!("failed to create archive client tls config: {err}"))
-        })?
-        .connect()
-        .await
-        .map_err(|err| {
-            Status::internal(format!("failed to create archive client channel: {err}"))
-        })?;
-
-    let mut client_archive = ArchiveServiceClient::new(client_archive_channel);
-
     // Pull sources
 
     for source in artifact.sources.iter() {
-        pull_source(&mut client_archive, source, &tx, &workspace_source_path).await?;
+        pull_source(
+            registry.clone(),
+            service_secret.clone(),
+            source,
+            &workspace_source_path,
+            &tx,
+        )
+        .await?;
 
         let source_digest = source
             .digest
@@ -561,6 +589,56 @@ async fn build_artifact(
 
         // Upload archive
 
+        // Create authenticated archive client for pushing
+        let ca_pem_path = get_key_ca_path();
+
+        if !ca_pem_path.exists() {
+            return Err(Status::internal(format!(
+                "CA certificate not found: {}",
+                ca_pem_path.display()
+            )));
+        }
+
+        let service_ca_pem = read(ca_pem_path)
+            .await
+            .map_err(|e| Status::internal(format!("failed to read CA certificate: {}", e)))?;
+
+        let service_ca = Certificate::from_pem(service_ca_pem);
+
+        let service_tls = ClientTlsConfig::new()
+            .ca_certificate(service_ca)
+            .domain_name("localhost");
+
+        let client_uri = registry
+            .parse::<Uri>()
+            .map_err(|e| Status::invalid_argument(format!("invalid registry uri: {e}")))?;
+
+        let client_archive_channel = Channel::builder(client_uri.clone())
+            .tls_config(service_tls.clone())
+            .map_err(|err| {
+                Status::internal(format!("failed to create archive client tls config: {err}"))
+            })?
+            .connect()
+            .await
+            .map_err(|err| {
+                Status::internal(format!("failed to create archive client channel: {err}"))
+            })?;
+
+        let auth_header_push: MetadataValue<_> = service_secret
+            .clone()
+            .parse()
+            .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
+
+        // Create client with authorization interceptor for pushing
+        let mut client_archive = ArchiveServiceClient::with_interceptor(
+            client_archive_channel,
+            move |mut req: Request<()>| {
+                req.metadata_mut()
+                    .insert("authorization", auth_header_push.clone());
+                Ok(req)
+            },
+        );
+
         send_message(format!("push: {artifact_digest}"), &tx).await?;
 
         let artifact_data = read(&artifact_archive)
@@ -588,8 +666,32 @@ async fn build_artifact(
 
         // Store artifact in registry
 
+        // Create authenticated artifact client
+        let ca_pem_path = get_key_ca_path();
+
+        if !ca_pem_path.exists() {
+            return Err(Status::internal(format!(
+                "CA certificate not found: {}",
+                ca_pem_path.display()
+            )));
+        }
+
+        let service_ca_pem = read(ca_pem_path)
+            .await
+            .map_err(|e| Status::internal(format!("failed to read CA certificate: {}", e)))?;
+
+        let service_ca = Certificate::from_pem(service_ca_pem);
+
+        let service_tls = ClientTlsConfig::new()
+            .ca_certificate(service_ca)
+            .domain_name("localhost");
+
+        let client_uri = registry
+            .parse::<Uri>()
+            .map_err(|e| Status::invalid_argument(format!("invalid registry uri: {e}")))?;
+
         let client_artifact_channel = Channel::builder(client_uri)
-            .tls_config(client_tls.clone())
+            .tls_config(service_tls)
             .map_err(|err| {
                 Status::internal(format!(
                     "failed to create artifact client tls config: {err}"
@@ -601,7 +703,19 @@ async fn build_artifact(
                 Status::internal(format!("failed to create artifact client channel: {err}"))
             })?;
 
-        let mut client_artifact = ArtifactServiceClient::new(client_artifact_channel);
+        let auth_header: MetadataValue<_> = service_secret
+            .parse()
+            .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
+
+        // Create client with authorization interceptor
+        let mut client_artifact = ArtifactServiceClient::with_interceptor(
+            client_artifact_channel,
+            move |mut req: Request<()>| {
+                req.metadata_mut()
+                    .insert("authorization", auth_header.clone());
+                Ok(req)
+            },
+        );
 
         let request = StoreArtifactRequest {
             artifact: Some(artifact),
@@ -665,7 +779,21 @@ impl WorkerService for WorkerServer {
         let registry = self.registry.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = build_artifact(request.into_inner(), registry, tx.clone()).await {
+            // Load service secret for authentication
+            let service_secret = match auth::load_service_secret().await {
+                Ok(secret) => secret,
+                Err(e) => {
+                    let err = Status::internal(format!("failed to load service secret: {}", e));
+                    if let Err(err) = send_build_response(&tx, Err(err)).await {
+                        error!("Failed to send response: {:?}", err);
+                    }
+                    return;
+                }
+            };
+
+            if let Err(err) =
+                build_artifact(request.into_inner(), registry, service_secret, tx.clone()).await
+            {
                 if let Err(err) = send_build_response(&tx, Err(err)).await {
                     error!("Failed to send response: {:?}", err);
                 }

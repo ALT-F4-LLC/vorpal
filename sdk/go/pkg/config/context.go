@@ -91,6 +91,12 @@ func GetContext() *ConfigContext {
 		log.Fatalf("failed to get system: %v", err)
 	}
 
+	// Load service secret for authentication
+	serviceSecret, err := LoadServiceSecret()
+	if err != nil {
+		log.Fatalf("Failed to load service secret: %v", err)
+	}
+
 	caCert, err := os.ReadFile("/var/lib/vorpal/key/ca.pem")
 	if err != nil {
 		log.Fatalf("Failed to read CA certificate: %v", err)
@@ -108,14 +114,24 @@ func GetContext() *ConfigContext {
 
 	agentHost := strings.ReplaceAll(cmd.Agent, "https://", "")
 
-	clientConnAgent, err := grpc.NewClient(agentHost, grpc.WithTransportCredentials(credentials))
+	clientConnAgent, err := grpc.NewClient(
+		agentHost,
+		grpc.WithTransportCredentials(credentials),
+		grpc.WithUnaryInterceptor(AuthInterceptor(serviceSecret)),
+		grpc.WithStreamInterceptor(StreamAuthInterceptor(serviceSecret)),
+	)
 	if err != nil {
 		log.Fatalf("failed to connect to agent: %v", err)
 	}
 
 	registryHost := strings.ReplaceAll(cmd.Registry, "https://", "")
 
-	clientConnArtifact, err := grpc.NewClient(registryHost, grpc.WithTransportCredentials(credentials))
+	clientConnArtifact, err := grpc.NewClient(
+		registryHost,
+		grpc.WithTransportCredentials(credentials),
+		grpc.WithUnaryInterceptor(AuthInterceptor(serviceSecret)),
+		grpc.WithStreamInterceptor(StreamAuthInterceptor(serviceSecret)),
+	)
 	if err != nil {
 		log.Fatalf("failed to connect to agent: %v", err)
 	}

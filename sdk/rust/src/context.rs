@@ -8,6 +8,7 @@ use crate::{
         context::context_service_server::{ContextService, ContextServiceServer},
     },
     artifact::system::get_system,
+    auth,
     cli::{Cli, Command},
 };
 use anyhow::{bail, Result};
@@ -36,6 +37,7 @@ pub struct ConfigContext {
     client_agent: AgentServiceClient<Channel>,
     client_artifact: ArtifactServiceClient<Channel>,
     port: u16,
+    service_secret: String,
     store: ConfigContextStore,
     system: ArtifactSystem,
     unlock: bool,
@@ -130,12 +132,16 @@ pub async fn get_context() -> Result<ConfigContext> {
             let client_agent = AgentServiceClient::new(client_agent_channel);
             let client_artifact = ArtifactServiceClient::new(client_registry_channel);
 
+            // Load service secret for authentication
+            let service_secret = auth::load_service_secret().await?;
+
             Ok(ConfigContext::new(
                 artifact,
                 PathBuf::from(artifact_context),
                 client_agent,
                 client_artifact,
                 port,
+                service_secret,
                 system,
                 unlock,
                 variable,
@@ -152,6 +158,7 @@ impl ConfigContext {
         client_agent: AgentServiceClient<Channel>,
         client_artifact: ArtifactServiceClient<Channel>,
         port: u16,
+        service_secret: String,
         system: String,
         unlock: bool,
         variable: Vec<String>,
@@ -162,6 +169,7 @@ impl ConfigContext {
             client_agent,
             client_artifact,
             port,
+            service_secret,
             store: ConfigContextStore {
                 artifact: HashMap::new(),
                 variable: variable
@@ -209,6 +217,15 @@ impl ConfigContext {
             artifact_context: self.artifact_context.display().to_string(),
             artifact_unlock: self.unlock,
         };
+
+        let mut request = Request::new(request);
+
+        request.metadata_mut().insert(
+            "authorization",
+            self.service_secret
+                .parse()
+                .expect("failed to set authorization header"),
+        );
 
         let response = self
             .client_agent
@@ -280,7 +297,16 @@ impl ConfigContext {
                 digest: alias.to_string(),
             };
 
-            match self.client_artifact.get_artifact(request.clone()).await {
+            let mut grpc_request = Request::new(request.clone());
+
+            grpc_request.metadata_mut().insert(
+                "authorization",
+                self.service_secret
+                    .parse()
+                    .expect("failed to set authorization header"),
+            );
+
+            match self.client_artifact.get_artifact(grpc_request).await {
                 Err(status) => {
                     if status.code() != NotFound {
                         bail!("artifact service error: {:?}", status);
@@ -312,11 +338,16 @@ impl ConfigContext {
             alias_system: self.system.into(),
         };
 
-        match self
-            .client_artifact
-            .get_artifact_alias(request.clone())
-            .await
-        {
+        let mut grpc_request = Request::new(request.clone());
+
+        grpc_request.metadata_mut().insert(
+            "authorization",
+            self.service_secret
+                .parse()
+                .expect("failed to set authorization header"),
+        );
+
+        match self.client_artifact.get_artifact_alias(grpc_request).await {
             Err(status) => {
                 if status.code() != NotFound {
                     bail!("artifact service error: {:?}", status);
@@ -332,7 +363,16 @@ impl ConfigContext {
                     digest: response.digest,
                 };
 
-                match self.client_artifact.get_artifact(request.clone()).await {
+                let mut grpc_request = Request::new(request.clone());
+
+                grpc_request.metadata_mut().insert(
+                    "authorization",
+                    self.service_secret
+                        .parse()
+                        .expect("failed to set authorization header"),
+                );
+
+                match self.client_artifact.get_artifact(grpc_request).await {
                     Err(status) => {
                         if status.code() != NotFound {
                             bail!("artifact service error: {:?}", status);
