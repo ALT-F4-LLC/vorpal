@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { version = "1.0.98" }
 async-compression = { version = "0.4.25", features = ["all"] }
-async_zip = { version = "0.0.17", features = ["deflate", "tokio"] }
+async_zip = { version = "0.0.18", features = ["deflate", "tokio"] }
 aws-config = { version = "1.8.1" }
 aws-sdk-s3 = { version = "1.96.0" }
 base64 = { version = "0.22.1" }
