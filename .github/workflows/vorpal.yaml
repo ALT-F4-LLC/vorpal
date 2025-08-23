@@ -143,7 +143,7 @@ jobs:
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
 
@@ -237,7 +237,7 @@ jobs:
 
       - run: git fetch --tags
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           fail-on-cache-miss: true
           pattern: vorpal-dist-*
