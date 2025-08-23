@@ -1,6 +1,6 @@
 use crate::command::store::paths::{
     get_key_ca_key_path, get_key_ca_path, get_key_service_key_path, get_key_service_path,
-    get_key_service_public_path, get_root_key_dir_path,
+    get_key_service_public_path, get_key_service_secret_path, get_root_key_dir_path,
 };
 use anyhow::Result;
 use rcgen::{
@@ -9,6 +9,7 @@ use rcgen::{
 };
 use tokio::fs::{create_dir_all, read_to_string, write};
 use tracing::info;
+use uuid::Uuid;
 
 pub async fn generate() -> Result<()> {
     let key_dir_path = get_root_key_dir_path();
@@ -128,6 +129,18 @@ pub async fn generate() -> Result<()> {
         write(service_path.clone(), cert_pem)
             .await
             .expect("failed to write service certificate to file");
+    }
+
+    let service_secret_path = get_key_service_secret_path();
+
+    if !service_secret_path.exists() {
+        let secret = Uuid::now_v7().to_string();
+
+        info!("Generating new service secret");
+
+        write(service_secret_path.clone(), secret)
+            .await
+            .expect("failed to write service secret to file");
     }
 
     Ok(())

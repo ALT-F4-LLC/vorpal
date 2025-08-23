@@ -52,6 +52,12 @@ pub fn get_key_service_public_path() -> PathBuf {
         .with_extension("public.pem")
 }
 
+pub fn get_key_service_secret_path() -> PathBuf {
+    get_root_key_dir_path()
+        .join("service")
+        .with_extension("secret")
+}
+
 // Artifact paths
 
 pub fn get_artifact_dir_path() -> PathBuf {
