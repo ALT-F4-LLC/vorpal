@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use path_clean::PathClean;
+use rustls::crypto::ring;
 use serde::Deserialize;
 use std::{
     env::{current_dir, var},
@@ -21,7 +22,7 @@ mod store;
 mod system;
 
 fn get_default_address() -> String {
-    "http://localhost:23151".to_string()
+    "https://localhost:23151".to_string()
 }
 
 async fn load_vorpal_toml(path: PathBuf) -> Option<VorpalToml> {
@@ -206,7 +207,7 @@ pub enum CommandArtifact {
         system: String,
 
         #[arg(default_value_t = false, long)]
-        update: bool,
+        unlock: bool,
 
         #[arg(long)]
         variable: Vec<String>,
@@ -259,6 +260,9 @@ pub enum CommandSystem {
 
         #[arg(long)]
         outputs: bool,
+
+        #[arg(long)]
+        sandboxes: bool,
     },
 }
 
@@ -322,6 +326,10 @@ struct VorpalToml {
 }
 
 pub async fn run() -> Result<()> {
+    ring::default_provider()
+        .install_default()
+        .expect("failed to install ring as default crypto provider");
+
     let cli = Cli::parse();
 
     let Cli {
@@ -376,11 +384,11 @@ pub async fn run() -> Result<()> {
                 config,
                 context,
                 export,
-                update,
                 name,
                 path,
                 rebuild,
                 system,
+                unlock,
                 variable,
                 worker,
             } => {
@@ -486,7 +494,7 @@ pub async fn run() -> Result<()> {
                     path: *path,
                     rebuild: *rebuild,
                     system: system.clone(),
-                    update: *update,
+                    unlock: *unlock,
                     variable: variable.clone(),
                 };
 
@@ -559,7 +567,10 @@ pub async fn run() -> Result<()> {
                 archives,
                 configs,
                 outputs,
-            } => system::prune::run(*aliases, *all, *archives, *configs, *outputs).await,
+                sandboxes,
+            } => {
+                system::prune::run(*aliases, *all, *archives, *configs, *outputs, *sandboxes).await
+            }
         },
     }
 }
@@ -587,7 +598,7 @@ mod tests {
                     }),
                 }),
             }),
-            registry: Some("http://home-registry:8080".to_string()),
+            registry: Some("https://home-registry:8080".to_string()),
         }
     }
 
@@ -607,7 +618,7 @@ mod tests {
                     }),
                 }),
             }),
-            registry: Some("http://project-registry:8080".to_string()),
+            registry: Some("https://project-registry:8080".to_string()),
         }
     }
 
@@ -645,7 +656,7 @@ mod tests {
     async fn test_load_vorpal_toml_valid_file() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("Vorpal.toml");
-        let toml_content = r#"registry = "http://test-registry:8080"
+        let toml_content = r#"registry = "https://test-registry:8080"
 
 [config]
 language = "rust"
@@ -669,7 +680,7 @@ packages = ["pkg1", "pkg2"]
 
         assert_eq!(
             config.registry,
-            Some("http://test-registry:8080".to_string())
+            Some("https://test-registry:8080".to_string())
         );
 
         assert!(config.config.is_some());
@@ -739,7 +750,7 @@ packages = ["pkg1", "pkg2"]
         // Project registry should override home registry
         assert_eq!(
             merged.registry,
-            Some("http://project-registry:8080".to_string())
+            Some("https://project-registry:8080".to_string())
         );
 
         let config = merged.config.unwrap();
@@ -776,7 +787,7 @@ packages = ["pkg1", "pkg2"]
                 name: None,
                 source: None,
             }),
-            registry: Some("http://home-registry:8080".to_string()),
+            registry: Some("https://home-registry:8080".to_string()),
         };
 
         let project_config = VorpalToml {
@@ -800,7 +811,7 @@ packages = ["pkg1", "pkg2"]
 
         assert_eq!(
             merged.registry,
-            Some("http://home-registry:8080".to_string())
+            Some("https://home-registry:8080".to_string())
         );
 
         let config = merged.config.unwrap();

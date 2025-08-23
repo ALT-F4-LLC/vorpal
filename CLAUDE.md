@@ -24,9 +24,8 @@ Vorpal is a build and distribution platform that uses declarative configurations
 ### Vorpal-Specific Commands
 - `make vorpal-start`: Start local services on `localhost:23152` (required for registry/worker interactions)
 - `make vorpal`: Build the repository using Vorpal itself (requires services running)
-- `make vorpal-update`: Update mode to refresh inputs and write `Vorpal.lock`
-- `make vorpal-offline`: Offline build using only local cache
-- `make vorpal-verify`: Verify lockfile against registry
+- `make vorpal-config-start`: Start config service for artifact configurations on port 50051
+- `make dist`: Package binary in `./dist` directory as tarball
 
 ### Protocol Buffer Generation
 - `make generate`: Regenerate Go API stubs from protobufs in `sdk/rust/api`
@@ -39,6 +38,7 @@ Vorpal is a build and distribution platform that uses declarative configurations
 - **`sdk/go/`**: Go SDK with generated protobuf bindings
 - **`config/`**: Config-driven artifacts and tasks; binary `vorpal-config`
 - **`script/`**: Development and CI helper scripts
+- **`terraform/`**: Infrastructure as code for deployment
 
 ### Key Components
 - **Artifacts**: Core abstraction for describing software builds with sources, steps, and target systems
@@ -59,6 +59,7 @@ Per development session: `make vorpal-start`
 - Tests use Rust `#[test]` and `#[tokio::test]` attributes
 - Tests are colocated with code where practical
 - Run tests with `make test`
+- Run specific tests with `cargo test test_name`
 - Name tests with `test_*` prefix and clear intent
 
 ## Code Style
@@ -72,5 +73,12 @@ Per development session: `make vorpal-start`
 
 1. Always run `make format lint test` before committing
 2. For Vorpal-in-Vorpal builds, ensure services are running with `make vorpal-start`
-3. Use `./script/dev.sh` for isolated development environment
-4. Follow commit message conventions: `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`
+3. Use `./script/dev.sh` for isolated development environment when needed
+4. Use `direnv allow` for automatic environment setup with direnv
+5. Follow commit message conventions: `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`
+
+## Additional Tools
+
+- **Lima**: Use `make lima` to create isolated VM environment for testing
+- **Vendor**: Use `make vendor` to create vendored dependencies for offline builds
+- **Cleanup**: Use `make clean` to remove all build artifacts and generated files

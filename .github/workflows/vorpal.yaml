@@ -14,8 +14,8 @@ jobs:
     strategy:
       matrix:
         runner:
-          - macos-13
           - macos-latest
+          - macos-latest-large
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:
@@ -74,8 +74,8 @@ jobs:
     strategy:
       matrix:
         runner:
-          - macos-13
           - macos-latest
+          - macos-latest-large
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:
@@ -113,8 +113,8 @@ jobs:
     strategy:
       matrix:
         runner:
-          - macos-13
           - macos-latest
+          - macos-latest-large
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:

@@ -1,6 +1,6 @@
 use crate::command::store::paths::{
     get_artifact_alias_dir_path, get_artifact_archive_dir_path, get_artifact_config_dir_path,
-    get_artifact_output_dir_path,
+    get_artifact_output_dir_path, get_root_sandbox_dir_path,
 };
 use anyhow::Result;
 use tokio::fs::{create_dir_all, remove_dir_all};
@@ -12,6 +12,7 @@ pub async fn run(
     archives: bool,
     configs: bool,
     outputs: bool,
+    sandboxes: bool,
 ) -> Result<()> {
     if aliases || all {
         info!("Pruning artifact aliases...");
@@ -67,6 +68,20 @@ pub async fn run(
         create_dir_all(&artifact_output_dir_path)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create artifact outputs directory: {}", e))?;
+    }
+
+    if sandboxes || all {
+        info!("Pruning sandboxes...");
+
+        let sandbox_dir_path = get_root_sandbox_dir_path();
+
+        remove_dir_all(&sandbox_dir_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to remove sandboxes: {}", e))?;
+
+        create_dir_all(&sandbox_dir_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create sandboxes directory: {}", e))?;
     }
 
     Ok(())

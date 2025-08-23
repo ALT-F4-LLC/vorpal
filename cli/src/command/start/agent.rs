@@ -5,13 +5,15 @@ use crate::command::{
         hashes::get_source_digest,
         notary,
         paths::{
-            copy_files, get_file_paths, get_key_private_path, get_key_public_path, set_timestamps,
+            copy_files, get_file_paths, get_key_ca_path, get_key_service_key_path,
+            get_key_service_public_path, set_timestamps,
         },
         temps::{create_sandbox_dir, create_sandbox_file},
     },
 };
 use anyhow::{bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
+use http::uri::{InvalidUri, Uri};
 use sha256::digest;
 use std::path::Path;
 use tokio::{
@@ -20,7 +22,10 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
-use tonic::{Code, Request, Response, Status};
+use tonic::{
+    transport::{Certificate, Channel, ClientTlsConfig},
+    Code, Request, Response, Status,
+};
 use tracing::{info, warn};
 use url::Url;
 use vorpal_sdk::api::{
@@ -43,8 +48,8 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 pub async fn build_source(
     artifact_context: String,
-    artifact_update: bool,
-    registry: String,
+    artifact_unlock: bool,
+    mut client_archive: ArchiveServiceClient<Channel>,
     source: &ArtifactSource,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
@@ -63,16 +68,12 @@ pub async fn build_source(
         );
     }
 
-    let mut client = ArchiveServiceClient::connect(registry.to_owned())
-        .await
-        .map_err(|err| Status::internal(format!("failed to connect to registry: {err:?}")))?;
-
     if let Some(digest) = &source.digest {
         let request = ArchivePullRequest {
             digest: digest.to_string(),
         };
 
-        match client.check(request).await {
+        match client_archive.check(request).await {
             Err(status) => {
                 if status.code() != Code::NotFound {
                     bail!("registry pull error: {:?}", status);
@@ -252,7 +253,7 @@ pub async fn build_source(
     let source_digest = get_source_digest(source_sandbox_files.clone())?;
 
     if let Some(digest) = source.digest.clone() {
-        if !artifact_update && source_digest != digest {
+        if !artifact_unlock && source_digest != digest {
             bail!(
                 "'source.{}.digest' mismatch: {} != {}",
                 source.name,
@@ -275,7 +276,7 @@ pub async fn build_source(
         digest: source_digest.clone(),
     };
 
-    if let Err(status) = client.check(registry_request).await {
+    if let Err(status) = client_archive.check(registry_request).await {
         if status.code() != Code::NotFound {
             bail!("registry pull error: {:?}", status);
         }
@@ -298,7 +299,7 @@ pub async fn build_source(
         )
         .await?;
 
-        let private_key_path = get_key_private_path();
+        let private_key_path = get_key_service_key_path();
 
         if !private_key_path.exists() {
             bail!("Private key not found: {}", private_key_path.display());
@@ -306,15 +307,12 @@ pub async fn build_source(
 
         let source_archive_data = read(&source_sandbox_archive).await?;
 
-        let source_signature = notary::sign(private_key_path.clone(), &source_archive_data).await?;
-
         let mut source_stream = vec![];
 
         for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
             source_stream.push(ArchivePushRequest {
                 data: chunk.to_vec(),
                 digest: source_digest.clone(),
-                signature: source_signature.clone().to_vec(),
             });
         }
 
@@ -327,7 +325,7 @@ pub async fn build_source(
             .await
             .map_err(|_| Status::internal("failed to send response"));
 
-        client
+        client_archive
             .push(tokio_stream::iter(source_stream))
             .await
             .expect("failed to push");
@@ -357,7 +355,7 @@ async fn prepare_artifact(
 
     // TODO: Check if artifact already exists in the registry
 
-    let public_key_path = get_key_public_path();
+    let public_key_path = get_key_service_public_path();
 
     let mut artifact_steps = vec![];
 
@@ -400,47 +398,26 @@ async fn prepare_artifact(
                 .iter()
                 .find(|s| s.name == source.name && s.platform == target_platform)
             {
-                let mut source_changed = false;
+                let changed_digest =
+                    source.digest.is_some() && source.digest.clone().unwrap() != lock_source.digest;
 
-                if source.includes != lock_source.includes {
-                    source_changed = true;
+                let changed_includes = source.includes != lock_source.includes;
+
+                let changed_excludes = source.excludes != lock_source.excludes;
+
+                let changed_path = source.path != lock_source.path;
+
+                let changed_source =
+                    changed_digest || changed_includes || changed_excludes || changed_path;
+
+                if changed_source && !request.artifact_unlock {
+                    return Err(Status::failed_precondition(format!(
+                        "source '{}' changed - use '--unlock' to update",
+                        source.name
+                    )));
                 }
 
-                if source.excludes != lock_source.excludes {
-                    source_changed = true;
-                }
-
-                if source.path != lock_source.path {
-                    source_changed = true;
-                }
-
-                if !request.artifact_update {
-                    // Check if source path changed in lockfile
-
-                    if source_changed {
-                        return Err(Status::failed_precondition(format!(
-                            "source '{}' changed in lockfile: {:?} -> {:?}",
-                            source.name, source.path, lock_source.path
-                        )));
-                    }
-
-                    // Checks if digests match configuration
-
-                    if let Some(source_digest) = source.digest.as_ref() {
-                        if lock_source.digest != *source_digest {
-                            return Err(Status::failed_precondition(format!(
-                                "source '{}' digest changed in lockfile: {:?} -> {:?}",
-                                source.name,
-                                source.digest.as_ref().unwrap(),
-                                lock_source.digest
-                            )));
-                        }
-                    }
-                }
-
-                // Check if digest exists in lockfile
-
-                if !lock_source.digest.is_empty() && !source_changed {
+                if !changed_source && !lock_source.digest.is_empty() {
                     source.digest = Some(lock_source.digest.clone());
 
                     info!(
@@ -451,10 +428,42 @@ async fn prepare_artifact(
             }
         }
 
+        let ca_pem_path = get_key_ca_path();
+
+        if !ca_pem_path.exists() {
+            return Err(Status::internal(format!(
+                "CA certificate not found: {}",
+                ca_pem_path.display()
+            )));
+        }
+
+        let service_ca_pem = read(ca_pem_path)
+            .await
+            .expect("failed to read CA certificate");
+
+        let service_ca = Certificate::from_pem(service_ca_pem);
+
+        let service_tls = ClientTlsConfig::new()
+            .ca_certificate(service_ca)
+            .domain_name("localhost");
+
+        let service_uri = registry.parse::<Uri>().map_err(|e: InvalidUri| {
+            Status::internal(format!("failed to parse registry URI: {}", e))
+        })?;
+
+        let channel = Channel::builder(service_uri)
+            .tls_config(service_tls)
+            .map_err(|e| Status::internal(format!("failed to create tls config: {}", e)))?
+            .connect()
+            .await
+            .map_err(|e| Status::internal(format!("failed to connect to registry: {}", e)))?;
+
+        let client_archive = ArchiveServiceClient::new(channel);
+
         let source_digest = build_source(
             request.artifact_context.clone(),
-            request.artifact_update,
-            registry.clone(),
+            request.artifact_unlock,
+            client_archive,
             &source,
             &tx.clone(),
         )
@@ -496,26 +505,26 @@ async fn prepare_artifact(
                 .iter_mut()
                 .find(|s| s.name == last.name && s.platform == target_platform)
             {
-                let new_digest = last.digest.clone().unwrap_or_default();
-                let new_excludes = &last.excludes;
-                let new_includes = &last.includes;
-                let new_path = &last.path.clone();
+                let next_digest = source_digest.clone();
+                let next_excludes = &last.excludes;
+                let next_includes = &last.includes;
+                let next_path = &last.path.clone();
 
-                if existing.digest != new_digest
-                    || existing.includes != *new_includes
-                    || existing.excludes != *new_excludes
-                    || existing.path != *new_path
+                if existing.digest != next_digest
+                    || existing.includes != *next_includes
+                    || existing.excludes != *next_excludes
+                    || existing.path != *next_path
                 {
-                    existing.digest = new_digest;
-                    existing.excludes = new_excludes.clone();
-                    existing.includes = new_includes.clone();
-                    existing.path = new_path.clone();
+                    existing.digest = next_digest;
+                    existing.excludes = next_excludes.clone();
+                    existing.includes = next_includes.clone();
+                    existing.path = next_path.clone();
 
                     lockfile_modified = true;
                 }
             } else {
                 lock.sources.push(LockSource {
-                    digest: last.digest.clone().unwrap_or_default(),
+                    digest: source_digest.clone(),
                     excludes: last.excludes.clone(),
                     includes: last.includes.clone(),
                     name: last.name.clone(),

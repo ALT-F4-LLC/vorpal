@@ -3,18 +3,21 @@ package config
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	apiContext "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/context"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 type ConfigContextStore struct {
@@ -23,14 +26,14 @@ type ConfigContextStore struct {
 }
 
 type ConfigContext struct {
-	agent           string
 	artifact        string
 	artifactContext string
+	clientAgent     agent.AgentServiceClient
+	clientArtifact  artifact.ArtifactServiceClient
 	port            int
-	registry        string
 	store           ConfigContextStore
 	system          artifact.ArtifactSystem
-	update          bool
+	unlock          bool
 }
 
 type ConfigServer struct {
@@ -88,15 +91,44 @@ func GetContext() *ConfigContext {
 		log.Fatalf("failed to get system: %v", err)
 	}
 
+	caCert, err := os.ReadFile("/var/lib/vorpal/key/ca.pem")
+	if err != nil {
+		log.Fatalf("Failed to read CA certificate: %v", err)
+	}
+
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(caCert) {
+		log.Fatal("Failed to append CA certificate")
+	}
+
+	credentials := credentials.NewTLS(&tls.Config{
+		RootCAs:    caCertPool,
+		ServerName: "localhost",
+	})
+
+	agentHost := strings.ReplaceAll(cmd.Agent, "https://", "")
+
+	clientConnAgent, err := grpc.NewClient(agentHost, grpc.WithTransportCredentials(credentials))
+	if err != nil {
+		log.Fatalf("failed to connect to agent: %v", err)
+	}
+
+	registryHost := strings.ReplaceAll(cmd.Registry, "https://", "")
+
+	clientConnArtifact, err := grpc.NewClient(registryHost, grpc.WithTransportCredentials(credentials))
+	if err != nil {
+		log.Fatalf("failed to connect to agent: %v", err)
+	}
+
 	return &ConfigContext{
-		agent:           cmd.Agent,
 		artifact:        cmd.Artifact,
 		artifactContext: cmd.ArtifactContext,
+		clientAgent:     agent.NewAgentServiceClient(clientConnAgent),
+		clientArtifact:  artifact.NewArtifactServiceClient(clientConnArtifact),
 		port:            cmd.Port,
-		registry:        cmd.Registry,
 		store:           store,
 		system:          *system,
-		update:          cmd.Update,
+		unlock:          cmd.Unlock,
 	}
 }
 
@@ -128,23 +160,12 @@ func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error
 
 	// TODO: make this run in parallel
 
-	agentHost := strings.ReplaceAll(c.agent, "http://", "")
-
-	clientConn, err := grpc.NewClient(agentHost, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, err
-	}
-
-	defer clientConn.Close()
-
-	client := agent.NewAgentServiceClient(clientConn)
-
 	clientReqest := &agent.PrepareArtifactRequest{
 		Artifact:        artifact,
 		ArtifactContext: c.artifactContext,
 	}
 
-	clientResponse, err := client.PrepareArtifact(context.Background(), clientReqest)
+	clientResponse, err := c.clientAgent.PrepareArtifact(context.Background(), clientReqest)
 	if err != nil {
 		return nil, fmt.Errorf("error preparing artifact: %v", err)
 	}
@@ -206,24 +227,12 @@ func fetchArtifacts(client artifact.ArtifactServiceClient, digest string, store 
 }
 
 func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
-	// Simplified artifact fetching - agent handles all lockfile operations
-	registry := strings.ReplaceAll(c.registry, "http://", "")
-
-	clientConn, err := grpc.NewClient(registry, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, err
-	}
-
-	defer clientConn.Close()
-
-	client := artifact.NewArtifactServiceClient(clientConn)
-
 	request := &artifact.GetArtifactAliasRequest{
 		Alias:       alias,
 		AliasSystem: c.system,
 	}
 
-	response, err := client.GetArtifactAlias(context.Background(), request)
+	response, err := c.clientArtifact.GetArtifactAlias(context.Background(), request)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching artifact alias: %v", err)
 	}
@@ -234,7 +243,7 @@ func (c *ConfigContext) FetchArtifact(alias string) (*string, error) {
 		return &digest, nil
 	}
 
-	err = fetchArtifacts(client, digest, c.store.artifact)
+	err = fetchArtifacts(c.clientArtifact, digest, c.store.artifact)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching '%s': %v", digest, err)
 	}

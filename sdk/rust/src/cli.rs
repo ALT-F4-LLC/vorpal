@@ -12,7 +12,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     Start {
-        #[clap(default_value = "http://localhost:23151", long)]
+        #[clap(default_value = "https://localhost:23151", long)]
         agent: String,
 
         #[clap(long)]
@@ -24,14 +24,14 @@ pub enum Command {
         #[clap(long)]
         port: u16,
 
-        #[clap(default_value = "http://localhost:23151", long)]
+        #[clap(default_value = "https://localhost:23151", long)]
         registry: String,
 
         #[arg(default_value_t = get_system_default_str(), long)]
         system: String,
 
         #[clap(long, default_value_t = false)]
-        update: bool,
+        unlock: bool,
 
         #[clap(long)]
         variable: Vec<String>,
