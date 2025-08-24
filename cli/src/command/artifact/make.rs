@@ -1,6 +1,6 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
-    start::auth::{load_service_secret, load_api_token_env},
+    start::auth::{load_api_token_env, load_service_secret},
     store::{
         archives::unpack_zstd,
         paths::{
