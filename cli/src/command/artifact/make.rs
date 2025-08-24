@@ -294,8 +294,7 @@ pub async fn run(
     let client_agent = AgentServiceClient::new(client_agent_channel);
     let client_artifact = ArtifactServiceClient::new(client_artifact_channel);
 
-    // Use the provided API token, falling back to environment variable only
-    let user_api_token = match api_token {
+    let client_api_token = match api_token {
         Some(token) => token,
         None => {
             if let Ok(service_secret) = load_service_secret().await {
@@ -312,12 +311,12 @@ pub async fn run(
         config.name.to_string(),
         config.context.to_path_buf(),
         client_agent,
+        client_api_token.clone(),
         client_artifact,
         0,
         artifact.system.to_string(),
         artifact.unlock,
         artifact.variable.clone(),
-        user_api_token.clone(),
     )?;
 
     let config_system = config_context.get_system();
@@ -422,7 +421,7 @@ pub async fn run(
         config_store,
         &mut client_archive,
         &mut client_worker,
-        &user_api_token,
+        &client_api_token,
     )
     .await?;
 
@@ -450,7 +449,7 @@ pub async fn run(
         config_file.display().to_string(),
         service.agent.to_string(),
         service.registry.to_string(),
-        user_api_token.clone(),
+        client_api_token.clone(),
     )
     .await
     {
@@ -557,7 +556,7 @@ pub async fn run(
         build_store,
         &mut client_archive,
         &mut client_worker,
-        &user_api_token,
+        &client_api_token,
     )
     .await?;
 

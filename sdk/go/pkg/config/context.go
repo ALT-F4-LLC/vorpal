@@ -92,7 +92,7 @@ func GetContext() *ConfigContext {
 	}
 
 	// Load user API token from environment variable
-	userAPIToken, err := LoadUserAPIToken()
+	clientAPIToken, err := LoadClientAPIToken()
 	if err != nil {
 		log.Fatalf("Failed to load user API token: %v", err)
 	}
@@ -117,8 +117,8 @@ func GetContext() *ConfigContext {
 	clientConnAgent, err := grpc.NewClient(
 		agentHost,
 		grpc.WithTransportCredentials(credentials),
-		grpc.WithUnaryInterceptor(AuthInterceptor(userAPIToken)),
-		grpc.WithStreamInterceptor(StreamAuthInterceptor(userAPIToken)),
+		grpc.WithUnaryInterceptor(AuthInterceptor(clientAPIToken)),
+		grpc.WithStreamInterceptor(StreamAuthInterceptor(clientAPIToken)),
 	)
 	if err != nil {
 		log.Fatalf("failed to connect to agent: %v", err)
@@ -129,8 +129,8 @@ func GetContext() *ConfigContext {
 	clientConnArtifact, err := grpc.NewClient(
 		registryHost,
 		grpc.WithTransportCredentials(credentials),
-		grpc.WithUnaryInterceptor(AuthInterceptor(userAPIToken)),
-		grpc.WithStreamInterceptor(StreamAuthInterceptor(userAPIToken)),
+		grpc.WithUnaryInterceptor(AuthInterceptor(clientAPIToken)),
+		grpc.WithStreamInterceptor(StreamAuthInterceptor(clientAPIToken)),
 	)
 	if err != nil {
 		log.Fatalf("failed to connect to agent: %v", err)

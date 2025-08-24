@@ -8,14 +8,13 @@ use crate::{
         context::context_service_server::{ContextService, ContextServiceServer},
     },
     artifact::system::get_system,
-    auth,
     cli::{Cli, Command},
 };
 use anyhow::{bail, Result};
 use clap::Parser;
 use http::uri::{InvalidUri, Uri};
 use sha256::digest;
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, env, path::PathBuf};
 use tokio::fs::read;
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig, Server},
@@ -35,9 +34,9 @@ pub struct ConfigContext {
     artifact: String,
     artifact_context: PathBuf,
     client_agent: AgentServiceClient<Channel>,
+    client_api_token: String,
     client_artifact: ArtifactServiceClient<Channel>,
     port: u16,
-    service_secret: String,
     store: ConfigContextStore,
     system: ArtifactSystem,
     unlock: bool,
@@ -132,19 +131,22 @@ pub async fn get_context() -> Result<ConfigContext> {
             let client_agent = AgentServiceClient::new(client_agent_channel);
             let client_artifact = ArtifactServiceClient::new(client_registry_channel);
 
-            // Load user API token from environment variable for SDK usage
-            let service_secret = auth::load_user_api_token()?;
+            let client_api_token = env::var("VORPAL_API_TOKEN").unwrap_or_default();
+
+            if client_api_token.is_empty() {
+                bail!("VORPAL_API_TOKEN environment variable is required");
+            }
 
             Ok(ConfigContext::new(
                 artifact,
                 PathBuf::from(artifact_context),
                 client_agent,
+                client_api_token,
                 client_artifact,
                 port,
                 system,
                 unlock,
                 variable,
-                service_secret,
             )?)
         }
     }
@@ -156,20 +158,20 @@ impl ConfigContext {
         artifact: String,
         artifact_context: PathBuf,
         client_agent: AgentServiceClient<Channel>,
+        client_api_token: String,
         client_artifact: ArtifactServiceClient<Channel>,
         port: u16,
         system: String,
         unlock: bool,
         variable: Vec<String>,
-        service_secret: String,
     ) -> Result<Self> {
         Ok(Self {
+            client_api_token,
             artifact,
             artifact_context,
             client_agent,
             client_artifact,
             port,
-            service_secret,
             store: ConfigContextStore {
                 artifact: HashMap::new(),
                 variable: variable
@@ -222,7 +224,7 @@ impl ConfigContext {
 
         request.metadata_mut().insert(
             "authorization",
-            self.service_secret
+            self.client_api_token
                 .parse()
                 .expect("failed to set authorization header"),
         );
@@ -301,7 +303,7 @@ impl ConfigContext {
 
             grpc_request.metadata_mut().insert(
                 "authorization",
-                self.service_secret
+                self.client_api_token
                     .parse()
                     .expect("failed to set authorization header"),
             );
@@ -342,7 +344,7 @@ impl ConfigContext {
 
         grpc_request.metadata_mut().insert(
             "authorization",
-            self.service_secret
+            self.client_api_token
                 .parse()
                 .expect("failed to set authorization header"),
         );
@@ -367,7 +369,7 @@ impl ConfigContext {
 
                 grpc_request.metadata_mut().insert(
                     "authorization",
-                    self.service_secret
+                    self.client_api_token
                         .parse()
                         .expect("failed to set authorization header"),
                 );
