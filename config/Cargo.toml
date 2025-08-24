@@ -2,7 +2,7 @@
 edition = "2021"
 name = "vorpal-config"
 publish = false
-version = "0.1.0-alpha"
+version = "0.1.0-rc.0"
 
 [[bin]]
 name = "vorpal-config"

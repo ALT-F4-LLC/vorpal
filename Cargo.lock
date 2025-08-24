@@ -3865,7 +3865,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vorpal-cli"
-version = "0.1.0-alpha"
+version = "0.1.0-rc.0"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3909,7 +3909,7 @@ dependencies = [
 
 [[package]]
 name = "vorpal-config"
-version = "0.1.0-alpha"
+version = "0.1.0-rc.0"
 dependencies = [
  "anyhow",
  "home",
@@ -3920,7 +3920,7 @@ dependencies = [
 
 [[package]]
 name = "vorpal-sdk"
-version = "0.5.0-alpha"
+version = "0.1.0-rc.0"
 dependencies = [
  "anyhow",
  "clap",
