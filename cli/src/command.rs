@@ -546,14 +546,13 @@ pub async fn run() -> Result<()> {
                     worker: worker.to_string(),
                 };
 
-                // Environment variable override - if set, it takes precedence over config files
                 if let Ok(env_token) = var("VORPAL_API_TOKEN") {
                     if !env_token.trim().is_empty() {
                         api_token = Some(env_token.trim().to_string());
                     }
                 }
 
-                artifact::make::run(artifact_args, config_args, service_args, api_token).await
+                artifact::make::run(api_token, artifact_args, config_args, service_args).await
             }
         },
 

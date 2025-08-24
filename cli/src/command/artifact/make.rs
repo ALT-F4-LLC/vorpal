@@ -1,6 +1,6 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
-    start::auth::{load_service_secret, load_user_api_token_from_env},
+    start::auth::{load_service_secret, load_api_token_env},
     store::{
         archives::unpack_zstd,
         paths::{
@@ -256,10 +256,10 @@ async fn build_artifacts(
 }
 
 pub async fn run(
+    api_token: Option<String>,
     artifact: RunArgsArtifact,
     config: RunArgsConfig,
     service: RunArgsService,
-    api_token: Option<String>,
 ) -> Result<()> {
     // Setup service clients
 
@@ -300,7 +300,7 @@ pub async fn run(
             if let Ok(service_secret) = load_service_secret().await {
                 service_secret
             } else {
-                load_user_api_token_from_env()?
+                load_api_token_env()?
             }
         }
     };

@@ -1,4 +1,7 @@
-use crate::command::{start::auth::load_user_api_token_from_env, store::paths::get_key_ca_path};
+use crate::command::{
+    start::auth::{load_api_token_env, load_service_secret},
+    store::paths::get_key_ca_path,
+};
 use anyhow::Result;
 use http::uri::{InvalidUri, Uri};
 use tokio::fs::read;
@@ -33,7 +36,13 @@ pub async fn run(digest: &str, registry: &str, api_token: Option<String>) -> Res
     // Use the provided API token, falling back to environment variable only
     let user_api_token = match api_token {
         Some(token) => token,
-        None => load_user_api_token_from_env()?,
+        None => {
+            if let Ok(service_secret) = load_service_secret().await {
+                service_secret
+            } else {
+                load_api_token_env()?
+            }
+        }
     };
 
     // Create authenticated request
