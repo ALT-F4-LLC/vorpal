@@ -20,7 +20,7 @@ use vorpal_sdk::api::{
 };
 
 mod agent;
-mod auth;
+pub mod auth;
 mod registry;
 mod worker;
 

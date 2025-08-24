@@ -50,3 +50,11 @@ func StreamAuthInterceptor(secret string) grpc.StreamClientInterceptor {
 	}
 }
 
+// LoadUserAPIToken loads the user API token from VORPAL_API_TOKEN environment variable
+func LoadUserAPIToken() (string, error) {
+	if token := os.Getenv("VORPAL_API_TOKEN"); strings.TrimSpace(token) != "" {
+		return strings.TrimSpace(token), nil
+	}
+	return "", fmt.Errorf("VORPAL_API_TOKEN environment variable not set or empty")
+}
+

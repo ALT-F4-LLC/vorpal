@@ -1,5 +1,5 @@
-use anyhow::Result;
-use std::path::PathBuf;
+use anyhow::{bail, Result};
+use std::{env, path::PathBuf};
 use tokio::fs::read_to_string;
 
 /// Returns the path to the service authentication secret
@@ -20,4 +20,12 @@ pub async fn load_service_secret() -> Result<String> {
     let secret = read_to_string(secret_path).await?.trim().to_string();
 
     Ok(secret)
+}
+
+/// Loads the user API token from VORPAL_API_TOKEN environment variable
+pub fn load_user_api_token() -> Result<String> {
+    match env::var("VORPAL_API_TOKEN") {
+        Ok(token) if !token.trim().is_empty() => Ok(token.trim().to_string()),
+        _ => bail!("VORPAL_API_TOKEN environment variable not set or empty"),
+    }
 }

@@ -91,10 +91,10 @@ func GetContext() *ConfigContext {
 		log.Fatalf("failed to get system: %v", err)
 	}
 
-	// Load service secret for authentication
-	serviceSecret, err := LoadServiceSecret()
+	// Load user API token from environment variable
+	userAPIToken, err := LoadUserAPIToken()
 	if err != nil {
-		log.Fatalf("Failed to load service secret: %v", err)
+		log.Fatalf("Failed to load user API token: %v", err)
 	}
 
 	caCert, err := os.ReadFile("/var/lib/vorpal/key/ca.pem")
@@ -117,8 +117,8 @@ func GetContext() *ConfigContext {
 	clientConnAgent, err := grpc.NewClient(
 		agentHost,
 		grpc.WithTransportCredentials(credentials),
-		grpc.WithUnaryInterceptor(AuthInterceptor(serviceSecret)),
-		grpc.WithStreamInterceptor(StreamAuthInterceptor(serviceSecret)),
+		grpc.WithUnaryInterceptor(AuthInterceptor(userAPIToken)),
+		grpc.WithStreamInterceptor(StreamAuthInterceptor(userAPIToken)),
 	)
 	if err != nil {
 		log.Fatalf("failed to connect to agent: %v", err)
@@ -129,8 +129,8 @@ func GetContext() *ConfigContext {
 	clientConnArtifact, err := grpc.NewClient(
 		registryHost,
 		grpc.WithTransportCredentials(credentials),
-		grpc.WithUnaryInterceptor(AuthInterceptor(serviceSecret)),
-		grpc.WithStreamInterceptor(StreamAuthInterceptor(serviceSecret)),
+		grpc.WithUnaryInterceptor(AuthInterceptor(userAPIToken)),
+		grpc.WithStreamInterceptor(StreamAuthInterceptor(userAPIToken)),
 	)
 	if err != nil {
 		log.Fatalf("failed to connect to agent: %v", err)

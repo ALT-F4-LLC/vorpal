@@ -132,8 +132,8 @@ pub async fn get_context() -> Result<ConfigContext> {
             let client_agent = AgentServiceClient::new(client_agent_channel);
             let client_artifact = ArtifactServiceClient::new(client_registry_channel);
 
-            // Load service secret for authentication
-            let service_secret = auth::load_service_secret().await?;
+            // Load user API token from environment variable for SDK usage
+            let service_secret = auth::load_user_api_token()?;
 
             Ok(ConfigContext::new(
                 artifact,
@@ -141,10 +141,10 @@ pub async fn get_context() -> Result<ConfigContext> {
                 client_agent,
                 client_artifact,
                 port,
-                service_secret,
                 system,
                 unlock,
                 variable,
+                service_secret,
             )?)
         }
     }
@@ -158,10 +158,10 @@ impl ConfigContext {
         client_agent: AgentServiceClient<Channel>,
         client_artifact: ArtifactServiceClient<Channel>,
         port: u16,
-        service_secret: String,
         system: String,
         unlock: bool,
         variable: Vec<String>,
+        service_secret: String,
     ) -> Result<Self> {
         Ok(Self {
             artifact,

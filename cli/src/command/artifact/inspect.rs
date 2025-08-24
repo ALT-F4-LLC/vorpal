@@ -1,3 +1,4 @@
+use crate::command::{start::auth::load_user_api_token_from_env, store::paths::get_key_ca_path};
 use anyhow::Result;
 use http::uri::{InvalidUri, Uri};
 use tokio::fs::read;
@@ -5,13 +6,9 @@ use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig},
     Request,
 };
-use vorpal_sdk::{
-    api::artifact::{artifact_service_client::ArtifactServiceClient, ArtifactRequest},
-    auth::load_service_secret,
-};
-use crate::command::store::paths::get_key_ca_path;
+use vorpal_sdk::api::artifact::{artifact_service_client::ArtifactServiceClient, ArtifactRequest};
 
-pub async fn run(digest: &str, registry: &str) -> Result<()> {
+pub async fn run(digest: &str, registry: &str, api_token: Option<String>) -> Result<()> {
     // Setup TLS with CA certificate
     let client_ca_pem_path = get_key_ca_path();
     let client_ca_pem = read(client_ca_pem_path).await?;
@@ -33,8 +30,11 @@ pub async fn run(digest: &str, registry: &str) -> Result<()> {
 
     let mut client = ArtifactServiceClient::new(client_registry_channel);
 
-    // Load service secret for authentication
-    let service_secret = load_service_secret().await?;
+    // Use the provided API token, falling back to environment variable only
+    let user_api_token = match api_token {
+        Some(token) => token,
+        None => load_user_api_token_from_env()?,
+    };
 
     // Create authenticated request
     let request = ArtifactRequest {
@@ -42,9 +42,12 @@ pub async fn run(digest: &str, registry: &str) -> Result<()> {
     };
 
     let mut grpc_request = Request::new(request);
+
     grpc_request.metadata_mut().insert(
         "authorization",
-        service_secret.parse().expect("failed to set authorization header"),
+        user_api_token
+            .parse()
+            .expect("failed to set authorization header"),
     );
 
     let response = client

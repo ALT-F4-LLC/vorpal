@@ -1,5 +1,6 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
+    start::auth::load_user_api_token_from_env,
     store::{
         archives::unpack_zstd,
         paths::{
@@ -36,7 +37,6 @@ use vorpal_sdk::{
         language::{go::GoBuilder, rust::RustBuilder},
         protoc, protoc_gen_go, protoc_gen_go_grpc,
     },
-    auth::load_service_secret,
     context::ConfigContext,
 };
 
@@ -71,7 +71,7 @@ async fn build(
     artifact_digest: &str,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
-    service_secret: &str,
+    user_api_token: &str,
 ) -> Result<()> {
     // 1. Check artifact
 
@@ -91,7 +91,7 @@ async fn build(
 
     request.metadata_mut().insert(
         "authorization",
-        service_secret
+        user_api_token
             .parse()
             .expect("failed to set authorization header"),
     );
@@ -170,7 +170,7 @@ async fn build(
 
     request.metadata_mut().insert(
         "authorization",
-        service_secret
+        user_api_token
             .parse()
             .expect("failed to set authorization header"),
     );
@@ -208,7 +208,7 @@ async fn build_artifacts(
     build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
-    service_secret: &str,
+    user_api_token: &str,
 ) -> Result<()> {
     let artifact_order = get_order(&build_store).await?;
 
@@ -241,7 +241,7 @@ async fn build_artifacts(
                     &artifact_digest,
                     client_archive,
                     client_worker,
-                    service_secret,
+                    user_api_token,
                 )
                 .await?;
 
@@ -259,6 +259,7 @@ pub async fn run(
     artifact: RunArgsArtifact,
     config: RunArgsConfig,
     service: RunArgsService,
+    api_token: Option<String>,
 ) -> Result<()> {
     // Setup service clients
 
@@ -293,9 +294,11 @@ pub async fn run(
     let client_agent = AgentServiceClient::new(client_agent_channel);
     let client_artifact = ArtifactServiceClient::new(client_artifact_channel);
 
-    // Load service secret for authentication
-    // TODO: implement user based authentication for CLI operations
-    let service_secret = load_service_secret().await?;
+    // Use the provided API token, falling back to environment variable only
+    let user_api_token = match api_token {
+        Some(token) => token,
+        None => load_user_api_token_from_env()?,
+    };
 
     // Prepare config context
 
@@ -305,10 +308,10 @@ pub async fn run(
         client_agent,
         client_artifact,
         0,
-        service_secret.clone(),
         artifact.system.to_string(),
         artifact.unlock,
         artifact.variable.clone(),
+        user_api_token.clone(),
     )?;
 
     let config_system = config_context.get_system();
@@ -413,7 +416,7 @@ pub async fn run(
         config_store,
         &mut client_archive,
         &mut client_worker,
-        &service_secret,
+        &user_api_token,
     )
     .await?;
 
@@ -441,6 +444,7 @@ pub async fn run(
         config_file.display().to_string(),
         service.agent.to_string(),
         service.registry.to_string(),
+        user_api_token.clone(),
     )
     .await
     {
@@ -547,7 +551,7 @@ pub async fn run(
         build_store,
         &mut client_archive,
         &mut client_worker,
-        &service_secret,
+        &user_api_token,
     )
     .await?;
 

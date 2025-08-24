@@ -80,6 +80,7 @@ pub async fn start(
     config_file: String,
     service_agent: String,
     service_registry: String,
+    user_api_token: String,
 ) -> Result<(Child, ContextServiceClient<Channel>)> {
     let command_artifact_context = artifact_context.display().to_string();
     let command_port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
@@ -112,6 +113,9 @@ pub async fn start(
     for var in artifact_variable.iter() {
         command.arg("--variable").arg(var);
     }
+
+    // Set the user API token environment variable for the configuration process
+    command.env("VORPAL_API_TOKEN", &user_api_token);
 
     let mut config_process = command
         .stdout(Stdio::piped())

@@ -1,5 +1,6 @@
 use crate::command::store::paths::get_key_service_secret_path;
 use anyhow::Result;
+use std::env::var;
 use tokio::fs::read_to_string;
 use tonic::{metadata::MetadataValue, Request, Status};
 use tracing::warn;
@@ -35,5 +36,16 @@ pub fn create_auth_interceptor(
                 Err(Status::unauthenticated("Missing authorization header"))
             }
         }
+    }
+}
+
+/// Loads the user API token from VORPAL_API_TOKEN environment variable
+/// Used as a fallback when no API token is provided by CLI commands
+pub fn load_user_api_token_from_env() -> Result<String> {
+    match var("VORPAL_API_TOKEN") {
+        Ok(token) if !token.trim().is_empty() => Ok(token.trim().to_string()),
+        _ => Err(anyhow::anyhow!(
+            "No API token found. Please set VORPAL_API_TOKEN environment variable or add 'api_token' to Vorpal.toml"
+        )),
     }
 }
