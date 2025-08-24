@@ -76,6 +76,7 @@ fn merge_configs(
             };
 
             Some(VorpalToml {
+                api_token: project.api_token.or(home.api_token),
                 config: merged_config,
                 registry: project.registry.or(home.registry),
             })
@@ -321,6 +322,7 @@ struct VorpalTomlConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 struct VorpalToml {
+    api_token: Option<String>,
     config: Option<VorpalTomlConfig>,
     registry: Option<String>,
 }
@@ -362,12 +364,14 @@ pub async fn run() -> Result<()> {
 
             CommandArtifact::Inspect { digest } => {
                 let mut registry = get_default_address();
+                let mut api_token = None;
 
                 if let Some(home_path) = get_home_config_path() {
                     if let Some(home_config) = load_vorpal_toml(home_path).await {
                         if let Some(home_registry) = home_config.registry {
                             registry = home_registry;
                         }
+                        api_token = home_config.api_token;
                     }
                 }
 
@@ -375,7 +379,14 @@ pub async fn run() -> Result<()> {
                     registry = r;
                 }
 
-                artifact::inspect::run(digest, &registry).await
+                // Environment variable override - if set, it takes precedence over config files
+                if let Ok(env_token) = var("VORPAL_API_TOKEN") {
+                    if !env_token.trim().is_empty() {
+                        api_token = Some(env_token.trim().to_string());
+                    }
+                }
+
+                artifact::inspect::run(digest, &registry, api_token).await
             }
 
             CommandArtifact::Make {
@@ -440,6 +451,21 @@ pub async fn run() -> Result<()> {
 
                 if let Some(ref r) = cli_registry {
                     registry = r.clone();
+                }
+
+                // Determine API token using existing merge logic (same pattern as registry)
+                let mut api_token = None;
+
+                // Extract API token from home config first
+                if let Some(ref hc) = home_config {
+                    api_token = hc.api_token.clone();
+                }
+
+                // Project config overrides home config
+                if let Some(ref pc) = project_config {
+                    if let Some(ref token) = pc.api_token {
+                        api_token = Some(token.clone());
+                    }
                 }
 
                 // Merge configurations (project overrides home)
@@ -520,7 +546,13 @@ pub async fn run() -> Result<()> {
                     worker: worker.to_string(),
                 };
 
-                artifact::make::run(artifact_args, config_args, service_args).await
+                if let Ok(env_token) = var("VORPAL_API_TOKEN") {
+                    if !env_token.trim().is_empty() {
+                        api_token = Some(env_token.trim().to_string());
+                    }
+                }
+
+                artifact::make::run(api_token, artifact_args, config_args, service_args).await
             }
         },
 
@@ -584,6 +616,7 @@ mod tests {
 
     fn create_home_config() -> VorpalToml {
         VorpalToml {
+            api_token: None,
             config: Some(VorpalTomlConfig {
                 language: Some("go".to_string()),
                 name: Some("home-app".to_string()),
@@ -604,6 +637,7 @@ mod tests {
 
     fn create_project_config() -> VorpalToml {
         VorpalToml {
+            api_token: None,
             config: Some(VorpalTomlConfig {
                 language: Some("rust".to_string()),
                 name: Some("project-app".to_string()),
@@ -782,6 +816,7 @@ packages = ["pkg1", "pkg2"]
     #[test]
     fn test_merge_configs_partial_home_config() {
         let home_config = VorpalToml {
+            api_token: None,
             config: Some(VorpalTomlConfig {
                 language: Some("go".to_string()),
                 name: None,
@@ -791,6 +826,7 @@ packages = ["pkg1", "pkg2"]
         };
 
         let project_config = VorpalToml {
+            api_token: None,
             config: Some(VorpalTomlConfig {
                 language: None,
                 name: Some("project-app".to_string()),

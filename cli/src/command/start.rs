@@ -20,6 +20,7 @@ use vorpal_sdk::api::{
 };
 
 mod agent;
+pub mod auth;
 mod registry;
 mod worker;
 
@@ -62,8 +63,15 @@ pub async fn run(
         .tls_config(ServerTlsConfig::new().identity(identity))?
         .add_service(health_service);
 
+    let service_secret = auth::load_service_secret().await?;
+
+    let auth_interceptor = auth::create_auth_interceptor(service_secret);
+
     if services.contains(&"agent".to_string()) {
-        let service = AgentServiceServer::new(AgentServer::new(registry.clone()));
+        let service = AgentServiceServer::with_interceptor(
+            AgentServer::new(registry.clone()),
+            auth_interceptor.clone(),
+        );
 
         info!("agent |> service: [::]:{}", port);
 
@@ -93,17 +101,22 @@ pub async fn run(
 
         info!("registry |> service: [::]:{}", port);
 
-        router = router.add_service(ArchiveServiceServer::new(ArchiveServer::new(
-            backend_archive,
-        )));
+        router = router.add_service(ArchiveServiceServer::with_interceptor(
+            ArchiveServer::new(backend_archive),
+            auth_interceptor.clone(),
+        ));
 
-        router = router.add_service(ArtifactServiceServer::new(ArtifactServer::new(
-            backend_artifact,
-        )));
+        router = router.add_service(ArtifactServiceServer::with_interceptor(
+            ArtifactServer::new(backend_artifact),
+            auth_interceptor.clone(),
+        ));
     }
 
     if services.contains(&"worker".to_string()) {
-        let service = WorkerServiceServer::new(WorkerServer::new(registry.to_owned()));
+        let service = WorkerServiceServer::with_interceptor(
+            WorkerServer::new(registry.to_owned()),
+            auth_interceptor.clone(),
+        );
 
         info!("worker |> service: [::]:{}", port);
 

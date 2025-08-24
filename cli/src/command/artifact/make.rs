@@ -1,5 +1,6 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
+    start::auth::{load_api_token_env, load_service_secret},
     store::{
         archives::unpack_zstd,
         paths::{
@@ -19,7 +20,7 @@ use std::{
 use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig},
-    Code,
+    Code, Request,
 };
 use tracing::{error, info};
 use vorpal_sdk::{
@@ -70,6 +71,7 @@ async fn build(
     artifact_digest: &str,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
+    user_api_token: &str,
 ) -> Result<()> {
     // 1. Check artifact
 
@@ -85,7 +87,16 @@ async fn build(
         digest: artifact_digest.to_string(),
     };
 
-    match client_archive.pull(request_pull.clone()).await {
+    let mut request = Request::new(request_pull);
+
+    request.metadata_mut().insert(
+        "authorization",
+        user_api_token
+            .parse()
+            .expect("failed to set authorization header"),
+    );
+
+    match client_archive.pull(request).await {
         Err(status) => {
             if status.code() != Code::NotFound {
                 bail!("registry pull error: {:?}", status);
@@ -155,6 +166,15 @@ async fn build(
         artifact_aliases,
     };
 
+    let mut request = Request::new(request);
+
+    request.metadata_mut().insert(
+        "authorization",
+        user_api_token
+            .parse()
+            .expect("failed to set authorization header"),
+    );
+
     let response = client_worker
         .build_artifact(request)
         .await
@@ -188,8 +208,10 @@ async fn build_artifacts(
     build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
+    user_api_token: &str,
 ) -> Result<()> {
     let artifact_order = get_order(&build_store).await?;
+
     let mut build_complete = HashMap::<String, Artifact>::new();
 
     for artifact_digest in artifact_order {
@@ -219,6 +241,7 @@ async fn build_artifacts(
                     &artifact_digest,
                     client_archive,
                     client_worker,
+                    user_api_token,
                 )
                 .await?;
 
@@ -233,6 +256,7 @@ async fn build_artifacts(
 }
 
 pub async fn run(
+    api_token: Option<String>,
     artifact: RunArgsArtifact,
     config: RunArgsConfig,
     service: RunArgsService,
@@ -270,12 +294,24 @@ pub async fn run(
     let client_agent = AgentServiceClient::new(client_agent_channel);
     let client_artifact = ArtifactServiceClient::new(client_artifact_channel);
 
+    let client_api_token = match api_token {
+        Some(token) => token,
+        None => {
+            if let Ok(service_secret) = load_service_secret().await {
+                service_secret
+            } else {
+                load_api_token_env()?
+            }
+        }
+    };
+
     // Prepare config context
 
     let mut config_context = ConfigContext::new(
         config.name.to_string(),
         config.context.to_path_buf(),
         client_agent,
+        client_api_token.clone(),
         client_artifact,
         0,
         artifact.system.to_string(),
@@ -385,6 +421,7 @@ pub async fn run(
         config_store,
         &mut client_archive,
         &mut client_worker,
+        &client_api_token,
     )
     .await?;
 
@@ -412,6 +449,7 @@ pub async fn run(
         config_file.display().to_string(),
         service.agent.to_string(),
         service.registry.to_string(),
+        client_api_token.clone(),
     )
     .await
     {
@@ -518,6 +556,7 @@ pub async fn run(
         build_store,
         &mut client_archive,
         &mut client_worker,
+        &client_api_token,
     )
     .await?;
 

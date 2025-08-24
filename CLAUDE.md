@@ -50,7 +50,7 @@ Vorpal is a build and distribution platform that uses declarative configurations
 ### Service Dependencies
 Local services are required for registry/worker interactions. One-time setup:
 1. `bash ./script/install.sh` (may require sudo)
-2. `./target/debug/vorpal system keys generate`
+2. `./target/debug/vorpal system keys generate` (generates TLS certificates and service authentication secret)
 
 Per development session: `make vorpal-start`
 
