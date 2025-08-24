@@ -1,6 +1,6 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
-    start::auth::load_user_api_token_from_env,
+    start::auth::{load_service_secret, load_user_api_token_from_env},
     store::{
         archives::unpack_zstd,
         paths::{
@@ -297,7 +297,13 @@ pub async fn run(
     // Use the provided API token, falling back to environment variable only
     let user_api_token = match api_token {
         Some(token) => token,
-        None => load_user_api_token_from_env()?,
+        None => {
+            if let Ok(service_secret) = load_service_secret().await {
+                service_secret
+            } else {
+                load_user_api_token_from_env()?
+            }
+        }
     };
 
     // Prepare config context
