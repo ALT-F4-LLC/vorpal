@@ -88,6 +88,13 @@ impl ArtifactBackend for LocalBackend {
                 }
             }
 
+            if alias_path.exists() {
+                return Err(Status::already_exists(format!(
+                    "alias '{}' already exists",
+                    alias
+                )));
+            }
+
             write(&alias_path, &config_digest)
                 .await
                 .map_err(|err| Status::internal(format!("failed to write alias: {err}")))?;
