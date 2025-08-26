@@ -43,40 +43,56 @@ cp -prv bin "$VORPAL_OUTPUT"`
 type ScriptUserenvTemplateArgs struct {
 	Path               string
 	SymlinksActivate   string
+	SymlinksCheck      string
 	SymlinksDeactivate string
 }
 
 const ScriptUserenvTemplate = `
 mkdir -pv $VORPAL_OUTPUT/bin
 
-cat > $VORPAL_OUTPUT/bin/activate-shell << "EOF"
-#!/bin/bash
+cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
 export PATH="$VORPAL_OUTPUT/bin:{{.Path}}:$PATH"
 EOF
 
-cat > $VORPAL_OUTPUT/bin/activate-symlinks << "EOF"
+cat > $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks << "EOF"
 #!/bin/bash
-
-if [ -x "$(command -v deactivate-symlinks)" ]; then
-    deactivate-symlinks
-fi
-
-echo "Activating new symlinks..."
-
-{{.SymlinksActivate}}
-EOF
-
-cat > $VORPAL_OUTPUT/bin/deactivate-symlinks << "EOF"
-#!/bin/bash
-
-echo "Deactivating existing symlinks..."
-
+set -euo pipefail
 {{.SymlinksDeactivate}}
 EOF
 
-chmod +x $VORPAL_OUTPUT/bin/activate-shell
-chmod +x $VORPAL_OUTPUT/bin/activate-symlinks
-chmod +x $VORPAL_OUTPUT/bin/deactivate-symlinks`
+cat > $VORPAL_OUTPUT/bin/vorpal-activate-symlinks << "EOF"
+#!/bin/bash
+set -euo pipefail
+{{.SymlinksCheck}}
+{{.SymlinksActivate}}
+EOF
+
+cat > $VORPAL_OUTPUT/bin/vorpal-activate << "EOF"
+#!/bin/bash
+set -euo pipefail
+
+echo "Deactivating previous symlinks..."
+
+if [ -f $HOME/.vorpal/bin/vorpal-deactivate-symlinks ]; then
+    $HOME/.vorpal/bin/vorpal-deactivate-symlinks
+fi
+
+echo "Activating symlinks..."
+
+$VORPAL_OUTPUT/bin/vorpal-activate-symlinks
+
+echo "Vorpal userenv installed. Run 'source vorpal-activate-shell' to activate."
+
+ln -s $VORPAL_OUTPUT/bin/vorpal-activate-shell $HOME/.vorpal/bin/vorpal-activate-shell
+ln -s $VORPAL_OUTPUT/bin/vorpal-activate-symlinks $HOME/.vorpal/bin/vorpal-activate-symlinks
+ln -s $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks $HOME/.vorpal/bin/vorpal-deactivate-symlinks
+EOF
+
+
+chmod +x $VORPAL_OUTPUT/bin/vorpal-activate-shell
+chmod +x $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks
+chmod +x $VORPAL_OUTPUT/bin/vorpal-activate-symlinks
+chmod +x $VORPAL_OUTPUT/bin/vorpal-activate`
 
 func ScriptDevenv(
 	context *config.ConfigContext,
@@ -208,16 +224,19 @@ func ScriptUserenv(
 	var scriptBuffer bytes.Buffer
 
 	symlinksActivate := make([]string, 0)
+	symlinksCheck := make([]string, 0)
 	symlinksDeactivate := make([]string, 0)
 
 	for source, target := range symlinks {
-		symlinksActivate = append(symlinksActivate, fmt.Sprintf("ln -sfv %s %s", source, target))
+		symlinksActivate = append(symlinksActivate, fmt.Sprintf("ln -sv %s %s", source, target))
+		symlinksCheck = append(symlinksCheck, fmt.Sprintf("if [ -f %s ]; then echo \"ERROR: Symlink target exists -> %s\" && exit 1; fi", target, target))
 		symlinksDeactivate = append(symlinksDeactivate, fmt.Sprintf("rm -fv %s", target))
 	}
 
 	stepScriptVars := ScriptUserenvTemplateArgs{
 		Path:               stepPath,
 		SymlinksActivate:   strings.Join(symlinksActivate, "\n"),
+		SymlinksCheck:      strings.Join(symlinksCheck, "\n"),
 		SymlinksDeactivate: strings.Join(symlinksDeactivate, "\n"),
 	}
 

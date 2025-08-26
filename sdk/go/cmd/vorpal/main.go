@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-	"os"
 	"text/template"
 
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -184,18 +183,13 @@ func main() {
 
 	// Vorpal userenv
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	_, errUserenv := artifact.ScriptUserenv(
 		context,
-		[]*string{vorpal},
-		nil,
+		[]*string{},
+		[]string{"PATH=$HOME/.vorpal/bin"},
 		"vorpal-userenv",
 		map[string]string{
-			fmt.Sprintf("/var/lib/vorpal/store/artifact/output/%s/bin/vorpal", *vorpal): fmt.Sprintf("%s/.vorpal/bin/vorpal", homeDir),
+			"$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal": "$HOME/.vorpal/bin/vorpal",
 		},
 		SYSTEMS,
 	)
