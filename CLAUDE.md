@@ -2,83 +2,73 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Common Development Commands
 
-Vorpal is a build and distribution platform that uses declarative configurations to build software distributively and natively across multiple platforms. It's written primarily in Rust with SDKs for multiple languages (Rust, Go, Python, TypeScript).
+### Build and Development
+- `make build` - Standard build using Cargo (default target)
+- `make build TARGET=release` - Release build
+- `cargo build` - Direct Cargo build (after setup)
+- `./script/dev.sh cargo build` - Build in isolated development environment
 
-## Development Commands
+### Code Quality
+- `make lint` - Run Clippy with deny warnings (run before pushing)
+- `make format` - Check code formatting with rustfmt
+- `make check` - Run cargo check
+- `make test` - Run test suite
 
-### Core Build Commands
-- `make` or `make build`: Build the Rust workspace (use `TARGET=release` for optimized builds)
-- `make check`: Fast type-check via `cargo check`
-- `make format`: Format code with `rustfmt`
-- `make lint`: Lint with Clippy (warnings are treated as errors)
-- `make test`: Run all Rust tests
-- `make clean`: Clean build artifacts and generated files
+### Development Environment Setup
+- `./script/dev.sh` - Setup isolated development environment and run commands
+- `direnv allow` - If using direnv for automatic environment management
 
-### Development Environment
-- `./script/dev.sh <command>`: Run commands in isolated development environment
-- Example: `./script/dev.sh cargo build`
-- Works with `direnv` for automatic environment setup
+### Vorpal-specific Commands
+- `make vorpal-start` - Start Vorpal services locally on port 23152
+- `make vorpal` - Build Vorpal using itself (requires services running)
+- `./target/debug/vorpal system keys generate` - Generate keys (after initial build)
+- `./target/debug/vorpal start` - Start Vorpal services
+- `./target/debug/vorpal artifact make "vorpal"` - Build artifact using Vorpal
 
-### Vorpal-Specific Commands
-- `make vorpal-start`: Start local services on `localhost:23152` (required for registry/worker interactions)
-- `make vorpal`: Build the repository using Vorpal itself (requires services running)
-- `make vorpal-config-start`: Start config service for artifact configurations on port 50051
-- `make dist`: Package binary in `./dist` directory as tarball
+### Testing Full Stack
+1. `make build` - Build without Vorpal
+2. `bash ./script/install.sh` - Install (requires sudo)
+3. `./target/debug/vorpal system keys generate` - Generate keys
+4. `./target/debug/vorpal start` - Start services
+5. `./target/debug/vorpal artifact make "vorpal"` - Build with Vorpal
 
-### Protocol Buffer Generation
-- `make generate`: Regenerate Go API stubs from protobufs in `sdk/rust/api`
+### Protocol Buffers
+- `make generate` - Regenerate Go gRPC bindings from Rust protobuf definitions
 
 ## Architecture
 
-### Workspace Structure
-- **`cli/`**: Main Rust CLI binary (`vorpal`) with entry point at `cli/src/main.rs`
-- **`sdk/rust/`**: Rust SDK crate (`vorpal-sdk`) with protobuf APIs and artifact builders
-- **`sdk/go/`**: Go SDK with generated protobuf bindings
-- **`config/`**: Config-driven artifacts and tasks; binary `vorpal-config`
-- **`script/`**: Development and CI helper scripts
-- **`terraform/`**: Infrastructure as code for deployment
+Vorpal is a distributed build system with a multi-language SDK approach:
 
-### Key Components
-- **Artifacts**: Core abstraction for describing software builds with sources, steps, and target systems
-- **Registry**: Service for storing and retrieving build artifacts
-- **Worker**: Service for executing build steps
-- **Agent**: Service for coordinating builds
-- **Context**: Runtime environment for executing artifact builds
+### Core Components
+- **CLI (`cli/`)** - Main Vorpal binary (`vorpal-cli` → `vorpal` executable)
+- **Config Service (`config/`)** - Configuration management service (`vorpal-config`)
+- **Rust SDK (`sdk/rust/`)** - Core SDK library (`vorpal-sdk`)
+- **Go SDK (`sdk/go/`)** - Go language bindings with generated gRPC clients
 
-### Service Dependencies
-Local services are required for registry/worker interactions. One-time setup:
-1. `bash ./script/install.sh` (may require sudo)
-2. `./target/debug/vorpal system keys generate` (generates TLS certificates and service authentication secret)
+### Key Architecture Patterns
+- **Workspace Structure**: Cargo workspace with `cli`, `config`, and `sdk/rust` members
+- **gRPC Services**: Agent, Archive, Artifact, Context, and Worker services
+- **Multi-target Builds**: Supports aarch64/x86_64 on Darwin/Linux
+- **Artifact System**: Declarative configuration using `Artifact` structures with sources, steps, and target systems
+- **SDK Pattern**: Language-specific builders (e.g., `RustArtifactBuilder`) wrap core artifact definitions
 
-Per development session: `make vorpal-start`
+### Service Architecture
+- **Registry**: Artifact and archive management (default port 23152)
+- **Agent**: Distributed build coordination
+- **Worker**: Build execution
+- **Context**: Build context management
 
-## Testing
+### Configuration Files
+- `Vorpal.toml` - Project-level Vorpal configuration
+- `Vorpal.go.toml` - Go SDK specific configuration
+- Individual language templates in `cli/src/command/template/`
 
-- Tests use Rust `#[test]` and `#[tokio::test]` attributes
-- Tests are colocated with code where practical
-- Run tests with `make test`
-- Run specific tests with `cargo test test_name`
-- Name tests with `test_*` prefix and clear intent
+### Development Environment
+- Uses `./script/dev.sh` for isolated dependency management
+- Supports direnv for automatic environment setup
+- Cross-platform development with Lima VM support for Linux testing
+- Rust toolchain pinned to 1.89.0 with clippy, rust-analyzer, rustfmt
 
-## Code Style
-
-- Rust 2021 edition
-- Use `snake_case` for functions/variables, `UpperCamelCase` for types, `SCREAMING_SNAKE_CASE` for constants
-- Run `cargo fmt` and ensure Clippy passes with no warnings
-- Keep modules small and focused
-
-## Development Workflow
-
-1. Always run `make format lint test` before committing
-2. For Vorpal-in-Vorpal builds, ensure services are running with `make vorpal-start`
-3. Use `./script/dev.sh` for isolated development environment when needed
-4. Use `direnv allow` for automatic environment setup with direnv
-5. Follow commit message conventions: `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`
-
-## Additional Tools
-
-- **Lima**: Use `make lima` to create isolated VM environment for testing
-- **Vendor**: Use `make vendor` to create vendored dependencies for offline builds
-- **Cleanup**: Use `make clean` to remove all build artifacts and generated files
+The system enables "bring-your-own-language" build configurations where developers can use Rust, Go, Python, or TypeScript SDKs to define the same underlying artifact build processes.
