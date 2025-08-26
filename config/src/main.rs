@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use indoc::formatdoc;
 use vorpal_sdk::{
     api::artifact::{
@@ -23,6 +23,7 @@ async fn main() -> Result<()> {
 
     // Dependencies
 
+    let github_cli = gh::build(context).await?;
     let go = go::build(context).await?;
     let goimports = goimports::build(context).await?;
     let gopls = gopls::build(context).await?;
@@ -97,20 +98,14 @@ async fn main() -> Result<()> {
 
     // Vorpal userenv
 
-    let home_dir = home::home_dir();
-
-    if home_dir.is_none() {
-        bail!("home directory not found");
-    }
-
     script::userenv(
         context,
-        vec![vorpal.clone()],
         vec![],
+        vec!["PATH=$HOME/.vorpal/bin".to_string()],
         "vorpal-userenv",
         vec![(
-            format!("/var/lib/vorpal/store/artifact/output/{vorpal}/bin/vorpal"),
-            format!("{}/.vorpal/bin/vorpal", home_dir.unwrap().display()),
+            "$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal".to_string(),
+            "$HOME/.vorpal/bin/vorpal".to_string(),
         )],
         SYSTEMS.to_vec(),
     )
@@ -145,17 +140,8 @@ async fn main() -> Result<()> {
 
         let aarch64_darwin = context.fetch_artifact(&aarch64_darwin.unwrap()).await?;
         let aarch64_linux = context.fetch_artifact(&aarch64_linux.unwrap()).await?;
-        let gh = gh::build(context).await?;
         let x8664_darwin = context.fetch_artifact(&x8664_darwin.unwrap()).await?;
         let x8664_linux = context.fetch_artifact(&x8664_linux.unwrap()).await?;
-
-        let artifacts = vec![
-            aarch64_darwin.clone(),
-            aarch64_linux.clone(),
-            gh,
-            x8664_darwin.clone(),
-            x8664_linux.clone(),
-        ];
 
         let script = formatdoc! {r#"
             git clone \
@@ -191,7 +177,13 @@ async fn main() -> Result<()> {
         };
 
         ArtifactTaskBuilder::new("vorpal-release", script, SYSTEMS.to_vec())
-            .with_artifacts(artifacts)
+            .with_artifacts(vec![
+                aarch64_darwin,
+                aarch64_linux,
+                github_cli,
+                x8664_darwin,
+                x8664_linux,
+            ])
             .build(context)
             .await?;
     }

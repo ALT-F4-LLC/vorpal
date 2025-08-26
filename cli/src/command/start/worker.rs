@@ -224,7 +224,7 @@ fn expand_env(text: &str, envs: &[&String]) -> String {
 }
 
 async fn run_step(
-    artifact_hash: &str,
+    artifact_digest: &str,
     artifact_path: &Path,
     step: ArtifactStep,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
@@ -259,8 +259,8 @@ async fn run_step(
     environments.extend([
         format!(
             "VORPAL_ARTIFACT_{}={}",
-            artifact_hash,
-            get_artifact_output_path(artifact_hash).display()
+            artifact_digest,
+            get_artifact_output_path(artifact_digest).display()
         ),
         format!("VORPAL_OUTPUT={}", artifact_path.display()),
         format!("VORPAL_WORKSPACE={}", workspace_path.display()),
