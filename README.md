@@ -26,11 +26,11 @@ flowchart LR
   Worker -- "Read & Write" --> Sandbox
   Worker -- "Pull & Push" --> Registry
 
-  CLI --> SDK
+  CLI -- "GetArtifacts" --> SDK
   SDK -- "FetchArtifact" --> Registry
   CLI -- "PrepareArtifact" --> Agent
   CLI -- "BuildArtifact" --> Worker
-  Store --> Storage(File system, object storage, etc)
+  Store --> ObjectStorage(Object Storage)
 ```
 
 ## Setup
@@ -91,77 +91,45 @@ func main() {
 }
 ```
 
-## Executors
-Vorpal does not lock you to a single executor. Each step sets its executor via `artifact.step[].entrypoint` and `artifact.step[].arguments`.
+## Quickstart
+These steps assume you installed Vorpal via the installer and have `vorpal` on your PATH.
 
-- Default: Bash. SDK “shell” helpers run in Bash (on Linux these run inside Bubblewrap).
-- Custom: Point `entrypoint` to any binary (e.g., `bwrap`, `docker`, `podman`) and pass flags via `arguments`.
+1) One-time keys
 
-Examples
+- `vorpal system keys generate`  # installer runs this; safe to re-run
 
-Rust (custom entrypoint/arguments)
-```rust
-use anyhow::Result;
-use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{ArtifactBuilder, ArtifactStepBuilder},
-    context::get_context,
-};
+2) Start services (agent, registry, worker)
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
-    let ctx = &mut get_context().await?;
+- If you used the installer, services are already running.
+- Otherwise: `vorpal services start`  # defaults to https://localhost:23151
 
-    let step = ArtifactStepBuilder::new("docker")
-        .with_arguments(vec![
-            "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
-            "alpine", "sh", "-lc", "echo hi > /out/hi.txt",
-        ])
-        .build();
+3) Create a new project (pick Go or Rust)
 
-    ArtifactBuilder::new("example-docker", vec![step], systems).build(ctx).await?;
-    ctx.run().await
-}
-```
+- `mkdir hello-vorpal && cd hello-vorpal`
+- `vorpal artifact init`  # scaffolds Vorpal.toml and a sample
 
-Go (custom entrypoint/arguments)
-```go
-package main
+4) Build your artifact
 
-import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
-    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
-    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
-)
+- `vorpal artifact make "vorpal" .`  # builds using the local services
+- To get the output path: `vorpal artifact make --path "vorpal" .`
 
-var systems = []api.ArtifactSystem{
-    api.ArtifactSystem_AARCH64_DARWIN,
-    api.ArtifactSystem_AARCH64_LINUX,
-    api.ArtifactSystem_X8664_DARWIN,
-    api.ArtifactSystem_X8664_LINUX,
-}
+5) Run the sample
 
-func main() {
-    ctx := config.GetContext()
+- `ARTIFACT_PATH=$(vorpal artifact make --path "vorpal" .)`
+- `$ARTIFACT_PATH/bin/example`  # runs the generated example binary
 
-    step, _ := artifact.NewArtifactStepBuilder().
-        WithEntrypoint("docker", systems).
-        WithArguments([]string{"run", "--rm", "-v", "$VORPAL_OUTPUT:/out", "alpine", "sh", "-lc", "echo hi > /out/hi.txt"}, systems).
-        Build(ctx)
+Build this repository
 
-    artifact.NewArtifactBuilder("example-docker", []*api.ArtifactStep{step}, systems).Build(ctx)
-    ctx.Run()
-}
-```
+- From the repo root: `vorpal artifact make "vorpal" .`
+- Optional Go parity (if present): `vorpal artifact make --config "Vorpal.go.toml" "vorpal" .`
 
 ## Dev & User Environments
-Manage local shells and user-wide commands using the builders.
+Manage development and user-wide environments using the builders:
 
-- Devenv: creates a portable shell activation (`bin/activate`) that prepends tool artifacts to PATH and sets env vars.
-- Userenv: installs activation helpers and safe symlinks under `$HOME/.vorpal/bin`.
+- Development environment (devenv): creates a portable shell activation (`bin/activate`) that prepends tool artifacts to PATH and sets env vars.
+- User environment (userenv): installs activation helpers and safe symlinking under `$HOME/.vorpal/bin`.
 
-Rust
+**Rust**
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
@@ -172,8 +140,8 @@ use vorpal_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-  let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
   let ctx = &mut get_context().await?;
+  let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
   DevenvBuilder::new("my-devenv", systems.clone())
     .with_environments(vec!["FOO=bar".into()])
@@ -187,7 +155,7 @@ async fn main() -> Result<()> {
 }
 ```
 
-Go
+**Go**
 ```go
 package main
 
@@ -220,8 +188,71 @@ func main() {
 ```
 
 ### Activate
-- Userenv: run `$HOME/.vorpal/bin/vorpal-activate`, then `source $HOME/.vorpal/bin/vorpal-activate-shell`.
-- Devenv: source the generated `bin/activate` inside the artifact output when used within a step or your own wrapper script.
+- Development environments: source generated `bin/activate` inside the artifact output when used within a step or your own wrapper script.
+- User environments: run `$HOME/.vorpal/bin/vorpal-activate`, then `source $HOME/.vorpal/bin/vorpal-activate-shell`.
+
+## Executors
+Vorpal does not lock you to a single executor. Each step sets its executor via `artifact.step[].entrypoint` and `artifact.step[].arguments`.
+
+- Default: Bash. SDK “shell” helpers run in Bash (on Linux these run inside Bubblewrap).
+- Custom: Point `entrypoint` to any binary (e.g., `bwrap`, `docker`, `podman`) and pass flags via `arguments`.
+
+**Rust (custom entrypoint/arguments)**
+```rust
+use anyhow::Result;
+use vorpal_sdk::{
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    artifact::{ArtifactBuilder, ArtifactStepBuilder},
+    context::get_context,
+};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let ctx = &mut get_context().await?;
+
+    let step = ArtifactStepBuilder::new("docker")
+        .with_arguments(vec![
+            "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
+            "alpine", "sh", "-lc", "echo hi > /out/hi.txt",
+        ])
+        .build();
+
+    ArtifactBuilder::new("example-docker", vec![step], systems).build(ctx).await?;
+    ctx.run().await
+}
+```
+
+**Go (custom entrypoint/arguments)**
+```go
+package main
+
+import (
+    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+)
+
+var systems = []api.ArtifactSystem{
+    api.ArtifactSystem_AARCH64_DARWIN,
+    api.ArtifactSystem_AARCH64_LINUX,
+    api.ArtifactSystem_X8664_DARWIN,
+    api.ArtifactSystem_X8664_LINUX,
+}
+
+func main() {
+    ctx := config.GetContext()
+
+    step, _ := artifact.NewArtifactStepBuilder().
+        WithEntrypoint("docker", systems).
+        WithArguments([]string{"run", "--rm", "-v", "$VORPAL_OUTPUT:/out", "alpine", "sh", "-lc", "echo hi > /out/hi.txt"}, systems).
+        Build(ctx)
+
+    artifact.NewArtifactBuilder("example-docker", []*api.ArtifactStep{step}, systems).Build(ctx)
+
+    ctx.Run()
+}
+```
 
 ## Contribute
 - Read the contributor guide: `AGENTS.md` (structure, commands, style, and PR workflow).
