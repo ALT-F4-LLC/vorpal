@@ -1,6 +1,6 @@
 # Vorpal
 
-Build and ship software with one language-agnostic workflow. Vorpal turns repeatable steps into portable “artifacts” that run reliably across macOS and Linux, letting teams reuse the same configuration from local dev to CI and release.
+Build and ship software with one language-agnostic workflow.
 
 ## Why?
 - Declarative: describe steps once, use them anywhere.
@@ -33,7 +33,7 @@ flowchart LR
   Store --> Storage(File system, object storage, etc)
 ```
 
-## Install or Build
+## Setup
 ### Install (prebuilt binaries):
   - `curl -fsSL https://github.com/ALT-F4-LLC/vorpal/blob/main/script/install.sh -o install.sh && sh install.sh`
 
@@ -42,7 +42,7 @@ flowchart LR
   - All platforms: `./script/dev.sh make build` (preferred; installs and uses a consistent toolchain)
   - Common tasks: `make check`, `make test`, `make format`, `make lint`, `make dist`
 
-## SDK Quick Start
+## Using the SDK
 The examples below build a simple Rust binary artifact for multiple systems and run the context.
 
 ### Rust
