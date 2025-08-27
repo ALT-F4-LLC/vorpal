@@ -257,6 +257,14 @@ digest = "6e3ef842d1006a6af7778a8549a8e8048fc3b923e5cf48eaa5b82b5d142220ae"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "gh"
+path = "https://github.com/cli/cli/releases/download/v2.69.0/gh_2.69.0_macOS_arm64.zip"
+includes = []
+excludes = []
+digest = "f9d97acb8bc92eca98e2e1ab608050972e4c55dfa4a31001a63a0ce30ee4b545"
+platform = "aarch64-darwin"
+
+[[sources]]
 name = "glibc"
 path = "https://ftpmirror.gnu.org/gnu/glibc/glibc-2.40.tar.gz"
 includes = []

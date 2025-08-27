@@ -6,11 +6,13 @@ use vorpal_sdk::{
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
     artifact::{
+        devenv::DevenvBuilder,
         get_env_key, gh, go, goimports, gopls, grpcurl,
         language::go::{get_goarch, get_goos},
         language::rust::RustBuilder,
-        protoc, protoc_gen_go, protoc_gen_go_grpc, script, staticcheck, ArtifactArgumentBuilder,
-        ArtifactProcessBuilder, ArtifactTaskBuilder,
+        protoc, protoc_gen_go, protoc_gen_go_grpc, staticcheck,
+        userenv::UserenvBuilder,
+        ArtifactArgumentBuilder, ArtifactProcessBuilder, ArtifactTaskBuilder,
     },
     context::get_context,
 };
@@ -44,9 +46,8 @@ async fn main() -> Result<()> {
 
     // Vorpal devenv
 
-    script::devenv(
-        context,
-        vec![
+    DevenvBuilder::new("vorpal-devenv", SYSTEMS.to_vec())
+        .with_artifacts(vec![
             go,
             goimports,
             gopls,
@@ -55,17 +56,15 @@ async fn main() -> Result<()> {
             protoc_gen_go,
             protoc_gen_go_grpc,
             staticcheck,
-        ],
-        vec![
+        ])
+        .with_environments(vec![
             "CGO_ENABLED=0".to_string(),
             format!("GOARCH={}", get_goarch(context.get_system())?),
             format!("GOOS={}", get_goos(context.get_system())?),
-        ],
-        "vorpal-devenv",
-        vec![],
-        SYSTEMS.to_vec(),
-    )
-    .await?;
+        ])
+        .with_secrets(vec![])
+        .build(context)
+        .await?;
 
     // Vorpal process
 
@@ -98,18 +97,17 @@ async fn main() -> Result<()> {
 
     // Vorpal userenv
 
-    script::userenv(
-        context,
-        vec![],
-        vec!["PATH=$HOME/.vorpal/bin".to_string()],
-        "vorpal-userenv",
-        vec![(
-            "$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal".to_string(),
-            "$HOME/.vorpal/bin/vorpal".to_string(),
-        )],
-        SYSTEMS.to_vec(),
-    )
-    .await?;
+    UserenvBuilder::new("vorpal-userenv", SYSTEMS.to_vec())
+        .with_artifacts(vec![])
+        .with_environments(vec!["PATH=$HOME/.vorpal/bin".to_string()])
+        .with_symlinks(vec![
+            (
+                "$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal",
+                "$HOME/.vorpal/bin/vorpal",
+            ),
+        ])
+        .build(context)
+        .await?;
 
     // Vorpal release
 

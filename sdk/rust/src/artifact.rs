@@ -7,6 +7,7 @@ use indoc::formatdoc;
 
 pub mod cargo;
 pub mod clippy;
+pub mod devenv;
 pub mod gh;
 pub mod go;
 pub mod goimports;
@@ -30,6 +31,7 @@ pub mod source;
 pub mod staticcheck;
 pub mod step;
 pub mod system;
+pub mod userenv;
 
 pub struct ArtifactArgumentBuilder<'a> {
     pub name: &'a str,
