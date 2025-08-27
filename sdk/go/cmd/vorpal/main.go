@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-	"os"
 	"text/template"
 
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -55,25 +54,104 @@ var SYSTEMS = []api.ArtifactSystem{
 	api.ArtifactSystem_X8664_LINUX,
 }
 
-func vorpal(context *config.ConfigContext) (*string, error) {
-	name := "vorpal"
+func main() {
+	context := config.GetContext()
+	contextTarget := context.GetTarget()
 
-	return language.NewRustBuilder(name, SYSTEMS).
-		WithBins([]string{name}).
+	// Dependencies
+
+	gobin, err := artifact.GoBin(context)
+	if err != nil {
+		log.Fatalf("failed to get go: %v", err)
+	}
+
+	goimports, err := artifact.Goimports(context)
+	if err != nil {
+		log.Fatalf("failed to get goimports: %v", err)
+	}
+
+	gopls, err := artifact.Gopls(context)
+	if err != nil {
+		log.Fatalf("failed to get gopls: %v", err)
+	}
+
+	grpcurl, err := artifact.Grpcurl(context)
+	if err != nil {
+		log.Fatalf("failed to get grpcurl: %v", err)
+	}
+
+	protoc, err := artifact.Protoc(context)
+	if err != nil {
+		log.Fatalf("failed to get protoc: %v", err)
+	}
+
+	protocGenGo, err := artifact.ProtocGenGo(context)
+	if err != nil {
+		log.Fatalf("failed to get protoc-gen-go: %v", err)
+	}
+
+	protocGenGoGRPC, err := artifact.ProtocGenGoGRPC(context)
+	if err != nil {
+		log.Fatalf("failed to get protoc-gen-go-grpc: %v", err)
+	}
+
+	staticcheck, err := artifact.Staticcheck(context)
+	if err != nil {
+		log.Fatalf("failed to get staticcheck: %v", err)
+	}
+
+	// Vorpal
+
+	vorpal, err := language.NewRustBuilder("vorpal", SYSTEMS).
+		WithBins([]string{"vorpal"}).
 		WithIncludes([]string{"cli", "sdk/rust"}).
 		WithPackages([]string{"vorpal-cli", "vorpal-sdk"}).
 		Build(context)
-}
-
-func vorpalProcess(context *config.ConfigContext) (*string, error) {
-	vorpal, err := vorpal(context)
 	if err != nil {
-		return nil, err
+		log.Fatalf("failed to build vorpal: %v", err)
 	}
 
-	entrypoint := fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(vorpal))
+	// Vorpal devenv
 
-	return artifact.NewArtifactProcessBuilder("vorpal-process", entrypoint, SYSTEMS).
+	goarch, err := language.GetGOARCH(contextTarget)
+	if err != nil {
+		log.Fatalf("failed to get GOARCH for target %s: %v", contextTarget, err)
+	}
+
+	goos, err := language.GetGOOS(contextTarget)
+	if err != nil {
+		log.Fatalf("failed to get GOOS for target %s: %v", contextTarget, err)
+	}
+
+    _, errDevenv := artifact.
+        NewDevenvBuilder("vorpal-devenv", SYSTEMS).
+        WithArtifacts([]*string{
+            gobin,
+            goimports,
+            gopls,
+            grpcurl,
+            protoc,
+            protocGenGo,
+            protocGenGoGRPC,
+            staticcheck,
+        }).
+        WithEnvironments([]string{
+            "CGO_ENABLED=0",
+            fmt.Sprintf("GOARCH=%s", *goarch),
+            fmt.Sprintf("GOOS=%s", *goos),
+        }).
+        Build(context)
+    if errDevenv != nil {
+        log.Fatalf("failed to build vorpal-devenv: %v", errDevenv)
+    }
+
+	// Vorpal process
+
+	_, errProcess := artifact.NewArtifactProcessBuilder(
+		"vorpal-process",
+		fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(vorpal)),
+		SYSTEMS,
+	).
 		WithArguments([]string{
 			"--registry",
 			"https://localhost:50051",
@@ -83,243 +161,134 @@ func vorpalProcess(context *config.ConfigContext) (*string, error) {
 		}).
 		WithArtifacts([]*string{vorpal}).
 		Build(context)
-}
-
-func vorpalRelease(context *config.ConfigContext) (*string, error) {
-	varAarch64Darwin, err := artifact.
-		NewArtifactArgumentBuilder("aarch64-darwin").
-		WithRequire().
-		Build(context)
-	if err != nil {
-		return nil, err
+	if errProcess != nil {
+		log.Fatalf("failed to build vorpal-process: %v", errProcess)
 	}
 
-	varAarch64Linux, err := artifact.
-		NewArtifactArgumentBuilder("aarch64-linux").
-		WithRequire().
-		Build(context)
-	if err != nil {
-		return nil, err
-	}
+	// Vorpal task
 
-	varBranchName, err := artifact.
-		NewArtifactArgumentBuilder("branch-name").
-		WithRequire().
-		Build(context)
-	if err != nil {
-		return nil, err
-	}
-
-	varX8664Darwin, err := artifact.
-		NewArtifactArgumentBuilder("x8664-darwin").
-		WithRequire().
-		Build(context)
-	if err != nil {
-		return nil, err
-	}
-
-	varX8664Linux, err := artifact.
-		NewArtifactArgumentBuilder("x8664-linux").
-		WithRequire().
-		Build(context)
-	if err != nil {
-		return nil, err
-	}
-
-	aarch64Darwin, err := context.FetchArtifact(*varAarch64Darwin)
-	if err != nil {
-		return nil, err
-	}
-
-	aarch64Linux, err := context.FetchArtifact(*varAarch64Linux)
-	if err != nil {
-		return nil, err
-	}
-
-	gh, err := artifact.Gh(context)
-	if err != nil {
-		return nil, err
-	}
-
-	x8664Darwin, err := context.FetchArtifact(*varX8664Darwin)
-	if err != nil {
-		return nil, err
-	}
-
-	x8664Linux, err := context.FetchArtifact(*varX8664Linux)
-	if err != nil {
-		return nil, err
-	}
-
-	artifacts := []*string{
-		aarch64Darwin,
-		aarch64Linux,
-		gh,
-		x8664Darwin,
-		x8664Linux,
-	}
-
-	scriptTemplate, err := template.New("script").Parse(releaseScript)
-	if err != nil {
-		return nil, err
-	}
-
-	var scriptBuffer bytes.Buffer
-
-	scriptTemplateVars := releaseScriptArgs{
-		Aarch64Darwin: *aarch64Darwin,
-		Aarch64Linux:  *aarch64Linux,
-		BranchName:    *varBranchName,
-		X8664Darwin:   *x8664Darwin,
-		X8664Linux:    *x8664Linux,
-	}
-
-	if err := scriptTemplate.Execute(&scriptBuffer, scriptTemplateVars); err != nil {
-		return nil, err
-	}
-
-	return artifact.NewArtifactTaskBuilder("vorpal-release", scriptBuffer.String(), SYSTEMS).
-		WithArtifacts(artifacts).
-		Build(context)
-}
-
-func vorpalDevenv(context *config.ConfigContext) (*string, error) {
-	gobin, err := artifact.GoBin(context)
-	if err != nil {
-		return nil, err
-	}
-
-	goimports, err := artifact.Goimports(context)
-	if err != nil {
-		return nil, err
-	}
-
-	gopls, err := artifact.Gopls(context)
-	if err != nil {
-		return nil, err
-	}
-
-	grpcurl, err := artifact.Grpcurl(context)
-	if err != nil {
-		return nil, err
-	}
-
-	protoc, err := artifact.Protoc(context)
-	if err != nil {
-		return nil, err
-	}
-
-	protocGenGo, err := artifact.ProtocGenGo(context)
-	if err != nil {
-		return nil, err
-	}
-
-	protocGenGoGRPC, err := artifact.ProtocGenGoGRPC(context)
-	if err != nil {
-		return nil, err
-	}
-
-	staticcheck, err := artifact.Staticcheck(context)
-	if err != nil {
-		return nil, err
-	}
-
-	artifacts := []*string{
-		gobin,
-		goimports,
-		gopls,
-		grpcurl,
-		protoc,
-		protocGenGo,
-		protocGenGoGRPC,
-		staticcheck,
-	}
-
-	contextTarget := context.GetTarget()
-
-	goarch, err := language.GetGOARCH(contextTarget)
-	if err != nil {
-		return nil, err
-	}
-
-	goos, err := language.GetGOOS(contextTarget)
-	if err != nil {
-		return nil, err
-	}
-
-	environments := []string{
-		"CGO_ENABLED=0",
-		fmt.Sprintf("GOARCH=%s", *goarch),
-		fmt.Sprintf("GOOS=%s", *goos),
-	}
-
-	return artifact.ScriptDevenv(context, artifacts, environments, "vorpal-devenv", nil, SYSTEMS)
-}
-
-func vorpalTest(context *config.ConfigContext) (*string, error) {
-	vorpal, err := vorpal(context)
-	if err != nil {
-		return nil, err
-	}
-
-	script := fmt.Sprintf("\n%s/bin/vorpal --version", artifact.GetEnvKey(vorpal))
-
-	return artifact.NewArtifactTaskBuilder("vorpal-test", script, SYSTEMS).
+	_, errTest := artifact.NewArtifactTaskBuilder(
+		"vorpal-test",
+		fmt.Sprintf("\n%s/bin/vorpal --version", artifact.GetEnvKey(vorpal)),
+		SYSTEMS,
+	).
 		WithArtifacts([]*string{vorpal}).
 		Build(context)
-}
-
-func vorpalUserenv(context *config.ConfigContext) (*string, error) {
-	vorpal, err := vorpal(context)
-	if err != nil {
-		return nil, err
+	if errTest != nil {
+		log.Fatalf("failed to build vorpal-test: %v", errTest)
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Vorpal userenv
 
-	artifacts := []*string{vorpal}
+    _, errUserenv := artifact.
+        NewUserenvBuilder("vorpal-userenv", SYSTEMS).
+        WithArtifacts([]*string{}).
+        WithEnvironments([]string{"PATH=$HOME/.vorpal/bin"}).
+        WithSymlinks(map[string]string{
+            "$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal": "$HOME/.vorpal/bin/vorpal",
+        }).
+        Build(context)
+    if errUserenv != nil {
+        log.Fatalf("failed to build vorpal-userenv: %v", errUserenv)
+    }
 
-	symlinks := map[string]string{}
+	if context.GetArtifactName() == "vorpal-release" {
+		varAarch64Darwin, err := artifact.
+			NewArtifactArgumentBuilder("aarch64-darwin").
+			WithRequire().
+			Build(context)
+		if err != nil {
+			log.Fatalf("failed to build artifact argument: %v", err)
+		}
 
-	symlinks[fmt.Sprintf("/var/lib/vorpal/store/artifact/output/%s/bin/vorpal", *vorpal)] = fmt.Sprintf("%s/.vorpal/bin/vorpal", homeDir)
+		varAarch64Linux, err := artifact.
+			NewArtifactArgumentBuilder("aarch64-linux").
+			WithRequire().
+			Build(context)
+		if err != nil {
+			log.Fatalf("failed to build artifact argument: %v", err)
+		}
 
-	return artifact.ScriptUserenv(
-		context,
-		artifacts,
-		nil,
-		"vorpal-userenv",
-		symlinks,
-		SYSTEMS,
-	)
-}
+		varBranchName, err := artifact.
+			NewArtifactArgumentBuilder("branch-name").
+			WithRequire().
+			Build(context)
+		if err != nil {
+			log.Fatalf("failed to build artifact argument: %v", err)
+		}
 
-func main() {
-	context := config.GetContext()
-	contextArtifact := context.GetArtifactName()
+		varX8664Darwin, err := artifact.
+			NewArtifactArgumentBuilder("x8664-darwin").
+			WithRequire().
+			Build(context)
+		if err != nil {
+			log.Fatalf("failed to build artifact argument: %v", err)
+		}
 
-	var err error
+		varX8664Linux, err := artifact.
+			NewArtifactArgumentBuilder("x8664-linux").
+			WithRequire().
+			Build(context)
+		if err != nil {
+			log.Fatalf("failed to build artifact argument: %v", err)
+		}
 
-	switch contextArtifact {
-	case "vorpal":
-		_, err = vorpal(context)
-	case "vorpal-devenv":
-		_, err = vorpalDevenv(context)
-	case "vorpal-process":
-		_, err = vorpalProcess(context)
-	case "vorpal-release":
-		_, err = vorpalRelease(context)
-	case "vorpal-test":
-		_, err = vorpalTest(context)
-	case "vorpal-userenv":
-		_, err = vorpalUserenv(context)
-	default:
-		log.Fatalf("unknown artifact %s", contextArtifact)
-	}
-	if err != nil {
-		log.Fatalf("failed to build %s: %v", contextArtifact, err)
+		aarch64Darwin, err := context.FetchArtifact(*varAarch64Darwin)
+		if err != nil {
+			log.Fatalf("failed to fetch artifact: %v", err)
+		}
+
+		aarch64Linux, err := context.FetchArtifact(*varAarch64Linux)
+		if err != nil {
+			log.Fatalf("failed to fetch artifact: %v", err)
+		}
+
+		githubCli, err := artifact.Gh(context)
+		if err != nil {
+			log.Fatalf("failed to get gh: %v", err)
+		}
+
+		x8664Darwin, err := context.FetchArtifact(*varX8664Darwin)
+		if err != nil {
+			log.Fatalf("failed to fetch artifact: %v", err)
+		}
+
+		x8664Linux, err := context.FetchArtifact(*varX8664Linux)
+		if err != nil {
+			log.Fatalf("failed to fetch artifact: %v", err)
+		}
+
+		scriptTemplate, err := template.New("script").Parse(releaseScript)
+		if err != nil {
+			log.Fatalf("failed to parse script template: %v", err)
+		}
+
+		var script bytes.Buffer
+
+		scriptVars := releaseScriptArgs{
+			Aarch64Darwin: *aarch64Darwin,
+			Aarch64Linux:  *aarch64Linux,
+			BranchName:    *varBranchName,
+			X8664Darwin:   *x8664Darwin,
+			X8664Linux:    *x8664Linux,
+		}
+
+		if scriptErr := scriptTemplate.Execute(&script, scriptVars); scriptErr != nil {
+			log.Fatalf("failed to execute script template: %v", scriptErr)
+		}
+
+		_, errRelease := artifact.NewArtifactTaskBuilder("vorpal-release", script.String(), SYSTEMS).
+			WithArtifacts([]*string{
+				aarch64Darwin,
+				aarch64Linux,
+				githubCli,
+				x8664Darwin,
+				x8664Linux,
+			}).
+			Build(context)
+		if errRelease != nil {
+			log.Fatalf("failed to build vorpal-release: %v", errRelease)
+		}
 	}
 
 	context.Run()

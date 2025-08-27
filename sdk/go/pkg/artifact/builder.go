@@ -58,6 +58,93 @@ type ArtifactBuilder struct {
 	Systems []api.ArtifactSystem
 }
 
+type DevenvBuilder struct {
+	Artifacts    []*string
+	Environments []string
+	Name         string
+	Secrets      []*api.ArtifactStepSecret
+	Systems      []api.ArtifactSystem
+}
+
+func NewDevenvBuilder(name string, systems []api.ArtifactSystem) *DevenvBuilder {
+	return &DevenvBuilder{
+		Artifacts:    []*string{},
+		Environments: []string{},
+		Name:         name,
+		Secrets:      []*api.ArtifactStepSecret{},
+		Systems:      systems,
+	}
+}
+
+func (b *DevenvBuilder) WithArtifacts(artifacts []*string) *DevenvBuilder {
+	b.Artifacts = artifacts
+	return b
+}
+
+func (b *DevenvBuilder) WithEnvironments(envs []string) *DevenvBuilder {
+	b.Environments = envs
+	return b
+}
+
+func (b *DevenvBuilder) WithSecrets(secrets map[string]string) *DevenvBuilder {
+	for name, value := range secrets {
+		secret := &api.ArtifactStepSecret{Name: name, Value: value}
+		if !slices.ContainsFunc(b.Secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
+			b.Secrets = append(b.Secrets, secret)
+		}
+	}
+	return b
+}
+
+func (b *DevenvBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+	return ScriptDevenv(ctx, b.Artifacts, b.Environments, b.Name, b.Secrets, b.Systems)
+}
+
+// UserenvBuilder builds a user environment activation artifact.
+type UserenvBuilder struct {
+	Artifacts    []*string
+	Environments []string
+	Name         string
+	Symlinks     map[string]string
+	Systems      []api.ArtifactSystem
+}
+
+func NewUserenvBuilder(name string, systems []api.ArtifactSystem) *UserenvBuilder {
+	return &UserenvBuilder{
+		Artifacts:    []*string{},
+		Environments: []string{},
+		Name:         name,
+		Symlinks:     map[string]string{},
+		Systems:      systems,
+	}
+}
+
+func (b *UserenvBuilder) WithArtifacts(artifacts []*string) *UserenvBuilder {
+	b.Artifacts = artifacts
+	return b
+}
+
+func (b *UserenvBuilder) WithEnvironments(envs []string) *UserenvBuilder {
+	b.Environments = envs
+	return b
+}
+
+func (b *UserenvBuilder) WithSymlinks(links map[string]string) *UserenvBuilder {
+	if b.Symlinks == nil {
+		b.Symlinks = map[string]string{}
+	}
+
+	for k, v := range links {
+		b.Symlinks[k] = v
+	}
+
+	return b
+}
+
+func (b *UserenvBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+	return ScriptUserenv(ctx, b.Artifacts, b.Environments, b.Name, b.Symlinks, b.Systems)
+}
+
 type ArtifactProcessScriptTemplateVars struct {
 	Arguments  string
 	Artifacts  string
