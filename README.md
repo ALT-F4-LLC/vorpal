@@ -56,8 +56,8 @@ use vorpal_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
     let ctx = &mut get_context().await?;
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
     RustBuilder::new("example", systems).build(ctx).await?;
 
@@ -208,8 +208,8 @@ use vorpal_sdk::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
     let ctx = &mut get_context().await?;
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
     let step = ArtifactStepBuilder::new("docker")
         .with_arguments(vec![
@@ -219,6 +219,7 @@ async fn main() -> Result<()> {
         .build();
 
     ArtifactBuilder::new("example-docker", vec![step], systems).build(ctx).await?;
+
     ctx.run().await
 }
 ```
