@@ -1,364 +1,230 @@
-# vorpal
+# Vorpal
 
-Build and ship software with one powerful tool.
+Build and ship software with one language-agnostic workflow. Vorpal turns repeatable steps into portable “artifacts” that run reliably across macOS and Linux, letting teams reuse the same configuration from local dev to CI and release.
 
-<p align="center">
-  <img src="./vorpal-purpose.jpg" />
-</p>
+## Why?
+- Declarative: describe steps once, use them anywhere.
+- Cross-language: Rust and Go SDKs today; more to come.
+- Reproducible: hermetic steps and pinned toolchains.
+- Scalable: the same artifacts power your end-to-end flow.
 
-## Overview
+## Architecture
+Vorpal is distributed and composed of horizontally scalable components:
 
-Vorpal uses declarative "bring-your-own-language" configurations to build software distributively and natively in a repeatable and reproducible way.
+- CLI (orchestrator): runs builds and talks to services over gRPC.
+- Agent service (localhost): performs filesystem/sandbox tasks close to the workload.
+- Registry service (storage): persists artifacts and metadata (e.g., S3-backed in CI).
+- Worker service (executor): executes steps in isolated environments; scale by adding workers.
 
-Examples of building a Rust application in multiple languages:
+Run services locally during development with `make vorpal-start` (or `cargo run --bin vorpal -- services start`).
 
-## Install
+```mermaid
+flowchart LR
+  Agent -- "Read & Write" --> Sandbox
+  Agent -- "Pull & Push" --> Registry
+  Registry -- "Read & Write" --> Store
+  Worker -- "Read & Write" --> Sandbox
+  Worker -- "Pull & Push" --> Registry
 
+  CLI --> SDK
+  SDK -- "FetchArtifact" --> Registry
+  CLI -- "PrepareArtifact" --> Agent
+  CLI -- "BuildArtifact" --> Worker
+  Store --> Storage(File system, object storage, etc)
 ```
-curl -fsSL https://github.com/ALT-F4-LLC/vorpal/blob/main/script/install.sh -o install.sh
-sh install.sh
-```
+
+## Install or Build
+### Install (prebuilt binaries):
+  - `curl -fsSL https://github.com/ALT-F4-LLC/vorpal/blob/main/script/install.sh -o install.sh && sh install.sh`
+
+### Build from source (macOS & Linux):
+  - macOS only (once): `xcode-select --install`
+  - All platforms: `./script/dev.sh make build` (preferred; installs and uses a consistent toolchain)
+  - Common tasks: `make check`, `make test`, `make format`, `make lint`, `make dist`
+
+## SDK Quick Start
+The examples below build a simple Rust binary artifact for multiple systems and run the context.
 
 ### Rust
-
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::{
-        ArtifactSystem,
-        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    },
-    artifact::language::rust::RustArtifactBuilder,
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    artifact::language::rust::RustBuilder,
     context::get_context,
 };
 
-const SYSTEMS: [ArtifactSystem; 4] = [Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. Get context
-    let context = &mut get_context().await?;
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let ctx = &mut get_context().await?;
 
-    // 2. Create artifact
-    RustArtifactBuilder::new("example", SYSTEMS.to_vec())
-        .build(context)
-        .await?;
+    RustBuilder::new("example", systems).build(ctx).await?;
 
-    // 3. Run context with artifacts
-    context.run().await
+    ctx.run().await
 }
 ```
 
 ### Go
-
 ```go
 package main
 
 import (
-    "log"
-
-	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
-    "github.com/ALT-F4-LLC/vorpal/sdk/go/internal/artifact/language"
-    "github.com/ALT-F4-LLC/vorpal/sdk/go/internal/config"
+    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-var SYSTEMS = []artifact.ArtifactSystem{
-	artifact.ArtifactSystem_AARCH64_DARWIN,
-	artifact.ArtifactSystem_AARCH64_LINUX,
-	artifact.ArtifactSystem_X8664_DARWIN,
-	artifact.ArtifactSystem_X8664_LINUX,
+var systems = []api.ArtifactSystem{
+    api.ArtifactSystem_AARCH64_DARWIN,
+    api.ArtifactSystem_AARCH64_LINUX,
+    api.ArtifactSystem_X8664_DARWIN,
+    api.ArtifactSystem_X8664_LINUX,
 }
 
 func main() {
-    // 1. Get context
-    context := config.GetContext()
+    ctx := config.GetContext()
 
-    // 2. Create artifact
-    _, err := language.
-        NewRustBuilder("example", SYSTEMS).
-        Build(context)
-    if err != nil {
-        log.Fatalf("failed to build artifact: %v", err)
-    }
+    language.NewRustBuilder("example", systems).Build(ctx)
 
-    // 3. Run context with artifacts
-    context.Run()
+    ctx.Run()
 }
 ```
 
-### Python
+## Executors
+Vorpal does not lock you to a single executor. Each step sets its executor via `artifact.step[].entrypoint` and `artifact.step[].arguments`.
 
-```python
-from vorpal_sdk.config import get_context
-from vorpal_sdk.api.artifact import ArtifactSystem
-from vorpal_sdk.config.artifact.language.rust import RustArtifactBuilder
+- Default: Bash. SDK “shell” helpers run in Bash (on Linux these run inside Bubblewrap).
+- Custom: Point `entrypoint` to any binary (e.g., `bwrap`, `docker`, `podman`) and pass flags via `arguments`.
 
-SYSTEMS = [
-    ArtifactSystem.AARCH64_DARWIN,
-    ArtifactSystem.AARCH64_LINUX,
-    ArtifactSystem.X8664_DARWIN,
-    ArtifactSystem.X8664_LINUX,
-]
+Examples
 
-def main():
-    # 1. Get context
-    context = get_context()
-
-    # 2. Create artifact
-    RustArtifactBuilder("example", SYSTEMS).build(context)
-
-    # 3. Run context with artifacts
-    context.run()
-
-if __name__ == "__main__":
-    main()
-```
-
-### TypeScript
-
-```typescript
-import { getContext } from '@vorpal/sdk';
-import { ArtifactSystem } from '@vorpal/sdk/api/artifact';
-import { RustArtifactBuilder } from '@vorpal/sdk/config/artifact/language/rust';
-
-const SYSTEMS = [
-    ArtifactSystem.AARCH64_DARWIN,
-    ArtifactSystem.AARCH64_LINUX,
-    ArtifactSystem.X8664_DARWIN,
-    ArtifactSystem.X8664_LINUX,
-];
-
-async function main() {
-    // 1. Get context
-    const context = await getContext();
-
-    // 2. Create artifact
-    await new RustArtifactBuilder('example', SYSTEMS)
-        .build(context);
-
-    // 3. Run context with artifacts
-    await context.run();
-}
-
-main().catch(console.error);
-```
-
-## Components
-
-Below is the existing working diagram that illustrates the platform's design:
-
-> [!CAUTION]
-> This design is subject to change at ANY moment and is a work in progress.
-
-![vorpal-domains](./vorpal-domains.svg)
-
-## Artifacts
-
-Vorpal uses `artifacts` to describe every aspect of your software in the language of your choice:
-
+Rust (custom entrypoint/arguments)
 ```rust
-Artifact {
-    // required: name of artifact
-    name: "example".to_string(),
-
-    // optional: named aliases
-    aliases: vec![],
-
-    // optional: source paths for artifact
-    sources: vec![
-        ArtifactSource {
-            name: "example", // required: unique per source
-            path: ".", // required: relative location to context
-            excludes: vec![], // optional: to remove files
-            hash: None, // optional: to track changes
-            includes: vec![], // optional: to only use files
-        }
-    ],
-
-    // required: steps of artifact (in order)
-    steps: vec![
-        ArtifactStep {
-            entrypoint: Some("/bin/bash"), // required, host path for command (can be artifact)
-            arguments: vec![], // optional, arguments for entrypoint
-            artifacts: vec![], // optional, artifacts included in step
-            environments: vec![], // optional, environment variables for step
-            secrets: vec![], // optional, secrets to be added to environment
-            script: Some("echo \"hello, world!\" > $VORPAL_OUTPUT/hello_world.txt"), // optional, script passed to executor
-        },
-    ],
-
-    // systems for artifact
-    systems: vec![Aarch64Darwin, Aarch64Linux],
-
-    // target
-    target: Aarch64Darwin
+use anyhow::Result;
+use vorpal_sdk::{
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    artifact::{ArtifactBuilder, ArtifactStepBuilder},
+    context::get_context,
 };
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let ctx = &mut get_context().await?;
+
+    let step = ArtifactStepBuilder::new("docker")
+        .with_arguments(vec![
+            "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
+            "alpine", "sh", "-lc", "echo hi > /out/hi.txt",
+        ])
+        .build();
+
+    ArtifactBuilder::new("example-docker", vec![step], systems).build(ctx).await?;
+    ctx.run().await
+}
 ```
 
-Artifacts can be wrapped in language functions and/or modules to be shared within projects or organizations providing centrally managed and reusable configurations with domain-specific overrides (see examples in overview).
+Go (custom entrypoint/arguments)
+```go
+package main
 
-### Sources
+import (
+    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+)
 
-Coming soon.
+var systems = []api.ArtifactSystem{
+    api.ArtifactSystem_AARCH64_DARWIN,
+    api.ArtifactSystem_AARCH64_LINUX,
+    api.ArtifactSystem_X8664_DARWIN,
+    api.ArtifactSystem_X8664_LINUX,
+}
 
-### Steps
+func main() {
+    ctx := config.GetContext()
 
-Steps provided by the SDKs are maintained to provide reproducibile cross-platform environments for them. These environments include strictly maintained low-level dependencies that are used as a wrapper for each step.
+    step, _ := artifact.NewArtifactStepBuilder().
+        WithEntrypoint("docker", systems).
+        WithArguments([]string{"run", "--rm", "-v", "$VORPAL_OUTPUT:/out", "alpine", "sh", "-lc", "echo hi > /out/hi.txt"}, systems).
+        Build(ctx)
 
-> [!NOTE]
-> Vorpal enables developers to create their own build steps instead of using the SDKs which are provided to handle "common" scenarios.
-
-#### Linux
-
-On Linux, developers can run steps in a community maintained sandbox which is isolated similiar to containers.
-
-The following are included in the sandbox:
-
-- `bash`
-- `binutils`
-- `bison`
-- `coreutils`
-- `curl`
-- `diffutils`
-- `file`
-- `findutils`
-- `gawk`
-- `gcc`
-- `gettext`
-- `glibc`
-- `grep`
-- `gzip`
-- `libidn2`
-- `libpsl`
-- `libunistring`
-- `linux-headers`
-- `m4`
-- `make`
-- `ncurses`
-- `openssl`
-- `patch`
-- `perl`
-- `python`
-- `sed`
-- `tar`
-- `texinfo`
-- `unzip`
-- `util-linux`
-- `xz`
-- `zlib`
-
-#### macOS
-
-Coming soon.
-
-#### Windows
-
-Coming soon.
-
-### Systems
-
-Coming soon.
-
-## Development
-
-### Requirements
-
-#### macOS
-
-On macOS, install the native tools with Xcode:
-
-```bash
-xcode-select --install
+    artifact.NewArtifactBuilder("example-docker", []*api.ArtifactStep{step}, systems).Build(ctx)
+    ctx.Run()
+}
 ```
 
-#### Linux
+## Dev & User Environments
+Manage local shells and user-wide commands using the builders.
 
-On Linux, install dependencies with the distro's package manger (apt, yum, etc):
+- Devenv: creates a portable shell activation (`bin/activate`) that prepends tool artifacts to PATH and sets env vars.
+- Userenv: installs activation helpers and safe symlinks under `$HOME/.vorpal/bin`.
 
-> [!IMPORTANT]
-> If you are using NixOS, there is a `shell.nix` configuration included for the development environment.
+Rust
+```rust
+use anyhow::Result;
+use vorpal_sdk::{
+  api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+  artifact::{devenv::DevenvBuilder, userenv::UserenvBuilder},
+  context::get_context,
+};
 
-- `bubblewrap` (sandboxing)
-- `curl` (downloading)
-- `docker` (sandboxing)
-- `protoc` (compiling)
-- `unzip` (downloading)
+#[tokio::main]
+async fn main() -> Result<()> {
+  let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+  let ctx = &mut get_context().await?;
 
-The helpful `./script/debian.sh` used for setting up systems in continuous integration can also be used to setup any similiar Debian-based systems.
+  DevenvBuilder::new("my-devenv", systems.clone())
+    .with_environments(vec!["FOO=bar".into()])
+    .build(ctx).await?;
 
-### Setup
+  UserenvBuilder::new("my-userenv", systems)
+    .with_symlinks(vec![("/path/to/local/bin/app", "$HOME/.vorpal/bin/app")])
+    .build(ctx).await?;
 
-The helpful `./script/dev.sh` used to run development commands in an isolated way without having to update your environment. 
-
-> [!IMPORTANT]
-> If you are using NixOS, there is a `shell.nix` configuration included for the development environment.
-
-The following installs missing dependencies then runs `cargo build` inside the development environment:
-
-```bash
-$ ./script/dev.sh cargo build
+  ctx.run().await
+}
 ```
 
-#### Direnv
+Go
+```go
+package main
 
-To develop inside the environment the supported solution is to use `direnv` which manages all of this for you. Direnv will automatically run "./script/dev.sh" under the hood and export environment variables to your shell when you enter the directory.
+import (
+  api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+  "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+  "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+)
 
-Once you've installed `direnv` on your system navigate to Vorpal's source code and run:
+var systems = []api.ArtifactSystem{
+  api.ArtifactSystem_AARCH64_DARWIN,
+  api.ArtifactSystem_AARCH64_LINUX,
+  api.ArtifactSystem_X8664_DARWIN,
+  api.ArtifactSystem_X8664_LINUX,
+}
 
-```bash
-$ direnv allow
+func main() {
+  ctx := config.GetContext()
+
+  artifact.NewDevenvBuilder("my-devenv", systems).
+    WithEnvironments([]string{"FOO=bar"}).
+    Build(ctx)
+
+  artifact.NewUserenvBuilder("my-userenv", systems).
+    WithSymlinks(map[string]string{"/path/to/local/bin/app": "$HOME/.vorpal/bin/app"}).
+    Build(ctx)
+
+  ctx.Run()
+}
 ```
 
-### Testing
+### Activate
+- Userenv: run `$HOME/.vorpal/bin/vorpal-activate`, then `source $HOME/.vorpal/bin/vorpal-activate-shell`.
+- Devenv: source the generated `bin/activate` inside the artifact output when used within a step or your own wrapper script.
 
-At this point, you should be able to run `cargo build` successfully in the repository. If that doesn't work, go back to "Setup" and verify you have done all the required steps.
-
-These steps guide how to compile from source and also test compiling Vorpal with Vorpal.
-
-1. Build without Vorpal:
-
-```bash
-make build
-```
-
-2. Run the initial install script, which will create all relevant directories and permissions needed to run the next steps.
-
-> [!CAUTION]
-> This step requires access to protected paths on your host filesystem. As such,
-> it will likely require `sudo` privileges (or your system's equivalent) to run.
-
-```bash
-bash ./script/install.sh
-```
-
-3. Generate keys for Vorpal:
-
-```bash
-./target/debug/vorpal system keys generate
-```
-
-4. Start services for Vorpal:
-
-```bash
-./target/debug/vorpal start
-```
-
-5. Build with Vorpal:
-
-```bash
-./target/debug/vorpal artifact make "vorpal"
-```
-
-The entire stack of has now been tested by building itself.
-
-### Makefile
-
-There is makefile which can be used as a reference for common commands used when developing.
-
-Here are some frequently used:
-
-- `make` (default build)
-- `make lint` (before pushing)
-- `make dist` (package in `./dist` path)
-- `make vorpal-start` (runs services with `cargo`)
-- `make vorpal` (builds vorpal-in-vorpal with `cargo`)
+## Contribute
+- Read the contributor guide: `AGENTS.md` (structure, commands, style, and PR workflow).
+- Before opening a PR: `make format && make lint && make test`.
+- Prefer small, focused changes with clear descriptions and linked issues.
+- For local development, use `./script/dev.sh` or `direnv allow` to get a consistent environment.
