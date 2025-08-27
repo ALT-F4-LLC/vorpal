@@ -178,7 +178,12 @@ pub async fn userenv(
         chmod +x $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks
         chmod +x $VORPAL_OUTPUT/bin/vorpal-activate-symlinks
         chmod +x $VORPAL_OUTPUT/bin/vorpal-activate"#,
-        environments = environments.iter().map(|e| format!("export {e}")).collect::<Vec<String>>().join("\n"),
+        environments = environments
+            .iter()
+            .filter(|e| !e.starts_with("PATH="))
+            .map(|e| format!("export {e}"))
+            .collect::<Vec<String>>()
+            .join("\n"),
         symlinks_deactivate = symlinks
             .iter()
             .map(|(_, target)| format!("rm -fv {target}"))

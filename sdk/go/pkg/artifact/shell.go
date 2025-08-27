@@ -208,12 +208,16 @@ func ScriptUserenv(
 		stepPathArtifacts = append(stepPathArtifacts, fmt.Sprintf("%s/bin", GetEnvKey(artifact)))
 	}
 
+	stepEnvironments := make([]string, 0)
 	stepPath := strings.Join(stepPathArtifacts, ":")
 
 	for _, envvar := range environments {
 		if strings.Contains(envvar, "PATH=") {
 			stepPath = fmt.Sprintf("%s:%s", strings.Replace(envvar, "PATH=", "", 1), stepPath)
+			continue
 		}
+
+		stepEnvironments = append(stepEnvironments, envvar)
 	}
 
 	// Setup script
@@ -242,7 +246,7 @@ func ScriptUserenv(
 	}
 
 	stepScriptVars := ScriptUserenvTemplateArgs{
-		Environments:       strings.Join(environmentsExport, "\n"),
+		Environments:       strings.Join(stepEnvironments, "\n"),
 		Path:               stepPath,
 		SymlinksActivate:   strings.Join(symlinksActivate, "\n"),
 		SymlinksCheck:      strings.Join(symlinksCheck, "\n"),
