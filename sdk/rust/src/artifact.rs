@@ -16,7 +16,6 @@ pub mod grpcurl;
 pub mod language;
 pub mod linux_debian;
 pub mod linux_vorpal;
-pub mod nginx;
 pub mod protoc;
 pub mod protoc_gen_go;
 pub mod protoc_gen_go_grpc;
