@@ -41,6 +41,7 @@ mkdir -pv $VORPAL_OUTPUT/bin
 cp -prv bin "$VORPAL_OUTPUT"`
 
 type ScriptUserenvTemplateArgs struct {
+	Environments       string
 	Path               string
 	SymlinksActivate   string
 	SymlinksCheck      string
@@ -51,6 +52,7 @@ const ScriptUserenvTemplate = `
 mkdir -pv $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
+{{.Environments}}
 export PATH="$VORPAL_OUTPUT/bin:{{.Path}}:$PATH"
 EOF
 
@@ -233,7 +235,14 @@ func ScriptUserenv(
 		symlinksDeactivate = append(symlinksDeactivate, fmt.Sprintf("rm -fv %s", target))
 	}
 
+	environmentsExport := make([]string, 0)
+
+	for _, envvar := range environments {
+		environmentsExport = append(environmentsExport, fmt.Sprintf("export %s", envvar))
+	}
+
 	stepScriptVars := ScriptUserenvTemplateArgs{
+		Environments:       strings.Join(environmentsExport, "\n"),
 		Path:               stepPath,
 		SymlinksActivate:   strings.Join(symlinksActivate, "\n"),
 		SymlinksCheck:      strings.Join(symlinksCheck, "\n"),

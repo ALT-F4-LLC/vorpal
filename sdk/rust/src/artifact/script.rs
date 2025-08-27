@@ -135,6 +135,7 @@ pub async fn userenv(
         mkdir -pv $VORPAL_OUTPUT/bin
 
         cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
+        {environments}
         export PATH="$VORPAL_OUTPUT/bin:{step_path}:$PATH"
         EOF
 
@@ -177,6 +178,7 @@ pub async fn userenv(
         chmod +x $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks
         chmod +x $VORPAL_OUTPUT/bin/vorpal-activate-symlinks
         chmod +x $VORPAL_OUTPUT/bin/vorpal-activate"#,
+        environments = environments.iter().map(|e| format!("export {e}")).collect::<Vec<String>>().join("\n"),
         symlinks_deactivate = symlinks
             .iter()
             .map(|(_, target)| format!("rm -fv {target}"))
