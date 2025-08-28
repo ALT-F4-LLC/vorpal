@@ -258,6 +258,14 @@ platform = "x86_64-linux"
 
 [[sources]]
 name = "gh"
+path = "https://github.com/cli/cli/releases/download/v2.69.0/gh_2.69.0_linux_arm64.tar.gz"
+includes = []
+excludes = []
+digest = "c63c8e24845de186b7130a8b9a0923ef93a8a031746dafaefae987ef04258f26"
+platform = "aarch64-linux"
+
+[[sources]]
+name = "gh"
 path = "https://github.com/cli/cli/releases/download/v2.69.0/gh_2.69.0_macOS_arm64.zip"
 includes = []
 excludes = []
