@@ -12,7 +12,7 @@ use crate::command::{
         temps::{create_sandbox_dir, create_sandbox_file},
     },
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
 use http::uri::{InvalidUri, Uri};
 use sha256::digest;
@@ -75,18 +75,18 @@ pub async fn build_source(
 
     let service_uri = registry
         .parse::<Uri>()
-        .map_err(|e: InvalidUri| anyhow::anyhow!("failed to parse registry URI: {}", e))?;
+        .map_err(|e: InvalidUri| anyhow!("failed to parse registry URI: {}", e))?;
 
     let channel = Channel::builder(service_uri)
         .tls_config(service_tls)
-        .map_err(|e| anyhow::anyhow!("failed to create tls config: {}", e))?
+        .map_err(|e| anyhow!("failed to create tls config: {}", e))?
         .connect()
         .await
-        .map_err(|e| anyhow::anyhow!("failed to connect to registry: {}", e))?;
+        .map_err(|e| anyhow!("failed to connect to registry: {}", e))?;
 
     let auth_header: MetadataValue<_> = service_secret
         .parse()
-        .map_err(|e| anyhow::anyhow!("failed to parse service secret: {}", e))?;
+        .map_err(|e| anyhow!("failed to parse service secret: {}", e))?;
 
     // Create client with authorization interceptor
     let mut client_archive =
@@ -141,115 +141,130 @@ pub async fn build_source(
         // If a digest is provided, we'll later verify it matches the computed digest
         // from the downloaded content. If not provided, proceed and compute it.
 
-        let http_path = Url::parse(&source.path).map_err(|e| anyhow::anyhow!(e))?;
+        let path = Url::parse(&source.path).map_err(|e| anyhow!(e))?;
 
-        if http_path.scheme() != "http" && http_path.scheme() != "https" {
-            bail!("remote scheme not supported: {:?}", http_path.scheme());
+        if path.scheme() != "http" && path.scheme() != "https" {
+            bail!("remote scheme not supported: {:?}", path.scheme());
         }
 
         let _ = tx
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
                 artifact_digest: None,
-                artifact_output: Some(format!("download source: {http_path}")),
+                artifact_output: Some(format!("download source: {path}")),
             }))
             .await
             .map_err(|_| Status::internal("failed to send response"));
 
-        let remote_response = reqwest::get(http_path.as_str())
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let response = reqwest::get(path.as_str()).await.map_err(|e| anyhow!(e))?;
 
-        if !remote_response.status().is_success() {
-            anyhow::bail!("URL not failed: {:?}", remote_response.status());
+        if !response.status().is_success() {
+            bail!("URL not failed: {:?}", response.status());
         }
 
-        let remote_response_bytes = remote_response
-            .bytes()
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
+        let response_bytes = response.bytes().await.map_err(|e| anyhow!(e))?;
+        let response_bytes = response_bytes.as_ref();
+        let response_kind = infer::get(response_bytes);
 
-        let remote_response_bytes = remote_response_bytes.as_ref();
+        match response_kind {
+            None => {
+                warn!("agent |> no mime-type detected for source: {}", source.name);
 
-        let kind = infer::get(remote_response_bytes);
+                let file_name = path
+                    .path_segments()
+                    .and_then(|mut segments| segments.next_back())
+                    .and_then(|name| if name.is_empty() { None } else { Some(name) })
+                    .unwrap_or(&source.name);
 
-        if kind.is_none() {
-            let source_file_name = http_path
-                .path_segments()
-                .and_then(|mut segments| segments.next_back())
-                .and_then(|name| if name.is_empty() { None } else { Some(name) })
-                .unwrap_or(&source.name);
+                let file_path = source_sandbox.join(file_name);
 
-            let source_file_path = source_sandbox.join(source_file_name);
+                write(&file_path, response_bytes)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+            }
 
-            write(&source_file_path, remote_response_bytes)
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
+            Some(kind) => {
+                info!(
+                    "agent |> detected mime-type: {} for source: {}",
+                    kind.mime_type(),
+                    source.name
+                );
 
-        let _ = tx
-            .send(Ok(PrepareArtifactResponse {
-                artifact: None,
-                artifact_digest: None,
-                artifact_output: Some(format!("unpack source: {http_path}")),
-            }))
-            .await
-            .map_err(|_| Status::internal("failed to send response"));
+                let _ = tx
+                    .send(Ok(PrepareArtifactResponse {
+                        artifact: None,
+                        artifact_digest: None,
+                        artifact_output: Some(format!("unpack source: {path}")),
+                    }))
+                    .await
+                    .map_err(|_| Status::internal("failed to send response"));
 
-        if let Some(kind) = kind {
-            match kind.mime_type() {
-                "application/gzip" => {
-                    let decoder = GzipDecoder::new(remote_response_bytes);
-                    let mut archive = Archive::new(decoder);
+                match kind.mime_type() {
+                    "application/x-executable" | "application/x-mach-binary" => {
+                        let file_name = path
+                            .path_segments()
+                            .and_then(|mut segments| segments.next_back())
+                            .and_then(|name| if name.is_empty() { None } else { Some(name) })
+                            .unwrap_or(&source.name);
 
-                    archive
-                        .unpack(&source_sandbox)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                        let file_path = source_sandbox.join(file_name);
 
-                    // let source_cache_path = source_cache_path.join("...");
-                }
+                        write(&file_path, response_bytes)
+                            .await
+                            .map_err(|e| anyhow!(e))?;
+                    }
 
-                "application/x-bzip2" => {
-                    let decoder = BzDecoder::new(remote_response_bytes);
-                    let mut archive = Archive::new(decoder);
+                    "application/gzip" => {
+                        let decoder = GzipDecoder::new(response_bytes);
+                        let mut archive = Archive::new(decoder);
 
-                    archive
-                        .unpack(&source_sandbox)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                }
+                        archive
+                            .unpack(&source_sandbox)
+                            .await
+                            .map_err(|e| anyhow!(e))?;
+                    }
 
-                "application/x-xz" => {
-                    let decoder = XzDecoder::new(remote_response_bytes);
-                    let mut archive = Archive::new(decoder);
+                    "application/x-bzip2" => {
+                        let decoder = BzDecoder::new(response_bytes);
+                        let mut archive = Archive::new(decoder);
 
-                    archive
-                        .unpack(&source_sandbox)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                }
+                        archive
+                            .unpack(&source_sandbox)
+                            .await
+                            .map_err(|e| anyhow!(e))?;
+                    }
 
-                "application/zip" => {
-                    let archive_sandbox_path = create_sandbox_file(Some("zip")).await?;
+                    "application/x-xz" => {
+                        let decoder = XzDecoder::new(response_bytes);
+                        let mut archive = Archive::new(decoder);
 
-                    write(&archive_sandbox_path, remote_response_bytes)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                        archive
+                            .unpack(&source_sandbox)
+                            .await
+                            .map_err(|e| anyhow!(e))?;
+                    }
 
-                    unpack_zip(&archive_sandbox_path, &source_sandbox).await?;
+                    "application/zip" => {
+                        let archive_sandbox_path = create_sandbox_file(Some("zip")).await?;
 
-                    remove_file(&archive_sandbox_path)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                }
+                        write(&archive_sandbox_path, response_bytes)
+                            .await
+                            .map_err(|e| anyhow!(e))?;
 
-                _ => {
-                    bail!(
-                        "'source.{}.path' unsupported mime-type detected: {:?}",
-                        source.name,
-                        source.path
-                    );
+                        unpack_zip(&archive_sandbox_path, &source_sandbox).await?;
+
+                        remove_file(&archive_sandbox_path)
+                            .await
+                            .map_err(|e| anyhow!(e))?;
+                    }
+
+                    _ => {
+                        bail!(
+                            "'source.{}.path' unsupported mime-type detected: {:?}",
+                            source.name,
+                            source.path
+                        );
+                    }
                 }
             }
         }
@@ -291,7 +306,7 @@ pub async fn build_source(
         set_timestamps(&sandbox_path).await?;
     }
 
-    // 4. Hash files
+    // 4. Digest files
 
     let source_digest = get_source_digest(source_sandbox_files.clone())?;
 
@@ -378,7 +393,7 @@ pub async fn build_source(
 
     remove_dir_all(&source_sandbox)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .map_err(|e| anyhow!(e))?;
 
     Ok(source_digest)
 }
@@ -618,11 +633,9 @@ impl AgentService for AgentServer {
         request: Request<PrepareArtifactRequest>,
     ) -> Result<Response<Self::PrepareArtifactStream>, Status> {
         let (tx, rx) = channel(100);
-
         let registry = self.registry.clone();
 
         tokio::spawn(async move {
-            // Load service secret for authentication
             let service_secret = match auth::load_service_secret().await {
                 Ok(secret) => secret,
                 Err(e) => {
