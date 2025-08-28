@@ -6,12 +6,12 @@ use vorpal_sdk::{
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
     artifact::{
-        devenv::DevenvBuilder,
+        devenv::DevEnvBuilder,
         get_env_key, gh, go, goimports, gopls, grpcurl,
         language::go::{get_goarch, get_goos},
         language::rust::RustBuilder,
         protoc, protoc_gen_go, protoc_gen_go_grpc, staticcheck,
-        userenv::UserenvBuilder,
+        userenv::UserEnvBuilder,
         ArtifactArgumentBuilder, ArtifactProcessBuilder, ArtifactTaskBuilder,
     },
     context::get_context,
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 
     // Vorpal devenv
 
-    DevenvBuilder::new("vorpal-devenv", SYSTEMS.to_vec())
+    DevEnvBuilder::new("vorpal-dev", SYSTEMS.to_vec())
         .with_artifacts(vec![
             go,
             goimports,
@@ -97,7 +97,7 @@ async fn main() -> Result<()> {
 
     // Vorpal userenv
 
-    UserenvBuilder::new("vorpal-userenv", SYSTEMS.to_vec())
+    UserEnvBuilder::new("vorpal-user", SYSTEMS.to_vec())
         .with_artifacts(vec![])
         .with_environments(vec!["PATH=$HOME/.vorpal/bin".to_string()])
         .with_symlinks(vec![

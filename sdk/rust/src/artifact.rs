@@ -25,7 +25,6 @@ pub mod rust_std;
 pub mod rust_toolchain;
 pub mod rustc;
 pub mod rustfmt;
-pub mod script;
 pub mod source;
 pub mod staticcheck;
 pub mod step;

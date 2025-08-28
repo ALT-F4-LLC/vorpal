@@ -111,7 +111,7 @@ func main() {
 		log.Fatalf("failed to build vorpal: %v", err)
 	}
 
-	// Vorpal devenv
+	// Vorpal dev environment
 
 	goarch, err := language.GetGOARCH(contextTarget)
 	if err != nil {
@@ -123,27 +123,27 @@ func main() {
 		log.Fatalf("failed to get GOOS for target %s: %v", contextTarget, err)
 	}
 
-    _, errDevenv := artifact.
-        NewDevenvBuilder("vorpal-devenv", SYSTEMS).
-        WithArtifacts([]*string{
-            gobin,
-            goimports,
-            gopls,
-            grpcurl,
-            protoc,
-            protocGenGo,
-            protocGenGoGRPC,
-            staticcheck,
-        }).
-        WithEnvironments([]string{
-            "CGO_ENABLED=0",
-            fmt.Sprintf("GOARCH=%s", *goarch),
-            fmt.Sprintf("GOOS=%s", *goos),
-        }).
-        Build(context)
-    if errDevenv != nil {
-        log.Fatalf("failed to build vorpal-devenv: %v", errDevenv)
-    }
+	_, errDev := artifact.
+		NewDevenvBuilder("vorpal-dev", SYSTEMS).
+		WithArtifacts([]*string{
+			gobin,
+			goimports,
+			gopls,
+			grpcurl,
+			protoc,
+			protocGenGo,
+			protocGenGoGRPC,
+			staticcheck,
+		}).
+		WithEnvironments([]string{
+			"CGO_ENABLED=0",
+			fmt.Sprintf("GOARCH=%s", *goarch),
+			fmt.Sprintf("GOOS=%s", *goos),
+		}).
+		Build(context)
+	if errDev != nil {
+		log.Fatalf("failed to build vorpal-dev: %v", errDev)
+	}
 
 	// Vorpal process
 
@@ -178,19 +178,19 @@ func main() {
 		log.Fatalf("failed to build vorpal-test: %v", errTest)
 	}
 
-	// Vorpal userenv
+	// Vorpal user environment
 
-    _, errUserenv := artifact.
-        NewUserenvBuilder("vorpal-userenv", SYSTEMS).
-        WithArtifacts([]*string{}).
-        WithEnvironments([]string{"PATH=$HOME/.vorpal/bin"}).
-        WithSymlinks(map[string]string{
-            "$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal": "$HOME/.vorpal/bin/vorpal",
-        }).
-        Build(context)
-    if errUserenv != nil {
-        log.Fatalf("failed to build vorpal-userenv: %v", errUserenv)
-    }
+	_, errUser := artifact.
+		NewUserEnvBuilder("vorpal-user", SYSTEMS).
+		WithArtifacts([]*string{}).
+		WithEnvironments([]string{"PATH=$HOME/.vorpal/bin"}).
+		WithSymlinks(map[string]string{
+			"$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal": "$HOME/.vorpal/bin/vorpal",
+		}).
+		Build(context)
+	if errUser != nil {
+		log.Fatalf("failed to build vorpal-user: %v", errUser)
+	}
 
 	if context.GetArtifactName() == "vorpal-release" {
 		varAarch64Darwin, err := artifact.

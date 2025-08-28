@@ -167,8 +167,8 @@ jobs:
           echo "VORPAL_ARTIFACT=$VORPAL_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_DEVENV_ARTIFACT=$(vorpal artifact make "vorpal-devenv" .)
-          echo "VORPAL_DEVENV_ARTIFACT=$VORPAL_DEVENV_ARTIFACT" >> $GITHUB_ENV
+          VORPAL_DEV_ARTIFACT=$(vorpal artifact make "vorpal-dev" .)
+          echo "VORPAL_DEV_ARTIFACT=$VORPAL_DEV_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
           VORPAL_PROCESS_ARTIFACT=$(vorpal artifact make "vorpal-process" .)
@@ -179,8 +179,8 @@ jobs:
           echo "VORPAL_TEST_ARTIFACT=$VORPAL_TEST_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
-          VORPAL_USERENV_ARTIFACT=$(vorpal artifact make "vorpal-userenv" .)
-          echo "VORPAL_USERENV_ARTIFACT=$VORPAL_USERENV_ARTIFACT" >> $GITHUB_ENV
+          VORPAL_USER_ARTIFACT=$(vorpal artifact make "vorpal-user" .)
+          echo "VORPAL_USER_ARTIFACT=$VORPAL_USER_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
           ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal" .)
@@ -190,9 +190,9 @@ jobs:
           fi
 
       - run: |
-          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal-devenv" .)
-          if [ "$ARTIFACT" != "$VORPAL_DEVENV_ARTIFACT" ]; then
-            echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_DEVENV_ARTIFACT"
+          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal-dev" .)
+          if [ "$ARTIFACT" != "$VORPAL_DEV_ARTIFACT" ]; then
+            echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_DEV_ARTIFACT"
             exit 1
           fi
 
@@ -211,9 +211,9 @@ jobs:
           fi
 
       - run: |
-          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal-userenv" .)
-          if [ "$ARTIFACT" != "$VORPAL_USERENV_ARTIFACT" ]; then
-            echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_USERENV_ARTIFACT"
+          ARTIFACT=$(vorpal artifact make --config "Vorpal.go.toml" "vorpal-user" .)
+          if [ "$ARTIFACT" != "$VORPAL_USER_ARTIFACT" ]; then
+            echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_USER_ARTIFACT"
             exit 1
           fi
 
