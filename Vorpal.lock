@@ -266,6 +266,14 @@ platform = "x86_64-darwin"
 
 [[sources]]
 name = "gh"
+path = "https://github.com/cli/cli/releases/download/v2.69.0/gh_2.69.0_linux_amd64.tar.gz"
+includes = []
+excludes = []
+digest = "27940116086dc2adaa8f12a6a12d8ca418b0613d6184f410846e1367777f4745"
+platform = "x86_64-linux"
+
+[[sources]]
+name = "gh"
 path = "https://github.com/cli/cli/releases/download/v2.69.0/gh_2.69.0_linux_arm64.tar.gz"
 includes = []
 excludes = []
