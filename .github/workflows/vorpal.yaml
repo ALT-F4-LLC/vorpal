@@ -207,7 +207,7 @@ jobs:
           path: Vorpal.lock
 
   release:
-    # if: github.event.schedule != ''
+    if: github.event.schedule != ''
     needs:
       - test
     permissions:
