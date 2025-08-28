@@ -85,7 +85,7 @@ var systems = []api.ArtifactSystem{
 func main() {
     ctx := config.GetContext()
 
-    language.NewRustBuilder("example", systems).Build(ctx)
+    language.NewGoBuilder("example", systems).Build(ctx)
 
     ctx.Run()
 }
