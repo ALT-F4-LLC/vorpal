@@ -38,7 +38,7 @@ mkdir -p "$INSTALL_DIR/bin"
 curl -s -L "$INSTALL_BINARY_URL" | tar xz -C "$INSTALL_DIR/bin"
 
 # Setup directories
-sudo mkdir -pv /var/lib/vorpal/{key,sandbox,store}
+sudo mkdir -pv /var/lib/vorpal/{key,log,sandbox,store}
 sudo mkdir -pv /var/lib/vorpal/store/artifact/{alias,archive,config,output}
 sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
 
@@ -66,6 +66,12 @@ cat <<EOF > "$HOME/Library/LaunchAgents/com.altf4llc.vorpal.plist"
         <string>${INSTALL_DIR}/bin/vorpal</string>
         <string>start</string>
     </array>
+
+    <key>StandardOutPath</key>
+    <string>/var/lib/vorpal/log/services.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/var/lib/vorpal/log/services.log</string>
 
     <!-- Start on login/load -->
     <key>RunAtLoad</key>
