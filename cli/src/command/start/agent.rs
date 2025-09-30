@@ -368,10 +368,12 @@ pub async fn build_source(
         let mut source_stream = vec![];
 
         for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
-            source_stream.push(ArchivePushRequest {
+            let request_push = ArchivePushRequest {
                 data: chunk.to_vec(),
                 digest: source_digest.clone(),
-            });
+            };
+
+            source_stream.push(request_push);
         }
 
         let _ = tx
@@ -383,10 +385,16 @@ pub async fn build_source(
             .await
             .map_err(|_| Status::internal("failed to send response"));
 
-        client_archive
-            .push(tokio_stream::iter(source_stream))
-            .await
-            .expect("failed to push");
+        let mut request = Request::new(tokio_stream::iter(source_stream));
+
+        request.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", service_secret)
+                .parse()
+                .expect("failed to set authorization header"),
+        );
+
+        client_archive.push(request).await.expect("failed to push");
 
         remove_file(&source_sandbox_archive).await?;
     }
