@@ -54,7 +54,7 @@ pub async fn run(digest: &str, registry: &str, api_token: Option<String>) -> Res
 
     grpc_request.metadata_mut().insert(
         "authorization",
-        user_api_token
+        format!("Bearer {}", user_api_token)
             .parse()
             .expect("failed to set authorization header"),
     );

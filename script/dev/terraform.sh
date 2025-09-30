@@ -5,7 +5,7 @@ ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
 OS="$(uname | tr '[:upper:]' '[:lower:]')"
 TERRAFORM_ARCH=""
 TERRAFORM_OS=""
-TERRAFORM_VERSION="1.13.0"
+TERRAFORM_VERSION="1.13.3"
 
 case "${OS}" in
   darwin|linux)

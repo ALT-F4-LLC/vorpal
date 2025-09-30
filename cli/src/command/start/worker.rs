@@ -114,7 +114,7 @@ async fn pull_source(
             Status::internal(format!("failed to create archive client channel: {err}"))
         })?;
 
-    let auth_header: MetadataValue<_> = service_secret
+    let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
         .parse()
         .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
 
@@ -624,8 +624,7 @@ async fn build_artifact(
                 Status::internal(format!("failed to create archive client channel: {err}"))
             })?;
 
-        let auth_header_push: MetadataValue<_> = service_secret
-            .clone()
+        let auth_header_push: MetadataValue<_> = format!("Bearer {}", service_secret.clone())
             .parse()
             .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
 
@@ -703,7 +702,7 @@ async fn build_artifact(
                 Status::internal(format!("failed to create artifact client channel: {err}"))
             })?;
 
-        let auth_header: MetadataValue<_> = service_secret
+        let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
             .parse()
             .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
 

@@ -91,10 +91,12 @@ async fn build(
 
     request.metadata_mut().insert(
         "authorization",
-        user_api_token
+        format!("Bearer {}", user_api_token)
             .parse()
             .expect("failed to set authorization header"),
     );
+
+    // TODO: add check before pulling
 
     match client_archive.pull(request).await {
         Err(status) => {
@@ -170,7 +172,7 @@ async fn build(
 
     request.metadata_mut().insert(
         "authorization",
-        user_api_token
+        format!("Bearer {}", user_api_token)
             .parse()
             .expect("failed to set authorization header"),
     );
