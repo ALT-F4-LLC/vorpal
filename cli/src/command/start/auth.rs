@@ -2,8 +2,7 @@ use crate::command::store::paths::get_key_service_secret_path;
 use anyhow::Result;
 use std::env::var;
 use tokio::fs::read_to_string;
-use tonic::{metadata::MetadataValue, Request, Status};
-use tracing::warn;
+use tonic::{Request, Status};
 
 pub async fn load_service_secret() -> Result<String> {
     let secret_path = get_key_service_secret_path();
@@ -19,21 +18,22 @@ pub async fn load_service_secret() -> Result<String> {
     Ok(secret)
 }
 
-pub fn create_auth_interceptor(
-    expected_token: String,
+pub fn create_interceptor(
+    service_token: String,
 ) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
-    move |req: Request<()>| -> Result<Request<()>, Status> {
-        let token_header: MetadataValue<_> = expected_token.parse().unwrap();
+    move |request: Request<()>| -> Result<Request<()>, Status> {
+        match request.metadata().get("authorization") {
+            None => Err(Status::unauthenticated("Missing authorization header")),
 
-        match req.metadata().get("authorization") {
-            Some(t) if token_header == *t => Ok(req),
-            Some(_) => {
-                warn!("Invalid token provided");
-                Err(Status::unauthenticated("Invalid token"))
-            }
-            None => {
-                warn!("Missing authorization header");
-                Err(Status::unauthenticated("Missing authorization header"))
+            Some(t) => {
+                let authorization = t.to_str().unwrap_or("").trim();
+                let authorization_token = &authorization[7..];
+
+                if authorization_token == service_token {
+                    Ok(request)
+                } else {
+                    Err(Status::unauthenticated("Invalid token"))
+                }
             }
         }
     }

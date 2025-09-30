@@ -65,7 +65,7 @@ pub async fn run(
 
     let service_secret = auth::load_service_secret().await?;
 
-    let auth_interceptor = auth::create_auth_interceptor(service_secret);
+    let auth_interceptor = auth::create_interceptor(service_secret);
 
     if services.contains(&"agent".to_string()) {
         let service = AgentServiceServer::with_interceptor(

@@ -224,7 +224,7 @@ impl ConfigContext {
 
         request.metadata_mut().insert(
             "authorization",
-            self.client_api_token
+            format!("Bearer {}", self.client_api_token)
                 .parse()
                 .expect("failed to set authorization header"),
         );
@@ -303,7 +303,7 @@ impl ConfigContext {
 
             grpc_request.metadata_mut().insert(
                 "authorization",
-                self.client_api_token
+                format!("Bearer {}", self.client_api_token)
                     .parse()
                     .expect("failed to set authorization header"),
             );
@@ -344,7 +344,7 @@ impl ConfigContext {
 
         grpc_request.metadata_mut().insert(
             "authorization",
-            self.client_api_token
+            format!("Bearer {}", self.client_api_token)
                 .parse()
                 .expect("failed to set authorization header"),
         );
@@ -369,7 +369,7 @@ impl ConfigContext {
 
                 grpc_request.metadata_mut().insert(
                     "authorization",
-                    self.client_api_token
+                    format!("Bearer {}", self.client_api_token)
                         .parse()
                         .expect("failed to set authorization header"),
                 );

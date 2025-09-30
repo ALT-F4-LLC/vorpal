@@ -84,7 +84,7 @@ pub async fn build_source(
         .await
         .map_err(|e| anyhow!("failed to connect to registry: {}", e))?;
 
-    let auth_header: MetadataValue<_> = service_secret
+    let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
         .parse()
         .map_err(|e| anyhow!("failed to parse service secret: {}", e))?;
 
