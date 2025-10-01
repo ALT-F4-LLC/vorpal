@@ -6,7 +6,7 @@ use crate::{
 use anyhow::Result;
 use indoc::formatdoc;
 
-pub struct DevEnvBuilder<'a> {
+pub struct ProjectEnvironmentBuilder<'a> {
     pub artifacts: Vec<String>,
     pub environments: Vec<String>,
     pub name: &'a str,
@@ -14,7 +14,7 @@ pub struct DevEnvBuilder<'a> {
     pub systems: Vec<ArtifactSystem>,
 }
 
-impl<'a> DevEnvBuilder<'a> {
+impl<'a> ProjectEnvironmentBuilder<'a> {
     pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],

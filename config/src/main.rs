@@ -6,13 +6,13 @@ use vorpal_sdk::{
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
     artifact::{
-        devenv::DevEnvBuilder,
         get_env_key, gh, go, goimports, gopls, grpcurl,
         language::go::{get_goarch, get_goos},
         language::rust::RustBuilder,
+        project_environment::ProjectEnvironmentBuilder,
         protoc, protoc_gen_go, protoc_gen_go_grpc, staticcheck,
-        userenv::UserEnvBuilder,
-        ArtifactArgumentBuilder, ArtifactProcessBuilder, ArtifactTaskBuilder,
+        user_environment::UserEnvironmentBuilder,
+        ArgumentBuilder, JobBuilder, ProcessBuilder,
     },
     context::get_context,
 };
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     let protoc_gen_go_grpc = protoc_gen_go_grpc::build(context).await?;
     let staticcheck = staticcheck::build(context).await?;
 
-    // Vorpal
+    // Rust artifact
 
     let vorpal = RustBuilder::new("vorpal", SYSTEMS.to_vec())
         .with_bins(vec!["vorpal"])
@@ -44,9 +44,39 @@ async fn main() -> Result<()> {
         .build(context)
         .await?;
 
-    // Vorpal devenv
+    // Job artifact
 
-    DevEnvBuilder::new("vorpal-dev", SYSTEMS.to_vec())
+    JobBuilder::new(
+        "vorpal-test",
+        format!("{}/bin/vorpal --version", get_env_key(&vorpal)),
+        SYSTEMS.to_vec(),
+    )
+    .with_artifacts(vec![vorpal.clone()])
+    .build(context)
+    .await?;
+
+    // Process artifact
+
+    ProcessBuilder::new(
+        "vorpal-process",
+        format!("{}/bin/vorpal", get_env_key(&vorpal)).as_str(),
+        SYSTEMS.to_vec(),
+    )
+    .with_arguments(vec![
+        "--registry",
+        "https://localhost:50051",
+        "services",
+        "start",
+        "--port",
+        "50051",
+    ])
+    .with_artifacts(vec![vorpal.clone()])
+    .build(context)
+    .await?;
+
+    // Project environment artifact
+
+    ProjectEnvironmentBuilder::new("vorpal-dev", SYSTEMS.to_vec())
         .with_artifacts(vec![
             go,
             goimports,
@@ -66,38 +96,9 @@ async fn main() -> Result<()> {
         .build(context)
         .await?;
 
-    // Vorpal process
+    // User environment artifact
 
-    ArtifactProcessBuilder::new(
-        "vorpal-process",
-        format!("{}/bin/vorpal", get_env_key(&vorpal)).as_str(),
-        SYSTEMS.to_vec(),
-    )
-    .with_arguments(vec![
-        "--registry",
-        "https://localhost:50051",
-        "start",
-        "--port",
-        "50051",
-    ])
-    .with_artifacts(vec![vorpal.clone()])
-    .build(context)
-    .await?;
-
-    // Vorpal task
-
-    ArtifactTaskBuilder::new(
-        "vorpal-test",
-        format!("{}/bin/vorpal --version", get_env_key(&vorpal)),
-        SYSTEMS.to_vec(),
-    )
-    .with_artifacts(vec![vorpal.clone()])
-    .build(context)
-    .await?;
-
-    // Vorpal userenv
-
-    UserEnvBuilder::new("vorpal-user", SYSTEMS.to_vec())
+    UserEnvironmentBuilder::new("vorpal-user", SYSTEMS.to_vec())
         .with_artifacts(vec![])
         .with_environments(vec!["PATH=$HOME/.vorpal/bin".to_string()])
         .with_symlinks(vec![
@@ -114,23 +115,23 @@ async fn main() -> Result<()> {
     if context.get_artifact_name() == "vorpal-release" {
         // Setup arguments
 
-        let aarch64_darwin = ArtifactArgumentBuilder::new("aarch64-darwin")
+        let aarch64_darwin = ArgumentBuilder::new("aarch64-darwin")
             .with_require()
             .build(context)?;
 
-        let aarch64_linux = ArtifactArgumentBuilder::new("aarch64-linux")
+        let aarch64_linux = ArgumentBuilder::new("aarch64-linux")
             .with_require()
             .build(context)?;
 
-        let branch_name = ArtifactArgumentBuilder::new("branch-name")
+        let branch_name = ArgumentBuilder::new("branch-name")
             .with_require()
             .build(context)?;
 
-        let x8664_darwin = ArtifactArgumentBuilder::new("x8664-darwin")
+        let x8664_darwin = ArgumentBuilder::new("x8664-darwin")
             .with_require()
             .build(context)?;
 
-        let x8664_linux = ArtifactArgumentBuilder::new("x8664-linux")
+        let x8664_linux = ArgumentBuilder::new("x8664-linux")
             .with_require()
             .build(context)?;
 
@@ -174,7 +175,7 @@ async fn main() -> Result<()> {
             x8664_linux = get_env_key(&x8664_linux),
         };
 
-        ArtifactTaskBuilder::new("vorpal-release", script, SYSTEMS.to_vec())
+        JobBuilder::new("vorpal-release", script, SYSTEMS.to_vec())
             .with_artifacts(vec![
                 aarch64_darwin,
                 aarch64_linux,

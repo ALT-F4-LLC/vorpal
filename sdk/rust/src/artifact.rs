@@ -7,7 +7,6 @@ use indoc::formatdoc;
 
 pub mod cargo;
 pub mod clippy;
-pub mod devenv;
 pub mod gh;
 pub mod go;
 pub mod goimports;
@@ -16,6 +15,7 @@ pub mod grpcurl;
 pub mod language;
 pub mod linux_debian;
 pub mod linux_vorpal;
+pub mod project_environment;
 pub mod protoc;
 pub mod protoc_gen_go;
 pub mod protoc_gen_go_grpc;
@@ -29,14 +29,14 @@ pub mod source;
 pub mod staticcheck;
 pub mod step;
 pub mod system;
-pub mod userenv;
+pub mod user_environment;
 
-pub struct ArtifactArgumentBuilder<'a> {
+pub struct ArgumentBuilder<'a> {
     pub name: &'a str,
     pub require: bool,
 }
 
-pub struct ArtifactProcessBuilder<'a> {
+pub struct ProcessBuilder<'a> {
     pub arguments: Vec<String>,
     pub artifacts: Vec<String>,
     pub entrypoint: &'a str,
@@ -62,7 +62,7 @@ pub struct ArtifactStepBuilder<'a> {
     pub script: Option<String>,
 }
 
-pub struct ArtifactTaskBuilder<'a> {
+pub struct JobBuilder<'a> {
     pub artifacts: Vec<String>,
     pub name: &'a str,
     pub secrets: Vec<ArtifactStepSecret>,
@@ -78,7 +78,7 @@ pub struct ArtifactBuilder<'a> {
     pub systems: Vec<ArtifactSystem>,
 }
 
-impl<'a> ArtifactArgumentBuilder<'a> {
+impl<'a> ArgumentBuilder<'a> {
     pub fn new(name: &'a str) -> Self {
         Self {
             name,
@@ -102,7 +102,7 @@ impl<'a> ArtifactArgumentBuilder<'a> {
     }
 }
 
-impl<'a> ArtifactProcessBuilder<'a> {
+impl<'a> ProcessBuilder<'a> {
     pub fn new(name: &'a str, entrypoint: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             arguments: vec![],
@@ -308,7 +308,7 @@ impl<'a> ArtifactStepBuilder<'a> {
     }
 }
 
-impl<'a> ArtifactTaskBuilder<'a> {
+impl<'a> JobBuilder<'a> {
     pub fn new(name: &'a str, script: String, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],
