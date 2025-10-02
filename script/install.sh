@@ -99,7 +99,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${INSTALL_DIR}/bin/vorpal start
+ExecStart=${INSTALL_DIR}/bin/vorpal services start
 Restart=always
 RestartSec=5
 
