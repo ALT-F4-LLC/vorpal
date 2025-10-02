@@ -35,7 +35,7 @@ flowchart LR
 
 ## Setup
 ### Install (prebuilt binaries):
-  - `curl -fsSL https://github.com/ALT-F4-LLC/vorpal/blob/main/script/install.sh -o install.sh && sh install.sh`
+  - `curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/refs/heads/main/script/install.sh -o install.sh && sh install.sh`
 
 ### Build from source (macOS & Linux):
   - macOS only (once): `xcode-select --install`
