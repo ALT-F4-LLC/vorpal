@@ -7,6 +7,7 @@ DIST_DIR := $(WORK_DIR)/dist
 VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_ARTIFACT := vorpal
 VORPAL_DIR := /var/lib/vorpal
+VORPAL_NAMESPACE := library
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
 LIMA_ARCH := $(ARCH)
@@ -103,7 +104,7 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- artifact make --agent "https://localhost:23152" --registry "https://localhost:23152" --worker "https://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- artifact make --agent "https://localhost:23152" --namespace "$(VORPAL_NAMESPACE)" --registry "https://localhost:23152" --worker "https://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
 	cargo $(CARGO_FLAGS) run --bin "vorpal" -- services start --port "23152" $(VORPAL_FLAGS)
