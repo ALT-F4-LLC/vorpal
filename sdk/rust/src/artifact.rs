@@ -847,7 +847,7 @@ impl<'a> Artifact<'a> {
 }
 
 pub fn get_default_address() -> String {
-    "localhost:23151".to_string()
+    "https://localhost:23151".to_string()
 }
 
 pub fn get_env_key(digest: &String) -> String {

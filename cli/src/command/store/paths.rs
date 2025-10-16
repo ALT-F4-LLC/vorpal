@@ -34,6 +34,12 @@ pub fn get_key_ca_key_path() -> PathBuf {
     get_root_key_dir_path().join("ca").with_extension("key.pem")
 }
 
+pub fn get_key_credentials_path() -> PathBuf {
+    get_root_key_dir_path()
+        .join("credentials")
+        .with_extension("json")
+}
+
 pub fn get_key_service_path() -> PathBuf {
     get_root_key_dir_path()
         .join("service")

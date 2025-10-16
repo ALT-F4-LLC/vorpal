@@ -12,4 +12,5 @@ pub struct VorpalCredentialsContent {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VorpalCredentials {
     pub issuer: HashMap<String, VorpalCredentialsContent>,
+    pub registry: HashMap<String, String>,
 }

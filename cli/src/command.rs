@@ -1,6 +1,7 @@
 use crate::command::{
     config::{VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourceRust},
     credentials::{VorpalCredentials, VorpalCredentialsContent},
+    store::paths::get_key_credentials_path,
 };
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -12,10 +13,12 @@ use oauth2::{
 use path_clean::PathClean;
 use rustls::crypto::ring;
 use std::{collections::HashMap, env::current_dir, path::PathBuf, process::exit};
-use tokio::fs::read;
-use tokio::time::sleep;
+use tokio::{
+    fs::{read, write},
+    time::sleep,
+};
 use toml::from_str;
-use tracing::{error, info, subscriber, Level};
+use tracing::{error, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::artifact::{get_default_address, system::get_system_default_str};
 
@@ -113,6 +116,10 @@ pub enum CommandAuth {
         /// Issuer base URL, e.g. https://id.example.com/realms/myrealm
         #[arg(long, default_value = "http://localhost:8080/realms/vorpal")]
         issuer: String,
+
+        // Registry address
+        #[arg(default_value_t = get_default_address(), global = true, long)]
+        registry: String,
     },
 }
 
@@ -382,10 +389,11 @@ pub async fn run() -> Result<()> {
         },
 
         Command::Auth(auth) => match auth {
-            CommandAuth::Login { client_id, issuer } => {
-                info!("Client ID: {}", client_id);
-                info!("Issuer: {}", issuer);
-
+            CommandAuth::Login {
+                client_id,
+                issuer,
+                registry,
+            } => {
                 let discovery_url = format!(
                     "{}/.well-known/openid-configuration",
                     issuer.trim_end_matches('/')
@@ -474,15 +482,19 @@ pub async fn run() -> Result<()> {
                 // TODO: load existing credentials file if it exists
 
                 let mut issuer_map = HashMap::new();
+                let mut registry_map = HashMap::new();
 
                 issuer_map.insert(issuer.to_string(), content);
+                registry_map.insert(registry.to_string(), issuer.to_string());
 
-                let credentials = VorpalCredentials { issuer: issuer_map };
-                let credentials_toml = toml::to_string_pretty(&credentials)?;
+                let credentials = VorpalCredentials {
+                    issuer: issuer_map,
+                    registry: registry_map,
+                };
+                let credentials_json = serde_json::to_string_pretty(&credentials)?;
+                let credentials_path = get_key_credentials_path();
 
-                println!("Credentials TOML:\n{}", credentials_toml);
-
-                // TODO: store token securely in Vorpal config file
+                write(&credentials_path, credentials_json.as_bytes()).await?;
 
                 Ok(())
             }

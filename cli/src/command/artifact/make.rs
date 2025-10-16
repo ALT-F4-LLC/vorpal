@@ -1,5 +1,6 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
+    start::auth,
     store::{
         archives::unpack_zstd,
         paths::{
@@ -89,14 +90,15 @@ async fn build(
         namespace: artifact_namespace.to_string(),
     };
 
-    let request = Request::new(request);
+    let mut request = Request::new(request);
 
-    // request.metadata_mut().insert(
-    //     "authorization",
-    //     format!("Bearer {}", user_api_token)
-    //         .parse()
-    //         .expect("failed to set authorization header"),
-    // );
+    let client_auth_header = auth::client_auth_header(&registry)
+        .await
+        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+
+    if let Some(header) = client_auth_header {
+        request.metadata_mut().insert("authorization", header);
+    }
 
     // TODO: add check before pulling
 
@@ -172,14 +174,15 @@ async fn build(
         registry: registry.to_string(),
     };
 
-    let request = Request::new(request);
+    let mut request = Request::new(request);
 
-    // request.metadata_mut().insert(
-    //     "authorization",
-    //     format!("Bearer {}", user_api_token)
-    //         .parse()
-    //         .expect("failed to set authorization header"),
-    // );
+    let client_auth_header = auth::client_auth_header(&registry)
+        .await
+        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+
+    if let Some(header) = client_auth_header {
+        request.metadata_mut().insert("authorization", header);
+    }
 
     let response = client_worker
         .build_artifact(request)

@@ -2,7 +2,7 @@ services:
   keycloak:
     command: start-dev
     environment:
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: password
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
     image: quay.io/keycloak/keycloak:26.4.0
     ports:

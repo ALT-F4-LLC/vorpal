@@ -1,5 +1,6 @@
 use crate::command::{
     lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
+    start::auth,
     store::{
         archives::{compress_zstd, unpack_zip},
         hashes::get_source_digest,
@@ -23,12 +24,8 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
 use tonic::{
-    // metadata::MetadataValue,
     transport::{Certificate, Channel, ClientTlsConfig},
-    Code,
-    Request,
-    Response,
-    Status,
+    Code, Request, Response, Status,
 };
 use tracing::{info, warn};
 use url::Url;
@@ -86,20 +83,18 @@ pub async fn build_source(
         .await
         .map_err(|e| anyhow!("failed to connect to registry: {}", e))?;
 
-    // let client_auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
-    //     .parse()
-    //     .map_err(|e| anyhow!("failed to parse service secret: {}", e))?;
+    let client_auth_header = auth::client_auth_header(&registry)
+        .await
+        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
 
-    // Create client with authorization interceptor
+    let mut client_archive =
+        ArchiveServiceClient::with_interceptor(channel, move |mut req: Request<()>| {
+            if let Some(header) = client_auth_header.clone() {
+                req.metadata_mut().insert("authorization", header);
+            }
 
-    // let mut client_archive =
-    //     ArchiveServiceClient::with_interceptor(channel, move |mut req: Request<()>| {
-    //         req.metadata_mut()
-    //             .insert("authorization", client_auth_header.clone());
-    //         Ok(req)
-    //     });
-
-    let mut client_archive = ArchiveServiceClient::new(channel);
+            Ok(req)
+        });
 
     let source_type = match &artifact_source.path {
         s if Path::new(s).exists() => ArtifactSourceType::Local,
@@ -125,7 +120,7 @@ pub async fn build_source(
         match client_archive.check(request).await {
             Err(status) => {
                 if status.code() != Code::NotFound {
-                    bail!("registry pull error: {:?}", status);
+                    bail!("registry check error: {:?}", status);
                 }
             }
 
@@ -346,7 +341,7 @@ pub async fn build_source(
 
     if let Err(status) = client_archive.check(registry_request).await {
         if status.code() != Code::NotFound {
-            bail!("registry pull error: {:?}", status);
+            bail!("registry check error: {:?}", status);
         }
 
         let source_sandbox_archive = create_sandbox_file(Some("tar.zst")).await?;

@@ -9,11 +9,9 @@ use crate::command::{
     store::paths::{get_key_service_key_path, get_key_service_path},
 };
 use anyhow::{bail, Result};
+use std::sync::Arc;
 use tokio::fs::read_to_string;
-use tonic::{
-    transport::{Identity, Server, ServerTlsConfig},
-    Request, Status,
-};
+use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tracing::info;
 use vorpal_sdk::api::{
     agent::agent_service_server::AgentServiceServer,
@@ -59,25 +57,6 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
     Ok(config)
 }
 
-fn new_interceptor(issuer: String) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
-    move |request: Request<()>| -> Result<Request<()>, Status> {
-        match request.metadata().get("authorization") {
-            None => Err(Status::unauthenticated("Missing authorization header")),
-
-            Some(t) => {
-                let authorization = t.to_str().unwrap_or("").trim();
-                let authorization_token = &authorization[7..];
-
-                if authorization_token == issuer {
-                    Ok(request)
-                } else {
-                    Err(Status::unauthenticated("Invalid token"))
-                }
-            }
-        }
-    }
-}
-
 pub async fn run(
     issuer: Option<String>,
     port: u16,
@@ -93,12 +72,14 @@ pub async fn run(
         .tls_config(tls_config)?
         .add_service(health_service);
 
-    // let service_secret = auth::load_service_secret().await?;
-
     let mut interceptor = None;
 
     if let Some(issuer) = issuer {
-        interceptor = Some(new_interceptor(issuer));
+        let audience = "artifact".to_string();
+
+        let validator = Arc::new(auth::OidcValidator::new(issuer, audience).await?);
+
+        interceptor = Some(auth::new_interceptor(validator));
     }
 
     if services.contains(&"agent".to_string()) {
