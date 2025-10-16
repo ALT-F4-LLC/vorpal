@@ -1,6 +1,6 @@
 use crate::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{language::go::GoBuilder, ArtifactSourceBuilder},
+    artifact::{language::go::Go, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -12,12 +12,12 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let source_path =
         format!("https://github.com/grpc/grpc-go/archive/refs/tags/v{source_version}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name, source_path.as_str()).build();
+    let source = ArtifactSource::new(name, source_path.as_str()).build();
 
     let build_directory = format!("grpc-go-{source_version}/cmd/{name}");
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    GoBuilder::new(name, systems)
+    Go::new(name, systems)
         .with_alias(format!("{name}:{source_version}"))
         .with_build_directory(build_directory.as_str())
         .with_source(source)

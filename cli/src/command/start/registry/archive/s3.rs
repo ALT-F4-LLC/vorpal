@@ -9,7 +9,7 @@ impl ArchiveBackend for S3Backend {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let archive_key = get_artifact_archive_key(&request.digest);
+        let archive_key = get_artifact_archive_key(&request.digest, &request.namespace);
 
         client
             .head_object()
@@ -30,7 +30,7 @@ impl ArchiveBackend for S3Backend {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let archive_key = get_artifact_archive_key(&request.digest);
+        let archive_key = get_artifact_archive_key(&request.digest, &request.namespace);
 
         client
             .head_object()
@@ -66,7 +66,7 @@ impl ArchiveBackend for S3Backend {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let archive_key = get_artifact_archive_key(&request.digest);
+        let archive_key = get_artifact_archive_key(&request.digest, &request.namespace);
         let archive_head = client
             .head_object()
             .bucket(bucket)

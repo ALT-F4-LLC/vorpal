@@ -25,8 +25,8 @@ mod registry;
 mod worker;
 
 pub async fn run(
+    issuer: Option<String>,
     port: u16,
-    registry: String,
     registry_backend: String,
     registry_backend_s3_bucket: Option<String>,
     services: Vec<String>,
@@ -55,27 +55,28 @@ pub async fn run(
         .await
         .expect("failed to read private key");
 
-    let identity = Identity::from_pem(cert, key);
-
     let (_, health_service) = tonic_health::server::health_reporter();
+
+    let identity = Identity::from_pem(cert, key);
 
     let mut router = Server::builder()
         .tls_config(ServerTlsConfig::new().identity(identity))?
         .add_service(health_service);
 
-    let service_secret = auth::load_service_secret().await?;
+    // let service_secret = auth::load_service_secret().await?;
 
-    let auth_interceptor = auth::create_interceptor(service_secret);
+    let mut auth_interceptor = None;
+
+    if let Some(issuer) = issuer {
+        auth_interceptor = Some(auth::create_interceptor(issuer));
+    }
 
     if services.contains(&"agent".to_string()) {
-        let service = AgentServiceServer::with_interceptor(
-            AgentServer::new(registry.clone()),
-            auth_interceptor.clone(),
-        );
-
-        info!("agent |> service: [::]:{}", port);
+        let service = AgentServiceServer::new(AgentServer::new());
 
         router = router.add_service(service);
+
+        info!("agent |> service: [::]:{}", port);
     }
 
     if services.contains(&"registry".to_string()) {
@@ -99,28 +100,41 @@ pub async fn run(
         let backend_artifact =
             backend_artifact(&registry_backend, registry_backend_s3_bucket).await?;
 
-        info!("registry |> service: [::]:{}", port);
+        if let Some(intercepter) = auth_interceptor.clone() {
+            router = router.add_service(ArchiveServiceServer::with_interceptor(
+                ArchiveServer::new(backend_archive),
+                intercepter.clone(),
+            ));
 
-        router = router.add_service(ArchiveServiceServer::with_interceptor(
-            ArchiveServer::new(backend_archive),
-            auth_interceptor.clone(),
-        ));
+            router = router.add_service(ArtifactServiceServer::with_interceptor(
+                ArtifactServer::new(backend_artifact),
+                intercepter.clone(),
+            ));
+        } else {
+            router = router.add_service(ArchiveServiceServer::new(ArchiveServer::new(
+                backend_archive,
+            )));
 
-        router = router.add_service(ArtifactServiceServer::with_interceptor(
-            ArtifactServer::new(backend_artifact),
-            auth_interceptor.clone(),
-        ));
+            router = router.add_service(ArtifactServiceServer::new(ArtifactServer::new(
+                backend_artifact,
+            )));
+        }
+
+        info!("archive |> service: [::]:{}", port);
+        info!("artifact |> service: [::]:{}", port);
     }
 
     if services.contains(&"worker".to_string()) {
-        let service = WorkerServiceServer::with_interceptor(
-            WorkerServer::new(registry.to_owned()),
-            auth_interceptor.clone(),
-        );
+        if let Some(intercepter) = auth_interceptor {
+            router = router.add_service(WorkerServiceServer::with_interceptor(
+                WorkerServer::new(),
+                intercepter,
+            ));
+        } else {
+            router = router.add_service(WorkerServiceServer::new(WorkerServer::new()));
+        }
 
         info!("worker |> service: [::]:{}", port);
-
-        router = router.add_service(service);
     }
 
     let address = format!("[::]:{port}")

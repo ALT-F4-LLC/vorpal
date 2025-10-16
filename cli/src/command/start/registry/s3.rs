@@ -1,22 +1,20 @@
-use anyhow::{bail, Result};
+use vorpal_sdk::api::artifact::ArtifactSystem;
 
-pub fn get_artifact_alias_key(alias: &str, system: &str) -> Result<String> {
-    let alias_parts = alias.split(':').collect::<Vec<&str>>();
+pub fn get_artifact_alias_key(
+    name: &str,
+    namespace: &str,
+    system: ArtifactSystem,
+    tag: &str,
+) -> String {
+    let system = system.as_str_name();
 
-    if alias_parts.len() != 2 {
-        bail!("invalid alias format");
-    }
-
-    let alias_dir = alias_parts[0];
-    let alias_file = alias_parts[1];
-
-    Ok(format!("artifact/alias/{system}/{alias_dir}/{alias_file}"))
+    format!("artifact/alias/{namespace}/{system}/{name}/{tag}")
 }
 
-pub fn get_artifact_archive_key(digest: &str) -> String {
-    format!("artifact/archive/{digest}.tar.zst")
+pub fn get_artifact_archive_key(digest: &str, namespace: &str) -> String {
+    format!("artifact/archive/{namespace}/{digest}.tar.zst")
 }
 
-pub fn get_artifact_config_key(digest: &str) -> String {
-    format!("artifact/config/{digest}.json")
+pub fn get_artifact_config_key(digest: &str, namespace: &str) -> String {
+    format!("artifact/config/{namespace}/{digest}.json")
 }

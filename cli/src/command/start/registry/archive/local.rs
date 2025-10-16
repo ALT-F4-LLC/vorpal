@@ -3,7 +3,7 @@ use crate::command::{
     store::paths::{get_artifact_archive_path, set_timestamps},
 };
 use tokio::{
-    fs::{read, write},
+    fs::{create_dir_all, read, write},
     sync::mpsc,
 };
 use tonic::{async_trait, Status};
@@ -12,7 +12,7 @@ use vorpal_sdk::api::archive::{ArchivePullRequest, ArchivePullResponse, ArchiveP
 #[async_trait]
 impl ArchiveBackend for LocalBackend {
     async fn check(&self, request: &ArchivePullRequest) -> Result<(), Status> {
-        let request_path = get_artifact_archive_path(&request.digest);
+        let request_path = get_artifact_archive_path(&request.digest, &request.namespace);
 
         if !request_path.exists() {
             return Err(Status::not_found("archive not found"));
@@ -26,7 +26,7 @@ impl ArchiveBackend for LocalBackend {
         request: &ArchivePullRequest,
         tx: mpsc::Sender<Result<ArchivePullResponse, Status>>,
     ) -> Result<(), Status> {
-        let request_path = get_artifact_archive_path(&request.digest);
+        let request_path = get_artifact_archive_path(&request.digest, &request.namespace);
 
         if !request_path.exists() {
             return Err(Status::not_found("archive not found"));
@@ -48,9 +48,13 @@ impl ArchiveBackend for LocalBackend {
     }
 
     async fn push(&self, request: &ArchivePushRequest) -> Result<(), Status> {
-        let request_path = get_artifact_archive_path(&request.digest);
+        let request_path = get_artifact_archive_path(&request.digest, &request.namespace);
 
         if !request_path.exists() {
+            create_dir_all(request_path.parent().unwrap())
+                .await
+                .map_err(|err| Status::internal(format!("failed to create store path: {err}")))?;
+
             write(&request_path, &request.data)
                 .await
                 .map_err(|err| Status::internal(format!("failed to write store path: {err}")))?;

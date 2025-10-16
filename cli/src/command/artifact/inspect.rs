@@ -1,9 +1,6 @@
-use crate::command::{
-    start::auth::{load_api_token_env, load_service_secret},
-    store::paths::get_key_ca_path,
-};
+use crate::command::store::paths::get_key_ca_path;
 use anyhow::Result;
-use http::uri::{InvalidUri, Uri};
+use http::uri::Uri;
 use tokio::fs::read;
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig},
@@ -11,63 +8,48 @@ use tonic::{
 };
 use vorpal_sdk::api::artifact::{artifact_service_client::ArtifactServiceClient, ArtifactRequest};
 
-pub async fn run(digest: &str, registry: &str, api_token: Option<String>) -> Result<()> {
+pub async fn run(digest: &str, namespace: &str, registry: &str) -> Result<()> {
     // Setup TLS with CA certificate
+
     let client_ca_pem_path = get_key_ca_path();
     let client_ca_pem = read(client_ca_pem_path).await?;
     let client_ca = Certificate::from_pem(client_ca_pem);
-
     let client_tls = ClientTlsConfig::new()
         .ca_certificate(client_ca)
         .domain_name("localhost");
 
     // Parse registry URI and create authenticated channel
-    let client_registry_uri = registry
-        .parse::<Uri>()
-        .map_err(|e: InvalidUri| anyhow::anyhow!("invalid registry address: {}", e))?;
 
-    let client_registry_channel = Channel::builder(client_registry_uri)
+    let client_uri = format!("https://{}", registry).parse::<Uri>()?;
+
+    let client_channel = Channel::builder(client_uri)
         .tls_config(client_tls)?
         .connect()
         .await?;
 
-    let mut client = ArtifactServiceClient::new(client_registry_channel);
+    let mut client = ArtifactServiceClient::new(client_channel);
 
-    // Use the provided API token, falling back to environment variable only
-    let user_api_token = match api_token {
-        Some(token) => token,
-        None => {
-            if let Ok(service_secret) = load_service_secret().await {
-                service_secret
-            } else {
-                load_api_token_env()?
-            }
-        }
-    };
+    // Create request
 
-    // Create authenticated request
     let request = ArtifactRequest {
         digest: digest.to_string(),
+        namespace: namespace.to_string(),
     };
 
-    let mut grpc_request = Request::new(request);
+    let request = Request::new(request);
 
-    grpc_request.metadata_mut().insert(
-        "authorization",
-        format!("Bearer {}", user_api_token)
-            .parse()
-            .expect("failed to set authorization header"),
-    );
+    // TODO: load token from config file for the specific registry
 
-    let response = client
-        .get_artifact(grpc_request)
-        .await
-        .expect("failed to get artifact");
+    // grpc_request.metadata_mut().insert(
+    //     "authorization",
+    //     format!("Bearer {}", user_api_token)
+    //         .parse()
+    //         .expect("failed to set authorization header"),
+    // );
 
-    let artifact = response.into_inner();
-
-    let artifact_data =
-        serde_json::to_string_pretty(&artifact).expect("failed to serialize artifact");
+    let artifact_response = client.get_artifact(request).await?;
+    let artifact = artifact_response.into_inner();
+    let artifact_data = serde_json::to_string_pretty(&artifact)?;
 
     println!("{artifact_data}");
 

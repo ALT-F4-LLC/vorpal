@@ -98,19 +98,19 @@ say() { printf '\n==> %s\n' "$*"; }
 #############################################
 say "Starting Device Authorization (scope: openid ${SCOPE_AUD_ARCHIVE} ${SCOPE_AUD_ARTIFACT} ${SCOPE_AUD_WORKER})"
 
-DEV_RESP="$(
+DEVICE_RESPONSE="$(
   curl -sS -X POST "$DEVICE_ENDPOINT" \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data "client_id=$CLI_CLIENT_ID" \
     --data-urlencode "scope=openid ${SCOPE_AUD_ARCHIVE} ${SCOPE_AUD_ARTIFACT} ${SCOPE_AUD_WORKER}" \
 )"
-DEVICE_CODE="$(jq -r '.device_code' <<<"$DEV_RESP")"
-USER_CODE="$(jq -r '.user_code' <<<"$DEV_RESP")"
-VERIF_URI="$(jq -r '.verification_uri' <<<"$DEV_RESP")"
-VERIF_URI_FULL="$(jq -r '.verification_uri_complete' <<<"$DEV_RESP")"
-INTERVAL="$(jq -r '.interval // 5' <<<"$DEV_RESP")"
+DEVICE_CODE="$(jq -r '.device_code' <<<"$DEVICE_RESPONSE")"
+USER_CODE="$(jq -r '.user_code' <<<"$DEVICE_RESPONSE")"
+VERIF_URI="$(jq -r '.verification_uri' <<<"$DEVICE_RESPONSE")"
+VERIF_URI_FULL="$(jq -r '.verification_uri_complete' <<<"$DEVICE_RESPONSE")"
+INTERVAL="$(jq -r '.interval // 5' <<<"$DEVICE_RESPONSE")"
 
-[ "$DEVICE_CODE" = "null" -o -z "$DEVICE_CODE" ] && { echo "Device flow failed:"; echo "$DEV_RESP"; exit 1; }
+[ "$DEVICE_CODE" = "null" -o -z "$DEVICE_CODE" ] && { echo "Device flow failed:"; echo "$DEVICE_RESPONSE"; exit 1; }
 
 cat <<EOF
 

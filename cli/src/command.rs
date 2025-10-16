@@ -1,172 +1,35 @@
-use anyhow::Result;
+use crate::command::{
+    config::{VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourceRust},
+    credentials::{VorpalCredentials, VorpalCredentialsContent},
+};
+use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
+use config::VorpalConfig;
+use oauth2::{
+    basic::BasicClient, AuthUrl, ClientId, DeviceAuthorizationUrl, Scope,
+    StandardDeviceAuthorizationResponse, TokenResponse, TokenUrl,
+};
 use path_clean::PathClean;
 use rustls::crypto::ring;
-use serde::Deserialize;
-use std::{
-    env::{current_dir, var},
-    path::PathBuf,
-    process::exit,
-};
+use std::{collections::HashMap, env::current_dir, path::PathBuf, process::exit};
 use tokio::fs::read;
+use tokio::time::sleep;
 use toml::from_str;
-use tracing::{error, subscriber, Level};
+use tracing::{error, info, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
-use vorpal_sdk::artifact::system::get_system_default_str;
+use vorpal_sdk::artifact::{get_default_address, system::get_system_default_str};
 
 mod artifact;
+mod config;
+mod credentials;
 mod init;
 mod lock;
 mod start;
 mod store;
 mod system;
 
-fn get_default_address() -> String {
-    "https://localhost:23151".to_string()
-}
-
-async fn load_vorpal_toml(path: PathBuf) -> Option<VorpalToml> {
-    if !path.exists() {
-        return None;
-    }
-
-    match read(&path).await {
-        Ok(toml_data_bytes) => {
-            let toml_data_str = String::from_utf8_lossy(&toml_data_bytes);
-            match from_str::<VorpalToml>(&toml_data_str) {
-                Ok(toml) => Some(toml),
-                Err(e) => {
-                    error!("Failed to parse config at {}: {}", path.display(), e);
-                    None
-                }
-            }
-        }
-        Err(e) => {
-            error!("Failed to read config at {}: {}", path.display(), e);
-            None
-        }
-    }
-}
-
-fn get_home_config_path() -> Option<PathBuf> {
-    var("HOME")
-        .ok()
-        .map(|home| PathBuf::from(home).join(".vorpal").join("Vorpal.toml"))
-}
-
-fn merge_configs(
-    home_config: Option<VorpalToml>,
-    project_config: Option<VorpalToml>,
-) -> Option<VorpalToml> {
-    match (home_config, project_config) {
-        (None, None) => None,
-        (Some(home), None) => Some(home),
-        (None, Some(project)) => Some(project),
-        (Some(home), Some(project)) => {
-            // Project config takes precedence over home config
-            let merged_config = match (home.config, project.config) {
-                (None, None) => None,
-                (Some(home_cfg), None) => Some(home_cfg),
-                (None, Some(project_cfg)) => Some(project_cfg),
-                (Some(home_cfg), Some(project_cfg)) => Some(VorpalTomlConfig {
-                    language: project_cfg.language.or(home_cfg.language),
-                    name: project_cfg.name.or(home_cfg.name),
-                    source: merge_config_sources(home_cfg.source, project_cfg.source),
-                }),
-            };
-
-            Some(VorpalToml {
-                api_token: project.api_token.or(home.api_token),
-                config: merged_config,
-                registry: project.registry.or(home.registry),
-            })
-        }
-    }
-}
-
-fn merge_config_sources(
-    home_source: Option<VorpalTomlConfigSource>,
-    project_source: Option<VorpalTomlConfigSource>,
-) -> Option<VorpalTomlConfigSource> {
-    match (home_source, project_source) {
-        (None, None) => None,
-        (Some(home), None) => Some(home),
-        (None, Some(project)) => Some(project),
-        (Some(home), Some(project)) => Some(VorpalTomlConfigSource {
-            go: merge_go_configs(home.go, project.go),
-            includes: merge_includes(home.includes, project.includes),
-            rust: merge_rust_configs(home.rust, project.rust),
-        }),
-    }
-}
-
-fn merge_go_configs(
-    home_go: Option<VorpalTomlConfigSourceGo>,
-    project_go: Option<VorpalTomlConfigSourceGo>,
-) -> Option<VorpalTomlConfigSourceGo> {
-    match (home_go, project_go) {
-        (None, None) => None,
-        (Some(home), None) => Some(home),
-        (None, Some(project)) => Some(project),
-        (Some(home), Some(project)) => Some(VorpalTomlConfigSourceGo {
-            directory: project.directory.or(home.directory),
-        }),
-    }
-}
-
-fn merge_rust_configs(
-    home_rust: Option<VorpalConfigSourceRust>,
-    project_rust: Option<VorpalConfigSourceRust>,
-) -> Option<VorpalConfigSourceRust> {
-    match (home_rust, project_rust) {
-        (None, None) => None,
-        (Some(home), None) => Some(home),
-        (None, Some(project)) => Some(project),
-        (Some(home), Some(project)) => Some(VorpalConfigSourceRust {
-            bin: project.bin.or(home.bin),
-            packages: merge_packages(home.packages, project.packages),
-        }),
-    }
-}
-
-fn merge_includes(
-    home_includes: Option<Vec<String>>,
-    project_includes: Option<Vec<String>>,
-) -> Option<Vec<String>> {
-    match (home_includes, project_includes) {
-        (None, None) => None,
-        (Some(home), None) => Some(home),
-        (None, Some(project)) => Some(project),
-        (Some(mut home), Some(project)) => {
-            // Combine includes, with project includes taking precedence for duplicates
-            for include in project {
-                if !home.contains(&include) {
-                    home.push(include);
-                }
-            }
-            Some(home)
-        }
-    }
-}
-
-fn merge_packages(
-    home_packages: Option<Vec<String>>,
-    project_packages: Option<Vec<String>>,
-) -> Option<Vec<String>> {
-    match (home_packages, project_packages) {
-        (None, None) => None,
-        (Some(home), None) => Some(home),
-        (None, Some(project)) => Some(project),
-        (Some(mut home), Some(project)) => {
-            // Combine packages, with project packages taking precedence for duplicates
-            for package in project {
-                if !home.contains(&package) {
-                    home.push(package);
-                }
-            }
-            Some(home)
-        }
-    }
+pub fn get_default_namespace() -> String {
+    "library".to_string()
 }
 
 #[derive(Subcommand)]
@@ -174,59 +37,91 @@ pub enum CommandArtifact {
     Init {},
 
     Inspect {
-        /// Artifact digest to inspect
+        /// Artifact digest
         digest: String,
+
+        /// Artifact namespace
+        #[arg(default_value_t = get_default_namespace(), long)]
+        namespace: String,
+
+        /// Registry address
+        #[arg(default_value_t = get_default_address(), long)]
+        registry: String,
     },
 
     Make {
         /// Artifact name
         name: String,
 
-        /// Artifact context
-        context: PathBuf,
-
-        /// Agent address
+        /// Artifact agent address
         #[arg(default_value_t = get_default_address(), long)]
         agent: String,
 
-        #[arg(long)]
-        alias: Vec<String>,
-
+        /// Artifact configuration file
         #[arg(default_value = "Vorpal.toml", long)]
         config: PathBuf,
 
+        /// Artifact context
+        #[arg(default_value = ".", long)]
+        context: PathBuf,
+
+        /// Artifact export
         #[arg(default_value_t = false, long)]
         export: bool,
 
+        /// Artifact namespace
+        #[arg(default_value_t = get_default_namespace(), long)]
+        namespace: String,
+
+        /// Artifact path
         #[arg(default_value_t = false, long)]
         path: bool,
 
+        /// Artifact rebuild
         #[arg(default_value_t = false, long)]
         rebuild: bool,
 
+        // Registry address
+        #[arg(default_value_t = get_default_address(), global = true, long)]
+        registry: String,
+
+        /// Artifact system (default: host system)
         #[arg(default_value_t = get_system_default_str(), long)]
         system: String,
 
+        /// Artifact lock unlock
         #[arg(default_value_t = false, long)]
         unlock: bool,
 
+        /// Artifact variables (key=value)
         #[arg(long)]
         variable: Vec<String>,
 
-        /// Worker address
+        /// Artifact worker address
         #[arg(default_value_t = get_default_address(), long)]
         worker: String,
     },
 }
 
 #[derive(Subcommand)]
-pub enum CommandSystemKeys {
-    Generate {},
+pub enum CommandAuth {
+    Login {
+        /// OAuth2 client_id configured in Keycloak
+        #[arg(long, default_value = "cli")]
+        client_id: String,
+
+        /// Issuer base URL, e.g. https://id.example.com/realms/myrealm
+        #[arg(long, default_value = "http://localhost:8080/realms/vorpal")]
+        issuer: String,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum CommandServices {
     Start {
+        #[arg(long)]
+        issuer: Option<String>,
+
         #[arg(default_value = "23151", long)]
         port: u16,
 
@@ -242,6 +137,11 @@ pub enum CommandServices {
 }
 
 #[derive(Subcommand)]
+pub enum CommandSystemKeys {
+    Generate {},
+}
+
+#[derive(Subcommand)]
 pub enum CommandSystem {
     #[clap(subcommand)]
     Keys(CommandSystemKeys),
@@ -251,16 +151,16 @@ pub enum CommandSystem {
         all: bool,
 
         #[arg(long)]
-        aliases: bool,
+        artifact_aliases: bool,
 
         #[arg(long)]
-        archives: bool,
+        artifact_archives: bool,
 
         #[arg(long)]
-        configs: bool,
+        artifact_configs: bool,
 
         #[arg(long)]
-        outputs: bool,
+        artifact_outputs: bool,
 
         #[arg(long)]
         sandboxes: bool,
@@ -271,6 +171,9 @@ pub enum CommandSystem {
 pub enum Command {
     #[clap(subcommand)]
     Artifact(CommandArtifact),
+
+    #[clap(subcommand)]
+    Auth(CommandAuth),
 
     #[clap(subcommand)]
     Services(CommandServices),
@@ -289,42 +192,6 @@ struct Cli {
     // Log level
     #[arg(default_value_t = Level::INFO, global = true, long)]
     level: Level,
-
-    /// Registry address
-    #[arg(long)]
-    registry: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct VorpalTomlConfigSourceGo {
-    pub directory: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct VorpalConfigSourceRust {
-    bin: Option<String>,
-    packages: Option<Vec<String>>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct VorpalTomlConfigSource {
-    go: Option<VorpalTomlConfigSourceGo>,
-    includes: Option<Vec<String>>,
-    rust: Option<VorpalConfigSourceRust>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct VorpalTomlConfig {
-    language: Option<String>,
-    name: Option<String>,
-    source: Option<VorpalTomlConfigSource>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct VorpalToml {
-    api_token: Option<String>,
-    config: Option<VorpalTomlConfig>,
-    registry: Option<String>,
 }
 
 pub async fn run() -> Result<()> {
@@ -334,11 +201,7 @@ pub async fn run() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let Cli {
-        command,
-        level,
-        registry: cli_registry,
-    } = cli;
+    let Cli { command, level } = cli;
 
     // Set up tracing subscriber
 
@@ -362,42 +225,22 @@ pub async fn run() -> Result<()> {
         Command::Artifact(artifact) => match artifact {
             CommandArtifact::Init {} => init::run().await,
 
-            CommandArtifact::Inspect { digest } => {
-                let mut registry = get_default_address();
-                let mut api_token = None;
-
-                if let Some(home_path) = get_home_config_path() {
-                    if let Some(home_config) = load_vorpal_toml(home_path).await {
-                        if let Some(home_registry) = home_config.registry {
-                            registry = home_registry;
-                        }
-                        api_token = home_config.api_token;
-                    }
-                }
-
-                if let Some(r) = cli_registry {
-                    registry = r;
-                }
-
-                // Environment variable override - if set, it takes precedence over config files
-                if let Ok(env_token) = var("VORPAL_API_TOKEN") {
-                    if !env_token.trim().is_empty() {
-                        api_token = Some(env_token.trim().to_string());
-                    }
-                }
-
-                artifact::inspect::run(digest, &registry, api_token).await
-            }
+            CommandArtifact::Inspect {
+                digest,
+                namespace,
+                registry,
+            } => artifact::inspect::run(digest, namespace, registry).await,
 
             CommandArtifact::Make {
                 agent,
-                alias,
                 config,
                 context,
                 export,
                 name,
+                namespace,
                 path,
                 rebuild,
+                registry,
                 system,
                 unlock,
                 variable,
@@ -405,10 +248,12 @@ pub async fn run() -> Result<()> {
             } => {
                 if name.is_empty() {
                     error!("no name specified");
+
                     exit(1);
                 }
 
-                // Set default configuration
+                // Set default configurations
+
                 let mut config_language = "rust".to_string();
                 let mut config_name = "vorpal".to_string();
                 let mut config_source_go_directory = None;
@@ -416,107 +261,93 @@ pub async fn run() -> Result<()> {
                 let mut config_source_rust_bin = None;
                 let mut config_source_rust_packages = None;
 
-                // Load configuration values from home and project
-                let home_config = if let Some(home_path) = get_home_config_path() {
-                    load_vorpal_toml(home_path).await
-                } else {
-                    None
+                // Load project configuration
+
+                let mut config_path = config.to_path_buf();
+
+                if !config.is_absolute() {
+                    let current_dir = current_dir().expect("failed to get current directory");
+
+                    config_path = current_dir.join(config).clean().to_path_buf();
+                }
+
+                config_path = config_path.clean();
+
+                // Load project configuration value, if exists
+
+                let config = match read(&config_path).await {
+                    Err(e) => Err(anyhow!("Failed to read {}: {}", config_path.display(), e)),
+
+                    Ok(toml_bytes) => {
+                        let toml_str = String::from_utf8_lossy(&toml_bytes);
+
+                        match from_str::<VorpalConfig>(&toml_str) {
+                            Err(e) => Err(anyhow!("Failed to parse: {}", e)),
+                            Ok(toml) => Ok(toml),
+                        }
+                    }
+                }?;
+
+                if let Some(language) = config.language {
+                    config_language = language;
+                }
+
+                if let Some(name) = config.name {
+                    if !name.is_empty() {
+                        config_name = name;
+                    }
+                }
+
+                if let Some(config_source) = config.source {
+                    if let Some(config_source_go) = config_source.go {
+                        if let Some(directory) = config_source_go.directory {
+                            if !directory.is_empty() {
+                                config_source_go_directory = Some(directory);
+                            }
+                        }
+                    }
+
+                    if let Some(includes) = config_source.includes {
+                        if !includes.is_empty() {
+                            config_source_includes = includes;
+                        }
+                    }
+
+                    if let Some(config_source_rust) = config_source.rust {
+                        if let Some(ca_source_rust_bin) = config_source_rust.bin {
+                            if !ca_source_rust_bin.is_empty() {
+                                config_source_rust_bin = Some(ca_source_rust_bin);
+                            }
+                        }
+
+                        if let Some(packages) = config_source_rust.packages {
+                            if !packages.is_empty() {
+                                config_source_rust_packages = Some(packages);
+                            }
+                        }
+                    }
                 };
 
-                let config_absolute_path = match config.is_absolute() {
-                    true => config.to_path_buf(),
-                    false => {
-                        let current_dir = current_dir().expect("failed to get current directory");
-                        current_dir.join(config).clean().to_path_buf()
-                    }
-                }
-                .clean();
+                // Load project context
 
-                let project_config = load_vorpal_toml(config_absolute_path).await;
+                let mut context = context.to_path_buf();
 
-                // Determine final registry value
-                let mut registry = get_default_address();
+                if !context.is_absolute() {
+                    let current_dir = current_dir().expect("failed to get current directory");
 
-                if let Some(ref hc) = home_config {
-                    if let Some(ref r) = hc.registry {
-                        registry = r.clone();
-                    }
+                    context = current_dir.join(context).clean().to_path_buf();
                 }
 
-                if let Some(ref pc) = project_config {
-                    if let Some(ref r) = pc.registry {
-                        registry = r.clone();
-                    }
-                }
+                context = context.clean();
 
-                if let Some(ref r) = cli_registry {
-                    registry = r.clone();
-                }
+                // Build artifact
 
-                // Determine API token using existing merge logic (same pattern as registry)
-                let mut api_token = None;
-
-                // Extract API token from home config first
-                if let Some(ref hc) = home_config {
-                    api_token = hc.api_token.clone();
-                }
-
-                // Project config overrides home config
-                if let Some(ref pc) = project_config {
-                    if let Some(ref token) = pc.api_token {
-                        api_token = Some(token.clone());
-                    }
-                }
-
-                // Merge configurations (project overrides home)
-                if let Some(merged_toml) = merge_configs(home_config, project_config) {
-                    if let Some(config) = merged_toml.config {
-                        if let Some(language) = config.language {
-                            config_language = language;
-                        }
-
-                        if let Some(name) = config.name {
-                            config_name = name;
-                        }
-
-                        if let Some(source) = config.source {
-                            if let Some(go) = source.go {
-                                if let Some(directory) = go.directory {
-                                    config_source_go_directory = Some(directory);
-                                }
-                            }
-
-                            if let Some(includes) = source.includes {
-                                config_source_includes = includes;
-                            }
-
-                            if let Some(rust) = source.rust {
-                                if let Some(bin) = rust.bin {
-                                    config_source_rust_bin = Some(bin);
-                                }
-
-                                if let Some(packages) = rust.packages {
-                                    config_source_rust_packages = Some(packages);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let context_absolute_path = match context.is_absolute() {
-                    true => context.to_path_buf(),
-                    false => {
-                        let current_dir = current_dir().expect("failed to get current directory");
-                        current_dir.join(context).clean().to_path_buf()
-                    }
-                }
-                .clean();
-
-                let artifact_args = artifact::make::RunArgsArtifact {
-                    aliases: alias.clone(),
-                    context: context_absolute_path.clone(),
+                let run_artifact = artifact::make::RunArgsArtifact {
+                    aliases: vec![],
+                    context: context.clone(),
                     export: *export,
                     name: name.clone(),
+                    namespace: namespace.clone(),
                     path: *path,
                     rebuild: *rebuild,
                     system: system.clone(),
@@ -524,12 +355,12 @@ pub async fn run() -> Result<()> {
                     variable: variable.clone(),
                 };
 
-                let config_args = artifact::make::RunArgsConfig {
-                    context: context_absolute_path,
+                let run_config = artifact::make::RunArgsConfig {
+                    context,
                     language: config_language,
                     name: config_name,
-                    source: Some(VorpalTomlConfigSource {
-                        go: Some(VorpalTomlConfigSourceGo {
+                    source: Some(VorpalConfigSource {
+                        go: Some(VorpalConfigSourceGo {
                             directory: config_source_go_directory,
                         }),
                         includes: Some(config_source_includes),
@@ -540,46 +371,134 @@ pub async fn run() -> Result<()> {
                     }),
                 };
 
-                let service_args = artifact::make::RunArgsService {
+                let run_service = artifact::make::RunArgsService {
                     agent: agent.to_string(),
-                    registry,
+                    registry: registry.to_string(),
                     worker: worker.to_string(),
                 };
 
-                if let Ok(env_token) = var("VORPAL_API_TOKEN") {
-                    if !env_token.trim().is_empty() {
-                        api_token = Some(env_token.trim().to_string());
-                    }
-                }
+                artifact::make::run(run_artifact, run_config, run_service).await
+            }
+        },
 
-                artifact::make::run(api_token, artifact_args, config_args, service_args).await
+        Command::Auth(auth) => match auth {
+            CommandAuth::Login { client_id, issuer } => {
+                info!("Client ID: {}", client_id);
+                info!("Issuer: {}", issuer);
+
+                let discovery_url = format!(
+                    "{}/.well-known/openid-configuration",
+                    issuer.trim_end_matches('/')
+                );
+
+                let doc: serde_json::Value = reqwest::get(&discovery_url)
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await?;
+
+                let device_endpoint = doc
+                    .get("device_authorization_endpoint")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("missing device_authorization_endpoint"))?;
+
+                let token_endpoint = doc
+                    .get("token_endpoint")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("missing token_endpoint"))?;
+
+                let client_device_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
+
+                let client = BasicClient::new(ClientId::new(client_id.to_string()))
+                    .set_auth_uri(AuthUrl::new(issuer.to_string())?)
+                    .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
+                    .set_device_authorization_url(client_device_url);
+
+                let http_client = reqwest::ClientBuilder::new()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .expect("Client should build");
+
+                let details: StandardDeviceAuthorizationResponse = client
+                    .exchange_device_code()
+                    .add_scope(Scope::new("archive".to_string()))
+                    .add_scope(Scope::new("artifact".to_string()))
+                    .add_scope(Scope::new("worker".to_string()))
+                    .request_async(&http_client)
+                    .await?;
+
+                if let Some(complete_uri) = details.verification_uri_complete() {
+                    println!(
+                        "Open this URL in your browser:\n{}",
+                        complete_uri.clone().into_secret()
+                    );
+                };
+
+                println!(
+                    "Or open {} and enter code: {}",
+                    details.verification_uri().to_string(),
+                    details.user_code().secret().to_string()
+                );
+
+                let token_result = client
+                    .exchange_device_access_token(&details)
+                    .request_async(&http_client, sleep, None)
+                    .await?;
+
+                let access_token = token_result.access_token().secret();
+
+                let expires_in = token_result
+                    .expires_in()
+                    .map(|d| d.as_secs())
+                    .unwrap_or_default();
+
+                let refresh_token = token_result
+                    .refresh_token()
+                    .map(|t| t.secret().to_string())
+                    .unwrap_or_default();
+
+                let scopes = token_result
+                    .scopes()
+                    .map(|s| s.iter().map(|scope| scope.to_string()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+
+                // Prepare to store token
+
+                let content = VorpalCredentialsContent {
+                    access_token: access_token.to_string(),
+                    expires_in,
+                    refresh_token,
+                    scopes,
+                };
+
+                // TODO: load existing credentials file if it exists
+
+                let mut issuer_map = HashMap::new();
+
+                issuer_map.insert(issuer.to_string(), content);
+
+                let credentials = VorpalCredentials { issuer: issuer_map };
+                let credentials_toml = toml::to_string_pretty(&credentials)?;
+
+                println!("Credentials TOML:\n{}", credentials_toml);
+
+                // TODO: store token securely in Vorpal config file
+
+                Ok(())
             }
         },
 
         Command::Services(services) => match services {
             CommandServices::Start {
+                issuer,
                 port,
                 registry_backend,
                 registry_backend_s3_bucket,
                 services,
             } => {
-                let mut registry = get_default_address();
-
-                if let Some(home_path) = get_home_config_path() {
-                    if let Some(home_config) = load_vorpal_toml(home_path).await {
-                        if let Some(home_registry) = home_config.registry {
-                            registry = home_registry;
-                        }
-                    }
-                }
-
-                if let Some(r) = cli_registry {
-                    registry = r;
-                }
-
                 start::run(
+                    issuer.clone(),
                     *port,
-                    registry,
                     registry_backend.clone(),
                     registry_backend_s3_bucket.clone(),
                     services.split(',').map(|s| s.to_string()).collect(),
@@ -594,344 +513,15 @@ pub async fn run() -> Result<()> {
             },
 
             CommandSystem::Prune {
-                aliases,
+                artifact_aliases: aliases,
                 all,
-                archives,
-                configs,
-                outputs,
+                artifact_archives: archives,
+                artifact_configs: configs,
+                artifact_outputs: outputs,
                 sandboxes,
             } => {
-                system::prune::run(*aliases, *all, *archives, *configs, *outputs, *sandboxes).await
+                system::prune::run(*all, *aliases, *archives, *configs, *outputs, *sandboxes).await
             }
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::env;
-    use tempfile::TempDir;
-    use tokio::fs::write;
-
-    fn create_home_config() -> VorpalToml {
-        VorpalToml {
-            api_token: None,
-            config: Some(VorpalTomlConfig {
-                language: Some("go".to_string()),
-                name: Some("home-app".to_string()),
-                source: Some(VorpalTomlConfigSource {
-                    go: Some(VorpalTomlConfigSourceGo {
-                        directory: Some("home-go".to_string()),
-                    }),
-                    includes: Some(vec!["home-include1".to_string(), "shared".to_string()]),
-                    rust: Some(VorpalConfigSourceRust {
-                        bin: Some("home-bin".to_string()),
-                        packages: Some(vec!["home-pkg1".to_string()]),
-                    }),
-                }),
-            }),
-            registry: Some("https://home-registry:8080".to_string()),
-        }
-    }
-
-    fn create_project_config() -> VorpalToml {
-        VorpalToml {
-            api_token: None,
-            config: Some(VorpalTomlConfig {
-                language: Some("rust".to_string()),
-                name: Some("project-app".to_string()),
-                source: Some(VorpalTomlConfigSource {
-                    go: Some(VorpalTomlConfigSourceGo {
-                        directory: Some("project-go".to_string()),
-                    }),
-                    includes: Some(vec!["project-include1".to_string(), "shared".to_string()]),
-                    rust: Some(VorpalConfigSourceRust {
-                        bin: Some("project-bin".to_string()),
-                        packages: Some(vec!["project-pkg1".to_string()]),
-                    }),
-                }),
-            }),
-            registry: Some("https://project-registry:8080".to_string()),
-        }
-    }
-
-    #[test]
-    fn test_get_home_config_path() {
-        let original_home = env::var("HOME");
-
-        env::set_var("HOME", "/test/home");
-
-        let path = get_home_config_path();
-
-        assert_eq!(path, Some(PathBuf::from("/test/home/.vorpal/Vorpal.toml")));
-
-        env::remove_var("HOME");
-
-        let path = get_home_config_path();
-
-        assert_eq!(path, None);
-
-        // Restore original HOME if it existed
-        if let Ok(home) = original_home {
-            env::set_var("HOME", home);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_load_vorpal_toml_nonexistent_file() {
-        let path = PathBuf::from("/nonexistent/path/Vorpal.toml");
-        let result = load_vorpal_toml(path).await;
-
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_load_vorpal_toml_valid_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("Vorpal.toml");
-        let toml_content = r#"registry = "https://test-registry:8080"
-
-[config]
-language = "rust"
-name = "test-app"
-
-[config.source]
-includes = ["src", "tests"]
-
-[config.source.rust]
-bin = "test-bin"
-packages = ["pkg1", "pkg2"]
-"#;
-
-        write(&config_path, toml_content).await.unwrap();
-
-        let result = load_vorpal_toml(config_path).await;
-
-        assert!(result.is_some());
-
-        let config = result.unwrap();
-
-        assert_eq!(
-            config.registry,
-            Some("https://test-registry:8080".to_string())
-        );
-
-        assert!(config.config.is_some());
-
-        let config_section = config.config.unwrap();
-
-        assert_eq!(config_section.language, Some("rust".to_string()));
-        assert_eq!(config_section.name, Some("test-app".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_load_vorpal_toml_invalid_toml() {
-        let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("Vorpal.toml");
-        let invalid_toml = "invalid toml content [[[";
-
-        write(&config_path, invalid_toml).await.unwrap();
-
-        let result = load_vorpal_toml(config_path).await;
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_merge_configs_both_none() {
-        let result = merge_configs(None, None);
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_merge_configs_home_only() {
-        let home_config = create_home_config();
-        let result = merge_configs(Some(home_config.clone()), None);
-
-        assert!(result.is_some());
-
-        let merged = result.unwrap();
-
-        assert_eq!(merged.registry, home_config.registry);
-        assert_eq!(merged.config.unwrap().language, Some("go".to_string()));
-    }
-
-    #[test]
-    fn test_merge_configs_project_only() {
-        let project_config = create_project_config();
-        let result = merge_configs(None, Some(project_config.clone()));
-
-        assert!(result.is_some());
-
-        let merged = result.unwrap();
-
-        assert_eq!(merged.registry, project_config.registry);
-        assert_eq!(merged.config.unwrap().language, Some("rust".to_string()));
-    }
-
-    #[test]
-    fn test_merge_configs_project_overrides_home() {
-        let home_config = create_home_config();
-        let project_config = create_project_config();
-        let result = merge_configs(Some(home_config), Some(project_config));
-
-        assert!(result.is_some());
-
-        let merged = result.unwrap();
-
-        // Project registry should override home registry
-        assert_eq!(
-            merged.registry,
-            Some("https://project-registry:8080".to_string())
-        );
-
-        let config = merged.config.unwrap();
-
-        // Project values should override home values
-        assert_eq!(config.language, Some("rust".to_string()));
-        assert_eq!(config.name, Some("project-app".to_string()));
-
-        let source = config.source.unwrap();
-
-        // Go directory should be from project
-        assert_eq!(source.go.unwrap().directory, Some("project-go".to_string()));
-
-        // Rust bin should be from project
-        let rust_config = source.rust.unwrap();
-
-        assert_eq!(rust_config.bin, Some("project-bin".to_string()));
-
-        // Includes should contain both home and project values
-        let includes = source.includes.unwrap();
-
-        assert!(includes.contains(&"home-include1".to_string()));
-        assert!(includes.contains(&"project-include1".to_string()));
-        assert!(includes.contains(&"shared".to_string()));
-
-        assert_eq!(includes.len(), 3); // No duplicates of "shared"
-    }
-
-    #[test]
-    fn test_merge_configs_partial_home_config() {
-        let home_config = VorpalToml {
-            api_token: None,
-            config: Some(VorpalTomlConfig {
-                language: Some("go".to_string()),
-                name: None,
-                source: None,
-            }),
-            registry: Some("https://home-registry:8080".to_string()),
-        };
-
-        let project_config = VorpalToml {
-            api_token: None,
-            config: Some(VorpalTomlConfig {
-                language: None,
-                name: Some("project-app".to_string()),
-                source: Some(VorpalTomlConfigSource {
-                    go: None,
-                    includes: Some(vec!["project-include".to_string()]),
-                    rust: None,
-                }),
-            }),
-            registry: None,
-        };
-
-        let result = merge_configs(Some(home_config), Some(project_config));
-
-        assert!(result.is_some());
-
-        let merged = result.unwrap();
-
-        assert_eq!(
-            merged.registry,
-            Some("https://home-registry:8080".to_string())
-        );
-
-        let config = merged.config.unwrap();
-
-        assert_eq!(config.language, Some("go".to_string())); // From home
-        assert_eq!(config.name, Some("project-app".to_string())); // From project
-
-        let source = config.source.unwrap();
-
-        assert_eq!(source.includes, Some(vec!["project-include".to_string()]));
-    }
-
-    #[test]
-    fn test_merge_includes_combines_without_duplicates() {
-        let home_includes = Some(vec!["home1".to_string(), "shared".to_string()]);
-        let project_includes = Some(vec!["project1".to_string(), "shared".to_string()]);
-        let result = merge_includes(home_includes, project_includes);
-
-        assert!(result.is_some());
-
-        let merged = result.unwrap();
-
-        assert_eq!(merged.len(), 3);
-
-        assert!(merged.contains(&"home1".to_string()));
-        assert!(merged.contains(&"project1".to_string()));
-        assert!(merged.contains(&"shared".to_string()));
-    }
-
-    #[test]
-    fn test_merge_packages_combines_without_duplicates() {
-        let home_packages = Some(vec!["home-pkg".to_string(), "shared-pkg".to_string()]);
-        let project_packages = Some(vec!["project-pkg".to_string(), "shared-pkg".to_string()]);
-        let result = merge_packages(home_packages, project_packages);
-
-        assert!(result.is_some());
-
-        let merged = result.unwrap();
-
-        assert_eq!(merged.len(), 3);
-
-        assert!(merged.contains(&"home-pkg".to_string()));
-        assert!(merged.contains(&"project-pkg".to_string()));
-        assert!(merged.contains(&"shared-pkg".to_string()));
-    }
-
-    #[test]
-    fn test_merge_go_configs_project_overrides() {
-        let home_go = Some(VorpalTomlConfigSourceGo {
-            directory: Some("home-dir".to_string()),
-        });
-
-        let project_go = Some(VorpalTomlConfigSourceGo {
-            directory: Some("project-dir".to_string()),
-        });
-
-        let result = merge_go_configs(home_go, project_go);
-
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().directory, Some("project-dir".to_string()));
-    }
-
-    #[test]
-    fn test_merge_rust_configs_project_overrides() {
-        let home_rust = Some(VorpalConfigSourceRust {
-            bin: Some("home-bin".to_string()),
-            packages: Some(vec!["home-pkg".to_string()]),
-        });
-
-        let project_rust = Some(VorpalConfigSourceRust {
-            bin: Some("project-bin".to_string()),
-            packages: Some(vec!["project-pkg".to_string()]),
-        });
-
-        let result = merge_rust_configs(home_rust, project_rust);
-
-        assert!(result.is_some());
-
-        let merged = result.unwrap();
-
-        assert_eq!(merged.bin, Some("project-bin".to_string()));
-        assert_eq!(
-            merged.packages,
-            Some(vec!["home-pkg".to_string(), "project-pkg".to_string()])
-        );
     }
 }

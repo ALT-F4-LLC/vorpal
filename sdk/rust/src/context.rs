@@ -3,7 +3,7 @@ use crate::{
         agent::{agent_service_client::AgentServiceClient, PrepareArtifactRequest},
         artifact::{
             artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
-            ArtifactSystem, ArtifactsRequest, ArtifactsResponse, GetArtifactAliasRequest,
+            ArtifactSystem, ArtifactsRequest, ArtifactsResponse,
         },
         context::context_service_server::{ContextService, ContextServiceServer},
     },
@@ -14,7 +14,7 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use http::uri::{InvalidUri, Uri};
 use sha256::digest;
-use std::{collections::HashMap, env, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 use tokio::fs::read;
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig, Server},
@@ -33,13 +33,14 @@ pub struct ConfigContextStore {
 pub struct ConfigContext {
     artifact: String,
     artifact_context: PathBuf,
+    artifact_namespace: String,
+    artifact_system: ArtifactSystem,
+    artifact_unlock: bool,
     client_agent: AgentServiceClient<Channel>,
-    client_api_token: String,
     client_artifact: ArtifactServiceClient<Channel>,
     port: u16,
+    registry: String,
     store: ConfigContextStore,
-    system: ArtifactSystem,
-    unlock: bool,
 }
 
 #[derive(Clone)]
@@ -94,11 +95,12 @@ pub async fn get_context() -> Result<ConfigContext> {
             agent,
             artifact,
             artifact_context,
+            artifact_namespace,
+            artifact_system,
+            artifact_unlock,
+            artifact_variable,
             port,
             registry,
-            system,
-            variable,
-            unlock,
         } => {
             let service_ca_pem = read("/var/lib/vorpal/key/ca.pem")
                 .await
@@ -131,22 +133,23 @@ pub async fn get_context() -> Result<ConfigContext> {
             let client_agent = AgentServiceClient::new(client_agent_channel);
             let client_artifact = ArtifactServiceClient::new(client_registry_channel);
 
-            let client_api_token = env::var("VORPAL_API_TOKEN").unwrap_or_default();
+            // let client_api_token = env::var("VORPAL_API_TOKEN").unwrap_or_default();
 
-            if client_api_token.is_empty() {
-                bail!("VORPAL_API_TOKEN environment variable is required");
-            }
+            // if client_api_token.is_empty() {
+            //     bail!("VORPAL_API_TOKEN environment variable is required");
+            // }
 
             Ok(ConfigContext::new(
                 artifact,
                 PathBuf::from(artifact_context),
+                artifact_namespace,
+                artifact_system,
+                artifact_unlock,
+                artifact_variable,
                 client_agent,
-                client_api_token,
                 client_artifact,
                 port,
-                system,
-                unlock,
-                variable,
+                registry,
             )?)
         }
     }
@@ -157,24 +160,26 @@ impl ConfigContext {
     pub fn new(
         artifact: String,
         artifact_context: PathBuf,
+        artifact_namespace: String,
+        artifact_system: String,
+        artifact_unlock: bool,
+        artifact_variable: Vec<String>,
         client_agent: AgentServiceClient<Channel>,
-        client_api_token: String,
         client_artifact: ArtifactServiceClient<Channel>,
         port: u16,
-        system: String,
-        unlock: bool,
-        variable: Vec<String>,
+        registry: String,
     ) -> Result<Self> {
         Ok(Self {
-            client_api_token,
             artifact,
             artifact_context,
             client_agent,
             client_artifact,
+            artifact_namespace,
             port,
+            registry,
             store: ConfigContextStore {
                 artifact: HashMap::new(),
-                variable: variable
+                variable: artifact_variable
                     .iter()
                     .map(|v| {
                         let mut parts = v.split('=');
@@ -184,8 +189,8 @@ impl ConfigContext {
                     })
                     .collect(),
             },
-            system: get_system(&system)?,
-            unlock,
+            artifact_system: get_system(&artifact_system)?,
+            artifact_unlock,
         })
     }
 
@@ -217,17 +222,19 @@ impl ConfigContext {
         let request = PrepareArtifactRequest {
             artifact: Some(artifact.clone()),
             artifact_context: self.artifact_context.display().to_string(),
-            artifact_unlock: self.unlock,
+            artifact_namespace: self.artifact_namespace.clone(),
+            artifact_unlock: self.artifact_unlock,
+            registry: self.registry.clone(),
         };
 
-        let mut request = Request::new(request);
+        let request = Request::new(request);
 
-        request.metadata_mut().insert(
-            "authorization",
-            format!("Bearer {}", self.client_api_token)
-                .parse()
-                .expect("failed to set authorization header"),
-        );
+        // request.metadata_mut().insert(
+        //     "authorization",
+        //     format!("Bearer {}", self.client_api_token)
+        //         .parse()
+        //         .expect("failed to set authorization header"),
+        // );
 
         let response = self
             .client_agent
@@ -282,123 +289,50 @@ impl ConfigContext {
         Ok(artifact_digest)
     }
 
-    pub async fn fetch_artifact(&mut self, alias: &str) -> Result<String> {
+    pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
         // TODO: look in lockfile for artifact version
 
         // if self.store.artifact.contains_key(digest) {
         //     return Ok(digest.to_string());
         // }
 
-        fn is_hex_digest(s: &str) -> bool {
-            s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
-        }
-
-        // Treat 64-hex strings as direct digests; otherwise resolve via alias
-        if is_hex_digest(alias) {
-            let request = ArtifactRequest {
-                digest: alias.to_string(),
-            };
-
-            let mut grpc_request = Request::new(request.clone());
-
-            grpc_request.metadata_mut().insert(
-                "authorization",
-                format!("Bearer {}", self.client_api_token)
-                    .parse()
-                    .expect("failed to set authorization header"),
-            );
-
-            match self.client_artifact.get_artifact(grpc_request).await {
-                Err(status) => {
-                    if status.code() != NotFound {
-                        bail!("artifact service error: {:?}", status);
-                    }
-
-                    bail!("artifact not found: {}", request.digest);
-                }
-
-                Ok(response) => {
-                    let artifact = response.into_inner();
-
-                    self.store
-                        .artifact
-                        .insert(request.digest.clone(), artifact.clone());
-
-                    for step in artifact.steps.iter() {
-                        for dep in step.artifacts.iter() {
-                            Box::pin(self.fetch_artifact(dep)).await?;
-                        }
-                    }
-
-                    return Ok(request.digest);
-                }
-            }
-        }
-
-        let request = GetArtifactAliasRequest {
-            alias: alias.to_string(),
-            alias_system: self.system.into(),
+        let request = ArtifactRequest {
+            digest: digest.to_string(),
+            namespace: self.artifact_namespace.clone(),
         };
 
-        let mut grpc_request = Request::new(request.clone());
+        let request = Request::new(request.clone());
 
-        grpc_request.metadata_mut().insert(
-            "authorization",
-            format!("Bearer {}", self.client_api_token)
-                .parse()
-                .expect("failed to set authorization header"),
-        );
+        // grpc_request.metadata_mut().insert(
+        //     "authorization",
+        //     format!("Bearer {}", self.client_api_token)
+        //         .parse()
+        //         .expect("failed to set authorization header"),
+        // );
 
-        match self.client_artifact.get_artifact_alias(grpc_request).await {
+        match self.client_artifact.get_artifact(request).await {
             Err(status) => {
                 if status.code() != NotFound {
                     bail!("artifact service error: {:?}", status);
                 }
 
-                bail!("artifact alias not found: {alias}");
+                bail!("artifact not found: {}", digest);
             }
 
             Ok(response) => {
-                let response = response.into_inner();
+                let artifact = response.into_inner();
 
-                let request = ArtifactRequest {
-                    digest: response.digest,
-                };
+                self.store
+                    .artifact
+                    .insert(digest.to_string(), artifact.clone());
 
-                let mut grpc_request = Request::new(request.clone());
-
-                grpc_request.metadata_mut().insert(
-                    "authorization",
-                    format!("Bearer {}", self.client_api_token)
-                        .parse()
-                        .expect("failed to set authorization header"),
-                );
-
-                match self.client_artifact.get_artifact(grpc_request).await {
-                    Err(status) => {
-                        if status.code() != NotFound {
-                            bail!("artifact service error: {:?}", status);
-                        }
-
-                        bail!("artifact not found: {}", request.digest);
-                    }
-
-                    Ok(response) => {
-                        let artifact = response.into_inner();
-
-                        self.store
-                            .artifact
-                            .insert(request.digest.clone(), artifact.clone());
-
-                        for step in artifact.steps.iter() {
-                            for artifact_digest in step.artifacts.iter() {
-                                Box::pin(self.fetch_artifact(artifact_digest)).await?;
-                            }
-                        }
-
-                        Ok(request.digest)
+                for step in artifact.steps.iter() {
+                    for dep in step.artifacts.iter() {
+                        Box::pin(self.fetch_artifact(dep)).await?;
                     }
                 }
+
+                return Ok(digest.to_string());
             }
         }
     }
@@ -420,7 +354,7 @@ impl ConfigContext {
     }
 
     pub fn get_system(&self) -> ArtifactSystem {
-        self.system
+        self.artifact_system
     }
 
     pub fn get_variable(&self, name: &str) -> Option<String> {

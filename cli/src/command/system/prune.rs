@@ -1,23 +1,24 @@
 use crate::command::store::paths::{
-    get_artifact_alias_dir_path, get_artifact_archive_dir_path, get_artifact_config_dir_path,
-    get_artifact_output_dir_path, get_root_sandbox_dir_path,
+    get_root_artifact_alias_dir_path, get_root_artifact_archive_dir_path,
+    get_root_artifact_config_dir_path, get_root_artifact_output_dir_path,
+    get_root_sandbox_dir_path,
 };
 use anyhow::Result;
 use tokio::fs::{create_dir_all, remove_dir_all};
 use tracing::info;
 
 pub async fn run(
-    aliases: bool,
     all: bool,
-    archives: bool,
-    configs: bool,
-    outputs: bool,
+    artifact_aliases: bool,
+    artifact_archives: bool,
+    artifact_configs: bool,
+    artifact_outputs: bool,
     sandboxes: bool,
 ) -> Result<()> {
-    if aliases || all {
+    if artifact_aliases || all {
         info!("Pruning artifact aliases...");
 
-        let artifact_alias_dir_path = get_artifact_alias_dir_path();
+        let artifact_alias_dir_path = get_root_artifact_alias_dir_path();
 
         remove_dir_all(&artifact_alias_dir_path)
             .await
@@ -28,10 +29,10 @@ pub async fn run(
             .map_err(|e| anyhow::anyhow!("Failed to create artifact aliases directory: {}", e))?;
     }
 
-    if archives || all {
+    if artifact_archives || all {
         info!("Pruning artifact archives...");
 
-        let artifact_archive_dir_path = get_artifact_archive_dir_path();
+        let artifact_archive_dir_path = get_root_artifact_archive_dir_path();
 
         remove_dir_all(&artifact_archive_dir_path)
             .await
@@ -42,10 +43,10 @@ pub async fn run(
             .map_err(|e| anyhow::anyhow!("Failed to create artifact archives directory: {}", e))?;
     }
 
-    if configs || all {
+    if artifact_configs || all {
         info!("Pruning artifact configs...");
 
-        let artifact_config_dir_path = get_artifact_config_dir_path();
+        let artifact_config_dir_path = get_root_artifact_config_dir_path();
 
         remove_dir_all(&artifact_config_dir_path)
             .await
@@ -56,10 +57,10 @@ pub async fn run(
             .map_err(|e| anyhow::anyhow!("Failed to create artifact configs directory: {}", e))?;
     }
 
-    if outputs || all {
+    if artifact_outputs || all {
         info!("Pruning artifact outputs...");
 
-        let artifact_output_dir_path = get_artifact_output_dir_path();
+        let artifact_output_dir_path = get_root_artifact_output_dir_path();
 
         remove_dir_all(&artifact_output_dir_path)
             .await

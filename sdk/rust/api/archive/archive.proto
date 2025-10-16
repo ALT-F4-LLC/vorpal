@@ -12,11 +12,13 @@ service ArchiveService {
 
 message ArchivePullRequest {
     string digest = 1;
+    string namespace = 2;
 }
 
 message ArchivePushRequest {
     bytes data = 1;
     string digest = 2;
+    string namespace = 3;
 }
 
 message ArchiveResponse {}

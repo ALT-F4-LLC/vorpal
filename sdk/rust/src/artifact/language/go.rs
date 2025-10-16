@@ -1,18 +1,15 @@
 use crate::{
+    api,
     api::artifact::{
         ArtifactSystem,
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
-    artifact::{
-        get_env_key, go, step, ArtifactBuilder, ArtifactSource, ArtifactSourceBuilder,
-        ArtifactStepSecret,
-    },
-    context::ConfigContext,
+    artifact, context,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
-pub struct GoBuilder<'a> {
+pub struct Go<'a> {
     aliases: Vec<String>,
     artifacts: Vec<String>,
     build_arguments: Vec<String>,
@@ -20,8 +17,8 @@ pub struct GoBuilder<'a> {
     build_path: Option<&'a str>,
     includes: Vec<&'a str>,
     name: &'a str,
-    secrets: Vec<ArtifactStepSecret>,
-    source: Option<ArtifactSource>,
+    secrets: Vec<api::artifact::ArtifactStepSecret>,
+    source: Option<api::artifact::ArtifactSource>,
     source_scripts: Vec<String>,
     systems: Vec<ArtifactSystem>,
 }
@@ -46,7 +43,7 @@ pub fn get_goarch(target: ArtifactSystem) -> Result<String> {
     Ok(goarch.to_string())
 }
 
-impl<'a> GoBuilder<'a> {
+impl<'a> Go<'a> {
     pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             aliases: vec![],
@@ -98,13 +95,14 @@ impl<'a> GoBuilder<'a> {
     pub fn with_secrets(mut self, secrets: Vec<(String, String)>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
-                self.secrets.push(ArtifactStepSecret { name, value });
+                self.secrets
+                    .push(api::artifact::ArtifactStepSecret { name, value });
             }
         }
         self
     }
 
-    pub fn with_source(mut self, source: ArtifactSource) -> Self {
+    pub fn with_source(mut self, source: api::artifact::ArtifactSource) -> Self {
         self.source = Some(source);
         self
     }
@@ -116,10 +114,10 @@ impl<'a> GoBuilder<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
         let source_path = ".";
 
-        let mut source_builder = ArtifactSourceBuilder::new(self.name, source_path);
+        let mut source_builder = artifact::ArtifactSource::new(self.name, source_path);
 
         if !self.includes.is_empty() {
             let source_includes = self.includes.iter().map(|s| s.to_string()).collect();
@@ -162,12 +160,12 @@ impl<'a> GoBuilder<'a> {
             name = self.name,
         };
 
-        let go = go::build(context).await?;
+        let go = artifact::go::build(context).await?;
         let goarch = get_goarch(context.get_system())?;
         let goos = get_goos(context.get_system())?;
 
         let steps = vec![
-            step::shell(
+            artifact::step::shell(
                 context,
                 [vec![go.clone()], self.artifacts].concat(),
                 vec![
@@ -176,7 +174,7 @@ impl<'a> GoBuilder<'a> {
                     "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
                     format!("GOOS={}", goos),
                     "GOPATH=$VORPAL_WORKSPACE/go".to_string(),
-                    format!("PATH={}/bin", get_env_key(&go)),
+                    format!("PATH={}/bin", artifact::get_env_key(&go)),
                 ],
                 step_script,
                 self.secrets,
@@ -184,7 +182,7 @@ impl<'a> GoBuilder<'a> {
             .await?,
         ];
 
-        ArtifactBuilder::new(self.name, steps, self.systems)
+        artifact::Artifact::new(self.name, steps, self.systems)
             .with_aliases(self.aliases)
             .with_sources(vec![source])
             .build(context)

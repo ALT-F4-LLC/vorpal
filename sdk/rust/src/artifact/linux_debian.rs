@@ -1,6 +1,6 @@
 use crate::{
     api::artifact::ArtifactSystem::{Aarch64Linux, X8664Linux},
-    artifact::{get_env_key, step, ArtifactBuilder},
+    artifact::{get_env_key, step, Artifact},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -174,7 +174,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         },
     )];
 
-    let dockerfile = ArtifactBuilder::new("linux-debian-dockerfile", steps, systems.clone())
+    let dockerfile = Artifact::new("linux-debian-dockerfile", steps, systems.clone())
         .build(context)
         .await?;
 
@@ -223,7 +223,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let name = "linux-debian";
 
-    ArtifactBuilder::new(name, steps, systems)
+    Artifact::new(name, steps, systems)
         .with_aliases(vec![format!("{name}:latest")])
         .build(context)
         .await

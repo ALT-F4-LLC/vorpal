@@ -1,6 +1,6 @@
 use crate::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{step, ArtifactBuilder, ArtifactSourceBuilder},
+    artifact::{step, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -26,7 +26,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let source_version = "2.69.0";
     let source_path = format!("https://github.com/cli/cli/releases/download/v{source_version}/gh_{source_version}_{source_target}.{source_extension}");
-    let source = ArtifactSourceBuilder::new(name, source_path.as_str()).build();
+    let source = ArtifactSource::new(name, source_path.as_str()).build();
 
     let step_script = formatdoc! {"
         mkdir -pv \"$VORPAL_OUTPUT/bin\"
@@ -39,7 +39,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let step = step::shell(context, vec![], vec![], step_script, vec![]).await?;
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    ArtifactBuilder::new(name, vec![step], systems)
+    Artifact::new(name, vec![step], systems)
         .with_aliases(vec![format!("{name}:{source_version}")])
         .with_sources(vec![source])
         .build(context)

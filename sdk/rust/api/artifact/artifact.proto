@@ -52,6 +52,7 @@ message Artifact {
 
 message ArtifactRequest {
     string digest = 1;
+    string namespace = 2;
 }
 
 message ArtifactResponse {
@@ -60,6 +61,7 @@ message ArtifactResponse {
 
 message ArtifactsRequest {
     repeated string digests = 1;
+    string namespace = 2;
 }
 
 message ArtifactsResponse {
@@ -67,8 +69,10 @@ message ArtifactsResponse {
 }
 
 message GetArtifactAliasRequest {
-  ArtifactSystem alias_system = 1;
-  string alias = 2;
+  ArtifactSystem system = 1;
+  string name = 2;
+  string namespace = 3;
+  string tag = 4;
 }
 
 message GetArtifactAliasResponse {
@@ -78,4 +82,5 @@ message GetArtifactAliasResponse {
 message StoreArtifactRequest {
   Artifact artifact = 1;
   repeated string artifact_aliases = 2;
+  string artifact_namespace = 3;
 }

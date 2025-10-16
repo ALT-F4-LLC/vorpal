@@ -5,7 +5,6 @@ locals {
     cli = {
       access_type                               = "PUBLIC"
       oauth2_device_authorization_grant_enabled = true
-
       optional_scopes = [
         "archive",
         "artifact",
@@ -16,7 +15,6 @@ locals {
     archive = {
       access_type                     = "CONFIDENTIAL"
       standard_token_exchange_enabled = true
-
       roles = [
         "archive:check",
         "archive:push",
@@ -27,7 +25,6 @@ locals {
     artifact = {
       access_type                     = "CONFIDENTIAL"
       standard_token_exchange_enabled = true
-
       roles = [
         "artifact:get",
         "artifact:get-alias",
@@ -38,12 +35,10 @@ locals {
     worker = {
       access_type                     = "CONFIDENTIAL"
       standard_token_exchange_enabled = true
-
       optional_scopes = [
         "archive",
         "artifact",
       ]
-
       roles = [
         "worker:build-artifact",
       ]
@@ -52,18 +47,18 @@ locals {
 
   client_scope = {
     archive = {
-      included_client_audience    = "archive"
       client_id_for_role_mappings = "archive"
+      included_client_audience    = "archive"
     }
 
     artifact = {
-      included_client_audience    = "artifact"
       client_id_for_role_mappings = "artifact"
+      included_client_audience    = "artifact"
     }
 
     worker = {
-      included_client_audience    = "worker"
       client_id_for_role_mappings = "worker"
+      included_client_audience    = "worker"
     }
   }
 
@@ -75,4 +70,13 @@ locals {
       }
     ]
   ])
+
+  users = {
+    "admin" = {
+      email      = "admin@localhost"
+      first_name = "Admin"
+      last_name  = "User"
+      password   = "password"
+    }
+  }
 }

@@ -57,7 +57,7 @@ impl S3Backend {
             return Err(BackendError::MissingS3Bucket);
         };
 
-        let client_version = aws_config::BehaviorVersion::v2025_01_17();
+        let client_version = aws_config::BehaviorVersion::v2025_08_07();
         let client_config = aws_config::load_defaults(client_version).await;
         let client = Client::new(&client_config);
 
@@ -158,6 +158,7 @@ impl ArchiveService for ArchiveServer {
     ) -> Result<Response<ArchiveResponse>, Status> {
         let mut request_data: Vec<u8> = vec![];
         let mut request_digest = None;
+        let mut request_namespace = None;
         let mut request_stream = request.into_inner();
 
         while let Some(request) = request_stream.next().await {
@@ -166,6 +167,7 @@ impl ArchiveService for ArchiveServer {
             request_data.extend_from_slice(&request.data);
 
             request_digest = Some(request.digest);
+            request_namespace = Some(request.namespace);
         }
 
         if request_data.is_empty() {
@@ -176,9 +178,14 @@ impl ArchiveService for ArchiveServer {
             return Err(Status::invalid_argument("missing `digest` field"));
         };
 
+        let Some(request_namespace) = request_namespace else {
+            return Err(Status::invalid_argument("missing `namespace` field"));
+        };
+
         let request = ArchivePushRequest {
             digest: request_digest,
             data: request_data,
+            namespace: request_namespace,
         };
 
         self.backend.push(&request).await?;
@@ -191,18 +198,21 @@ impl ArchiveService for ArchiveServer {
 
 #[tonic::async_trait]
 pub trait ArtifactBackend: Send + Sync + 'static {
-    async fn get_artifact(&self, digest: String) -> Result<Artifact, Status>;
+    async fn get_artifact(&self, digest: String, namespace: String) -> Result<Artifact, Status>;
 
     async fn get_artifact_alias(
         &self,
-        alias: String,
-        alias_system: ArtifactSystem,
+        artifact_name: String,
+        artifact_namespace: String,
+        artifact_system: ArtifactSystem,
+        artifact_tag: String,
     ) -> Result<String, Status>;
 
     async fn store_artifact(
         &self,
         artifact: Artifact,
         artifact_aliases: Vec<String>,
+        artifact_namespace: String,
     ) -> Result<String, Status>;
 
     /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
@@ -237,9 +247,12 @@ impl ArtifactService for ArtifactServer {
             return Err(Status::invalid_argument("missing `digest` field"));
         }
 
-        let artifact = self.backend.get_artifact(request.digest.clone()).await?;
+        let artifact = self
+            .backend
+            .get_artifact(request.digest.clone(), request.namespace.clone())
+            .await?;
 
-        info!("registry |> artifact get: {}", request.digest);
+        info!("artifact |> get: {}", request.digest);
 
         Ok(Response::new(artifact))
     }
@@ -250,18 +263,22 @@ impl ArtifactService for ArtifactServer {
     ) -> Result<Response<GetArtifactAliasResponse>, Status> {
         let request = request.into_inner();
 
-        if request.alias.is_empty() {
-            return Err(Status::invalid_argument("missing `alias` field"));
-        }
-
-        let alias_system = request.alias_system();
+        let request_system = ArtifactSystem::try_from(request.system);
 
         let digest = self
             .backend
-            .get_artifact_alias(request.alias.clone(), alias_system)
+            .get_artifact_alias(
+                request.name.clone(),
+                request.namespace,
+                request_system.unwrap_or(ArtifactSystem::UnknownSystem),
+                request.tag.clone(),
+            )
             .await?;
 
-        info!("artifact alias |> get: {} -> {}", request.alias, digest);
+        info!(
+            "artifact |> alias get: {}:{} -> {}",
+            request.name, request.tag, digest
+        );
 
         Ok(Response::new(GetArtifactAliasResponse { digest }))
     }
@@ -291,10 +308,14 @@ impl ArtifactService for ArtifactServer {
 
         let digest = self
             .backend
-            .store_artifact(artifact, request.artifact_aliases)
+            .store_artifact(
+                artifact,
+                request.artifact_aliases,
+                request.artifact_namespace,
+            )
             .await?;
 
-        info!("registry |> artifact store: {}", digest);
+        info!("artifact |> store: {}", digest);
 
         Ok(Response::new(ArtifactResponse { digest }))
     }

@@ -1,4 +1,4 @@
-use crate::artifact::system::get_system_default_str;
+use crate::artifact::get_default_address;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -12,7 +12,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     Start {
-        #[clap(default_value = "https://localhost:23151", long)]
+        #[clap(default_value_t = get_default_address(), long)]
         agent: String,
 
         #[clap(long)]
@@ -22,18 +22,21 @@ pub enum Command {
         artifact_context: String,
 
         #[clap(long)]
-        port: u16,
+        artifact_namespace: String,
 
-        #[clap(default_value = "https://localhost:23151", long)]
-        registry: String,
-
-        #[arg(default_value_t = get_system_default_str(), long)]
-        system: String,
+        #[arg(long)]
+        artifact_system: String,
 
         #[clap(long, default_value_t = false)]
-        unlock: bool,
+        artifact_unlock: bool,
 
         #[clap(long)]
-        variable: Vec<String>,
+        artifact_variable: Vec<String>,
+
+        #[clap(long)]
+        port: u16,
+
+        #[clap(default_value_t = get_default_address(), long)]
+        registry: String,
     },
 }

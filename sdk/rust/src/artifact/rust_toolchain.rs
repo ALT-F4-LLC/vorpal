@@ -5,7 +5,7 @@ use crate::{
     },
     artifact::{
         cargo, clippy, get_env_key, rust_analyzer, rust_src, rust_std, rustc, rustfmt, step,
-        ArtifactBuilder,
+        Artifact,
     },
     context::ConfigContext,
 };
@@ -95,7 +95,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
     let name = "rust-toolchain";
 
-    ArtifactBuilder::new(name, steps, systems)
+    Artifact::new(name, steps, systems)
         .with_aliases(vec![format!("{name}:{toolchain_version}")])
         .build(context)
         .await

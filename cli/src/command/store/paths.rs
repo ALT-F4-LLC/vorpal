@@ -64,57 +64,71 @@ pub fn get_artifact_dir_path() -> PathBuf {
     get_root_store_dir_path().join("artifact")
 }
 
-pub fn get_artifact_alias_dir_path() -> PathBuf {
+pub fn get_root_artifact_alias_dir_path() -> PathBuf {
     get_artifact_dir_path().join("alias")
 }
 
-pub fn get_artifact_archive_dir_path() -> PathBuf {
+pub fn get_artifact_alias_dir_path(namespace: &str, system: ArtifactSystem) -> PathBuf {
+    get_root_artifact_alias_dir_path()
+        .join(namespace)
+        .join(system.as_str_name())
+}
+
+pub fn get_artifact_alias_path(
+    name: &str,
+    namespace: &str,
+    system: ArtifactSystem,
+    tag: &str,
+) -> Result<PathBuf> {
+    Ok(get_artifact_alias_dir_path(namespace, system)
+        .join(name)
+        .join(tag))
+}
+
+pub fn get_root_artifact_archive_dir_path() -> PathBuf {
     get_artifact_dir_path().join("archive")
 }
 
-pub fn get_artifact_config_dir_path() -> PathBuf {
-    get_artifact_dir_path().join("config")
+pub fn get_artifact_archive_dir_path(namespace: &str) -> PathBuf {
+    get_root_artifact_archive_dir_path().join(namespace)
 }
 
-pub fn get_artifact_output_dir_path() -> PathBuf {
-    get_artifact_dir_path().join("output")
-}
-
-pub fn get_artifact_alias_path(alias: &str, system: ArtifactSystem) -> Result<PathBuf> {
-    let alias = alias.split(':').collect::<Vec<&str>>();
-
-    if alias.len() != 2 {
-        bail!("invalid alias format");
-    }
-
-    let system = system.as_str_name();
-
-    Ok(get_artifact_alias_dir_path()
-        .join(system)
-        .join(alias[0])
-        .join(alias[1]))
-}
-
-pub fn get_artifact_archive_path(digest: &str) -> PathBuf {
-    get_artifact_archive_dir_path()
+pub fn get_artifact_archive_path(digest: &str, namespace: &str) -> PathBuf {
+    get_artifact_archive_dir_path(namespace)
         .join(digest)
         .with_extension("tar.zst")
 }
 
-pub fn get_artifact_config_path(digest: &str) -> PathBuf {
-    get_artifact_config_dir_path()
+pub fn get_root_artifact_config_dir_path() -> PathBuf {
+    get_artifact_dir_path().join("config")
+}
+
+pub fn get_artifact_config_dir_path(namespace: &str) -> PathBuf {
+    get_root_artifact_config_dir_path().join(namespace)
+}
+
+pub fn get_artifact_config_path(digest: &str, namespace: &str) -> PathBuf {
+    get_artifact_config_dir_path(namespace)
         .join(digest)
         .with_extension("json")
 }
 
-pub fn get_artifact_output_path(digest: &str) -> PathBuf {
-    get_artifact_output_dir_path().join(digest)
+pub fn get_root_artifact_output_dir_path() -> PathBuf {
+    get_artifact_dir_path().join("output")
 }
 
-pub fn get_artifact_output_lock_path(digest: &str) -> PathBuf {
-    get_artifact_output_dir_path()
+pub fn get_artifact_output_dir_path(namespace: &str) -> PathBuf {
+    get_root_artifact_output_dir_path().join(namespace)
+}
+
+pub fn get_artifact_output_lock_path(digest: &str, namespace: &str) -> PathBuf {
+    get_artifact_output_dir_path(namespace)
         .join(digest)
         .with_extension("lock.json")
+}
+
+pub fn get_artifact_output_path(digest: &str, namespace: &str) -> PathBuf {
+    get_artifact_output_dir_path(namespace).join(digest)
 }
 
 // Temp paths

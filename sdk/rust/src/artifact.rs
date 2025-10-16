@@ -1,9 +1,7 @@
-use crate::{
-    api::artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactStepSecret, ArtifactSystem},
-    context::ConfigContext,
-};
+use crate::{api, context};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
+use std::{error::Error, fmt};
 
 pub mod cargo;
 pub mod clippy;
@@ -15,7 +13,6 @@ pub mod grpcurl;
 pub mod language;
 pub mod linux_debian;
 pub mod linux_vorpal;
-pub mod project_environment;
 pub mod protoc;
 pub mod protoc_gen_go;
 pub mod protoc_gen_go_grpc;
@@ -25,27 +22,57 @@ pub mod rust_std;
 pub mod rust_toolchain;
 pub mod rustc;
 pub mod rustfmt;
-pub mod source;
 pub mod staticcheck;
 pub mod step;
 pub mod system;
-pub mod user_environment;
 
-pub struct ArgumentBuilder<'a> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactAlias {
+    digest: Option<String>,
+    name: String,
+    namespace: Option<String>,
+    registry: Option<String>,
+    tag: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArtifactAliasParseError {
+    EmptyUri,
+    InvalidFormat(String),
+    MissingName,
+}
+
+pub struct ArtifactArgument<'a> {
     pub name: &'a str,
     pub require: bool,
 }
 
-pub struct ProcessBuilder<'a> {
+pub struct ArtifactJob<'a> {
+    pub artifacts: Vec<String>,
+    pub name: &'a str,
+    pub secrets: Vec<api::artifact::ArtifactStepSecret>,
+    pub script: String,
+    pub systems: Vec<api::artifact::ArtifactSystem>,
+}
+
+pub struct ArtifactProcess<'a> {
     pub arguments: Vec<String>,
     pub artifacts: Vec<String>,
     pub entrypoint: &'a str,
     pub name: &'a str,
-    pub secrets: Vec<ArtifactStepSecret>,
-    pub systems: Vec<ArtifactSystem>,
+    pub secrets: Vec<api::artifact::ArtifactStepSecret>,
+    pub systems: Vec<api::artifact::ArtifactSystem>,
 }
 
-pub struct ArtifactSourceBuilder<'a> {
+pub struct ArtifactProjectEnvironment<'a> {
+    pub artifacts: Vec<String>,
+    pub environments: Vec<String>,
+    pub name: &'a str,
+    pub secrets: Vec<api::artifact::ArtifactStepSecret>,
+    pub systems: Vec<api::artifact::ArtifactSystem>,
+}
+
+pub struct ArtifactSource<'a> {
     pub digest: Option<&'a str>,
     pub excludes: Vec<String>,
     pub includes: Vec<String>,
@@ -53,32 +80,193 @@ pub struct ArtifactSourceBuilder<'a> {
     pub path: &'a str,
 }
 
-pub struct ArtifactStepBuilder<'a> {
+pub struct ArtifactStep<'a> {
     pub arguments: Vec<String>,
     pub artifacts: Vec<String>,
     pub entrypoint: &'a str,
     pub environments: Vec<String>,
-    pub secrets: Vec<ArtifactStepSecret>,
+    pub secrets: Vec<api::artifact::ArtifactStepSecret>,
     pub script: Option<String>,
 }
 
-pub struct JobBuilder<'a> {
+pub struct ArtifactUserEnvironment<'a> {
     pub artifacts: Vec<String>,
+    pub environments: Vec<String>,
     pub name: &'a str,
-    pub secrets: Vec<ArtifactStepSecret>,
-    pub script: String,
-    pub systems: Vec<ArtifactSystem>,
+    pub symlinks: Vec<(String, String)>,
+    pub systems: Vec<api::artifact::ArtifactSystem>,
 }
 
-pub struct ArtifactBuilder<'a> {
+pub struct Artifact<'a> {
     pub aliases: Vec<String>,
     pub name: &'a str,
-    pub sources: Vec<ArtifactSource>,
-    pub steps: Vec<ArtifactStep>,
-    pub systems: Vec<ArtifactSystem>,
+    pub sources: Vec<api::artifact::ArtifactSource>,
+    pub steps: Vec<api::artifact::ArtifactStep>,
+    pub systems: Vec<api::artifact::ArtifactSystem>,
 }
 
-impl<'a> ArgumentBuilder<'a> {
+impl fmt::Display for ArtifactAliasParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ArtifactAliasParseError::EmptyUri => write!(f, "URI cannot be empty"),
+            ArtifactAliasParseError::InvalidFormat(msg) => write!(f, "Invalid URI format: {}", msg),
+            ArtifactAliasParseError::MissingName => write!(f, "Name is required"),
+        }
+    }
+}
+
+impl Error for ArtifactAliasParseError {}
+
+impl ArtifactAlias {
+    /// Parse a URI string into an ArtifactUri
+    /// Format: [<registry>/][<namespace>/]<name>[:<tag>][@<digest>]
+    pub fn parse(uri: &str) -> Result<Self, ArtifactAliasParseError> {
+        if uri.is_empty() {
+            return Err(ArtifactAliasParseError::EmptyUri);
+        }
+
+        // Step 1: Extract digest (everything after '@')
+        let (uri_without_digest, digest) = match uri.rsplit_once('@') {
+            Some((base, digest_str)) => {
+                if digest_str.is_empty() {
+                    return Err(ArtifactAliasParseError::InvalidFormat(
+                        "Empty digest".to_string(),
+                    ));
+                }
+                (base, Some(digest_str.to_string()))
+            }
+            None => (uri, None),
+        };
+
+        // Step 2: Extract tag (everything after last ':')
+        let (uri_without_tag, tag) = match uri_without_digest.rsplit_once(':') {
+            Some((base, tag_str)) => {
+                // Check if this is a port (part of registry) or a tag
+                // If the part before ':' contains '/', it's likely a tag
+                // If it doesn't contain '/' and the tag contains '/', it's probably a port
+                if base.contains('/') || !tag_str.contains('/') {
+                    if tag_str.is_empty() {
+                        return Err(ArtifactAliasParseError::InvalidFormat(
+                            "Empty tag".to_string(),
+                        ));
+                    }
+                    (base, Some(tag_str.to_string()))
+                } else {
+                    // This ':' is part of the registry (port number)
+                    (uri_without_digest, None)
+                }
+            }
+            None => (uri_without_digest, None),
+        };
+
+        // Step 3: Split by '/' to get registry, namespace, and name
+        let parts: Vec<&str> = uri_without_tag.split('/').collect();
+
+        if parts.is_empty() || parts.iter().all(|p| p.is_empty()) {
+            return Err(ArtifactAliasParseError::MissingName);
+        }
+
+        let (registry, namespace, name) = match parts.len() {
+            1 => {
+                // Just name
+                (None, None, parts[0].to_string())
+            }
+            2 => {
+                // Could be registry/name or namespace/name
+                // If first part looks like a domain (contains '.' or ':'), treat as registry
+                if parts[0].contains('.') || parts[0].contains(':') {
+                    (Some(parts[0].to_string()), None, parts[1].to_string())
+                } else {
+                    // Otherwise treat as namespace/name
+                    (None, Some(parts[0].to_string()), parts[1].to_string())
+                }
+            }
+            3 => {
+                // registry/namespace/name
+                (
+                    Some(parts[0].to_string()),
+                    Some(parts[1].to_string()),
+                    parts[2].to_string(),
+                )
+            }
+            _ => {
+                // More than 3 parts: first is registry, last is name, middle parts are namespace
+                let registry = Some(parts[0].to_string());
+                let name = parts[parts.len() - 1].to_string();
+                let namespace = Some(parts[1..parts.len() - 1].join("/"));
+                (registry, namespace, name)
+            }
+        };
+
+        if name.is_empty() {
+            return Err(ArtifactAliasParseError::MissingName);
+        }
+
+        Ok(ArtifactAlias {
+            digest,
+            name,
+            namespace,
+            registry,
+            tag,
+        })
+    }
+
+    /// Get the digest if present
+    pub fn get_digest(&self) -> Option<&str> {
+        self.digest.as_deref()
+    }
+
+    /// Get the name (required field)
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the namespace if present
+    pub fn get_namespace(&self) -> Option<&str> {
+        self.namespace.as_deref()
+    }
+
+    /// Get the registry if present
+    pub fn get_registry(&self) -> Option<&str> {
+        self.registry.as_deref()
+    }
+
+    /// Get the tag if present
+    pub fn get_tag(&self) -> Option<&str> {
+        self.tag.as_deref()
+    }
+
+    /// Reconstruct the full URI from the parsed components
+    pub fn get_uri(&self) -> String {
+        let mut uri = String::new();
+
+        if let Some(registry) = &self.registry {
+            uri.push_str(registry);
+            uri.push('/');
+        }
+
+        if let Some(namespace) = &self.namespace {
+            uri.push_str(namespace);
+            uri.push('/');
+        }
+
+        uri.push_str(&self.name);
+
+        if let Some(tag) = &self.tag {
+            uri.push(':');
+            uri.push_str(tag);
+        }
+
+        if let Some(digest) = &self.digest {
+            uri.push('@');
+            uri.push_str(digest);
+        }
+
+        uri
+    }
+}
+
+impl<'a> ArtifactArgument<'a> {
     pub fn new(name: &'a str) -> Self {
         Self {
             name,
@@ -91,7 +279,7 @@ impl<'a> ArgumentBuilder<'a> {
         self
     }
 
-    pub fn build(self, context: &mut ConfigContext) -> Result<Option<String>> {
+    pub fn build(self, context: &mut context::ConfigContext) -> Result<Option<String>> {
         let variable = context.get_variable(self.name);
 
         if self.require && variable.is_none() {
@@ -102,8 +290,55 @@ impl<'a> ArgumentBuilder<'a> {
     }
 }
 
-impl<'a> ProcessBuilder<'a> {
-    pub fn new(name: &'a str, entrypoint: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+impl<'a> ArtifactJob<'a> {
+    pub fn new(name: &'a str, script: String, systems: Vec<api::artifact::ArtifactSystem>) -> Self {
+        Self {
+            artifacts: vec![],
+            name,
+            secrets: vec![],
+            script,
+            systems,
+        }
+    }
+
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        for artifact in artifacts {
+            if !self.artifacts.contains(&artifact) {
+                self.artifacts.push(artifact);
+            }
+        }
+
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
+        for (name, value) in secrets {
+            if !self.secrets.iter().any(|s| s.name == name) {
+                self.secrets.push(api::artifact::ArtifactStepSecret {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                });
+            }
+        }
+
+        self
+    }
+
+    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+        let step = step::shell(context, self.artifacts, vec![], self.script, self.secrets).await?;
+
+        Artifact::new(self.name, vec![step], self.systems)
+            .build(context)
+            .await
+    }
+}
+
+impl<'a> ArtifactProcess<'a> {
+    pub fn new(
+        name: &'a str,
+        entrypoint: &'a str,
+        systems: Vec<api::artifact::ArtifactSystem>,
+    ) -> Self {
         Self {
             arguments: vec![],
             artifacts: vec![],
@@ -131,7 +366,7 @@ impl<'a> ProcessBuilder<'a> {
     pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
         for (name, value) in secrets {
             if !self.secrets.iter().any(|s| s.name == name) {
-                self.secrets.push(ArtifactStepSecret {
+                self.secrets.push(api::artifact::ArtifactStepSecret {
                     name: name.to_string(),
                     value: value.to_string(),
                 });
@@ -141,7 +376,7 @@ impl<'a> ProcessBuilder<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
         let script = formatdoc! {r#"
             mkdir -pv $VORPAL_OUTPUT/bin
 
@@ -213,12 +448,141 @@ impl<'a> ProcessBuilder<'a> {
 
         let step = step::shell(context, self.artifacts, vec![], script, self.secrets).await?;
 
-        ArtifactBuilder::new(self.name, vec![step], self.systems)
+        Artifact::new(self.name, vec![step], self.systems)
             .build(context)
             .await
     }
 }
-impl<'a> ArtifactSourceBuilder<'a> {
+
+impl<'a> ArtifactProjectEnvironment<'a> {
+    pub fn new(name: &'a str, systems: Vec<api::artifact::ArtifactSystem>) -> Self {
+        Self {
+            artifacts: vec![],
+            environments: vec![],
+            name,
+            secrets: vec![],
+            systems,
+        }
+    }
+
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts = artifacts;
+        self
+    }
+
+    pub fn with_environments(mut self, environments: Vec<String>) -> Self {
+        self.environments = environments;
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
+        for (name, value) in secrets.into_iter() {
+            if !self.secrets.iter().any(|s| s.name == name) {
+                self.secrets.push(api::artifact::ArtifactStepSecret {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                });
+            }
+        }
+        self
+    }
+
+    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+        let mut envs_backup = vec![
+            "export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"".to_string(),
+            "export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"".to_string(),
+            "export VORPAL_SHELL_BACKUP_VORPAL_SHELL=\"$VORPAL_SHELL\"".to_string(),
+        ];
+
+        let mut envs_export = vec![
+            format!("export PS1=\"({}) $PS1\"", self.name),
+            "export VORPAL_SHELL=\"1\"".to_string(),
+        ];
+
+        let mut envs_restore = vec![
+            "export PATH=\"$VORPAL_SHELL_BACKUP_PATH\"".to_string(),
+            "export PS1=\"$VORPAL_SHELL_BACKUP_PS1\"".to_string(),
+            "export VORPAL_SHELL=\"$VORPAL_SHELL_BACKUP_VORPAL_SHELL\"".to_string(),
+        ];
+
+        let mut envs_unset = vec![
+            "unset VORPAL_SHELL_BACKUP_PATH".to_string(),
+            "unset VORPAL_SHELL_BACKUP_PS1".to_string(),
+            "unset VORPAL_SHELL_BACKUP_VORPAL_SHELL".to_string(),
+        ];
+
+        for env in self.environments.clone().into_iter() {
+            let key = env.split("=").next().unwrap();
+
+            if key == "PATH" {
+                continue;
+            }
+
+            envs_backup.push(format!("export VORPAL_SHELL_BACKUP_{key}=\"${key}\""));
+            envs_export.push(format!("export {env}"));
+            envs_restore.push(format!("export {key}=\"$VORPAL_SHELL_BACKUP_{key}\""));
+            envs_unset.push(format!("unset VORPAL_SHELL_BACKUP_{key}"));
+        }
+
+        // Setup path
+
+        let step_path_artifacts = self
+            .artifacts
+            .iter()
+            .map(|artifact| format!("{}/bin", get_env_key(artifact)))
+            .collect::<Vec<String>>()
+            .join(":");
+
+        let mut step_path = step_path_artifacts;
+
+        if let Some(path) = self.environments.iter().find(|x| x.starts_with("PATH=")) {
+            if let Some(path_value) = path.split('=').nth(1) {
+                step_path = format!("{path_value}:{step_path}");
+            }
+        }
+
+        envs_export.push(format!("export PATH={step_path}:$PATH"));
+
+        // Setup script
+
+        let step_script = formatdoc! {"
+            mkdir -pv $VORPAL_WORKSPACE/bin
+
+            cat > bin/activate << \"EOF\"
+            #!/bin/bash
+
+            {backups}
+            {exports}
+
+            deactivate(){{
+            {restores}
+            {unsets}
+            }}
+
+            exec \"$@\"
+            EOF
+
+            chmod +x $VORPAL_WORKSPACE/bin/activate
+
+            mkdir -pv $VORPAL_OUTPUT/bin
+
+            cp -prv bin \"$VORPAL_OUTPUT\"",
+            backups = envs_backup.join("\n"),
+            exports = envs_export.join("\n"),
+            restores = envs_restore.join("\n"),
+            unsets = envs_unset.join("\n"),
+        };
+
+        let steps =
+            vec![step::shell(context, self.artifacts, vec![], step_script, self.secrets).await?];
+
+        Artifact::new(self.name, steps, self.systems)
+            .build(context)
+            .await
+    }
+}
+
+impl<'a> ArtifactSource<'a> {
     pub fn new(name: &'a str, path: &'a str) -> Self {
         Self {
             digest: None,
@@ -244,8 +608,8 @@ impl<'a> ArtifactSourceBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> ArtifactSource {
-        ArtifactSource {
+    pub fn build(self) -> api::artifact::ArtifactSource {
+        api::artifact::ArtifactSource {
             digest: self.digest.map(|v| v.to_string()),
             includes: self.includes,
             excludes: self.excludes,
@@ -255,7 +619,7 @@ impl<'a> ArtifactSourceBuilder<'a> {
     }
 }
 
-impl<'a> ArtifactStepBuilder<'a> {
+impl<'a> ArtifactStep<'a> {
     pub fn new(entrypoint: &'a str) -> Self {
         Self {
             arguments: vec![],
@@ -282,7 +646,7 @@ impl<'a> ArtifactStepBuilder<'a> {
         self
     }
 
-    pub fn with_secrets(mut self, secrets: Vec<ArtifactStepSecret>) -> Self {
+    pub fn with_secrets(mut self, secrets: Vec<api::artifact::ArtifactStepSecret>) -> Self {
         for secret in secrets {
             if !self.secrets.iter().any(|s| s.name == secret.name) {
                 self.secrets.push(secret);
@@ -296,8 +660,8 @@ impl<'a> ArtifactStepBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> ArtifactStep {
-        ArtifactStep {
+    pub fn build(self) -> api::artifact::ArtifactStep {
+        api::artifact::ArtifactStep {
             arguments: self.arguments,
             artifacts: self.artifacts,
             entrypoint: Some(self.entrypoint.to_string()),
@@ -308,51 +672,138 @@ impl<'a> ArtifactStepBuilder<'a> {
     }
 }
 
-impl<'a> JobBuilder<'a> {
-    pub fn new(name: &'a str, script: String, systems: Vec<ArtifactSystem>) -> Self {
+impl<'a> ArtifactUserEnvironment<'a> {
+    pub fn new(name: &'a str, systems: Vec<api::artifact::ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],
+            environments: vec![],
             name,
-            secrets: vec![],
-            script,
+            symlinks: vec![],
             systems,
         }
     }
 
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
-        for artifact in artifacts {
-            if !self.artifacts.contains(&artifact) {
-                self.artifacts.push(artifact);
-            }
-        }
-
+        self.artifacts = artifacts;
         self
     }
 
-    pub fn with_secrets(mut self, secrets: Vec<(&str, &str)>) -> Self {
-        for (name, value) in secrets {
-            if !self.secrets.iter().any(|s| s.name == name) {
-                self.secrets.push(ArtifactStepSecret {
-                    name: name.to_string(),
-                    value: value.to_string(),
-                });
-            }
-        }
-
+    pub fn with_environments(mut self, environments: Vec<String>) -> Self {
+        self.environments = environments;
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        let step = step::shell(context, self.artifacts, vec![], self.script, self.secrets).await?;
+    pub fn with_symlinks(mut self, symlinks: Vec<(&str, &str)>) -> Self {
+        for (source, target) in symlinks.into_iter() {
+            self.symlinks.push((source.to_string(), target.to_string()));
+        }
+        self
+    }
 
-        ArtifactBuilder::new(self.name, vec![step], self.systems)
+    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+        // Setup path
+
+        let step_path_artifacts = self
+            .artifacts
+            .iter()
+            .map(|artifact| format!("{}/bin", get_env_key(artifact)))
+            .collect::<Vec<String>>()
+            .join(":");
+
+        let mut step_path = step_path_artifacts;
+
+        if let Some(path) = self.environments.iter().find(|x| x.starts_with("PATH=")) {
+            if let Some(path_value) = path.split('=').nth(1) {
+                step_path = format!("{path_value}:{step_path}");
+            }
+        }
+
+        // Setup script
+
+        let step_script = formatdoc! {r#"
+            mkdir -pv $VORPAL_OUTPUT/bin
+
+            cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
+            {environments}
+            export PATH="$VORPAL_OUTPUT/bin:{step_path}:$PATH"
+            EOF
+
+            cat > $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks << "EOF"
+            #!/bin/bash
+            set -euo pipefail
+            {symlinks_deactivate}
+            EOF
+
+            cat > $VORPAL_OUTPUT/bin/vorpal-activate-symlinks << "EOF"
+            #!/bin/bash
+            set -euo pipefail
+            {symlinks_check}
+            {symlinks_activate}
+            EOF
+
+            cat > $VORPAL_OUTPUT/bin/vorpal-activate << "EOF"
+            #!/bin/bash
+            set -euo pipefail
+
+            echo "Deactivating previous symlinks..."
+
+            if [ -f $HOME/.vorpal/bin/vorpal-deactivate-symlinks ]; then
+                $HOME/.vorpal/bin/vorpal-deactivate-symlinks
+            fi
+
+            echo "Activating symlinks..."
+
+            $VORPAL_OUTPUT/bin/vorpal-activate-symlinks
+
+            echo "Vorpal userenv installed. Run 'source vorpal-activate-shell' to activate."
+
+            ln -sfv $VORPAL_OUTPUT/bin/vorpal-activate-shell $HOME/.vorpal/bin/vorpal-activate-shell
+            ln -sfv $VORPAL_OUTPUT/bin/vorpal-activate-symlinks $HOME/.vorpal/bin/vorpal-activate-symlinks
+            ln -sfv $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks $HOME/.vorpal/bin/vorpal-deactivate-symlinks
+            EOF
+
+
+            chmod +x $VORPAL_OUTPUT/bin/vorpal-activate-shell
+            chmod +x $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks
+            chmod +x $VORPAL_OUTPUT/bin/vorpal-activate-symlinks
+            chmod +x $VORPAL_OUTPUT/bin/vorpal-activate"#,
+            environments = self.environments
+                .iter()
+                .filter(|e| !e.starts_with("PATH="))
+                .map(|e| format!("export {e}"))
+                .collect::<Vec<String>>()
+                .join("\n"),
+            symlinks_deactivate = self.symlinks
+                .iter()
+                .map(|(_, target)| format!("rm -fv {target}"))
+                .collect::<Vec<String>>()
+                .join("\n"),
+            symlinks_check = self.symlinks
+                .iter()
+                .map(|(_, target)| format!("if [ -f {target} ]; then echo \"ERROR: Symlink target exists -> {target}\" && exit 1; fi"))
+                .collect::<Vec<String>>()
+                .join("\n"),
+            symlinks_activate = self.symlinks
+                .iter()
+                .map(|(source, target)| format!("ln -sv {source} {target}"))
+                .collect::<Vec<String>>()
+                .join("\n"),
+        };
+
+        let steps = vec![step::shell(context, self.artifacts, vec![], step_script, vec![]).await?];
+
+        Artifact::new(self.name, steps, self.systems)
             .build(context)
             .await
     }
 }
 
-impl<'a> ArtifactBuilder<'a> {
-    pub fn new(name: &'a str, steps: Vec<ArtifactStep>, systems: Vec<ArtifactSystem>) -> Self {
+impl<'a> Artifact<'a> {
+    pub fn new(
+        name: &'a str,
+        steps: Vec<api::artifact::ArtifactStep>,
+        systems: Vec<api::artifact::ArtifactSystem>,
+    ) -> Self {
         Self {
             aliases: vec![],
             name,
@@ -371,7 +822,7 @@ impl<'a> ArtifactBuilder<'a> {
         self
     }
 
-    pub fn with_sources(mut self, sources: Vec<ArtifactSource>) -> Self {
+    pub fn with_sources(mut self, sources: Vec<api::artifact::ArtifactSource>) -> Self {
         for source in sources {
             if !self.sources.iter().any(|s| s.name == source.name) {
                 self.sources.push(source);
@@ -381,8 +832,8 @@ impl<'a> ArtifactBuilder<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        let artifact = Artifact {
+    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+        let artifact = api::artifact::Artifact {
             aliases: self.aliases,
             name: self.name.to_string(),
             sources: self.sources,
@@ -393,6 +844,10 @@ impl<'a> ArtifactBuilder<'a> {
 
         context.add_artifact(&artifact).await
     }
+}
+
+pub fn get_default_address() -> String {
+    "localhost:23151".to_string()
 }
 
 pub fn get_env_key(digest: &String) -> String {

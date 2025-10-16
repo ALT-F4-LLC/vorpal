@@ -60,3 +60,19 @@ resource "keycloak_openid_client_optional_scopes" "this" {
   optional_scopes = [for scope in each.value.optional_scopes : keycloak_openid_client_scope.this[scope].name]
   realm_id        = keycloak_realm.this.id
 }
+
+resource "keycloak_user" "user" {
+  for_each = { for user_name, user in local.users : user_name => user }
+
+  email      = each.value.email
+  enabled    = true
+  first_name = each.value.first_name
+  last_name  = each.value.last_name
+  realm_id   = keycloak_realm.this.id
+  username   = each.key
+
+  initial_password {
+    temporary = false
+    value     = each.value.password
+  }
+}

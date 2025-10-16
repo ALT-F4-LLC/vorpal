@@ -1,6 +1,5 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
-    start::auth::{load_api_token_env, load_service_secret},
     store::{
         archives::unpack_zstd,
         paths::{
@@ -8,7 +7,7 @@ use crate::command::{
             get_file_paths, get_key_ca_path, set_timestamps,
         },
     },
-    VorpalTomlConfigSource,
+    VorpalConfigSource,
 };
 use anyhow::{anyhow, bail, Result};
 use http::uri::{InvalidUri, Uri};
@@ -34,7 +33,7 @@ use vorpal_sdk::{
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
-        language::{go::GoBuilder, rust::RustBuilder},
+        language::{go::Go, rust::RustBuilder},
         protoc, protoc_gen_go, protoc_gen_go_grpc,
     },
     context::ConfigContext,
@@ -45,6 +44,7 @@ pub struct RunArgsArtifact {
     pub context: PathBuf,
     pub export: bool,
     pub name: String,
+    pub namespace: String,
     pub path: bool,
     pub rebuild: bool,
     pub system: String,
@@ -56,7 +56,7 @@ pub struct RunArgsConfig {
     pub context: PathBuf,
     pub language: String,
     pub name: String,
-    pub source: Option<VorpalTomlConfigSource>,
+    pub source: Option<VorpalConfigSource>,
 }
 
 pub struct RunArgsService {
@@ -69,13 +69,14 @@ async fn build(
     artifact: &Artifact,
     artifact_aliases: Vec<String>,
     artifact_digest: &str,
+    artifact_namespace: &str,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
-    user_api_token: &str,
+    registry: &str,
 ) -> Result<()> {
     // 1. Check artifact
 
-    let artifact_path = get_artifact_output_path(artifact_digest);
+    let artifact_path = get_artifact_output_path(artifact_digest, artifact_namespace);
 
     if artifact_path.exists() {
         return Ok(());
@@ -83,18 +84,19 @@ async fn build(
 
     // 2. Pull
 
-    let request_pull = ArchivePullRequest {
+    let request = ArchivePullRequest {
         digest: artifact_digest.to_string(),
+        namespace: artifact_namespace.to_string(),
     };
 
-    let mut request = Request::new(request_pull);
+    let request = Request::new(request);
 
-    request.metadata_mut().insert(
-        "authorization",
-        format!("Bearer {}", user_api_token)
-            .parse()
-            .expect("failed to set authorization header"),
-    );
+    // request.metadata_mut().insert(
+    //     "authorization",
+    //     format!("Bearer {}", user_api_token)
+    //         .parse()
+    //         .expect("failed to set authorization header"),
+    // );
 
     // TODO: add check before pulling
 
@@ -130,7 +132,7 @@ async fn build(
             }
 
             if !stream_data.is_empty() {
-                let archive_path = get_artifact_archive_path(artifact_digest);
+                let archive_path = get_artifact_archive_path(artifact_digest, artifact_namespace);
 
                 write(&archive_path, &stream_data)
                     .await
@@ -166,16 +168,18 @@ async fn build(
     let request = BuildArtifactRequest {
         artifact: Some(artifact.clone()),
         artifact_aliases,
+        artifact_namespace: artifact_namespace.to_string(),
+        registry: registry.to_string(),
     };
 
-    let mut request = Request::new(request);
+    let request = Request::new(request);
 
-    request.metadata_mut().insert(
-        "authorization",
-        format!("Bearer {}", user_api_token)
-            .parse()
-            .expect("failed to set authorization header"),
-    );
+    // request.metadata_mut().insert(
+    //     "authorization",
+    //     format!("Bearer {}", user_api_token)
+    //         .parse()
+    //         .expect("failed to set authorization header"),
+    // );
 
     let response = client_worker
         .build_artifact(request)
@@ -205,12 +209,13 @@ async fn build(
 }
 
 async fn build_artifacts(
+    artifact_namespace: &str,
     artifact_selected: Option<&Artifact>,
     artifact_selected_aliases: Vec<String>,
     build_store: HashMap<String, Artifact>,
     client_archive: &mut ArchiveServiceClient<Channel>,
     client_worker: &mut WorkerServiceClient<Channel>,
-    user_api_token: &str,
+    registry: &str,
 ) -> Result<()> {
     let artifact_order = get_order(&build_store).await?;
 
@@ -241,9 +246,10 @@ async fn build_artifacts(
                     artifact,
                     artifact_aliases,
                     &artifact_digest,
+                    artifact_namespace,
                     client_archive,
                     client_worker,
-                    user_api_token,
+                    registry,
                 )
                 .await?;
 
@@ -258,7 +264,6 @@ async fn build_artifacts(
 }
 
 pub async fn run(
-    api_token: Option<String>,
     artifact: RunArgsArtifact,
     config: RunArgsConfig,
     service: RunArgsService,
@@ -296,29 +301,30 @@ pub async fn run(
     let client_agent = AgentServiceClient::new(client_agent_channel);
     let client_artifact = ArtifactServiceClient::new(client_artifact_channel);
 
-    let client_api_token = match api_token {
-        Some(token) => token,
-        None => {
-            if let Ok(service_secret) = load_service_secret().await {
-                service_secret
-            } else {
-                load_api_token_env()?
-            }
-        }
-    };
+    // let client_api_token = match api_token {
+    //     Some(token) => token,
+    //     None => {
+    //         if let Ok(service_secret) = load_service_secret().await {
+    //             service_secret
+    //         } else {
+    //             load_api_token_env()?
+    //         }
+    //     }
+    // };
 
     // Prepare config context
 
     let mut config_context = ConfigContext::new(
         config.name.to_string(),
         config.context.to_path_buf(),
-        client_agent,
-        client_api_token.clone(),
-        client_artifact,
-        0,
+        artifact.namespace.to_string(),
         artifact.system.to_string(),
         artifact.unlock,
         artifact.variable.clone(),
+        client_agent,
+        client_artifact,
+        0,
+        service.registry.clone(),
     )?;
 
     let config_system = config_context.get_system();
@@ -337,7 +343,7 @@ pub async fn run(
                 includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             }
 
-            let mut builder = GoBuilder::new(&config.name, vec![config_system])
+            let mut builder = Go::new(&config.name, vec![config_system])
                 .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
                 .with_includes(includes);
 
@@ -418,12 +424,13 @@ pub async fn run(
     let config_store = config_context.get_artifact_store();
 
     build_artifacts(
+        &artifact.namespace,
         None,
         vec![],
         config_store,
         &mut client_archive,
         &mut client_worker,
-        &client_api_token,
+        &service.registry,
     )
     .await?;
 
@@ -431,7 +438,7 @@ pub async fn run(
 
     let config_file = format!(
         "{}/bin/{}",
-        &get_artifact_output_path(&config_digest).display(),
+        &get_artifact_output_path(&config_digest, &artifact.namespace).display(),
         &config.name
     );
 
@@ -443,15 +450,15 @@ pub async fn run(
     }
 
     let (mut config_process, mut config_client) = match start(
+        service.agent.to_string(),
         artifact.context.to_path_buf(),
         artifact.name.to_string(),
+        artifact.namespace.to_string(),
         artifact.system.to_string(),
         artifact.unlock,
         artifact.variable.clone(),
         config_file.display().to_string(),
-        service.agent.to_string(),
         service.registry.to_string(),
-        client_api_token.clone(),
     )
     .await
     {
@@ -465,7 +472,10 @@ pub async fn run(
     // Populate artifacts
 
     let config_artifacts_response = match config_client
-        .get_artifacts(ArtifactsRequest { digests: vec![] })
+        .get_artifacts(ArtifactsRequest {
+            digests: vec![],
+            namespace: artifact.namespace.clone(),
+        })
         .await
     {
         Ok(res) => res,
@@ -481,6 +491,7 @@ pub async fn run(
     for digest in config_artifacts_response.digests.into_iter() {
         let request = ArtifactRequest {
             digest: digest.clone(),
+            namespace: artifact.namespace.clone(),
         };
 
         let response = match config_client.get_artifact(request).await {
@@ -505,7 +516,8 @@ pub async fn run(
         .ok_or_else(|| anyhow!("selected 'artifact' not found: {}", artifact.name))?;
 
     if artifact.rebuild {
-        let artifact_output_lock_path = get_artifact_output_lock_path(&selected_artifact_digest);
+        let artifact_output_lock_path =
+            get_artifact_output_lock_path(&selected_artifact_digest, &artifact.namespace);
 
         if artifact_output_lock_path.exists() {
             remove_file(&artifact_output_lock_path)
@@ -513,7 +525,8 @@ pub async fn run(
                 .expect("failed to remove artifact lock file");
         }
 
-        let artifact_output_path = get_artifact_output_path(&selected_artifact_digest);
+        let artifact_output_path =
+            get_artifact_output_path(&selected_artifact_digest, &artifact.namespace);
 
         if artifact_output_path.exists() {
             remove_dir_all(&artifact_output_path)
@@ -553,18 +566,20 @@ pub async fn run(
     }
 
     build_artifacts(
+        &artifact.namespace,
         Some(&selected_artifact),
         artifact.aliases,
         build_store,
         &mut client_archive,
         &mut client_worker,
-        &client_api_token,
+        &service.registry,
     )
     .await?;
 
     // TODO: explore running post scripts
 
-    let artifact_output_path = get_artifact_output_path(&selected_artifact_digest);
+    let artifact_output_path =
+        get_artifact_output_path(&selected_artifact_digest, &artifact.namespace);
     let mut output = selected_artifact_digest.clone();
 
     if artifact.path {

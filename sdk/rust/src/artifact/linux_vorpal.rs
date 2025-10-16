@@ -3,7 +3,7 @@ use crate::{
     artifact::{
         linux_debian,
         linux_vorpal::script::{setup, stage_01, stage_02, stage_03, stage_04, stage_05},
-        step, ArtifactBuilder,
+        step, Artifact,
     },
     context::ConfigContext,
 };
@@ -312,7 +312,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let name = "linux-vorpal";
 
-    ArtifactBuilder::new(name, steps, systems)
+    Artifact::new(name, steps, systems)
         .with_aliases(vec![format!("{name}:latest")])
         .with_sources(vec![
             bash,

@@ -1,5 +1,5 @@
 use crate::command::{
-    start::auth,
+    // start::auth,
     store::{
         archives::{compress_zstd, unpack_zstd},
         notary,
@@ -25,10 +25,12 @@ use tokio_stream::{
     StreamExt,
 };
 use tonic::{
-    metadata::MetadataValue,
+    // metadata::MetadataValue,
     transport::{Certificate, Channel, ClientTlsConfig},
     Code::NotFound,
-    Request, Response, Status,
+    Request,
+    Response,
+    Status,
 };
 use tracing::{error, info};
 use vorpal_sdk::{
@@ -50,30 +52,28 @@ use vorpal_sdk::{
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 #[derive(Debug, Default)]
-pub struct WorkerServer {
-    pub registry: String,
-}
+pub struct WorkerServer {}
 
 impl WorkerServer {
-    pub fn new(registry: String) -> Self {
-        Self { registry }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
 async fn pull_source(
+    artifact_namespace: String,
+    artifact_source: &ArtifactSource,
+    artifact_source_dir_path: &Path,
     registry: String,
-    service_secret: String,
-    source: &ArtifactSource,
-    source_dir_path: &Path,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
-    if source.digest.is_none() {
+    if artifact_source.digest.is_none() {
         return Err(Status::invalid_argument(
             "artifact source 'digest' is missing",
         ));
     }
 
-    if source.name.is_empty() {
+    if artifact_source.name.is_empty() {
         return Err(Status::invalid_argument(
             "artifact source 'name' is missing",
         ));
@@ -114,28 +114,31 @@ async fn pull_source(
             Status::internal(format!("failed to create archive client channel: {err}"))
         })?;
 
-    let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
-        .parse()
-        .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
+    // let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
+    //     .parse()
+    //     .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
 
     // Create client with authorization interceptor
-    let mut client_archive = ArchiveServiceClient::with_interceptor(
-        client_archive_channel,
-        move |mut req: Request<()>| {
-            req.metadata_mut()
-                .insert("authorization", auth_header.clone());
-            Ok(req)
-        },
-    );
+    // let mut client_archive = ArchiveServiceClient::with_interceptor(
+    //     client_archive_channel,
+    //     move |mut req: Request<()>| {
+    //         req.metadata_mut()
+    //             .insert("authorization", auth_header.clone());
+    //         Ok(req)
+    //     },
+    // );
 
-    let source_digest = source.digest.as_ref().unwrap();
-    let source_archive = get_artifact_archive_path(source_digest);
+    let mut client_archive = ArchiveServiceClient::new(client_archive_channel);
+
+    let source_digest = artifact_source.digest.as_ref().unwrap();
+    let source_archive = get_artifact_archive_path(source_digest, &artifact_namespace);
 
     if !source_archive.exists() {
         send_message(format!("pull source: {source_digest}"), tx).await?;
 
         let request = ArchivePullRequest {
             digest: source_digest.to_string(),
+            namespace: artifact_namespace,
         };
 
         match client_archive.pull(request).await {
@@ -188,7 +191,7 @@ async fn pull_source(
 
     send_message(format!("unpack source: {source_digest}"), tx).await?;
 
-    let source_workspace_path = source_dir_path.join(&source.name);
+    let source_workspace_path = artifact_source_dir_path.join(&artifact_source.name);
 
     if let Err(err) = create_dir_all(&source_workspace_path).await {
         return Err(Status::internal(format!(
@@ -225,6 +228,7 @@ fn expand_env(text: &str, envs: &[&String]) -> String {
 
 async fn run_step(
     artifact_digest: &str,
+    artifact_namespace: &str,
     artifact_path: &Path,
     step: ArtifactStep,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
@@ -237,7 +241,7 @@ async fn run_step(
     let mut paths = vec![];
 
     for artifact in step.artifacts.iter() {
-        let path = get_artifact_output_path(artifact);
+        let path = get_artifact_output_path(artifact, &artifact_namespace);
 
         if !path.exists() {
             return Err(Status::internal("artifact not found"));
@@ -260,7 +264,7 @@ async fn run_step(
         format!(
             "VORPAL_ARTIFACT_{}={}",
             artifact_digest,
-            get_artifact_output_path(artifact_digest).display()
+            get_artifact_output_path(artifact_digest, &artifact_namespace).display()
         ),
         format!("VORPAL_OUTPUT={}", artifact_path.display()),
         format!("VORPAL_WORKSPACE={}", workspace_path.display()),
@@ -423,13 +427,13 @@ async fn send_message(
 
 async fn build_artifact(
     request: BuildArtifactRequest,
-    registry: String,
-    service_secret: String,
     tx: Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     let artifact = request
         .artifact
         .ok_or_else(|| Status::invalid_argument("artifact is missing"))?;
+
+    let artifact_namespace = &request.artifact_namespace;
 
     if artifact.name.is_empty() {
         return Err(Status::invalid_argument("artifact 'name' is missing"));
@@ -461,11 +465,11 @@ async fn build_artifact(
     let artifact_json = serde_json::to_string(&artifact)
         .map_err(|err| Status::internal(format!("artifact failed to serialize: {err}")))?;
 
-    let artifact_digest = digest(artifact_json.as_bytes());
+    let artifact_digest = &digest(artifact_json.as_bytes());
 
     // Check if artifact exists
 
-    let artifact_output_path = get_artifact_output_path(&artifact_digest);
+    let artifact_output_path = get_artifact_output_path(artifact_digest, artifact_namespace);
 
     if artifact_output_path.exists() {
         error!("worker |> artifact already exists: {}", artifact_digest);
@@ -474,7 +478,7 @@ async fn build_artifact(
 
     // Check if artifact is locked
 
-    let artifact_output_lock = get_artifact_output_lock_path(&artifact_digest);
+    let artifact_output_lock = get_artifact_output_lock_path(artifact_digest, artifact_namespace);
 
     if artifact_output_lock.exists() {
         error!("worker |> artifact is locked: {}", artifact_digest);
@@ -482,6 +486,14 @@ async fn build_artifact(
     }
 
     // Create lock file
+
+    let artifact_output_lock_parent = artifact_output_lock
+        .parent()
+        .ok_or_else(|| Status::internal("failed to get lock file parent"))?;
+
+    create_dir_all(artifact_output_lock_parent)
+        .await
+        .map_err(|err| Status::internal(format!("failed to create lock file parent: {err}")))?;
 
     if let Err(err) = write(&artifact_output_lock, artifact_json).await {
         error!("worker |> failed to create lock file: {:?}", err);
@@ -496,9 +508,9 @@ async fn build_artifact(
         .await
         .map_err(|err| Status::internal(format!("failed to create workspace: {err}")))?;
 
-    let workspace_source_path = workspace_path.join("source");
+    let artifact_source_dir_path = workspace_path.join("source");
 
-    if let Err(err) = create_dir_all(&workspace_source_path).await {
+    if let Err(err) = create_dir_all(&artifact_source_dir_path).await {
         error!("worker |> failed to create source path: {:?}", err);
         return Err(Status::internal(format!(
             "failed to create source path: {err:?}"
@@ -507,17 +519,19 @@ async fn build_artifact(
 
     // Pull sources
 
-    for source in artifact.sources.iter() {
+    let registry = request.registry;
+
+    for artifact_source in artifact.sources.iter() {
         pull_source(
+            artifact_namespace.clone(),
+            artifact_source,
+            &artifact_source_dir_path,
             registry.clone(),
-            service_secret.clone(),
-            source,
-            &workspace_source_path,
             &tx,
         )
         .await?;
 
-        let source_digest = source
+        let source_digest = artifact_source
             .digest
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("source 'digest' is missing"))?;
@@ -537,6 +551,7 @@ async fn build_artifact(
     for step in artifact.steps.iter() {
         if let Err(err) = run_step(
             &artifact_digest,
+            artifact_namespace,
             &artifact_output_path,
             step.clone(),
             &tx,
@@ -624,19 +639,21 @@ async fn build_artifact(
                 Status::internal(format!("failed to create archive client channel: {err}"))
             })?;
 
-        let auth_header_push: MetadataValue<_> = format!("Bearer {}", service_secret.clone())
-            .parse()
-            .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
+        // let auth_header_push: MetadataValue<_> = format!("Bearer {}", service_secret.clone())
+        //     .parse()
+        //     .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
 
         // Create client with authorization interceptor for pushing
-        let mut client_archive = ArchiveServiceClient::with_interceptor(
-            client_archive_channel,
-            move |mut req: Request<()>| {
-                req.metadata_mut()
-                    .insert("authorization", auth_header_push.clone());
-                Ok(req)
-            },
-        );
+        // let mut client_archive = ArchiveServiceClient::with_interceptor(
+        //     client_archive_channel,
+        //     move |mut req: Request<()>| {
+        //         req.metadata_mut()
+        //             .insert("authorization", auth_header_push.clone());
+        //         Ok(req)
+        //     },
+        // );
+
+        let mut client_archive = ArchiveServiceClient::new(client_archive_channel);
 
         send_message(format!("push: {artifact_digest}"), &tx).await?;
 
@@ -650,6 +667,7 @@ async fn build_artifact(
             request_stream.push(ArchivePushRequest {
                 data: chunk.to_vec(),
                 digest: artifact_digest.clone(),
+                namespace: artifact_namespace.clone(),
             });
         }
 
@@ -702,23 +720,26 @@ async fn build_artifact(
                 Status::internal(format!("failed to create artifact client channel: {err}"))
             })?;
 
-        let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
-            .parse()
-            .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
+        // let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
+        //     .parse()
+        //     .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
 
         // Create client with authorization interceptor
-        let mut client_artifact = ArtifactServiceClient::with_interceptor(
-            client_artifact_channel,
-            move |mut req: Request<()>| {
-                req.metadata_mut()
-                    .insert("authorization", auth_header.clone());
-                Ok(req)
-            },
-        );
+        // let mut client_artifact = ArtifactServiceClient::with_interceptor(
+        //     client_artifact_channel,
+        //     move |mut req: Request<()>| {
+        //         req.metadata_mut()
+        //             .insert("authorization", auth_header.clone());
+        //         Ok(req)
+        //     },
+        // );
+
+        let mut client_artifact = ArtifactServiceClient::new(client_artifact_channel);
 
         let request = StoreArtifactRequest {
             artifact: Some(artifact),
             artifact_aliases: request.artifact_aliases,
+            artifact_namespace: request.artifact_namespace,
         };
 
         client_artifact
@@ -775,24 +796,20 @@ impl WorkerService for WorkerServer {
     ) -> Result<Response<Self::BuildArtifactStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
-        let registry = self.registry.clone();
-
         tokio::spawn(async move {
             // Load service secret for authentication
-            let service_secret = match auth::load_service_secret().await {
-                Ok(secret) => secret,
-                Err(e) => {
-                    let err = Status::internal(format!("failed to load service secret: {}", e));
-                    if let Err(err) = send_build_response(&tx, Err(err)).await {
-                        error!("Failed to send response: {:?}", err);
-                    }
-                    return;
-                }
-            };
+            // let service_secret = match auth::load_service_secret().await {
+            //     Ok(secret) => secret,
+            //     Err(e) => {
+            //         let err = Status::internal(format!("failed to load service secret: {}", e));
+            //         if let Err(err) = send_build_response(&tx, Err(err)).await {
+            //             error!("Failed to send response: {:?}", err);
+            //         }
+            //         return;
+            //     }
+            // };
 
-            if let Err(err) =
-                build_artifact(request.into_inner(), registry, service_secret, tx.clone()).await
-            {
+            if let Err(err) = build_artifact(request.into_inner(), tx.clone()).await {
                 if let Err(err) = send_build_response(&tx, Err(err)).await {
                     error!("Failed to send response: {:?}", err);
                 }
