@@ -1,8 +1,8 @@
 // use crate::command::store::paths::get_key_service_secret_path;
-use anyhow::Result;
+// use anyhow::Result;
 // use std::env::var;
 // use tokio::fs::read_to_string;
-use tonic::{Request, Status};
+// use tonic::{Request, Status};
 
 // pub async fn load_service_secret() -> Result<String> {
 //     let secret_path = get_key_service_secret_path();
@@ -17,27 +17,6 @@ use tonic::{Request, Status};
 //
 //     Ok(secret)
 // }
-
-pub fn create_interceptor(
-    issuer: String,
-) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
-    move |request: Request<()>| -> Result<Request<()>, Status> {
-        match request.metadata().get("authorization") {
-            None => Err(Status::unauthenticated("Missing authorization header")),
-
-            Some(t) => {
-                let authorization = t.to_str().unwrap_or("").trim();
-                let authorization_token = &authorization[7..];
-
-                if authorization_token == issuer {
-                    Ok(request)
-                } else {
-                    Err(Status::unauthenticated("Invalid token"))
-                }
-            }
-        }
-    }
-}
 
 // Loads the user API token from VORPAL_API_TOKEN environment variable
 // Used as a fallback when no API token is provided by CLI commands

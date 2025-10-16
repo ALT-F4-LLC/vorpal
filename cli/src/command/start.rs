@@ -10,7 +10,10 @@ use crate::command::{
 };
 use anyhow::{bail, Result};
 use tokio::fs::read_to_string;
-use tonic::transport::{Identity, Server, ServerTlsConfig};
+use tonic::{
+    transport::{Identity, Server, ServerTlsConfig},
+    Request, Status,
+};
 use tracing::info;
 use vorpal_sdk::api::{
     agent::agent_service_server::AgentServiceServer,
@@ -24,13 +27,7 @@ pub mod auth;
 mod registry;
 mod worker;
 
-pub async fn run(
-    issuer: Option<String>,
-    port: u16,
-    registry_backend: String,
-    registry_backend_s3_bucket: Option<String>,
-    services: Vec<String>,
-) -> Result<()> {
+async fn new_tls_config() -> Result<ServerTlsConfig> {
     let cert_path = get_key_service_path();
 
     if !cert_path.exists() {
@@ -51,24 +48,57 @@ pub async fn run(
         .await
         .expect("failed to read public key");
 
-    let key = read_to_string(private_key_path)
+    let priavate_key = read_to_string(private_key_path)
         .await
         .expect("failed to read private key");
 
+    let config_identity = Identity::from_pem(cert, priavate_key);
+
+    let config = ServerTlsConfig::new().identity(config_identity);
+
+    Ok(config)
+}
+
+fn new_interceptor(issuer: String) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
+    move |request: Request<()>| -> Result<Request<()>, Status> {
+        match request.metadata().get("authorization") {
+            None => Err(Status::unauthenticated("Missing authorization header")),
+
+            Some(t) => {
+                let authorization = t.to_str().unwrap_or("").trim();
+                let authorization_token = &authorization[7..];
+
+                if authorization_token == issuer {
+                    Ok(request)
+                } else {
+                    Err(Status::unauthenticated("Invalid token"))
+                }
+            }
+        }
+    }
+}
+
+pub async fn run(
+    issuer: Option<String>,
+    port: u16,
+    registry_backend: String,
+    registry_backend_s3_bucket: Option<String>,
+    services: Vec<String>,
+) -> Result<()> {
+    let tls_config = new_tls_config().await?;
+
     let (_, health_service) = tonic_health::server::health_reporter();
 
-    let identity = Identity::from_pem(cert, key);
-
     let mut router = Server::builder()
-        .tls_config(ServerTlsConfig::new().identity(identity))?
+        .tls_config(tls_config)?
         .add_service(health_service);
 
     // let service_secret = auth::load_service_secret().await?;
 
-    let mut auth_interceptor = None;
+    let mut interceptor = None;
 
     if let Some(issuer) = issuer {
-        auth_interceptor = Some(auth::create_interceptor(issuer));
+        interceptor = Some(new_interceptor(issuer));
     }
 
     if services.contains(&"agent".to_string()) {
@@ -100,24 +130,22 @@ pub async fn run(
         let backend_artifact =
             backend_artifact(&registry_backend, registry_backend_s3_bucket).await?;
 
-        if let Some(intercepter) = auth_interceptor.clone() {
+        let archive_server = ArchiveServer::new(backend_archive);
+        let artifact_server = ArtifactServer::new(backend_artifact);
+
+        if let Some(intercepter) = interceptor.clone() {
             router = router.add_service(ArchiveServiceServer::with_interceptor(
-                ArchiveServer::new(backend_archive),
+                archive_server,
                 intercepter.clone(),
             ));
 
             router = router.add_service(ArtifactServiceServer::with_interceptor(
-                ArtifactServer::new(backend_artifact),
+                artifact_server,
                 intercepter.clone(),
             ));
         } else {
-            router = router.add_service(ArchiveServiceServer::new(ArchiveServer::new(
-                backend_archive,
-            )));
-
-            router = router.add_service(ArtifactServiceServer::new(ArtifactServer::new(
-                backend_artifact,
-            )));
+            router = router.add_service(ArchiveServiceServer::new(archive_server));
+            router = router.add_service(ArtifactServiceServer::new(artifact_server));
         }
 
         info!("archive |> service: [::]:{}", port);
@@ -125,7 +153,7 @@ pub async fn run(
     }
 
     if services.contains(&"worker".to_string()) {
-        if let Some(intercepter) = auth_interceptor {
+        if let Some(intercepter) = interceptor {
             router = router.add_service(WorkerServiceServer::with_interceptor(
                 WorkerServer::new(),
                 intercepter,
