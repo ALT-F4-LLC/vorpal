@@ -129,6 +129,12 @@ pub enum CommandServices {
         #[arg(long)]
         issuer: Option<String>,
 
+        #[arg(long)]
+        issuer_client_id: Option<String>,
+
+        #[arg(long)]
+        issuer_client_secret: Option<String>,
+
         #[arg(default_value = "23151", long)]
         port: u16,
 
@@ -503,6 +509,8 @@ pub async fn run() -> Result<()> {
         Command::Services(services) => match services {
             CommandServices::Start {
                 issuer,
+                issuer_client_id,
+                issuer_client_secret,
                 port,
                 registry_backend,
                 registry_backend_s3_bucket,
@@ -510,6 +518,8 @@ pub async fn run() -> Result<()> {
             } => {
                 start::run(
                     issuer.clone(),
+                    issuer_client_id.clone(),
+                    issuer_client_secret.clone(),
                     *port,
                     registry_backend.clone(),
                     registry_backend_s3_bucket.clone(),

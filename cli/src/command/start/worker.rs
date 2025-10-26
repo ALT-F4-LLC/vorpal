@@ -1,5 +1,5 @@
 use crate::command::{
-    // start::auth,
+    start::auth,
     store::{
         archives::{compress_zstd, unpack_zstd},
         notary,
@@ -25,12 +25,10 @@ use tokio_stream::{
     StreamExt,
 };
 use tonic::{
-    // metadata::MetadataValue,
+    metadata::{Ascii, MetadataValue},
     transport::{Certificate, Channel, ClientTlsConfig},
     Code::NotFound,
-    Request,
-    Response,
-    Status,
+    Request, Response, Status,
 };
 use tracing::{error, info};
 use vorpal_sdk::{
@@ -51,16 +49,74 @@ use vorpal_sdk::{
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
-#[derive(Debug, Default)]
-pub struct WorkerServer {}
+#[derive(Debug)]
+pub struct WorkerServer {
+    pub oauth_issuer: Option<String>,
+    pub oauth_client_id: Option<String>,
+    pub oauth_client_secret: Option<String>,
+}
 
 impl WorkerServer {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(
+        oauth_issuer: Option<String>,
+        oauth_client_id: Option<String>,
+        oauth_client_secret: Option<String>,
+    ) -> Self {
+        Self {
+            oauth_issuer,
+            oauth_client_id,
+            oauth_client_secret,
+        }
+    }
+}
+
+/// Obtains OAuth2 service credentials for service-to-service authentication
+///
+/// Attempts to exchange client credentials for an access token using the OAuth2
+/// Client Credentials Flow. Returns None if credentials are not configured.
+async fn obtain_service_credentials(
+    issuer: Option<&str>,
+    client_id: Option<&str>,
+    client_secret: Option<&str>,
+    scope: &str,
+) -> Option<MetadataValue<Ascii>> {
+    let issuer = issuer?;
+    let client_id = client_id?;
+    let client_secret = client_secret?;
+
+    match auth::exchange_client_credentials(issuer, client_id, client_secret, scope).await {
+        Ok(token) => {
+            info!(
+                "worker |> obtained service credentials for scope: {}",
+                scope
+            );
+            Some(token)
+        }
+        Err(err) => {
+            error!(
+                "worker |> failed to obtain service credentials for scope {}: {}",
+                scope, err
+            );
+            None
+        }
+    }
+}
+
+/// Helper function to apply authorization header to a request if token is available
+fn apply_auth_to_request(
+    auth_header: &Option<MetadataValue<Ascii>>,
+) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone + '_ {
+    move |mut req: Request<()>| {
+        if let Some(header) = auth_header {
+            req.metadata_mut().insert("authorization", header.clone());
+        }
+
+        Ok(req)
     }
 }
 
 async fn pull_source(
+    archive_auth_header: Option<MetadataValue<Ascii>>,
     artifact_namespace: String,
     artifact_source: &ArtifactSource,
     artifact_source_dir_path: &Path,
@@ -114,21 +170,11 @@ async fn pull_source(
             Status::internal(format!("failed to create archive client channel: {err}"))
         })?;
 
-    // let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
-    //     .parse()
-    //     .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
-
-    // Create client with authorization interceptor
-    // let mut client_archive = ArchiveServiceClient::with_interceptor(
-    //     client_archive_channel,
-    //     move |mut req: Request<()>| {
-    //         req.metadata_mut()
-    //             .insert("authorization", auth_header.clone());
-    //         Ok(req)
-    //     },
-    // );
-
-    let mut client_archive = ArchiveServiceClient::new(client_archive_channel);
+    // Create client with authorization interceptor if token is available
+    let mut client_archive = ArchiveServiceClient::with_interceptor(
+        client_archive_channel,
+        apply_auth_to_request(&archive_auth_header),
+    );
 
     let source_digest = artifact_source.digest.as_ref().unwrap();
     let source_archive = get_artifact_archive_path(source_digest, &artifact_namespace);
@@ -426,6 +472,9 @@ async fn send_message(
 }
 
 async fn build_artifact(
+    client_id: Option<&str>,
+    client_secret: Option<&str>,
+    issuer: Option<&str>,
     request: BuildArtifactRequest,
     tx: Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
@@ -459,6 +508,13 @@ async fn build_artifact(
             "artifact 'target' unsupported for worker",
         ));
     }
+
+    // Obtain service-to-service OAuth2 tokens for archive and artifact services
+    let archive_auth_header =
+        obtain_service_credentials(issuer, client_id, client_secret, "archive").await;
+
+    let artifact_auth_header =
+        obtain_service_credentials(issuer, client_id, client_secret, "artifact").await;
 
     // Calculate artifact digest
 
@@ -523,6 +579,7 @@ async fn build_artifact(
 
     for artifact_source in artifact.sources.iter() {
         pull_source(
+            archive_auth_header.clone(),
             artifact_namespace.clone(),
             artifact_source,
             &artifact_source_dir_path,
@@ -639,21 +696,11 @@ async fn build_artifact(
                 Status::internal(format!("failed to create archive client channel: {err}"))
             })?;
 
-        // let auth_header_push: MetadataValue<_> = format!("Bearer {}", service_secret.clone())
-        //     .parse()
-        //     .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
-
-        // Create client with authorization interceptor for pushing
-        // let mut client_archive = ArchiveServiceClient::with_interceptor(
-        //     client_archive_channel,
-        //     move |mut req: Request<()>| {
-        //         req.metadata_mut()
-        //             .insert("authorization", auth_header_push.clone());
-        //         Ok(req)
-        //     },
-        // );
-
-        let mut client_archive = ArchiveServiceClient::new(client_archive_channel);
+        // Create client with authorization interceptor for pushing if token is available
+        let mut client_archive = ArchiveServiceClient::with_interceptor(
+            client_archive_channel,
+            apply_auth_to_request(&archive_auth_header),
+        );
 
         send_message(format!("push: {artifact_digest}"), &tx).await?;
 
@@ -720,21 +767,11 @@ async fn build_artifact(
                 Status::internal(format!("failed to create artifact client channel: {err}"))
             })?;
 
-        // let auth_header: MetadataValue<_> = format!("Bearer {}", service_secret)
-        //     .parse()
-        //     .map_err(|e| Status::internal(format!("failed to parse service secret: {}", e)))?;
-
-        // Create client with authorization interceptor
-        // let mut client_artifact = ArtifactServiceClient::with_interceptor(
-        //     client_artifact_channel,
-        //     move |mut req: Request<()>| {
-        //         req.metadata_mut()
-        //             .insert("authorization", auth_header.clone());
-        //         Ok(req)
-        //     },
-        // );
-
-        let mut client_artifact = ArtifactServiceClient::new(client_artifact_channel);
+        // Create client with authorization interceptor if token is available
+        let mut client_artifact = ArtifactServiceClient::with_interceptor(
+            client_artifact_channel,
+            apply_auth_to_request(&artifact_auth_header),
+        );
 
         let request = StoreArtifactRequest {
             artifact: Some(artifact),
@@ -796,20 +833,20 @@ impl WorkerService for WorkerServer {
     ) -> Result<Response<Self::BuildArtifactStream>, Status> {
         let (tx, rx) = mpsc::channel(100);
 
-        tokio::spawn(async move {
-            // Load service secret for authentication
-            // let service_secret = match auth::load_service_secret().await {
-            //     Ok(secret) => secret,
-            //     Err(e) => {
-            //         let err = Status::internal(format!("failed to load service secret: {}", e));
-            //         if let Err(err) = send_build_response(&tx, Err(err)).await {
-            //             error!("Failed to send response: {:?}", err);
-            //         }
-            //         return;
-            //     }
-            // };
+        let client_id = self.oauth_client_id.clone();
+        let client_secret = self.oauth_client_secret.clone();
+        let issuer = self.oauth_issuer.clone();
 
-            if let Err(err) = build_artifact(request.into_inner(), tx.clone()).await {
+        tokio::spawn(async move {
+            if let Err(err) = build_artifact(
+                client_id.as_deref(),
+                client_secret.as_deref(),
+                issuer.as_deref(),
+                request.into_inner(),
+                tx.clone(),
+            )
+            .await
+            {
                 if let Err(err) = send_build_response(&tx, Err(err)).await {
                     error!("Failed to send response: {:?}", err);
                 }

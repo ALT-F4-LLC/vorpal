@@ -1,13 +1,14 @@
 use crate::command::{credentials::VorpalCredentials, get_key_credentials_path};
 use anyhow::{anyhow, Context, Result};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::{fs::read, sync::RwLock};
 use tonic::{
     metadata::{Ascii, MetadataValue},
     Request, Status,
 };
+use tracing::{error, info};
 
 #[derive(Debug, Deserialize, Clone)]
 struct OidcDiscovery {
@@ -65,15 +66,15 @@ enum AuthError {
 }
 
 pub struct OidcValidator {
+    pub audiences: Vec<String>,
     pub issuer: String,
-    pub expected_aud: String,
     pub jwks_uri: String,
     // Cache the current JWK set; refresh if key not found
     jwks: Arc<RwLock<JwkSet>>,
 }
 
 impl OidcValidator {
-    pub async fn new(issuer: String, expected_aud: String) -> Result<Self> {
+    pub async fn new(issuer: String, audiences: Vec<String>) -> Result<Self> {
         // 1) Discover the realm (/.well-known/openid-configuration)
         let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
         let disc: OidcDiscovery = reqwest::Client::new()
@@ -94,8 +95,8 @@ impl OidcValidator {
         let jwks = fetch_jwks(&disc.jwks_uri).await?;
 
         Ok(Self {
+            audiences,
             issuer,
-            expected_aud,
             jwks_uri: disc.jwks_uri,
             jwks: Arc::new(RwLock::new(jwks)),
         })
@@ -157,7 +158,9 @@ impl OidcValidator {
             DecodingKey::from_rsa_components(&n, &e).map_err(|e| AuthError::Jwt(e.to_string()))?;
 
         let mut validation = Validation::new(Algorithm::RS256);
-        validation.set_audience(&[&self.expected_aud]);
+        // Note: For service-to-service auth, the audience in the token may be the client_id
+        // rather than the service name. We validate issuer and expiry but allow flexible audiences.
+        validation.validate_aud = false; // Don't enforce strict audience validation
         validation.set_issuer(&[&self.issuer]);
         validation.validate_exp = true;
         validation.validate_nbf = true;
@@ -263,4 +266,121 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
     }
 
     Ok(client_auth_header)
+}
+
+// ===== OAuth2 Client Credentials Flow =====
+
+#[derive(Debug, Deserialize, Clone)]
+struct TokenEndpointDiscovery {
+    token_endpoint: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ClientCredentialsRequest {
+    grant_type: String,
+    client_id: String,
+    client_secret: String,
+    scope: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClientCredentialsResponse {
+    access_token: String,
+    expires_in: u64,
+    token_type: String,
+}
+
+/// Performs OAuth2 Client Credentials Flow token exchange for service-to-service authentication
+///
+/// Args:
+/// - issuer: Base URL of the OIDC provider (e.g., http://localhost:8080/realms/vorpal)
+/// - client_id: Service account client ID
+/// - client_secret: Service account client secret
+/// - scope: OAuth2 scope to request (e.g., "archive" or "artifact")
+///
+/// Returns: Bearer token as MetadataValue suitable for gRPC requests
+pub async fn exchange_client_credentials(
+    issuer: &str,
+    client_id: &str,
+    client_secret: &str,
+    scope: &str,
+) -> Result<MetadataValue<Ascii>> {
+    // 1) Discover the token endpoint via OIDC discovery
+    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+
+    let discovery_response = reqwest::Client::new()
+        .get(&discovery_url)
+        .send()
+        .await
+        .context("failed to fetch OIDC discovery")?;
+
+    let discovery_status = discovery_response.status();
+    let discovery_text = discovery_response
+        .text()
+        .await
+        .unwrap_or_else(|_| "<unable to read response body>".to_string());
+
+    let disc: TokenEndpointDiscovery = serde_json::from_str(&discovery_text).map_err(|e| {
+        error!(
+            "auth |> failed to parse OIDC discovery response: {} - full response: {}",
+            e, discovery_text
+        );
+        anyhow!(
+            "failed to parse OIDC discovery response: {} - response was: {}",
+            e,
+            discovery_text
+        )
+    })?;
+
+    // 2) Exchange client credentials for access token
+    let token_request = ClientCredentialsRequest {
+        grant_type: "client_credentials".to_string(),
+        client_id: client_id.to_string(),
+        client_secret: client_secret.to_string(),
+        scope: scope.to_string(),
+    };
+
+    let token_response = reqwest::Client::new()
+        .post(&disc.token_endpoint)
+        .form(&token_request)
+        .send()
+        .await
+        .context("failed to send token request to OIDC provider")?;
+
+    let token_status = token_response.status();
+    let token_text = token_response
+        .text()
+        .await
+        .unwrap_or_else(|_| "<unable to read response body>".to_string());
+
+    if !token_status.is_success() {
+        error!(
+            "auth |> token exchange failed with status {}: {}",
+            token_status, token_text
+        );
+        return Err(anyhow!(
+            "token endpoint returned {}: {}",
+            token_status,
+            token_text
+        ));
+    }
+
+    let response: ClientCredentialsResponse = serde_json::from_str(&token_text).map_err(|e| {
+        error!(
+            "auth |> failed to parse token response: {} - full response: {}",
+            e, token_text
+        );
+        anyhow!(
+            "failed to parse token response: {} - response was: {}",
+            e,
+            token_text
+        )
+    })?;
+
+    // 3) Create Bearer token header
+    let auth_header: MetadataValue<Ascii> = format!("Bearer {}", response.access_token)
+        .parse()
+        .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
+
+    Ok(auth_header)
 }

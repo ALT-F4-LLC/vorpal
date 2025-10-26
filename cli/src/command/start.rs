@@ -59,6 +59,8 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
 
 pub async fn run(
     issuer: Option<String>,
+    issuer_client_id: Option<String>,
+    issuer_client_secret: Option<String>,
     port: u16,
     registry_backend: String,
     registry_backend_s3_bucket: Option<String>,
@@ -71,16 +73,6 @@ pub async fn run(
     let mut router = Server::builder()
         .tls_config(tls_config)?
         .add_service(health_service);
-
-    let mut interceptor = None;
-
-    if let Some(issuer) = issuer {
-        let audience = "artifact".to_string();
-
-        let validator = Arc::new(auth::OidcValidator::new(issuer, audience).await?);
-
-        interceptor = Some(auth::new_interceptor(validator));
-    }
 
     if services.contains(&"agent".to_string()) {
         let service = AgentServiceServer::new(AgentServer::new());
@@ -114,15 +106,20 @@ pub async fn run(
         let archive_server = ArchiveServer::new(backend_archive);
         let artifact_server = ArtifactServer::new(backend_artifact);
 
-        if let Some(intercepter) = interceptor.clone() {
+        if let Some(issuer) = &issuer {
+            let validator_audiences = vec!["cli".to_string(), "worker".to_string()];
+            let validator =
+                Arc::new(auth::OidcValidator::new(issuer.clone(), validator_audiences).await?);
+            let validator_intercepter = auth::new_interceptor(validator);
+
             router = router.add_service(ArchiveServiceServer::with_interceptor(
                 archive_server,
-                intercepter.clone(),
+                validator_intercepter.clone(),
             ));
 
             router = router.add_service(ArtifactServiceServer::with_interceptor(
                 artifact_server,
-                intercepter.clone(),
+                validator_intercepter,
             ));
         } else {
             router = router.add_service(ArchiveServiceServer::new(archive_server));
@@ -134,13 +131,21 @@ pub async fn run(
     }
 
     if services.contains(&"worker".to_string()) {
-        if let Some(intercepter) = interceptor {
+        let worker_server =
+            WorkerServer::new(issuer.clone(), issuer_client_id, issuer_client_secret);
+
+        if let Some(issuer) = &issuer {
+            let validator_audiences = vec!["cli".to_string()];
+            let validator =
+                Arc::new(auth::OidcValidator::new(issuer.clone(), validator_audiences).await?);
+            let validator_intercepter = auth::new_interceptor(validator);
+
             router = router.add_service(WorkerServiceServer::with_interceptor(
-                WorkerServer::new(),
-                intercepter,
+                worker_server,
+                validator_intercepter,
             ));
         } else {
-            router = router.add_service(WorkerServiceServer::new(WorkerServer::new()));
+            router = router.add_service(WorkerServiceServer::new(worker_server));
         }
 
         info!("worker |> service: [::]:{}", port);
