@@ -332,7 +332,7 @@ impl ConfigContext {
                     }
                 }
 
-                return Ok(digest.to_string());
+                Ok(digest.to_string())
             }
         }
     }

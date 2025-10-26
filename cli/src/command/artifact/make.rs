@@ -92,7 +92,7 @@ async fn build(
 
     let mut request = Request::new(request);
 
-    let client_auth_header = auth::client_auth_header(&registry)
+    let client_auth_header = auth::client_auth_header(registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
 
@@ -176,7 +176,7 @@ async fn build(
 
     let mut request = Request::new(request);
 
-    let client_auth_header = auth::client_auth_header(&registry)
+    let client_auth_header = auth::client_auth_header(registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
 

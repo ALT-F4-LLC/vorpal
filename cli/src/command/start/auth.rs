@@ -8,7 +8,7 @@ use tonic::{
     metadata::{Ascii, MetadataValue},
     Request, Status,
 };
-use tracing::{error, info};
+use tracing::error;
 
 #[derive(Debug, Deserialize, Clone)]
 struct OidcDiscovery {
@@ -25,32 +25,31 @@ struct JwkSet {
 struct Jwk {
     kid: Option<String>,
     kty: String,
-    alg: Option<String>,
+    // alg: Option<String>,
     n: Option<String>, // RSA modulus (base64url)
     e: Option<String>, // RSA exponent (base64url)
-                       // (add EC/Ed25519 members if you enable those in Keycloak)
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct Claims {
     // Standard-ish
-    sub: Option<String>,
-    iss: Option<String>,
-    aud: Option<serde_json::Value>, // can be string or array
-    exp: Option<u64>,
-    nbf: Option<u64>,
-    iat: Option<u64>,
+    // aud: Option<serde_json::Value>, // can be string or array
+    // exp: Option<u64>,
+    // iat: Option<u64>,
+    // iss: Option<String>,
+    // nbf: Option<u64>,
+    // sub: Option<String>,
     // Useful Keycloak extras
-    scope: Option<String>,
-    azp: Option<String>,
-    preferred_username: Option<String>,
-    email: Option<String>,
+    // azp: Option<String>,
+    // email: Option<String>,
+    // preferred_username: Option<String>,
+    // scope: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
 enum AuthError {
-    #[error("missing authorization header")]
-    MissingAuthHeader,
+    // #[error("missing authorization header")]
+    // MissingAuthHeader,
     #[error("invalid authorization scheme")]
     InvalidScheme,
     #[error("token header missing kid")]
@@ -59,14 +58,14 @@ enum AuthError {
     KeyNotFound,
     #[error("token validation failed: {0}")]
     Jwt(String),
-    #[error("bad issuer")]
-    Issuer,
-    #[error("bad audience")]
-    Audience,
+    // #[error("bad issuer")]
+    // Issuer,
+    // #[error("bad audience")]
+    // Audience,
 }
 
 pub struct OidcValidator {
-    pub audiences: Vec<String>,
+    // pub audiences: Vec<String>,
     pub issuer: String,
     pub jwks_uri: String,
     // Cache the current JWK set; refresh if key not found
@@ -74,7 +73,7 @@ pub struct OidcValidator {
 }
 
 impl OidcValidator {
-    pub async fn new(issuer: String, audiences: Vec<String>) -> Result<Self> {
+    pub async fn new(issuer: String, _: Vec<String>) -> Result<Self> {
         // 1) Discover the realm (/.well-known/openid-configuration)
         let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
         let disc: OidcDiscovery = reqwest::Client::new()
@@ -95,7 +94,7 @@ impl OidcValidator {
         let jwks = fetch_jwks(&disc.jwks_uri).await?;
 
         Ok(Self {
-            audiences,
+            // audiences,
             issuer,
             jwks_uri: disc.jwks_uri,
             jwks: Arc::new(RwLock::new(jwks)),
@@ -277,17 +276,17 @@ struct TokenEndpointDiscovery {
 
 #[derive(Debug, Serialize)]
 struct ClientCredentialsRequest {
-    grant_type: String,
     client_id: String,
     client_secret: String,
+    grant_type: String,
     scope: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct ClientCredentialsResponse {
     access_token: String,
-    expires_in: u64,
-    token_type: String,
+    // expires_in: u64,
+    // token_type: String,
 }
 
 /// Performs OAuth2 Client Credentials Flow token exchange for service-to-service authentication
@@ -314,7 +313,7 @@ pub async fn exchange_client_credentials(
         .await
         .context("failed to fetch OIDC discovery")?;
 
-    let discovery_status = discovery_response.status();
+    // let discovery_status = discovery_response.status();
     let discovery_text = discovery_response
         .text()
         .await

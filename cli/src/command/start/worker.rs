@@ -287,7 +287,7 @@ async fn run_step(
     let mut paths = vec![];
 
     for artifact in step.artifacts.iter() {
-        let path = get_artifact_output_path(artifact, &artifact_namespace);
+        let path = get_artifact_output_path(artifact, artifact_namespace);
 
         if !path.exists() {
             return Err(Status::internal("artifact not found"));
@@ -310,7 +310,7 @@ async fn run_step(
         format!(
             "VORPAL_ARTIFACT_{}={}",
             artifact_digest,
-            get_artifact_output_path(artifact_digest, &artifact_namespace).display()
+            get_artifact_output_path(artifact_digest, artifact_namespace).display()
         ),
         format!("VORPAL_OUTPUT={}", artifact_path.display()),
         format!("VORPAL_WORKSPACE={}", workspace_path.display()),
@@ -607,7 +607,7 @@ async fn build_artifact(
 
     for step in artifact.steps.iter() {
         if let Err(err) = run_step(
-            &artifact_digest,
+            artifact_digest,
             artifact_namespace,
             &artifact_output_path,
             step.clone(),

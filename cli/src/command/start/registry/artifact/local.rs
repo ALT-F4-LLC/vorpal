@@ -157,7 +157,7 @@ impl ArtifactBackend for LocalBackend {
             let alias_tag = alias.split(':').nth(1).unwrap_or("latest").to_string();
 
             let alias_path = get_artifact_alias_path(
-                &alias_name,
+                alias_name,
                 &artifact_namespace,
                 artifact_system,
                 &alias_tag,

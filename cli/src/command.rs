@@ -450,8 +450,8 @@ pub async fn run() -> Result<()> {
 
                 println!(
                     "Or open {} and enter code: {}",
-                    details.verification_uri().to_string(),
-                    details.user_code().secret().to_string()
+                    details.verification_uri(),
+                    details.user_code().secret()
                 );
 
                 let token_result = client
