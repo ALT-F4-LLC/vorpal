@@ -35,6 +35,7 @@ locals {
     worker = {
       access_type                     = "CONFIDENTIAL"
       standard_token_exchange_enabled = true
+      service_accounts_enabled        = true
       optional_scopes = [
         "archive",
         "artifact",

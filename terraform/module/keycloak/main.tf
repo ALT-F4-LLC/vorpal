@@ -9,6 +9,7 @@ resource "keycloak_openid_client" "this" {
   client_id                                 = each.key
   oauth2_device_authorization_grant_enabled = try(each.value.oauth2_device_authorization_grant_enabled, false)
   realm_id                                  = keycloak_realm.this.id
+  service_accounts_enabled                  = try(each.value.service_accounts_enabled, false)
   standard_token_exchange_enabled           = try(each.value.standard_token_exchange_enabled, false)
 }
 
