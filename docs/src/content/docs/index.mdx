@@ -1,0 +1,44 @@
+---
+title: Vorpal
+description: Manage your entire software supply chain with one tool.
+template: splash
+hero:
+  tagline: Manage your entire software supply chain with one tool.
+  image:
+    file: ../../assets/houston.webp
+  actions:
+    - text: Install Vorpal
+      link: /vorpal/guides/install/
+      icon: right-arrow
+    - text: Learn more
+      link: /vorpal/reference/
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Features
+
+<CardGrid>
+	<Card title="Reproducible builds" icon="puzzle">
+		Thanks to the sandboxed nature of artifacts in Vorpal, builds are entirely
+    reproducible from the get-go. Be rid of pesky _works on my machine!_
+    problems.
+	</Card>
+	<Card title="Ship your code" icon="rocket">
+		Vorpal provides a registry component that can be used to ship code
+    throughout your infrastructure, whether that's the public registry, or your
+    own securely self-hosted one.
+	</Card>
+	<Card title="Secrets supported!" icon="setting">
+		Vorpal comes with powerful build-time secrets injection out of the box. Use
+    the official implementation or a third-party one for whatever secrets
+    platform you use.
+	</Card>
+	<Card title="Verify everything" icon="approve-check-circle">
+		Built with attestations & signing in mind, Vorpal provides the ability to
+    verify the source and artifacts of your builds came from a trusted host, and
+    was not tampered with.
+	</Card>
+</CardGrid>
