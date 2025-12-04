@@ -85,7 +85,7 @@ impl ArchiveBackend for S3Backend {
             .body(request.data.clone().into())
             .send()
             .await
-            .map_err(|err| Status::internal(format!("failed to write store path: {err}")))?;
+            .map_err(|err| Status::internal(format!("failed to write s3 path: {err}")))?;
 
         Ok(())
     }

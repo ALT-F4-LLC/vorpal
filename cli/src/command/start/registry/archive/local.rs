@@ -57,7 +57,7 @@ impl ArchiveBackend for LocalBackend {
 
             write(&request_path, &request.data)
                 .await
-                .map_err(|err| Status::internal(format!("failed to write store path: {err}")))?;
+                .map_err(|err| Status::internal(format!("failed to write local path: {err}")))?;
 
             set_timestamps(&request_path)
                 .await
