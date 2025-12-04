@@ -149,7 +149,7 @@ name = "curl-cacert"
 path = "https://curl.se/ca/cacert.pem"
 includes = []
 excludes = []
-digest = "8b3bd9bd8efaf3e8926fc562d9e61e4d7b8c482bc711f448fb381b6c1499fd64"
+digest = "0fef43b996f6c91c7d727a900f16e0ab0fb376617b7e1fd85646d92cb2993a87"
 platform = "aarch64-linux"
 
 [[sources]]
@@ -157,7 +157,7 @@ name = "curl-cacert"
 path = "https://curl.se/ca/cacert.pem"
 includes = []
 excludes = []
-digest = "8b3bd9bd8efaf3e8926fc562d9e61e4d7b8c482bc711f448fb381b6c1499fd64"
+digest = "0fef43b996f6c91c7d727a900f16e0ab0fb376617b7e1fd85646d92cb2993a87"
 platform = "x86_64-linux"
 
 [[sources]]
