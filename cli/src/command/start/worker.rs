@@ -218,6 +218,14 @@ async fn pull_source(
                     return Err(Status::not_found("source archive empty in registry"));
                 }
 
+                let source_archive_parent = source_archive
+                    .parent()
+                    .ok_or_else(|| Status::internal("failed to get source archive parent"))?;
+
+                create_dir_all(source_archive_parent)
+                    .await
+                    .map_err(|err| Status::internal(format!("failed to create source archive parent: {err}")))?;
+
                 write(&source_archive, &response_data)
                     .await
                     .map_err(|err| {
