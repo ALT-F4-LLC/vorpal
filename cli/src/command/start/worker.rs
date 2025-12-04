@@ -222,9 +222,9 @@ async fn pull_source(
                     .parent()
                     .ok_or_else(|| Status::internal("failed to get source archive parent"))?;
 
-                create_dir_all(source_archive_parent)
-                    .await
-                    .map_err(|err| Status::internal(format!("failed to create source archive parent: {err}")))?;
+                create_dir_all(source_archive_parent).await.map_err(|err| {
+                    Status::internal(format!("failed to create source archive parent: {err}"))
+                })?;
 
                 write(&source_archive, &response_data)
                     .await
