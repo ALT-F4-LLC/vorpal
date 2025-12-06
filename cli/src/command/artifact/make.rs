@@ -136,6 +136,12 @@ async fn build(
             if !stream_data.is_empty() {
                 let archive_path = get_artifact_archive_path(artifact_digest, artifact_namespace);
 
+                let archive_path_parent = archive_path
+                    .parent()
+                    .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+
+                create_dir_all(archive_path_parent).await?;
+
                 write(&archive_path, &stream_data)
                     .await
                     .expect("failed to write archive");
