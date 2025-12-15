@@ -103,7 +103,7 @@ fn generate_version_script() -> String {
 
 fn generate_dockerfile() -> String {
     formatdoc! {"
-        FROM docker.io/library/debian:sid-slim@sha256:2eac978892d960f967fdad9a5387eb0bf5addfa3fab7f6fa09a00e0adff7975d
+        FROM docker.io/library/debian:sid-slim@sha256:c0f1b3716686ee452f7c62c82d8aee5f79feccba7402e967b79658100d5bd6cf
 
         RUN ARCH=$(uname -m) \
             && if [ \"${{ARCH}}\" = \"aarch64\" ]; then ARCH=\"arm64\"; fi \
