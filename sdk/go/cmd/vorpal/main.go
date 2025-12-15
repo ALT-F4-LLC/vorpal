@@ -234,12 +234,12 @@ func main() {
 			log.Fatalf("failed to build artifact argument: %v", err)
 		}
 
-		aarch64Darwin, err := context.FetchArtifact(*varAarch64Darwin)
+		aarch64Darwin, err := context.FetchArtifactAlias(*varAarch64Darwin)
 		if err != nil {
 			log.Fatalf("failed to fetch artifact: %v", err)
 		}
 
-		aarch64Linux, err := context.FetchArtifact(*varAarch64Linux)
+		aarch64Linux, err := context.FetchArtifactAlias(*varAarch64Linux)
 		if err != nil {
 			log.Fatalf("failed to fetch artifact: %v", err)
 		}
@@ -249,12 +249,12 @@ func main() {
 			log.Fatalf("failed to get gh: %v", err)
 		}
 
-		x8664Darwin, err := context.FetchArtifact(*varX8664Darwin)
+		x8664Darwin, err := context.FetchArtifactAlias(*varX8664Darwin)
 		if err != nil {
 			log.Fatalf("failed to fetch artifact: %v", err)
 		}
 
-		x8664Linux, err := context.FetchArtifact(*varX8664Linux)
+		x8664Linux, err := context.FetchArtifactAlias(*varX8664Linux)
 		if err != nil {
 			log.Fatalf("failed to fetch artifact: %v", err)
 		}

@@ -202,10 +202,10 @@ pub trait ArtifactBackend: Send + Sync + 'static {
 
     async fn get_artifact_alias(
         &self,
-        artifact_name: String,
-        artifact_namespace: String,
-        artifact_system: ArtifactSystem,
-        artifact_tag: String,
+        name: String,
+        namespace: String,
+        system: ArtifactSystem,
+        version: String,
     ) -> Result<String, Status>;
 
     async fn store_artifact(

@@ -1,6 +1,5 @@
 use crate::command::{
     artifact::config::{get_artifacts, get_order, start},
-    start::auth,
     store::{
         archives::unpack_zstd,
         paths::{
@@ -37,7 +36,7 @@ use vorpal_sdk::{
         language::{go::Go, rust::RustBuilder},
         protoc, protoc_gen_go, protoc_gen_go_grpc,
     },
-    context::ConfigContext,
+    context::{client_auth_header, ConfigContext},
 };
 
 pub struct RunArgsArtifact {
@@ -91,12 +90,11 @@ async fn build(
     };
 
     let mut request = Request::new(request);
-
-    let client_auth_header = auth::client_auth_header(registry)
+    let request_auth_header = client_auth_header(registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
 
-    if let Some(header) = client_auth_header {
+    if let Some(header) = request_auth_header {
         request.metadata_mut().insert("authorization", header);
     }
 
@@ -181,12 +179,11 @@ async fn build(
     };
 
     let mut request = Request::new(request);
-
-    let client_auth_header = auth::client_auth_header(registry)
+    let request_auth_header = client_auth_header(registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
 
-    if let Some(header) = client_auth_header {
+    if let Some(header) = request_auth_header {
         request.metadata_mut().insert("authorization", header);
     }
 

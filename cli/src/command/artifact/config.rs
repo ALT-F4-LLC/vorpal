@@ -116,9 +116,6 @@ pub async fn start(
         command.arg("--artifact-variable").arg(var);
     }
 
-    // Set the user API token environment variable for the configuration process
-    // command.env("VORPAL_API_TOKEN", &user_api_token);
-
     let mut config_process = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

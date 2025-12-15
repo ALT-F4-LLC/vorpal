@@ -10,13 +10,18 @@ use crate::{
     artifact::system::get_system,
     cli::{Cli, Command},
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use http::uri::{InvalidUri, Uri};
+use serde::{Deserialize, Serialize};
 use sha256::digest;
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 use tokio::fs::read;
 use tonic::{
+    metadata::{Ascii, MetadataValue},
     transport::{Certificate, Channel, ClientTlsConfig, Server},
     Code::NotFound,
     Request, Response, Status,
@@ -46,6 +51,20 @@ pub struct ConfigContext {
 #[derive(Clone)]
 pub struct ConfigServer {
     pub store: ConfigContextStore,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VorpalCredentialsContent {
+    pub access_token: String,
+    pub expires_in: u64,
+    pub refresh_token: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct VorpalCredentials {
+    pub issuer: HashMap<String, VorpalCredentialsContent>,
+    pub registry: HashMap<String, String>,
 }
 
 impl ConfigServer {
@@ -132,12 +151,6 @@ pub async fn get_context() -> Result<ConfigContext> {
 
             let client_agent = AgentServiceClient::new(client_agent_channel);
             let client_artifact = ArtifactServiceClient::new(client_registry_channel);
-
-            // let client_api_token = env::var("VORPAL_API_TOKEN").unwrap_or_default();
-
-            // if client_api_token.is_empty() {
-            //     bail!("VORPAL_API_TOKEN environment variable is required");
-            // }
 
             Ok(ConfigContext::new(
                 artifact,
@@ -227,14 +240,12 @@ impl ConfigContext {
             registry: self.registry.clone(),
         };
 
-        let request = Request::new(request);
+        let mut request = Request::new(request);
+        let request_auth = client_auth_header(&self.registry).await?;
 
-        // request.metadata_mut().insert(
-        //     "authorization",
-        //     format!("Bearer {}", self.client_api_token)
-        //         .parse()
-        //         .expect("failed to set authorization header"),
-        // );
+        if let Some(header) = request_auth {
+            request.metadata_mut().insert("authorization", header);
+        }
 
         let response = self
             .client_agent
@@ -292,23 +303,17 @@ impl ConfigContext {
     pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
         // TODO: look in lockfile for artifact version
 
-        // if self.store.artifact.contains_key(digest) {
-        //     return Ok(digest.to_string());
-        // }
-
         let request = ArtifactRequest {
             digest: digest.to_string(),
             namespace: self.artifact_namespace.clone(),
         };
 
-        let request = Request::new(request.clone());
+        let mut request = Request::new(request.clone());
+        let request_auth = client_auth_header(&self.registry).await?;
 
-        // grpc_request.metadata_mut().insert(
-        //     "authorization",
-        //     format!("Bearer {}", self.client_api_token)
-        //         .parse()
-        //         .expect("failed to set authorization header"),
-        // );
+        if let Some(header) = request_auth {
+            request.metadata_mut().insert("authorization", header);
+        }
 
         match self.client_artifact.get_artifact(request).await {
             Err(status) => {
@@ -375,4 +380,51 @@ impl ConfigContext {
             .await
             .map_err(|e| anyhow::anyhow!("failed to serve: {}", e))
     }
+}
+
+pub fn get_root_dir_path() -> PathBuf {
+    Path::new("/var/lib/vorpal").to_path_buf()
+}
+
+pub fn get_root_key_dir_path() -> PathBuf {
+    get_root_dir_path().join("key")
+}
+
+pub fn get_key_credentials_path() -> PathBuf {
+    get_root_key_dir_path()
+        .join("credentials")
+        .with_extension("json")
+}
+
+pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
+    let mut header: Option<MetadataValue<_>> = None;
+
+    let credentials_path = get_key_credentials_path();
+
+    if credentials_path.exists() {
+        let credentials_data = read(credentials_path).await?;
+
+        let credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
+
+        let registry_issuer = credentials
+            .registry
+            .get(registry)
+            .ok_or_else(|| anyhow!("no issuer found for registry: {}", registry))?;
+
+        let issuer_credentials = credentials.issuer.get(registry_issuer).ok_or_else(|| {
+            anyhow!(
+                "no issuer found for registry: {} (issuer: {})",
+                registry,
+                registry_issuer
+            )
+        })?;
+
+        header = Some(
+            format!("Bearer {}", issuer_credentials.access_token)
+                .parse()
+                .map_err(|e| anyhow!("failed to parse service secret: {}", e))?,
+        );
+    }
+
+    Ok(header)
 }

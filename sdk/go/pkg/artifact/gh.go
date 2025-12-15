@@ -5,5 +5,5 @@ import (
 )
 
 func Gh(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact("gh:2.69.0")
+	return context.FetchArtifactAlias("gh:2.69.0")
 }

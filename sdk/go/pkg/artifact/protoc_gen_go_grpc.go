@@ -5,5 +5,5 @@ import (
 )
 
 func ProtocGenGoGRPC(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact("protoc-gen-go-grpc:1.70.0")
+	return context.FetchArtifactAlias("protoc-gen-go-grpc:1.70.0")
 }

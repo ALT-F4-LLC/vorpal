@@ -5,5 +5,5 @@ import (
 )
 
 func Protoc(ctx *config.ConfigContext) (*string, error) {
-	return ctx.FetchArtifact("protoc:25.4")
+	return ctx.FetchArtifactAlias("protoc:25.4")
 }

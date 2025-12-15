@@ -1,6 +1,5 @@
 use crate::command::{
     config::{VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourceRust},
-    credentials::{VorpalCredentials, VorpalCredentialsContent},
     store::paths::get_key_credentials_path,
 };
 use anyhow::{anyhow, Result};
@@ -20,11 +19,13 @@ use tokio::{
 use toml::from_str;
 use tracing::{error, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
-use vorpal_sdk::artifact::{get_default_address, system::get_system_default_str};
+use vorpal_sdk::{
+    artifact::{get_default_address, system::get_system_default_str},
+    context::{VorpalCredentials, VorpalCredentialsContent},
+};
 
 mod artifact;
 mod config;
-mod credentials;
 mod init;
 mod lock;
 mod start;

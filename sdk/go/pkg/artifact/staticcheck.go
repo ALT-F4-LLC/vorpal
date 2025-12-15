@@ -5,5 +5,5 @@ import (
 )
 
 func Staticcheck(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact("staticcheck:2025.1.1")
+	return context.FetchArtifactAlias("staticcheck:2025.1.1")
 }

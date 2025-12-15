@@ -5,5 +5,5 @@ import (
 )
 
 func Goimports(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact("goimports:0.29.0")
+	return context.FetchArtifactAlias("goimports:0.29.0")
 }

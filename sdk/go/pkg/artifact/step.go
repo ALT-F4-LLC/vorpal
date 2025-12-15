@@ -271,7 +271,7 @@ func Shell(
 	}
 
 	if stepSystem == api.ArtifactSystem_AARCH64_LINUX || stepSystem == api.ArtifactSystem_X8664_LINUX {
-		linux_vorpal, err := context.FetchArtifact("linux-vorpal:latest")
+		linux_vorpal, err := context.FetchArtifactAlias("linux-vorpal:latest")
 		if err != nil {
 			return nil, err
 		}

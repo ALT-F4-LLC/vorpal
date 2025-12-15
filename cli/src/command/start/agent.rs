@@ -1,6 +1,5 @@
 use crate::command::{
     lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
-    start::auth,
     store::{
         archives::{compress_zstd, unpack_zip},
         hashes::get_source_digest,
@@ -29,12 +28,17 @@ use tonic::{
 };
 use tracing::{info, warn};
 use url::Url;
-use vorpal_sdk::api::{
-    agent::{agent_service_server::AgentService, PrepareArtifactRequest, PrepareArtifactResponse},
-    archive::{
-        archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
+use vorpal_sdk::{
+    api::{
+        agent::{
+            agent_service_server::AgentService, PrepareArtifactRequest, PrepareArtifactResponse,
+        },
+        archive::{
+            archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
+        },
+        artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactStepSecret},
     },
-    artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactStepSecret},
+    context::client_auth_header,
 };
 
 #[derive(PartialEq)]
@@ -83,7 +87,7 @@ pub async fn build_source(
         .await
         .map_err(|e| anyhow!("failed to connect to registry: {}", e))?;
 
-    let client_auth_header = auth::client_auth_header(&registry)
+    let client_auth_header = client_auth_header(&registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
 

@@ -1,9 +1,8 @@
-use crate::command::{credentials::VorpalCredentials, get_key_credentials_path};
 use anyhow::{anyhow, Context, Result};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::{fs::read, sync::RwLock};
+use tokio::sync::RwLock;
 use tonic::{
     metadata::{Ascii, MetadataValue},
     Request, Status,
@@ -229,42 +228,6 @@ pub fn new_interceptor(
         req.extensions_mut().insert(claims);
         Ok(req)
     }
-}
-
-pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
-    let mut client_auth_header: Option<MetadataValue<_>> = None;
-
-    let credentials_path = get_key_credentials_path();
-
-    if credentials_path.exists() {
-        let credentials_data = read(credentials_path)
-            .await
-            .map_err(|e| anyhow!("failed to read credentials file: {}", e))?;
-
-        let credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)
-            .map_err(|e| anyhow!("failed to parse credentials file: {}", e))?;
-
-        let registry_issuer = credentials
-            .registry
-            .get(registry)
-            .ok_or_else(|| anyhow!("no credentials found for registry: {}", registry))?;
-
-        let issuer_credentials = credentials.issuer.get(registry_issuer).ok_or_else(|| {
-            anyhow!(
-                "no issuer found for registry: {} (issuer: {})",
-                registry,
-                registry_issuer
-            )
-        })?;
-
-        client_auth_header = Some(
-            format!("Bearer {}", issuer_credentials.access_token)
-                .parse()
-                .map_err(|e| anyhow!("failed to parse service secret: {}", e))?,
-        );
-    }
-
-    Ok(client_auth_header)
 }
 
 // ===== OAuth2 Client Credentials Flow =====

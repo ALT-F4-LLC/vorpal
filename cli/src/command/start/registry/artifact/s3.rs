@@ -54,12 +54,12 @@ impl ArtifactBackend for S3Backend {
         name: String,
         namespace: String,
         system: ArtifactSystem,
-        tag: String,
+        version: String,
     ) -> Result<String, Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let alias_key = get_artifact_alias_key(&name, &namespace, system, &tag);
+        let alias_key = get_artifact_alias_key(&name, &namespace, system, &version);
 
         let mut alias_stream = client
             .get_object()

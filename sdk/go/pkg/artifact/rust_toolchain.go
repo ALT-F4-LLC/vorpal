@@ -32,5 +32,5 @@ func RustToolchainVersion() string {
 }
 
 func RustToolchain(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact(fmt.Sprintf("rust-toolchain:%s", RustToolchainVersion()))
+	return context.FetchArtifactAlias(fmt.Sprintf("rust-toolchain:%s", RustToolchainVersion()))
 }
