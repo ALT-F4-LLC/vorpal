@@ -60,7 +60,7 @@ pub fn script(
 
         pushd $VORPAL_SOURCE/glibc/glibc-{glibc_version}
 
-        patch -Np1 -i $VORPAL_SOURCE/glibc-patch/glibc-2.40-fhs-1.patch
+        patch -Np1 -i $VORPAL_SOURCE/glibc-patch/glibc-2.42-fhs-1.patch
 
         popd
 

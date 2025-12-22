@@ -49,7 +49,7 @@ pub fn script(
         ../configure \
         --target=\"$VORPAL_TARGET\" \
         --prefix=\"$VORPAL_OUTPUT/tools\" \
-        --with-glibc-version=\"2.40\" \
+        --with-glibc-version=\"2.42\" \
         --with-sysroot=\"$VORPAL_OUTPUT\" \
         --with-newlib \
         --without-headers \
