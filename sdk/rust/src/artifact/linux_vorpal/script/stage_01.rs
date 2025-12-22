@@ -156,7 +156,7 @@ pub fn script(
         --disable-multilib \
         --disable-nls \
         --disable-libstdcxx-pch \
-            --with-gxx-include-dir=\"/tools/$VORPAL_TARGET/include/c++/14.2.0\"
+        --with-gxx-include-dir=\"/tools/$VORPAL_TARGET/include/c++/15.2.0\"
 
         make
         make DESTDIR=\"$VORPAL_OUTPUT\" install

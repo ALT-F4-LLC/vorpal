@@ -43,7 +43,7 @@ pub fn gnu_gcc(version: &str) -> api::artifact::ArtifactSource {
 pub fn gnu_glibc_patch(version: &str) -> api::artifact::ArtifactSource {
     let name = "glibc-patch";
     let path =
-        format!("https://www.linuxfromscratch.org/patches/lfs/12.2/glibc-{version}-fhs-1.patch",);
+        format!("https://www.linuxfromscratch.org/patches/lfs/12.4/glibc-{version}-fhs-1.patch");
 
     ArtifactSource::new(name, path.as_str()).build()
 }
@@ -73,7 +73,8 @@ pub fn linux(version: &str) -> api::artifact::ArtifactSource {
 
 pub fn ncurses(version: &str) -> api::artifact::ArtifactSource {
     let name = "ncurses";
-    let path = format!("https://invisible-mirror.net/archives/ncurses/ncurses-{version}.tar.gz");
+    let path =
+        format!("https://invisible-mirror.net/archives/ncurses/current/ncurses-{version}.tgz");
 
     ArtifactSource::new(name, path.as_str()).build()
 }
@@ -101,15 +102,16 @@ pub fn python(version: &str) -> api::artifact::ArtifactSource {
 
 pub fn unzip_patch_fixes(version: &str) -> api::artifact::ArtifactSource {
     let name = "unzip-patch-fixes";
-    let path = format!("https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-consolidated_fixes-1.patch");
+    let path = format!("https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-{version}-consolidated_fixes-1.patch");
 
     ArtifactSource::new(name, path.as_str()).build()
 }
 
 pub fn unzip_patch_gcc14(version: &str) -> api::artifact::ArtifactSource {
     let name = "unzip-patch-gcc14";
-    let path =
-        format!("https://www.linuxfromscratch.org/patches/blfs/12.2/unzip-{version}-gcc14-1.patch");
+    let path = format!(
+        "https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-{version}-gcc14-1.patch"
+    );
 
     ArtifactSource::new(name, path.as_str()).build()
 }
@@ -125,7 +127,7 @@ pub fn unzip(version: &str) -> api::artifact::ArtifactSource {
 pub fn util_linux(version: &str) -> api::artifact::ArtifactSource {
     let name = "util-linux";
     let path = format!(
-        "https://www.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-{version}.tar.xz"
+        "https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-{version}.tar.xz"
     );
 
     ArtifactSource::new(name, path.as_str()).build()

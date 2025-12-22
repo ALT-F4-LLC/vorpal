@@ -88,8 +88,30 @@ pub fn script(
 
         pushd $VORPAL_SOURCE/unzip/unzip{unzip_version}
 
+        cat > \"$VORPAL_SOURCE/unzip-patch-fixes/gcc15.patch\" <<'EOF'
+        --- a/unix/unxcfg.h
+        +++ b/unix/unxcfg.h
+        @@ -117,7 +117,6 @@ typedef struct stat z_stat;
+         #  endif
+         #else
+         #  include <time.h>
+        -   struct tm *gmtime(), *localtime();
+         #endif
+        EOF
+
+        echo \"Applying consolidated unzip patches...\"
         patch -Np1 -i $VORPAL_SOURCE/unzip-patch-fixes/unzip-6.0-consolidated_fixes-1.patch
+
+        echo \"Applying gcc14 unzip patch...\"
         patch -Np1 -i $VORPAL_SOURCE/unzip-patch-gcc14/unzip-6.0-gcc14-1.patch
+
+        echo \"Applying GCC 15 unzip patches...\"
+        patch -Np1 -i $VORPAL_SOURCE/unzip-patch-fixes/gcc15.patch
+
+        echo \"Applying unzip closeerror gargs sed changes...\"
+        grep -n 'CloseError(G.outfile, G.filename)' unix/unix.c
+        sed -i 's/CloseError(G\\.outfile, *G\\.filename)/CloseError(__G)/g' unix/unix.c
+        grep -n 'CloseError(' unix/unix.c
 
         make -f unix/Makefile generic
 

@@ -126,7 +126,7 @@ lima-sync:
 	limactl shell "vorpal-$(LIMA_ARCH)" ./script/lima.sh sync
 
 lima-vorpal:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal artifact make $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal artifact make $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)'
 
 lima-vorpal-start:
 	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal services start $(VORPAL_FLAGS)'

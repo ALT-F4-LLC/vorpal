@@ -154,11 +154,11 @@ pub fn script(
         make install
 
         chown -v -R root:root \
-            /usr/lib/gcc/$(gcc -dumpmachine)/14.2.0/include{{,-fixed}}
+            /usr/lib/gcc/$(gcc -dumpmachine)/15.2.0/include{{,-fixed}}
 
         ln -svr /usr/bin/cpp /usr/lib
         ln -sv gcc.1 /usr/share/man/man1/cc.1
-        ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/14.2.0/liblto_plugin.so \
+        ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/15.2.0/liblto_plugin.so \
                 /usr/lib/bfd-plugins/
 
         echo 'int main(){{}}' > dummy.c
