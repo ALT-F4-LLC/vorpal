@@ -81,7 +81,7 @@ func Bash(
 		return nil, err
 	}
 
-	step := NewArtifactStepBuilder()
+	step := NewArtifactStep()
 
 	step = step.WithArtifacts(artifacts, systems)
 	step = step.WithEntrypoint(stepEntrypoint, systems)
@@ -235,7 +235,7 @@ func Bwrap(
 
 	// Setup step
 
-	step := NewArtifactStepBuilder()
+	step := NewArtifactStep()
 
 	step = step.WithArguments(stepArguments, systems)
 	step = step.WithArtifacts(stepArtifacts, systems)
@@ -302,7 +302,7 @@ func Docker(
 	artifacts []*string,
 	systems []api.ArtifactSystem,
 ) (*api.ArtifactStep, error) {
-	step := NewArtifactStepBuilder()
+	step := NewArtifactStep()
 
 	step = step.WithArguments(arguments, systems)
 	step = step.WithArtifacts(artifacts, systems)

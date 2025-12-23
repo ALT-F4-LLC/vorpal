@@ -33,7 +33,7 @@ use vorpal_sdk::{
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
-        language::{go::Go, rust::RustBuilder},
+        language::{go::Go, rust::Rust},
         protoc, protoc_gen_go, protoc_gen_go_grpc,
     },
     context::{client_auth_header, ConfigContext},
@@ -385,7 +385,7 @@ pub async fn run(
                 includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             }
 
-            RustBuilder::new(&config.name, vec![config_system])
+            Rust::new(&config.name, vec![config_system])
                 .with_bins(bins.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
                 .with_includes(includes)
                 .with_packages(packages)

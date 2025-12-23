@@ -10,30 +10,30 @@ use std::fs::read_to_string;
 use toml::from_str;
 
 #[derive(Debug, Deserialize)]
-struct RustArtifactCargoToml {
-    bin: Option<Vec<RustArtifactCargoTomlBinary>>,
-    package: Option<RustArtifactCargoTomlPackage>,
-    workspace: Option<RustArtifactCargoTomlWorkspace>,
+struct RustCargoToml {
+    bin: Option<Vec<RustCargoTomlBinary>>,
+    package: Option<RustCargoTomlPackage>,
+    workspace: Option<RustCargoTomlWorkspace>,
 }
 
 #[derive(Debug, Deserialize)]
-struct RustArtifactCargoTomlBinary {
+struct RustCargoTomlBinary {
     name: String,
     path: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct RustArtifactCargoTomlPackage {
+struct RustCargoTomlPackage {
     name: String,
     // version: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct RustArtifactCargoTomlWorkspace {
+struct RustCargoTomlWorkspace {
     members: Option<Vec<String>>,
 }
 
-pub struct RustBuilder<'a> {
+pub struct Rust<'a> {
     artifacts: Vec<String>,
     bins: Vec<String>,
     build: bool,
@@ -50,13 +50,13 @@ pub struct RustBuilder<'a> {
     systems: Vec<ArtifactSystem>,
 }
 
-fn parse_cargo(path: &str) -> Result<RustArtifactCargoToml> {
+fn parse_cargo(path: &str) -> Result<RustCargoToml> {
     let contents = read_to_string(path).expect("Failed to read Cargo.toml");
 
     Ok(from_str(&contents).expect("Failed to parse Cargo.toml"))
 }
 
-impl<'a> RustBuilder<'a> {
+impl<'a> Rust<'a> {
     pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],

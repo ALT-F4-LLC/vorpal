@@ -18,7 +18,7 @@ func main() {
 		api.ArtifactSystem_X8664_LINUX,
 	}
 
-	_, err := language.NewGoBuilder("example", systems).
+	_, err := language.NewGo("example", systems).
 		WithIncludes([]string{"main.go", "go.mod", "go.sum"}).
 		Build(context)
 	if err != nil {

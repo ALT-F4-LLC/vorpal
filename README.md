@@ -50,7 +50,7 @@ The examples below build a simple Rust binary artifact for multiple systems and 
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::language::rust::RustBuilder,
+    artifact::language::rust::Rust,
     context::get_context,
 };
 
@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    RustBuilder::new("example", systems).build(ctx).await?;
+    Rust::new("example", systems).build(ctx).await?;
 
     ctx.run().await
 }
@@ -85,7 +85,7 @@ var systems = []api.ArtifactSystem{
 func main() {
     ctx := config.GetContext()
 
-    language.NewGoBuilder("example", systems).Build(ctx)
+    language.NewGo("example", systems).Build(ctx)
 
     ctx.Run()
 }
@@ -134,7 +134,7 @@ Manage development and user-wide environments using the builders:
 use anyhow::Result;
 use vorpal_sdk::{
   api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-  artifact::{devenv::DevenvBuilder, userenv::UserenvBuilder},
+  artifact::{ProjectEnvironment, UserEnvironment},
   context::get_context,
 };
 
@@ -143,11 +143,11 @@ async fn main() -> Result<()> {
   let ctx = &mut get_context().await?;
   let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-  DevenvBuilder::new("my-devenv", systems.clone())
+  ProjectEnvironment::new("my-project", systems.clone())
     .with_environments(vec!["FOO=bar".into()])
     .build(ctx).await?;
 
-  UserenvBuilder::new("my-userenv", systems)
+  UserEnvironment::new("my-home", systems)
     .with_symlinks(vec![("/path/to/local/bin/app", "$HOME/.vorpal/bin/app")])
     .build(ctx).await?;
 
@@ -175,11 +175,11 @@ var systems = []api.ArtifactSystem{
 func main() {
   ctx := config.GetContext()
 
-  artifact.NewDevenvBuilder("my-devenv", systems).
+  artifact.NewProjectEnvironment("my-project", systems).
     WithEnvironments([]string{"FOO=bar"}).
     Build(ctx)
 
-  artifact.NewUserenvBuilder("my-userenv", systems).
+  artifact.NewUserEnvironment("my-home", systems).
     WithSymlinks(map[string]string{"/path/to/local/bin/app": "$HOME/.vorpal/bin/app"}).
     Build(ctx)
 
@@ -202,7 +202,7 @@ Vorpal does not lock you to a single executor. Each step sets its executor via `
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{ArtifactBuilder, ArtifactStepBuilder},
+    artifact::{Artifact, ArtifactStep},
     context::get_context,
 };
 
@@ -211,14 +211,14 @@ async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    let step = ArtifactStepBuilder::new("docker")
+    let step = ArtifactStep::new("docker")
         .with_arguments(vec![
             "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
             "alpine", "sh", "-lc", "echo hi > /out/hi.txt",
         ])
         .build();
 
-    ArtifactBuilder::new("example-docker", vec![step], systems).build(ctx).await?;
+    Artifact::new("example-docker", vec![step], systems).build(ctx).await?;
 
     ctx.run().await
 }
@@ -244,12 +244,12 @@ var systems = []api.ArtifactSystem{
 func main() {
     ctx := config.GetContext()
 
-    step, _ := artifact.NewArtifactStepBuilder().
+    step, _ := artifact.NewArtifactStep().
         WithEntrypoint("docker", systems).
         WithArguments([]string{"run", "--rm", "-v", "$VORPAL_OUTPUT:/out", "alpine", "sh", "-lc", "echo hi > /out/hi.txt"}, systems).
         Build(ctx)
 
-    artifact.NewArtifactBuilder("example-docker", []*api.ArtifactStep{step}, systems).Build(ctx)
+    artifact.NewArtifact("example-docker", []*api.ArtifactStep{step}, systems).Build(ctx)
 
     ctx.Run()
 }

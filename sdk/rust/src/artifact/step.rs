@@ -7,8 +7,6 @@ use crate::{
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
-// TODO: implement amber step
-
 pub fn bash(
     artifacts: Vec<String>,
     environments: Vec<String>,

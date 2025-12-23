@@ -33,7 +33,7 @@ type RustArtifactCargoTomlWorkspace struct {
 	Members []string `toml:"members,omitempty"`
 }
 
-type RustBuilder struct {
+type Rust struct {
 	artifacts []*string
 	bins      []string
 	build     bool
@@ -154,8 +154,8 @@ func stripPrefix(path, prefix string) string {
 	return path
 }
 
-func NewRustBuilder(name string, systems []api.ArtifactSystem) *RustBuilder {
-	return &RustBuilder{
+func NewRust(name string, systems []api.ArtifactSystem) *Rust {
+	return &Rust{
 		artifacts: make([]*string, 0),
 		bins:      make([]string, 0),
 		build:     true,
@@ -173,47 +173,47 @@ func NewRustBuilder(name string, systems []api.ArtifactSystem) *RustBuilder {
 	}
 }
 
-func (a *RustBuilder) WithArtifacts(artifacts []*string) *RustBuilder {
+func (a *Rust) WithArtifacts(artifacts []*string) *Rust {
 	a.artifacts = artifacts
 	return a
 }
 
-func (a *RustBuilder) WithBins(bins []string) *RustBuilder {
+func (a *Rust) WithBins(bins []string) *Rust {
 	a.bins = bins
 	return a
 }
 
-func (a *RustBuilder) WithCheck() *RustBuilder {
+func (a *Rust) WithCheck() *Rust {
 	a.check = true
 	return a
 }
 
-func (a *RustBuilder) WithExcludes(excludes []string) *RustBuilder {
+func (a *Rust) WithExcludes(excludes []string) *Rust {
 	a.excludes = excludes
 	return a
 }
 
-func (a *RustBuilder) WithFormat() *RustBuilder {
+func (a *Rust) WithFormat() *Rust {
 	a.format = true
 	return a
 }
 
-func (a *RustBuilder) WithIncludes(includes []string) *RustBuilder {
+func (a *Rust) WithIncludes(includes []string) *Rust {
 	a.includes = includes
 	return a
 }
 
-func (a *RustBuilder) WithLint() *RustBuilder {
+func (a *Rust) WithLint() *Rust {
 	a.lint = true
 	return a
 }
 
-func (a *RustBuilder) WithPackages(packages []string) *RustBuilder {
+func (a *Rust) WithPackages(packages []string) *Rust {
 	a.packages = packages
 	return a
 }
 
-func (a *RustBuilder) WithSecrets(secrets map[string]string) *RustBuilder {
+func (a *Rust) WithSecrets(secrets map[string]string) *Rust {
 	for name, value := range secrets {
 		secret := &api.ArtifactStepSecret{
 			Name:  name,
@@ -230,17 +230,17 @@ func (a *RustBuilder) WithSecrets(secrets map[string]string) *RustBuilder {
 	return a
 }
 
-func (a *RustBuilder) WithSource(source *string) *RustBuilder {
+func (a *Rust) WithSource(source *string) *Rust {
 	a.source = source
 	return a
 }
 
-func (a *RustBuilder) WithTests() *RustBuilder {
+func (a *Rust) WithTests() *Rust {
 	a.tests = true
 	return a
 }
 
-func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error) {
+func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 	protoc, err := artifact.Protoc(context)
 	if err != nil {
 		return nil, err
@@ -439,7 +439,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	vendorName := fmt.Sprintf("%s-vendor", builder.name)
 
-	vendorSource := artifact.NewArtifactSourceBuilder(vendorName, sourcePath).
+	vendorSource := artifact.NewArtifactSource(vendorName, sourcePath).
 		WithIncludes(vendorCargoPaths).
 		Build()
 
@@ -454,7 +454,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	vendorSources := []*api.ArtifactSource{&vendorSource}
 
-	vendor, err := artifact.NewArtifactBuilder(vendorName, vendorSteps, systems).
+	vendor, err := artifact.NewArtifact(vendorName, vendorSteps, systems).
 		WithSources(vendorSources).
 		Build(context)
 	if err != nil {
@@ -479,7 +479,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 		sourceIncludes = append(sourceIncludes, include)
 	}
 
-	sourceBuilder := artifact.NewArtifactSourceBuilder(builder.name, sourcePath).
+	sourceBuilder := artifact.NewArtifactSource(builder.name, sourcePath).
 		WithIncludes(sourceIncludes).
 		WithExcludes(sourceExcludes)
 
@@ -536,7 +536,7 @@ func (builder *RustBuilder) Build(context *config.ConfigContext) (*string, error
 
 	steps := []*api.ArtifactStep{step}
 
-	return artifact.NewArtifactBuilder(builder.name, steps, systems).
+	return artifact.NewArtifact(builder.name, steps, systems).
 		WithSources(sources).
 		Build(context)
 }

@@ -102,7 +102,7 @@ func main() {
 
 	// Vorpal
 
-	vorpal, err := language.NewRustBuilder("vorpal", SYSTEMS).
+	vorpal, err := language.NewRust("vorpal", SYSTEMS).
 		WithBins([]string{"vorpal"}).
 		WithIncludes([]string{"cli", "sdk/rust"}).
 		WithPackages([]string{"vorpal-cli", "vorpal-sdk"}).
@@ -124,7 +124,7 @@ func main() {
 	}
 
 	_, errProjectEnvironment := artifact.
-		NewProjectEnvironmentBuilder("vorpal-dev", SYSTEMS).
+		NewProjectEnvironment("vorpal-dev", SYSTEMS).
 		WithArtifacts([]*string{
 			gobin,
 			goimports,
@@ -147,7 +147,7 @@ func main() {
 
 	// Vorpal process
 
-	_, errProcess := artifact.NewProcessBuilder(
+	_, errProcess := artifact.NewProcess(
 		"vorpal-process",
 		fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(vorpal)),
 		SYSTEMS,
@@ -168,7 +168,7 @@ func main() {
 
 	// Vorpal task
 
-	_, errTest := artifact.NewTaskBuilder(
+	_, errTest := artifact.NewTask(
 		"vorpal-test",
 		fmt.Sprintf("\n%s/bin/vorpal --version", artifact.GetEnvKey(vorpal)),
 		SYSTEMS,
@@ -182,7 +182,7 @@ func main() {
 	// Vorpal user environment
 
 	_, errUserEnvironment := artifact.
-		NewUserEnvironmentBuilder("vorpal-user", SYSTEMS).
+		NewUserEnvironment("vorpal-user", SYSTEMS).
 		WithArtifacts([]*string{}).
 		WithEnvironments([]string{"PATH=$HOME/.vorpal/bin"}).
 		WithSymlinks(map[string]string{
@@ -195,7 +195,7 @@ func main() {
 
 	if context.GetArtifactName() == "vorpal-release" {
 		varAarch64Darwin, err := artifact.
-			NewArtifactArgumentBuilder("aarch64-darwin").
+			NewArtifactArgument("aarch64-darwin").
 			WithRequire().
 			Build(context)
 		if err != nil {
@@ -203,7 +203,7 @@ func main() {
 		}
 
 		varAarch64Linux, err := artifact.
-			NewArtifactArgumentBuilder("aarch64-linux").
+			NewArtifactArgument("aarch64-linux").
 			WithRequire().
 			Build(context)
 		if err != nil {
@@ -211,7 +211,7 @@ func main() {
 		}
 
 		varBranchName, err := artifact.
-			NewArtifactArgumentBuilder("branch-name").
+			NewArtifactArgument("branch-name").
 			WithRequire().
 			Build(context)
 		if err != nil {
@@ -219,7 +219,7 @@ func main() {
 		}
 
 		varX8664Darwin, err := artifact.
-			NewArtifactArgumentBuilder("x8664-darwin").
+			NewArtifactArgument("x8664-darwin").
 			WithRequire().
 			Build(context)
 		if err != nil {
@@ -227,7 +227,7 @@ func main() {
 		}
 
 		varX8664Linux, err := artifact.
-			NewArtifactArgumentBuilder("x8664-linux").
+			NewArtifactArgument("x8664-linux").
 			WithRequire().
 			Build(context)
 		if err != nil {
@@ -278,7 +278,7 @@ func main() {
 			log.Fatalf("failed to execute script template: %v", scriptErr)
 		}
 
-		_, errRelease := artifact.NewTaskBuilder("vorpal-release", script.String(), SYSTEMS).
+		_, errRelease := artifact.NewTask("vorpal-release", script.String(), SYSTEMS).
 			WithArtifacts([]*string{
 				aarch64Darwin,
 				aarch64Linux,

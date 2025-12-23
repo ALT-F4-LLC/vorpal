@@ -8,9 +8,9 @@ use vorpal_sdk::{
     artifact::{
         get_env_key, gh, go, goimports, gopls, grpcurl,
         language::go::{get_goarch, get_goos},
-        language::rust::RustBuilder,
-        protoc, protoc_gen_go, protoc_gen_go_grpc, staticcheck, ArtifactArgument, ArtifactJob,
-        ArtifactProcess, ArtifactProjectEnvironment, ArtifactUserEnvironment,
+        language::rust::Rust,
+        protoc, protoc_gen_go, protoc_gen_go_grpc, staticcheck, Argument, Job, Process,
+        ProjectEnvironment, UserEnvironment,
     },
     context::get_context,
 };
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
 
     // Rust artifact
 
-    let vorpal = RustBuilder::new("vorpal", SYSTEMS.to_vec())
+    let vorpal = Rust::new("vorpal", SYSTEMS.to_vec())
         .with_bins(vec!["vorpal"])
         .with_includes(vec!["cli", "sdk/rust"])
         .with_packages(vec!["vorpal-cli", "vorpal-sdk"])
@@ -44,37 +44,7 @@ async fn main() -> Result<()> {
 
     // Job artifact
 
-    ArtifactJob::new(
-        "vorpal-test",
-        format!("{}/bin/vorpal --version", get_env_key(&vorpal)),
-        SYSTEMS.to_vec(),
-    )
-    .with_artifacts(vec![vorpal.clone()])
-    .build(context)
-    .await?;
-
-    // Process artifact
-
-    ArtifactProcess::new(
-        "vorpal-process",
-        format!("{}/bin/vorpal", get_env_key(&vorpal)).as_str(),
-        SYSTEMS.to_vec(),
-    )
-    .with_arguments(vec![
-        "--registry",
-        "https://localhost:50051",
-        "services",
-        "start",
-        "--port",
-        "50051",
-    ])
-    .with_artifacts(vec![vorpal.clone()])
-    .build(context)
-    .await?;
-
-    // Project environment artifact
-
-    ArtifactProjectEnvironment::new("vorpal-dev", SYSTEMS.to_vec())
+    ProjectEnvironment::new("vorpal-dev", SYSTEMS.to_vec())
         .with_artifacts(vec![
             go,
             goimports,
@@ -96,7 +66,36 @@ async fn main() -> Result<()> {
 
     // User environment artifact
 
-    ArtifactUserEnvironment::new("vorpal-user", SYSTEMS.to_vec())
+    Process::new(
+        "vorpal-process",
+        format!("{}/bin/vorpal", get_env_key(&vorpal)).as_str(),
+        SYSTEMS.to_vec(),
+    )
+    .with_arguments(vec![
+        "--registry",
+        "https://localhost:50051",
+        "start",
+        "--port",
+        "50051",
+    ])
+    .with_artifacts(vec![vorpal.clone()])
+    .build(context)
+    .await?;
+
+    // Vorpal job
+
+    Job::new(
+        "vorpal-test",
+        format!("{}/bin/vorpal --version", get_env_key(&vorpal)),
+        SYSTEMS.to_vec(),
+    )
+    .with_artifacts(vec![vorpal.clone()])
+    .build(context)
+    .await?;
+
+    // Vorpal user environment
+
+    UserEnvironment::new("vorpal-user", SYSTEMS.to_vec())
         .with_artifacts(vec![])
         .with_environments(vec!["PATH=$HOME/.vorpal/bin".to_string()])
         .with_symlinks(vec![
@@ -113,25 +112,21 @@ async fn main() -> Result<()> {
     if context.get_artifact_name() == "vorpal-release" {
         // Setup arguments
 
-        let aarch64_darwin = ArtifactArgument::new("aarch64-darwin")
+        let aarch64_darwin = Argument::new("aarch64-darwin")
             .with_require()
             .build(context)?;
 
-        let aarch64_linux = ArtifactArgument::new("aarch64-linux")
+        let aarch64_linux = Argument::new("aarch64-linux")
             .with_require()
             .build(context)?;
 
-        let branch_name = ArtifactArgument::new("branch-name")
+        let branch_name = Argument::new("branch-name").with_require().build(context)?;
+
+        let x8664_darwin = Argument::new("x8664-darwin")
             .with_require()
             .build(context)?;
 
-        let x8664_darwin = ArtifactArgument::new("x8664-darwin")
-            .with_require()
-            .build(context)?;
-
-        let x8664_linux = ArtifactArgument::new("x8664-linux")
-            .with_require()
-            .build(context)?;
+        let x8664_linux = Argument::new("x8664-linux").with_require().build(context)?;
 
         // Fetch artifacts
 
@@ -173,7 +168,7 @@ async fn main() -> Result<()> {
             x8664_linux = get_env_key(&x8664_linux),
         };
 
-        ArtifactJob::new("vorpal-release", script, SYSTEMS.to_vec())
+        Job::new("vorpal-release", script, SYSTEMS.to_vec())
             .with_artifacts(vec![
                 aarch64_darwin,
                 aarch64_linux,

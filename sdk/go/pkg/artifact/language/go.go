@@ -20,7 +20,7 @@ type GoScriptTemplateArgs struct {
 	SourceScripts  string
 }
 
-type GoBuilder struct {
+type Go struct {
 	artifacts      []*string
 	buildDirectory *string
 	buildPath      *string
@@ -75,8 +75,8 @@ func GetGOARCH(target api.ArtifactSystem) (*string, error) {
 	return &goarch, nil
 }
 
-func NewGoBuilder(name string, systems []api.ArtifactSystem) *GoBuilder {
-	return &GoBuilder{
+func NewGo(name string, systems []api.ArtifactSystem) *Go {
+	return &Go{
 		artifacts:      []*string{},
 		buildDirectory: nil,
 		buildPath:      nil,
@@ -89,27 +89,27 @@ func NewGoBuilder(name string, systems []api.ArtifactSystem) *GoBuilder {
 	}
 }
 
-func (b *GoBuilder) WithArtifacts(artifacts []*string) *GoBuilder {
+func (b *Go) WithArtifacts(artifacts []*string) *Go {
 	b.artifacts = artifacts
 	return b
 }
 
-func (b *GoBuilder) WithBuildDirectory(directory string) *GoBuilder {
+func (b *Go) WithBuildDirectory(directory string) *Go {
 	b.buildDirectory = &directory
 	return b
 }
 
-func (b *GoBuilder) WithBuildPath(path string) *GoBuilder {
+func (b *Go) WithBuildPath(path string) *Go {
 	b.buildPath = &path
 	return b
 }
 
-func (b *GoBuilder) WithIncludes(includes []string) *GoBuilder {
+func (b *Go) WithIncludes(includes []string) *Go {
 	b.includes = includes
 	return b
 }
 
-func (b *GoBuilder) WithSecrets(secrets map[string]string) *GoBuilder {
+func (b *Go) WithSecrets(secrets map[string]string) *Go {
 	for name, value := range secrets {
 		secret := &api.ArtifactStepSecret{
 			Name:  name,
@@ -126,19 +126,19 @@ func (b *GoBuilder) WithSecrets(secrets map[string]string) *GoBuilder {
 	return b
 }
 
-func (b *GoBuilder) WithSource(source *api.ArtifactSource) *GoBuilder {
+func (b *Go) WithSource(source *api.ArtifactSource) *Go {
 	b.source = source
 	return b
 }
 
-func (b *GoBuilder) WithSourceScript(script string) *GoBuilder {
+func (b *Go) WithSourceScript(script string) *Go {
 	if !slices.Contains(b.sourceScripts, script) {
 		b.sourceScripts = append(b.sourceScripts, script)
 	}
 	return b
 }
 
-func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) {
+func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 	goBin, err := artifact.GoBin(context)
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 	if builder.source != nil {
 		source = builder.source
 	} else {
-		sourceBuilder := artifact.NewArtifactSourceBuilder(builder.name, sourcePath)
+		sourceBuilder := artifact.NewArtifactSource(builder.name, sourcePath)
 
 		if len(builder.includes) > 0 {
 			sourceBuilder = sourceBuilder.WithIncludes(builder.includes)
@@ -232,7 +232,7 @@ func (builder *GoBuilder) Build(context *config.ConfigContext) (*string, error) 
 
 	steps := []*api.ArtifactStep{step}
 
-	return artifact.NewArtifactBuilder(builder.name, steps, builder.systems).
+	return artifact.NewArtifact(builder.name, steps, builder.systems).
 		WithSources(sources).
 		Build(context)
 }

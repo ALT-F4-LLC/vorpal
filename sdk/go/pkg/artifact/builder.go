@@ -12,21 +12,12 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-type ArtifactArgumentBuilder struct {
+type Argument struct {
 	Name    string
 	Require bool
 }
 
-type ProcessBuilder struct {
-	Arguments  []string
-	Artifacts  []*string
-	Entrypoint string
-	Name       string
-	Secrets    []*api.ArtifactStepSecret
-	Systems    []api.ArtifactSystem
-}
-
-type ArtifactSourceBuilder struct {
+type ArtifactSource struct {
 	Digest   *string
 	Excludes []string
 	Includes []string
@@ -34,7 +25,7 @@ type ArtifactSourceBuilder struct {
 	Path     string
 }
 
-type ArtifactStepBuilder struct {
+type ArtifactStep struct {
 	Arguments    map[api.ArtifactSystem][]string
 	Artifacts    map[api.ArtifactSystem][]*string
 	Entrypoint   map[api.ArtifactSystem]string
@@ -43,15 +34,7 @@ type ArtifactStepBuilder struct {
 	Script       map[api.ArtifactSystem]string
 }
 
-type TaskBuilder struct {
-	Artifacts []*string
-	Name      string
-	Script    string
-	Secrets   []*api.ArtifactStepSecret
-	Systems   []api.ArtifactSystem
-}
-
-type ArtifactBuilder struct {
+type Artifact struct {
 	Aliases []string
 	Name    string
 	Sources []*api.ArtifactSource
@@ -59,14 +42,31 @@ type ArtifactBuilder struct {
 	Systems []api.ArtifactSystem
 }
 
-type ArtifactProcessScriptTemplateVars struct {
+type Job struct {
+	Artifacts []*string
+	Name      string
+	Script    string
+	Secrets   []*api.ArtifactStepSecret
+	Systems   []api.ArtifactSystem
+}
+
+type Process struct {
+	Arguments  []string
+	Artifacts  []*string
+	Entrypoint string
+	Name       string
+	Secrets    []*api.ArtifactStepSecret
+	Systems    []api.ArtifactSystem
+}
+
+type ProcessScriptTemplateVars struct {
 	Arguments  string
 	Artifacts  string
 	Entrypoint string
 	Name       string
 }
 
-type ProjectEnvironmentBuilder struct {
+type ProjectEnvironment struct {
 	Artifacts    []*string
 	Environments []string
 	Name         string
@@ -81,7 +81,7 @@ type ProjectEnvironmentTemplateArgs struct {
 	Unsets   string
 }
 
-type UserEnvironmentBuilder struct {
+type UserEnvironment struct {
 	Artifacts    []*string
 	Environments []string
 	Name         string
@@ -97,7 +97,7 @@ type UserEnvironmentTemplateArgs struct {
 	SymlinksDeactivate string
 }
 
-const ArtifactProcessScriptTemplate = `
+const ProcessScriptTemplate = `
 mkdir -pv $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/{{.Name}}-logs << "EOF"
@@ -226,19 +226,19 @@ func GetEnvKey(digest *string) string {
 	return fmt.Sprintf("$VORPAL_ARTIFACT_%s", *digest)
 }
 
-func NewArtifactArgumentBuilder(name string) *ArtifactArgumentBuilder {
-	return &ArtifactArgumentBuilder{
+func NewArtifactArgument(name string) *Argument {
+	return &Argument{
 		Name:    name,
 		Require: false,
 	}
 }
 
-func (v *ArtifactArgumentBuilder) WithRequire() *ArtifactArgumentBuilder {
+func (v *Argument) WithRequire() *Argument {
 	v.Require = true
 	return v
 }
 
-func (v *ArtifactArgumentBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (v *Argument) Build(ctx *config.ConfigContext) (*string, error) {
 	variable := ctx.GetVariable(v.Name)
 
 	if v.Require && variable == nil {
@@ -248,8 +248,8 @@ func (v *ArtifactArgumentBuilder) Build(ctx *config.ConfigContext) (*string, err
 	return variable, nil
 }
 
-func NewProcessBuilder(name string, entrypoint string, systems []api.ArtifactSystem) *ProcessBuilder {
-	return &ProcessBuilder{
+func NewProcess(name string, entrypoint string, systems []api.ArtifactSystem) *Process {
+	return &Process{
 		Arguments:  []string{},
 		Artifacts:  []*string{},
 		Entrypoint: entrypoint,
@@ -259,12 +259,12 @@ func NewProcessBuilder(name string, entrypoint string, systems []api.ArtifactSys
 	}
 }
 
-func (a *ProcessBuilder) WithArguments(arguments []string) *ProcessBuilder {
+func (a *Process) WithArguments(arguments []string) *Process {
 	a.Arguments = arguments
 	return a
 }
 
-func (a *ProcessBuilder) WithArtifacts(artifacts []*string) *ProcessBuilder {
+func (a *Process) WithArtifacts(artifacts []*string) *Process {
 	for _, artifact := range artifacts {
 		if artifact != nil && !slices.Contains(a.Artifacts, artifact) {
 			a.Artifacts = append(a.Artifacts, artifact)
@@ -273,7 +273,7 @@ func (a *ProcessBuilder) WithArtifacts(artifacts []*string) *ProcessBuilder {
 	return a
 }
 
-func (a *ProcessBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *ProcessBuilder {
+func (a *Process) WithSecrets(secrets []*api.ArtifactStepSecret) *Process {
 	for _, secret := range secrets {
 		if !slices.Contains(a.Secrets, secret) {
 			a.Secrets = append(a.Secrets, secret)
@@ -282,7 +282,7 @@ func (a *ProcessBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *Process
 	return a
 }
 
-func (a *ProcessBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (a *Process) Build(ctx *config.ConfigContext) (*string, error) {
 	arguments := strings.Join(a.Arguments, " ")
 
 	artifacts := []string{}
@@ -293,14 +293,14 @@ func (a *ProcessBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 		}
 	}
 
-	script, err := template.New("script").Parse(ArtifactProcessScriptTemplate)
+	script, err := template.New("script").Parse(ProcessScriptTemplate)
 	if err != nil {
 		return nil, err
 	}
 
 	var scriptBuffer strings.Builder
 
-	scriptTemplateVars := ArtifactProcessScriptTemplateVars{
+	scriptTemplateVars := ProcessScriptTemplateVars{
 		Arguments:  arguments,
 		Artifacts:  strings.Join(artifacts, ":"),
 		Entrypoint: a.Entrypoint,
@@ -318,12 +318,12 @@ func (a *ProcessBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 
 	steps := []*api.ArtifactStep{step}
 
-	return NewArtifactBuilder(a.Name, steps, a.Systems).
+	return NewArtifact(a.Name, steps, a.Systems).
 		Build(ctx)
 }
 
-func NewArtifactSourceBuilder(name, path string) *ArtifactSourceBuilder {
-	return &ArtifactSourceBuilder{
+func NewArtifactSource(name, path string) *ArtifactSource {
+	return &ArtifactSource{
 		Excludes: []string{},
 		Digest:   nil,
 		Includes: []string{},
@@ -332,22 +332,22 @@ func NewArtifactSourceBuilder(name, path string) *ArtifactSourceBuilder {
 	}
 }
 
-func (a *ArtifactSourceBuilder) WithExcludes(excludes []string) *ArtifactSourceBuilder {
+func (a *ArtifactSource) WithExcludes(excludes []string) *ArtifactSource {
 	a.Excludes = excludes
 	return a
 }
 
-func (a *ArtifactSourceBuilder) WithHash(hash string) *ArtifactSourceBuilder {
+func (a *ArtifactSource) WithHash(hash string) *ArtifactSource {
 	a.Digest = &hash
 	return a
 }
 
-func (a *ArtifactSourceBuilder) WithIncludes(includes []string) *ArtifactSourceBuilder {
+func (a *ArtifactSource) WithIncludes(includes []string) *ArtifactSource {
 	a.Includes = includes
 	return a
 }
 
-func (a *ArtifactSourceBuilder) Build() api.ArtifactSource {
+func (a *ArtifactSource) Build() api.ArtifactSource {
 	var digest *string
 	if a.Digest != nil {
 		digest = a.Digest
@@ -362,8 +362,8 @@ func (a *ArtifactSourceBuilder) Build() api.ArtifactSource {
 	}
 }
 
-func NewArtifactStepBuilder() *ArtifactStepBuilder {
-	return &ArtifactStepBuilder{
+func NewArtifactStep() *ArtifactStep {
+	return &ArtifactStep{
 		Arguments:    make(map[api.ArtifactSystem][]string),
 		Artifacts:    make(map[api.ArtifactSystem][]*string),
 		Entrypoint:   make(map[api.ArtifactSystem]string),
@@ -373,42 +373,42 @@ func NewArtifactStepBuilder() *ArtifactStepBuilder {
 	}
 }
 
-func (a *ArtifactStepBuilder) WithArguments(arguments []string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStep) WithArguments(arguments []string, systems []api.ArtifactSystem) *ArtifactStep {
 	for _, system := range systems {
 		a.Arguments[system] = arguments
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithArtifacts(artifacts []*string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStep) WithArtifacts(artifacts []*string, systems []api.ArtifactSystem) *ArtifactStep {
 	for _, system := range systems {
 		a.Artifacts[system] = artifacts
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithEntrypoint(entrypoint string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStep) WithEntrypoint(entrypoint string, systems []api.ArtifactSystem) *ArtifactStep {
 	for _, system := range systems {
 		a.Entrypoint[system] = entrypoint
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithEnvironments(environments []string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStep) WithEnvironments(environments []string, systems []api.ArtifactSystem) *ArtifactStep {
 	for _, system := range systems {
 		a.Environments[system] = environments
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithScript(script string, systems []api.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStep) WithScript(script string, systems []api.ArtifactSystem) *ArtifactStep {
 	for _, system := range systems {
 		a.Script[system] = script
 	}
 	return a
 }
 
-func (a *ArtifactStepBuilder) WithSecrets(secrets []*api.ArtifactStepSecret, systems []api.ArtifactSystem) *ArtifactStepBuilder {
+func (a *ArtifactStep) WithSecrets(secrets []*api.ArtifactStepSecret, systems []api.ArtifactSystem) *ArtifactStep {
 	for _, system := range systems {
 		if _, ok := a.Secrets[system]; !ok {
 			a.Secrets[system] = []*api.ArtifactStepSecret{}
@@ -418,7 +418,7 @@ func (a *ArtifactStepBuilder) WithSecrets(secrets []*api.ArtifactStepSecret, sys
 	return a
 }
 
-func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactStep, error) {
+func (a *ArtifactStep) Build(ctx *config.ConfigContext) (*api.ArtifactStep, error) {
 	stepTarget := ctx.GetTarget()
 
 	stepArguments := []string{}
@@ -469,8 +469,8 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactSte
 	}, nil
 }
 
-func NewTaskBuilder(name string, script string, systems []api.ArtifactSystem) *TaskBuilder {
-	return &TaskBuilder{
+func NewTask(name string, script string, systems []api.ArtifactSystem) *Job {
+	return &Job{
 		Artifacts: []*string{},
 		Name:      name,
 		Secrets:   []*api.ArtifactStepSecret{},
@@ -479,12 +479,12 @@ func NewTaskBuilder(name string, script string, systems []api.ArtifactSystem) *T
 	}
 }
 
-func (a *TaskBuilder) WithArtifacts(artifacts []*string) *TaskBuilder {
+func (a *Job) WithArtifacts(artifacts []*string) *Job {
 	a.Artifacts = artifacts
 	return a
 }
 
-func (a *TaskBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *TaskBuilder {
+func (a *Job) WithSecrets(secrets []*api.ArtifactStepSecret) *Job {
 	for _, secret := range secrets {
 		if !slices.Contains(a.Secrets, secret) {
 			a.Secrets = append(a.Secrets, secret)
@@ -493,7 +493,7 @@ func (a *TaskBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *TaskBuilde
 	return a
 }
 
-func (a *TaskBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (a *Job) Build(ctx *config.ConfigContext) (*string, error) {
 	step, err := Shell(ctx, a.Artifacts, []string{}, a.Script, a.Secrets)
 	if err != nil {
 		return nil, err
@@ -501,12 +501,12 @@ func (a *TaskBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 
 	steps := []*api.ArtifactStep{step}
 
-	return NewArtifactBuilder(a.Name, steps, a.Systems).
+	return NewArtifact(a.Name, steps, a.Systems).
 		Build(ctx)
 }
 
-func NewArtifactBuilder(name string, steps []*api.ArtifactStep, systems []api.ArtifactSystem) *ArtifactBuilder {
-	return &ArtifactBuilder{
+func NewArtifact(name string, steps []*api.ArtifactStep, systems []api.ArtifactSystem) *Artifact {
+	return &Artifact{
 		Aliases: []string{},
 		Name:    name,
 		Sources: []*api.ArtifactSource{},
@@ -515,7 +515,7 @@ func NewArtifactBuilder(name string, steps []*api.ArtifactStep, systems []api.Ar
 	}
 }
 
-func (a *ArtifactBuilder) WithAliases(aliases []string) *ArtifactBuilder {
+func (a *Artifact) WithAliases(aliases []string) *Artifact {
 	for _, alias := range aliases {
 		if !slices.Contains(a.Aliases, alias) {
 			a.Aliases = append(a.Aliases, alias)
@@ -525,7 +525,7 @@ func (a *ArtifactBuilder) WithAliases(aliases []string) *ArtifactBuilder {
 	return a
 }
 
-func (a *ArtifactBuilder) WithSources(source []*api.ArtifactSource) *ArtifactBuilder {
+func (a *Artifact) WithSources(source []*api.ArtifactSource) *Artifact {
 	for _, s := range source {
 		if s != nil && !slices.Contains(a.Sources, s) {
 			a.Sources = append(a.Sources, s)
@@ -535,7 +535,7 @@ func (a *ArtifactBuilder) WithSources(source []*api.ArtifactSource) *ArtifactBui
 	return a
 }
 
-func (a *ArtifactBuilder) WithStep(step *api.ArtifactStep) *ArtifactBuilder {
+func (a *Artifact) WithStep(step *api.ArtifactStep) *Artifact {
 	if !slices.Contains(a.Steps, step) {
 		a.Steps = append(a.Steps, step)
 	}
@@ -543,7 +543,7 @@ func (a *ArtifactBuilder) WithStep(step *api.ArtifactStep) *ArtifactBuilder {
 	return a
 }
 
-func (a *ArtifactBuilder) WithSystem(system api.ArtifactSystem) *ArtifactBuilder {
+func (a *Artifact) WithSystem(system api.ArtifactSystem) *Artifact {
 	if !slices.Contains(a.Systems, system) {
 		a.Systems = append(a.Systems, system)
 	}
@@ -551,7 +551,7 @@ func (a *ArtifactBuilder) WithSystem(system api.ArtifactSystem) *ArtifactBuilder
 	return a
 }
 
-func (a *ArtifactBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (a *Artifact) Build(ctx *config.ConfigContext) (*string, error) {
 	artifact := api.Artifact{
 		Name:    a.Name,
 		Sources: a.Sources,
@@ -567,8 +567,8 @@ func (a *ArtifactBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 	return ctx.AddArtifact(&artifact)
 }
 
-func NewProjectEnvironmentBuilder(name string, systems []api.ArtifactSystem) *ProjectEnvironmentBuilder {
-	return &ProjectEnvironmentBuilder{
+func NewProjectEnvironment(name string, systems []api.ArtifactSystem) *ProjectEnvironment {
+	return &ProjectEnvironment{
 		Artifacts:    []*string{},
 		Environments: []string{},
 		Name:         name,
@@ -577,17 +577,17 @@ func NewProjectEnvironmentBuilder(name string, systems []api.ArtifactSystem) *Pr
 	}
 }
 
-func (b *ProjectEnvironmentBuilder) WithArtifacts(artifacts []*string) *ProjectEnvironmentBuilder {
+func (b *ProjectEnvironment) WithArtifacts(artifacts []*string) *ProjectEnvironment {
 	b.Artifacts = artifacts
 	return b
 }
 
-func (b *ProjectEnvironmentBuilder) WithEnvironments(envs []string) *ProjectEnvironmentBuilder {
+func (b *ProjectEnvironment) WithEnvironments(envs []string) *ProjectEnvironment {
 	b.Environments = envs
 	return b
 }
 
-func (b *ProjectEnvironmentBuilder) WithSecrets(secrets map[string]string) *ProjectEnvironmentBuilder {
+func (b *ProjectEnvironment) WithSecrets(secrets map[string]string) *ProjectEnvironment {
 	for name, value := range secrets {
 		secret := &api.ArtifactStepSecret{Name: name, Value: value}
 		if !slices.ContainsFunc(b.Secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
@@ -597,7 +597,7 @@ func (b *ProjectEnvironmentBuilder) WithSecrets(secrets map[string]string) *Proj
 	return b
 }
 
-func (b *ProjectEnvironmentBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (b *ProjectEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 	backups := []string{
 		"export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"",
 		"export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"",
@@ -681,13 +681,13 @@ func (b *ProjectEnvironmentBuilder) Build(ctx *config.ConfigContext) (*string, e
 
 	steps := []*api.ArtifactStep{step}
 
-	artifact := NewArtifactBuilder(b.Name, steps, b.Systems)
+	artifact := NewArtifact(b.Name, steps, b.Systems)
 
 	return artifact.Build(ctx)
 }
 
-func NewUserEnvironmentBuilder(name string, systems []api.ArtifactSystem) *UserEnvironmentBuilder {
-	return &UserEnvironmentBuilder{
+func NewUserEnvironment(name string, systems []api.ArtifactSystem) *UserEnvironment {
+	return &UserEnvironment{
 		Artifacts:    []*string{},
 		Environments: []string{},
 		Name:         name,
@@ -696,17 +696,17 @@ func NewUserEnvironmentBuilder(name string, systems []api.ArtifactSystem) *UserE
 	}
 }
 
-func (b *UserEnvironmentBuilder) WithArtifacts(artifacts []*string) *UserEnvironmentBuilder {
+func (b *UserEnvironment) WithArtifacts(artifacts []*string) *UserEnvironment {
 	b.Artifacts = artifacts
 	return b
 }
 
-func (b *UserEnvironmentBuilder) WithEnvironments(envs []string) *UserEnvironmentBuilder {
+func (b *UserEnvironment) WithEnvironments(envs []string) *UserEnvironment {
 	b.Environments = envs
 	return b
 }
 
-func (b *UserEnvironmentBuilder) WithSymlinks(links map[string]string) *UserEnvironmentBuilder {
+func (b *UserEnvironment) WithSymlinks(links map[string]string) *UserEnvironment {
 	if b.Symlinks == nil {
 		b.Symlinks = map[string]string{}
 	}
@@ -718,7 +718,7 @@ func (b *UserEnvironmentBuilder) WithSymlinks(links map[string]string) *UserEnvi
 	return b
 }
 
-func (b *UserEnvironmentBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (b *UserEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 	// Setup path
 
 	stepPathArtifacts := make([]string, 0)
@@ -785,7 +785,7 @@ func (b *UserEnvironmentBuilder) Build(ctx *config.ConfigContext) (*string, erro
 
 	steps := []*api.ArtifactStep{step}
 
-	artifact := NewArtifactBuilder(b.Name, steps, b.Systems)
+	artifact := NewArtifact(b.Name, steps, b.Systems)
 
 	return artifact.Build(ctx)
 }
