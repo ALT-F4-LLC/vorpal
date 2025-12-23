@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - nightly
   schedule:
     - cron: "0 8 * * *"
 
@@ -207,7 +209,7 @@ jobs:
           path: Vorpal.lock
 
   release:
-    if: github.event_name == 'schedule'
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/tags/nightly')) }}
     needs:
       - test
     permissions:

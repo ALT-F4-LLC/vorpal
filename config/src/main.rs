@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         .build(context)
         .await?;
 
-    // Job artifact
+    // Project environments
 
     ProjectEnvironment::new("vorpal-dev", SYSTEMS.to_vec())
         .with_artifacts(vec![
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         .build(context)
         .await?;
 
-    // User environment artifact
+    // Processes
 
     Process::new(
         "vorpal-process",
@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
     .build(context)
     .await?;
 
-    // Vorpal job
+    // Jobs
 
     Job::new(
         "vorpal-test",
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
     .build(context)
     .await?;
 
-    // Vorpal user environment
+    // User environments
 
     UserEnvironment::new("vorpal-user", SYSTEMS.to_vec())
         .with_artifacts(vec![])
@@ -113,28 +113,28 @@ async fn main() -> Result<()> {
     if context.get_artifact_name() == "vorpal-release" {
         // Setup arguments
 
-        let aarch64_darwin = Argument::new("aarch64-darwin")
-            .with_require()
-            .build(context)?;
-
-        let aarch64_linux = Argument::new("aarch64-linux")
-            .with_require()
-            .build(context)?;
-
         let branch_name = Argument::new("branch-name").with_require().build(context)?;
 
-        let x8664_darwin = Argument::new("x8664-darwin")
+        let darwin_aarch64 = Argument::new("aarch64-darwin")
             .with_require()
             .build(context)?;
 
-        let x8664_linux = Argument::new("x8664-linux").with_require().build(context)?;
+        let darwin_x8664 = Argument::new("x8664-darwin")
+            .with_require()
+            .build(context)?;
+
+        let linux_aarch64 = Argument::new("aarch64-linux")
+            .with_require()
+            .build(context)?;
+
+        let linux_x8664 = Argument::new("x8664-linux").with_require().build(context)?;
 
         // Fetch artifacts
 
-        let aarch64_darwin = context.fetch_artifact(&aarch64_darwin.unwrap()).await?;
-        let aarch64_linux = context.fetch_artifact(&aarch64_linux.unwrap()).await?;
-        let x8664_darwin = context.fetch_artifact(&x8664_darwin.unwrap()).await?;
-        let x8664_linux = context.fetch_artifact(&x8664_linux.unwrap()).await?;
+        let aarch64_darwin = context.fetch_artifact(&darwin_aarch64.unwrap()).await?;
+        let aarch64_linux = context.fetch_artifact(&linux_aarch64.unwrap()).await?;
+        let x8664_darwin = context.fetch_artifact(&darwin_x8664.unwrap()).await?;
+        let x8664_linux = context.fetch_artifact(&linux_x8664.unwrap()).await?;
 
         let script = formatdoc! {r#"
             git clone \
