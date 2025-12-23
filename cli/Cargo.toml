@@ -21,11 +21,13 @@ futures-lite = { version = "2.6.0" }
 http = { version = "1.3.1" }
 infer = { version = "0.19.0" }
 inquire = { version = "0.7.5" }
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+oauth2 = { version = "5.0.0", features = ["reqwest"] }
 path-clean = { version = "1.0.1" }
 petgraph = { version = "0.8.2" }
 port-selector = { version = "0.1.6" }
 rcgen = { version = "0.14.3", features = ["x509-parser"] }
-reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12.22", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rsa = { version = "0.9.8", features = ["sha2"] }
 rustls = { version = "0.23.31" }
 sanitize-filename = { version = "0.6.0" }

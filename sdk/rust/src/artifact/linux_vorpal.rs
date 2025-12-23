@@ -3,7 +3,7 @@ use crate::{
     artifact::{
         linux_debian,
         linux_vorpal::script::{setup, stage_01, stage_02, stage_03, stage_04, stage_05},
-        step, ArtifactBuilder,
+        step, Artifact,
     },
     context::ConfigContext,
 };
@@ -14,68 +14,66 @@ mod script;
 mod source;
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let bash_version = "5.2.32";
+    let bash_version = "5.3";
     let bash = source::gnu("bash", bash_version);
 
-    let binutils_version = "2.43.1";
+    let binutils_version = "2.45";
     let binutils = source::gnu("binutils", binutils_version);
 
     let bison_version = "3.8.2";
     let bison = source::gnu("bison", bison_version);
 
-    let coreutils_version = "9.5";
+    let coreutils_version = "9.7";
     let coreutils = source::gnu("coreutils", coreutils_version);
 
-    let curl_version = "8.11.0";
+    let curl_version = "8.15.0";
     let curl = source::curl(curl_version);
-
     let curl_cacert = source::curl_cacert();
 
-    let diffutils_version = "3.10";
+    let diffutils_version = "3.12";
     let diffutils = source::gnu_xz("diffutils", diffutils_version);
 
-    let file_version = "5.45";
+    let file_version = "5.46";
     let file = source::file(file_version);
 
     let findutils_version = "4.10.0";
     let findutils = source::gnu_xz("findutils", findutils_version);
 
-    let gawk_version = "5.3.0";
+    let gawk_version = "5.3.2";
     let gawk = source::gnu("gawk", gawk_version);
 
-    let gcc_version = "14.2.0";
+    let gcc_version = "15.2.0";
     let gcc = source::gnu_gcc(gcc_version);
 
-    let gettext_version = "0.22.5";
+    let gettext_version = "0.26";
     let gettext = source::gnu("gettext", gettext_version);
 
-    let glibc_version = "2.40";
+    let glibc_version = "2.42";
     let glibc = source::gnu("glibc", glibc_version);
-
     let glibc_patch = source::gnu_glibc_patch(glibc_version);
 
     let gmp_version = "6.3.0";
     let gmp = source::gnu("gmp", gmp_version);
 
-    let grep_version = "3.11";
+    let grep_version = "3.12";
     let grep = source::gnu("grep", grep_version);
 
-    let gzip_version = "1.13";
+    let gzip_version = "1.14";
     let gzip = source::gnu("gzip", gzip_version);
 
-    let libidn2_version = "2.3.7";
+    let libidn2_version = "2.3.8";
     let libidn2 = source::libidn2(libidn2_version);
 
     let libpsl_version = "0.21.5";
     let libpsl = source::libpsl(libpsl_version);
 
-    let libunistring_version = "1.2";
+    let libunistring_version = "1.3";
     let libunistring = source::gnu("libunistring", libunistring_version);
 
-    let linux_version = "6.10.5";
+    let linux_version = "6.16.1";
     let linux = source::linux(linux_version);
 
-    let m4_version = "1.4.19";
+    let m4_version = "1.4.20";
     let m4 = source::gnu("m4", m4_version);
 
     let make_version = "4.4.1";
@@ -84,22 +82,22 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let mpc_version = "1.3.1";
     let mpc = source::gnu("mpc", mpc_version);
 
-    let mpfr_version = "4.2.1";
+    let mpfr_version = "4.2.2";
     let mpfr = source::gnu_xz("mpfr", mpfr_version);
 
-    let ncurses_version = "6.5";
+    let ncurses_version = "6.5-20250809";
     let ncurses = source::ncurses(ncurses_version);
 
-    let openssl_version = "3.3.1";
+    let openssl_version = "3.5.2";
     let openssl = source::openssl(openssl_version);
 
-    let patch_version = "2.7.6";
-    let patch = source::gnu("patch", "2.7.6");
+    let patch_version = "2.8";
+    let patch = source::gnu("patch", patch_version);
 
-    let perl_version = "5.40.0";
+    let perl_version = "5.42.0";
     let perl = source::perl(perl_version);
 
-    let python_version = "3.12.5";
+    let python_version = "3.13.7";
     let python = source::python(python_version);
 
     let sed_version = "4.9";
@@ -108,20 +106,19 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let tar_version = "1.35";
     let tar = source::gnu("tar", tar_version);
 
-    let texinfo_version = "7.1.1";
+    let texinfo_version = "7.2";
     let texinfo = source::gnu("texinfo", texinfo_version);
 
     let unzip_version = "6.0";
     let unzip = source::unzip(unzip_version);
 
     let unzip_patch_fixes = source::unzip_patch_fixes("6.0");
-
     let unzip_patch_gcc14 = source::unzip_patch_gcc14("6.0");
 
-    let util_linux_version = "2.40.2";
+    let util_linux_version = "2.41.1";
     let util_linux = source::util_linux(util_linux_version);
 
-    let xz_version = "5.6.2";
+    let xz_version = "5.8.1";
     let xz = source::xz(xz_version);
 
     let zlib_version = "1.3.1";
@@ -312,7 +309,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let name = "linux-vorpal";
 
-    ArtifactBuilder::new(name, steps, systems)
+    Artifact::new(name, steps, systems)
         .with_aliases(vec![format!("{name}:latest")])
         .with_sources(vec![
             bash,

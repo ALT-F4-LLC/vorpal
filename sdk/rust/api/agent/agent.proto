@@ -13,7 +13,9 @@ service AgentService {
 message PrepareArtifactRequest {
   bool artifact_unlock = 1;
   string artifact_context = 2;
-  vorpal.artifact.Artifact artifact = 3;
+  string artifact_namespace = 3;
+  string registry = 4;
+  vorpal.artifact.Artifact artifact = 5;
 }
 
 message PrepareArtifactResponse {

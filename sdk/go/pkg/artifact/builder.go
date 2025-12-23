@@ -17,7 +17,7 @@ type ArtifactArgumentBuilder struct {
 	Require bool
 }
 
-type ArtifactProcessBuilder struct {
+type ProcessBuilder struct {
 	Arguments  []string
 	Artifacts  []*string
 	Entrypoint string
@@ -43,7 +43,7 @@ type ArtifactStepBuilder struct {
 	Script       map[api.ArtifactSystem]string
 }
 
-type ArtifactTaskBuilder struct {
+type TaskBuilder struct {
 	Artifacts []*string
 	Name      string
 	Script    string
@@ -59,7 +59,14 @@ type ArtifactBuilder struct {
 	Systems []api.ArtifactSystem
 }
 
-type DevEnvBuilder struct {
+type ArtifactProcessScriptTemplateVars struct {
+	Arguments  string
+	Artifacts  string
+	Entrypoint string
+	Name       string
+}
+
+type ProjectEnvironmentBuilder struct {
 	Artifacts    []*string
 	Environments []string
 	Name         string
@@ -67,14 +74,14 @@ type DevEnvBuilder struct {
 	Systems      []api.ArtifactSystem
 }
 
-type DevEnvTemplateArgs struct {
+type ProjectEnvironmentTemplateArgs struct {
 	Backups  string
 	Exports  string
 	Restores string
 	Unsets   string
 }
 
-type UserEnvBuilder struct {
+type UserEnvironmentBuilder struct {
 	Artifacts    []*string
 	Environments []string
 	Name         string
@@ -82,19 +89,12 @@ type UserEnvBuilder struct {
 	Systems      []api.ArtifactSystem
 }
 
-type UserEnvTemplateArgs struct {
+type UserEnvironmentTemplateArgs struct {
 	Environments       string
 	Path               string
 	SymlinksActivate   string
 	SymlinksCheck      string
 	SymlinksDeactivate string
-}
-
-type ArtifactProcessScriptTemplateVars struct {
-	Arguments  string
-	Artifacts  string
-	Entrypoint string
-	Name       string
 }
 
 const ArtifactProcessScriptTemplate = `
@@ -151,7 +151,7 @@ EOF
 
 chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
 
-const ScriptDevEnvTemplate = `
+const ScriptProjectEnvironmentTemplate = `
 mkdir -pv $VORPAL_WORKSPACE/bin
 
 cat > bin/activate << "EOF"
@@ -174,7 +174,7 @@ mkdir -pv $VORPAL_OUTPUT/bin
 
 cp -prv bin "$VORPAL_OUTPUT"`
 
-const ScriptUserEnvTemplate = `
+const ScriptUserEnvironmentTemplate = `
 mkdir -pv $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
@@ -248,8 +248,8 @@ func (v *ArtifactArgumentBuilder) Build(ctx *config.ConfigContext) (*string, err
 	return variable, nil
 }
 
-func NewArtifactProcessBuilder(name string, entrypoint string, systems []api.ArtifactSystem) *ArtifactProcessBuilder {
-	return &ArtifactProcessBuilder{
+func NewProcessBuilder(name string, entrypoint string, systems []api.ArtifactSystem) *ProcessBuilder {
+	return &ProcessBuilder{
 		Arguments:  []string{},
 		Artifacts:  []*string{},
 		Entrypoint: entrypoint,
@@ -259,12 +259,12 @@ func NewArtifactProcessBuilder(name string, entrypoint string, systems []api.Art
 	}
 }
 
-func (a *ArtifactProcessBuilder) WithArguments(arguments []string) *ArtifactProcessBuilder {
+func (a *ProcessBuilder) WithArguments(arguments []string) *ProcessBuilder {
 	a.Arguments = arguments
 	return a
 }
 
-func (a *ArtifactProcessBuilder) WithArtifacts(artifacts []*string) *ArtifactProcessBuilder {
+func (a *ProcessBuilder) WithArtifacts(artifacts []*string) *ProcessBuilder {
 	for _, artifact := range artifacts {
 		if artifact != nil && !slices.Contains(a.Artifacts, artifact) {
 			a.Artifacts = append(a.Artifacts, artifact)
@@ -273,7 +273,7 @@ func (a *ArtifactProcessBuilder) WithArtifacts(artifacts []*string) *ArtifactPro
 	return a
 }
 
-func (a *ArtifactProcessBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *ArtifactProcessBuilder {
+func (a *ProcessBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *ProcessBuilder {
 	for _, secret := range secrets {
 		if !slices.Contains(a.Secrets, secret) {
 			a.Secrets = append(a.Secrets, secret)
@@ -282,7 +282,7 @@ func (a *ArtifactProcessBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) 
 	return a
 }
 
-func (a *ArtifactProcessBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (a *ProcessBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 	arguments := strings.Join(a.Arguments, " ")
 
 	artifacts := []string{}
@@ -469,8 +469,8 @@ func (a *ArtifactStepBuilder) Build(ctx *config.ConfigContext) (*api.ArtifactSte
 	}, nil
 }
 
-func NewArtifactTaskBuilder(name string, script string, systems []api.ArtifactSystem) *ArtifactTaskBuilder {
-	return &ArtifactTaskBuilder{
+func NewTaskBuilder(name string, script string, systems []api.ArtifactSystem) *TaskBuilder {
+	return &TaskBuilder{
 		Artifacts: []*string{},
 		Name:      name,
 		Secrets:   []*api.ArtifactStepSecret{},
@@ -479,12 +479,12 @@ func NewArtifactTaskBuilder(name string, script string, systems []api.ArtifactSy
 	}
 }
 
-func (a *ArtifactTaskBuilder) WithArtifacts(artifacts []*string) *ArtifactTaskBuilder {
+func (a *TaskBuilder) WithArtifacts(artifacts []*string) *TaskBuilder {
 	a.Artifacts = artifacts
 	return a
 }
 
-func (a *ArtifactTaskBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *ArtifactTaskBuilder {
+func (a *TaskBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *TaskBuilder {
 	for _, secret := range secrets {
 		if !slices.Contains(a.Secrets, secret) {
 			a.Secrets = append(a.Secrets, secret)
@@ -493,7 +493,7 @@ func (a *ArtifactTaskBuilder) WithSecrets(secrets []*api.ArtifactStepSecret) *Ar
 	return a
 }
 
-func (a *ArtifactTaskBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (a *TaskBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 	step, err := Shell(ctx, a.Artifacts, []string{}, a.Script, a.Secrets)
 	if err != nil {
 		return nil, err
@@ -567,8 +567,8 @@ func (a *ArtifactBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 	return ctx.AddArtifact(&artifact)
 }
 
-func NewDevenvBuilder(name string, systems []api.ArtifactSystem) *DevEnvBuilder {
-	return &DevEnvBuilder{
+func NewProjectEnvironmentBuilder(name string, systems []api.ArtifactSystem) *ProjectEnvironmentBuilder {
+	return &ProjectEnvironmentBuilder{
 		Artifacts:    []*string{},
 		Environments: []string{},
 		Name:         name,
@@ -577,17 +577,17 @@ func NewDevenvBuilder(name string, systems []api.ArtifactSystem) *DevEnvBuilder 
 	}
 }
 
-func (b *DevEnvBuilder) WithArtifacts(artifacts []*string) *DevEnvBuilder {
+func (b *ProjectEnvironmentBuilder) WithArtifacts(artifacts []*string) *ProjectEnvironmentBuilder {
 	b.Artifacts = artifacts
 	return b
 }
 
-func (b *DevEnvBuilder) WithEnvironments(envs []string) *DevEnvBuilder {
+func (b *ProjectEnvironmentBuilder) WithEnvironments(envs []string) *ProjectEnvironmentBuilder {
 	b.Environments = envs
 	return b
 }
 
-func (b *DevEnvBuilder) WithSecrets(secrets map[string]string) *DevEnvBuilder {
+func (b *ProjectEnvironmentBuilder) WithSecrets(secrets map[string]string) *ProjectEnvironmentBuilder {
 	for name, value := range secrets {
 		secret := &api.ArtifactStepSecret{Name: name, Value: value}
 		if !slices.ContainsFunc(b.Secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
@@ -597,7 +597,7 @@ func (b *DevEnvBuilder) WithSecrets(secrets map[string]string) *DevEnvBuilder {
 	return b
 }
 
-func (b *DevEnvBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (b *ProjectEnvironmentBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 	backups := []string{
 		"export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"",
 		"export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"",
@@ -654,14 +654,14 @@ func (b *DevEnvBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 
 	// Setup script
 
-	scriptTemplate, err := template.New("script").Parse(ScriptDevEnvTemplate)
+	scriptTemplate, err := template.New("script").Parse(ScriptProjectEnvironmentTemplate)
 	if err != nil {
 		return nil, err
 	}
 
 	var scriptBuffer bytes.Buffer
 
-	stepScriptVars := DevEnvTemplateArgs{
+	stepScriptVars := ProjectEnvironmentTemplateArgs{
 		Backups:  strings.Join(backups, "\n"),
 		Exports:  strings.Join(exports, "\n"),
 		Restores: strings.Join(restores, "\n"),
@@ -686,8 +686,8 @@ func (b *DevEnvBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 	return artifact.Build(ctx)
 }
 
-func NewUserEnvBuilder(name string, systems []api.ArtifactSystem) *UserEnvBuilder {
-	return &UserEnvBuilder{
+func NewUserEnvironmentBuilder(name string, systems []api.ArtifactSystem) *UserEnvironmentBuilder {
+	return &UserEnvironmentBuilder{
 		Artifacts:    []*string{},
 		Environments: []string{},
 		Name:         name,
@@ -696,17 +696,17 @@ func NewUserEnvBuilder(name string, systems []api.ArtifactSystem) *UserEnvBuilde
 	}
 }
 
-func (b *UserEnvBuilder) WithArtifacts(artifacts []*string) *UserEnvBuilder {
+func (b *UserEnvironmentBuilder) WithArtifacts(artifacts []*string) *UserEnvironmentBuilder {
 	b.Artifacts = artifacts
 	return b
 }
 
-func (b *UserEnvBuilder) WithEnvironments(envs []string) *UserEnvBuilder {
+func (b *UserEnvironmentBuilder) WithEnvironments(envs []string) *UserEnvironmentBuilder {
 	b.Environments = envs
 	return b
 }
 
-func (b *UserEnvBuilder) WithSymlinks(links map[string]string) *UserEnvBuilder {
+func (b *UserEnvironmentBuilder) WithSymlinks(links map[string]string) *UserEnvironmentBuilder {
 	if b.Symlinks == nil {
 		b.Symlinks = map[string]string{}
 	}
@@ -718,7 +718,7 @@ func (b *UserEnvBuilder) WithSymlinks(links map[string]string) *UserEnvBuilder {
 	return b
 }
 
-func (b *UserEnvBuilder) Build(ctx *config.ConfigContext) (*string, error) {
+func (b *UserEnvironmentBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 	// Setup path
 
 	stepPathArtifacts := make([]string, 0)
@@ -741,7 +741,7 @@ func (b *UserEnvBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 
 	// Setup script
 
-	scriptTemplate, err := template.New("script").Parse(ScriptUserEnvTemplate)
+	scriptTemplate, err := template.New("script").Parse(ScriptUserEnvironmentTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -764,7 +764,7 @@ func (b *UserEnvBuilder) Build(ctx *config.ConfigContext) (*string, error) {
 		environmentsExport = append(environmentsExport, fmt.Sprintf("export %s", envvar))
 	}
 
-	stepScriptVars := UserEnvTemplateArgs{
+	stepScriptVars := UserEnvironmentTemplateArgs{
 		Environments:       strings.Join(stepEnvironments, "\n"),
 		Path:               stepPath,
 		SymlinksActivate:   strings.Join(symlinksActivate, "\n"),

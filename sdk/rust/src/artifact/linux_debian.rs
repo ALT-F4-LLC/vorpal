@@ -1,6 +1,6 @@
 use crate::{
     api::artifact::ArtifactSystem::{Aarch64Linux, X8664Linux},
-    artifact::{get_env_key, step, ArtifactBuilder},
+    artifact::{get_env_key, step, Artifact},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -103,7 +103,7 @@ fn generate_version_script() -> String {
 
 fn generate_dockerfile() -> String {
     formatdoc! {"
-        FROM docker.io/library/debian:sid-slim@sha256:2eac978892d960f967fdad9a5387eb0bf5addfa3fab7f6fa09a00e0adff7975d
+        FROM docker.io/library/debian:sid-slim@sha256:c0f1b3716686ee452f7c62c82d8aee5f79feccba7402e967b79658100d5bd6cf
 
         RUN ARCH=$(uname -m) \
             && if [ \"${{ARCH}}\" = \"aarch64\" ]; then ARCH=\"arm64\"; fi \
@@ -174,7 +174,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
         },
     )];
 
-    let dockerfile = ArtifactBuilder::new("linux-debian-dockerfile", steps, systems.clone())
+    let dockerfile = Artifact::new("linux-debian-dockerfile", steps, systems.clone())
         .build(context)
         .await?;
 
@@ -223,7 +223,7 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
 
     let name = "linux-debian";
 
-    ArtifactBuilder::new(name, steps, systems)
+    Artifact::new(name, steps, systems)
         .with_aliases(vec![format!("{name}:latest")])
         .build(context)
         .await

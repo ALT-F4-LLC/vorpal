@@ -5,5 +5,5 @@ import (
 )
 
 func ProtocGenGo(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact("protoc-gen-go:1.36.3")
+	return context.FetchArtifactAlias("protoc-gen-go:1.36.3")
 }

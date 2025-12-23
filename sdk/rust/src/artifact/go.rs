@@ -1,9 +1,18 @@
 use crate::{
+    api,
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{step, ArtifactBuilder, ArtifactSourceBuilder},
+    artifact::{step, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
+
+pub fn source_tools(name: &str) -> api::artifact::ArtifactSource {
+    let version = "0.29.0";
+
+    let path = format!("https://go.googlesource.com/tools/+archive/refs/tags/v{version}.tar.gz");
+
+    ArtifactSource::new(name, path.as_str()).build()
+}
 
 pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let name = "go";
@@ -21,13 +30,13 @@ pub async fn build(context: &mut ConfigContext) -> Result<String> {
     let source_version = "1.24.2";
     let source_path = format!("https://go.dev/dl/go{source_version}.{source_target}.tar.gz");
 
-    let source = ArtifactSourceBuilder::new(name, source_path.as_str()).build();
+    let source = ArtifactSource::new(name, source_path.as_str()).build();
 
     let step_script = format!("cp -prv \"./source/{name}/go/.\" \"$VORPAL_OUTPUT\"");
     let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    ArtifactBuilder::new(name, steps, systems)
+    Artifact::new(name, steps, systems)
         .with_aliases(vec![format!("{name}:{source_version}")])
         .with_sources(vec![source])
         .build(context)

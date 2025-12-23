@@ -5,5 +5,5 @@ import (
 )
 
 func GoBin(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact("go:1.24.2")
+	return context.FetchArtifactAlias("go:1.24.2")
 }

@@ -72,15 +72,15 @@ pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Ve
 
 #[allow(clippy::too_many_arguments)]
 pub async fn start(
+    agent: String,
     artifact_context: PathBuf,
     artifact_name: String,
+    artifact_namespace: String,
     artifact_system: String,
     artifact_unlock: bool,
     artifact_variable: Vec<String>,
     config_file: String,
-    service_agent: String,
-    service_registry: String,
-    user_api_token: String,
+    registry: String,
 ) -> Result<(Child, ContextServiceClient<Channel>)> {
     let command_artifact_context = artifact_context.display().to_string();
     let command_port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
@@ -91,31 +91,30 @@ pub async fn start(
     let command_arguments = vec![
         "start",
         "--agent",
-        &service_agent,
+        &agent,
         "--artifact",
         &artifact_name,
         "--artifact-context",
         &command_artifact_context,
+        "--artifact-namespace",
+        &artifact_namespace,
+        "--artifact-system",
+        &artifact_system,
         "--port",
         &command_port,
         "--registry",
-        &service_registry,
-        "--system",
-        &artifact_system,
+        &registry,
     ];
 
     command.args(command_arguments);
 
     if artifact_unlock {
-        command.arg("--unlock");
+        command.arg("--artifact-unlock");
     }
 
     for var in artifact_variable.iter() {
-        command.arg("--variable").arg(var);
+        command.arg("--artifact-variable").arg(var);
     }
-
-    // Set the user API token environment variable for the configuration process
-    command.env("VORPAL_API_TOKEN", &user_api_token);
 
     let mut config_process = command
         .stdout(Stdio::piped())

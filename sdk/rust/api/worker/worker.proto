@@ -12,7 +12,9 @@ service WorkerService {
 
 message BuildArtifactRequest {
   repeated string artifact_aliases = 1;
-  vorpal.artifact.Artifact artifact = 2;
+  string artifact_namespace = 2;
+  string registry = 4;
+  vorpal.artifact.Artifact artifact = 3;
 }
 
 message BuildArtifactResponse {

@@ -8,11 +8,15 @@ use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 
 #[async_trait]
 impl ArtifactBackend for S3Backend {
-    async fn get_artifact(&self, artifact_digest: String) -> Result<Artifact, Status> {
+    async fn get_artifact(
+        &self,
+        artifact_digest: String,
+        artifact_namespace: String,
+    ) -> Result<Artifact, Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let artifact_key = get_artifact_config_key(&artifact_digest);
+        let artifact_key = get_artifact_config_key(&artifact_digest, &artifact_namespace);
 
         client
             .head_object()
@@ -47,14 +51,15 @@ impl ArtifactBackend for S3Backend {
 
     async fn get_artifact_alias(
         &self,
-        artifact_alias: String,
-        artifact_system: ArtifactSystem,
+        name: String,
+        namespace: String,
+        system: ArtifactSystem,
+        version: String,
     ) -> Result<String, Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let alias_key = get_artifact_alias_key(&artifact_alias, artifact_system.as_str_name())
-            .map_err(|err| Status::internal(format!("failed to get artifact alias key: {err}")))?;
+        let alias_key = get_artifact_alias_key(&name, &namespace, system, &version);
 
         let mut alias_stream = client
             .get_object()
@@ -80,28 +85,29 @@ impl ArtifactBackend for S3Backend {
         &self,
         artifact: Artifact,
         artifact_aliases: Vec<String>,
+        artifact_namespace: String,
     ) -> Result<String, Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let config_json = serde_json::to_vec(&artifact)
+        let artifact_json = serde_json::to_vec(&artifact)
             .map_err(|err| Status::internal(format!("failed to serialize artifact: {err}")))?;
-        let config_digest = digest(&config_json);
-        let config_key = get_artifact_config_key(&config_digest);
+        let artifact_digest = digest(&artifact_json);
+        let artifact_config_key = get_artifact_config_key(&artifact_digest, &artifact_namespace);
 
-        let config_head = client
+        let artifact_config_head = client
             .head_object()
             .bucket(bucket)
-            .key(&config_key)
+            .key(&artifact_config_key)
             .send()
             .await;
 
-        if config_head.is_err() {
+        if artifact_config_head.is_err() {
             client
                 .put_object()
                 .bucket(bucket)
-                .key(config_key)
-                .body(config_json.into())
+                .key(artifact_config_key)
+                .body(artifact_json.into())
                 .send()
                 .await
                 .map_err(|err| Status::internal(format!("failed to write config: {err}")))?;
@@ -112,14 +118,84 @@ impl ArtifactBackend for S3Backend {
             .into_iter()
             .collect::<Vec<String>>();
 
-        let alias_system = artifact.target().as_str_name();
+        let artifact_system = artifact.target();
 
         for alias in aliases {
-            let alias_key = get_artifact_alias_key(&alias, alias_system).map_err(|err| {
-                Status::internal(format!("failed to get artifact alias key: {err}"))
-            })?;
+            let alias_name = alias.split(':').next().unwrap_or(&alias);
 
-            let alias_data = config_digest.as_bytes().to_vec();
+            if alias_name.is_empty() {
+                continue;
+            }
+
+            if alias_name.len() > 255 {
+                return Err(Status::invalid_argument(format!(
+                    "alias name '{}' is too long (max 255 characters)",
+                    alias_name
+                )));
+            }
+
+            if alias_name.contains('/') {
+                return Err(Status::invalid_argument(format!(
+                    "alias name '{}' cannot contain '/'",
+                    alias_name
+                )));
+            }
+
+            if alias_name.contains('\\') {
+                return Err(Status::invalid_argument(format!(
+                    "alias name '{}' cannot contain '\\'",
+                    alias_name
+                )));
+            }
+
+            if alias_name.contains('\0') {
+                return Err(Status::invalid_argument(format!(
+                    "alias name '{}' cannot contain null bytes",
+                    alias_name
+                )));
+            }
+
+            if alias_name.starts_with('.') || alias_name.ends_with('.') {
+                return Err(Status::invalid_argument(format!(
+                    "alias name '{}' cannot start or end with '.'",
+                    alias_name
+                )));
+            }
+
+            if alias_name.starts_with('-') || alias_name.ends_with('-') {
+                return Err(Status::invalid_argument(format!(
+                    "alias name '{}' cannot start or end with '-'",
+                    alias_name
+                )));
+            }
+
+            if alias_name.chars().any(|c| c.is_whitespace()) {
+                return Err(Status::invalid_argument(format!(
+                    "alias name '{}' cannot contain whitespace",
+                    alias_name
+                )));
+            }
+
+            if alias_name
+                .chars()
+                .any(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.')
+            {
+                return Err(Status::invalid_argument(format!(
+                    "alias name '{}' can only contain alphanumeric characters, '_', '-', and '.'",
+                    alias_name
+                )));
+            }
+
+            let alias_tag = alias.split(':').nth(1).unwrap_or("latest").to_string();
+
+            let alias_key = get_artifact_alias_key(
+                alias_name,
+                &artifact_namespace,
+                artifact_system,
+                &alias_tag,
+            );
+
+            let alias_data = artifact_digest.as_bytes().to_vec();
 
             client
                 .put_object()
@@ -131,7 +207,7 @@ impl ArtifactBackend for S3Backend {
                 .map_err(|err| Status::internal(format!("failed to write alias: {err}")))?;
         }
 
-        Ok(config_digest)
+        Ok(artifact_digest)
     }
 
     fn box_clone(&self) -> Box<dyn ArtifactBackend> {

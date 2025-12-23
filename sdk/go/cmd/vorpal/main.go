@@ -123,8 +123,8 @@ func main() {
 		log.Fatalf("failed to get GOOS for target %s: %v", contextTarget, err)
 	}
 
-	_, errDev := artifact.
-		NewDevenvBuilder("vorpal-dev", SYSTEMS).
+	_, errProjectEnvironment := artifact.
+		NewProjectEnvironmentBuilder("vorpal-dev", SYSTEMS).
 		WithArtifacts([]*string{
 			gobin,
 			goimports,
@@ -141,13 +141,13 @@ func main() {
 			fmt.Sprintf("GOOS=%s", *goos),
 		}).
 		Build(context)
-	if errDev != nil {
-		log.Fatalf("failed to build vorpal-dev: %v", errDev)
+	if errProjectEnvironment != nil {
+		log.Fatalf("failed to build vorpal-dev: %v", errProjectEnvironment)
 	}
 
 	// Vorpal process
 
-	_, errProcess := artifact.NewArtifactProcessBuilder(
+	_, errProcess := artifact.NewProcessBuilder(
 		"vorpal-process",
 		fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(vorpal)),
 		SYSTEMS,
@@ -155,6 +155,7 @@ func main() {
 		WithArguments([]string{
 			"--registry",
 			"https://localhost:50051",
+			"services",
 			"start",
 			"--port",
 			"50051",
@@ -167,7 +168,7 @@ func main() {
 
 	// Vorpal task
 
-	_, errTest := artifact.NewArtifactTaskBuilder(
+	_, errTest := artifact.NewTaskBuilder(
 		"vorpal-test",
 		fmt.Sprintf("\n%s/bin/vorpal --version", artifact.GetEnvKey(vorpal)),
 		SYSTEMS,
@@ -180,16 +181,16 @@ func main() {
 
 	// Vorpal user environment
 
-	_, errUser := artifact.
-		NewUserEnvBuilder("vorpal-user", SYSTEMS).
+	_, errUserEnvironment := artifact.
+		NewUserEnvironmentBuilder("vorpal-user", SYSTEMS).
 		WithArtifacts([]*string{}).
 		WithEnvironments([]string{"PATH=$HOME/.vorpal/bin"}).
 		WithSymlinks(map[string]string{
 			"$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal": "$HOME/.vorpal/bin/vorpal",
 		}).
 		Build(context)
-	if errUser != nil {
-		log.Fatalf("failed to build vorpal-user: %v", errUser)
+	if errUserEnvironment != nil {
+		log.Fatalf("failed to build vorpal-user: %v", errUserEnvironment)
 	}
 
 	if context.GetArtifactName() == "vorpal-release" {
@@ -233,12 +234,12 @@ func main() {
 			log.Fatalf("failed to build artifact argument: %v", err)
 		}
 
-		aarch64Darwin, err := context.FetchArtifact(*varAarch64Darwin)
+		aarch64Darwin, err := context.FetchArtifactAlias(*varAarch64Darwin)
 		if err != nil {
 			log.Fatalf("failed to fetch artifact: %v", err)
 		}
 
-		aarch64Linux, err := context.FetchArtifact(*varAarch64Linux)
+		aarch64Linux, err := context.FetchArtifactAlias(*varAarch64Linux)
 		if err != nil {
 			log.Fatalf("failed to fetch artifact: %v", err)
 		}
@@ -248,12 +249,12 @@ func main() {
 			log.Fatalf("failed to get gh: %v", err)
 		}
 
-		x8664Darwin, err := context.FetchArtifact(*varX8664Darwin)
+		x8664Darwin, err := context.FetchArtifactAlias(*varX8664Darwin)
 		if err != nil {
 			log.Fatalf("failed to fetch artifact: %v", err)
 		}
 
-		x8664Linux, err := context.FetchArtifact(*varX8664Linux)
+		x8664Linux, err := context.FetchArtifactAlias(*varX8664Linux)
 		if err != nil {
 			log.Fatalf("failed to fetch artifact: %v", err)
 		}
@@ -277,7 +278,7 @@ func main() {
 			log.Fatalf("failed to execute script template: %v", scriptErr)
 		}
 
-		_, errRelease := artifact.NewArtifactTaskBuilder("vorpal-release", script.String(), SYSTEMS).
+		_, errRelease := artifact.NewTaskBuilder("vorpal-release", script.String(), SYSTEMS).
 			WithArtifacts([]*string{
 				aarch64Darwin,
 				aarch64Linux,

@@ -5,5 +5,5 @@ import (
 )
 
 func Gopls(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact("gopls:0.29.0")
+	return context.FetchArtifactAlias("gopls:0.29.0")
 }

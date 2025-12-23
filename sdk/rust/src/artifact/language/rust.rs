@@ -1,6 +1,6 @@
 use crate::{
     api::artifact::{ArtifactStepSecret, ArtifactSystem},
-    artifact::{get_env_key, protoc, rust_toolchain, step, ArtifactBuilder, ArtifactSourceBuilder},
+    artifact::{get_env_key, protoc, rust_toolchain, step, Artifact, ArtifactSource},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -323,11 +323,11 @@ impl<'a> RustBuilder<'a> {
 
         let vendor_name = format!("{}-vendor", self.name);
 
-        let vendor_source = ArtifactSourceBuilder::new(vendor_name.as_str(), source_path)
+        let vendor_source = ArtifactSource::new(vendor_name.as_str(), source_path)
             .with_includes(vendor_cargo_paths.clone())
             .build();
 
-        let vendor = ArtifactBuilder::new(vendor_name.as_str(), vendor_steps, self.systems.clone())
+        let vendor = Artifact::new(vendor_name.as_str(), vendor_steps, self.systems.clone())
             .with_sources(vec![vendor_source])
             .build(context)
             .await?;
@@ -348,7 +348,7 @@ impl<'a> RustBuilder<'a> {
             source_includes.push(include.to_string());
         }
 
-        let source = ArtifactSourceBuilder::new(self.name, source_path)
+        let source = ArtifactSource::new(self.name, source_path)
             .with_includes(source_includes)
             .with_excludes(source_excludes)
             .build();
@@ -447,7 +447,7 @@ impl<'a> RustBuilder<'a> {
 
         // Create artifact
 
-        ArtifactBuilder::new(self.name, steps, self.systems)
+        Artifact::new(self.name, steps, self.systems)
             .with_sources(vec![source])
             .build(context)
             .await

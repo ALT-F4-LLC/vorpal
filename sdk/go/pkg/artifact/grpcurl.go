@@ -5,5 +5,5 @@ import (
 )
 
 func Grpcurl(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifact("grpcurl:1.9.3")
+	return context.FetchArtifactAlias("grpcurl:1.9.3")
 }

@@ -1,9 +1,7 @@
 use crate::{
-    api::artifact::{
-        ArtifactStepSecret,
-        ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    },
-    artifact::{get_env_key, linux_vorpal, ArtifactStep, ArtifactStepBuilder},
+    api,
+    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
+    artifact,
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -14,9 +12,9 @@ use indoc::formatdoc;
 pub fn bash(
     artifacts: Vec<String>,
     environments: Vec<String>,
-    secrets: Vec<ArtifactStepSecret>,
+    secrets: Vec<api::artifact::ArtifactStepSecret>,
     script: String,
-) -> ArtifactStep {
+) -> api::artifact::ArtifactStep {
     let mut step_environments = vec![];
 
     for environment in environments.iter() {
@@ -29,7 +27,7 @@ pub fn bash(
 
     let step_path_bins = artifacts
         .iter()
-        .map(|a| format!("{}/bin", get_env_key(a)))
+        .map(|a| format!("{}/bin", artifact::get_env_key(a)))
         .collect::<Vec<String>>()
         .join(":");
 
@@ -52,7 +50,7 @@ pub fn bash(
         {script}
     "};
 
-    ArtifactStepBuilder::new("bash")
+    artifact::ArtifactStep::new("bash")
         .with_artifacts(artifacts)
         .with_environments(step_environments)
         .with_secrets(secrets)
@@ -65,9 +63,9 @@ pub async fn bwrap(
     artifacts: Vec<String>,
     environments: Vec<String>,
     rootfs: Option<String>,
-    secrets: Vec<ArtifactStepSecret>,
+    secrets: Vec<api::artifact::ArtifactStepSecret>,
     script: String,
-) -> Result<ArtifactStep> {
+) -> Result<api::artifact::ArtifactStep> {
     // Setup arguments
 
     let mut step_arguments = vec![
@@ -105,7 +103,7 @@ pub async fn bwrap(
     let mut step_artifacts = vec![];
 
     if let Some(rootfs) = rootfs {
-        let rootfs_env = get_env_key(&rootfs);
+        let rootfs_env = artifact::get_env_key(&rootfs);
         let rootfs_bin = format!("{rootfs_env}/bin");
         let rootfs_etc = format!("{rootfs_env}/etc");
         let rootfs_lib = format!("{rootfs_env}/lib");
@@ -146,18 +144,18 @@ pub async fn bwrap(
 
     for artifact in step_artifacts.iter() {
         step_arguments.push("--ro-bind".to_string());
-        step_arguments.push(get_env_key(artifact));
-        step_arguments.push(get_env_key(artifact));
+        step_arguments.push(artifact::get_env_key(artifact));
+        step_arguments.push(artifact::get_env_key(artifact));
         step_arguments.push("--setenv".to_string());
-        step_arguments.push(get_env_key(artifact).replace("$", ""));
-        step_arguments.push(get_env_key(artifact));
+        step_arguments.push(artifact::get_env_key(artifact).replace("$", ""));
+        step_arguments.push(artifact::get_env_key(artifact));
     }
 
     // Setup environment arguments
 
     let step_path_bins = step_artifacts
         .iter()
-        .map(|a| format!("{}/bin", get_env_key(a)))
+        .map(|a| format!("{}/bin", artifact::get_env_key(a)))
         .collect::<Vec<String>>()
         .join(":");
 
@@ -203,7 +201,7 @@ pub async fn bwrap(
 
     // Setup step
 
-    let step = ArtifactStepBuilder::new("bwrap")
+    let step = artifact::ArtifactStep::new("bwrap")
         .with_arguments(step_arguments.iter().map(|x| x.as_str()).collect())
         .with_artifacts(step_artifacts)
         .with_environments(vec![
@@ -221,8 +219,8 @@ pub async fn shell(
     artifacts: Vec<String>,
     environments: Vec<String>,
     script: String,
-    secrets: Vec<ArtifactStepSecret>,
-) -> Result<ArtifactStep> {
+    secrets: Vec<api::artifact::ArtifactStepSecret>,
+) -> Result<api::artifact::ArtifactStep> {
     // Setup target
 
     let step_system = context.get_system();
@@ -235,7 +233,7 @@ pub async fn shell(
         }
 
         Aarch64Linux | X8664Linux => {
-            let linux_vorpal = linux_vorpal::build(context).await?;
+            let linux_vorpal = artifact::linux_vorpal::build(context).await?;
 
             bwrap(
                 vec![],
@@ -256,8 +254,8 @@ pub async fn shell(
 
 // TODO: Add support for secrets with docker step
 
-pub fn docker(arguments: Vec<&str>, artifacts: Vec<String>) -> ArtifactStep {
-    ArtifactStepBuilder::new("docker")
+pub fn docker(arguments: Vec<&str>, artifacts: Vec<String>) -> api::artifact::ArtifactStep {
+    artifact::ArtifactStep::new("docker")
         .with_arguments(arguments)
         .with_artifacts(artifacts)
         .with_environments(vec![

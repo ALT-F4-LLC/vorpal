@@ -58,10 +58,11 @@ pub fn script(
         mkdir -pv build
         pushd build
 
-        ../configure AWK=gawk
+        ../configure --prefix=$VORPAL_OUTPUT/tools AWK=gawk
 
         make -C include
         make -C progs tic
+        install progs/tic $VORPAL_OUTPUT/tools/bin
 
         popd
 
@@ -148,6 +149,7 @@ pub fn script(
         ../configure \
             --prefix=\"/usr\" \
             --host=\"$VORPAL_TARGET\" \
+            gl_cv_func_strcasecmp_works=y \
             --build=\"$(../build-aux/config.guess)\"
 
         make
