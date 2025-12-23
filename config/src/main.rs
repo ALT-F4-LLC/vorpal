@@ -74,6 +74,7 @@ async fn main() -> Result<()> {
     .with_arguments(vec![
         "--registry",
         "https://localhost:50051",
+        "services",
         "start",
         "--port",
         "50051",
