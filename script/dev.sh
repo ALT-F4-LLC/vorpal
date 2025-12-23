@@ -4,9 +4,7 @@ set -euo pipefail
 export ENV_PATH="${PWD}/.env"
 readonly SCRIPT_PATH="${PWD}/script"
 
-# TODO: add lima and qemu installation
-
-scripts=("lima" "rustup" "protoc" "terraform")
+scripts=("rustup" "protoc" "terraform")
 
 if [[ "$(uname -s)" == "Linux" ]]; then
     . /etc/os-release
