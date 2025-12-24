@@ -134,7 +134,7 @@ module "ssh_private_key_param" {
 
 module "instance_registry" {
   source  = "terraform-aws-modules/ec2-instance/aws"
-  version = "6.1.1"
+  version = "6.1.5"
 
   ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
@@ -152,7 +152,7 @@ module "instance_registry" {
 
 module "instance_worker_aarch64_linux" {
   source  = "terraform-aws-modules/ec2-instance/aws"
-  version = "6.1.1"
+  version = "6.1.5"
 
   ami                         = data.aws_ami.ubuntu_2404_arm64.id
   associate_public_ip_address = true
@@ -170,7 +170,7 @@ module "instance_worker_aarch64_linux" {
 
 module "instance_worker_x8664_linux" {
   source  = "terraform-aws-modules/ec2-instance/aws"
-  version = "6.1.1"
+  version = "6.1.5"
 
   ami                         = data.aws_ami.ubuntu_2404_x86_64.id
   associate_public_ip_address = true
@@ -195,7 +195,7 @@ resource "aws_ec2_host" "worker_aarch64_darwin" {
 
 module "instance_worker_aarch64_darwin" {
   source  = "terraform-aws-modules/ec2-instance/aws"
-  version = "6.1.1"
+  version = "6.1.5"
 
   count = var.create_mac_instances ? 1 : 0
 
@@ -225,7 +225,7 @@ resource "aws_ec2_host" "worker_x8664_darwin" {
 
 module "instance_worker_x8664_darwin" {
   source  = "terraform-aws-modules/ec2-instance/aws"
-  version = "6.1.1"
+  version = "6.1.5"
 
   count = var.create_mac_instances ? 1 : 0
 
