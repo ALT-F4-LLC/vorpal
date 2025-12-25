@@ -3,6 +3,7 @@ name: vorpal-nightly
 on:
   schedule:
     - cron: "0 8 * * *"
+  workflow_dispatch:
 
 concurrency:
   cancel-in-progress: true
@@ -15,6 +16,13 @@ jobs:
       id-token: write
     runs-on: ubuntu-latest
     steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view nightly > /dev/null 2>&1; then
+            gh release delete --cleanup-tag --yes nightly
+          fi
+
       - uses: actions/checkout@v5
 
       - run: git fetch --tags
@@ -22,8 +30,5 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view nightly > /dev/null 2>&1; then
-            gh release delete --cleanup-tag --yes nightly
-          fi
           git tag nightly
           git push --tags
