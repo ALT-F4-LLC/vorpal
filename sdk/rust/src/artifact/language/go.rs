@@ -12,8 +12,8 @@ use indoc::formatdoc;
 pub struct Go<'a> {
     aliases: Vec<String>,
     artifacts: Vec<String>,
-    build_arguments: Vec<String>,
     build_directory: Option<&'a str>,
+    build_flags: Option<&'a str>,
     build_path: Option<&'a str>,
     includes: Vec<&'a str>,
     name: &'a str,
@@ -48,8 +48,8 @@ impl<'a> Go<'a> {
         Self {
             aliases: vec![],
             artifacts: vec![],
-            build_arguments: vec![],
             build_directory: None,
+            build_flags: None,
             build_path: None,
             includes: vec![],
             name,
@@ -67,11 +67,6 @@ impl<'a> Go<'a> {
         self
     }
 
-    pub fn with_build_arguments(mut self, arguments: Vec<String>) -> Self {
-        self.build_arguments = arguments;
-        self
-    }
-
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts = artifacts;
         self
@@ -79,6 +74,11 @@ impl<'a> Go<'a> {
 
     pub fn with_build_directory(mut self, directory: &'a str) -> Self {
         self.build_directory = Some(directory);
+        self
+    }
+
+    pub fn with_build_flags(mut self, flags: &'a str) -> Self {
+        self.build_flags = Some(flags);
         self
     }
 
@@ -149,12 +149,13 @@ impl<'a> Go<'a> {
         }
 
         let build_directory = self.build_directory.unwrap_or(source_path);
+        let build_flags = self.build_flags.unwrap_or("");
         let build_path = self.build_path.unwrap_or(source_path);
 
         step_script = formatdoc! {r#"
             {step_script}
 
-            go build -C {build_directory} -o $VORPAL_OUTPUT/bin/{name} {build_path}
+            go build -C {build_directory} -o $VORPAL_OUTPUT/bin/{name} {build_flags} {build_path}
 
             go clean -modcache"#,
             name = self.name,

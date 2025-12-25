@@ -14,6 +14,7 @@ import (
 
 type GoScriptTemplateArgs struct {
 	BuildDirectory string
+	BuildFlags     string
 	BuildPath      string
 	Name           string
 	SourceDir      string
@@ -23,6 +24,7 @@ type GoScriptTemplateArgs struct {
 type Go struct {
 	artifacts      []*string
 	buildDirectory *string
+	buildFlags     *string
 	buildPath      *string
 	includes       []string
 	name           string
@@ -41,7 +43,7 @@ mkdir -p $VORPAL_OUTPUT/bin
 {{.SourceScripts}}
 {{- end}}
 
-go build -C {{.BuildDirectory}} -o $VORPAL_OUTPUT/bin/{{.Name}} {{.BuildPath}}
+go build -C {{.BuildDirectory}} -o $VORPAL_OUTPUT/bin/{{.Name}} {{.BuildFlags}} {{.BuildPath}}
 
 go clean -modcache`
 
@@ -79,12 +81,13 @@ func NewGo(name string, systems []api.ArtifactSystem) *Go {
 	return &Go{
 		artifacts:      []*string{},
 		buildDirectory: nil,
+		buildFlags:     nil,
 		buildPath:      nil,
-		sourceScripts:  []string{},
 		includes:       []string{},
 		name:           name,
 		secrets:        []*api.ArtifactStepSecret{},
 		source:         nil,
+		sourceScripts:  []string{},
 		systems:        systems,
 	}
 }
@@ -96,6 +99,11 @@ func (b *Go) WithArtifacts(artifacts []*string) *Go {
 
 func (b *Go) WithBuildDirectory(directory string) *Go {
 	b.buildDirectory = &directory
+	return b
+}
+
+func (b *Go) WithBuildFlags(flags string) *Go {
+	b.buildFlags = &flags
 	return b
 }
 
@@ -167,6 +175,11 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 		buildDirectory = *builder.buildDirectory
 	}
 
+	buildFlags := ""
+	if builder.buildFlags != nil {
+		buildFlags = *builder.buildFlags
+	}
+
 	buildPath := sourcePath
 	if builder.buildPath != nil {
 		buildPath = *builder.buildPath
@@ -179,6 +192,7 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 
 	stepScriptData := GoScriptTemplateArgs{
 		BuildDirectory: buildDirectory,
+		BuildFlags:     buildFlags,
 		BuildPath:      buildPath,
 		Name:           builder.name,
 		SourceDir:      fmt.Sprintf("./source/%s", source.Name),
