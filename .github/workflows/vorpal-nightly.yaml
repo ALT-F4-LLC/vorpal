@@ -16,19 +16,27 @@ jobs:
       id-token: write
     runs-on: ubuntu-latest
     steps:
+      - id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ALTF4LLC_GITHUB_APP_ID }}
+          owner: ${{ github.repository_owner }}
+          private-key: ${{ secrets.ALTF4LLC_GITHUB_APP_PRIVATE_KEY }}
+          repositories: vorpal
+
       - env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           if gh release view nightly > /dev/null 2>&1; then
             gh release delete --cleanup-tag --yes nightly
           fi
 
       - uses: actions/checkout@v5
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
 
       - run: git fetch --tags
 
-      - env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git tag nightly
-          git push --tags
+      - run: git tag nightly
+
+      - run: git push --tags
