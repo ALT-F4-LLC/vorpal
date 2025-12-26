@@ -188,7 +188,7 @@ func Bwrap(
 	stepPath := fmt.Sprintf("%s:%s", strings.Join(stepPathBins, ":"), "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin")
 
 	for _, envvar := range environments {
-		if strings.Contains(envvar, "PATH=") {
+		if strings.HasPrefix(envvar, "PATH=") {
 			stepPath = fmt.Sprintf("%s:%s", strings.ReplaceAll(envvar, "PATH=", ""), stepPath)
 		}
 	}
@@ -201,7 +201,7 @@ func Bwrap(
 		key := strings.Split(envvar, "=")[0]
 		value := strings.Split(envvar, "=")[1]
 
-		if strings.Contains(key, "PATH") {
+		if strings.HasPrefix(key, "PATH") {
 			continue
 		}
 
@@ -271,7 +271,7 @@ func Shell(
 	}
 
 	if stepSystem == api.ArtifactSystem_AARCH64_LINUX || stepSystem == api.ArtifactSystem_X8664_LINUX {
-		linux_vorpal, err := context.FetchArtifactAlias("linux-vorpal:latest")
+		linux_vorpal, err := context.FetchArtifactAlias("library/linux-vorpal:latest")
 		if err != nil {
 			return nil, err
 		}
