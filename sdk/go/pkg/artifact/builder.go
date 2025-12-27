@@ -553,6 +553,7 @@ func (a *Artifact) WithSystem(system api.ArtifactSystem) *Artifact {
 
 func (a *Artifact) Build(ctx *config.ConfigContext) (*string, error) {
 	artifact := api.Artifact{
+		Aliases: a.Aliases,
 		Name:    a.Name,
 		Sources: a.Sources,
 		Steps:   a.Steps,
