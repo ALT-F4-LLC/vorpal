@@ -254,7 +254,7 @@ jobs:
           mv dist/x86_64-darwin/vorpal dist/x86_64-darwin/vorpal-x86_64-darwin
           mv dist/x86_64-linux/vorpal dist/x86_64-linux/vorpal-x86_64-linux
 
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             dist/aarch64-darwin/vorpal-aarch64-darwin
