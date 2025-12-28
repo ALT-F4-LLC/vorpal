@@ -16,10 +16,6 @@ jobs:
       id-token: write
     runs-on: ubuntu-latest
     steps:
-      - env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release delete --cleanup-tag --yes nightly
-
       - id: generate-token
         uses: actions/create-github-app-token@v1
         with:
@@ -28,10 +24,26 @@ jobs:
           private-key: ${{ secrets.ALTF4LLC_GITHUB_APP_PRIVATE_KEY }}
           repositories: vorpal
 
-      - uses: actions/checkout@v5
-        with:
-          token: ${{ steps.generate-token.outputs.token }}
+      - env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh release view nightly >/dev/null 2>&1 && gh release delete --cleanup-tag --yes nightly || true
 
-      - run: git fetch --tags
-      - run: git tag nightly
-      - run: git push --tags
+      - id: main-sha
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          SHA=$(gh api repos/${{ github.repository }}/commits/main --jq '.sha')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/nightly 2>/dev/null || true
+
+      - env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh api repos/${{ github.repository }}/git/refs \
+            -f ref=refs/tags/nightly \
+            -f sha=${{ steps.main-sha.outputs.sha }}
