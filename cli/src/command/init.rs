@@ -15,10 +15,17 @@ pub async fn run() -> Result<()> {
     match answer {
         Ok(choice) => match choice {
             "Go" => {
-                template.insert("Vorpal.toml", include_str!("template/go/Vorpal.toml"));
+                template.insert(
+                    "cmd/example/main.go",
+                    include_str!("template/go/cmd/example/main.go"),
+                );
+                template.insert(
+                    "cmd/vorpal/main.go",
+                    include_str!("template/go/cmd/vorpal/main.go"),
+                );
                 template.insert("go.mod", include_str!("template/go/go.mod"));
-                template.insert("main.go", include_str!("template/go/main.go"));
-                template.insert("vorpal.go", include_str!("template/go/vorpal.go"));
+                template.insert("go.sum", include_str!("template/go/go.sum"));
+                template.insert("Vorpal.toml", include_str!("template/go/Vorpal.toml"));
             }
 
             "Rust" => {
