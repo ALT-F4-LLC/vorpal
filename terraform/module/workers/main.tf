@@ -116,7 +116,7 @@ module "sg_ssh" {
 
 module "key_pair" {
   source  = "terraform-aws-modules/key-pair/aws"
-  version = "2.1.0"
+  version = "2.1.1"
 
   create_private_key = true
   key_name           = "vorpal-dev"
