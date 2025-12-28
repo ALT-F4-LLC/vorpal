@@ -25,7 +25,7 @@ jobs:
           repositories: vorpal
 
       - env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view nightly > /dev/null 2>&1; then
             gh release delete --cleanup-tag --yes nightly
