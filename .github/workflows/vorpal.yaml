@@ -25,12 +25,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
@@ -39,12 +39,12 @@ jobs:
       - run: ./script/dev.sh make .cargo vendor
       - run: ./script/dev.sh make TARGET=release check
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v5
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v5
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
@@ -56,12 +56,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
@@ -85,12 +85,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
           path: target
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
