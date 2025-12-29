@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -52,14 +53,22 @@ impl LocalBackend {
 }
 
 impl S3Backend {
-    pub async fn new(bucket: Option<String>) -> Result<Self, BackendError> {
+    pub async fn new(bucket: Option<String>, force_path_style: bool) -> Result<Self, BackendError> {
         let Some(bucket) = bucket else {
             return Err(BackendError::MissingS3Bucket);
         };
 
-        let client_version = aws_config::BehaviorVersion::v2025_08_07();
-        let client_config = aws_config::load_defaults(client_version).await;
-        let client = Client::new(&client_config);
+        let config_sdk = aws_config::defaults(BehaviorVersion::latest()).load().await;
+
+        let mut config_builder = aws_sdk_s3::config::Builder::from(&config_sdk);
+
+        if force_path_style {
+            config_builder = config_builder.force_path_style(true);
+        }
+
+        let config = config_builder.build();
+
+        let client = Client::from_conf(config);
 
         Ok(Self { bucket, client })
     }
@@ -324,6 +333,7 @@ impl ArtifactService for ArtifactServer {
 pub async fn backend_archive(
     registry_backend: String,
     registry_backend_s3_bucket: Option<String>,
+    registry_backend_s3_force_path_style: bool,
 ) -> Result<Box<dyn ArchiveBackend>> {
     let backend = match registry_backend.as_str() {
         "local" => ServerBackend::Local,
@@ -333,7 +343,13 @@ pub async fn backend_archive(
 
     let backend_archive: Box<dyn ArchiveBackend> = match backend {
         ServerBackend::Local => Box::new(LocalBackend::new()?),
-        ServerBackend::S3 => Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?),
+        ServerBackend::S3 => Box::new(
+            S3Backend::new(
+                registry_backend_s3_bucket.clone(),
+                registry_backend_s3_force_path_style,
+            )
+            .await?,
+        ),
         ServerBackend::Unknown => bail!("unknown archive backend: {}", registry_backend),
     };
 
@@ -343,6 +359,7 @@ pub async fn backend_archive(
 pub async fn backend_artifact(
     registry_backend: &str,
     registry_backend_s3_bucket: Option<String>,
+    registry_backend_s3_force_path_style: bool,
 ) -> Result<Box<dyn ArtifactBackend>> {
     let backend = match registry_backend {
         "local" => ServerBackend::Local,
@@ -352,7 +369,13 @@ pub async fn backend_artifact(
 
     let backend_artifact: Box<dyn ArtifactBackend> = match backend {
         ServerBackend::Local => Box::new(LocalBackend::new()?),
-        ServerBackend::S3 => Box::new(S3Backend::new(registry_backend_s3_bucket.clone()).await?),
+        ServerBackend::S3 => Box::new(
+            S3Backend::new(
+                registry_backend_s3_bucket.clone(),
+                registry_backend_s3_force_path_style,
+            )
+            .await?,
+        ),
         ServerBackend::Unknown => bail!("unknown artifact backend: {}", registry_backend),
     };
 
