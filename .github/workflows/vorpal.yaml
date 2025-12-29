@@ -105,7 +105,7 @@ jobs:
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
           path: dist
@@ -131,7 +131,7 @@ jobs:
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV
           echo "OS=$(uname -s | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
 
@@ -205,7 +205,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
           path: Vorpal.lock
@@ -223,7 +223,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           fail-on-cache-miss: true
           pattern: vorpal-dist-*
