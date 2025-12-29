@@ -124,7 +124,7 @@ module "key_pair" {
 
 module "ssh_private_key_param" {
   source  = "terraform-aws-modules/ssm-parameter/aws"
-  version = "~> 1.0"
+  version = "~> 2.0"
 
   description = "SSH private key for Vorpal dev instances"
   name        = "/vorpal-dev/private-key"
