@@ -147,6 +147,9 @@ pub enum CommandServices {
 
         #[arg(long)]
         registry_backend_s3_bucket: Option<String>,
+
+        #[arg(default_value_t = false, long)]
+        registry_backend_s3_force_path_style: bool,
     },
 }
 
@@ -515,18 +518,21 @@ pub async fn run() -> Result<()> {
                 port,
                 registry_backend,
                 registry_backend_s3_bucket,
+                registry_backend_s3_force_path_style,
                 services,
             } => {
-                start::run(
-                    issuer.clone(),
-                    issuer_client_id.clone(),
-                    issuer_client_secret.clone(),
-                    *port,
-                    registry_backend.clone(),
-                    registry_backend_s3_bucket.clone(),
-                    services.split(',').map(|s| s.to_string()).collect(),
-                )
-                .await
+                let run_args = start::RunArgs {
+                    issuer: issuer.clone(),
+                    issuer_client_id: issuer_client_id.clone(),
+                    issuer_client_secret: issuer_client_secret.clone(),
+                    port: *port,
+                    registry_backend: registry_backend.clone(),
+                    registry_backend_s3_bucket: registry_backend_s3_bucket.clone(),
+                    registry_backend_s3_force_path_style: *registry_backend_s3_force_path_style,
+                    services: services.split(',').map(|s| s.to_string()).collect(),
+                };
+
+                start::run(run_args).await
             }
         },
 

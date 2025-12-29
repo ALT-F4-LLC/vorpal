@@ -25,6 +25,17 @@ pub mod auth;
 mod registry;
 mod worker;
 
+pub struct RunArgs {
+    pub issuer: Option<String>,
+    pub issuer_client_id: Option<String>,
+    pub issuer_client_secret: Option<String>,
+    pub port: u16,
+    pub registry_backend: String,
+    pub registry_backend_s3_bucket: Option<String>,
+    pub registry_backend_s3_force_path_style: bool,
+    pub services: Vec<String>,
+}
+
 async fn new_tls_config() -> Result<ServerTlsConfig> {
     let cert_path = get_key_service_path();
 
@@ -57,15 +68,7 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
     Ok(config)
 }
 
-pub async fn run(
-    issuer: Option<String>,
-    issuer_client_id: Option<String>,
-    issuer_client_secret: Option<String>,
-    port: u16,
-    registry_backend: String,
-    registry_backend_s3_bucket: Option<String>,
-    services: Vec<String>,
-) -> Result<()> {
+pub async fn run(args: RunArgs) -> Result<()> {
     let tls_config = new_tls_config().await?;
 
     let (_, health_service) = tonic_health::server::health_reporter();
@@ -74,39 +77,47 @@ pub async fn run(
         .tls_config(tls_config)?
         .add_service(health_service);
 
-    if services.contains(&"agent".to_string()) {
+    if args.services.contains(&"agent".to_string()) {
         let service = AgentServiceServer::new(AgentServer::new());
 
         router = router.add_service(service);
 
-        info!("agent |> service: [::]:{}", port);
+        info!("agent |> service: [::]:{}", args.port);
     }
 
-    if services.contains(&"registry".to_string()) {
-        let backend = match registry_backend.as_str() {
+    if args.services.contains(&"registry".to_string()) {
+        let backend = match args.registry_backend.as_str() {
             "local" => ServerBackend::Local,
             "s3" => ServerBackend::S3,
             _ => ServerBackend::Unknown,
         };
 
         if backend == ServerBackend::Unknown {
-            bail!("unknown registry backend: {}", registry_backend);
+            bail!("unknown registry backend: {}", args.registry_backend);
         }
 
-        if backend == ServerBackend::S3 && registry_backend_s3_bucket.is_none() {
+        if backend == ServerBackend::S3 && args.registry_backend_s3_bucket.is_none() {
             bail!("s3 backend requires '--registry-backend-s3-bucket' parameter");
         }
 
-        let backend_archive =
-            backend_archive(registry_backend.clone(), registry_backend_s3_bucket.clone()).await?;
+        let backend_archive = backend_archive(
+            args.registry_backend.clone(),
+            args.registry_backend_s3_bucket.clone(),
+            args.registry_backend_s3_force_path_style,
+        )
+        .await?;
 
-        let backend_artifact =
-            backend_artifact(&registry_backend, registry_backend_s3_bucket).await?;
+        let backend_artifact = backend_artifact(
+            &args.registry_backend,
+            args.registry_backend_s3_bucket,
+            args.registry_backend_s3_force_path_style,
+        )
+        .await?;
 
         let archive_server = ArchiveServer::new(backend_archive);
         let artifact_server = ArtifactServer::new(backend_artifact);
 
-        if let Some(issuer) = &issuer {
+        if let Some(issuer) = &args.issuer {
             let validator_audiences = vec!["cli".to_string(), "worker".to_string()];
             let validator =
                 Arc::new(auth::OidcValidator::new(issuer.clone(), validator_audiences).await?);
@@ -126,15 +137,18 @@ pub async fn run(
             router = router.add_service(ArtifactServiceServer::new(artifact_server));
         }
 
-        info!("archive |> service: [::]:{}", port);
-        info!("artifact |> service: [::]:{}", port);
+        info!("archive |> service: [::]:{}", args.port);
+        info!("artifact |> service: [::]:{}", args.port);
     }
 
-    if services.contains(&"worker".to_string()) {
-        let worker_server =
-            WorkerServer::new(issuer.clone(), issuer_client_id, issuer_client_secret);
+    if args.services.contains(&"worker".to_string()) {
+        let worker_server = WorkerServer::new(
+            args.issuer.clone(),
+            args.issuer_client_id,
+            args.issuer_client_secret,
+        );
 
-        if let Some(issuer) = &issuer {
+        if let Some(issuer) = &args.issuer {
             let validator_audiences = vec!["cli".to_string()];
             let validator =
                 Arc::new(auth::OidcValidator::new(issuer.clone(), validator_audiences).await?);
@@ -148,10 +162,10 @@ pub async fn run(
             router = router.add_service(WorkerServiceServer::new(worker_server));
         }
 
-        info!("worker |> service: [::]:{}", port);
+        info!("worker |> service: [::]:{}", args.port);
     }
 
-    let address = format!("[::]:{port}")
+    let address = format!("[::]:{}", args.port)
         .parse()
         .expect("failed to parse address");
 
