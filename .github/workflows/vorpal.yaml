@@ -23,7 +23,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/cache/restore@v5
         with:
@@ -54,7 +54,7 @@ jobs:
       - vendor
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/cache/restore@v5
         with:
@@ -83,7 +83,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/cache/restore@v5
         with:
@@ -122,7 +122,7 @@ jobs:
           - ubuntu-latest
           - ubuntu-latest-arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - if: contains(matrix.runner, 'ubuntu')
         run: ./script/dev/debian.sh
@@ -221,7 +221,7 @@ jobs:
       packages: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/download-artifact@v5
         with:
