@@ -54,6 +54,7 @@ pub struct RunArgsArtifact {
 
 pub struct RunArgsConfig {
     pub context: PathBuf,
+    pub environments: Vec<String>,
     pub language: String,
     pub name: String,
     pub source: Option<VorpalConfigSource>,
@@ -342,6 +343,15 @@ pub async fn run(
                 .with_artifacts(vec![protoc, protoc_gen_go, protoc_gen_go_grpc])
                 .with_includes(includes);
 
+            if !config.environments.is_empty() {
+                builder = builder
+                    .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
+            }
+
+            if let Some(script) = config.source.as_ref().and_then(|s| s.script.as_ref()) {
+                builder = builder.with_source_script(script);
+            }
+
             if let Some(directory) = config
                 .source
                 .as_ref()
@@ -374,12 +384,17 @@ pub async fn run(
                 includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             }
 
-            Rust::new(&config.name, vec![config_system])
+            let mut builder = Rust::new(&config.name, vec![config_system])
                 .with_bins(bins.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
                 .with_includes(includes)
-                .with_packages(packages)
-                .build(&mut config_context)
-                .await?
+                .with_packages(packages);
+
+            if !config.environments.is_empty() {
+                builder = builder
+                    .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
+            }
+
+            builder.build(&mut config_context).await?
         }
 
         _ => "".to_string(),
