@@ -271,12 +271,14 @@ pub async fn run() -> Result<()> {
 
                 // Set default configurations
 
+                let mut config_environments = Vec::new();
                 let mut config_language = "rust".to_string();
                 let mut config_name = "vorpal".to_string();
                 let mut config_source_go_directory = None;
                 let mut config_source_includes = Vec::new();
                 let mut config_source_rust_bin = None;
                 let mut config_source_rust_packages = None;
+                let mut config_source_script = None;
 
                 // Load project configuration
 
@@ -304,6 +306,12 @@ pub async fn run() -> Result<()> {
                         }
                     }
                 }?;
+
+                if let Some(environments) = config.environments {
+                    if !environments.is_empty() {
+                        config_environments = environments;
+                    }
+                }
 
                 if let Some(language) = config.language {
                     config_language = language;
@@ -343,6 +351,12 @@ pub async fn run() -> Result<()> {
                             }
                         }
                     }
+
+                    if let Some(script) = config_source.script {
+                        if !script.is_empty() {
+                            config_source_script = Some(script);
+                        }
+                    }
                 };
 
                 // Load project context
@@ -374,6 +388,7 @@ pub async fn run() -> Result<()> {
 
                 let run_config = artifact::make::RunArgsConfig {
                     context,
+                    environments: config_environments,
                     language: config_language,
                     name: config_name,
                     source: Some(VorpalConfigSource {
@@ -385,6 +400,7 @@ pub async fn run() -> Result<()> {
                             bin: config_source_rust_bin,
                             packages: config_source_rust_packages,
                         }),
+                        script: config_source_script,
                     }),
                 };
 

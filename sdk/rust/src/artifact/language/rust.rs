@@ -38,6 +38,7 @@ pub struct Rust<'a> {
     bins: Vec<String>,
     build: bool,
     check: bool,
+    environments: Vec<&'a str>,
     excludes: Vec<&'a str>,
     format: bool,
     includes: Vec<&'a str>,
@@ -63,6 +64,7 @@ impl<'a> Rust<'a> {
             bins: vec![],
             build: true,
             check: false,
+            environments: vec![],
             excludes: vec![],
             format: false,
             includes: vec![],
@@ -88,6 +90,11 @@ impl<'a> Rust<'a> {
 
     pub fn with_check(mut self) -> Self {
         self.check = true;
+        self
+    }
+
+    pub fn with_environments(mut self, environments: Vec<&'a str>) -> Self {
+        self.environments = environments;
         self
     }
 
@@ -243,7 +250,7 @@ impl<'a> Rust<'a> {
 
         let mut step_artifacts = vec![rust_toolchain.clone()];
 
-        let step_environments = vec![
+        let mut step_environments = vec![
             "HOME=$VORPAL_WORKSPACE/home".to_string(),
             format!(
                 "PATH={}",
@@ -256,6 +263,10 @@ impl<'a> Rust<'a> {
             format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain)),
             format!("RUSTUP_TOOLCHAIN={}", rust_toolchain_name),
         ];
+
+        for environment in self.environments {
+            step_environments.push(environment.to_string());
+        }
 
         // Create vendor artifact
 
