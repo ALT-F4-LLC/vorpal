@@ -40,8 +40,8 @@ tokio-stream = { version = "0.1.17", features = ["io-util"] }
 tokio-tar = { version = "0.3.1" }
 tokio-util = { version = "0.7.15", features = ["compat"] }
 toml = { version = "0.9.0" }
-tonic = { version = "0.13.1", features = ["tls-ring"] }
-tonic-health = { version = "0.13.1" }
+tonic = { version = "0.14.0", features = ["tls-ring"] }
+tonic-health = { version = "0.14.0" }
 tracing = { version = "0.1.41" }
 tracing-subscriber = { version = "0.3.19" }
 url = { version = "2.5.4" }
