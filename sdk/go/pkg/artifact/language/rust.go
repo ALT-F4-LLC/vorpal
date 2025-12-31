@@ -34,20 +34,21 @@ type RustArtifactCargoTomlWorkspace struct {
 }
 
 type Rust struct {
-	artifacts []*string
-	bins      []string
-	build     bool
-	check     bool
-	excludes  []string
-	format    bool
-	includes  []string
-	lint      bool
-	name      string
-	packages  []string
-	secrets   []*api.ArtifactStepSecret
-	source    *string
-	tests     bool
-	systems   []api.ArtifactSystem
+	artifacts    []*string
+	bins         []string
+	build        bool
+	check        bool
+	environments []string
+	excludes     []string
+	format       bool
+	includes     []string
+	lint         bool
+	name         string
+	packages     []string
+	secrets      []*api.ArtifactStepSecret
+	source       *string
+	tests        bool
+	systems      []api.ArtifactSystem
 }
 
 type VendorStepScriptTemplateArgs struct {
@@ -156,20 +157,21 @@ func stripPrefix(path, prefix string) string {
 
 func NewRust(name string, systems []api.ArtifactSystem) *Rust {
 	return &Rust{
-		artifacts: make([]*string, 0),
-		bins:      make([]string, 0),
-		build:     true,
-		check:     false,
-		excludes:  make([]string, 0),
-		format:    false,
-		includes:  make([]string, 0),
-		lint:      false,
-		name:      name,
-		packages:  make([]string, 0),
-		secrets:   make([]*api.ArtifactStepSecret, 0),
-		source:    nil,
-		tests:     false,
-		systems:   systems,
+		artifacts:    make([]*string, 0),
+		bins:         make([]string, 0),
+		build:        true,
+		check:        false,
+		environments: make([]string, 0),
+		excludes:     make([]string, 0),
+		format:       false,
+		includes:     make([]string, 0),
+		lint:         false,
+		name:         name,
+		packages:     make([]string, 0),
+		secrets:      make([]*api.ArtifactStepSecret, 0),
+		source:       nil,
+		tests:        false,
+		systems:      systems,
 	}
 }
 
@@ -185,6 +187,11 @@ func (a *Rust) WithBins(bins []string) *Rust {
 
 func (a *Rust) WithCheck() *Rust {
 	a.check = true
+	return a
+}
+
+func (a *Rust) WithEnvironments(environments []string) *Rust {
+	a.environments = environments
 	return a
 }
 
@@ -389,6 +396,10 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 		),
 		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(rustToolchain)),
 		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rustToolchainName),
+	}
+
+	for _, env := range builder.environments {
+		stepEnvironments = append(stepEnvironments, env)
 	}
 
 	// Create vendor artifact

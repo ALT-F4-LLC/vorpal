@@ -15,6 +15,7 @@ pub struct Go<'a> {
     build_directory: Option<&'a str>,
     build_flags: Option<&'a str>,
     build_path: Option<&'a str>,
+    environments: Vec<&'a str>,
     includes: Vec<&'a str>,
     name: &'a str,
     secrets: Vec<api::artifact::ArtifactStepSecret>,
@@ -51,6 +52,7 @@ impl<'a> Go<'a> {
             build_directory: None,
             build_flags: None,
             build_path: None,
+            environments: vec![],
             includes: vec![],
             name,
             secrets: vec![],
@@ -84,6 +86,11 @@ impl<'a> Go<'a> {
 
     pub fn with_build_path(mut self, path: &'a str) -> Self {
         self.build_path = Some(path);
+        self
+    }
+
+    pub fn with_environments(mut self, environments: Vec<&'a str>) -> Self {
+        self.environments = environments;
         self
     }
 
@@ -165,18 +172,23 @@ impl<'a> Go<'a> {
         let goarch = get_goarch(context.get_system())?;
         let goos = get_goos(context.get_system())?;
 
+        let mut step_environments = vec![
+            format!("GOARCH={}", goarch),
+            "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
+            format!("GOOS={}", goos),
+            "GOPATH=$VORPAL_WORKSPACE/go".to_string(),
+            format!("PATH={}/bin", artifact::get_env_key(&go)),
+        ];
+
+        for env in self.environments {
+            step_environments.push(env.to_string());
+        }
+
         let steps = vec![
             artifact::step::shell(
                 context,
                 [vec![go.clone()], self.artifacts].concat(),
-                vec![
-                    "CGO_ENABLED=0".to_string(),
-                    format!("GOARCH={}", goarch),
-                    "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
-                    format!("GOOS={}", goos),
-                    "GOPATH=$VORPAL_WORKSPACE/go".to_string(),
-                    format!("PATH={}/bin", artifact::get_env_key(&go)),
-                ],
+                step_environments,
                 step_script,
                 self.secrets,
             )

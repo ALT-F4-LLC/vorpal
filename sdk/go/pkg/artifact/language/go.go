@@ -26,6 +26,7 @@ type Go struct {
 	buildDirectory *string
 	buildFlags     *string
 	buildPath      *string
+	environments   []string
 	includes       []string
 	name           string
 	secrets        []*api.ArtifactStepSecret
@@ -83,6 +84,7 @@ func NewGo(name string, systems []api.ArtifactSystem) *Go {
 		buildDirectory: nil,
 		buildFlags:     nil,
 		buildPath:      nil,
+		environments:   []string{},
 		includes:       []string{},
 		name:           name,
 		secrets:        []*api.ArtifactStepSecret{},
@@ -109,6 +111,11 @@ func (b *Go) WithBuildFlags(flags string) *Go {
 
 func (b *Go) WithBuildPath(path string) *Go {
 	b.buildPath = &path
+	return b
+}
+
+func (b *Go) WithEnvironments(environments []string) *Go {
+	b.environments = environments
 	return b
 }
 
@@ -229,7 +236,6 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 	}
 
 	environments := []string{
-		"CGO_ENABLED=0",
 		fmt.Sprintf("GOARCH=%s", *goarch),
 		"GOCACHE=$VORPAL_WORKSPACE/go/cache",
 		fmt.Sprintf("GOOS=%s", *goos),

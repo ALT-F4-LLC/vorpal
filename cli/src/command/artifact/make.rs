@@ -307,17 +307,6 @@ pub async fn run(
     let client_agent = AgentServiceClient::new(client_agent_channel);
     let client_artifact = ArtifactServiceClient::new(client_artifact_channel);
 
-    // let client_api_token = match api_token {
-    //     Some(token) => token,
-    //     None => {
-    //         if let Ok(service_secret) = load_service_secret().await {
-    //             service_secret
-    //         } else {
-    //             load_api_token_env()?
-    //         }
-    //     }
-    // };
-
     // Prepare config context
 
     let mut config_context = ConfigContext::new(
