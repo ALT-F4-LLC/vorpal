@@ -8,8 +8,19 @@ use walkdir::WalkDir;
 
 // Root paths
 
+const DEFAULT_ROOT_DIR_PATH: &'static str = "/var/bin/vorpal";
+
 pub fn get_root_dir_path() -> PathBuf {
-    Path::new("/var/lib/vorpal").to_path_buf()
+    let path = match std::env::var("VORPAL_ROOT_PATH") {
+        Ok(value) => PathBuf::from(value),
+        Err(std::env::VarError::NotUnicode(os_string)) => PathBuf::from(os_string),
+        Err(std::env::VarError::NotPresent) => PathBuf::from(DEFAULT_ROOT_DIR_PATH)
+    };
+    if !path.exists() {
+        // TODO: Initialize root directory?
+        panic!("Vorpal root directory ({}) does not exist", path.to_string_lossy())
+    }
+    path
 }
 
 pub fn get_root_key_dir_path() -> PathBuf {
