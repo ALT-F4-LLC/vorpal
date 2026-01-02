@@ -26,7 +26,7 @@ oauth2 = { version = "5.0.0", features = ["reqwest"] }
 path-clean = { version = "1.0.1" }
 petgraph = { version = "0.8.2" }
 port-selector = { version = "0.1.6" }
-rcgen = { version = "0.14.3", features = ["x509-parser"] }
+rcgen = { version = "0.14.3", features = ["aws_lc_rs", "x509-parser"] }
 reqwest = { version = "0.12.22", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rsa = { version = "0.9.8", features = ["sha2"] }
 rustls = { version = "0.23.31" }
@@ -40,8 +40,8 @@ tokio-stream = { version = "0.1.17", features = ["io-util"] }
 tokio-tar = { version = "0.3.1" }
 tokio-util = { version = "0.7.15", features = ["compat"] }
 toml = { version = "0.9.0" }
-tonic = { version = "0.13.1", features = ["tls-ring"] }
-tonic-health = { version = "0.13.1" }
+tonic = { version = "0.14.2", features = ["tls-ring"] }
+tonic-health = { version = "0.14.2" }
 tracing = { version = "0.1.41" }
 tracing-subscriber = { version = "0.3.19" }
 url = { version = "2.5.4" }

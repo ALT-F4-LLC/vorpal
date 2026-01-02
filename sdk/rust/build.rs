@@ -1,5 +1,5 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .message_attribute(
             "vorpal.artifact.ArtifactSource",
             "#[derive(serde::Serialize, serde::Deserialize)]",

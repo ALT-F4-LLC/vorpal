@@ -5,7 +5,7 @@ use crate::command::store::paths::{
 use anyhow::Result;
 use rcgen::{
     CertificateParams, DnType, DnValue::PrintableString, ExtendedKeyUsagePurpose, IsCa, Issuer,
-    KeyPair, KeyUsagePurpose,
+    KeyPair, KeyUsagePurpose, PKCS_RSA_SHA256,
 };
 use tokio::fs::{create_dir_all, read_to_string, write};
 use tracing::info;
@@ -23,7 +23,7 @@ pub async fn generate() -> Result<()> {
     let ca_key_path = get_key_ca_key_path();
 
     if !ca_key_path.exists() {
-        let key_pair = KeyPair::generate().unwrap();
+        let key_pair = KeyPair::generate_for(&PKCS_RSA_SHA256).unwrap();
         let key_pair_pem = key_pair.serialize_pem();
 
         info!("Generating new CA keypair");
@@ -71,7 +71,7 @@ pub async fn generate() -> Result<()> {
     let service_key_path = get_key_service_key_path();
 
     if !service_key_path.exists() {
-        let key_pair = KeyPair::generate().unwrap();
+        let key_pair = KeyPair::generate_for(&PKCS_RSA_SHA256).unwrap();
         let key_pair_pem = key_pair.serialize_pem();
 
         info!("Generating new service keypair");

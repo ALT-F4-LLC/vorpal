@@ -557,6 +557,11 @@ pub async fn run(
     )
     .await?;
 
+    info!(
+        "make: {} ({})",
+        selected_artifact.name, selected_artifact_digest
+    );
+
     // Agent handles all lockfile operations internally
     let mode = if artifact.unlock {
         "unlocked"
