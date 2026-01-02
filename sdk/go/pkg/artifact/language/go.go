@@ -243,6 +243,10 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 		fmt.Sprintf("PATH=%s/bin", artifact.GetEnvKey(goBin)),
 	}
 
+	for _, env := range builder.environments {
+		environments = append(environments, env)
+	}
+
 	sources := []*api.ArtifactSource{source}
 
 	step, err := artifact.Shell(context, artifacts, environments, stepScript, builder.secrets)
