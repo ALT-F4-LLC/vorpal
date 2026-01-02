@@ -5,6 +5,7 @@ use indoc::formatdoc;
 pub mod cargo;
 pub mod clippy;
 pub mod gh;
+pub mod git;
 pub mod go;
 pub mod goimports;
 pub mod gopls;

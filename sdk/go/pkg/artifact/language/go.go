@@ -154,6 +154,11 @@ func (b *Go) WithSourceScript(script string) *Go {
 }
 
 func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
+	git, err := artifact.Git(context)
+	if err != nil {
+		return nil, err
+	}
+
 	goBin, err := artifact.GoBin(context)
 	if err != nil {
 		return nil, err
@@ -220,6 +225,7 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 	stepScript := stepScriptBuffer.String()
 
 	var artifacts []*string
+	artifacts = append(artifacts, git)
 	artifacts = append(artifacts, goBin)
 	artifacts = append(artifacts, builder.artifacts...)
 

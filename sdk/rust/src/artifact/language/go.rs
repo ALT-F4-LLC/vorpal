@@ -168,6 +168,7 @@ impl<'a> Go<'a> {
             name = self.name,
         };
 
+        let git = artifact::git::build(context).await?;
         let go = artifact::go::build(context).await?;
         let goarch = get_goarch(context.get_system())?;
         let goos = get_goos(context.get_system())?;
@@ -187,7 +188,7 @@ impl<'a> Go<'a> {
         let steps = vec![
             artifact::step::shell(
                 context,
-                [vec![go.clone()], self.artifacts].concat(),
+                [vec![git.clone(), go.clone()], self.artifacts].concat(),
                 step_environments,
                 step_script,
                 self.secrets,
