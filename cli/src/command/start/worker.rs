@@ -275,8 +275,51 @@ async fn pull_source(
 
 fn expand_env(text: &str, envs: &[&String]) -> String {
     envs.iter().fold(text.to_string(), |acc, e| {
-        let e = e.split('=').collect::<Vec<&str>>();
-        acc.replace(&format!("${}", e[0]), e[1])
+        let parts = e.split('=').collect::<Vec<&str>>();
+        let key = parts[0];
+        let value = parts[1];
+
+        // First, replace ${VAR} syntax (braced)
+        let result = acc.replace(&format!("${{{}}}", key), value);
+
+        // Then, replace $VAR syntax (unbraced) while preserving ${{VAR}} and $VARNAME patterns
+        let search = format!("${}", key);
+        let mut output = String::new();
+        let mut i = 0;
+
+        while i < result.len() {
+            if result[i..].starts_with(&search) {
+                let after_idx = i + search.len();
+
+                // Check what comes after $KEY
+                if after_idx >= result.len() {
+                    // End of string - replace it
+                    output.push_str(value);
+                    i = after_idx;
+                } else {
+                    let next_char = result[after_idx..].chars().next().unwrap();
+
+                    if next_char == '{' {
+                        // This is $VAR{ or part of ${{VAR}} - don't replace
+                        output.push_str(&search);
+                        i += search.len();
+                    } else if next_char.is_alphanumeric() || next_char == '_' {
+                        // Part of longer variable name like $API_SECRETA - don't replace
+                        output.push_str(&search);
+                        i += search.len();
+                    } else {
+                        // Followed by delimiter (space, quote, slash, etc.) - replace it
+                        output.push_str(value);
+                        i = after_idx;
+                    }
+                }
+            } else {
+                output.push(result[i..].chars().next().unwrap());
+                i += result[i..].chars().next().unwrap().len_utf8();
+            }
+        }
+
+        output
     })
 }
 
@@ -402,8 +445,14 @@ async fn run_step(
     // Setup arguments
 
     if !entrypoint.is_empty() {
+        // Create references to all environments for expansion (includes VORPAL_ vars, custom envs, and secrets)
+        let all_envs: Vec<_> = environments_sorted.iter().collect();
+
         for arg in step.arguments.iter() {
-            let arg = expand_env(arg, &vorpal_envs);
+            // Expand with all environment variables (VORPAL_ vars, custom envs, and secrets)
+            // Supports both ${VAR} and $VAR syntax
+            let arg = expand_env(arg, &all_envs);
+
             command.arg(arg);
         }
 
