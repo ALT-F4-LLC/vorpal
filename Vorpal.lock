@@ -297,6 +297,14 @@ digest = "c7811ed4fe8c1c5afcecea15929178c33dcef4fa885086df96cb558cd9466f29"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "git"
+path = "https://www.kernel.org/pub/software/scm/git/git-2.52.0.tar.gz"
+includes = []
+excludes = []
+digest = "c7811ed4fe8c1c5afcecea15929178c33dcef4fa885086df96cb558cd9466f29"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "glibc"
 path = "https://ftpmirror.gnu.org/gnu/glibc/glibc-2.42.tar.gz"
 includes = []
