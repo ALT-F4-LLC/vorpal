@@ -3955,6 +3955,7 @@ dependencies = [
  "tokio",
  "toml",
  "tonic",
+ "tonic-prost",
  "tonic-prost-build",
  "tracing",
 ]
