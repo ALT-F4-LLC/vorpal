@@ -39,6 +39,7 @@ pub fn bash(
         }
     }
 
+    step_environments.push("HOME=$VORPAL_WORKSPACE".to_string());
     step_environments.push(format!("PATH={step_path}"));
 
     let step_script = formatdoc! {"
@@ -93,6 +94,9 @@ pub async fn bwrap(
         "$VORPAL_OUTPUT".to_string(),
         "--setenv".to_string(),
         "VORPAL_WORKSPACE".to_string(),
+        "$VORPAL_WORKSPACE".to_string(),
+        "--setenv".to_string(),
+        "HOME".to_string(),
         "$VORPAL_WORKSPACE".to_string(),
     ];
 
