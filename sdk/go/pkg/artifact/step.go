@@ -64,6 +64,7 @@ func Bash(
 		}
 	}
 
+	stepEnvironments = append(stepEnvironments, "HOME=$VORPAL_WORKSPACE")
 	stepEnvironments = append(stepEnvironments, fmt.Sprintf("PATH=%s", stepPath))
 
 	scriptTemplate, err := template.New("script").Parse(BashScriptTemplate)
@@ -132,6 +133,9 @@ func Bwrap(
 		"--setenv",
 		"VORPAL_WORKSPACE",
 		"$VORPAL_WORKSPACE",
+		"--setenv",
+        "HOME",
+        "$VORPAL_WORKSPACE",
 	}
 
 	// Setup artifacts arguments
