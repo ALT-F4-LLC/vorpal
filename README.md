@@ -110,18 +110,18 @@ These steps assume you installed Vorpal via the installer and have `vorpal` on y
 
 4) Build your artifact
 
-- `vorpal artifact make "vorpal" .`  # builds using the local services
-- To get the output path: `vorpal artifact make --path "vorpal" .`
+- `vorpal build "vorpal"`  # builds using the local services
+- To get the output path: `vorpal build --path "vorpal"`
 
 5) Run the sample
 
-- `ARTIFACT_PATH=$(vorpal artifact make --path "vorpal" .)`
+- `ARTIFACT_PATH=$(vorpal build --path "vorpal")`
 - `$ARTIFACT_PATH/bin/example`  # runs the generated example binary
 
 Build this repository
 
-- From the repo root: `vorpal artifact make "vorpal" .`
-- Optional Go parity (if present): `vorpal artifact make --config "Vorpal.go.toml" "vorpal" .`
+- From the repo root: `vorpal build "vorpal"`
+- Optional Go parity (if present): `vorpal build --config "Vorpal.go.toml" "vorpal"`
 
 ## Dev & User Environments
 Manage development and user-wide environments using the builders:

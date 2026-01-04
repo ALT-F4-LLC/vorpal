@@ -24,9 +24,10 @@ use vorpal_sdk::{
     context::{VorpalCredentials, VorpalCredentialsContent},
 };
 
-mod artifact;
+mod build;
 mod config;
 mod init;
+mod inspect;
 mod lock;
 mod start;
 mod store;
@@ -37,23 +38,69 @@ pub fn get_default_namespace() -> String {
 }
 
 #[derive(Subcommand)]
-pub enum CommandArtifact {
-    Init {},
+pub enum CommandSystemKeys {
+    Generate {},
+}
 
-    Inspect {
-        /// Artifact digest
-        digest: String,
+#[derive(Subcommand)]
+pub enum CommandSystem {
+    #[clap(subcommand)]
+    Keys(CommandSystemKeys),
 
-        /// Artifact namespace
-        #[arg(default_value_t = get_default_namespace(), long)]
-        namespace: String,
+    Prune {
+        #[arg(default_value_t = false, long)]
+        all: bool,
 
-        /// Registry address
-        #[arg(default_value_t = get_default_address(), long)]
-        registry: String,
+        #[arg(long)]
+        artifact_aliases: bool,
+
+        #[arg(long)]
+        artifact_archives: bool,
+
+        #[arg(long)]
+        artifact_configs: bool,
+
+        #[arg(long)]
+        artifact_outputs: bool,
+
+        #[arg(long)]
+        sandboxes: bool,
     },
+}
 
-    Make {
+#[derive(Subcommand)]
+pub enum CommandServices {
+    Start {
+        #[arg(long)]
+        issuer: Option<String>,
+
+        #[arg(long)]
+        issuer_client_id: Option<String>,
+
+        #[arg(long)]
+        issuer_client_secret: Option<String>,
+
+        #[arg(default_value = "23151", long)]
+        port: u16,
+
+        #[arg(default_value = "agent,registry,worker", long)]
+        services: String,
+
+        #[arg(default_value = "local", long)]
+        registry_backend: String,
+
+        #[arg(long)]
+        registry_backend_s3_bucket: Option<String>,
+
+        #[arg(default_value_t = false, long)]
+        registry_backend_s3_force_path_style: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum Command {
+    /// Build an artifact
+    Build {
         /// Artifact name
         name: String,
 
@@ -105,10 +152,25 @@ pub enum CommandArtifact {
         #[arg(default_value_t = get_default_address(), long)]
         worker: String,
     },
-}
 
-#[derive(Subcommand)]
-pub enum CommandAuth {
+    /// Initialize Vorpal in the current directory
+    Init {},
+
+    /// Inspect an artifact
+    Inspect {
+        /// Artifact digest
+        digest: String,
+
+        /// Artifact namespace
+        #[arg(default_value_t = get_default_namespace(), long)]
+        namespace: String,
+
+        /// Registry address
+        #[arg(default_value_t = get_default_address(), long)]
+        registry: String,
+    },
+
+    /// Login to an OAuth2 provider
     Login {
         /// OAuth2 client_id configured in Keycloak
         #[arg(long, default_value = "cli")]
@@ -122,79 +184,12 @@ pub enum CommandAuth {
         #[arg(default_value_t = get_default_address(), global = true, long)]
         registry: String,
     },
-}
 
-#[derive(Subcommand)]
-pub enum CommandServices {
-    Start {
-        #[arg(long)]
-        issuer: Option<String>,
-
-        #[arg(long)]
-        issuer_client_id: Option<String>,
-
-        #[arg(long)]
-        issuer_client_secret: Option<String>,
-
-        #[arg(default_value = "23151", long)]
-        port: u16,
-
-        #[arg(default_value = "agent,registry,worker", long)]
-        services: String,
-
-        #[arg(default_value = "local", long)]
-        registry_backend: String,
-
-        #[arg(long)]
-        registry_backend_s3_bucket: Option<String>,
-
-        #[arg(default_value_t = false, long)]
-        registry_backend_s3_force_path_style: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum CommandSystemKeys {
-    Generate {},
-}
-
-#[derive(Subcommand)]
-pub enum CommandSystem {
-    #[clap(subcommand)]
-    Keys(CommandSystemKeys),
-
-    Prune {
-        #[arg(default_value_t = false, long)]
-        all: bool,
-
-        #[arg(long)]
-        artifact_aliases: bool,
-
-        #[arg(long)]
-        artifact_archives: bool,
-
-        #[arg(long)]
-        artifact_configs: bool,
-
-        #[arg(long)]
-        artifact_outputs: bool,
-
-        #[arg(long)]
-        sandboxes: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum Command {
-    #[clap(subcommand)]
-    Artifact(CommandArtifact),
-
-    #[clap(subcommand)]
-    Auth(CommandAuth),
-
+    /// Manage Vorpal services
     #[clap(subcommand)]
     Services(CommandServices),
 
+    /// Manage Vorpal system
     #[clap(subcommand)]
     System(CommandSystem),
 }
@@ -239,292 +234,288 @@ pub async fn run() -> Result<()> {
     subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     match &command {
-        Command::Artifact(artifact) => match artifact {
-            CommandArtifact::Init {} => init::run().await,
+        Command::Build {
+            agent,
+            config,
+            context,
+            export,
+            name,
+            namespace,
+            path,
+            rebuild,
+            registry,
+            system,
+            unlock,
+            variable,
+            worker,
+        } => {
+            if name.is_empty() {
+                error!("no name specified");
 
-            CommandArtifact::Inspect {
-                digest,
-                namespace,
-                registry,
-            } => artifact::inspect::run(digest, namespace, registry).await,
+                exit(1);
+            }
 
-            CommandArtifact::Make {
-                agent,
-                config,
+            // Set default configurations
+
+            let mut config_environments = Vec::new();
+            let mut config_language = "rust".to_string();
+            let mut config_name = "vorpal".to_string();
+            let mut config_source_go_directory = None;
+            let mut config_source_includes = Vec::new();
+            let mut config_source_rust_bin = None;
+            let mut config_source_rust_packages = None;
+            let mut config_source_script = None;
+
+            // Load project configuration
+
+            let mut config_path = config.to_path_buf();
+
+            if !config.is_absolute() {
+                let current_dir = current_dir().expect("failed to get current directory");
+
+                config_path = current_dir.join(config).clean().to_path_buf();
+            }
+
+            config_path = config_path.clean();
+
+            // Load project configuration value, if exists
+
+            let config = match read(&config_path).await {
+                Err(e) => Err(anyhow!("Failed to read {}: {}", config_path.display(), e)),
+
+                Ok(toml_bytes) => {
+                    let toml_str = String::from_utf8_lossy(&toml_bytes);
+
+                    match from_str::<VorpalConfig>(&toml_str) {
+                        Err(e) => Err(anyhow!("Failed to parse: {}", e)),
+                        Ok(toml) => Ok(toml),
+                    }
+                }
+            }?;
+
+            if let Some(environments) = config.environments {
+                if !environments.is_empty() {
+                    config_environments = environments;
+                }
+            }
+
+            if let Some(language) = config.language {
+                config_language = language;
+            }
+
+            if let Some(name) = config.name {
+                if !name.is_empty() {
+                    config_name = name;
+                }
+            }
+
+            if let Some(config_source) = config.source {
+                if let Some(config_source_go) = config_source.go {
+                    if let Some(directory) = config_source_go.directory {
+                        if !directory.is_empty() {
+                            config_source_go_directory = Some(directory);
+                        }
+                    }
+                }
+
+                if let Some(includes) = config_source.includes {
+                    if !includes.is_empty() {
+                        config_source_includes = includes;
+                    }
+                }
+
+                if let Some(config_source_rust) = config_source.rust {
+                    if let Some(ca_source_rust_bin) = config_source_rust.bin {
+                        if !ca_source_rust_bin.is_empty() {
+                            config_source_rust_bin = Some(ca_source_rust_bin);
+                        }
+                    }
+
+                    if let Some(packages) = config_source_rust.packages {
+                        if !packages.is_empty() {
+                            config_source_rust_packages = Some(packages);
+                        }
+                    }
+                }
+
+                if let Some(script) = config_source.script {
+                    if !script.is_empty() {
+                        config_source_script = Some(script);
+                    }
+                }
+            };
+
+            // Load project context
+
+            let mut context = context.to_path_buf();
+
+            if !context.is_absolute() {
+                let current_dir = current_dir().expect("failed to get current directory");
+
+                context = current_dir.join(context).clean().to_path_buf();
+            }
+
+            context = context.clean();
+
+            // Build artifact
+
+            let run_artifact = build::RunArgsArtifact {
+                aliases: vec![],
+                context: context.clone(),
+                export: *export,
+                name: name.clone(),
+                namespace: namespace.clone(),
+                path: *path,
+                rebuild: *rebuild,
+                system: system.clone(),
+                unlock: *unlock,
+                variable: variable.clone(),
+            };
+
+            let run_config = build::RunArgsConfig {
                 context,
-                export,
-                name,
-                namespace,
-                path,
-                rebuild,
-                registry,
-                system,
-                unlock,
-                variable,
-                worker,
-            } => {
-                if name.is_empty() {
-                    error!("no name specified");
-
-                    exit(1);
-                }
-
-                // Set default configurations
-
-                let mut config_environments = Vec::new();
-                let mut config_language = "rust".to_string();
-                let mut config_name = "vorpal".to_string();
-                let mut config_source_go_directory = None;
-                let mut config_source_includes = Vec::new();
-                let mut config_source_rust_bin = None;
-                let mut config_source_rust_packages = None;
-                let mut config_source_script = None;
-
-                // Load project configuration
-
-                let mut config_path = config.to_path_buf();
-
-                if !config.is_absolute() {
-                    let current_dir = current_dir().expect("failed to get current directory");
-
-                    config_path = current_dir.join(config).clean().to_path_buf();
-                }
-
-                config_path = config_path.clean();
-
-                // Load project configuration value, if exists
-
-                let config = match read(&config_path).await {
-                    Err(e) => Err(anyhow!("Failed to read {}: {}", config_path.display(), e)),
-
-                    Ok(toml_bytes) => {
-                        let toml_str = String::from_utf8_lossy(&toml_bytes);
-
-                        match from_str::<VorpalConfig>(&toml_str) {
-                            Err(e) => Err(anyhow!("Failed to parse: {}", e)),
-                            Ok(toml) => Ok(toml),
-                        }
-                    }
-                }?;
-
-                if let Some(environments) = config.environments {
-                    if !environments.is_empty() {
-                        config_environments = environments;
-                    }
-                }
-
-                if let Some(language) = config.language {
-                    config_language = language;
-                }
-
-                if let Some(name) = config.name {
-                    if !name.is_empty() {
-                        config_name = name;
-                    }
-                }
-
-                if let Some(config_source) = config.source {
-                    if let Some(config_source_go) = config_source.go {
-                        if let Some(directory) = config_source_go.directory {
-                            if !directory.is_empty() {
-                                config_source_go_directory = Some(directory);
-                            }
-                        }
-                    }
-
-                    if let Some(includes) = config_source.includes {
-                        if !includes.is_empty() {
-                            config_source_includes = includes;
-                        }
-                    }
-
-                    if let Some(config_source_rust) = config_source.rust {
-                        if let Some(ca_source_rust_bin) = config_source_rust.bin {
-                            if !ca_source_rust_bin.is_empty() {
-                                config_source_rust_bin = Some(ca_source_rust_bin);
-                            }
-                        }
-
-                        if let Some(packages) = config_source_rust.packages {
-                            if !packages.is_empty() {
-                                config_source_rust_packages = Some(packages);
-                            }
-                        }
-                    }
-
-                    if let Some(script) = config_source.script {
-                        if !script.is_empty() {
-                            config_source_script = Some(script);
-                        }
-                    }
-                };
-
-                // Load project context
-
-                let mut context = context.to_path_buf();
-
-                if !context.is_absolute() {
-                    let current_dir = current_dir().expect("failed to get current directory");
-
-                    context = current_dir.join(context).clean().to_path_buf();
-                }
-
-                context = context.clean();
-
-                // Build artifact
-
-                let run_artifact = artifact::make::RunArgsArtifact {
-                    aliases: vec![],
-                    context: context.clone(),
-                    export: *export,
-                    name: name.clone(),
-                    namespace: namespace.clone(),
-                    path: *path,
-                    rebuild: *rebuild,
-                    system: system.clone(),
-                    unlock: *unlock,
-                    variable: variable.clone(),
-                };
-
-                let run_config = artifact::make::RunArgsConfig {
-                    context,
-                    environments: config_environments,
-                    language: config_language,
-                    name: config_name,
-                    source: Some(VorpalConfigSource {
-                        go: Some(VorpalConfigSourceGo {
-                            directory: config_source_go_directory,
-                        }),
-                        includes: Some(config_source_includes),
-                        rust: Some(VorpalConfigSourceRust {
-                            bin: config_source_rust_bin,
-                            packages: config_source_rust_packages,
-                        }),
-                        script: config_source_script,
+                environments: config_environments,
+                language: config_language,
+                name: config_name,
+                source: Some(VorpalConfigSource {
+                    go: Some(VorpalConfigSourceGo {
+                        directory: config_source_go_directory,
                     }),
-                };
+                    includes: Some(config_source_includes),
+                    rust: Some(VorpalConfigSourceRust {
+                        bin: config_source_rust_bin,
+                        packages: config_source_rust_packages,
+                    }),
+                    script: config_source_script,
+                }),
+            };
 
-                let run_service = artifact::make::RunArgsService {
-                    agent: agent.to_string(),
-                    registry: registry.to_string(),
-                    worker: worker.to_string(),
-                };
+            let run_service = build::RunArgsService {
+                agent: agent.to_string(),
+                registry: registry.to_string(),
+                worker: worker.to_string(),
+            };
 
-                artifact::make::run(run_artifact, run_config, run_service).await
-            }
-        },
+            build::run(run_artifact, run_config, run_service).await
+        }
 
-        Command::Auth(auth) => match auth {
-            CommandAuth::Login {
-                client_id,
-                issuer,
-                registry,
-            } => {
-                let discovery_url = format!(
-                    "{}/.well-known/openid-configuration",
-                    issuer.trim_end_matches('/')
-                );
+        Command::Init {} => init::run().await,
 
-                let doc: serde_json::Value = reqwest::get(&discovery_url)
-                    .await?
-                    .error_for_status()?
-                    .json()
-                    .await?;
+        Command::Inspect {
+            digest,
+            namespace,
+            registry,
+        } => inspect::run(digest, namespace, registry).await,
 
-                let device_endpoint = doc
-                    .get("device_authorization_endpoint")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow!("missing device_authorization_endpoint"))?;
+        Command::Login {
+            client_id,
+            issuer,
+            registry,
+        } => {
+            let discovery_url = format!(
+                "{}/.well-known/openid-configuration",
+                issuer.trim_end_matches('/')
+            );
 
-                let token_endpoint = doc
-                    .get("token_endpoint")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| anyhow!("missing token_endpoint"))?;
+            let doc: serde_json::Value = reqwest::get(&discovery_url)
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
 
-                let client_device_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
+            let device_endpoint = doc
+                .get("device_authorization_endpoint")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("missing device_authorization_endpoint"))?;
 
-                let client = BasicClient::new(ClientId::new(client_id.to_string()))
-                    .set_auth_uri(AuthUrl::new(issuer.to_string())?)
-                    .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
-                    .set_device_authorization_url(client_device_url);
+            let token_endpoint = doc
+                .get("token_endpoint")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("missing token_endpoint"))?;
 
-                let http_client = reqwest::ClientBuilder::new()
-                    .redirect(reqwest::redirect::Policy::none())
-                    .build()
-                    .expect("Client should build");
+            let client_device_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
 
-                let details: StandardDeviceAuthorizationResponse = client
-                    .exchange_device_code()
-                    .add_scope(Scope::new("archive".to_string()))
-                    .add_scope(Scope::new("artifact".to_string()))
-                    .add_scope(Scope::new("worker".to_string()))
-                    .request_async(&http_client)
-                    .await?;
+            let client = BasicClient::new(ClientId::new(client_id.to_string()))
+                .set_auth_uri(AuthUrl::new(issuer.to_string())?)
+                .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
+                .set_device_authorization_url(client_device_url);
 
-                if let Some(complete_uri) = details.verification_uri_complete() {
-                    println!(
-                        "Open this URL in your browser:\n{}",
-                        complete_uri.clone().into_secret()
-                    );
-                };
+            let http_client = reqwest::ClientBuilder::new()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("Client should build");
 
+            let details: StandardDeviceAuthorizationResponse = client
+                .exchange_device_code()
+                .add_scope(Scope::new("archive".to_string()))
+                .add_scope(Scope::new("artifact".to_string()))
+                .add_scope(Scope::new("worker".to_string()))
+                .request_async(&http_client)
+                .await?;
+
+            if let Some(complete_uri) = details.verification_uri_complete() {
                 println!(
-                    "Or open {} and enter code: {}",
-                    details.verification_uri(),
-                    details.user_code().secret()
+                    "Open this URL in your browser:\n{}",
+                    complete_uri.clone().into_secret()
                 );
+            };
 
-                let token_result = client
-                    .exchange_device_access_token(&details)
-                    .request_async(&http_client, sleep, None)
-                    .await?;
+            println!(
+                "Or open {} and enter code: {}",
+                details.verification_uri(),
+                details.user_code().secret()
+            );
 
-                let access_token = token_result.access_token().secret();
+            let token_result = client
+                .exchange_device_access_token(&details)
+                .request_async(&http_client, sleep, None)
+                .await?;
 
-                let expires_in = token_result
-                    .expires_in()
-                    .map(|d| d.as_secs())
-                    .unwrap_or_default();
+            let access_token = token_result.access_token().secret();
 
-                let refresh_token = token_result
-                    .refresh_token()
-                    .map(|t| t.secret().to_string())
-                    .unwrap_or_default();
+            let expires_in = token_result
+                .expires_in()
+                .map(|d| d.as_secs())
+                .unwrap_or_default();
 
-                let scopes = token_result
-                    .scopes()
-                    .map(|s| s.iter().map(|scope| scope.to_string()).collect::<Vec<_>>())
-                    .unwrap_or_default();
+            let refresh_token = token_result
+                .refresh_token()
+                .map(|t| t.secret().to_string())
+                .unwrap_or_default();
 
-                // Prepare to store token
+            let scopes = token_result
+                .scopes()
+                .map(|s| s.iter().map(|scope| scope.to_string()).collect::<Vec<_>>())
+                .unwrap_or_default();
 
-                let content = VorpalCredentialsContent {
-                    access_token: access_token.to_string(),
-                    expires_in,
-                    refresh_token,
-                    scopes,
-                };
+            // Prepare to store token
 
-                // TODO: load existing credentials file if it exists
+            let content = VorpalCredentialsContent {
+                access_token: access_token.to_string(),
+                expires_in,
+                refresh_token,
+                scopes,
+            };
 
-                let mut issuer_map = HashMap::new();
-                let mut registry_map = HashMap::new();
+            // TODO: load existing credentials file if it exists
 
-                issuer_map.insert(issuer.to_string(), content);
-                registry_map.insert(registry.to_string(), issuer.to_string());
+            let mut issuer_map = HashMap::new();
+            let mut registry_map = HashMap::new();
 
-                let credentials = VorpalCredentials {
-                    issuer: issuer_map,
-                    registry: registry_map,
-                };
-                let credentials_json = serde_json::to_string_pretty(&credentials)?;
-                let credentials_path = get_key_credentials_path();
+            issuer_map.insert(issuer.to_string(), content);
+            registry_map.insert(registry.to_string(), issuer.to_string());
 
-                write(&credentials_path, credentials_json.as_bytes()).await?;
+            let credentials = VorpalCredentials {
+                issuer: issuer_map,
+                registry: registry_map,
+            };
+            let credentials_json = serde_json::to_string_pretty(&credentials)?;
+            let credentials_path = get_key_credentials_path();
 
-                Ok(())
-            }
-        },
+            write(&credentials_path, credentials_json.as_bytes()).await?;
+
+            Ok(())
+        }
 
         Command::Services(services) => match services {
             CommandServices::Start {

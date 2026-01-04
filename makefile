@@ -104,7 +104,7 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- artifact make --agent "https://localhost:23152" --namespace "$(VORPAL_NAMESPACE)" --registry "https://localhost:23152" --worker "https://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- build --agent "https://localhost:23152" --namespace "$(VORPAL_NAMESPACE)" --registry "https://localhost:23152" --worker "https://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
 	cargo $(CARGO_FLAGS) run --bin "vorpal" -- services start --port "23152" $(VORPAL_FLAGS)
@@ -126,7 +126,7 @@ lima-sync:
 	limactl shell "vorpal-$(LIMA_ARCH)" ./script/lima.sh sync
 
 lima-vorpal:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal artifact make $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal build $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)'
 
 lima-vorpal-start:
 	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal services start $(VORPAL_FLAGS)'
