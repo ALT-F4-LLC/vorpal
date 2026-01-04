@@ -350,3 +350,113 @@ async fn load_function_definition(
 
     Ok(definition)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::TempDir;
+    use tokio::fs::{create_dir_all, write};
+    use vorpal_sdk::api::artifact::ArtifactFunctionParam;
+
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let prev = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn definition(name: &str, namespace: &str, tag: &str) -> ArtifactFunctionDefinition {
+        ArtifactFunctionDefinition {
+            meta: ArtifactFunction {
+                name: name.to_string(),
+                namespace: namespace.to_string(),
+                tag: tag.to_string(),
+                description: "test".to_string(),
+                params: vec![ArtifactFunctionParam {
+                    name: "version".to_string(),
+                    required: true,
+                    description: String::new(),
+                    default: String::new(),
+                }],
+            },
+            artifact_template: Artifact {
+                target: ArtifactSystem::UnknownSystem as i32,
+                sources: Vec::new(),
+                steps: Vec::new(),
+                systems: Vec::new(),
+                aliases: Vec::new(),
+                name: "name-{{version}}".to_string(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_local_function_discovery_and_resolution() {
+        let _lock = env_lock();
+        let temp = TempDir::new().expect("tempdir");
+        let _guard = EnvVarGuard::set("VORPAL_ROOT_DIR", temp.path());
+
+        let name = "hello";
+        let namespace = "default";
+        let tag = "latest";
+        let definition = definition(name, namespace, tag);
+
+        let path = get_artifact_function_path(name, namespace, tag);
+        if let Some(parent) = path.parent() {
+            create_dir_all(parent).await.expect("create dir");
+        }
+
+        let data = serde_json::to_vec(&definition).expect("serialize");
+        write(&path, data).await.expect("write");
+
+        let backend = LocalBackend::new().expect("backend");
+
+        let functions = backend
+            .get_artifact_functions(namespace.to_string(), String::new())
+            .await
+            .expect("functions");
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name, name);
+
+        let mut params = HashMap::new();
+        params.insert("version".to_string(), "1.2.3".to_string());
+
+        let artifact = backend
+            .get_artifact_function(
+                name.to_string(),
+                namespace.to_string(),
+                tag.to_string(),
+                ArtifactSystem::X8664Linux,
+                params,
+            )
+            .await
+            .expect("artifact");
+
+        assert_eq!(artifact.name, "name-1.2.3");
+        assert_eq!(artifact.target(), ArtifactSystem::X8664Linux);
+    }
+}

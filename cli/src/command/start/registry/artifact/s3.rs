@@ -365,3 +365,22 @@ fn map_get_object_error(
         _ => Status::internal(err.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_function_key_name;
+
+    #[test]
+    fn test_parse_function_key_name_valid() {
+        let key = "artifact/function/default/hello/latest.json";
+        assert_eq!(parse_function_key_name(key), Some("hello"));
+    }
+
+    #[test]
+    fn test_parse_function_key_name_invalid() {
+        assert_eq!(parse_function_key_name("artifact/functions/ns/name/tag.json"), None);
+        assert_eq!(parse_function_key_name("artifact/function/ns/name/tag"), None);
+        assert_eq!(parse_function_key_name("artifact/function/ns/name/tag.json/extra"), None);
+        assert_eq!(parse_function_key_name("artifact/function/ns/name.json"), None);
+    }
+}

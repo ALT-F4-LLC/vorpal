@@ -128,3 +128,132 @@ fn render_template(value: &str, params: &HashMap<String, String>) -> String {
 
     rendered
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tonic::Code;
+
+    fn param(name: &str, required: bool, default: &str) -> ArtifactFunctionParam {
+        ArtifactFunctionParam {
+            name: name.to_string(),
+            required,
+            description: String::new(),
+            default: default.to_string(),
+        }
+    }
+
+    fn params_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn test_resolve_params_missing_required() {
+        let spec = vec![param("version", true, "")];
+        let params = HashMap::new();
+
+        let err = resolve_params(&spec, params).expect_err("expected error");
+        assert_eq!(err.code(), Code::InvalidArgument);
+        assert!(err.message().contains("missing required param"));
+    }
+
+    #[test]
+    fn test_resolve_params_default_applied() {
+        let spec = vec![param("version", false, "1.0.0")];
+        let params = HashMap::new();
+
+        let resolved = resolve_params(&spec, params).expect("resolved");
+        assert_eq!(resolved.get("version"), Some(&"1.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_params_override_default() {
+        let spec = vec![param("version", false, "1.0.0")];
+        let params = params_map(&[("version", "2.0.0")]);
+
+        let resolved = resolve_params(&spec, params).expect("resolved");
+        assert_eq!(resolved.get("version"), Some(&"2.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_params_preserves_extra_params() {
+        let spec = Vec::new();
+        let params = params_map(&[("extra", "value")]);
+
+        let resolved = resolve_params(&spec, params).expect("resolved");
+        assert_eq!(resolved.get("extra"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn test_apply_params_to_artifact_nested_fields() {
+        let params = params_map(&[("version", "1.2.3")]);
+        let mut artifact = Artifact {
+            target: ArtifactSystem::UnknownSystem as i32,
+            sources: vec![
+                ArtifactSource {
+                    digest: Some("digest-{{version}}".to_string()),
+                    excludes: vec!["exclude-{{version}}".to_string()],
+                    includes: vec!["include-{{version}}".to_string()],
+                    name: "source-{{version}}".to_string(),
+                    path: "/opt/{{version}}".to_string(),
+                },
+                ArtifactSource {
+                    digest: None,
+                    excludes: Vec::new(),
+                    includes: Vec::new(),
+                    name: "static".to_string(),
+                    path: "/opt/static".to_string(),
+                },
+            ],
+            steps: vec![
+                ArtifactStep {
+                    entrypoint: Some("run-{{version}}".to_string()),
+                    script: Some("echo {{version}}".to_string()),
+                    secrets: vec![ArtifactStepSecret {
+                        name: "secret-{{version}}".to_string(),
+                        value: "value-{{version}}".to_string(),
+                    }],
+                    arguments: vec!["--ver={{version}}".to_string()],
+                    artifacts: vec!["artifact-{{version}}".to_string()],
+                    environments: vec!["ENV={{version}}".to_string()],
+                },
+                ArtifactStep {
+                    entrypoint: None,
+                    script: None,
+                    secrets: Vec::new(),
+                    arguments: Vec::new(),
+                    artifacts: Vec::new(),
+                    environments: Vec::new(),
+                },
+            ],
+            systems: Vec::new(),
+            aliases: vec!["alias-{{version}}".to_string()],
+            name: "name-{{version}}".to_string(),
+        };
+
+        apply_params_to_artifact(&mut artifact, &params);
+
+        assert_eq!(artifact.name, "name-1.2.3");
+        assert_eq!(artifact.aliases[0], "alias-1.2.3");
+
+        assert_eq!(artifact.sources[0].digest.as_deref(), Some("digest-1.2.3"));
+        assert_eq!(artifact.sources[0].excludes[0], "exclude-1.2.3");
+        assert_eq!(artifact.sources[0].includes[0], "include-1.2.3");
+        assert_eq!(artifact.sources[0].name, "source-1.2.3");
+        assert_eq!(artifact.sources[0].path, "/opt/1.2.3");
+        assert_eq!(artifact.sources[1].digest, None);
+
+        assert_eq!(artifact.steps[0].entrypoint.as_deref(), Some("run-1.2.3"));
+        assert_eq!(artifact.steps[0].script.as_deref(), Some("echo 1.2.3"));
+        assert_eq!(artifact.steps[0].secrets[0].name, "secret-1.2.3");
+        assert_eq!(artifact.steps[0].secrets[0].value, "value-1.2.3");
+        assert_eq!(artifact.steps[0].arguments[0], "--ver=1.2.3");
+        assert_eq!(artifact.steps[0].artifacts[0], "artifact-1.2.3");
+        assert_eq!(artifact.steps[0].environments[0], "ENV=1.2.3");
+        assert!(artifact.steps[1].entrypoint.is_none());
+        assert!(artifact.steps[1].script.is_none());
+    }
+}
