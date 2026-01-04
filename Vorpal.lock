@@ -513,6 +513,14 @@ digest = "459265943fcb010124e5056bfff3e9fc95d571f3abef9d022b0af18cbc282b02"
 platform = "aarch64-linux"
 
 [[sources]]
+name = "gh"
+path = "https://github.com/cli/cli/releases/download/v2.69.0/gh_2.69.0_macOS_arm64.zip"
+includes = []
+excludes = []
+digest = "f9d97acb8bc92eca98e2e1ab608050972e4c55dfa4a31001a63a0ce30ee4b545"
+platform = "aarch64-darwin"
+
+[[sources]]
 name = "git"
 path = "https://www.kernel.org/pub/software/scm/git/git-2.52.0.tar.gz"
 includes = []
@@ -575,6 +583,22 @@ includes = []
 excludes = []
 digest = "191226cef6e9ce60e291e178db47682aadea28cb3e92f35f006ba317f3e10195"
 platform = "aarch64-linux"
+
+[[sources]]
+name = "go"
+path = "https://go.dev/dl/go1.24.2.darwin-arm64.tar.gz"
+includes = []
+excludes = []
+digest = "5380e02cdfe2b254af7c3306671fbacc0bfefeb3a9684b502e4af3ad5db917e7"
+platform = "aarch64-darwin"
+
+[[sources]]
+name = "goimports"
+path = "https://go.googlesource.com/tools/+archive/refs/tags/v0.29.0.tar.gz"
+includes = []
+excludes = []
+digest = "b4faf133f053f372cfe8ea3189bf035d19ca1661cb3ac1e7cd34a465de5641c2"
+platform = "aarch64-darwin"
 
 [[sources]]
 name = "golangci-lint"
@@ -609,6 +633,14 @@ digest = "b701d9c54e242620de6013a0ca00f9a2efa9b3e07807363519385f45da44fb97"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "gopls"
+path = "https://go.googlesource.com/tools/+archive/refs/tags/v0.29.0.tar.gz"
+includes = []
+excludes = []
+digest = "b4faf133f053f372cfe8ea3189bf035d19ca1661cb3ac1e7cd34a465de5641c2"
+platform = "aarch64-darwin"
+
+[[sources]]
 name = "grep"
 path = "https://ftpmirror.gnu.org/gnu/grep/grep-3.12.tar.gz"
 includes = []
@@ -623,6 +655,14 @@ includes = []
 excludes = []
 digest = "127096050676822f1f9f18e2bdf847f74907ec691562959cdcbf07e7d524012c"
 platform = "aarch64-linux"
+
+[[sources]]
+name = "grpcurl"
+path = "https://github.com/fullstorydev/grpcurl/archive/refs/tags/v1.9.3.tar.gz"
+includes = []
+excludes = []
+digest = "3db5cef04f38e71c4007ed96cc827209ae5a1b6613c710cd656a252fafcde86c"
+platform = "aarch64-darwin"
 
 [[sources]]
 name = "gzip"
@@ -1169,6 +1209,22 @@ digest = "d5e8fb327ea9568fd1ce2de3557740948a2168faff79c0e02e64bd9f040964d9"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "protoc-gen-go"
+path = "https://github.com/protocolbuffers/protobuf-go/releases/download/v1.36.3/protoc-gen-go.v1.36.3.darwin.arm64.tar.gz"
+includes = []
+excludes = []
+digest = "55c2a0cc7137f3625bd1bf3be85ed940c643e56fa1ceaf51f94c6434980f65a5"
+platform = "aarch64-darwin"
+
+[[sources]]
+name = "protoc-gen-go-grpc"
+path = "https://github.com/grpc/grpc-go/archive/refs/tags/v1.70.0.tar.gz"
+includes = []
+excludes = []
+digest = "eba0f83ab252cffe2c6209f894c4c8238b2473a403bbdbcb985af25140aac95d"
+platform = "aarch64-darwin"
+
+[[sources]]
 name = "python"
 path = "https://www.python.org/ftp/python/3.13.7/Python-3.13.7.tar.xz"
 includes = []
@@ -1423,6 +1479,14 @@ includes = []
 excludes = []
 digest = "d8556139752336799737c98ebacbadc0c8c1c7268da2f0b89110b391bd93b19c"
 platform = "aarch64-linux"
+
+[[sources]]
+name = "staticcheck"
+path = "https://github.com/dominikh/go-tools/archive/refs/tags/2025.1.1.tar.gz"
+includes = []
+excludes = []
+digest = "e8f40ddbc450bf26d1855916519283f7c997ffedbcb971e2a7b92892650d92b6"
+platform = "aarch64-darwin"
 
 [[sources]]
 name = "tar"
