@@ -2,6 +2,8 @@
 
 Build and ship software with one language-agnostic workflow.
 
+![Vorpal](./vorpal_meme.jpg)
+
 ## Why?
 - Declarative: describe steps once, use them anywhere.
 - Cross-language: Rust and Go SDKs today; more to come.
