@@ -17,6 +17,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .message_attribute(
+            "vorpal.artifact.ArtifactFunctionParam",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
+            "vorpal.artifact.ArtifactFunction",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
             "vorpal.artifact.Artifacts",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )

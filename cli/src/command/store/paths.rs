@@ -9,7 +9,9 @@ use walkdir::WalkDir;
 // Root paths
 
 pub fn get_root_dir_path() -> PathBuf {
-    Path::new("/var/lib/vorpal").to_path_buf()
+    std::env::var_os("VORPAL_ROOT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new("/var/lib/vorpal").to_path_buf())
 }
 
 pub fn get_root_key_dir_path() -> PathBuf {
@@ -119,6 +121,21 @@ pub fn get_artifact_config_path(digest: &str, namespace: &str) -> PathBuf {
         .with_extension("json")
 }
 
+pub fn get_root_artifact_function_dir_path() -> PathBuf {
+    get_artifact_dir_path().join("function")
+}
+
+pub fn get_artifact_function_dir_path(namespace: &str) -> PathBuf {
+    get_root_artifact_function_dir_path().join(namespace)
+}
+
+pub fn get_artifact_function_path(name: &str, namespace: &str, tag: &str) -> PathBuf {
+    get_artifact_function_dir_path(namespace)
+        .join(name)
+        .join(tag)
+        .with_extension("json")
+}
+
 pub fn get_root_artifact_output_dir_path() -> PathBuf {
     get_artifact_dir_path().join("output")
 }
@@ -214,6 +231,50 @@ pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let prev = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    #[test]
+    fn test_get_root_dir_path_override() {
+        let _lock = env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let _guard = EnvVarGuard::set("VORPAL_ROOT_DIR", temp.path());
+
+        assert_eq!(get_root_dir_path(), temp.path());
+    }
 }
 
 pub async fn copy_files(

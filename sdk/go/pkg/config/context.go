@@ -442,6 +442,66 @@ func (c *ConfigContext) FetchArtifactAlias(alias string) (*string, error) {
 	return &artifactDigest, nil
 }
 
+func (c *ConfigContext) GetArtifactFunctions(namespace string, namePrefix string) ([]*artifact.ArtifactFunction, error) {
+	request := &artifact.ArtifactFunctionsRequest{
+		Namespace:  namespace,
+		NamePrefix: namePrefix,
+	}
+
+	authHeader, err := ClientAuthHeader(c.registry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get auth header: %w", err)
+	}
+
+	ctx := context.Background()
+	if authHeader != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", authHeader)
+	}
+
+	response, err := c.clientArtifact.GetArtifactFunctions(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching artifact functions: %v", err)
+	}
+
+	return response.Functions, nil
+}
+
+func (c *ConfigContext) GetArtifactFunction(name, namespace, tag string, params map[string]string) (*artifact.Artifact, error) {
+	request := &artifact.ArtifactFunctionRequest{
+		Name:      name,
+		Namespace: namespace,
+		Tag:       tag,
+		System:    c.artifactSystem,
+		Params:    params,
+	}
+
+	authHeader, err := ClientAuthHeader(c.registry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get auth header: %w", err)
+	}
+
+	ctx := context.Background()
+	if authHeader != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", authHeader)
+	}
+
+	response, err := c.clientArtifact.GetArtifactFunction(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching artifact function: %v", err)
+	}
+
+	return response, nil
+}
+
+func (c *ConfigContext) AddArtifactFunction(name, namespace, tag string, params map[string]string) (*string, error) {
+	artifactConfig, err := c.GetArtifactFunction(name, namespace, tag, params)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.AddArtifact(artifactConfig)
+}
+
 func (c *ConfigContext) GetArtifact(digest string) *artifact.Artifact {
 	return c.store.artifact[digest]
 }
