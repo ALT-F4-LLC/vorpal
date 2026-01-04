@@ -1,5 +1,5 @@
 use crate::command::{
-    artifact::config::{get_artifacts, get_order, start},
+    config::{get_artifacts, get_order, start},
     store::{
         archives::unpack_zstd,
         paths::{
