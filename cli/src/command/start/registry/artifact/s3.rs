@@ -1,10 +1,12 @@
 use crate::command::start::registry::{
-    s3::{get_artifact_alias_key, get_artifact_config_key},
+    artifact::function::{resolve_function, ArtifactFunctionDefinition},
+    s3::{get_artifact_alias_key, get_artifact_config_key, get_artifact_function_key},
     ArtifactBackend, S3Backend,
 };
 use sha256::digest;
+use std::collections::HashMap;
 use tonic::{async_trait, Status};
-use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
+use vorpal_sdk::api::artifact::{Artifact, ArtifactFunction, ArtifactSystem};
 
 #[async_trait]
 impl ArtifactBackend for S3Backend {
@@ -210,7 +212,156 @@ impl ArtifactBackend for S3Backend {
         Ok(artifact_digest)
     }
 
+    async fn get_artifact_functions(
+        &self,
+        namespace: String,
+        name_prefix: String,
+    ) -> Result<Vec<ArtifactFunction>, Status> {
+        let client = &self.client;
+        let bucket = &self.bucket;
+
+        let prefix = if namespace.is_empty() {
+            "artifact/function/".to_string()
+        } else {
+            format!("artifact/function/{namespace}/")
+        };
+
+        let name_prefix = if name_prefix.is_empty() {
+            None
+        } else {
+            Some(name_prefix)
+        };
+
+        let mut functions = Vec::new();
+        let mut continuation_token: Option<String> = None;
+
+        loop {
+            let mut request = client.list_objects_v2().bucket(bucket).prefix(&prefix);
+
+            if let Some(token) = continuation_token.as_deref() {
+                request = request.continuation_token(token);
+            }
+
+            let response = request
+                .send()
+                .await
+                .map_err(|err| Status::internal(err.to_string()))?;
+
+            for object in response.contents() {
+                let Some(key) = object.key() else {
+                    continue;
+                };
+
+                if !key.ends_with(".json") {
+                    continue;
+                }
+
+                let Some(function_name) = parse_function_key_name(key) else {
+                    continue;
+                };
+
+                if let Some(prefix) = name_prefix.as_deref() {
+                    if !function_name.starts_with(prefix) {
+                        continue;
+                    }
+                }
+
+                let definition = load_function_definition_from_key(client, bucket, key).await?;
+                functions.push(definition.meta);
+            }
+
+            continuation_token = response
+                .next_continuation_token()
+                .map(|token| token.to_string());
+
+            if continuation_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(functions)
+    }
+
+    async fn get_artifact_function(
+        &self,
+        name: String,
+        namespace: String,
+        tag: String,
+        system: ArtifactSystem,
+        params: HashMap<String, String>,
+    ) -> Result<Artifact, Status> {
+        let client = &self.client;
+        let bucket = &self.bucket;
+
+        let tag = if tag.is_empty() { "latest" } else { &tag };
+        let key = get_artifact_function_key(&name, &namespace, tag);
+
+        let definition = load_function_definition_from_key(client, bucket, &key).await?;
+
+        resolve_function(definition, params, system)
+    }
+
     fn box_clone(&self) -> Box<dyn ArtifactBackend> {
         Box::new(self.clone())
+    }
+}
+
+async fn load_function_definition_from_key(
+    client: &aws_sdk_s3::Client,
+    bucket: &str,
+    key: &str,
+) -> Result<ArtifactFunctionDefinition, Status> {
+    let mut object_stream = client
+        .get_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(map_get_object_error)?
+        .body;
+
+    let mut definition_json = String::new();
+
+    while let Some(chunk) = object_stream.next().await {
+        let chunk = chunk.map_err(|err| Status::internal(err.to_string()))?;
+        definition_json.push_str(&String::from_utf8_lossy(&chunk));
+    }
+
+    let definition: ArtifactFunctionDefinition = serde_json::from_str(&definition_json)
+        .map_err(|err| Status::internal(format!("failed to parse function definition: {err}")))?;
+
+    Ok(definition)
+}
+
+fn parse_function_key_name(key: &str) -> Option<&str> {
+    let parts: Vec<&str> = key.split('/').collect();
+
+    if parts.len() != 5 {
+        return None;
+    }
+
+    if parts[0] != "artifact" || parts[1] != "function" {
+        return None;
+    }
+
+    if !parts[4].ends_with(".json") {
+        return None;
+    }
+
+    Some(parts[3])
+}
+
+fn map_get_object_error(
+    err: aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::get_object::GetObjectError>,
+) -> Status {
+    match err {
+        aws_sdk_s3::error::SdkError::ServiceError(service_err) => {
+            if service_err.err().is_no_such_key() {
+                Status::not_found(service_err.err().to_string())
+            } else {
+                Status::internal(service_err.err().to_string())
+            }
+        }
+        _ => Status::internal(err.to_string()),
     }
 }

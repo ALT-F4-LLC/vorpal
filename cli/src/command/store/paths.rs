@@ -119,6 +119,21 @@ pub fn get_artifact_config_path(digest: &str, namespace: &str) -> PathBuf {
         .with_extension("json")
 }
 
+pub fn get_root_artifact_function_dir_path() -> PathBuf {
+    get_artifact_dir_path().join("function")
+}
+
+pub fn get_artifact_function_dir_path(namespace: &str) -> PathBuf {
+    get_root_artifact_function_dir_path().join(namespace)
+}
+
+pub fn get_artifact_function_path(name: &str, namespace: &str, tag: &str) -> PathBuf {
+    get_artifact_function_dir_path(namespace)
+        .join(name)
+        .join(tag)
+        .with_extension("json")
+}
+
 pub fn get_root_artifact_output_dir_path() -> PathBuf {
     get_artifact_dir_path().join("output")
 }

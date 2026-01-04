@@ -1,11 +1,19 @@
 use crate::command::{
-    start::registry::{ArtifactBackend, LocalBackend},
-    store::paths::{get_artifact_alias_path, get_artifact_config_path, set_timestamps},
+    start::registry::{
+        artifact::function::{resolve_function, ArtifactFunctionDefinition},
+        ArtifactBackend, LocalBackend,
+    },
+    store::paths::{
+        get_artifact_alias_path, get_artifact_config_path, get_artifact_function_dir_path,
+        get_artifact_function_path, get_root_artifact_function_dir_path, set_timestamps,
+    },
 };
 use sha256::digest;
-use tokio::fs::{create_dir_all, read, write};
+use std::collections::HashMap;
+use std::path::Path;
+use tokio::fs::{create_dir_all, read, read_dir, write};
 use tonic::{async_trait, Status};
-use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
+use vorpal_sdk::api::artifact::{Artifact, ArtifactFunction, ArtifactSystem};
 
 #[async_trait]
 impl ArtifactBackend for LocalBackend {
@@ -191,7 +199,154 @@ impl ArtifactBackend for LocalBackend {
         Ok(artifact_digest)
     }
 
+    async fn get_artifact_functions(
+        &self,
+        namespace: String,
+        name_prefix: String,
+    ) -> Result<Vec<ArtifactFunction>, Status> {
+        let namespace_filter = if namespace.is_empty() {
+            None
+        } else {
+            Some(namespace.as_str())
+        };
+        let name_prefix = if name_prefix.is_empty() {
+            None
+        } else {
+            Some(name_prefix.as_str())
+        };
+
+        let mut functions = Vec::new();
+
+        let namespaces = if let Some(namespace) = namespace_filter {
+            vec![get_artifact_function_dir_path(namespace)]
+        } else {
+            let root_dir = get_root_artifact_function_dir_path();
+
+            if !root_dir.exists() {
+                return Ok(functions);
+            }
+
+            let mut namespace_dirs = Vec::new();
+            let mut dir_entries = read_dir(root_dir)
+                .await
+                .map_err(|err| Status::internal(format!("failed to read function dir: {err}")))?;
+
+            while let Some(entry) = dir_entries
+                .next_entry()
+                .await
+                .map_err(|err| Status::internal(format!("failed to read function dir: {err}")))?
+            {
+                if entry
+                    .file_type()
+                    .await
+                    .map_err(|err| Status::internal(format!("failed to read function dir: {err}")))?
+                    .is_dir()
+                {
+                    namespace_dirs.push(entry.path());
+                }
+            }
+
+            namespace_dirs
+        };
+
+        for namespace_dir in namespaces {
+            if !namespace_dir.exists() {
+                continue;
+            }
+
+            let mut names = read_dir(&namespace_dir)
+                .await
+                .map_err(|err| Status::internal(format!("failed to read function dir: {err}")))?;
+
+            while let Some(name_entry) = names
+                .next_entry()
+                .await
+                .map_err(|err| Status::internal(format!("failed to read function dir: {err}")))?
+            {
+                if !name_entry
+                    .file_type()
+                    .await
+                    .map_err(|err| Status::internal(format!("failed to read function dir: {err}")))?
+                    .is_dir()
+                {
+                    continue;
+                }
+
+                let name = name_entry.file_name();
+                let name = name.to_string_lossy();
+
+                if let Some(prefix) = name_prefix {
+                    if !name.starts_with(prefix) {
+                        continue;
+                    }
+                }
+
+                let mut tags = read_dir(name_entry.path()).await.map_err(|err| {
+                    Status::internal(format!("failed to read function dir: {err}"))
+                })?;
+
+                while let Some(tag_entry) = tags.next_entry().await.map_err(|err| {
+                    Status::internal(format!("failed to read function dir: {err}"))
+                })? {
+                    if !tag_entry
+                        .file_type()
+                        .await
+                        .map_err(|err| {
+                            Status::internal(format!("failed to read function dir: {err}"))
+                        })?
+                        .is_file()
+                    {
+                        continue;
+                    }
+
+                    if tag_entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+                        continue;
+                    }
+
+                    let definition = load_function_definition(tag_entry.path()).await?;
+                    functions.push(definition.meta);
+                }
+            }
+        }
+
+        Ok(functions)
+    }
+
+    async fn get_artifact_function(
+        &self,
+        name: String,
+        namespace: String,
+        tag: String,
+        system: ArtifactSystem,
+        params: HashMap<String, String>,
+    ) -> Result<Artifact, Status> {
+        let tag = if tag.is_empty() { "latest" } else { &tag };
+
+        let definition_path = get_artifact_function_path(&name, &namespace, tag);
+
+        if !definition_path.exists() {
+            return Err(Status::not_found("function definition not found"));
+        }
+
+        let definition = load_function_definition(definition_path).await?;
+
+        resolve_function(definition, params, system)
+    }
+
     fn box_clone(&self) -> Box<dyn ArtifactBackend> {
         Box::new(self.clone())
     }
+}
+
+async fn load_function_definition(
+    path: impl AsRef<Path>,
+) -> Result<ArtifactFunctionDefinition, Status> {
+    let definition_data = read(path)
+        .await
+        .map_err(|err| Status::internal(format!("failed to read function definition: {err}")))?;
+
+    let definition: ArtifactFunctionDefinition = serde_json::from_slice(&definition_data)
+        .map_err(|err| Status::internal(format!("failed to parse function definition: {err}")))?;
+
+    Ok(definition)
 }
