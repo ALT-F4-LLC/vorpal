@@ -85,7 +85,7 @@ locals {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "6.5.1"
+  version = "6.6.0"
 
   azs                  = [local.az]
   cidr                 = "10.42.0.0/16"
