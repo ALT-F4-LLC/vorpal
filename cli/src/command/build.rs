@@ -308,6 +308,14 @@ pub async fn run(
     let client_agent = AgentServiceClient::new(client_agent_channel);
     let client_artifact = ArtifactServiceClient::new(client_artifact_channel);
 
+    let mode = if artifact.unlock {
+        "unlocked"
+    } else {
+        "locked"
+    };
+
+    info!("mode: {}", mode);
+
     // Prepare config context
 
     let mut config_context = ConfigContext::new(
@@ -543,8 +551,6 @@ pub async fn run(
                 .await
                 .expect("failed to remove artifact path");
         }
-
-        info!("rebuilding artifact: {}", selected_artifact.name);
     }
 
     let mut build_store = HashMap::<String, Artifact>::new();
@@ -556,20 +562,6 @@ pub async fn run(
         &config_artifacts_store,
     )
     .await?;
-
-    info!(
-        "make: {} ({})",
-        selected_artifact.name, selected_artifact_digest
-    );
-
-    // Agent handles all lockfile operations internally
-    let mode = if artifact.unlock {
-        "unlocked"
-    } else {
-        "locked"
-    };
-
-    info!("mode: {}", mode);
 
     if artifact.export {
         let export =

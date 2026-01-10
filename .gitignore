@@ -2,6 +2,7 @@
 .cargo
 .env
 /dist
+CLAUDE.md
 target
 vendor
 vorpal-*-*
