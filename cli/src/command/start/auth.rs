@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use serde_json::Value;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tonic::{
     metadata::{Ascii, MetadataValue},
@@ -30,19 +31,53 @@ struct Jwk {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct Claims {
-    // Standard-ish
-    // aud: Option<serde_json::Value>, // can be string or array
-    // exp: Option<u64>,
-    // iat: Option<u64>,
-    // iss: Option<String>,
-    // nbf: Option<u64>,
-    // sub: Option<String>,
-    // Useful Keycloak extras
-    // azp: Option<String>,
-    // email: Option<String>,
-    // preferred_username: Option<String>,
-    // scope: Option<String>,
+pub struct Claims {
+    #[allow(dead_code)]
+    pub aud: Option<Value>,
+    #[allow(dead_code)]
+    pub exp: Option<u64>,
+    #[allow(dead_code)]
+    pub iss: Option<String>,
+    pub sub: Option<String>,
+    #[allow(dead_code)]
+    pub scope: Option<String>,
+    #[allow(dead_code)]
+    pub azp: Option<String>,
+    #[allow(dead_code)]
+    pub gty: Option<String>,
+
+    // Namespace permissions
+    pub namespaces: Option<HashMap<String, Vec<String>>>,
+}
+
+impl Claims {
+    /// Check if user has specific permission for a namespace
+    pub fn has_namespace_permission(&self, namespace: &str, permission: &str) -> bool {
+        if let Some(ns_perms) = &self.namespaces {
+            // Check for exact namespace match
+            if let Some(perms) = ns_perms.get(namespace) {
+                return perms.contains(&permission.to_string());
+            }
+
+            // Check for wildcard admin access
+            if let Some(perms) = ns_perms.get("*") {
+                return perms.contains(&permission.to_string());
+            }
+        }
+
+        false
+    }
+
+    /// Get subject (user ID or client ID)
+    pub fn subject(&self) -> Option<&str> {
+        self.sub.as_deref()
+    }
+
+    /// Get grant type for audit logging
+    #[allow(dead_code)]
+    pub fn grant_type(&self) -> Option<&str> {
+        self.gty.as_deref()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,17 +99,20 @@ enum AuthError {
 }
 
 pub struct OidcValidator {
-    // pub audiences: Vec<String>,
     pub issuer: String,
+    pub issuer_audiences: Vec<String>,
     pub jwks_uri: String,
     // Cache the current JWK set; refresh if key not found
     jwks: Arc<RwLock<JwkSet>>,
 }
 
 impl OidcValidator {
-    pub async fn new(issuer: String, _: Vec<String>) -> Result<Self> {
+    pub async fn new(issuer: String, issuer_audiences: Vec<String>) -> Result<Self> {
+        // Normalize issuer by removing trailing slash for consistent comparison
+        let normalized_issuer = issuer.trim_end_matches('/').to_string();
+
         // 1) Discover the realm (/.well-known/openid-configuration)
-        let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+        let discovery_url = format!("{}/.well-known/openid-configuration", normalized_issuer);
         let disc: OidcDiscovery = reqwest::Client::new()
             .get(&discovery_url)
             .send()
@@ -84,19 +122,26 @@ impl OidcValidator {
             .await
             .context("parsing discovery doc")?;
 
-        if disc.issuer != issuer {
+        // Normalize discovery issuer for comparison (Auth0 always includes trailing slash)
+        let normalized_disc_issuer = disc.issuer.trim_end_matches('/').to_string();
+
+        if normalized_disc_issuer != normalized_issuer {
             // Defensive: enforce exact issuer match
-            return Err(anyhow!("issuer mismatch (discovery says {})", disc.issuer));
+            return Err(anyhow!(
+                "issuer mismatch (expected {}, discovery says {})",
+                normalized_issuer,
+                disc.issuer
+            ));
         }
 
         // 2) Fetch JWKS
         let jwks = fetch_jwks(&disc.jwks_uri).await?;
 
         Ok(Self {
-            // audiences,
-            issuer,
-            jwks_uri: disc.jwks_uri,
+            issuer: normalized_issuer,
+            issuer_audiences,
             jwks: Arc::new(RwLock::new(jwks)),
+            jwks_uri: disc.jwks_uri,
         })
     }
 
@@ -108,9 +153,10 @@ impl OidcValidator {
         // Decode header to pick the right key (kid)
         let header = decode_header(token).map_err(|e| AuthError::Jwt(e.to_string()))?;
         let kid = header.kid.ok_or(AuthError::MissingKid)?;
+        let aud: Vec<&str> = self.issuer_audiences.iter().map(|s| s.as_str()).collect();
 
         // Try current cache
-        if let Some(claims) = self.try_decode_with_kid(token, &kid).await? {
+        if let Some(claims) = self.try_decode_with_kid(aud.clone(), &kid, token).await? {
             // self.validate_claims(&claims)?;
             return Ok(claims);
         }
@@ -121,7 +167,7 @@ impl OidcValidator {
             .map_err(|e| AuthError::Jwt(format!("jwks refresh failed: {e}")))?;
         *self.jwks.write().await = fresh;
 
-        if let Some(claims) = self.try_decode_with_kid(token, &kid).await? {
+        if let Some(claims) = self.try_decode_with_kid(aud, &kid, token).await? {
             // self.validate_claims(&claims)?;
             return Ok(claims);
         }
@@ -131,8 +177,9 @@ impl OidcValidator {
 
     async fn try_decode_with_kid(
         &self,
-        token: &str,
+        aud: Vec<&str>,
         kid: &str,
+        token: &str,
     ) -> Result<Option<Claims>, AuthError> {
         let jwks = self.jwks.read().await.clone();
         let Some(jwk) = jwks.keys.iter().find(|k| k.kid.as_deref() == Some(kid)) else {
@@ -156,10 +203,10 @@ impl OidcValidator {
             DecodingKey::from_rsa_components(&n, &e).map_err(|e| AuthError::Jwt(e.to_string()))?;
 
         let mut validation = Validation::new(Algorithm::RS256);
-        // Note: For service-to-service auth, the audience in the token may be the client_id
-        // rather than the service name. We validate issuer and expiry but allow flexible audiences.
-        validation.validate_aud = false; // Don't enforce strict audience validation
-        validation.set_issuer(&[&self.issuer]);
+        validation.set_audience(&aud);
+        validation.validate_aud = true;
+        // Accept issuer with or without trailing slash (Auth0 includes it, others may not)
+        validation.set_issuer(&[&self.issuer, &format!("{}/", self.issuer)]);
         validation.validate_exp = true;
         validation.validate_nbf = true;
 
@@ -239,6 +286,7 @@ struct TokenEndpointDiscovery {
 
 #[derive(Debug, Serialize)]
 struct ClientCredentialsRequest {
+    audience: Option<String>,
     client_id: String,
     client_secret: String,
     grant_type: String,
@@ -248,8 +296,9 @@ struct ClientCredentialsRequest {
 #[derive(Debug, Deserialize)]
 struct ClientCredentialsResponse {
     access_token: String,
-    // expires_in: u64,
-    // token_type: String,
+    expires_in: u64,
+    #[allow(dead_code)]
+    token_type: String,
 }
 
 /// Performs OAuth2 Client Credentials Flow token exchange for service-to-service authentication
@@ -258,15 +307,17 @@ struct ClientCredentialsResponse {
 /// - issuer: Base URL of the OIDC provider (e.g., http://localhost:8080/realms/vorpal)
 /// - client_id: Service account client ID
 /// - client_secret: Service account client secret
-/// - scope: OAuth2 scope to request (e.g., "archive" or "artifact")
+/// - scope: OAuth2 scope to request
+/// - audience: API identifier
 ///
-/// Returns: Bearer token as MetadataValue suitable for gRPC requests
+/// Returns: Bearer token as MetadataValue and expires_in suitable for gRPC requests
 pub async fn exchange_client_credentials(
     issuer: &str,
-    client_id: &str,
-    client_secret: &str,
+    issuer_audience: Option<&str>,
+    issuer_client_id: &str,
+    issuer_client_secret: &str,
     scope: &str,
-) -> Result<MetadataValue<Ascii>> {
+) -> Result<(MetadataValue<Ascii>, u64)> {
     // 1) Discover the token endpoint via OIDC discovery
     let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
 
@@ -296,9 +347,10 @@ pub async fn exchange_client_credentials(
 
     // 2) Exchange client credentials for access token
     let token_request = ClientCredentialsRequest {
+        audience: issuer_audience.map(|s| s.to_string()),
+        client_id: issuer_client_id.to_string(),
+        client_secret: issuer_client_secret.to_string(),
         grant_type: "client_credentials".to_string(),
-        client_id: client_id.to_string(),
-        client_secret: client_secret.to_string(),
         scope: scope.to_string(),
     };
 
@@ -344,5 +396,36 @@ pub async fn exchange_client_credentials(
         .parse()
         .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
 
-    Ok(auth_header)
+    Ok((auth_header, response.expires_in))
+}
+
+// ===== Authorization Helpers =====
+
+/// Require namespace permission in gRPC handler - returns 403 if missing
+pub fn require_namespace_permission<T>(
+    request: &Request<T>,
+    namespace: &str,
+    permission: &str,
+) -> Result<(), Status> {
+    let claims = request
+        .extensions()
+        .get::<Claims>()
+        .ok_or_else(|| Status::unauthenticated("no claims found"))?;
+
+    if !claims.has_namespace_permission(namespace, permission) {
+        return Err(Status::permission_denied(format!(
+            "insufficient permissions: no {} access to namespace: {}",
+            permission, namespace
+        )));
+    }
+
+    Ok(())
+}
+
+/// Extract user context for audit logging
+pub fn get_user_context<T>(request: &Request<T>) -> Option<String> {
+    request
+        .extensions()
+        .get::<Claims>()
+        .and_then(|claims| claims.subject().map(String::from))
 }

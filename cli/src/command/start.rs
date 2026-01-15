@@ -27,6 +27,7 @@ mod worker;
 
 pub struct RunArgs {
     pub issuer: Option<String>,
+    pub issuer_audience: Option<String>,
     pub issuer_client_id: Option<String>,
     pub issuer_client_secret: Option<String>,
     pub port: u16,
@@ -118,7 +119,12 @@ pub async fn run(args: RunArgs) -> Result<()> {
         let artifact_server = ArtifactServer::new(backend_artifact);
 
         if let Some(issuer) = &args.issuer {
-            let validator_audiences = vec!["cli".to_string(), "worker".to_string()];
+            let mut validator_audiences = vec![];
+
+            if let Some(audience) = &args.issuer_audience {
+                validator_audiences.push(audience.clone());
+            }
+
             let validator =
                 Arc::new(auth::OidcValidator::new(issuer.clone(), validator_audiences).await?);
             let validator_intercepter = auth::new_interceptor(validator);
@@ -144,12 +150,18 @@ pub async fn run(args: RunArgs) -> Result<()> {
     if args.services.contains(&"worker".to_string()) {
         let worker_server = WorkerServer::new(
             args.issuer.clone(),
+            args.issuer_audience.clone(),
             args.issuer_client_id,
             args.issuer_client_secret,
         );
 
         if let Some(issuer) = &args.issuer {
-            let validator_audiences = vec!["cli".to_string()];
+            let mut validator_audiences = vec![];
+
+            if let Some(audience) = &args.issuer_audience {
+                validator_audiences.push(audience.clone());
+            }
+
             let validator =
                 Arc::new(auth::OidcValidator::new(issuer.clone(), validator_audiences).await?);
             let validator_intercepter = auth::new_interceptor(validator);

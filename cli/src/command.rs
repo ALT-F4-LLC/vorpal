@@ -75,6 +75,9 @@ pub enum CommandServices {
         issuer: Option<String>,
 
         #[arg(long)]
+        issuer_audience: Option<String>,
+
+        #[arg(long)]
         issuer_client_id: Option<String>,
 
         #[arg(long)]
@@ -172,13 +175,17 @@ pub enum Command {
 
     /// Login to an OAuth2 provider
     Login {
-        /// OAuth2 client_id configured in Keycloak
-        #[arg(long, default_value = "cli")]
-        client_id: String,
-
         /// Issuer base URL, e.g. https://id.example.com/realms/myrealm
         #[arg(long, default_value = "http://localhost:8080/realms/vorpal")]
         issuer: String,
+
+        #[arg(long)]
+        /// Issuer OAuth2 Client Audience
+        issuer_audience: Option<String>,
+
+        /// Issuer OAuth2 Client ID
+        #[arg(long, default_value = "cli")]
+        issuer_client_id: String,
 
         // Registry address
         #[arg(default_value_t = get_default_address(), global = true, long)]
@@ -408,8 +415,9 @@ pub async fn run() -> Result<()> {
         } => inspect::run(digest, namespace, registry).await,
 
         Command::Login {
-            client_id,
             issuer,
+            issuer_audience,
+            issuer_client_id,
             registry,
         } => {
             let discovery_url = format!(
@@ -435,7 +443,7 @@ pub async fn run() -> Result<()> {
 
             let client_device_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
 
-            let client = BasicClient::new(ClientId::new(client_id.to_string()))
+            let client = BasicClient::new(ClientId::new(issuer_client_id.to_string()))
                 .set_auth_uri(AuthUrl::new(issuer.to_string())?)
                 .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
                 .set_device_authorization_url(client_device_url);
@@ -445,13 +453,16 @@ pub async fn run() -> Result<()> {
                 .build()
                 .expect("Client should build");
 
-            let details: StandardDeviceAuthorizationResponse = client
+            let mut device_request = client
                 .exchange_device_code()
-                .add_scope(Scope::new("archive".to_string()))
-                .add_scope(Scope::new("artifact".to_string()))
-                .add_scope(Scope::new("worker".to_string()))
-                .request_async(&http_client)
-                .await?;
+                .add_scope(Scope::new("offline_access".to_string()));
+
+            if let Some(audience) = issuer_audience {
+                device_request = device_request.add_extra_param("audience", audience);
+            }
+
+            let details: StandardDeviceAuthorizationResponse =
+                device_request.request_async(&http_client).await?;
 
             if let Some(complete_uri) = details.verification_uri_complete() {
                 println!(
@@ -492,7 +503,13 @@ pub async fn run() -> Result<()> {
 
             let content = VorpalCredentialsContent {
                 access_token: access_token.to_string(),
+                audience: issuer_audience.clone(),
+                client_id: issuer_client_id.clone(),
                 expires_in,
+                issued_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
                 refresh_token,
                 scopes,
             };
@@ -520,6 +537,7 @@ pub async fn run() -> Result<()> {
         Command::Services(services) => match services {
             CommandServices::Start {
                 issuer,
+                issuer_audience,
                 issuer_client_id,
                 issuer_client_secret,
                 port,
@@ -530,6 +548,7 @@ pub async fn run() -> Result<()> {
             } => {
                 let run_args = start::RunArgs {
                     issuer: issuer.clone(),
+                    issuer_audience: issuer_audience.clone(),
                     issuer_client_id: issuer_client_id.clone(),
                     issuer_client_secret: issuer_client_secret.clone(),
                     port: *port,

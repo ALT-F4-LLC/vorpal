@@ -104,7 +104,7 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- build --agent "https://localhost:23152" --namespace "$(VORPAL_NAMESPACE)" --registry "https://localhost:23152" --worker "https://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- build --agent "https://localhost:23152" --registry "https://localhost:23152" --worker "https://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
 	cargo $(CARGO_FLAGS) run --bin "vorpal" -- services start --port "23152" $(VORPAL_FLAGS)
