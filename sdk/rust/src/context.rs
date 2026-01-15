@@ -301,6 +301,10 @@ impl ConfigContext {
     }
 
     pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
+        if self.store.artifact.contains_key(digest) {
+            return Ok(digest.to_string());
+        }
+
         // TODO: look in lockfile for artifact version
 
         let request = ArtifactRequest {
