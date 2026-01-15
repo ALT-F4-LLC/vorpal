@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Original function to restore after tests
@@ -41,12 +42,14 @@ func TestClientAuthHeaderValid(t *testing.T) {
 	tempDir := t.TempDir()
 	credPath := filepath.Join(tempDir, "credentials.json")
 
-	// Create valid credentials file
+	// Create valid credentials file with IssuedAt set to now (token not expired)
 	credentials := VorpalCredentials{
 		Issuer: map[string]VorpalCredentialsContent{
 			"example-issuer": {
 				AccessToken:  "test-access-token-12345",
+				ClientId:     "test-client-id",
 				ExpiresIn:    3600,
+				IssuedAt:     time.Now().Unix(),
 				RefreshToken: "test-refresh-token",
 				Scopes:       []string{"read", "write"},
 			},
@@ -91,7 +94,9 @@ func TestClientAuthHeaderRegistryNotFound(t *testing.T) {
 		Issuer: map[string]VorpalCredentialsContent{
 			"example-issuer": {
 				AccessToken:  "test-access-token",
+				ClientId:     "test-client-id",
 				ExpiresIn:    3600,
+				IssuedAt:     time.Now().Unix(),
 				RefreshToken: "test-refresh-token",
 				Scopes:       []string{"read"},
 			},
@@ -114,15 +119,13 @@ func TestClientAuthHeaderRegistryNotFound(t *testing.T) {
 	getKeyCredentialsPathFunc = mockGetKeyCredentialsPath(credPath)
 	defer func() { getKeyCredentialsPathFunc = originalGetKeyCredentialsPathFunc }()
 
-	// Test with registry not in credentials
-	_, err = ClientAuthHeader("https://registry.example.com")
-	if err == nil {
-		t.Fatal("expected error for registry not found, got nil")
+	// Test with registry not in credentials - should return empty string (allows unauthenticated)
+	header, err := ClientAuthHeader("https://registry.example.com")
+	if err != nil {
+		t.Fatalf("expected no error for registry not found, got: %v", err)
 	}
-
-	expectedError := "no issuer found for registry"
-	if err.Error()[:len(expectedError)] != expectedError {
-		t.Fatalf("expected error containing %q, got %q", expectedError, err.Error())
+	if header != "" {
+		t.Fatalf("expected empty header for registry not found, got: %q", header)
 	}
 }
 
@@ -136,7 +139,9 @@ func TestClientAuthHeaderIssuerNotFound(t *testing.T) {
 		Issuer: map[string]VorpalCredentialsContent{
 			"different-issuer": {
 				AccessToken:  "test-access-token",
+				ClientId:     "test-client-id",
 				ExpiresIn:    3600,
+				IssuedAt:     time.Now().Unix(),
 				RefreshToken: "test-refresh-token",
 				Scopes:       []string{"read"},
 			},
@@ -165,7 +170,7 @@ func TestClientAuthHeaderIssuerNotFound(t *testing.T) {
 		t.Fatal("expected error for issuer not found, got nil")
 	}
 
-	expectedError := "no issuer found for registry"
+	expectedError := "no credentials for issuer"
 	if err.Error()[:len(expectedError)] != expectedError {
 		t.Fatalf("expected error containing %q, got %q", expectedError, err.Error())
 	}
@@ -204,17 +209,22 @@ func TestClientAuthHeaderMultipleRegistries(t *testing.T) {
 	credPath := filepath.Join(tempDir, "credentials.json")
 
 	// Create credentials file with multiple registries and issuers
+	now := time.Now().Unix()
 	credentials := VorpalCredentials{
 		Issuer: map[string]VorpalCredentialsContent{
 			"issuer-one": {
 				AccessToken:  "token-one",
+				ClientId:     "client-one",
 				ExpiresIn:    3600,
+				IssuedAt:     now,
 				RefreshToken: "refresh-one",
 				Scopes:       []string{"read"},
 			},
 			"issuer-two": {
 				AccessToken:  "token-two",
+				ClientId:     "client-two",
 				ExpiresIn:    7200,
+				IssuedAt:     now,
 				RefreshToken: "refresh-two",
 				Scopes:       []string{"read", "write"},
 			},

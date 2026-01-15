@@ -13,13 +13,14 @@ use crate::{
 use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use http::uri::{InvalidUri, Uri};
+use oauth2::{basic::BasicClient, AuthUrl, ClientId, RefreshToken, TokenResponse, TokenUrl};
 use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
-use tokio::fs::read;
+use tokio::fs::{read, write};
 use tonic::{
     metadata::{Ascii, MetadataValue},
     transport::{Certificate, Channel, ClientTlsConfig, Server},
@@ -56,7 +57,11 @@ pub struct ConfigServer {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VorpalCredentialsContent {
     pub access_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<String>,
+    pub client_id: String,
     pub expires_in: u64,
+    pub issued_at: u64,
     pub refresh_token: String,
     pub scopes: Vec<String>,
 }
@@ -396,35 +401,141 @@ pub fn get_key_credentials_path() -> PathBuf {
         .with_extension("json")
 }
 
-pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
-    let mut header: Option<MetadataValue<_>> = None;
+/// Refreshes an expired access token using the refresh token
+async fn refresh_access_token(
+    audience: Option<&str>,
+    client_id: &str,
+    issuer: &str,
+    refresh_token: &str,
+) -> Result<(String, u64, u64)> {
+    // Discover token endpoint
+    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+    let doc: serde_json::Value = reqwest::get(&discovery_url).await?.json().await?;
 
-    let credentials_path = get_key_credentials_path();
+    let token_endpoint = doc
+        .get("token_endpoint")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("missing token_endpoint in OIDC discovery"))?;
 
-    if credentials_path.exists() {
-        let credentials_data = read(credentials_path).await?;
+    // Create OAuth2 client
+    let client = BasicClient::new(ClientId::new(client_id.to_string()))
+        .set_auth_uri(AuthUrl::new(issuer.to_string())?)
+        .set_token_uri(TokenUrl::new(token_endpoint.to_string())?);
 
-        let credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
+    // Exchange refresh token
+    let http_client = reqwest::Client::new();
+    let refresh_token_obj = RefreshToken::new(refresh_token.to_string());
+    let mut request = client.exchange_refresh_token(&refresh_token_obj);
 
-        let registry_issuer = credentials
-            .registry
-            .get(registry)
-            .ok_or_else(|| anyhow!("no issuer found for registry: {}", registry))?;
-
-        let issuer_credentials = credentials.issuer.get(registry_issuer).ok_or_else(|| {
-            anyhow!(
-                "no issuer found for registry: {} (issuer: {})",
-                registry,
-                registry_issuer
-            )
-        })?;
-
-        header = Some(
-            format!("Bearer {}", issuer_credentials.access_token)
-                .parse()
-                .map_err(|e| anyhow!("failed to parse service secret: {}", e))?,
-        );
+    // Only add audience if provided (Auth0 requires it, others may not)
+    if let Some(aud) = audience {
+        request = request.add_extra_param("audience", aud);
     }
 
-    Ok(header)
+    let token_result = request.request_async(&http_client).await?;
+
+    let new_access_token = token_result.access_token().secret().to_string();
+    let new_expires_in = token_result
+        .expires_in()
+        .map(|d| d.as_secs())
+        .unwrap_or(3600);
+
+    let issued_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+
+    Ok((new_access_token, new_expires_in, issued_at))
+}
+
+pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
+    let credentials_path = get_key_credentials_path();
+
+    if !credentials_path.exists() {
+        return Ok(None);
+    }
+
+    let credentials_data = read(&credentials_path).await?;
+    let mut credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
+
+    let registry_issuer = match credentials.registry.get(registry) {
+        Some(issuer) => issuer.clone(),
+        None => return Ok(None),
+    };
+
+    // Check if token needs refresh
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+
+    let needs_refresh = {
+        let issuer_creds = credentials
+            .issuer
+            .get(&registry_issuer)
+            .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?;
+
+        let token_age = now - issuer_creds.issued_at;
+        let expires_in = issuer_creds.expires_in;
+
+        // Refresh if token has less than 5 minutes left
+        token_age + 300 >= expires_in
+    };
+
+    if needs_refresh {
+        // Clone values needed for refresh
+        let (audience, client_id, refresh_token) = {
+            let issuer_creds = credentials
+                .issuer
+                .get(&registry_issuer)
+                .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?;
+            (
+                issuer_creds.audience.clone(),
+                issuer_creds.client_id.clone(),
+                issuer_creds.refresh_token.clone(),
+            )
+        };
+
+        // Skip refresh if no refresh token available (user must re-login)
+        if refresh_token.is_empty() {
+            return Err(anyhow!(
+                "Access token expired and no refresh token available. Please run: vorpal login --issuer {}",
+                registry_issuer
+            ));
+        }
+
+        let (new_token, new_expires, new_issued_at) = refresh_access_token(
+            audience.as_deref(),
+            &client_id,
+            &registry_issuer,
+            &refresh_token,
+        )
+        .await?;
+
+        // Now update the credentials
+        let issuer_creds = credentials
+            .issuer
+            .get_mut(&registry_issuer)
+            .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?;
+
+        issuer_creds.access_token = new_token;
+        issuer_creds.expires_in = new_expires;
+        issuer_creds.issued_at = new_issued_at;
+
+        // Save updated credentials
+        let credentials_json = serde_json::to_string_pretty(&credentials)?;
+        write(&credentials_path, credentials_json.as_bytes()).await?;
+    }
+
+    // Get the access token
+    let access_token = credentials
+        .issuer
+        .get(&registry_issuer)
+        .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?
+        .access_token
+        .clone();
+
+    let header = format!("Bearer {}", access_token)
+        .parse()
+        .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
+
+    Ok(Some(header))
 }
