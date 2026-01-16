@@ -4,6 +4,6 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_PASSWORD: password
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
-    image: quay.io/keycloak/keycloak:26.4.7
+    image: quay.io/keycloak/keycloak:26.5.1
     ports:
       - 127.0.0.1:8080:8080
