@@ -10,8 +10,11 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -48,7 +51,10 @@ type ConfigContext struct {
 // VorpalCredentialsContent represents OIDC credentials for an issuer
 type VorpalCredentialsContent struct {
 	AccessToken  string   `json:"access_token"`
+	Audience     *string  `json:"audience,omitempty"`
+	ClientId     string   `json:"client_id"`
 	ExpiresIn    int64    `json:"expires_in"`
+	IssuedAt     int64    `json:"issued_at"`
 	RefreshToken string   `json:"refresh_token"`
 	Scopes       []string `json:"scopes"`
 }
@@ -57,6 +63,11 @@ type VorpalCredentialsContent struct {
 type VorpalCredentials struct {
 	Issuer   map[string]VorpalCredentialsContent `json:"issuer"`
 	Registry map[string]string                   `json:"registry"`
+}
+
+// OIDCDiscovery represents the OIDC discovery document
+type OIDCDiscovery struct {
+	TokenEndpoint string `json:"token_endpoint"`
 }
 
 type ConfigServer struct {
@@ -98,6 +109,58 @@ func (s *ConfigServer) GetArtifacts(ctx context.Context, request *artifact.Artif
 	return response, nil
 }
 
+// refreshAccessToken refreshes an expired access token using the refresh token
+func refreshAccessToken(audience *string, clientId, issuer, refreshToken string) (string, int64, int64, error) {
+	// Discover token endpoint
+	discoveryURL := fmt.Sprintf("%s/.well-known/openid-configuration", issuer)
+	resp, err := http.Get(discoveryURL)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("failed to fetch OIDC discovery: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var discovery OIDCDiscovery
+	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil {
+		return "", 0, 0, fmt.Errorf("failed to parse OIDC discovery: %w", err)
+	}
+
+	// Build refresh token request
+	data := url.Values{}
+	data.Set("grant_type", "refresh_token")
+	data.Set("client_id", clientId)
+	data.Set("refresh_token", refreshToken)
+	if audience != nil {
+		data.Set("audience", *audience)
+	}
+
+	tokenResp, err := http.PostForm(discovery.TokenEndpoint, data)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("failed to refresh token: %w", err)
+	}
+	defer tokenResp.Body.Close()
+
+	if tokenResp.StatusCode != http.StatusOK {
+		return "", 0, 0, fmt.Errorf("token refresh failed with status: %d", tokenResp.StatusCode)
+	}
+
+	var tokenResult struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int64  `json:"expires_in"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
+		return "", 0, 0, fmt.Errorf("failed to parse token response: %w", err)
+	}
+
+	expiresIn := tokenResult.ExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 3600 // default 1 hour
+	}
+
+	issuedAt := time.Now().Unix()
+
+	return tokenResult.AccessToken, expiresIn, issuedAt, nil
+}
+
 // ClientAuthHeader retrieves the authorization header for a given registry.
 // Returns the Bearer token string if credentials exist, empty string otherwise, or error on failure.
 // This matches the Rust SDK's client_auth_header function.
@@ -125,13 +188,50 @@ func ClientAuthHeader(registry string) (string, error) {
 	// Lookup registry -> issuer mapping
 	registryIssuer, ok := credentials.Registry[registry]
 	if !ok {
-		return "", fmt.Errorf("no issuer found for registry: %s", registry)
+		// No registry mapping - allow unauthenticated requests
+		return "", nil
 	}
 
 	// Lookup issuer credentials
 	issuerCredentials, ok := credentials.Issuer[registryIssuer]
 	if !ok {
-		return "", fmt.Errorf("no issuer found for registry: %s (issuer: %s)", registry, registryIssuer)
+		return "", fmt.Errorf("no credentials for issuer: %s", registryIssuer)
+	}
+
+	// Check if token needs refresh (5-minute buffer)
+	now := time.Now().Unix()
+	tokenAge := now - issuerCredentials.IssuedAt
+	needsRefresh := tokenAge+300 >= issuerCredentials.ExpiresIn
+
+	if needsRefresh {
+		if issuerCredentials.RefreshToken == "" {
+			return "", fmt.Errorf("access token expired and no refresh token available. Please run: vorpal login --issuer %s", registryIssuer)
+		}
+
+		newToken, newExpires, newIssuedAt, err := refreshAccessToken(
+			issuerCredentials.Audience,
+			issuerCredentials.ClientId,
+			registryIssuer,
+			issuerCredentials.RefreshToken,
+		)
+		if err != nil {
+			return "", fmt.Errorf("failed to refresh token: %w", err)
+		}
+
+		// Update credentials
+		issuerCredentials.AccessToken = newToken
+		issuerCredentials.ExpiresIn = newExpires
+		issuerCredentials.IssuedAt = newIssuedAt
+		credentials.Issuer[registryIssuer] = issuerCredentials
+
+		// Save updated credentials
+		updatedData, err := json.MarshalIndent(credentials, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to serialize credentials: %w", err)
+		}
+		if err := os.WriteFile(credentialsPath, updatedData, 0600); err != nil {
+			return "", fmt.Errorf("failed to write credentials: %w", err)
+		}
 	}
 
 	// Format Bearer token

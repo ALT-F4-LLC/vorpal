@@ -51,21 +51,24 @@ const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
 #[derive(Debug)]
 pub struct WorkerServer {
-    pub oauth_issuer: Option<String>,
-    pub oauth_client_id: Option<String>,
-    pub oauth_client_secret: Option<String>,
+    pub issuer_audience: Option<String>,
+    pub issuer_client_id: Option<String>,
+    pub issuer_client_secret: Option<String>,
+    pub issuer: Option<String>,
 }
 
 impl WorkerServer {
     pub fn new(
-        oauth_issuer: Option<String>,
-        oauth_client_id: Option<String>,
-        oauth_client_secret: Option<String>,
+        issuer: Option<String>,
+        issuer_audience: Option<String>,
+        issuer_client_id: Option<String>,
+        issuer_client_secret: Option<String>,
     ) -> Self {
         Self {
-            oauth_issuer,
-            oauth_client_id,
-            oauth_client_secret,
+            issuer,
+            issuer_audience,
+            issuer_client_id,
+            issuer_client_secret,
         }
     }
 }
@@ -76,26 +79,35 @@ impl WorkerServer {
 /// Client Credentials Flow. Returns None if credentials are not configured.
 async fn obtain_service_credentials(
     issuer: Option<&str>,
-    client_id: Option<&str>,
-    client_secret: Option<&str>,
-    scope: &str,
-) -> Option<MetadataValue<Ascii>> {
+    issuer_audience: Option<&str>,
+    issuer_client_id: Option<&str>,
+    issuer_client_secret: Option<&str>,
+    issuer_scope: &str,
+) -> Option<(MetadataValue<Ascii>, u64)> {
     let issuer = issuer?;
-    let client_id = client_id?;
-    let client_secret = client_secret?;
+    let issuer_client_id = issuer_client_id?;
+    let issuer_client_secret = issuer_client_secret?;
 
-    match auth::exchange_client_credentials(issuer, client_id, client_secret, scope).await {
-        Ok(token) => {
+    match auth::exchange_client_credentials(
+        issuer,
+        issuer_audience,
+        issuer_client_id,
+        issuer_client_secret,
+        issuer_scope,
+    )
+    .await
+    {
+        Ok((token, expires_in)) => {
             info!(
-                "worker |> obtained service credentials for scope: {}",
-                scope
+                "worker |> obtained service credentials for scope: {} (expires in {}s)",
+                issuer_scope, expires_in
             );
-            Some(token)
+            Some((token, expires_in))
         }
         Err(err) => {
             error!(
                 "worker |> failed to obtain service credentials for scope {}: {}",
-                scope, err
+                issuer_scope, err
             );
             None
         }
@@ -529,9 +541,10 @@ async fn send_message(
 }
 
 async fn build_artifact(
-    client_id: Option<&str>,
-    client_secret: Option<&str>,
     issuer: Option<&str>,
+    issuer_audience: Option<&str>,
+    issuer_client_id: Option<&str>,
+    issuer_client_secret: Option<&str>,
     request: BuildArtifactRequest,
     tx: Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
@@ -567,11 +580,25 @@ async fn build_artifact(
     }
 
     // Obtain service-to-service OAuth2 tokens for archive and artifact services
-    let archive_auth_header =
-        obtain_service_credentials(issuer, client_id, client_secret, "archive").await;
+    let archive_auth_header = obtain_service_credentials(
+        issuer,
+        issuer_audience,
+        issuer_client_id,
+        issuer_client_secret,
+        "read:archive write:archive",
+    )
+    .await
+    .map(|(token, _expires_in)| token);
 
-    let artifact_auth_header =
-        obtain_service_credentials(issuer, client_id, client_secret, "artifact").await;
+    let artifact_auth_header = obtain_service_credentials(
+        issuer,
+        issuer_audience,
+        issuer_client_id,
+        issuer_client_secret,
+        "read:artifact write:artifact",
+    )
+    .await
+    .map(|(token, _expires_in)| token);
 
     // Calculate artifact digest
 
@@ -888,17 +915,32 @@ impl WorkerService for WorkerServer {
         &self,
         request: Request<BuildArtifactRequest>,
     ) -> Result<Response<Self::BuildArtifactStream>, Status> {
+        // Check namespace authorization if auth is enabled
+        if request.extensions().get::<auth::Claims>().is_some() {
+            let req_inner = request.get_ref();
+            auth::require_namespace_permission(&request, &req_inner.artifact_namespace, "write")?;
+
+            if let Some(user) = auth::get_user_context(&request) {
+                info!(
+                    "worker |> build requested by user: {} in namespace: {}",
+                    user, req_inner.artifact_namespace
+                );
+            }
+        }
+
         let (tx, rx) = mpsc::channel(100);
 
-        let client_id = self.oauth_client_id.clone();
-        let client_secret = self.oauth_client_secret.clone();
-        let issuer = self.oauth_issuer.clone();
+        let issuer_audience = self.issuer_audience.clone();
+        let issuer_client_id = self.issuer_client_id.clone();
+        let issuer_client_secret = self.issuer_client_secret.clone();
+        let issuer = self.issuer.clone();
 
         tokio::spawn(async move {
             if let Err(err) = build_artifact(
-                client_id.as_deref(),
-                client_secret.as_deref(),
                 issuer.as_deref(),
+                issuer_audience.as_deref(),
+                issuer_client_id.as_deref(),
+                issuer_client_secret.as_deref(),
                 request.into_inner(),
                 tx.clone(),
             )

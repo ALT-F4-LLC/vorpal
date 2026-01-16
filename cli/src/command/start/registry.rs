@@ -1,3 +1,4 @@
+use crate::command::start::auth::{get_user_context, require_namespace_permission};
 use anyhow::{bail, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
@@ -131,6 +132,23 @@ impl ArchiveService for ArchiveServer {
         &self,
         request: Request<ArchivePullRequest>,
     ) -> Result<Response<Self::PullStream>, Status> {
+        // Authorization check before spawning task
+        if request
+            .extensions()
+            .get::<crate::command::start::auth::Claims>()
+            .is_some()
+        {
+            let req_inner = request.get_ref();
+            require_namespace_permission(&request, &req_inner.namespace, "read")?;
+
+            if let Some(user) = get_user_context(&request) {
+                info!(
+                    "archive |> pull requested by {} in namespace {}",
+                    user, req_inner.namespace
+                );
+            }
+        }
+
         let (tx, rx) = mpsc::channel(100);
 
         let backend = self.backend.clone();
@@ -250,6 +268,23 @@ impl ArtifactService for ArtifactServer {
         &self,
         request: Request<ArtifactRequest>,
     ) -> Result<Response<Artifact>, Status> {
+        // Authorization check
+        if request
+            .extensions()
+            .get::<crate::command::start::auth::Claims>()
+            .is_some()
+        {
+            let req_inner = request.get_ref();
+            require_namespace_permission(&request, &req_inner.namespace, "read")?;
+
+            if let Some(user) = get_user_context(&request) {
+                info!(
+                    "artifact |> get_artifact by {} in namespace {}",
+                    user, req_inner.namespace
+                );
+            }
+        }
+
         let request = request.into_inner();
 
         if request.digest.is_empty() {
@@ -270,6 +305,16 @@ impl ArtifactService for ArtifactServer {
         &self,
         request: Request<GetArtifactAliasRequest>,
     ) -> Result<Response<GetArtifactAliasResponse>, Status> {
+        // Authorization check
+        if request
+            .extensions()
+            .get::<crate::command::start::auth::Claims>()
+            .is_some()
+        {
+            let req_inner = request.get_ref();
+            require_namespace_permission(&request, &req_inner.namespace, "read")?;
+        }
+
         let request = request.into_inner();
 
         let request_system = ArtifactSystem::try_from(request.system);
@@ -309,6 +354,23 @@ impl ArtifactService for ArtifactServer {
         &self,
         request: Request<StoreArtifactRequest>,
     ) -> Result<Response<ArtifactResponse>, Status> {
+        // Authorization check
+        if request
+            .extensions()
+            .get::<crate::command::start::auth::Claims>()
+            .is_some()
+        {
+            let req_inner = request.get_ref();
+            require_namespace_permission(&request, &req_inner.artifact_namespace, "write")?;
+
+            if let Some(user) = get_user_context(&request) {
+                info!(
+                    "artifact |> store_artifact by {} in namespace {}",
+                    user, req_inner.artifact_namespace
+                );
+            }
+        }
+
         let request = request.into_inner();
 
         let artifact = request

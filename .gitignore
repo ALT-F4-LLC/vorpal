@@ -1,6 +1,7 @@
 *.tar.*
 .cargo
 .env
+.env.*
 /dist
 CLAUDE.md
 target
