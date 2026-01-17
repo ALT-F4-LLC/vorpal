@@ -2,6 +2,7 @@ use crate::command::start::auth::{get_user_context, require_namespace_permission
 use anyhow::{bail, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
@@ -12,9 +13,10 @@ use vorpal_sdk::api::{
         ArchivePushRequest, ArchiveResponse,
     },
     artifact::{
-        artifact_service_server::ArtifactService, Artifact, ArtifactRequest, ArtifactResponse,
-        ArtifactSystem, ArtifactsRequest, ArtifactsResponse, GetArtifactAliasRequest,
-        GetArtifactAliasResponse, StoreArtifactRequest,
+        artifact_service_server::ArtifactService, Artifact, ArtifactFunction,
+        ArtifactFunctionRequest, ArtifactFunctionsRequest, ArtifactFunctionsResponse,
+        ArtifactRequest, ArtifactResponse, ArtifactSystem, ArtifactsRequest, ArtifactsResponse,
+        GetArtifactAliasRequest, GetArtifactAliasResponse, StoreArtifactRequest,
     },
 };
 
@@ -242,6 +244,21 @@ pub trait ArtifactBackend: Send + Sync + 'static {
         artifact_namespace: String,
     ) -> Result<String, Status>;
 
+    async fn get_artifact_functions(
+        &self,
+        namespace: String,
+        name_prefix: String,
+    ) -> Result<Vec<ArtifactFunction>, Status>;
+
+    async fn get_artifact_function(
+        &self,
+        name: String,
+        namespace: String,
+        tag: String,
+        system: ArtifactSystem,
+        params: HashMap<String, String>,
+    ) -> Result<Artifact, Status>;
+
     /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
     fn box_clone(&self) -> Box<dyn ArtifactBackend>;
 }
@@ -348,6 +365,60 @@ impl ArtifactService for ArtifactServer {
         Err(Status::unimplemented(
             "get_artifacts is not implemented yet",
         ))
+    }
+
+    async fn get_artifact_functions(
+        &self,
+        request: Request<ArtifactFunctionsRequest>,
+    ) -> Result<Response<ArtifactFunctionsResponse>, Status> {
+        let request = request.into_inner();
+
+        let functions = self
+            .backend
+            .get_artifact_functions(request.namespace, request.name_prefix)
+            .await?;
+
+        info!("artifact |> functions list");
+
+        Ok(Response::new(ArtifactFunctionsResponse { functions }))
+    }
+
+    async fn get_artifact_function(
+        &self,
+        request: Request<ArtifactFunctionRequest>,
+    ) -> Result<Response<Artifact>, Status> {
+        let request = request.into_inner();
+
+        if request.name.is_empty() {
+            return Err(Status::invalid_argument("missing `name` field"));
+        }
+
+        if request.namespace.is_empty() {
+            return Err(Status::invalid_argument("missing `namespace` field"));
+        }
+
+        let tag = if request.tag.is_empty() {
+            "latest".to_string()
+        } else {
+            request.tag
+        };
+
+        let request_system = ArtifactSystem::try_from(request.system);
+
+        let artifact = self
+            .backend
+            .get_artifact_function(
+                request.name.clone(),
+                request.namespace,
+                tag,
+                request_system.unwrap_or(ArtifactSystem::UnknownSystem),
+                request.params,
+            )
+            .await?;
+
+        info!("artifact |> function resolve: {}", request.name);
+
+        Ok(Response::new(artifact))
     }
 
     async fn store_artifact(

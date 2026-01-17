@@ -18,3 +18,7 @@ pub fn get_artifact_archive_key(digest: &str, namespace: &str) -> String {
 pub fn get_artifact_config_key(digest: &str, namespace: &str) -> String {
     format!("artifact/config/{namespace}/{digest}.json")
 }
+
+pub fn get_artifact_function_key(name: &str, namespace: &str, tag: &str) -> String {
+    format!("artifact/function/{namespace}/{name}/{tag}.json")
+}

@@ -2,8 +2,9 @@ use crate::{
     api::{
         agent::{agent_service_client::AgentServiceClient, PrepareArtifactRequest},
         artifact::{
-            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
-            ArtifactSystem, ArtifactsRequest, ArtifactsResponse,
+            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactFunction,
+            ArtifactFunctionRequest, ArtifactFunctionsRequest, ArtifactRequest, ArtifactSystem,
+            ArtifactsRequest, ArtifactsResponse,
         },
         context::context_service_server::{ContextService, ContextServiceServer},
     },
@@ -349,6 +350,79 @@ impl ConfigContext {
                 Ok(digest.to_string())
             }
         }
+    }
+
+    pub async fn get_artifact_functions(
+        &mut self,
+        namespace: Option<&str>,
+        name_prefix: Option<&str>,
+    ) -> Result<Vec<ArtifactFunction>> {
+        let request = ArtifactFunctionsRequest {
+            namespace: namespace.unwrap_or_default().to_string(),
+            name_prefix: name_prefix.unwrap_or_default().to_string(),
+        };
+
+        let mut request = Request::new(request);
+        let request_auth = client_auth_header(&self.registry).await?;
+
+        if let Some(header) = request_auth {
+            request.metadata_mut().insert("authorization", header);
+        }
+
+        let response = self
+            .client_artifact
+            .get_artifact_functions(request)
+            .await
+            .map_err(|status| anyhow!("artifact service error: {:?}", status))?;
+
+        Ok(response.into_inner().functions)
+    }
+
+    pub async fn get_artifact_function(
+        &mut self,
+        name: &str,
+        namespace: &str,
+        tag: &str,
+        params: HashMap<String, String>,
+    ) -> Result<Artifact> {
+        let tag = if tag.is_empty() { "latest" } else { tag };
+
+        let request = ArtifactFunctionRequest {
+            name: name.to_string(),
+            namespace: namespace.to_string(),
+            tag: tag.to_string(),
+            system: self.artifact_system as i32,
+            params,
+        };
+
+        let mut request = Request::new(request);
+        let request_auth = client_auth_header(&self.registry).await?;
+
+        if let Some(header) = request_auth {
+            request.metadata_mut().insert("authorization", header);
+        }
+
+        let response = self
+            .client_artifact
+            .get_artifact_function(request)
+            .await
+            .map_err(|status| anyhow!("artifact service error: {:?}", status))?;
+
+        Ok(response.into_inner())
+    }
+
+    pub async fn add_artifact_function(
+        &mut self,
+        name: &str,
+        namespace: &str,
+        tag: &str,
+        params: HashMap<String, String>,
+    ) -> Result<String> {
+        let artifact = self
+            .get_artifact_function(name, namespace, tag, params)
+            .await?;
+
+        self.add_artifact(&artifact).await
     }
 
     pub fn get_artifact_store(&self) -> HashMap<String, Artifact> {

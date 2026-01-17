@@ -8,6 +8,8 @@ service ArtifactService {
     rpc GetArtifact(ArtifactRequest) returns (Artifact);
     rpc GetArtifactAlias(GetArtifactAliasRequest) returns (GetArtifactAliasResponse);
     rpc GetArtifacts(ArtifactsRequest) returns (ArtifactsResponse);
+    rpc GetArtifactFunctions(ArtifactFunctionsRequest) returns (ArtifactFunctionsResponse);
+    rpc GetArtifactFunction(ArtifactFunctionRequest) returns (Artifact);
     rpc StoreArtifact(StoreArtifactRequest) returns (ArtifactResponse);
 }
 
@@ -48,6 +50,38 @@ message Artifact {
     repeated ArtifactSystem systems = 4;
     repeated string aliases = 5;
     string name = 6;
+}
+
+message ArtifactFunctionParam {
+  string name = 1;
+  bool required = 2;
+  string description = 3;
+  string default = 4;
+}
+
+message ArtifactFunction {
+  string name = 1;
+  string namespace = 2;
+  string tag = 3;
+  string description = 4;
+  repeated ArtifactFunctionParam params = 5;
+}
+
+message ArtifactFunctionRequest {
+  string name = 1;
+  string namespace = 2;
+  string tag = 3;
+  ArtifactSystem system = 4;
+  map<string, string> params = 5;
+}
+
+message ArtifactFunctionsRequest {
+  string namespace = 1;
+  string name_prefix = 2;
+}
+
+message ArtifactFunctionsResponse {
+  repeated ArtifactFunction functions = 1;
 }
 
 message ArtifactRequest {

@@ -255,6 +255,87 @@ func main() {
 }
 ```
 
+## Templates (via `vorpal artifact init`)
+These are excerpts from the generated templates so you can map scaffolding to SDK usage.
+
+**Rust template** (`cli/src/command/template/rust/src/vorpal.rs`)
+```rust
+Rust::new("example", SYSTEMS.to_vec())
+    .with_bins(vec!["example"])
+    .with_includes(vec!["src/main.rs", "Cargo.lock", "Cargo.toml"])
+    .build(context)
+    .await?;
+```
+
+**Go template** (`cli/src/command/template/go/cmd/vorpal/main.go`)
+```go
+artifact.NewProjectEnvironment("example-dev", Systems).
+    WithArtifacts([]*string{gobin, goimports, gopls, protoc, protocGenGo, protocGenGoGRPC, staticcheck}).
+    WithEnvironments([]string{fmt.Sprintf("GOARCH=%s", *goarch), fmt.Sprintf("GOOS=%s", *goos)}).
+    Build(context)
+
+language.NewGo("example", Systems).
+    WithBuildDirectory("cmd/example").
+    WithIncludes([]string{"cmd/example", "go.mod", "go.sum"}).
+    Build(context)
+```
+
+## Remix an existing artifact
+This mirrors the “fetch, tweak, and rebuild” flow. If you want to modify an existing artifact, you can do so by fetching it, tweaking it, and adding it back to the context.
+
+**Rust**
+```rust
+use anyhow::Result;
+use vorpal_sdk::{context::get_context, api::artifact::Artifact};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let ctx = &mut get_context().await?;
+    let git_digest = ctx.fetch_artifact("<digest>").await?;
+    let mut git: Artifact = ctx.get_artifact(&git_digest).expect("git artifact");
+
+    git.name = "my-git".to_string();
+    // tweak git.steps / git.systems / git.sources as needed
+
+    ctx.add_artifact(&git).await?;
+    ctx.run().await
+}
+```
+
+**Go**
+```go
+ctx := config.GetContext()
+digest, _ := ctx.FetchArtifactAlias("library/git:latest")
+git := ctx.GetArtifact(*digest)
+
+git.Name = "my-git"
+// tweak git.Steps / git.Systems / git.Sources as needed
+
+ctx.AddArtifact(git)
+ctx.Run()
+```
+
+## Artifact functions
+Use artifact functions as a starting point, then customize.
+
+**Rust**
+```rust
+use std::collections::HashMap;
+let mut git = ctx
+    .get_artifact_function("git", "library", "latest", HashMap::new())
+    .await?;
+git.name = "my-git".to_string();
+ctx.add_artifact(&git).await?;
+```
+
+**Go**
+```go
+git, _ := ctx.GetArtifactFunction("git", "library", "latest", map[string]string{})
+git.Name = "my-git"
+ctx.AddArtifact(git)
+```
+
+
 ## Contribute
 - Read the contributor guide: `AGENTS.md` (structure, commands, style, and PR workflow).
 - Before opening a PR: `make format && make lint && make test`.
