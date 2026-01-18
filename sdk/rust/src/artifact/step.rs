@@ -1,7 +1,7 @@
 use crate::{
     api,
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact,
+    artifact::{self, linux_vorpal::LinuxVorpal},
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -235,7 +235,7 @@ pub async fn shell(
         }
 
         Aarch64Linux | X8664Linux => {
-            let linux_vorpal = artifact::linux_vorpal::build(context).await?;
+            let linux_vorpal = LinuxVorpal::new().build(context).await?;
 
             bwrap(
                 vec![],

@@ -6,34 +6,43 @@ use crate::{
 use anyhow::Result;
 use indoc::formatdoc;
 
-pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let name = "git";
+#[derive(Default)]
+pub struct Git {}
 
-    let source_version = "2.52.0";
+impl Git {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    let source_path =
-        format!("https://www.kernel.org/pub/software/scm/git/git-{source_version}.tar.gz");
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let name = "git";
 
-    let source = ArtifactSource::new(name, source_path.as_str()).build();
+        let source_version = "2.52.0";
 
-    let step_script = formatdoc! {"
-        mkdir -pv \"$VORPAL_OUTPUT/bin\"
+        let source_path =
+            format!("https://www.kernel.org/pub/software/scm/git/git-{source_version}.tar.gz");
 
-        pushd ./source/{name}/git-{source_version}
+        let source = ArtifactSource::new(name, source_path.as_str()).build();
 
-        ./configure --prefix=$VORPAL_OUTPUT
+        let step_script = formatdoc! {"
+            mkdir -pv \"$VORPAL_OUTPUT/bin\"
 
-        make
-        make install",
-    };
+            pushd ./source/{name}/git-{source_version}
 
-    let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
+            ./configure --prefix=$VORPAL_OUTPUT
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+            make
+            make install",
+        };
 
-    Artifact::new(name, steps, systems)
-        .with_aliases(vec![format!("{name}:{source_version}")])
-        .with_sources(vec![source])
-        .build(context)
-        .await
+        let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
+
+        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+
+        Artifact::new(name, steps, systems)
+            .with_aliases(vec![format!("{name}:{source_version}")])
+            .with_sources(vec![source])
+            .build(context)
+            .await
+    }
 }

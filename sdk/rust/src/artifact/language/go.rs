@@ -4,7 +4,8 @@ use crate::{
         ArtifactSystem,
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
-    artifact, context,
+    artifact::{get_env_key, git::Git, go::Go as GoDist, step, Artifact, ArtifactSource},
+    context,
 };
 use anyhow::{bail, Result};
 use indoc::formatdoc;
@@ -124,7 +125,7 @@ impl<'a> Go<'a> {
     pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
         let source_path = ".";
 
-        let mut source_builder = artifact::ArtifactSource::new(self.name, source_path);
+        let mut source_builder = ArtifactSource::new(self.name, source_path);
 
         if !self.includes.is_empty() {
             let source_includes = self.includes.iter().map(|s| s.to_string()).collect();
@@ -168,8 +169,8 @@ impl<'a> Go<'a> {
             name = self.name,
         };
 
-        let git = artifact::git::build(context).await?;
-        let go = artifact::go::build(context).await?;
+        let git = Git::new().build(context).await?;
+        let go = GoDist::new().build(context).await?;
         let goarch = get_goarch(context.get_system())?;
         let goos = get_goos(context.get_system())?;
 
@@ -178,7 +179,7 @@ impl<'a> Go<'a> {
             "GOCACHE=$VORPAL_WORKSPACE/go/cache".to_string(),
             format!("GOOS={}", goos),
             "GOPATH=$VORPAL_WORKSPACE/go".to_string(),
-            format!("PATH={}/bin", artifact::get_env_key(&go)),
+            format!("PATH={}/bin", get_env_key(&go)),
         ];
 
         for env in self.environments {
@@ -186,7 +187,7 @@ impl<'a> Go<'a> {
         }
 
         let steps = vec![
-            artifact::step::shell(
+            step::shell(
                 context,
                 [vec![git.clone(), go.clone()], self.artifacts].concat(),
                 step_environments,
@@ -196,7 +197,7 @@ impl<'a> Go<'a> {
             .await?,
         ];
 
-        artifact::Artifact::new(self.name, steps, self.systems)
+        Artifact::new(self.name, steps, self.systems)
             .with_aliases(self.aliases)
             .with_sources(vec![source])
             .build(context)

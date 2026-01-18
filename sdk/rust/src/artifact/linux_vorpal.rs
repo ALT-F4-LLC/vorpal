@@ -1,7 +1,7 @@
 use crate::{
     api::artifact::ArtifactSystem::{Aarch64Linux, X8664Linux},
     artifact::{
-        linux_debian,
+        linux_debian::LinuxDebian,
         linux_vorpal::script::{setup, stage_01, stage_02, stage_03, stage_04, stage_05},
         step, Artifact,
     },
@@ -13,345 +13,354 @@ use indoc::formatdoc;
 mod script;
 mod source;
 
-pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let bash_version = "5.3";
-    let bash = source::gnu("bash", bash_version);
+#[derive(Default)]
+pub struct LinuxVorpal {}
 
-    let binutils_version = "2.45";
-    let binutils = source::gnu("binutils", binutils_version);
+impl LinuxVorpal {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    let bison_version = "3.8.2";
-    let bison = source::gnu("bison", bison_version);
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let bash_version = "5.3";
+        let bash = source::gnu("bash", bash_version);
 
-    let coreutils_version = "9.7";
-    let coreutils = source::gnu("coreutils", coreutils_version);
+        let binutils_version = "2.45";
+        let binutils = source::gnu("binutils", binutils_version);
 
-    let curl_version = "8.15.0";
-    let curl = source::curl(curl_version);
-    let curl_cacert = source::curl_cacert();
+        let bison_version = "3.8.2";
+        let bison = source::gnu("bison", bison_version);
 
-    let diffutils_version = "3.12";
-    let diffutils = source::gnu_xz("diffutils", diffutils_version);
+        let coreutils_version = "9.7";
+        let coreutils = source::gnu("coreutils", coreutils_version);
 
-    let file_version = "5.46";
-    let file = source::file(file_version);
+        let curl_version = "8.15.0";
+        let curl = source::curl(curl_version);
+        let curl_cacert = source::curl_cacert();
 
-    let findutils_version = "4.10.0";
-    let findutils = source::gnu_xz("findutils", findutils_version);
+        let diffutils_version = "3.12";
+        let diffutils = source::gnu_xz("diffutils", diffutils_version);
 
-    let gawk_version = "5.3.2";
-    let gawk = source::gnu("gawk", gawk_version);
+        let file_version = "5.46";
+        let file = source::file(file_version);
 
-    let gcc_version = "15.2.0";
-    let gcc = source::gnu_gcc(gcc_version);
+        let findutils_version = "4.10.0";
+        let findutils = source::gnu_xz("findutils", findutils_version);
 
-    let gettext_version = "0.26";
-    let gettext = source::gnu("gettext", gettext_version);
+        let gawk_version = "5.3.2";
+        let gawk = source::gnu("gawk", gawk_version);
 
-    let glibc_version = "2.42";
-    let glibc = source::gnu("glibc", glibc_version);
-    let glibc_patch = source::gnu_glibc_patch(glibc_version);
+        let gcc_version = "15.2.0";
+        let gcc = source::gnu_gcc(gcc_version);
 
-    let gmp_version = "6.3.0";
-    let gmp = source::gnu("gmp", gmp_version);
+        let gettext_version = "0.26";
+        let gettext = source::gnu("gettext", gettext_version);
 
-    let grep_version = "3.12";
-    let grep = source::gnu("grep", grep_version);
+        let glibc_version = "2.42";
+        let glibc = source::gnu("glibc", glibc_version);
+        let glibc_patch = source::gnu_glibc_patch(glibc_version);
 
-    let gzip_version = "1.14";
-    let gzip = source::gnu("gzip", gzip_version);
+        let gmp_version = "6.3.0";
+        let gmp = source::gnu("gmp", gmp_version);
 
-    let libidn2_version = "2.3.8";
-    let libidn2 = source::libidn2(libidn2_version);
+        let grep_version = "3.12";
+        let grep = source::gnu("grep", grep_version);
 
-    let libpsl_version = "0.21.5";
-    let libpsl = source::libpsl(libpsl_version);
+        let gzip_version = "1.14";
+        let gzip = source::gnu("gzip", gzip_version);
 
-    let libunistring_version = "1.3";
-    let libunistring = source::gnu("libunistring", libunistring_version);
+        let libidn2_version = "2.3.8";
+        let libidn2 = source::libidn2(libidn2_version);
 
-    let linux_version = "6.16.1";
-    let linux = source::linux(linux_version);
+        let libpsl_version = "0.21.5";
+        let libpsl = source::libpsl(libpsl_version);
 
-    let m4_version = "1.4.20";
-    let m4 = source::gnu("m4", m4_version);
+        let libunistring_version = "1.3";
+        let libunistring = source::gnu("libunistring", libunistring_version);
 
-    let make_version = "4.4.1";
-    let make = source::gnu("make", make_version);
+        let linux_version = "6.16.1";
+        let linux = source::linux(linux_version);
 
-    let mpc_version = "1.3.1";
-    let mpc = source::gnu("mpc", mpc_version);
+        let m4_version = "1.4.20";
+        let m4 = source::gnu("m4", m4_version);
 
-    let mpfr_version = "4.2.2";
-    let mpfr = source::gnu_xz("mpfr", mpfr_version);
+        let make_version = "4.4.1";
+        let make = source::gnu("make", make_version);
 
-    let ncurses_version = "6.5-20250809";
-    let ncurses = source::ncurses(ncurses_version);
+        let mpc_version = "1.3.1";
+        let mpc = source::gnu("mpc", mpc_version);
 
-    let openssl_version = "3.5.2";
-    let openssl = source::openssl(openssl_version);
+        let mpfr_version = "4.2.2";
+        let mpfr = source::gnu_xz("mpfr", mpfr_version);
 
-    let patch_version = "2.8";
-    let patch = source::gnu("patch", patch_version);
+        let ncurses_version = "6.5-20250809";
+        let ncurses = source::ncurses(ncurses_version);
 
-    let perl_version = "5.42.0";
-    let perl = source::perl(perl_version);
+        let openssl_version = "3.5.2";
+        let openssl = source::openssl(openssl_version);
 
-    let python_version = "3.13.7";
-    let python = source::python(python_version);
+        let patch_version = "2.8";
+        let patch = source::gnu("patch", patch_version);
 
-    let sed_version = "4.9";
-    let sed = source::gnu("sed", sed_version);
+        let perl_version = "5.42.0";
+        let perl = source::perl(perl_version);
 
-    let tar_version = "1.35";
-    let tar = source::gnu("tar", tar_version);
+        let python_version = "3.13.7";
+        let python = source::python(python_version);
 
-    let texinfo_version = "7.2";
-    let texinfo = source::gnu("texinfo", texinfo_version);
+        let sed_version = "4.9";
+        let sed = source::gnu("sed", sed_version);
 
-    let unzip_version = "6.0";
-    let unzip = source::unzip(unzip_version);
+        let tar_version = "1.35";
+        let tar = source::gnu("tar", tar_version);
 
-    let unzip_patch_fixes = source::unzip_patch_fixes("6.0");
-    let unzip_patch_gcc14 = source::unzip_patch_gcc14("6.0");
+        let texinfo_version = "7.2";
+        let texinfo = source::gnu("texinfo", texinfo_version);
 
-    let util_linux_version = "2.41.1";
-    let util_linux = source::util_linux(util_linux_version);
+        let unzip_version = "6.0";
+        let unzip = source::unzip(unzip_version);
 
-    let xz_version = "5.8.1";
-    let xz = source::xz(xz_version);
+        let unzip_patch_fixes = source::unzip_patch_fixes("6.0");
+        let unzip_patch_gcc14 = source::unzip_patch_gcc14("6.0");
 
-    let zlib_version = "1.3.1";
-    let zlib = source::zlib(zlib_version);
+        let util_linux_version = "2.41.1";
+        let util_linux = source::util_linux(util_linux_version);
 
-    let step_environments = vec!["PATH=/usr/bin:/usr/sbin".to_string()];
-    let step_rootfs = linux_debian::build(context).await?;
+        let xz_version = "5.8.1";
+        let xz = source::xz(xz_version);
 
-    let step_setup_script = setup::script(
-        binutils_version,
-        gawk_version,
-        gcc_version,
-        glibc_version,
-        gmp_version,
-        mpc_version,
-        mpfr_version,
-        ncurses_version,
-    );
+        let zlib_version = "1.3.1";
+        let zlib = source::zlib(zlib_version);
 
-    let step_stage_01_script =
-        stage_01::script(binutils_version, gcc_version, glibc_version, linux_version);
+        let step_environments = vec!["PATH=/usr/bin:/usr/sbin".to_string()];
+        let step_rootfs = LinuxDebian::new().build(context).await?;
 
-    let step_stage_02_script = stage_02::script(
-        bash_version,
-        binutils_version,
-        coreutils_version,
-        diffutils_version,
-        file_version,
-        findutils_version,
-        gawk_version,
-        gcc_version,
-        grep_version,
-        gzip_version,
-        m4_version,
-        make_version,
-        ncurses_version,
-        patch_version,
-        sed_version,
-        tar_version,
-        xz_version,
-    );
+        let step_setup_script = setup::script(
+            binutils_version,
+            gawk_version,
+            gcc_version,
+            glibc_version,
+            gmp_version,
+            mpc_version,
+            mpfr_version,
+            ncurses_version,
+        );
 
-    let bwrap_arguments = vec![
-        // mount bin
-        "--bind",
-        "$VORPAL_OUTPUT/bin",
-        "/bin",
-        // mount etc
-        "--bind",
-        "$VORPAL_OUTPUT/etc",
-        "/etc",
-        // mount lib
-        "--bind",
-        "$VORPAL_OUTPUT/lib",
-        "/lib",
-        // mount lib64 (if exists)
-        "--bind-try",
-        "$VORPAL_OUTPUT/lib64",
-        "/lib64",
-        // mount sbin
-        "--bind",
-        "$VORPAL_OUTPUT/sbin",
-        "/sbin",
-        // mount usr
-        "--bind",
-        "$VORPAL_OUTPUT/usr",
-        "/usr",
-        // mount current directory
-        "--bind",
-        "$VORPAL_WORKSPACE",
-        "$VORPAL_WORKSPACE",
-        // change directory
-        "--chdir",
-        "$VORPAL_WORKSPACE",
-        // set group id
-        "--gid",
-        "0",
-        // set user id
-        "--uid",
-        "0",
-    ];
+        let step_stage_01_script =
+            stage_01::script(binutils_version, gcc_version, glibc_version, linux_version);
 
-    let step_stage_03_script = stage_03::script(
-        bison_version,
-        gettext_version,
-        perl_version,
-        python_version,
-        texinfo_version,
-        util_linux_version,
-    );
+        let step_stage_02_script = stage_02::script(
+            bash_version,
+            binutils_version,
+            coreutils_version,
+            diffutils_version,
+            file_version,
+            findutils_version,
+            gawk_version,
+            gcc_version,
+            grep_version,
+            gzip_version,
+            m4_version,
+            make_version,
+            ncurses_version,
+            patch_version,
+            sed_version,
+            tar_version,
+            xz_version,
+        );
 
-    let step_stage_04_script = stage_04::script(
-        binutils_version,
-        gcc_version,
-        glibc_version,
-        openssl_version,
-        zlib_version,
-    );
+        let bwrap_arguments = vec![
+            // mount bin
+            "--bind",
+            "$VORPAL_OUTPUT/bin",
+            "/bin",
+            // mount etc
+            "--bind",
+            "$VORPAL_OUTPUT/etc",
+            "/etc",
+            // mount lib
+            "--bind",
+            "$VORPAL_OUTPUT/lib",
+            "/lib",
+            // mount lib64 (if exists)
+            "--bind-try",
+            "$VORPAL_OUTPUT/lib64",
+            "/lib64",
+            // mount sbin
+            "--bind",
+            "$VORPAL_OUTPUT/sbin",
+            "/sbin",
+            // mount usr
+            "--bind",
+            "$VORPAL_OUTPUT/usr",
+            "/usr",
+            // mount current directory
+            "--bind",
+            "$VORPAL_WORKSPACE",
+            "$VORPAL_WORKSPACE",
+            // change directory
+            "--chdir",
+            "$VORPAL_WORKSPACE",
+            // set group id
+            "--gid",
+            "0",
+            // set user id
+            "--uid",
+            "0",
+        ];
 
-    let step_stage_05_script = stage_05::script(
-        curl_version,
-        libidn2_version,
-        libpsl_version,
-        libunistring_version,
-        unzip_version,
-    );
+        let step_stage_03_script = stage_03::script(
+            bison_version,
+            gettext_version,
+            perl_version,
+            python_version,
+            texinfo_version,
+            util_linux_version,
+        );
 
-    let systems = vec![Aarch64Linux, X8664Linux];
+        let step_stage_04_script = stage_04::script(
+            binutils_version,
+            gcc_version,
+            glibc_version,
+            openssl_version,
+            zlib_version,
+        );
 
-    // TODO: impove readability with list in list
+        let step_stage_05_script = stage_05::script(
+            curl_version,
+            libidn2_version,
+            libpsl_version,
+            libunistring_version,
+            unzip_version,
+        );
 
-    let steps = vec![
-        step::bwrap(
-            vec![],
-            vec![],
-            step_environments.clone(),
-            Some(step_rootfs.clone()),
-            vec![],
-            step_setup_script,
-        )
-        .await?,
-        step::bwrap(
-            vec![],
-            vec![],
-            step_environments.clone(),
-            Some(step_rootfs.clone()),
-            vec![],
-            step_stage_01_script,
-        )
-        .await?,
-        step::bwrap(
-            vec![],
-            vec![],
-            step_environments.clone(),
-            Some(step_rootfs.clone()),
-            vec![],
-            step_stage_02_script,
-        )
-        .await?,
-        step::bwrap(
-            [
+        let systems = vec![Aarch64Linux, X8664Linux];
+
+        // TODO: impove readability with list in list
+
+        let steps = vec![
+            step::bwrap(
+                vec![],
+                vec![],
+                step_environments.clone(),
+                Some(step_rootfs.clone()),
+                vec![],
+                step_setup_script,
+            )
+            .await?,
+            step::bwrap(
+                vec![],
+                vec![],
+                step_environments.clone(),
+                Some(step_rootfs.clone()),
+                vec![],
+                step_stage_01_script,
+            )
+            .await?,
+            step::bwrap(
+                vec![],
+                vec![],
+                step_environments.clone(),
+                Some(step_rootfs.clone()),
+                vec![],
+                step_stage_02_script,
+            )
+            .await?,
+            step::bwrap(
+                [
+                    bwrap_arguments.clone(),
+                    vec![
+                        // mount tools
+                        "--bind",
+                        "$VORPAL_OUTPUT/tools",
+                        "/tools",
+                    ],
+                ]
+                .concat(),
+                vec![],
+                step_environments.clone(),
+                None,
+                vec![],
+                step_stage_03_script,
+            )
+            .await?,
+            step::bwrap(
+                vec![],
+                vec![],
+                step_environments.clone(),
+                Some(step_rootfs.clone()),
+                vec![],
+                formatdoc! {"
+                    rm -rf $VORPAL_OUTPUT/tools",
+                },
+            )
+            .await?,
+            step::bwrap(
                 bwrap_arguments.clone(),
-                vec![
-                    // mount tools
-                    "--bind",
-                    "$VORPAL_OUTPUT/tools",
-                    "/tools",
-                ],
-            ]
-            .concat(),
-            vec![],
-            step_environments.clone(),
-            None,
-            vec![],
-            step_stage_03_script,
-        )
-        .await?,
-        step::bwrap(
-            vec![],
-            vec![],
-            step_environments.clone(),
-            Some(step_rootfs.clone()),
-            vec![],
-            formatdoc! {"
-                rm -rf $VORPAL_OUTPUT/tools",
-            },
-        )
-        .await?,
-        step::bwrap(
-            bwrap_arguments.clone(),
-            vec![],
-            step_environments.clone(),
-            None,
-            vec![],
-            step_stage_04_script,
-        )
-        .await?,
-        step::bwrap(
-            bwrap_arguments.clone(),
-            vec![],
-            step_environments.clone(),
-            None,
-            vec![],
-            step_stage_05_script,
-        )
-        .await?,
-    ];
+                vec![],
+                step_environments.clone(),
+                None,
+                vec![],
+                step_stage_04_script,
+            )
+            .await?,
+            step::bwrap(
+                bwrap_arguments.clone(),
+                vec![],
+                step_environments.clone(),
+                None,
+                vec![],
+                step_stage_05_script,
+            )
+            .await?,
+        ];
 
-    let name = "linux-vorpal";
+        let name = "linux-vorpal";
 
-    Artifact::new(name, steps, systems)
-        .with_aliases(vec![format!("{name}:latest")])
-        .with_sources(vec![
-            bash,
-            binutils,
-            bison,
-            coreutils,
-            curl,
-            curl_cacert,
-            diffutils,
-            file,
-            findutils,
-            gawk,
-            gcc,
-            gettext,
-            glibc,
-            glibc_patch,
-            gmp,
-            grep,
-            gzip,
-            libidn2,
-            libpsl,
-            libunistring,
-            linux,
-            m4,
-            make,
-            mpc,
-            mpfr,
-            ncurses,
-            openssl,
-            patch,
-            perl,
-            python,
-            sed,
-            tar,
-            texinfo,
-            unzip,
-            unzip_patch_fixes,
-            unzip_patch_gcc14,
-            util_linux,
-            xz,
-            zlib,
-        ])
-        .build(context)
-        .await
+        Artifact::new(name, steps, systems)
+            .with_aliases(vec![format!("{name}:latest")])
+            .with_sources(vec![
+                bash,
+                binutils,
+                bison,
+                coreutils,
+                curl,
+                curl_cacert,
+                diffutils,
+                file,
+                findutils,
+                gawk,
+                gcc,
+                gettext,
+                glibc,
+                glibc_patch,
+                gmp,
+                grep,
+                gzip,
+                libidn2,
+                libpsl,
+                libunistring,
+                linux,
+                m4,
+                make,
+                mpc,
+                mpfr,
+                ncurses,
+                openssl,
+                patch,
+                perl,
+                python,
+                sed,
+                tar,
+                texinfo,
+                unzip,
+                unzip_patch_fixes,
+                unzip_patch_gcc14,
+                util_linux,
+                xz,
+                zlib,
+            ])
+            .build(context)
+            .await
+    }
 }

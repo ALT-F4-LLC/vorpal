@@ -34,7 +34,9 @@ use vorpal_sdk::{
     },
     artifact::{
         language::{go::Go, rust::Rust},
-        protoc, protoc_gen_go, protoc_gen_go_grpc,
+        protoc::Protoc,
+        protoc_gen_go::ProtocGenGo,
+        protoc_gen_go_grpc::ProtocGenGoGrpc,
     },
     context::{client_auth_header, ConfigContext},
 };
@@ -335,9 +337,9 @@ pub async fn run(
 
     let config_digest = match config.language.as_str() {
         "go" => {
-            let protoc = protoc::build(&mut config_context).await?;
-            let protoc_gen_go = protoc_gen_go::build(&mut config_context).await?;
-            let protoc_gen_go_grpc = protoc_gen_go_grpc::build(&mut config_context).await?;
+            let protoc = Protoc::new().build(&mut config_context).await?;
+            let protoc_gen_go = ProtocGenGo::new().build(&mut config_context).await?;
+            let protoc_gen_go_grpc = ProtocGenGoGrpc::new().build(&mut config_context).await?;
 
             let source_path = format!("{}.go", config.name);
 
