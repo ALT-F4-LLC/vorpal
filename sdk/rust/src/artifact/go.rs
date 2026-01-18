@@ -14,31 +14,40 @@ pub fn source_tools(name: &str) -> api::artifact::ArtifactSource {
     ArtifactSource::new(name, path.as_str()).build()
 }
 
-pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let name = "go";
+#[derive(Default)]
+pub struct Go {}
 
-    let system = context.get_system();
+impl Go {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    let source_target = match system {
-        Aarch64Darwin => "darwin-arm64",
-        Aarch64Linux => "linux-arm64",
-        X8664Darwin => "darwin-amd64",
-        X8664Linux => "linux-amd64",
-        _ => bail!("unsupported {name} system: {}", system.as_str_name()),
-    };
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let name = "go";
 
-    let source_version = "1.24.2";
-    let source_path = format!("https://go.dev/dl/go{source_version}.{source_target}.tar.gz");
+        let system = context.get_system();
 
-    let source = ArtifactSource::new(name, source_path.as_str()).build();
+        let source_target = match system {
+            Aarch64Darwin => "darwin-arm64",
+            Aarch64Linux => "linux-arm64",
+            X8664Darwin => "darwin-amd64",
+            X8664Linux => "linux-amd64",
+            _ => bail!("unsupported {name} system: {}", system.as_str_name()),
+        };
 
-    let step_script = format!("cp -prv \"./source/{name}/go/.\" \"$VORPAL_OUTPUT\"");
-    let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let source_version = "1.24.2";
+        let source_path = format!("https://go.dev/dl/go{source_version}.{source_target}.tar.gz");
 
-    Artifact::new(name, steps, systems)
-        .with_aliases(vec![format!("{name}:{source_version}")])
-        .with_sources(vec![source])
-        .build(context)
-        .await
+        let source = ArtifactSource::new(name, source_path.as_str()).build();
+
+        let step_script = format!("cp -prv \"./source/{name}/go/.\" \"$VORPAL_OUTPUT\"");
+        let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
+        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+
+        Artifact::new(name, steps, systems)
+            .with_aliases(vec![format!("{name}:{source_version}")])
+            .with_sources(vec![source])
+            .build(context)
+            .await
+    }
 }

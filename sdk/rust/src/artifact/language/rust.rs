@@ -1,6 +1,9 @@
 use crate::{
     api::artifact::{ArtifactStepSecret, ArtifactSystem},
-    artifact::{get_env_key, protoc, rust_toolchain, step, Artifact, ArtifactSource},
+    artifact::{
+        get_env_key, protoc::Protoc, rust_toolchain, rust_toolchain::RustToolchain, step, Artifact,
+        ArtifactSource,
+    },
     context::ConfigContext,
 };
 use anyhow::{bail, Result};
@@ -147,7 +150,7 @@ impl<'a> Rust<'a> {
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        let protoc = protoc::build(context).await?;
+        let protoc = Protoc::new().build(context).await?;
 
         // Parse source path
 
@@ -241,7 +244,7 @@ impl<'a> Rust<'a> {
 
         // Get rust toolchain artifact
 
-        let rust_toolchain = rust_toolchain::build(context).await?;
+        let rust_toolchain = RustToolchain::new().build(context).await?;
         let rust_toolchain_target = rust_toolchain::target(context.get_system())?;
         let rust_toolchain_version = rust_toolchain::version();
         let rust_toolchain_name = format!("{rust_toolchain_version}-{rust_toolchain_target}");

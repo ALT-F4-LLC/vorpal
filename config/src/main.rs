@@ -6,11 +6,19 @@ use vorpal_sdk::{
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
     artifact::{
-        get_env_key, gh, go, goimports, gopls, grpcurl,
+        get_env_key,
+        gh::Gh,
+        go::Go,
+        goimports::Goimports,
+        gopls::Gopls,
+        grpcurl::Grpcurl,
         language::go::{get_goarch, get_goos},
         language::rust::Rust,
-        protoc, protoc_gen_go, protoc_gen_go_grpc, staticcheck, Argument, Job, Process,
-        ProjectEnvironment, UserEnvironment,
+        protoc::Protoc,
+        protoc_gen_go::ProtocGenGo,
+        protoc_gen_go_grpc::ProtocGenGoGrpc,
+        staticcheck::Staticcheck,
+        Argument, Job, Process, ProjectEnvironment, UserEnvironment,
     },
     context::get_context,
 };
@@ -23,15 +31,15 @@ async fn main() -> Result<()> {
 
     // Dependencies
 
-    let github_cli = gh::build(context).await?;
-    let go = go::build(context).await?;
-    let goimports = goimports::build(context).await?;
-    let gopls = gopls::build(context).await?;
-    let grpcurl = grpcurl::build(context).await?;
-    let protoc = protoc::build(context).await?;
-    let protoc_gen_go = protoc_gen_go::build(context).await?;
-    let protoc_gen_go_grpc = protoc_gen_go_grpc::build(context).await?;
-    let staticcheck = staticcheck::build(context).await?;
+    let gh = Gh::new().build(context).await?;
+    let go = Go::new().build(context).await?;
+    let goimports = Goimports::new().build(context).await?;
+    let gopls = Gopls::new().build(context).await?;
+    let grpcurl = Grpcurl::new().build(context).await?;
+    let protoc = Protoc::new().build(context).await?;
+    let protoc_gen_go = ProtocGenGo::new().build(context).await?;
+    let protoc_gen_go_grpc = ProtocGenGoGrpc::new().build(context).await?;
+    let staticcheck = Staticcheck::new().build(context).await?;
 
     // Rust artifact
 
@@ -173,7 +181,7 @@ async fn main() -> Result<()> {
             .with_artifacts(vec![
                 aarch64_darwin,
                 aarch64_linux,
-                github_cli,
+                gh,
                 x8664_darwin,
                 x8664_linux,
             ])

@@ -4,8 +4,8 @@ use crate::{
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
     artifact::{
-        cargo, clippy, get_env_key, rust_analyzer, rust_src, rust_std, rustc, rustfmt, step,
-        Artifact,
+        cargo::Cargo, clippy::Clippy, get_env_key, rust_analyzer::RustAnalyzer, rust_src::RustSrc,
+        rust_std::RustStd, rustc::Rustc, rustfmt::Rustfmt, step, Artifact,
     },
     context::ConfigContext,
 };
@@ -28,75 +28,154 @@ pub fn version() -> String {
     "1.89.0".to_string()
 }
 
-pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let cargo = cargo::build(context).await?;
-    let clippy = clippy::build(context).await?;
-    let rust_analyzer = rust_analyzer::build(context).await?;
-    let rust_src = rust_src::build(context).await?;
-    let rust_std = rust_std::build(context).await?;
-    let rustc = rustc::build(context).await?;
-    let rustfmt = rustfmt::build(context).await?;
+#[derive(Default)]
+pub struct RustToolchain<'a> {
+    cargo: Option<&'a str>,
+    clippy: Option<&'a str>,
+    rust_analyzer: Option<&'a str>,
+    rust_src: Option<&'a str>,
+    rust_std: Option<&'a str>,
+    rustc: Option<&'a str>,
+    rustfmt: Option<&'a str>,
+}
 
-    let artifacts = vec![
-        cargo,
-        clippy,
-        rust_analyzer,
-        rust_src,
-        rust_std,
-        rustc,
-        rustfmt,
-    ];
-
-    let mut toolchain_component_paths = vec![];
-
-    for component in &artifacts {
-        toolchain_component_paths.push(get_env_key(component));
+impl<'a> RustToolchain<'a> {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    let toolchain_target = target(context.get_system())?;
-    let toolchain_version = version();
+    pub fn with_cargo(mut self, cargo: &'a str) -> Self {
+        self.cargo = Some(cargo);
+        self
+    }
 
-    let step_script = formatdoc! {"
-        toolchain_dir=\"$VORPAL_OUTPUT/toolchains/{toolchain_version}-{toolchain_target}\"
+    pub fn with_clippy(mut self, clippy: &'a str) -> Self {
+        self.clippy = Some(clippy);
+        self
+    }
 
-        mkdir -pv \"$toolchain_dir\"
+    pub fn with_rust_analyzer(mut self, rust_analyzer: &'a str) -> Self {
+        self.rust_analyzer = Some(rust_analyzer);
+        self
+    }
 
-        components=({component_paths})
+    pub fn with_rust_src(mut self, rust_src: &'a str) -> Self {
+        self.rust_src = Some(rust_src);
+        self
+    }
 
-        for component in \"${{components[@]}}\"; do
-            find \"$component\" | while read -r file; do
-                relative_path=$(echo \"$file\" | sed -e \"s|$component||\")
+    pub fn with_rust_std(mut self, rust_std: &'a str) -> Self {
+        self.rust_std = Some(rust_std);
+        self
+    }
 
-                echo \"Copying $file to $toolchain_dir$relative_path\"
+    pub fn with_rustc(mut self, rustc: &'a str) -> Self {
+        self.rustc = Some(rustc);
+        self
+    }
 
-                if [[ \"$relative_path\" == \"/manifest.in\" ]]; then
-                    continue
-                fi
+    pub fn with_rustfmt(mut self, rustfmt: &'a str) -> Self {
+        self.rustfmt = Some(rustfmt);
+        self
+    }
 
-                if [ -d \"$file\" ]; then
-                    mkdir -pv \"$toolchain_dir$relative_path\"
-                else
-                    cp -pv \"$file\" \"$toolchain_dir$relative_path\"
-                fi
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let cargo = match self.cargo {
+            Some(digest) => digest.to_string(),
+            None => Cargo::new().build(context).await?,
+        };
+
+        let clippy = match self.clippy {
+            Some(digest) => digest.to_string(),
+            None => Clippy::new().build(context).await?,
+        };
+
+        let rust_analyzer = match self.rust_analyzer {
+            Some(digest) => digest.to_string(),
+            None => RustAnalyzer::new().build(context).await?,
+        };
+
+        let rust_src = match self.rust_src {
+            Some(digest) => digest.to_string(),
+            None => RustSrc::new().build(context).await?,
+        };
+
+        let rust_std = match self.rust_std {
+            Some(digest) => digest.to_string(),
+            None => RustStd::new().build(context).await?,
+        };
+
+        let rustc = match self.rustc {
+            Some(digest) => digest.to_string(),
+            None => Rustc::new().build(context).await?,
+        };
+
+        let rustfmt = match self.rustfmt {
+            Some(digest) => digest.to_string(),
+            None => Rustfmt::new().build(context).await?,
+        };
+
+        let artifacts = vec![
+            cargo,
+            clippy,
+            rust_analyzer,
+            rust_src,
+            rust_std,
+            rustc,
+            rustfmt,
+        ];
+
+        let mut toolchain_component_paths = vec![];
+
+        for component in &artifacts {
+            toolchain_component_paths.push(get_env_key(component));
+        }
+
+        let toolchain_target = target(context.get_system())?;
+        let toolchain_version = version();
+
+        let step_script = formatdoc! {"
+            toolchain_dir=\"$VORPAL_OUTPUT/toolchains/{toolchain_version}-{toolchain_target}\"
+
+            mkdir -pv \"$toolchain_dir\"
+
+            components=({component_paths})
+
+            for component in \"${{components[@]}}\"; do
+                find \"$component\" | while read -r file; do
+                    relative_path=$(echo \"$file\" | sed -e \"s|$component||\")
+
+                    echo \"Copying $file to $toolchain_dir$relative_path\"
+
+                    if [[ \"$relative_path\" == \"/manifest.in\" ]]; then
+                        continue
+                    fi
+
+                    if [ -d \"$file\" ]; then
+                        mkdir -pv \"$toolchain_dir$relative_path\"
+                    else
+                        cp -pv \"$file\" \"$toolchain_dir$relative_path\"
+                    fi
+                done
             done
-        done
 
-        cat > \"$VORPAL_OUTPUT/settings.toml\" << \"EOF\"
-        auto_self_update = \"disable\"
-        profile = \"minimal\"
-        version = \"12\"
+            cat > \"$VORPAL_OUTPUT/settings.toml\" << \"EOF\"
+            auto_self_update = \"disable\"
+            profile = \"minimal\"
+            version = \"12\"
 
-        [overrides]
-        EOF",
-        component_paths = toolchain_component_paths.join(" "),
-    };
+            [overrides]
+            EOF",
+            component_paths = toolchain_component_paths.join(" "),
+        };
 
-    let steps = vec![step::shell(context, artifacts, vec![], step_script, vec![]).await?];
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
-    let name = "rust-toolchain";
+        let steps = vec![step::shell(context, artifacts, vec![], step_script, vec![]).await?];
+        let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+        let name = "rust-toolchain";
 
-    Artifact::new(name, steps, systems)
-        .with_aliases(vec![format!("{name}:{toolchain_version}")])
-        .build(context)
-        .await
+        Artifact::new(name, steps, systems)
+            .with_aliases(vec![format!("{name}:{toolchain_version}")])
+            .build(context)
+            .await
+    }
 }

@@ -154,77 +154,86 @@ fn generate_dockerfile() -> String {
     "}
 }
 
-pub async fn build(context: &mut ConfigContext) -> Result<String> {
-    let systems = vec![Aarch64Linux, X8664Linux];
+#[derive(Default)]
+pub struct LinuxDebian {}
 
-    let steps = vec![step::bash(
-        vec![],
-        vec![],
-        vec![],
-        formatdoc! {"
-            cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"
-            {version_script}
-            EOF
+impl LinuxDebian {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-            cat > $VORPAL_OUTPUT/Dockerfile << \"EOF\"
-            {dockerfile}
-            EOF",
-            dockerfile = generate_dockerfile(),
-            version_script = generate_version_script(),
-        },
-    )];
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let systems = vec![Aarch64Linux, X8664Linux];
 
-    let dockerfile = Artifact::new("linux-debian-dockerfile", steps, systems.clone())
-        .build(context)
-        .await?;
-
-    let image = format!("altf4llc/debin:{dockerfile}");
-
-    let steps = vec![
-        step::docker(
-            vec![
-                "buildx",
-                "build",
-                "--progress=plain",
-                format!("--tag={image}").as_str(),
-                &get_env_key(&dockerfile),
-            ],
-            vec![dockerfile.clone()],
-        ),
-        step::docker(
-            vec!["container", "create", "--name", &dockerfile, &image],
-            vec![],
-        ),
-        step::docker(
-            vec![
-                "container",
-                "export",
-                "--output",
-                "$VORPAL_WORKSPACE/debian.tar",
-                &dockerfile,
-            ],
-            vec![],
-        ),
-        step::bash(
+        let steps = vec![step::bash(
             vec![],
             vec![],
             vec![],
             formatdoc! {"
-                ## extract files
-                tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
+                cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"
+                {version_script}
+                EOF
 
-                ## patch files
-                echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
-            "},
-        ),
-        step::docker(vec!["container", "stop", &dockerfile], vec![]),
-        step::docker(vec!["container", "rm", "--force", &dockerfile], vec![]),
-    ];
+                cat > $VORPAL_OUTPUT/Dockerfile << \"EOF\"
+                {dockerfile}
+                EOF",
+                dockerfile = generate_dockerfile(),
+                version_script = generate_version_script(),
+            },
+        )];
 
-    let name = "linux-debian";
+        let dockerfile = Artifact::new("linux-debian-dockerfile", steps, systems.clone())
+            .build(context)
+            .await?;
 
-    Artifact::new(name, steps, systems)
-        .with_aliases(vec![format!("{name}:latest")])
-        .build(context)
-        .await
+        let image = format!("altf4llc/debin:{dockerfile}");
+
+        let steps = vec![
+            step::docker(
+                vec![
+                    "buildx",
+                    "build",
+                    "--progress=plain",
+                    format!("--tag={image}").as_str(),
+                    &get_env_key(&dockerfile),
+                ],
+                vec![dockerfile.clone()],
+            ),
+            step::docker(
+                vec!["container", "create", "--name", &dockerfile, &image],
+                vec![],
+            ),
+            step::docker(
+                vec![
+                    "container",
+                    "export",
+                    "--output",
+                    "$VORPAL_WORKSPACE/debian.tar",
+                    &dockerfile,
+                ],
+                vec![],
+            ),
+            step::bash(
+                vec![],
+                vec![],
+                vec![],
+                formatdoc! {"
+                    ## extract files
+                    tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
+
+                    ## patch files
+                    echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf
+                "},
+            ),
+            step::docker(vec!["container", "stop", &dockerfile], vec![]),
+            step::docker(vec!["container", "rm", "--force", &dockerfile], vec![]),
+        ];
+
+        let name = "linux-debian";
+
+        Artifact::new(name, steps, systems)
+            .with_aliases(vec![format!("{name}:latest")])
+            .build(context)
+            .await
+    }
 }
