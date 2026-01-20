@@ -3,6 +3,37 @@ set -euo pipefail
 
 ## TODO: Support installing only specific components (registry, worker, etc.)
 
+# Non-interactive mode: set via VORPAL_NONINTERACTIVE=1, CI=true, or -y/--yes flag
+NONINTERACTIVE="${VORPAL_NONINTERACTIVE:-${CI:-0}}"
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -y|--yes)
+            NONINTERACTIVE=1
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: install.sh [OPTIONS]"
+            echo ""
+            echo "Install Vorpal to ~/.vorpal and configure system services."
+            echo ""
+            echo "Options:"
+            echo "  -y, --yes     Run in non-interactive mode (skip prompts)"
+            echo "  -h, --help    Show this help message"
+            echo ""
+            echo "Environment variables:"
+            echo "  VORPAL_NONINTERACTIVE=1    Enable non-interactive mode"
+            echo "  CI=true                    Enable non-interactive mode"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
 # Environment variables
 INSTALL_ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')
 INSTALL_DIR="$HOME/.vorpal"
@@ -10,20 +41,28 @@ INSTALL_OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 INSTALL_VERSION="nightly"
 INSTALL_BINARY_URL="https://github.com/ALT-F4-LLC/vorpal/releases/download/$INSTALL_VERSION/vorpal-$INSTALL_ARCH-$INSTALL_OS.tar.gz"
 
-read -p "|> Install script requires sudo permissions. Would you like to continue? (y/n) " -n 1 -r
-
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "\nAborting."
-    exit 1
-fi
-
-if [ -d "$INSTALL_DIR" ]; then
-    echo -e ""
-    read -p "|> Install path $INSTALL_DIR exists. Would you like to replace? (y/n) " -n 1 -r
+if [[ "$NONINTERACTIVE" != "1" && "$NONINTERACTIVE" != "true" ]]; then
+    read -p "|> Install script requires sudo permissions. Would you like to continue? (y/n) " -n 1 -r
 
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo -e "\nAborting."
         exit 1
+    fi
+else
+    echo "|> Install script requires sudo permissions. Continuing (non-interactive mode)..."
+fi
+
+if [ -d "$INSTALL_DIR" ]; then
+    if [[ "$NONINTERACTIVE" != "1" && "$NONINTERACTIVE" != "true" ]]; then
+        echo -e ""
+        read -p "|> Install path $INSTALL_DIR exists. Would you like to replace? (y/n) " -n 1 -r
+
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "\nAborting."
+            exit 1
+        fi
+    else
+        echo "|> Install path $INSTALL_DIR exists. Replacing (non-interactive mode)..."
     fi
 
     rm -rf "$INSTALL_DIR"
