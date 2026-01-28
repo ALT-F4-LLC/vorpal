@@ -156,8 +156,15 @@ pub enum Command {
         worker: String,
     },
 
-    /// Initialize Vorpal in the current directory
-    Init {},
+    /// Initialize Vorpal in a directory
+    Init {
+        /// Project name
+        name: String,
+
+        /// Output directory
+        #[arg(default_value = ".", long)]
+        path: PathBuf,
+    },
 
     /// Inspect an artifact
     Inspect {
@@ -406,7 +413,7 @@ pub async fn run() -> Result<()> {
             build::run(run_artifact, run_config, run_service).await
         }
 
-        Command::Init {} => init::run().await,
+        Command::Init { name, path } => init::run(name, path).await,
 
         Command::Inspect {
             digest,

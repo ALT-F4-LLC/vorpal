@@ -1,10 +1,10 @@
 use anyhow::{bail, Result};
 use inquire::{InquireError, Select};
-use std::{collections::BTreeMap, env::current_dir};
+use std::{collections::BTreeMap, path::Path};
 use tokio::fs::{create_dir_all, write};
 use tracing::{info, warn};
 
-pub async fn run() -> Result<()> {
+pub async fn run(name: &str, path: &Path) -> Result<()> {
     let options: Vec<&str> = vec!["Go", "Rust"];
 
     let answer: Result<&str, InquireError> =
@@ -31,6 +31,7 @@ pub async fn run() -> Result<()> {
             "Rust" => {
                 template.insert("src/main.rs", include_str!("template/rust/src/main.rs"));
                 template.insert("src/vorpal.rs", include_str!("template/rust/src/vorpal.rs"));
+                template.insert("Cargo.lock", include_str!("template/rust/Cargo.lock"));
                 template.insert("Cargo.toml", include_str!("template/rust/Cargo.toml"));
                 template.insert("Vorpal.toml", include_str!("template/rust/Vorpal.toml"));
             }
@@ -43,13 +44,15 @@ pub async fn run() -> Result<()> {
         }
     }
 
-    for (path, content) in template {
-        let path = path.to_string();
-        let content = content.to_string();
+    for (template_path, content) in template {
+        // Replace "example" with the provided name in file paths
+        let template_path = template_path.replace("cmd/example", &format!("cmd/{}", name));
 
-        let mut file_path = current_dir().expect("failed to get current directory");
+        // Replace "example" with the provided name in file content
+        let content = content.replace("example", name);
 
-        file_path.push(path.clone());
+        let mut file_path = path.to_path_buf();
+        file_path.push(&template_path);
 
         if let Some(parent) = file_path.parent() {
             create_dir_all(parent)
@@ -58,7 +61,7 @@ pub async fn run() -> Result<()> {
         }
 
         if file_path.exists() {
-            warn!("File already exists: {}", path);
+            warn!("File already exists: {}", template_path);
             continue;
         }
 
@@ -66,7 +69,7 @@ pub async fn run() -> Result<()> {
             .await
             .expect("failed to write file");
 
-        info!("Created file: {}", path);
+        info!("Created file: {}", template_path);
     }
 
     Ok(())
