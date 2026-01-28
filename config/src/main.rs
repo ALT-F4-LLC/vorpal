@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
 
     match context.get_artifact_name() {
         "vorpal" => Vorpal::new().build(context).await?,
-        "vorpal-image" => {
+        "linux-vorpal-slim" => {
             let linux_vorpal = LinuxVorpal::new().build(context).await?;
             let rsync = Rsync::new().build(context).await?;
 
