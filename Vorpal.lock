@@ -1273,6 +1273,14 @@ digest = "eb0c1779060a651e1288e5a3a6f3d5e3460a2955b64f9d71feefa444ceb52b54"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "rsync"
+path = "https://download.samba.org/pub/rsync/src/rsync-3.4.1.tar.gz"
+includes = []
+excludes = []
+digest = "5ca18fad3772ffe2a04feaffd4639482632baa0fc6b357622b51ea9d17658ec0"
+platform = "x86_64-linux"
+
+[[sources]]
 name = "rust-analyzer"
 path = "https://static.rust-lang.org/dist/rust-analyzer-1.89.0-x86_64-unknown-linux-gnu.tar.gz"
 includes = []
