@@ -48,7 +48,10 @@ async fn calculate_dir_size_async(path: &Path) -> u64 {
     tokio::task::spawn_blocking(move || calculate_dir_size(p))
         .await
         .unwrap_or_else(|e| {
-            warn!("Task failed calculating directory size for {}: {}", path_display, e);
+            warn!(
+                "Task failed calculating directory size for {}: {}",
+                path_display, e
+            );
             0
         })
 }
