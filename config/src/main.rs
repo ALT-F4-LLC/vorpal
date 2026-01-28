@@ -18,9 +18,12 @@ async fn main() -> Result<()> {
         "vorpal" => Vorpal::new().build(context).await?,
         "linux-vorpal-slim" => {
             let linux_vorpal = LinuxVorpal::new().build(context).await?;
+
+            println!("Linux Vorpal: {}", linux_vorpal);
+
             let rsync = Rsync::new().build(context).await?;
 
-            // TODO: migrate oci artifact here
+            println!("Rsync: {}", rsync);
 
             LinuxVorpalSlim::new()
                 .with_linux_vorpal(&linux_vorpal)
