@@ -4,9 +4,9 @@ use crate::command::store::paths::{
     get_root_sandbox_dir_path,
 };
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs::{create_dir_all, remove_dir_all};
-use tracing::info;
+use tracing::{info, warn};
 use walkdir::WalkDir;
 
 fn calculate_dir_size(path: PathBuf) -> u64 {
@@ -42,6 +42,17 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+async fn calculate_dir_size_async(path: &Path) -> u64 {
+    let path_display = path.display().to_string();
+    let p = path.to_path_buf();
+    tokio::task::spawn_blocking(move || calculate_dir_size(p))
+        .await
+        .unwrap_or_else(|e| {
+            warn!("Task failed calculating directory size for {}: {}", path_display, e);
+            0
+        })
+}
+
 pub async fn run(
     all: bool,
     artifact_aliases: bool,
@@ -54,10 +65,7 @@ pub async fn run(
 
     if artifact_aliases || all {
         let artifact_alias_dir_path = get_root_artifact_alias_dir_path();
-        let path = artifact_alias_dir_path.clone();
-        let size = tokio::task::spawn_blocking(move || calculate_dir_size(path))
-            .await
-            .unwrap_or(0);
+        let size = calculate_dir_size_async(&artifact_alias_dir_path).await;
         total_freed += size;
 
         remove_dir_all(&artifact_alias_dir_path)
@@ -73,10 +81,7 @@ pub async fn run(
 
     if artifact_archives || all {
         let artifact_archive_dir_path = get_root_artifact_archive_dir_path();
-        let path = artifact_archive_dir_path.clone();
-        let size = tokio::task::spawn_blocking(move || calculate_dir_size(path))
-            .await
-            .unwrap_or(0);
+        let size = calculate_dir_size_async(&artifact_archive_dir_path).await;
         total_freed += size;
 
         remove_dir_all(&artifact_archive_dir_path)
@@ -92,10 +97,7 @@ pub async fn run(
 
     if artifact_configs || all {
         let artifact_config_dir_path = get_root_artifact_config_dir_path();
-        let path = artifact_config_dir_path.clone();
-        let size = tokio::task::spawn_blocking(move || calculate_dir_size(path))
-            .await
-            .unwrap_or(0);
+        let size = calculate_dir_size_async(&artifact_config_dir_path).await;
         total_freed += size;
 
         remove_dir_all(&artifact_config_dir_path)
@@ -111,10 +113,7 @@ pub async fn run(
 
     if artifact_outputs || all {
         let artifact_output_dir_path = get_root_artifact_output_dir_path();
-        let path = artifact_output_dir_path.clone();
-        let size = tokio::task::spawn_blocking(move || calculate_dir_size(path))
-            .await
-            .unwrap_or(0);
+        let size = calculate_dir_size_async(&artifact_output_dir_path).await;
         total_freed += size;
 
         remove_dir_all(&artifact_output_dir_path)
@@ -130,10 +129,7 @@ pub async fn run(
 
     if sandboxes || all {
         let sandbox_dir_path = get_root_sandbox_dir_path();
-        let path = sandbox_dir_path.clone();
-        let size = tokio::task::spawn_blocking(move || calculate_dir_size(path))
-            .await
-            .unwrap_or(0);
+        let size = calculate_dir_size_async(&sandbox_dir_path).await;
         total_freed += size;
 
         remove_dir_all(&sandbox_dir_path)
