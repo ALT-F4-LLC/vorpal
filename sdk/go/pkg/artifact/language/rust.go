@@ -221,7 +221,8 @@ func (a *Rust) WithPackages(packages []string) *Rust {
 }
 
 func (a *Rust) WithSecrets(secrets map[string]string) *Rust {
-	for name, value := range secrets {
+	for _, name := range artifact.SortedKeys(secrets) {
+		value := secrets[name]
 		secret := &api.ArtifactStepSecret{
 			Name:  name,
 			Value: value,

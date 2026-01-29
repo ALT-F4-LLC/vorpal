@@ -5,12 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"text/template"
 
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
+
+// SortedKeys returns the keys of a map in sorted order for deterministic iteration.
+func SortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 type Argument struct {
 	Name    string
@@ -589,7 +600,8 @@ func (b *ProjectEnvironment) WithEnvironments(envs []string) *ProjectEnvironment
 }
 
 func (b *ProjectEnvironment) WithSecrets(secrets map[string]string) *ProjectEnvironment {
-	for name, value := range secrets {
+	for _, name := range SortedKeys(secrets) {
+		value := secrets[name]
 		secret := &api.ArtifactStepSecret{Name: name, Value: value}
 		if !slices.ContainsFunc(b.Secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
 			b.Secrets = append(b.Secrets, secret)
@@ -753,7 +765,8 @@ func (b *UserEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 	symlinksCheck := make([]string, 0)
 	symlinksDeactivate := make([]string, 0)
 
-	for source, target := range b.Symlinks {
+	for _, source := range SortedKeys(b.Symlinks) {
+		target := b.Symlinks[source]
 		symlinksActivate = append(symlinksActivate, fmt.Sprintf("ln -sv %s %s", source, target))
 		symlinksCheck = append(symlinksCheck, fmt.Sprintf("if [ -f %s ]; then echo \"ERROR: Symlink target exists -> %s\" && exit 1; fi", target, target))
 		symlinksDeactivate = append(symlinksDeactivate, fmt.Sprintf("rm -fv %s", target))
