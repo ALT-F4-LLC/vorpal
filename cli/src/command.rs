@@ -11,7 +11,7 @@ use oauth2::{
 };
 use path_clean::PathClean;
 use rustls::crypto::ring;
-use std::{collections::HashMap, env::current_dir, path::PathBuf, process::exit};
+use std::{collections::BTreeMap, env::current_dir, path::PathBuf, process::exit};
 use tokio::{
     fs::{read, write},
     time::sleep,
@@ -523,8 +523,8 @@ pub async fn run() -> Result<()> {
 
             // TODO: load existing credentials file if it exists
 
-            let mut issuer_map = HashMap::new();
-            let mut registry_map = HashMap::new();
+            let mut issuer_map = BTreeMap::new();
+            let mut registry_map = BTreeMap::new();
 
             issuer_map.insert(issuer.to_string(), content);
             registry_map.insert(registry.to_string(), issuer.to_string());

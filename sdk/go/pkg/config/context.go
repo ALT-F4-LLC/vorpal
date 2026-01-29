@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -101,6 +102,8 @@ func (s *ConfigServer) GetArtifacts(ctx context.Context, request *artifact.Artif
 	for digest := range s.store.artifact {
 		digests = append(digests, digest)
 	}
+
+	sort.Strings(digests)
 
 	response := &artifact.ArtifactsResponse{
 		Digests: digests,

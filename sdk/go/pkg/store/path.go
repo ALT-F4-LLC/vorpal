@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -103,6 +104,9 @@ func GetFilePaths(inputPath string, excludes []string, includes []string) ([]str
 	if err != nil {
 		return nil, err
 	}
+
+	// Sort paths for reproducible build hashes
+	sort.Strings(paths)
 
 	return paths, nil
 }

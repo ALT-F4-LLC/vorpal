@@ -280,7 +280,10 @@ impl<'a> Job<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        // Sort for deterministic output
+        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+
         let step = step::shell(context, self.artifacts, vec![], self.script, self.secrets).await?;
 
         Artifact::new(self.name, vec![step], self.systems)
@@ -319,10 +322,14 @@ impl<'a> ProjectEnvironment<'a> {
                 });
             }
         }
+
         self
     }
 
-    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        // Sort for deterministic output
+        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+
         let mut envs_backup = vec![
             "export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"".to_string(),
             "export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"".to_string(),
@@ -460,7 +467,10 @@ impl<'a> Process<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        // Sort for deterministic output
+        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+
         let script = formatdoc! {r#"
             mkdir -pv $VORPAL_OUTPUT/bin
 
@@ -566,7 +576,10 @@ impl<'a> UserEnvironment<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        // Sort for deterministic output
+        self.symlinks.sort_by(|a, b| a.0.cmp(&b.0));
+
         // Setup path
 
         let step_path_artifacts = self

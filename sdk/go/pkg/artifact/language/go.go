@@ -125,7 +125,8 @@ func (b *Go) WithIncludes(includes []string) *Go {
 }
 
 func (b *Go) WithSecrets(secrets map[string]string) *Go {
-	for name, value := range secrets {
+	for _, name := range artifact.SortedKeys(secrets) {
+		value := secrets[name]
 		secret := &api.ArtifactStepSecret{
 			Name:  name,
 			Value: value,

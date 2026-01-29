@@ -149,7 +149,10 @@ impl<'a> Rust<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
+        // Sort for deterministic output
+        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+
         let protoc = Protoc::new().build(context).await?;
 
         // Parse source path

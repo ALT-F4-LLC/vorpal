@@ -17,7 +17,7 @@ use oauth2::{basic::BasicClient, AuthUrl, ClientId, RefreshToken, TokenResponse,
 use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
 };
 use tokio::fs::{read, write};
@@ -68,8 +68,8 @@ pub struct VorpalCredentialsContent {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VorpalCredentials {
-    pub issuer: HashMap<String, VorpalCredentialsContent>,
-    pub registry: HashMap<String, String>,
+    pub issuer: BTreeMap<String, VorpalCredentialsContent>,
+    pub registry: BTreeMap<String, String>,
 }
 
 impl ConfigServer {
@@ -103,9 +103,10 @@ impl ContextService for ConfigServer {
         &self,
         _: tonic::Request<ArtifactsRequest>,
     ) -> Result<tonic::Response<ArtifactsResponse>, tonic::Status> {
-        let response = ArtifactsResponse {
-            digests: self.store.artifact.keys().cloned().collect(),
-        };
+        let mut digests: Vec<String> = self.store.artifact.keys().cloned().collect();
+        digests.sort();
+
+        let response = ArtifactsResponse { digests };
 
         Ok(Response::new(response))
     }

@@ -107,6 +107,7 @@ impl<'a> Go<'a> {
                     .push(api::artifact::ArtifactStepSecret { name, value });
             }
         }
+
         self
     }
 
@@ -122,7 +123,10 @@ impl<'a> Go<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        // Sort for deterministic output
+        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+
         let source_path = ".";
 
         let mut source_builder = ArtifactSource::new(self.name, source_path);
