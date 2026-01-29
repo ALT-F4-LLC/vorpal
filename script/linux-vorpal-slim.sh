@@ -117,7 +117,7 @@ ${BOLD}OPTIONS:${RESET}
     --execute           Actually perform the removal (disables dry-run)
     --no-confirm        Skip confirmation prompts (use with caution)
     --backup            Create tar.gz backup before modification
-    --sections=N,M      Only run specific sections (comma-separated, 1-13)
+    --sections=N,M      Only run specific sections (comma-separated, 1-13; default: all)
     --aggressive        Enable aggressive cleanup (strip binaries)
     --verbose           Show detailed output
     --quiet             Minimal output
@@ -135,19 +135,19 @@ ${BOLD}EXAMPLES:${RESET}
     $SCRIPT_NAME --execute --sections=8,9,10 /path/to/rootfs
 
 ${BOLD}SECTIONS:${RESET}
-    1.  GCC Compiler Infrastructure (1.2GB)
-    2.  Development Tools (50-100MB)
-    3.  Python Complete Removal (278MB)
-    4.  Perl Complete Removal (60MB)
-    5.  Static Libraries (252MB)
-    6.  Header Files (34MB)
-    7.  Sanitizer Libraries (31MB)
-    8.  Documentation (51MB)
-    9.  Locale Data (222MB)
-    10. Locale Translations (76MB)
-    11. i18n & Character Encodings (43MB)
-    12. Build Artifacts (minimal)
-    13. Optional Cleanup (20-30MB)
+    1.  GCC Compiler Infrastructure
+    2.  Development Tools & Binutils
+    3.  Python Complete Removal
+    4.  Perl Complete Removal
+    5.  Static Libraries
+    6.  Header Files
+    7.  Sanitizer Libraries
+    8.  Documentation
+    9.  Locale Data
+    10. Locale Translations
+    11. i18n & Character Encodings
+    12. Build Artifacts
+    13. Optional Cleanup
 
 ${BOLD}WARNING:${RESET}
     This script will permanently remove files. Use --dry-run first to review
@@ -290,6 +290,23 @@ safe_remove_pattern() {
     return 0
 }
 
+# Safe removal of empty directories with tracking
+safe_remove_empty_dirs() {
+    local base_dir="$1"
+    local description="$2"
+
+    if [ ! -d "$base_dir" ]; then
+        log_action "SKIP" "$description - base directory not found"
+        return 0
+    fi
+
+    while IFS= read -r -d '' item; do
+        safe_remove "$item" "$description"
+    done < <(find "$base_dir" -type d -empty -print0 2>/dev/null)
+
+    return 0
+}
+
 # Confirmation prompt
 confirm() {
     local prompt="$1"
@@ -325,6 +342,24 @@ should_run_section() {
     fi
 }
 
+# Calculate total size of paths matching a pattern in a directory
+calculate_pattern_size() {
+    local base_dir="$1"
+    local pattern="$2"
+
+    if [ ! -d "$base_dir" ]; then
+        echo "0"
+        return
+    fi
+
+    local total=0
+    while IFS= read -r -d '' item; do
+        total=$((total + $(size_of "$item")))
+    done < <(find "$base_dir" -maxdepth 1 -name "$pattern" -print0 2>/dev/null)
+
+    echo "$total"
+}
+
 # Section header
 section_header() {
     local section_num="$1"
@@ -348,7 +383,22 @@ section_header() {
 section_01_gcc_compiler() {
     if ! should_run_section 1; then return 0; fi
 
-    section_header 1 "GCC Compiler Infrastructure" "~1.2GB"
+    # Calculate section size
+    local section_size=0
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/libexec/gcc")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/lib/gcc")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/share" "gcc-*")))
+    # GCC binaries
+    local gcc_bins=("gcc" "g++" "c++" "cpp" "cc" "gcc-ar" "gcc-nm" "gcc-ranlib" "gcov" "gcov-tool" "gcov-dump" "lto-dump")
+    for bin in "${gcc_bins[@]}"; do
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "$bin")))
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "$bin-*")))
+    done
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "aarch64-unknown-linux-gnu-*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "*-linux-gnu-gcc*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "libcc1.so*")))
+
+    section_header 1 "GCC Compiler Infrastructure" "$(human_readable $section_size)"
 
     # Remove GCC compiler internals (largest target)
     safe_remove "$ROOTFS/usr/libexec/gcc" "GCC compiler internals"
@@ -386,7 +436,36 @@ section_01_gcc_compiler() {
 section_02_dev_tools() {
     if ! should_run_section 2; then return 0; fi
 
-    section_header 2 "Development Tools & Binutils" "~50-100MB"
+    # Calculate section size
+    local section_size=0
+    local calc_binutils=("as" "ld" "ld.bfd" "ld.gold" "ar" "ranlib" "nm" "objcopy" "objdump" "readelf" "size" "strings" "addr2line" "c++filt" "elfedit" "gprof" "dwp" "gold")
+    for bin in "${calc_binutils[@]}"; do
+        section_size=$((section_size + $(size_of "$ROOTFS/usr/bin/$bin")))
+    done
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "gprofng*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "gp-*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "libbfd*.so*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "libopcodes*.so*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "libctf*.so*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "libsframe*.so*")))
+    local calc_build_tools=("make" "bison" "yacc" "flex" "lex" "m4")
+    for tool in "${calc_build_tools[@]}"; do
+        section_size=$((section_size + $(size_of "$ROOTFS/usr/bin/$tool")))
+    done
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "gdb*")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/gdb")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/bison")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/aclocal")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/bin/pkg-config")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/lib/pkgconfig")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/pkgconfig")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "autoconf*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "autom4te*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "autoreconf*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "automake*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "aclocal*")))
+
+    section_header 2 "Development Tools & Binutils" "$(human_readable $section_size)"
 
     # Remove binutils development binaries
     local binutils_binaries=(
@@ -441,7 +520,19 @@ section_02_dev_tools() {
 section_03_python() {
     if ! should_run_section 3; then return 0; fi
 
-    section_header 3 "Python Complete Removal" "~278MB"
+    # Calculate section size
+    local section_size=0
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "python3*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "libpython3*.so*")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "libpython*.so*")))
+    local calc_py_bins=("python" "python3" "pip" "pip3" "pydoc" "pydoc3" "2to3" "idle" "idle3" "pyvenv")
+    for bin in "${calc_py_bins[@]}"; do
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "$bin")))
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "${bin}.*")))
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "${bin}-*")))
+    done
+
+    section_header 3 "Python Complete Removal" "$(human_readable $section_size)"
 
     # Remove Python library directories
     safe_remove_pattern "$ROOTFS/usr/lib" "python3*" "Python libraries"
@@ -465,9 +556,9 @@ section_03_python() {
     done
 
     # Clean up any remaining Python artifacts
-    find "$ROOTFS" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-    find "$ROOTFS" -type f -name "*.pyc" -delete 2>/dev/null || true
-    find "$ROOTFS" -type f -name "*.pyo" -delete 2>/dev/null || true
+    safe_remove_pattern "$ROOTFS" "__pycache__" "Python cache directories"
+    safe_remove_pattern "$ROOTFS" "*.pyc" "Python bytecode files"
+    safe_remove_pattern "$ROOTFS" "*.pyo" "Python optimized files"
 
     log_action "INFO" "Python completely removed"
 }
@@ -476,7 +567,17 @@ section_03_python() {
 section_04_perl() {
     if ! should_run_section 4; then return 0; fi
 
-    section_header 4 "Perl Complete Removal" "~60MB"
+    # Calculate section size
+    local section_size=0
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/lib/perl5")))
+    local calc_perl_bins=("perl" "cpan" "corelist" "enc2xs" "encguess" "h2ph" "h2xs" "instmodsh" "json_pp" "libnetcfg" "piconv" "pl2pm" "prove" "ptar" "ptardiff" "ptargrep" "shasum" "splain" "streamzip" "xsubpp" "zipdetails")
+    for bin in "${calc_perl_bins[@]}"; do
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "$bin")))
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "${bin}5.*")))
+    done
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/bin" "pod2*")))
+
+    section_header 4 "Perl Complete Removal" "$(human_readable $section_size)"
 
     # Remove Perl library directory
     safe_remove "$ROOTFS/usr/lib/perl5" "Perl libraries"
@@ -516,15 +617,20 @@ section_04_perl() {
 section_05_static_libs() {
     if ! should_run_section 5; then return 0; fi
 
-    section_header 5 "Static Libraries" "~252MB"
+    # Calculate section size
+    local section_size=0
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "*.a")))
+    section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "*.la")))
+
+    section_header 5 "Static Libraries" "$(human_readable $section_size)"
 
     # Remove all .a files
     log_action "INFO" "Removing all static libraries (.a files)"
-    find "$ROOTFS/usr/lib" -type f -name "*.a" -delete 2>/dev/null || true
+    safe_remove_pattern "$ROOTFS/usr/lib" "*.a" "Static libraries"
 
     # Remove libtool .la files
     log_action "INFO" "Removing libtool archives (.la files)"
-    find "$ROOTFS/usr/lib" -type f -name "*.la" -delete 2>/dev/null || true
+    safe_remove_pattern "$ROOTFS/usr/lib" "*.la" "Libtool archives"
 
     log_action "INFO" "All static libraries removed"
 }
@@ -533,13 +639,17 @@ section_05_static_libs() {
 section_06_headers() {
     if ! should_run_section 6; then return 0; fi
 
-    section_header 6 "Header Files" "~34MB"
+    # Calculate section size
+    local section_size=0
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/include")))
+
+    section_header 6 "Header Files" "$(human_readable $section_size)"
 
     # Remove all header files
     safe_remove "$ROOTFS/usr/include" "All header files"
 
     # Remove any lingering header directories
-    find "$ROOTFS/usr/lib" -type d -name "include" -exec rm -rf {} + 2>/dev/null || true
+    safe_remove_pattern "$ROOTFS/usr/lib" "include" "Lingering header directories"
 
     log_action "INFO" "Cannot compile code without headers"
 }
@@ -548,7 +658,15 @@ section_06_headers() {
 section_07_sanitizers() {
     if ! should_run_section 7; then return 0; fi
 
-    section_header 7 "Sanitizer Libraries" "~31MB"
+    # Calculate section size
+    local section_size=0
+    local calc_sanitizers=("asan" "tsan" "ubsan" "lsan" "hwasan")
+    for san in "${calc_sanitizers[@]}"; do
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "lib${san}*.so*")))
+        section_size=$((section_size + $(calculate_pattern_size "$ROOTFS/usr/lib" "lib${san}*.a")))
+    done
+
+    section_header 7 "Sanitizer Libraries" "$(human_readable $section_size)"
 
     # Remove sanitizer shared and static libraries
     local sanitizers=("asan" "tsan" "ubsan" "lsan" "hwasan")
@@ -565,7 +683,19 @@ section_07_sanitizers() {
 section_08_documentation() {
     if ! should_run_section 8; then return 0; fi
 
-    section_header 8 "Documentation" "~51MB"
+    # Calculate section size
+    local section_size=0
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/man")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/info")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/doc")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/texinfo")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/texi2any")))
+    local calc_texinfo_bins=("makeinfo" "texi2any" "texi2dvi" "texi2pdf" "texindex" "info" "install-info" "pdftexi2dvi")
+    for bin in "${calc_texinfo_bins[@]}"; do
+        section_size=$((section_size + $(size_of "$ROOTFS/usr/bin/$bin")))
+    done
+
+    section_header 8 "Documentation" "$(human_readable $section_size)"
 
     # Remove man pages
     safe_remove "$ROOTFS/usr/share/man" "Man pages"
@@ -592,7 +722,11 @@ section_08_documentation() {
 section_09_locale_data() {
     if ! should_run_section 9; then return 0; fi
 
-    section_header 9 "Locale Data" "~222MB"
+    # Calculate section size
+    local section_size=0
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/lib/locale")))
+
+    section_header 9 "Locale Data" "$(human_readable $section_size)"
 
     # Check if localedef is available for rebuilding
     if [ -x "$ROOTFS/usr/bin/localedef" ]; then
@@ -624,7 +758,15 @@ section_09_locale_data() {
 section_10_locale_translations() {
     if ! should_run_section 10; then return 0; fi
 
-    section_header 10 "Locale Translations" "~76MB"
+    # Calculate section size (excluding en_US and en directories)
+    local section_size=0
+    if [ -d "$ROOTFS/usr/share/locale" ]; then
+        while IFS= read -r -d '' dir; do
+            section_size=$((section_size + $(size_of "$dir")))
+        done < <(find "$ROOTFS/usr/share/locale" -mindepth 1 -maxdepth 1 -type d ! -name "en_US*" ! -name "en" -print0 2>/dev/null)
+    fi
+
+    section_header 10 "Locale Translations" "$(human_readable $section_size)"
 
     if [ -d "$ROOTFS/usr/share/locale" ]; then
         log_action "INFO" "Removing non-English locale translations"
@@ -646,7 +788,21 @@ section_10_locale_translations() {
 section_11_i18n_encodings() {
     if ! should_run_section 11; then return 0; fi
 
-    section_header 11 "i18n & Character Encodings" "~43MB"
+    # Calculate section size
+    local section_size=0
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/i18n")))
+    # For gconv, estimate removable size (total minus essential modules)
+    if [ -d "$ROOTFS/usr/lib/gconv" ]; then
+        local gconv_total=$(size_of "$ROOTFS/usr/lib/gconv")
+        local gconv_keep=0
+        gconv_keep=$((gconv_keep + $(calculate_pattern_size "$ROOTFS/usr/lib/gconv" "UTF-*.so")))
+        gconv_keep=$((gconv_keep + $(size_of "$ROOTFS/usr/lib/gconv/ISO8859-1.so")))
+        gconv_keep=$((gconv_keep + $(size_of "$ROOTFS/usr/lib/gconv/gconv-modules")))
+        gconv_keep=$((gconv_keep + $(size_of "$ROOTFS/usr/lib/gconv/gconv-modules.cache")))
+        section_size=$((section_size + gconv_total - gconv_keep))
+    fi
+
+    section_header 11 "i18n & Character Encodings" "$(human_readable $section_size)"
 
     # Remove i18n source data
     safe_remove "$ROOTFS/usr/share/i18n" "i18n source data"
@@ -688,18 +844,36 @@ section_11_i18n_encodings() {
 section_12_build_artifacts() {
     if ! should_run_section 12; then return 0; fi
 
-    section_header 12 "Build Artifacts" "~minimal"
+    # Calculate section size (recursive patterns require find)
+    local section_size=0
+    while IFS= read -r -d '' item; do
+        section_size=$((section_size + $(size_of "$item")))
+    done < <(find "$ROOTFS" -name "__pycache__" -print0 2>/dev/null)
+    while IFS= read -r -d '' item; do
+        section_size=$((section_size + $(size_of "$item")))
+    done < <(find "$ROOTFS" -name "*.pyc" -print0 2>/dev/null)
+    while IFS= read -r -d '' item; do
+        section_size=$((section_size + $(size_of "$item")))
+    done < <(find "$ROOTFS" -name "*.pyo" -print0 2>/dev/null)
+    while IFS= read -r -d '' item; do
+        section_size=$((section_size + $(size_of "$item")))
+    done < <(find "$ROOTFS" -name "perllocal.pod" -print0 2>/dev/null)
+    while IFS= read -r -d '' item; do
+        section_size=$((section_size + $(size_of "$item")))
+    done < <(find "$ROOTFS" -name ".packlist" -print0 2>/dev/null)
+
+    section_header 12 "Build Artifacts" "$(human_readable $section_size)"
 
     # Remove Python cache (if any remain)
     log_action "INFO" "Cleaning Python artifacts"
-    find "$ROOTFS" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-    find "$ROOTFS" -type f -name "*.pyc" -delete 2>/dev/null || true
-    find "$ROOTFS" -type f -name "*.pyo" -delete 2>/dev/null || true
+    safe_remove_pattern "$ROOTFS" "__pycache__" "Python cache directories"
+    safe_remove_pattern "$ROOTFS" "*.pyc" "Python bytecode files"
+    safe_remove_pattern "$ROOTFS" "*.pyo" "Python optimized files"
 
     # Remove Perl build artifacts
     log_action "INFO" "Cleaning Perl artifacts"
-    find "$ROOTFS" -type f -name "perllocal.pod" -delete 2>/dev/null || true
-    find "$ROOTFS" -type f -name ".packlist" -delete 2>/dev/null || true
+    safe_remove_pattern "$ROOTFS" "perllocal.pod" "Perl local documentation"
+    safe_remove_pattern "$ROOTFS" ".packlist" "Perl packlist files"
 
     log_action "INFO" "Build artifacts cleaned"
 }
@@ -708,7 +882,22 @@ section_12_build_artifacts() {
 section_13_optional_cleanup() {
     if ! should_run_section 13; then return 0; fi
 
-    section_header 13 "Optional Cleanup" "~20-30MB"
+    # Calculate section size
+    local section_size=0
+    # Terminfo - estimate removable entries (non-essential terminals)
+    if [ -d "$ROOTFS/usr/share/terminfo" ]; then
+        while IFS= read -r -d '' item; do
+            section_size=$((section_size + $(size_of "$item")))
+        done < <(find "$ROOTFS/usr/share/terminfo" -mindepth 2 -type f \
+            ! -name "linux*" ! -name "vt100*" ! -name "vt220*" \
+            ! -name "xterm*" ! -name "screen*" -print0 2>/dev/null)
+    fi
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/misc")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/color")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/tabset")))
+    section_size=$((section_size + $(size_of "$ROOTFS/usr/share/dict")))
+
+    section_header 13 "Optional Cleanup" "$(human_readable $section_size)"
 
     # Reduce terminfo to essential terminals
     if [ -d "$ROOTFS/usr/share/terminfo" ]; then
@@ -755,7 +944,7 @@ section_13_optional_cleanup() {
 
     # Remove empty directories
     log_action "INFO" "Removing empty directories"
-    find "$ROOTFS/usr" -type d -empty -delete 2>/dev/null || true
+    safe_remove_empty_dirs "$ROOTFS/usr" "Empty directories"
 }
 
 #==============================================================================
