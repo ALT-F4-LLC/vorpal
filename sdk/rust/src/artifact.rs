@@ -4,6 +4,7 @@ use indoc::formatdoc;
 
 pub mod cargo;
 pub mod clippy;
+pub mod crane;
 pub mod gh;
 pub mod git;
 pub mod go;
@@ -14,6 +15,7 @@ pub mod language;
 pub mod linux_debian;
 pub mod linux_vorpal;
 pub mod linux_vorpal_slim;
+pub mod oci_image;
 pub mod protoc;
 pub mod protoc_gen_go;
 pub mod protoc_gen_go_grpc;

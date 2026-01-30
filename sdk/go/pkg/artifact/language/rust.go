@@ -391,10 +391,10 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 		"HOME=$VORPAL_WORKSPACE/home",
 		fmt.Sprintf(
 			"PATH=%s/toolchains/%s/bin",
-			artifact.GetEnvKey(rustToolchain),
+			artifact.GetEnvKey(*rustToolchain),
 			rustToolchainName,
 		),
-		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(rustToolchain)),
+		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(*rustToolchain)),
 		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", rustToolchainName),
 	}
 
@@ -527,7 +527,7 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 		Name:          builder.name,
 		Packages:      strings.Join(stepScriptPackages, ","),
 		Tests:         fmt.Sprintf("%t", builder.tests),
-		Vendor:        artifact.GetEnvKey(vendor),
+		Vendor:        artifact.GetEnvKey(*vendor),
 	}
 
 	if err := stepScript.Execute(&stepScriptBuffer, stepScriptArgs); err != nil {

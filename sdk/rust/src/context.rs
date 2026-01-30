@@ -225,6 +225,20 @@ impl ConfigContext {
             bail!("systems cannot be empty");
         }
 
+        // Validate target is in systems list
+        if !artifact.systems.contains(&artifact.target) {
+            bail!(
+                "artifact '{}' does not support system '{:?}' (supported: {:?})",
+                artifact.name,
+                ArtifactSystem::try_from(artifact.target).unwrap_or(ArtifactSystem::UnknownSystem),
+                artifact
+                    .systems
+                    .iter()
+                    .filter_map(|&s| ArtifactSystem::try_from(s).ok())
+                    .collect::<Vec<_>>()
+            );
+        }
+
         // Send raw sources to agent - agent will handle all lockfile operations
         let artifact_json =
             serde_json::to_vec(&artifact).expect("failed to serialize artifact to JSON");
@@ -365,6 +379,10 @@ impl ConfigContext {
 
     pub fn get_artifact_name(&self) -> &str {
         self.artifact.as_str()
+    }
+
+    pub fn get_artifact_namespace(&self) -> &str {
+        self.artifact_namespace.as_str()
     }
 
     pub fn get_system(&self) -> ArtifactSystem {

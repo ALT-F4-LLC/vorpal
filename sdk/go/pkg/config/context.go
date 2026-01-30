@@ -318,7 +318,22 @@ func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error
 		return nil, fmt.Errorf("'systems' is required")
 	}
 
-	// 1. Setup systems
+	// Validate target is in systems list
+	targetSupported := false
+	for _, s := range artifact.Systems {
+		if s == artifact.Target {
+			targetSupported = true
+			break
+		}
+	}
+	if !targetSupported {
+		return nil, fmt.Errorf(
+			"artifact '%s' does not support system '%s' (supported: %v)",
+			artifact.Name,
+			artifact.Target.String(),
+			artifact.Systems,
+		)
+	}
 
 	artifactJson, err := json.Marshal(artifact)
 	if err != nil {
