@@ -87,6 +87,13 @@ impl<'a> OciImage<'a> {
             ROOTFS_DIR=${{PWD}}/rootfs
             STORE_PREFIX=var/lib/vorpal/store/artifact/output/{namespace}
 
+            # Detect platform based on build architecture
+            case \"$(uname -m)\" in
+                x86_64)  OCI_PLATFORM=\"linux/amd64\" ;;
+                aarch64) OCI_PLATFORM=\"linux/arm64\" ;;
+                *)       OCI_PLATFORM=\"linux/$(uname -m)\" ;;
+            esac
+
             mkdir -pv ${{ROOTFS_DIR}}
 
             for artifact in ${{OCI_IMAGE_ARTIFACTS}}; do
@@ -122,7 +129,8 @@ impl<'a> OciImage<'a> {
                 --new_layer ${{OUTPUT_TAR}} \
                 --new_tag ${{OCI_IMAGE_NAME}}:latest \
                 --oci-empty-base \
-                --output ${{VORPAL_OUTPUT}}/image.tar",
+                --output ${{VORPAL_OUTPUT}}/image.tar \
+                --platform ${{OCI_PLATFORM}}",
             artifacts_list = artifacts_list,
             crane = get_env_key(&crane),
             name = self.name,
