@@ -155,7 +155,7 @@ func (o *OciImage) Build(context *config.ConfigContext) (*string, error) {
 		artifactDigests[i] = *artifact
 	}
 
-	scriptTemplate, err := template.New("script").Parse(BashScriptTemplate)
+	scriptTemplate, err := template.New("script").Parse(ociImageScript)
 	if err != nil {
 		return nil, err
 	}
