@@ -229,7 +229,7 @@ func ClientAuthHeader(registry string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to serialize credentials: %w", err)
 		}
-		if err := os.WriteFile(credentialsPath, updatedData, 0600); err != nil {
+		if err := os.WriteFile(credentialsPath, updatedData, 0o600); err != nil {
 			return "", fmt.Errorf("failed to write credentials: %w", err)
 		}
 	}
@@ -567,6 +567,10 @@ func (c *ConfigContext) GetArtifactContextPath() string {
 
 func (c *ConfigContext) GetArtifactName() string {
 	return c.artifact
+}
+
+func (c *ConfigContext) GetArtifactNamespace() string {
+	return c.artifactNamespace
 }
 
 func (c *ConfigContext) GetTarget() artifact.ArtifactSystem {

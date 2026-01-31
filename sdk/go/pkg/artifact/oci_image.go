@@ -14,6 +14,7 @@ type ociImageScriptData struct {
 	ArtifactsList string
 	Crane         string
 	Name          string
+	Namespace     string
 	Rootfs        string
 	Rsync         string
 }
@@ -35,7 +36,7 @@ OCI_IMAGE_ROOTFS="{{.Rootfs}}"
 OCI_IMAGE_RSYNC="{{.Rsync}}"
 OUTPUT_TAR=${PWD}/rootfs.tar
 ROOTFS_DIR=${PWD}/rootfs
-STORE_PREFIX=var/lib/vorpal/store/artifact/output/library
+STORE_PREFIX=var/lib/vorpal/store/artifact/output/{{.Namespace}}
 
 # Detect platform based on build architecture
 case \"$(uname -m)\" in
@@ -164,10 +165,11 @@ func (o *OciImage) Build(context *config.ConfigContext) (*string, error) {
 
 	scriptTemplateVars := ociImageScriptData{
 		ArtifactsList: strings.Join(artifactDigests, " "),
-		Crane:         *crane,
+		Crane:         GetEnvKey(*crane),
 		Name:          o.name,
-		Rootfs:        o.rootfs,
-		Rsync:         *rsync,
+		Namespace:     context.GetArtifactNamespace(),
+		Rootfs:        GetEnvKey(o.rootfs),
+		Rsync:         GetEnvKey(*rsync),
 	}
 
 	if err := scriptTemplate.Execute(&scriptBuffer, scriptTemplateVars); err != nil {
