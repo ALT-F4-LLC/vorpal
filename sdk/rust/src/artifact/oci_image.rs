@@ -75,8 +75,6 @@ impl<'a> OciImage<'a> {
 
         let rootfs = self.rootfs.to_string();
 
-        let artifact_name = format!("oci-image-{}", self.name.replace([':', '/', '.'], "-"));
-
         let artifacts_list = self.artifacts.join(" ");
 
         let step_script = formatdoc! {"
@@ -143,7 +141,7 @@ impl<'a> OciImage<'a> {
 
         let systems = vec![Aarch64Linux, X8664Linux];
 
-        Artifact::new(&artifact_name, vec![step], systems)
+        Artifact::new(self.name, vec![step], systems)
             .with_aliases(self.aliases.into_iter().map(String::from).collect())
             .build(context)
             .await
