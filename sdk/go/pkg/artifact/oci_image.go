@@ -18,6 +18,15 @@ type ociImageScriptData struct {
 	Rsync         string
 }
 
+type OciImage struct {
+	aliases   []string
+	artifacts []*string
+	crane     *string
+	name      string
+	rootfs    string
+	rsync     *string
+}
+
 const ociImageScript = `
 OCI_IMAGE_ARTIFACTS="{{.ArtifactsList}}"
 OCI_IMAGE_CRANE="{{.Crane}}"
@@ -74,20 +83,13 @@ ${OCI_IMAGE_CRANE}/bin/crane append \
     --platform ${OCI_PLATFORM}
 `
 
-type OciImage struct {
-	aliases   []string
-	artifacts []*string
-	crane     *string
-	rootfs    *string
-	name      string
-}
-
-func NewOciImage(name string) *OciImage {
+func NewOciImage(name string, rootfs string) *OciImage {
 	return &OciImage{
 		artifacts: []*string{},
 		crane:     nil,
-		rootfs:    nil,
 		name:      name,
+		rootfs:    rootfs,
+		rsync:     nil,
 	}
 }
 
@@ -101,7 +103,7 @@ func (o *OciImage) WithCrane(crane *string) *OciImage {
 	return o
 }
 
-func (o *OciImage) WithRootfs(rootfs *string) *OciImage {
+func (o *OciImage) WithRootfs(rootfs string) *OciImage {
 	o.rootfs = rootfs
 	return o
 }
@@ -137,24 +139,16 @@ func (o *OciImage) Build(context *config.ConfigContext) (*string, error) {
 		crane = c
 	}
 
-	var rootfs *string
-	if o.rootfs != nil {
-		rootfs = o.rootfs
+	var rsync *string
+	if o.rsync != nil {
+		rsync = o.rsync
 	} else {
-		r, err := context.FetchArtifactAlias("library/linux-vorpal-slim:latest")
+		r, err := Rsync(context)
 		if err != nil {
 			return nil, err
 		}
-		rootfs = r
+		rsync = r
 	}
-
-	rsync, err := Rsync(context)
-	if err != nil {
-		return nil, err
-	}
-
-	artifactName := fmt.Sprintf("oci-image-%s",
-		strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(o.name, ":", "-"), "/", "-"), ".", "-"))
 
 	artifactDigests := make([]string, len(o.artifacts))
 	for i, artifact := range o.artifacts {
@@ -172,7 +166,7 @@ func (o *OciImage) Build(context *config.ConfigContext) (*string, error) {
 		ArtifactsList: strings.Join(artifactDigests, " "),
 		Crane:         *crane,
 		Name:          o.name,
-		Rootfs:        *rootfs,
+		Rootfs:        o.rootfs,
 		Rsync:         *rsync,
 	}
 
@@ -180,7 +174,7 @@ func (o *OciImage) Build(context *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	stepArtifacts := []*string{crane, rsync, rootfs}
+	stepArtifacts := []*string{crane, rsync, &o.rootfs}
 	stepArtifacts = append(stepArtifacts, o.artifacts...)
 
 	step, err := Shell(context, stepArtifacts, nil, scriptBuffer.String(), nil)
@@ -193,7 +187,7 @@ func (o *OciImage) Build(context *config.ConfigContext) (*string, error) {
 		api.ArtifactSystem_X8664_LINUX,
 	}
 
-	return NewArtifact(artifactName, []*api.ArtifactStep{step}, systems).
+	return NewArtifact(o.name, []*api.ArtifactStep{step}, systems).
 		WithAliases(o.aliases).
 		Build(context)
 }
