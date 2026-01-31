@@ -136,8 +136,8 @@ func Bwrap(
 		"VORPAL_WORKSPACE",
 		"$VORPAL_WORKSPACE",
 		"--setenv",
-        "HOME",
-        "$VORPAL_WORKSPACE",
+		"HOME",
+		"$VORPAL_WORKSPACE",
 	}
 
 	// Setup artifacts arguments

@@ -28,6 +28,13 @@ OUTPUT_TAR=${PWD}/rootfs.tar
 ROOTFS_DIR=${PWD}/rootfs
 STORE_PREFIX=var/lib/vorpal/store/artifact/output/library
 
+# Detect platform based on build architecture
+case \"$(uname -m)\" in
+    x86_64)  OCI_PLATFORM=\"linux/amd64\" ;;
+    aarch64) OCI_PLATFORM=\"linux/arm64\" ;;
+    *)       OCI_PLATFORM=\"linux/$(uname -m)\" ;;
+esac
+
 mkdir -pv ${ROOTFS_DIR}
 
 for artifact in ${OCI_IMAGE_ARTIFACTS}; do
@@ -38,14 +45,14 @@ for artifact in ${OCI_IMAGE_ARTIFACTS}; do
 
     echo "Copying artifact layer ${artifact}..."
 
-    ${OCI_IMAGE_RSYNC}/bin/rsync -aPW ${SOURCE_DIR}/ ${ROOTFS_DIR}/${TARGET_PATH}
+    ${OCI_IMAGE_RSYNC}/bin/rsync -aW ${SOURCE_DIR}/ ${ROOTFS_DIR}/${TARGET_PATH}
 
     echo "Copied artifact layer ${artifact}"
 done
 
 echo "Copying Vorpal operating system files..."
 
-${OCI_IMAGE_RSYNC}/bin/rsync -aPW ${OCI_IMAGE_ROOTFS}/ ${ROOTFS_DIR}
+${OCI_IMAGE_RSYNC}/bin/rsync -aW ${OCI_IMAGE_ROOTFS}/ ${ROOTFS_DIR}
 
 echo "Copied Vorpal operating system files"
 
@@ -63,7 +70,8 @@ ${OCI_IMAGE_CRANE}/bin/crane append \
     --new_layer ${OUTPUT_TAR} \
     --new_tag ${OCI_IMAGE_NAME}:latest \
     --oci-empty-base \
-    --output ${VORPAL_OUTPUT}/image.tar
+    --output ${VORPAL_OUTPUT}/image.tar \
+    --platform ${OCI_PLATFORM}
 `
 
 type OciImage struct {

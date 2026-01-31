@@ -154,6 +154,11 @@ jobs:
           VORPAL_ARTIFACT=$(vorpal build "vorpal")
           echo "VORPAL_ARTIFACT=$VORPAL_ARTIFACT" >> $GITHUB_ENV
 
+      - if: contains(matrix.runner, 'ubuntu')
+        run: |
+          VORPAL_CONTAINER_IMAGE_ARTIFACT=$(vorpal build "vorpal-container-image")
+          echo "VORPAL_CONTAINER_IMAGE_ARTIFACT=$VORPAL_CONTAINER_IMAGE_ARTIFACT" >> $GITHUB_ENV
+
       - run: |
           VORPAL_JOB_ARTIFACT=$(vorpal build "vorpal-job")
           echo "VORPAL_JOB_ARTIFACT=$VORPAL_JOB_ARTIFACT" >> $GITHUB_ENV
@@ -174,6 +179,14 @@ jobs:
           ARTIFACT=$(vorpal build --config "Vorpal.go.toml" "vorpal")
           if [ "$ARTIFACT" != "$VORPAL_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_ARTIFACT"
+            exit 1
+          fi
+
+      - if: contains(matrix.runner, 'ubuntu')
+        run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.go.toml" "vorpal-container-image")
+          if [ "$ARTIFACT" != "$VORPAL_CONTAINER_IMAGE_ARTIFACT" ]; then
+            echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_CONTAINER_IMAGE_ARTIFACT"
             exit 1
           fi
 
