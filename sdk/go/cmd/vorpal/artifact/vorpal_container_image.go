@@ -13,6 +13,12 @@ func BuildVorpalContainerImage(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("failed to build vorpal: %w", err)
 	}
 
+	vorpal, err := Vorpal(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build vorpal: %w", err)
+	}
+
 	return artifact.NewOciImage("vorpal-container-image", *rootfs).
+		WithArtifacts([]*string{vorpal}).
 		Build(context)
 }

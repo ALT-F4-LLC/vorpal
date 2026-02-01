@@ -107,6 +107,18 @@ impl<'a> OciImage<'a> {
                 ${{OCI_IMAGE_RSYNC}}/bin/rsync -aW ${{SOURCE_DIR}}/ ${{ROOTFS_DIR}}/${{TARGET_PATH}}
 
                 echo \"Copied artifact layer ${{artifact}}\"
+
+                # Symlink bin files to /usr/local/bin
+                if [ -d \"${{SOURCE_DIR}}/bin\" ]; then
+                    mkdir -p ${{ROOTFS_DIR}}/usr/local/bin
+                    for bin_file in ${{SOURCE_DIR}}/bin/*; do
+                        if [ -f \"${{bin_file}}\" ]; then
+                            bin_name=$(basename \"${{bin_file}}\")
+                            ln -sf /${{TARGET_PATH}}/bin/${{bin_name}} ${{ROOTFS_DIR}}/usr/local/bin/${{bin_name}}
+                            echo \"Symlinked ${{bin_name}} to /usr/local/bin\"
+                        fi
+                    done
+                fi
             done
 
             echo \"Copying Vorpal operating system files...\"
