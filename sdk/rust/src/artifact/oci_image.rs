@@ -126,9 +126,9 @@ impl<'a> OciImage<'a> {
             echo \"Creating OCI image ${{OCI_IMAGE_NAME}}:latest\"
 
             ${{OCI_IMAGE_CRANE}}/bin/crane append \\
-                --new_layer ${{OUTPUT_TAR}} \
+                --new_layer ${{OUTPUT_TAR}} \\
                 --new_tag ${{OCI_IMAGE_NAME}}:latest \\
-                --oci-empty-base \
+                --oci-empty-base \\
                 --output ${{VORPAL_OUTPUT}}/image.tar \\
                 --platform ${{OCI_PLATFORM}}",
             artifacts_list = artifacts_list,
