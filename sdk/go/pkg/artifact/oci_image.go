@@ -39,10 +39,10 @@ ROOTFS_DIR=${PWD}/rootfs
 STORE_PREFIX=var/lib/vorpal/store/artifact/output/{{.Namespace}}
 
 # Detect platform based on build architecture
-case \"$(uname -m)\" in
-    x86_64)  OCI_PLATFORM=\"linux/amd64\" ;;
-    aarch64) OCI_PLATFORM=\"linux/arm64\" ;;
-    *)       OCI_PLATFORM=\"linux/$(uname -m)\" ;;
+case "$(uname -m)" in
+    x86_64)  OCI_PLATFORM="linux/amd64" ;;
+    aarch64) OCI_PLATFORM="linux/arm64" ;;
+    *)       OCI_PLATFORM="linux/$(uname -m)" ;;
 esac
 
 mkdir -pv ${ROOTFS_DIR}
@@ -81,8 +81,7 @@ ${OCI_IMAGE_CRANE}/bin/crane append \
     --new_tag ${OCI_IMAGE_NAME}:latest \
     --oci-empty-base \
     --output ${VORPAL_OUTPUT}/image.tar \
-    --platform ${OCI_PLATFORM}
-`
+    --platform ${OCI_PLATFORM}`
 
 func NewOciImage(name string, rootfs string) *OciImage {
 	return &OciImage{
