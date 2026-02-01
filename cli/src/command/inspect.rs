@@ -14,13 +14,14 @@ pub async fn run(digest: &str, namespace: &str, registry: &str) -> Result<()> {
     let client_ca_pem_path = get_key_ca_path();
     let client_ca_pem = read(client_ca_pem_path).await?;
     let client_ca = Certificate::from_pem(client_ca_pem);
+
     let client_tls = ClientTlsConfig::new()
         .ca_certificate(client_ca)
         .domain_name("localhost");
 
     // Parse registry URI and create authenticated channel
 
-    let client_uri = format!("https://{}", registry).parse::<Uri>()?;
+    let client_uri = registry.parse::<Uri>()?;
 
     let client_channel = Channel::builder(client_uri)
         .tls_config(client_tls)?
@@ -37,15 +38,6 @@ pub async fn run(digest: &str, namespace: &str, registry: &str) -> Result<()> {
     };
 
     let request = Request::new(request);
-
-    // TODO: load token from config file for the specific registry
-
-    // grpc_request.metadata_mut().insert(
-    //     "authorization",
-    //     format!("Bearer {}", user_api_token)
-    //         .parse()
-    //         .expect("failed to set authorization header"),
-    // );
 
     let artifact_response = client.get_artifact(request).await?;
     let artifact = artifact_response.into_inner();
