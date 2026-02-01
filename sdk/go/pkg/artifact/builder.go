@@ -233,8 +233,8 @@ chmod +x $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks
 chmod +x $VORPAL_OUTPUT/bin/vorpal-activate-symlinks
 chmod +x $VORPAL_OUTPUT/bin/vorpal-activate`
 
-func GetEnvKey(digest *string) string {
-	return fmt.Sprintf("$VORPAL_ARTIFACT_%s", *digest)
+func GetEnvKey(digest string) string {
+	return fmt.Sprintf("$VORPAL_ARTIFACT_%s", digest)
 }
 
 func NewArtifactArgument(name string) *Argument {
@@ -652,7 +652,9 @@ func (b *ProjectEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 	stepPathArtifacts := make([]string, 0)
 
 	for _, artifact := range b.Artifacts {
-		stepPathArtifacts = append(stepPathArtifacts, fmt.Sprintf("%s/bin", GetEnvKey(artifact)))
+		if artifact != nil {
+			stepPathArtifacts = append(stepPathArtifacts, fmt.Sprintf("%s/bin", GetEnvKey(*artifact)))
+		}
 	}
 
 	stepPath := strings.Join(stepPathArtifacts, ":")
@@ -737,7 +739,9 @@ func (b *UserEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 	stepPathArtifacts := make([]string, 0)
 
 	for _, artifact := range b.Artifacts {
-		stepPathArtifacts = append(stepPathArtifacts, fmt.Sprintf("%s/bin", GetEnvKey(artifact)))
+		if artifact != nil {
+			stepPathArtifacts = append(stepPathArtifacts, fmt.Sprintf("%s/bin", GetEnvKey(*artifact)))
+		}
 	}
 
 	stepEnvironments := make([]string, 0)

@@ -1,6 +1,7 @@
 use crate::artifact::{
-    vorpal::Vorpal, vorpal_job::VorpalJob, vorpal_process::VorpalProcess,
-    vorpal_release::VorpalRelease, vorpal_shell::VorpalShell, vorpal_user::VorpalUser,
+    vorpal::Vorpal, vorpal_container_image::VorpalContainerImage, vorpal_job::VorpalJob,
+    vorpal_process::VorpalProcess, vorpal_release::VorpalRelease, vorpal_shell::VorpalShell,
+    vorpal_user::VorpalUser,
 };
 use anyhow::Result;
 use vorpal_sdk::context::get_context;
@@ -13,6 +14,7 @@ async fn main() -> Result<()> {
 
     match context.get_artifact_name() {
         "vorpal" => Vorpal::new().build(context).await?,
+        "vorpal-container-image" => VorpalContainerImage::new().build(context).await?,
         "vorpal-job" => VorpalJob::new().build(context).await?,
         "vorpal-process" => VorpalProcess::new().build(context).await?,
         "vorpal-release" => VorpalRelease::new().build(context).await?,

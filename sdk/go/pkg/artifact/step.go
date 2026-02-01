@@ -51,7 +51,9 @@ func Bash(
 	stepPathBins := make([]string, 0)
 
 	for _, art := range artifacts {
-		stepPathBins = append(stepPathBins, fmt.Sprintf("%s/bin", GetEnvKey(art)))
+		if art != nil {
+			stepPathBins = append(stepPathBins, fmt.Sprintf("%s/bin", GetEnvKey(*art)))
+		}
 	}
 
 	stepPathDefault := "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"
@@ -134,8 +136,8 @@ func Bwrap(
 		"VORPAL_WORKSPACE",
 		"$VORPAL_WORKSPACE",
 		"--setenv",
-        "HOME",
-        "$VORPAL_WORKSPACE",
+		"HOME",
+		"$VORPAL_WORKSPACE",
 	}
 
 	// Setup artifacts arguments
@@ -145,22 +147,22 @@ func Bwrap(
 	if rootfs != nil {
 		rootfsArgs := []string{
 			"--ro-bind",
-			fmt.Sprintf("%s/bin", GetEnvKey(rootfs)),
+			fmt.Sprintf("%s/bin", GetEnvKey(*rootfs)),
 			"/bin",
 			"--ro-bind",
-			fmt.Sprintf("%s/etc", GetEnvKey(rootfs)),
+			fmt.Sprintf("%s/etc", GetEnvKey(*rootfs)),
 			"/etc",
 			"--ro-bind",
-			fmt.Sprintf("%s/lib", GetEnvKey(rootfs)),
+			fmt.Sprintf("%s/lib", GetEnvKey(*rootfs)),
 			"/lib",
 			"--ro-bind-try",
-			fmt.Sprintf("%s/lib64", GetEnvKey(rootfs)),
+			fmt.Sprintf("%s/lib64", GetEnvKey(*rootfs)),
 			"/lib64",
 			"--ro-bind",
-			fmt.Sprintf("%s/sbin", GetEnvKey(rootfs)),
+			fmt.Sprintf("%s/sbin", GetEnvKey(*rootfs)),
 			"/sbin",
 			"--ro-bind",
-			fmt.Sprintf("%s/usr", GetEnvKey(rootfs)),
+			fmt.Sprintf("%s/usr", GetEnvKey(*rootfs)),
 			"/usr",
 		}
 
@@ -173,12 +175,14 @@ func Bwrap(
 	}
 
 	for _, art := range stepArtifacts {
-		stepArguments = append(stepArguments, "--ro-bind")
-		stepArguments = append(stepArguments, GetEnvKey(art))
-		stepArguments = append(stepArguments, GetEnvKey(art))
-		stepArguments = append(stepArguments, "--setenv")
-		stepArguments = append(stepArguments, strings.ReplaceAll(GetEnvKey(art), "$", ""))
-		stepArguments = append(stepArguments, GetEnvKey(art))
+		if art != nil {
+			stepArguments = append(stepArguments, "--ro-bind")
+			stepArguments = append(stepArguments, GetEnvKey(*art))
+			stepArguments = append(stepArguments, GetEnvKey(*art))
+			stepArguments = append(stepArguments, "--setenv")
+			stepArguments = append(stepArguments, strings.ReplaceAll(GetEnvKey(*art), "$", ""))
+			stepArguments = append(stepArguments, GetEnvKey(*art))
+		}
 	}
 
 	// Setup environment arguments
@@ -186,7 +190,9 @@ func Bwrap(
 	stepPathBins := make([]string, 0)
 
 	for _, art := range stepArtifacts {
-		stepPathBins = append(stepPathBins, fmt.Sprintf("%s/bin", GetEnvKey(art)))
+		if art != nil {
+			stepPathBins = append(stepPathBins, fmt.Sprintf("%s/bin", GetEnvKey(*art)))
+		}
 	}
 
 	stepPath := fmt.Sprintf("%s:%s", strings.Join(stepPathBins, ":"), "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin")

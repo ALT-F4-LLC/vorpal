@@ -8,14 +8,14 @@ import (
 )
 
 func BuildVorpalProcess(context *config.ConfigContext) (*string, error) {
-	vorpal, err := BuildVorpal(context)
+	vorpal, err := Vorpal(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build vorpal: %w", err)
 	}
 
 	return artifact.NewProcess(
 		"vorpal-process",
-		fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(vorpal)),
+		fmt.Sprintf("%s/bin/vorpal", artifact.GetEnvKey(*vorpal)),
 		SYSTEMS,
 	).
 		WithArguments([]string{

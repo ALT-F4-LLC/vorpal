@@ -247,7 +247,7 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 		"GOCACHE=$VORPAL_WORKSPACE/go/cache",
 		fmt.Sprintf("GOOS=%s", *goos),
 		"GOPATH=$VORPAL_WORKSPACE/go",
-		fmt.Sprintf("PATH=%s/bin", artifact.GetEnvKey(goBin)),
+		fmt.Sprintf("PATH=%s/bin", artifact.GetEnvKey(*goBin)),
 	}
 
 	for _, env := range builder.environments {

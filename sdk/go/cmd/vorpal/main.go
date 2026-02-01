@@ -13,7 +13,9 @@ func main() {
 	var err error
 	switch context.GetArtifactName() {
 	case "vorpal":
-		_, err = artifact.BuildVorpal(context)
+		_, err = artifact.Vorpal(context)
+	case "vorpal-container-image":
+		_, err = artifact.BuildVorpalContainerImage(context)
 	case "vorpal-job":
 		_, err = artifact.BuildVorpalJob(context)
 	case "vorpal-process":

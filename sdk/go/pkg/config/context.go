@@ -232,7 +232,7 @@ func ClientAuthHeader(registry string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to serialize credentials: %w", err)
 		}
-		if err := os.WriteFile(credentialsPath, updatedData, 0600); err != nil {
+		if err := os.WriteFile(credentialsPath, updatedData, 0o600); err != nil {
 			return "", fmt.Errorf("failed to write credentials: %w", err)
 		}
 	}
@@ -321,7 +321,22 @@ func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error
 		return nil, fmt.Errorf("'systems' is required")
 	}
 
-	// 1. Setup systems
+	// Validate target is in systems list
+	targetSupported := false
+	for _, s := range artifact.Systems {
+		if s == artifact.Target {
+			targetSupported = true
+			break
+		}
+	}
+	if !targetSupported {
+		return nil, fmt.Errorf(
+			"artifact '%s' does not support system '%s' (supported: %v)",
+			artifact.Name,
+			artifact.Target.String(),
+			artifact.Systems,
+		)
+	}
 
 	artifactJson, err := json.Marshal(artifact)
 	if err != nil {
@@ -555,6 +570,10 @@ func (c *ConfigContext) GetArtifactContextPath() string {
 
 func (c *ConfigContext) GetArtifactName() string {
 	return c.artifact
+}
+
+func (c *ConfigContext) GetArtifactNamespace() string {
+	return c.artifactNamespace
 }
 
 func (c *ConfigContext) GetTarget() artifact.ArtifactSystem {
