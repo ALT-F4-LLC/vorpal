@@ -98,9 +98,9 @@ ${OCI_IMAGE_CRANE}/bin/crane append \
 echo "Setting platform metadata in image config..."
 
 ${OCI_IMAGE_CRANE}/bin/crane mutate \
-    ${VORPAL_OUTPUT}/image.tar \
-    ${VORPAL_OUTPUT}/image-mutated.tar \
-    --set-platform ${OCI_PLATFORM}
+    --set-platform ${OCI_PLATFORM} \
+    --output ${VORPAL_OUTPUT}/image-mutated.tar \
+    ${VORPAL_OUTPUT}/image.tar
 
 mv ${VORPAL_OUTPUT}/image-mutated.tar ${VORPAL_OUTPUT}/image.tar
 
