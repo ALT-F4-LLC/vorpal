@@ -283,14 +283,42 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
 
       - run: |
+          if [ "$ARCH" = "aarch64" ]; then
+            TAG_SUFFIX="arm64"
+          else
+            TAG_SUFFIX="amd64"
+          fi
           docker image tag \
             "vorpal-container-image:latest" \
-            "docker.io/altf4llc/vorpal:nightly"
+            "docker.io/altf4llc/vorpal:nightly-${TAG_SUFFIX}"
 
       - run: |
-          docker image push \
-            --platform $PLATFORM \
-            "docker.io/altf4llc/vorpal:nightly"
+          if [ "$ARCH" = "aarch64" ]; then
+            TAG_SUFFIX="arm64"
+          else
+            TAG_SUFFIX="amd64"
+          fi
+          docker image push "docker.io/altf4llc/vorpal:nightly-${TAG_SUFFIX}"
+
+  container-image-manifest:
+    needs:
+      - container-image
+    permissions:
+      contents: write
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+
+      - run: |
+          docker manifest create docker.io/altf4llc/vorpal:nightly \
+            docker.io/altf4llc/vorpal:nightly-amd64 \
+            docker.io/altf4llc/vorpal:nightly-arm64
+
+      - run: docker manifest push docker.io/altf4llc/vorpal:nightly
 
   release:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
