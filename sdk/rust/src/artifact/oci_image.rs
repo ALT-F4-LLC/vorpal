@@ -147,10 +147,13 @@ impl<'a> OciImage<'a> {
             echo \"Setting platform metadata in image config...\"
 
             ${{OCI_IMAGE_CRANE}}/bin/crane mutate \\
-                --set-platform ${{OCI_PLATFORM}} \\
-                --output ${{VORPAL_OUTPUT}}/image.tar \\
-                --tag ${{OCI_IMAGE_NAME}}:latest \\
-                ${{VORPAL_OUTPUT}}/image.tar",
+                ${{VORPAL_OUTPUT}}/image.tar \\
+                ${{VORPAL_OUTPUT}}/image-mutated.tar \\
+                --set-platform ${{OCI_PLATFORM}}
+
+            mv ${{VORPAL_OUTPUT}}/image-mutated.tar ${{VORPAL_OUTPUT}}/image.tar
+
+            echo \"Created OCI image ${{OCI_IMAGE_NAME}}:latest\"",
             artifacts_list = artifacts_list,
             crane = get_env_key(&crane),
             name = self.name,
