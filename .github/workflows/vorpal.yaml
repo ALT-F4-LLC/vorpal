@@ -285,12 +285,12 @@ jobs:
       - run: |
           docker image tag \
             "vorpal-container-image:latest" \
-            "docker.io/altf4llc/vorpal:${{ github.ref_name }}"
+            "docker.io/altf4llc/vorpal:nightly"
 
       - run: |
           docker image push \
             --platform $PLATFORM \
-            "docker.io/altf4llc/vorpal:${{ github.ref_name }}"
+            "docker.io/altf4llc/vorpal:nightly"
 
   release:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
