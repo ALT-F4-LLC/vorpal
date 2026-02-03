@@ -225,6 +225,14 @@ digest = "a7abdad032ae6c318dbb4c9b444d9031ab34d1308700005c4bd5eb5156cad523"
 platform = "aarch64-linux"
 
 [[sources]]
+name = "crane"
+path = "https://github.com/google/go-containerregistry/archive/refs/tags/v0.20.7.tar.gz"
+includes = []
+excludes = []
+digest = "e61f88c967db41f46cd0b7852b7dbedeef4f286fae7613fbb8aff7aa0a35d848"
+platform = "aarch64-darwin"
+
+[[sources]]
 name = "cue"
 path = "https://github.com/cue-lang/cue/releases/download/v0.15.1/cue_v0.15.1_linux_amd64.tar.gz"
 includes = []

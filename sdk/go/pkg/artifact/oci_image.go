@@ -97,12 +97,40 @@ ${OCI_IMAGE_CRANE}/bin/crane append \
 
 echo "Setting platform metadata in image config..."
 
-${OCI_IMAGE_CRANE}/bin/crane mutate \
-    --set-platform ${OCI_PLATFORM} \
-    --output ${VORPAL_OUTPUT}/image-mutated.tar \
-    ${VORPAL_OUTPUT}/image.tar
+# Extract tarball to modify config (crane mutate cannot work with local files)
+WORK_DIR=${PWD}/image-work
+mkdir -p ${WORK_DIR}
+tar -xf ${VORPAL_OUTPUT}/image.tar -C ${WORK_DIR}
 
-mv ${VORPAL_OUTPUT}/image-mutated.tar ${VORPAL_OUTPUT}/image.tar
+# Get config filename from manifest
+CONFIG_FILE=$(sed -n 's/.*"Config":"\([^"]*\)".*/\1/p' ${WORK_DIR}/manifest.json)
+
+# Detect architecture for config metadata
+case "$(uname -m)" in
+    x86_64)  CONFIG_ARCH="amd64" ;;
+    aarch64) CONFIG_ARCH="arm64" ;;
+    *)       CONFIG_ARCH="$(uname -m)" ;;
+esac
+
+# Modify config to set platform (crane append leaves these empty)
+sed -i "s/\"architecture\":\"\"/\"architecture\":\"${CONFIG_ARCH}\"/" ${WORK_DIR}/${CONFIG_FILE}
+sed -i "s/\"os\":\"\"/\"os\":\"linux\"/" ${WORK_DIR}/${CONFIG_FILE}
+
+# Compute new hash and rename config file
+NEW_HASH=$(sha256sum ${WORK_DIR}/${CONFIG_FILE} | awk '{print $1}')
+NEW_CONFIG="sha256:${NEW_HASH}"
+mv ${WORK_DIR}/${CONFIG_FILE} ${WORK_DIR}/${NEW_CONFIG}
+
+# Update manifest with new config reference
+sed -i "s|${CONFIG_FILE}|${NEW_CONFIG}|" ${WORK_DIR}/manifest.json
+
+# Repackage tarball
+pushd ${WORK_DIR}
+tar -cf ${VORPAL_OUTPUT}/image.tar manifest.json ${NEW_CONFIG} *.tar.gz
+popd
+
+# Cleanup
+rm -rf ${WORK_DIR}
 
 echo "Created OCI image ${OCI_IMAGE_NAME}:latest"`
 
