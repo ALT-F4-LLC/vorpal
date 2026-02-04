@@ -74,7 +74,7 @@ lsof -ti:23152 | xargs kill 2>/dev/null || true
 
 ## Arguments
 
-The skill accepts an optional artifact name. Default is `vorpal-shell`:
+The skill accepts an optional artifact name. Default is `vorpal`:
 
 - `/e2e-test` - Test with vorpal-shell artifact
 - `/e2e-test vorpal` - Test with vorpal artifact
