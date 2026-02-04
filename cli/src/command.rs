@@ -97,6 +97,10 @@ pub enum CommandServices {
 
         #[arg(default_value_t = false, long)]
         registry_backend_s3_force_path_style: bool,
+
+        /// TTL in seconds for caching archive check results. Set to 0 to disable caching.
+        #[arg(default_value = "300", long)]
+        archive_check_cache_ttl: u64,
     },
 }
 
@@ -543,6 +547,7 @@ pub async fn run() -> Result<()> {
 
         Command::Services(services) => match services {
             CommandServices::Start {
+                archive_check_cache_ttl,
                 issuer,
                 issuer_audience,
                 issuer_client_id,
@@ -554,6 +559,7 @@ pub async fn run() -> Result<()> {
                 services,
             } => {
                 let run_args = start::RunArgs {
+                    archive_check_cache_ttl: *archive_check_cache_ttl,
                     issuer: issuer.clone(),
                     issuer_audience: issuer_audience.clone(),
                     issuer_client_id: issuer_client_id.clone(),

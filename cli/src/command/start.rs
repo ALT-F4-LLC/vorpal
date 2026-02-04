@@ -26,6 +26,7 @@ mod registry;
 mod worker;
 
 pub struct RunArgs {
+    pub archive_check_cache_ttl: u64,
     pub issuer: Option<String>,
     pub issuer_audience: Option<String>,
     pub issuer_client_id: Option<String>,
@@ -115,7 +116,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
         )
         .await?;
 
-        let archive_server = ArchiveServer::new(backend_archive);
+        let archive_server = ArchiveServer::new(backend_archive, args.archive_check_cache_ttl);
         let artifact_server = ArtifactServer::new(backend_artifact);
 
         if let Some(issuer) = &args.issuer {

@@ -2,6 +2,8 @@ use crate::command::start::auth::{get_user_context, require_namespace_permission
 use anyhow::{bail, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
+use moka::future::Cache;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
@@ -99,11 +101,31 @@ impl Clone for Box<dyn ArchiveBackend> {
 
 pub struct ArchiveServer {
     pub backend: Box<dyn ArchiveBackend>,
+    /// Cache for archive check results: key is "{namespace}/{digest}", value is exists (bool)
+    check_cache: Cache<String, bool>,
 }
 
 impl ArchiveServer {
-    pub fn new(backend: Box<dyn ArchiveBackend>) -> Self {
-        Self { backend }
+    pub fn new(backend: Box<dyn ArchiveBackend>, cache_ttl_seconds: u64) -> Self {
+        info!(
+            "registry |> archive server: initializing check cache with ttl={}s",
+            cache_ttl_seconds
+        );
+
+        let check_cache = if cache_ttl_seconds > 0 {
+            Cache::builder()
+                .time_to_live(Duration::from_secs(cache_ttl_seconds))
+                .build()
+        } else {
+            // TTL of 0 means don't cache (immediate expiry)
+            info!("registry |> archive server: caching disabled (ttl=0)");
+            Cache::builder().time_to_live(Duration::ZERO).build()
+        };
+
+        Self {
+            backend,
+            check_cache,
+        }
     }
 }
 
@@ -121,11 +143,46 @@ impl ArchiveService for ArchiveServer {
             return Err(Status::invalid_argument("missing `digest` field"));
         }
 
-        self.backend.check(&req).await?;
+        let cache_key = format!("{}/{}", req.namespace, req.digest);
+        info!("registry |> archive check: cache_key={}", cache_key);
 
-        info!("registry |> archive check: {}", req.digest);
+        // Try cache first
+        if let Some(exists) = self.check_cache.get(&cache_key).await {
+            info!(
+                "registry |> archive check: cache hit, exists={}, digest={}",
+                exists, req.digest
+            );
+            if exists {
+                info!("registry |> archive check (cached): {}", req.digest);
+                return Ok(Response::new(ArchiveResponse {}));
+            } else {
+                return Err(Status::not_found("archive not found"));
+            }
+        }
 
-        Ok(Response::new(ArchiveResponse {}))
+        info!(
+            "registry |> archive check: cache miss, calling backend, digest={}",
+            req.digest
+        );
+
+        // Cache miss - call backend
+        let result = self.backend.check(&req).await;
+
+        // Cache the result
+        let exists = result.is_ok();
+        info!(
+            "registry |> archive check: caching result, exists={}, cache_key={}",
+            exists, cache_key
+        );
+        self.check_cache.insert(cache_key, exists).await;
+
+        if exists {
+            info!("registry |> archive check: {}", req.digest);
+            Ok(Response::new(ArchiveResponse {}))
+        } else {
+            result?;
+            unreachable!()
+        }
     }
 
     async fn pull(
@@ -442,4 +499,215 @@ pub async fn backend_artifact(
     };
 
     Ok(backend_artifact)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use vorpal_sdk::api::archive::archive_service_server::ArchiveService;
+
+    /// Mock backend that tracks call counts and returns configurable results.
+    struct MockBackend {
+        check_call_count: Arc<AtomicUsize>,
+        should_exist: bool,
+    }
+
+    impl MockBackend {
+        fn new(should_exist: bool) -> Self {
+            Self {
+                check_call_count: Arc::new(AtomicUsize::new(0)),
+                should_exist,
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            self.check_call_count.load(Ordering::SeqCst)
+        }
+    }
+
+    #[tonic::async_trait]
+    impl ArchiveBackend for MockBackend {
+        async fn check(&self, _req: &ArchivePullRequest) -> Result<(), Status> {
+            self.check_call_count.fetch_add(1, Ordering::SeqCst);
+            if self.should_exist {
+                Ok(())
+            } else {
+                Err(Status::not_found("archive not found"))
+            }
+        }
+
+        async fn pull(
+            &self,
+            _req: &ArchivePullRequest,
+            _tx: mpsc::Sender<Result<ArchivePullResponse, Status>>,
+        ) -> Result<(), Status> {
+            unimplemented!("not needed for cache tests")
+        }
+
+        async fn push(&self, _req: &ArchivePushRequest) -> Result<(), Status> {
+            unimplemented!("not needed for cache tests")
+        }
+
+        fn box_clone(&self) -> Box<dyn ArchiveBackend> {
+            Box::new(MockBackend {
+                check_call_count: Arc::clone(&self.check_call_count),
+                should_exist: self.should_exist,
+            })
+        }
+    }
+
+    fn make_check_request(namespace: &str, digest: &str) -> Request<ArchivePullRequest> {
+        Request::new(ArchivePullRequest {
+            namespace: namespace.to_string(),
+            digest: digest.to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_cache_hit_skips_backend() {
+        // Given: a server with caching enabled (TTL = 300s)
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        // When: we check the same archive twice
+        let _ = server
+            .check(make_check_request("ns", "digest1"))
+            .await
+            .unwrap();
+        let _ = server
+            .check(make_check_request("ns", "digest1"))
+            .await
+            .unwrap();
+
+        // Then: backend should only be called once (second call hits cache)
+        assert_eq!(backend.call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_miss_for_different_keys() {
+        // Given: a server with caching enabled
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        // When: we check different digests
+        let _ = server
+            .check(make_check_request("ns", "digest-a"))
+            .await
+            .unwrap();
+        let _ = server
+            .check(make_check_request("ns", "digest-b"))
+            .await
+            .unwrap();
+
+        // Then: backend should be called twice (each is a cache miss)
+        assert_eq!(backend.call_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_cache_miss_for_different_namespaces() {
+        // Given: a server with caching enabled
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        // When: we check the same digest in different namespaces
+        let _ = server
+            .check(make_check_request("ns1", "digest"))
+            .await
+            .unwrap();
+        let _ = server
+            .check(make_check_request("ns2", "digest"))
+            .await
+            .unwrap();
+
+        // Then: backend should be called twice (different cache keys)
+        assert_eq!(backend.call_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_negative_caching_not_found() {
+        // Given: a server with a backend that returns "not found"
+        let backend = MockBackend::new(false);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        // When: we check the same archive twice
+        let result1 = server.check(make_check_request("ns", "missing")).await;
+        let result2 = server.check(make_check_request("ns", "missing")).await;
+
+        // Then: both should return not_found
+        assert!(result1.is_err());
+        assert_eq!(result1.unwrap_err().code(), tonic::Code::NotFound);
+        assert!(result2.is_err());
+        assert_eq!(result2.unwrap_err().code(), tonic::Code::NotFound);
+
+        // And: backend should only be called once (negative result is cached)
+        assert_eq!(backend.call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_ttl_zero_disables_caching() {
+        // Given: a server with TTL = 0 (caching disabled)
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 0);
+
+        // When: we check the same archive multiple times
+        let _ = server
+            .check(make_check_request("ns", "digest"))
+            .await
+            .unwrap();
+        let _ = server
+            .check(make_check_request("ns", "digest"))
+            .await
+            .unwrap();
+        let _ = server
+            .check(make_check_request("ns", "digest"))
+            .await
+            .unwrap();
+
+        // Then: backend should be called every time (no caching)
+        assert_eq!(backend.call_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_ttl_expiration() {
+        // Given: a server with a very short TTL (1 second)
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 1);
+
+        // When: we check, wait for TTL to expire, then check again
+        let _ = server
+            .check(make_check_request("ns", "digest"))
+            .await
+            .unwrap();
+        assert_eq!(backend.call_count(), 1);
+
+        // Wait for cache to expire
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+
+        let _ = server
+            .check(make_check_request("ns", "digest"))
+            .await
+            .unwrap();
+
+        // Then: backend should be called twice (second call after expiration)
+        assert_eq!(backend.call_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_check_returns_error_for_empty_digest() {
+        // Given: a server
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        // When: we check with an empty digest
+        let result = server.check(make_check_request("ns", "")).await;
+
+        // Then: should return InvalidArgument error
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+
+        // And: backend should not be called
+        assert_eq!(backend.call_count(), 0);
+    }
 }
