@@ -119,9 +119,7 @@ impl ArchiveServer {
         } else {
             // TTL of 0 means don't cache (immediate expiry)
             info!("registry |> archive server: caching disabled (ttl=0)");
-            Cache::builder()
-                .time_to_live(Duration::ZERO)
-                .build()
+            Cache::builder().time_to_live(Duration::ZERO).build()
         };
 
         Self {
