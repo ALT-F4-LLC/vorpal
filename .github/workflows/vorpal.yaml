@@ -224,7 +224,7 @@ jobs:
           path: Vorpal.lock
 
   container-image:
-    # if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
+    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
     needs:
       - test
     permissions:
@@ -290,7 +290,7 @@ jobs:
           fi
           docker image tag \
             "vorpal-container-image:latest" \
-            "docker.io/altf4llc/vorpal:nightly-${TAG_SUFFIX}"
+            "docker.io/altf4llc/vorpal:${{ github.ref_name }}-${TAG_SUFFIX}"
 
       - run: |
           if [ "$ARCH" = "aarch64" ]; then
@@ -298,9 +298,10 @@ jobs:
           else
             TAG_SUFFIX="amd64"
           fi
-          docker image push "docker.io/altf4llc/vorpal:nightly-${TAG_SUFFIX}"
+          docker image push "docker.io/altf4llc/vorpal:${{ github.ref_name }}-${TAG_SUFFIX}"
 
   container-image-manifest:
+    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
     needs:
       - container-image
     permissions:
@@ -314,11 +315,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
 
       - run: |
-          docker manifest create docker.io/altf4llc/vorpal:nightly \
-            docker.io/altf4llc/vorpal:nightly-amd64 \
-            docker.io/altf4llc/vorpal:nightly-arm64
+          docker manifest create docker.io/altf4llc/vorpal:${{ github.ref_name }} \
+            docker.io/altf4llc/vorpal:${{ github.ref_name }}-amd64 \
+            docker.io/altf4llc/vorpal:${{ github.ref_name }}-arm64
 
-      - run: docker manifest push docker.io/altf4llc/vorpal:nightly
+      - run: docker manifest push docker.io/altf4llc/vorpal:${{ github.ref_name }}
 
   release:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
