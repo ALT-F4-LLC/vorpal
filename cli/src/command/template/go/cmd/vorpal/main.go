@@ -71,7 +71,7 @@ func main() {
 	}
 
 	_, err = artifact.
-		NewProjectEnvironment("example-dev", Systems).
+		NewProjectEnvironment("example-shell", Systems).
 		WithArtifacts([]*string{
 			gobin,
 			goimports,

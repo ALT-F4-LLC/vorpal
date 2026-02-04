@@ -8,7 +8,7 @@ import (
 )
 
 func BuildVorpalContainerImage(context *config.ConfigContext) (*string, error) {
-	rootfs, err := artifact.LinuxVorpalSlim(context)
+	linuxVorpalSlim, err := artifact.LinuxVorpalSlim(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build vorpal: %w", err)
 	}
@@ -18,7 +18,10 @@ func BuildVorpalContainerImage(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("failed to build vorpal: %w", err)
 	}
 
-	return artifact.NewOciImage("vorpal-container-image", *rootfs).
+	name := "vorpal-container-image"
+
+	return artifact.NewOciImage(name, *linuxVorpalSlim).
+		WithAliases([]string{fmt.Sprintf("%s:latest", name)}).
 		WithArtifacts([]*string{vorpal}).
 		Build(context)
 }

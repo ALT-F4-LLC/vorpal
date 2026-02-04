@@ -11,6 +11,11 @@ import (
 func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 	contextTarget := context.GetTarget()
 
+	crane, err := artifact.Crane(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get crane: %w", err)
+	}
+
 	gobin, err := artifact.GoBin(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get go: %w", err)
@@ -64,6 +69,7 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 	return artifact.
 		NewProjectEnvironment("vorpal-shell", SYSTEMS).
 		WithArtifacts([]*string{
+			crane,
 			gobin,
 			goimports,
 			gopls,

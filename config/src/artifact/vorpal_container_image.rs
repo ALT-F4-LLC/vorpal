@@ -14,10 +14,13 @@ impl VorpalContainerImage {
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        let rootfs = LinuxVorpalSlim::new().build(context).await?;
+        let linux_vorpal_slim = LinuxVorpalSlim::new().build(context).await?;
         let vorpal = Vorpal::new().build(context).await?;
 
-        OciImage::new("vorpal-container-image", &rootfs)
+        let name = "vorpal-container-image";
+
+        OciImage::new(name, &linux_vorpal_slim)
+            .with_aliases(vec![&format!("{}:latest", name)])
             .with_artifacts(vec![&vorpal])
             .build(context)
             .await
