@@ -213,6 +213,14 @@ pub enum Command {
         /// Arguments to pass to the artifact binary
         #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
         args: Vec<String>,
+
+        /// Override the binary name to execute (default: artifact name)
+        #[arg(long)]
+        bin: Option<String>,
+
+        /// Registry address
+        #[arg(default_value_t = get_default_address(), long)]
+        registry: String,
     },
 
     /// Manage Vorpal services
@@ -557,7 +565,12 @@ pub async fn run() -> Result<()> {
             Ok(())
         }
 
-        Command::Run { alias, args } => run::run(alias, args).await,
+        Command::Run {
+            alias,
+            args,
+            bin,
+            registry,
+        } => run::run(alias, args, bin.as_deref(), registry).await,
 
         Command::Services(services) => match services {
             CommandServices::Start {
