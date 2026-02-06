@@ -29,9 +29,71 @@ use vorpal_sdk::{
     context::{client_auth_header, parse_artifact_alias},
 };
 
-/// Read and validate the artifact digest from an alias file.
-///
-/// Returns the trimmed digest string. Fails if the file cannot be read or is empty.
+async fn get_alias_from_registry(
+    registry: &str,
+    name: &str,
+    namespace: &str,
+    system: ArtifactSystem,
+    tag: &str,
+) -> Result<String> {
+    let client_ca_pem_path = get_key_ca_path();
+    let client_ca_pem = read(&client_ca_pem_path).await.with_context(|| {
+        format!(
+            "failed to read CA certificate: {}",
+            client_ca_pem_path.display()
+        )
+    })?;
+    let client_ca = Certificate::from_pem(client_ca_pem);
+
+    let client_tls = ClientTlsConfig::new()
+        .ca_certificate(client_ca)
+        .domain_name("localhost");
+
+    let client_uri = registry
+        .parse::<Uri>()
+        .map_err(|e| anyhow!("invalid registry address: {}", e))?;
+
+    let client_channel = Channel::builder(client_uri)
+        .tls_config(client_tls)?
+        .connect()
+        .await
+        .with_context(|| format!("failed to connect to registry: {}", registry))?;
+
+    let mut client = ArtifactServiceClient::new(client_channel);
+
+    let request = GetArtifactAliasRequest {
+        system: system.into(),
+        name: name.to_string(),
+        namespace: namespace.to_string(),
+        tag: tag.to_string(),
+    };
+
+    let mut request = Request::new(request);
+    let request_auth_header = client_auth_header(registry)
+        .await
+        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+
+    if let Some(header) = request_auth_header {
+        request.metadata_mut().insert("authorization", header);
+    }
+
+    let response = client.get_artifact_alias(request).await.map_err(|status| {
+        if status.code() == Code::NotFound {
+            anyhow!("alias not found in registry")
+        } else {
+            anyhow!("registry error: {:?}", status)
+        }
+    })?;
+
+    let digest = response.into_inner().digest;
+
+    if digest.is_empty() {
+        bail!("registry returned empty digest for alias");
+    }
+
+    Ok(digest)
+}
+
 async fn read_alias_digest(alias_path: &Path, artifact_name: &str) -> Result<String> {
     let artifact_digest = read_to_string(alias_path)
         .await
@@ -54,10 +116,134 @@ async fn read_alias_digest(alias_path: &Path, artifact_name: &str) -> Result<Str
     Ok(artifact_digest)
 }
 
-/// Validate a binary name for safety and correctness.
-///
-/// Ensures the name is non-empty, contains no path separators, and does not
-/// start with a dot. This prevents path traversal attacks via `--bin`.
+async fn pull_artifact_from_registry(
+    registry: &str,
+    digest: &str,
+    namespace: &str,
+    output_path: &std::path::Path,
+) -> Result<()> {
+    // Setup TLS with CA certificate
+
+    let client_ca_pem_path = get_key_ca_path();
+    let client_ca_pem = read(&client_ca_pem_path).await.with_context(|| {
+        format!(
+            "failed to read CA certificate: {}",
+            client_ca_pem_path.display()
+        )
+    })?;
+    let client_ca = Certificate::from_pem(client_ca_pem);
+
+    let client_tls = ClientTlsConfig::new()
+        .ca_certificate(client_ca)
+        .domain_name("localhost");
+
+    // Connect to registry archive service
+
+    let client_uri = registry
+        .parse::<Uri>()
+        .map_err(|e| anyhow!("invalid registry address: {}", e))?;
+
+    let client_channel = Channel::builder(client_uri)
+        .tls_config(client_tls)?
+        .connect()
+        .await
+        .with_context(|| format!("failed to connect to registry: {}", registry))?;
+
+    let mut client_archive = ArchiveServiceClient::new(client_channel);
+
+    // Pull archive from registry
+
+    let request = ArchivePullRequest {
+        digest: digest.to_string(),
+        namespace: namespace.to_string(),
+    };
+
+    let mut request = Request::new(request);
+    let request_auth_header = client_auth_header(registry)
+        .await
+        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+
+    if let Some(header) = request_auth_header {
+        request.metadata_mut().insert("authorization", header);
+    }
+
+    let response = match client_archive.pull(request).await {
+        Ok(response) => response,
+
+        Err(status) => {
+            if status.code() == Code::NotFound {
+                bail!("artifact not found in registry");
+            }
+
+            bail!("registry pull error: {:?}", status);
+        }
+    };
+
+    let mut stream = response.into_inner();
+    let mut stream_data = Vec::new();
+
+    loop {
+        match stream.message().await {
+            Ok(Some(chunk)) => {
+                if !chunk.data.is_empty() {
+                    stream_data.extend_from_slice(&chunk.data);
+                }
+            }
+
+            Ok(None) => break,
+
+            Err(status) => {
+                if status.code() == Code::NotFound {
+                    bail!("artifact not found in registry");
+                }
+
+                bail!("registry stream error: {:?}", status);
+            }
+        }
+    }
+
+    if stream_data.is_empty() {
+        bail!("registry returned empty archive for digest: {digest}");
+    }
+
+    // Write archive to local store
+
+    let archive_path = get_artifact_archive_path(digest, namespace);
+
+    let archive_path_parent = archive_path
+        .parent()
+        .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+
+    create_dir_all(archive_path_parent).await?;
+
+    write(&archive_path, &stream_data)
+        .await
+        .with_context(|| format!("failed to write archive: {}", archive_path.display()))?;
+
+    set_timestamps(&archive_path).await?;
+
+    // Unpack archive to output path
+
+    info!("unpacking artifact: {digest}");
+
+    create_dir_all(output_path).await.with_context(|| {
+        format!(
+            "failed to create output directory: {}",
+            output_path.display()
+        )
+    })?;
+
+    unpack_zstd(&output_path.to_path_buf(), &archive_path).await?;
+
+    let artifact_files = get_file_paths(&output_path.to_path_buf(), vec![], vec![])?;
+
+    for file in &artifact_files {
+        set_timestamps(file).await?;
+    }
+
+    Ok(())
+}
+
 fn validate_binary_name(binary_name: &str) -> Result<()> {
     if binary_name.is_empty() {
         bail!(
@@ -90,11 +276,6 @@ fn validate_binary_name(binary_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Resolve a binary inside the artifact output directory.
-///
-/// Validates the binary name, checks that the binary exists in the `bin/`
-/// subdirectory of `output_path`, and verifies it has execute permissions.
-/// Returns the full path to the binary on success.
 async fn resolve_binary(output_path: &Path, binary_name: &str) -> Result<PathBuf> {
     validate_binary_name(binary_name)?;
 
@@ -142,7 +323,6 @@ async fn resolve_binary(output_path: &Path, binary_name: &str) -> Result<PathBuf
         bail!("{message}");
     }
 
-    // Verify the binary is executable
     let metadata = tokio::fs::metadata(&binary_path)
         .await
         .with_context(|| format!("failed to read metadata for: {}", binary_path.display()))?;
@@ -288,199 +468,6 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
 
     // exec() only returns on error
     bail!("failed to execute {}: {}", binary_path.display(), err,);
-}
-
-async fn get_alias_from_registry(
-    registry: &str,
-    name: &str,
-    namespace: &str,
-    system: ArtifactSystem,
-    tag: &str,
-) -> Result<String> {
-    let client_ca_pem_path = get_key_ca_path();
-    let client_ca_pem = read(&client_ca_pem_path).await.with_context(|| {
-        format!(
-            "failed to read CA certificate: {}",
-            client_ca_pem_path.display()
-        )
-    })?;
-    let client_ca = Certificate::from_pem(client_ca_pem);
-
-    let client_tls = ClientTlsConfig::new()
-        .ca_certificate(client_ca)
-        .domain_name("localhost");
-
-    let client_uri = registry
-        .parse::<Uri>()
-        .map_err(|e| anyhow!("invalid registry address: {}", e))?;
-
-    let client_channel = Channel::builder(client_uri)
-        .tls_config(client_tls)?
-        .connect()
-        .await
-        .with_context(|| format!("failed to connect to registry: {}", registry))?;
-
-    let mut client = ArtifactServiceClient::new(client_channel);
-
-    let request = GetArtifactAliasRequest {
-        system: system.into(),
-        name: name.to_string(),
-        namespace: namespace.to_string(),
-        tag: tag.to_string(),
-    };
-
-    let mut request = Request::new(request);
-    let request_auth_header = client_auth_header(registry)
-        .await
-        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
-
-    if let Some(header) = request_auth_header {
-        request.metadata_mut().insert("authorization", header);
-    }
-
-    let response = client.get_artifact_alias(request).await.map_err(|status| {
-        if status.code() == Code::NotFound {
-            anyhow!("alias not found in registry")
-        } else {
-            anyhow!("registry error: {:?}", status)
-        }
-    })?;
-
-    let digest = response.into_inner().digest;
-
-    if digest.is_empty() {
-        bail!("registry returned empty digest for alias");
-    }
-
-    Ok(digest)
-}
-
-async fn pull_artifact_from_registry(
-    registry: &str,
-    digest: &str,
-    namespace: &str,
-    output_path: &std::path::Path,
-) -> Result<()> {
-    // Setup TLS with CA certificate
-
-    let client_ca_pem_path = get_key_ca_path();
-    let client_ca_pem = read(&client_ca_pem_path).await.with_context(|| {
-        format!(
-            "failed to read CA certificate: {}",
-            client_ca_pem_path.display()
-        )
-    })?;
-    let client_ca = Certificate::from_pem(client_ca_pem);
-
-    let client_tls = ClientTlsConfig::new()
-        .ca_certificate(client_ca)
-        .domain_name("localhost");
-
-    // Connect to registry archive service
-
-    let client_uri = registry
-        .parse::<Uri>()
-        .map_err(|e| anyhow!("invalid registry address: {}", e))?;
-
-    let client_channel = Channel::builder(client_uri)
-        .tls_config(client_tls)?
-        .connect()
-        .await
-        .with_context(|| format!("failed to connect to registry: {}", registry))?;
-
-    let mut client_archive = ArchiveServiceClient::new(client_channel);
-
-    // Pull archive from registry
-
-    let request = ArchivePullRequest {
-        digest: digest.to_string(),
-        namespace: namespace.to_string(),
-    };
-
-    let mut request = Request::new(request);
-    let request_auth_header = client_auth_header(registry)
-        .await
-        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
-
-    if let Some(header) = request_auth_header {
-        request.metadata_mut().insert("authorization", header);
-    }
-
-    let response = match client_archive.pull(request).await {
-        Ok(response) => response,
-
-        Err(status) => {
-            if status.code() == Code::NotFound {
-                bail!("artifact not found in registry");
-            }
-
-            bail!("registry pull error: {:?}", status);
-        }
-    };
-
-    let mut stream = response.into_inner();
-    let mut stream_data = Vec::new();
-
-    loop {
-        match stream.message().await {
-            Ok(Some(chunk)) => {
-                if !chunk.data.is_empty() {
-                    stream_data.extend_from_slice(&chunk.data);
-                }
-            }
-
-            Ok(None) => break,
-
-            Err(status) => {
-                if status.code() == Code::NotFound {
-                    bail!("artifact not found in registry");
-                }
-
-                bail!("registry stream error: {:?}", status);
-            }
-        }
-    }
-
-    if stream_data.is_empty() {
-        bail!("registry returned empty archive for digest: {digest}");
-    }
-
-    // Write archive to local store
-
-    let archive_path = get_artifact_archive_path(digest, namespace);
-
-    let archive_path_parent = archive_path
-        .parent()
-        .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
-
-    create_dir_all(archive_path_parent).await?;
-
-    write(&archive_path, &stream_data)
-        .await
-        .with_context(|| format!("failed to write archive: {}", archive_path.display()))?;
-
-    set_timestamps(&archive_path).await?;
-
-    // Unpack archive to output path
-
-    info!("unpacking artifact: {digest}");
-
-    create_dir_all(output_path).await.with_context(|| {
-        format!(
-            "failed to create output directory: {}",
-            output_path.display()
-        )
-    })?;
-
-    unpack_zstd(&output_path.to_path_buf(), &archive_path).await?;
-
-    let artifact_files = get_file_paths(&output_path.to_path_buf(), vec![], vec![])?;
-
-    for file in &artifact_files {
-        set_timestamps(file).await?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
