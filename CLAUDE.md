@@ -86,6 +86,28 @@ artifact.NewArtifact("name", steps, systems).Build(ctx)
 
 Pre-built artifact helpers exist for common tools (crane, gh, git, protoc, rust-toolchain, etc.) and language builds (Rust, Go).
 
+## Running Artifacts
+
+After building, use `vorpal run` to execute artifacts directly from the store:
+
+```bash
+# Run a built artifact (uses local store, falls back to registry)
+vorpal run <alias> [-- <args>...]
+
+# Alias format: [<namespace>/]<name>[:<tag>]
+vorpal run rsync -- --help              # name only (namespace=library, tag=latest)
+vorpal run rsync:3.4.1 -- -avz src/ dst/  # name with tag
+vorpal run team/my-tool:v2.0            # namespace, name, and tag
+
+# Override which binary to execute (default: artifact name)
+vorpal run my-tool --bin my-tool-helper -- --verbose
+
+# Use a specific registry
+vorpal run rsync --registry https://registry.example.com:23151
+```
+
+Resolution order: local alias file → registry lookup → error with build hint.
+
 ## Testing
 
 ```bash

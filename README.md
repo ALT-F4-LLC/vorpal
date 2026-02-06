@@ -115,13 +115,40 @@ These steps assume you installed Vorpal via the installer and have `vorpal` on y
 
 5) Run the sample
 
-- `ARTIFACT_PATH=$(vorpal build --path "vorpal")`
-- `$ARTIFACT_PATH/bin/example`  # runs the generated example binary
+- `vorpal run example`  # runs the built artifact directly from the store
+- Or manually: `ARTIFACT_PATH=$(vorpal build --path "vorpal")` then `$ARTIFACT_PATH/bin/example`
 
 Build this repository
 
 - From the repo root: `vorpal build "vorpal"`
 - Optional Go parity (if present): `vorpal build --config "Vorpal.go.toml" "vorpal"`
+
+## Running Artifacts
+
+Use `vorpal run` to execute a built artifact directly from the store without manually locating the output path. The command resolves the artifact locally first, then falls back to pulling from the registry.
+
+```bash
+# Basic usage — run an artifact by name
+vorpal run rsync -- --help
+
+# Alias format: [<namespace>/]<name>[:<tag>]
+vorpal run rsync                           # defaults: namespace=library, tag=latest
+vorpal run rsync:3.4.1 -- -avz src/ dest/  # pin a specific version tag
+vorpal run team/my-tool:v2.0               # custom namespace and tag
+
+# Override which binary inside the artifact to execute
+vorpal run my-tool --bin my-tool-helper -- --verbose
+
+# Point to a remote registry (defaults to localhost)
+vorpal run rsync --registry https://registry.example.com:23151
+```
+
+**Resolution flow**: local alias → registry alias lookup → pull artifact archive → execute binary.
+
+**Errors and troubleshooting**:
+- *"artifact alias not found"* — the artifact hasn't been built yet. Run `vorpal build <name>` first.
+- *"binary not found in artifact output"* — the artifact exists but doesn't contain a binary matching the name. The error lists available binaries; use `--bin <name>` to select one.
+- *"artifact output not found for digest"* — the alias exists but the output was cleaned up. Rebuild with `vorpal build <name>`.
 
 ## Dev & User Environments
 Manage development and user-wide environments using the builders:

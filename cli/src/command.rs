@@ -21,7 +21,7 @@ use tracing::{error, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::{
     artifact::{get_default_address, system::get_system_default_str},
-    context::{VorpalCredentials, VorpalCredentialsContent},
+    context::{VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE},
 };
 
 mod build;
@@ -29,12 +29,13 @@ mod config;
 mod init;
 mod inspect;
 mod lock;
+mod run;
 mod start;
 mod store;
 mod system;
 
 pub fn get_default_namespace() -> String {
-    "library".to_string()
+    DEFAULT_NAMESPACE.to_string()
 }
 
 #[derive(Subcommand)]
@@ -200,6 +201,25 @@ pub enum Command {
 
         // Registry address
         #[arg(default_value_t = get_default_address(), global = true, long)]
+        registry: String,
+    },
+
+    /// Run a built artifact from the store
+    #[clap(trailing_var_arg = true)]
+    Run {
+        /// Artifact alias ([<namespace>/]<name>[:<tag>])
+        alias: String,
+
+        /// Arguments to pass to the artifact binary
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<String>,
+
+        /// Override the binary name to execute (default: artifact name)
+        #[arg(long)]
+        bin: Option<String>,
+
+        /// Registry address
+        #[arg(default_value_t = get_default_address(), long)]
         registry: String,
     },
 
@@ -544,6 +564,13 @@ pub async fn run() -> Result<()> {
 
             Ok(())
         }
+
+        Command::Run {
+            alias,
+            args,
+            bin,
+            registry,
+        } => run::run(alias, args, bin.as_deref(), registry).await,
 
         Command::Services(services) => match services {
             CommandServices::Start {
