@@ -44,31 +44,6 @@ pub enum CommandSystemKeys {
 }
 
 #[derive(Subcommand)]
-pub enum CommandSystemPrune {
-    /// Prune system resources
-    Prune {
-        /// Prune all resources
-        #[arg(default_value_t = false, long)]
-        all: bool,
-        /// Prune artifact aliases
-        #[arg(long)]
-        artifact_aliases: bool,
-        /// Prune artifact archives
-        #[arg(long)]
-        artifact_archives: bool,
-        /// Prune artifact configs
-        #[arg(long)]
-        artifact_configs: bool,
-        /// Prune artifact outputs
-        #[arg(long)]
-        artifact_outputs: bool,
-        /// Prune sandboxes
-        #[arg(long)]
-        sandboxes: bool,
-    },
-}
-
-#[derive(Subcommand)]
 pub enum CommandSystemServices {
     Start {
         #[arg(long)]
@@ -109,8 +84,26 @@ pub enum CommandSystem {
     #[clap(subcommand)]
     Keys(CommandSystemKeys),
 
-    #[clap(subcommand)]
-    Prune(CommandSystemPrune),
+    Prune {
+        /// Prune all resources
+        #[arg(default_value_t = false, long)]
+        all: bool,
+        /// Prune artifact aliases
+        #[arg(long)]
+        artifact_aliases: bool,
+        /// Prune artifact archives
+        #[arg(long)]
+        artifact_archives: bool,
+        /// Prune artifact configs
+        #[arg(long)]
+        artifact_configs: bool,
+        /// Prune artifact outputs
+        #[arg(long)]
+        artifact_outputs: bool,
+        /// Prune sandboxes
+        #[arg(long)]
+        sandboxes: bool,
+    },
 
     #[clap(subcommand)]
     Services(CommandSystemServices),
@@ -584,19 +577,16 @@ pub async fn run() -> Result<()> {
                 CommandSystemKeys::Generate {} => system::keys::generate().await,
             },
 
-            CommandSystem::Prune(prune) => match prune {
-                CommandSystemPrune::Prune {
-                    artifact_aliases: aliases,
-                    all,
-                    artifact_archives: archives,
-                    artifact_configs: configs,
-                    artifact_outputs: outputs,
-                    sandboxes,
-                } => {
-                    system::prune::run(*all, *aliases, *archives, *configs, *outputs, *sandboxes)
-                        .await
-                }
-            },
+            CommandSystem::Prune {
+                artifact_aliases: aliases,
+                all,
+                artifact_archives: archives,
+                artifact_configs: configs,
+                artifact_outputs: outputs,
+                sandboxes,
+            } => {
+                system::prune::run(*all, *aliases, *archives, *configs, *outputs, *sandboxes).await
+            }
 
             CommandSystem::Services(services) => match services {
                 CommandSystemServices::Start {
