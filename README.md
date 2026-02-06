@@ -16,7 +16,7 @@ Vorpal is distributed and composed of horizontally scalable components:
 - Registry service (storage): persists artifacts and metadata (e.g., S3-backed in CI).
 - Worker service (executor): executes steps in isolated environments; scale by adding workers.
 
-Run services locally during development with `make vorpal-start` (or `cargo run --bin vorpal -- services start`).
+Run services locally during development with `make vorpal-start` (or `cargo run --bin vorpal -- system services start`).
 
 ```mermaid
 flowchart LR
@@ -101,7 +101,7 @@ These steps assume you installed Vorpal via the installer and have `vorpal` on y
 2) Start services (agent, registry, worker)
 
 - If you used the installer, services are already running.
-- Otherwise: `vorpal services start`  # defaults to https://localhost:23151
+- Otherwise: `vorpal system services start`  # defaults to https://localhost:23151
 
 3) Create a new project (pick Go or Rust)
 

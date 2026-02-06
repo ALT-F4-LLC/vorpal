@@ -103,6 +103,8 @@ cat <<EOF > "$HOME/Library/LaunchAgents/com.altf4llc.vorpal.plist"
     <key>ProgramArguments</key>
     <array>
         <string>${INSTALL_DIR}/bin/vorpal</string>
+        <string>system</string>
+        <string>services</string>
         <string>start</string>
     </array>
 
@@ -138,7 +140,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${INSTALL_DIR}/bin/vorpal services start
+ExecStart=${INSTALL_DIR}/bin/vorpal system services start
 Restart=always
 RestartSec=5
 

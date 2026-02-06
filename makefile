@@ -107,7 +107,7 @@ vorpal:
 	cargo $(CARGO_FLAGS) run --bin "vorpal" -- build --agent "https://localhost:23152" --registry "https://localhost:23152" --worker "https://localhost:23152" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- services start --port "23152" $(VORPAL_FLAGS)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start --port "23152" $(VORPAL_FLAGS)
 
 # Lima environment
 
@@ -129,4 +129,4 @@ lima-vorpal:
 	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal build $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)'
 
 lima-vorpal-start:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal services start $(VORPAL_FLAGS)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal system services start $(VORPAL_FLAGS)'

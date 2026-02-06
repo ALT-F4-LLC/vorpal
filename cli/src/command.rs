@@ -44,33 +44,32 @@ pub enum CommandSystemKeys {
 }
 
 #[derive(Subcommand)]
-pub enum CommandSystem {
-    #[clap(subcommand)]
-    Keys(CommandSystemKeys),
-
+pub enum CommandSystemPrune {
+    /// Prune system resources
     Prune {
+        /// Prune all resources
         #[arg(default_value_t = false, long)]
         all: bool,
-
+        /// Prune artifact aliases
         #[arg(long)]
         artifact_aliases: bool,
-
+        /// Prune artifact archives
         #[arg(long)]
         artifact_archives: bool,
-
+        /// Prune artifact configs
         #[arg(long)]
         artifact_configs: bool,
-
+        /// Prune artifact outputs
         #[arg(long)]
         artifact_outputs: bool,
-
+        /// Prune sandboxes
         #[arg(long)]
         sandboxes: bool,
     },
 }
 
 #[derive(Subcommand)]
-pub enum CommandServices {
+pub enum CommandSystemServices {
     Start {
         #[arg(long)]
         issuer: Option<String>,
@@ -103,6 +102,18 @@ pub enum CommandServices {
         #[arg(default_value = "300", long)]
         archive_check_cache_ttl: u64,
     },
+}
+
+#[derive(Subcommand)]
+pub enum CommandSystem {
+    #[clap(subcommand)]
+    Keys(CommandSystemKeys),
+
+    #[clap(subcommand)]
+    Prune(CommandSystemPrune),
+
+    #[clap(subcommand)]
+    Services(CommandSystemServices),
 }
 
 #[derive(Subcommand)]
@@ -222,10 +233,6 @@ pub enum Command {
         #[arg(default_value_t = get_default_address(), long)]
         registry: String,
     },
-
-    /// Manage Vorpal services
-    #[clap(subcommand)]
-    Services(CommandServices),
 
     /// Manage Vorpal system
     #[clap(subcommand)]
@@ -572,51 +579,54 @@ pub async fn run() -> Result<()> {
             registry,
         } => run::run(alias, args, bin.as_deref(), registry).await,
 
-        Command::Services(services) => match services {
-            CommandServices::Start {
-                archive_check_cache_ttl,
-                issuer,
-                issuer_audience,
-                issuer_client_id,
-                issuer_client_secret,
-                port,
-                registry_backend,
-                registry_backend_s3_bucket,
-                registry_backend_s3_force_path_style,
-                services,
-            } => {
-                let run_args = start::RunArgs {
-                    archive_check_cache_ttl: *archive_check_cache_ttl,
-                    issuer: issuer.clone(),
-                    issuer_audience: issuer_audience.clone(),
-                    issuer_client_id: issuer_client_id.clone(),
-                    issuer_client_secret: issuer_client_secret.clone(),
-                    port: *port,
-                    registry_backend: registry_backend.clone(),
-                    registry_backend_s3_bucket: registry_backend_s3_bucket.clone(),
-                    registry_backend_s3_force_path_style: *registry_backend_s3_force_path_style,
-                    services: services.split(',').map(|s| s.to_string()).collect(),
-                };
-
-                start::run(run_args).await
-            }
-        },
-
         Command::System(system) => match system {
             CommandSystem::Keys(keys) => match keys {
                 CommandSystemKeys::Generate {} => system::keys::generate().await,
             },
 
-            CommandSystem::Prune {
-                artifact_aliases: aliases,
-                all,
-                artifact_archives: archives,
-                artifact_configs: configs,
-                artifact_outputs: outputs,
-                sandboxes,
-            } => {
-                system::prune::run(*all, *aliases, *archives, *configs, *outputs, *sandboxes).await
-            }
+            CommandSystem::Prune(prune) => match prune {
+                CommandSystemPrune::Prune {
+                    artifact_aliases: aliases,
+                    all,
+                    artifact_archives: archives,
+                    artifact_configs: configs,
+                    artifact_outputs: outputs,
+                    sandboxes,
+                } => {
+                    system::prune::run(*all, *aliases, *archives, *configs, *outputs, *sandboxes)
+                        .await
+                }
+            },
+
+            CommandSystem::Services(services) => match services {
+                CommandSystemServices::Start {
+                    archive_check_cache_ttl,
+                    issuer,
+                    issuer_audience,
+                    issuer_client_id,
+                    issuer_client_secret,
+                    port,
+                    registry_backend,
+                    registry_backend_s3_bucket,
+                    registry_backend_s3_force_path_style,
+                    services,
+                } => {
+                    let run_args = start::RunArgs {
+                        archive_check_cache_ttl: *archive_check_cache_ttl,
+                        issuer: issuer.clone(),
+                        issuer_audience: issuer_audience.clone(),
+                        issuer_client_id: issuer_client_id.clone(),
+                        issuer_client_secret: issuer_client_secret.clone(),
+                        port: *port,
+                        registry_backend: registry_backend.clone(),
+                        registry_backend_s3_bucket: registry_backend_s3_bucket.clone(),
+                        registry_backend_s3_force_path_style: *registry_backend_s3_force_path_style,
+                        services: services.split(',').map(|s| s.to_string()).collect(),
+                    };
+
+                    start::run(run_args).await
+                }
+            },
         },
     }
 }
