@@ -460,8 +460,6 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
     let binary_name = bin.unwrap_or(&alias_parsed.name);
     let binary_path = resolve_binary(&output_path, binary_name).await?;
 
-    info!("run: executing {}", binary_path.display());
-
     // Step 3: Execute the binary, replacing this process
 
     let err = Command::new(&binary_path).args(args).exec();
