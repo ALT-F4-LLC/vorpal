@@ -21,7 +21,7 @@ use tracing::{error, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::{
     artifact::{get_default_address, system::get_system_default_str},
-    context::{VorpalCredentials, VorpalCredentialsContent},
+    context::{VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE},
 };
 
 mod build;
@@ -29,12 +29,13 @@ mod config;
 mod init;
 mod inspect;
 mod lock;
+mod run;
 mod start;
 mod store;
 mod system;
 
 pub fn get_default_namespace() -> String {
-    "library".to_string()
+    DEFAULT_NAMESPACE.to_string()
 }
 
 #[derive(Subcommand)]
@@ -201,6 +202,17 @@ pub enum Command {
         // Registry address
         #[arg(default_value_t = get_default_address(), global = true, long)]
         registry: String,
+    },
+
+    /// Run a built artifact from the store
+    #[clap(trailing_var_arg = true)]
+    Run {
+        /// Artifact alias ([<namespace>/]<name>[:<tag>])
+        alias: String,
+
+        /// Arguments to pass to the artifact binary
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<String>,
     },
 
     /// Manage Vorpal services
@@ -544,6 +556,8 @@ pub async fn run() -> Result<()> {
 
             Ok(())
         }
+
+        Command::Run { alias, args } => run::run(alias, args).await,
 
         Command::Services(services) => match services {
             CommandServices::Start {
