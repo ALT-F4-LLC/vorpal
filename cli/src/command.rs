@@ -46,6 +46,14 @@ pub enum CommandSystemKeys {
 #[derive(Subcommand)]
 pub enum CommandSystemServices {
     Start {
+        /// Enable the plaintext health-check listener
+        #[arg(default_value_t = false, long)]
+        health_check: bool,
+
+        /// Plaintext (non-TLS) port for gRPC health checks
+        #[arg(default_value = "23152", long)]
+        health_check_port: u16,
+
         #[arg(long)]
         issuer: Option<String>,
 
@@ -591,6 +599,8 @@ pub async fn run() -> Result<()> {
             CommandSystem::Services(services) => match services {
                 CommandSystemServices::Start {
                     archive_check_cache_ttl,
+                    health_check,
+                    health_check_port,
                     issuer,
                     issuer_audience,
                     issuer_client_id,
@@ -603,6 +613,8 @@ pub async fn run() -> Result<()> {
                 } => {
                     let run_args = start::RunArgs {
                         archive_check_cache_ttl: *archive_check_cache_ttl,
+                        health_check: *health_check,
+                        health_check_port: *health_check_port,
                         issuer: issuer.clone(),
                         issuer_audience: issuer_audience.clone(),
                         issuer_client_id: issuer_client_id.clone(),

@@ -11,8 +11,11 @@ use crate::command::{
 use anyhow::{bail, Result};
 use std::sync::Arc;
 use tokio::fs::read_to_string;
+use tokio::net::TcpListener;
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
-use tracing::info;
+use tonic_health::{pb::health_server::HealthServer, server::HealthService};
+use tracing::{info, warn};
 use vorpal_sdk::api::{
     agent::agent_service_server::AgentServiceServer,
     archive::archive_service_server::ArchiveServiceServer,
@@ -27,6 +30,8 @@ mod worker;
 
 pub struct RunArgs {
     pub archive_check_cache_ttl: u64,
+    pub health_check: bool,
+    pub health_check_port: u16,
     pub issuer: Option<String>,
     pub issuer_audience: Option<String>,
     pub issuer_client_id: Option<String>,
@@ -59,11 +64,11 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
         .await
         .expect("failed to read public key");
 
-    let priavate_key = read_to_string(private_key_path)
+    let private_key = read_to_string(private_key_path)
         .await
         .expect("failed to read private key");
 
-    let config_identity = Identity::from_pem(cert, priavate_key);
+    let config_identity = Identity::from_pem(cert, private_key);
 
     let config = ServerTlsConfig::new().identity(config_identity);
 
@@ -71,15 +76,42 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
 }
 
 pub async fn run(args: RunArgs) -> Result<()> {
+    if args.health_check && args.health_check_port == args.port {
+        bail!(
+            "health check port ({}) must differ from the main service port ({})",
+            args.health_check_port,
+            args.port
+        );
+    }
+
     let tls_config = new_tls_config().await?;
 
-    let (_, health_service) = tonic_health::server::health_reporter();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
     let mut router = Server::builder()
         .tls_config(tls_config)?
         .add_service(health_service);
 
-    if args.services.contains(&"agent".to_string()) {
+    let health_prepared = if args.health_check {
+        let health_service_plaintext =
+            HealthServer::new(HealthService::from_health_reporter(health_reporter.clone()));
+
+        let health_address = format!("[::]:{}", args.health_check_port);
+
+        let health_listener = TcpListener::bind(&health_address).await.map_err(|err| {
+            anyhow::anyhow!("failed to bind health server on {}: {}", health_address, err)
+        })?;
+
+        let health_router = Server::builder().add_service(health_service_plaintext);
+
+        Some((health_router, health_listener, health_address))
+    } else {
+        None
+    };
+
+    let has_agent = args.services.contains(&"agent".to_string());
+
+    if has_agent {
         let service = AgentServiceServer::new(AgentServer::new());
 
         router = router.add_service(service);
@@ -87,7 +119,9 @@ pub async fn run(args: RunArgs) -> Result<()> {
         info!("agent |> service: [::]:{}", args.port);
     }
 
-    if args.services.contains(&"registry".to_string()) {
+    let has_registry = args.services.contains(&"registry".to_string());
+
+    if has_registry {
         let backend = match args.registry_backend.as_str() {
             "local" => ServerBackend::Local,
             "s3" => ServerBackend::S3,
@@ -148,7 +182,9 @@ pub async fn run(args: RunArgs) -> Result<()> {
         info!("artifact |> service: [::]:{}", args.port);
     }
 
-    if args.services.contains(&"worker".to_string()) {
+    let has_worker = args.services.contains(&"worker".to_string());
+
+    if has_worker {
         let worker_server = WorkerServer::new(
             args.issuer.clone(),
             args.issuer_audience.clone(),
@@ -178,14 +214,65 @@ pub async fn run(args: RunArgs) -> Result<()> {
         info!("worker |> service: [::]:{}", args.port);
     }
 
-    let address = format!("[::]:{}", args.port)
-        .parse()
-        .expect("failed to parse address");
+    let address = format!("[::]:{}", args.port);
 
-    router
-        .serve(address)
+    let main_listener = TcpListener::bind(&address)
         .await
-        .expect("failed to start worker server");
+        .map_err(|err| anyhow::anyhow!("failed to bind main server on {}: {}", address, err))?;
 
-    Ok(())
+    let main_incoming = TcpListenerStream::new(main_listener);
+
+    tokio::spawn(async move {
+        tokio::task::yield_now().await;
+
+        if has_agent {
+            health_reporter
+                .set_serving::<AgentServiceServer<AgentServer>>()
+                .await;
+        }
+
+        if has_registry {
+            health_reporter
+                .set_serving::<ArchiveServiceServer<ArchiveServer>>()
+                .await;
+            health_reporter
+                .set_serving::<ArtifactServiceServer<ArtifactServer>>()
+                .await;
+        }
+
+        if has_worker {
+            health_reporter
+                .set_serving::<WorkerServiceServer<WorkerServer>>()
+                .await;
+        }
+    });
+
+    if let Some((health_router, health_listener, health_address)) = health_prepared {
+        let health_incoming = TcpListenerStream::new(health_listener);
+
+        info!("health |> service: {}", health_address);
+
+        let health_handle = tokio::spawn(async move {
+            if let Err(err) = health_router
+                .serve_with_incoming(health_incoming)
+                .await
+            {
+                warn!("health server failed: {}", err);
+            }
+        });
+
+        let result = router
+            .serve_with_incoming(main_incoming)
+            .await
+            .map_err(|err| anyhow::anyhow!("main server failed: {}", err));
+
+        health_handle.abort();
+
+        result
+    } else {
+        router
+            .serve_with_incoming(main_incoming)
+            .await
+            .map_err(|err| anyhow::anyhow!("main server failed: {}", err))
+    }
 }
