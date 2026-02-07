@@ -99,7 +99,11 @@ pub async fn run(args: RunArgs) -> Result<()> {
         let health_address = format!("[::]:{}", args.health_check_port);
 
         let health_listener = TcpListener::bind(&health_address).await.map_err(|err| {
-            anyhow::anyhow!("failed to bind health server on {}: {}", health_address, err)
+            anyhow::anyhow!(
+                "failed to bind health server on {}: {}",
+                health_address,
+                err
+            )
         })?;
 
         let health_router = Server::builder().add_service(health_service_plaintext);
@@ -253,10 +257,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
         info!("health |> service: {}", health_address);
 
         let health_handle = tokio::spawn(async move {
-            if let Err(err) = health_router
-                .serve_with_incoming(health_incoming)
-                .await
-            {
+            if let Err(err) = health_router.serve_with_incoming(health_incoming).await {
                 warn!("health server failed: {}", err);
             }
         });
