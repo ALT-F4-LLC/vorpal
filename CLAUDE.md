@@ -21,7 +21,7 @@ make build TARGET=release
 make test TARGET=release
 
 # Run Vorpal services locally
-make vorpal-start   # Starts agent, registry, worker on https://localhost:23152
+make vorpal-start   # Starts agent, registry, worker on https://localhost:23153
 
 # Build using Vorpal (self-hosting)
 make vorpal         # Builds the "vorpal" artifact

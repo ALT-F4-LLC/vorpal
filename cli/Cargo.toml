@@ -36,8 +36,8 @@ serde = { version = "1.0.228", features = ["serde_derive"] }
 serde_json = { version = "1.0.149" }
 sha256 = { version = "1.6.0" }
 thiserror = { version = "2.0.18" }
-tokio = { version = "1.49.0", features = ["process", "rt-multi-thread"] }
-tokio-stream = { version = "0.1.18", features = ["io-util"] }
+tokio = { version = "1.49.0", features = ["net", "process", "rt-multi-thread"] }
+tokio-stream = { version = "0.1.18", features = ["io-util", "net"] }
 tokio-tar = { version = "0.3.1" }
 tokio-util = { version = "0.7.18", features = ["compat"] }
 toml = { version = "0.9.11" }
