@@ -29,7 +29,7 @@ mod registry;
 mod worker;
 
 pub struct RunArgs {
-    pub archive_check_cache_ttl: u64,
+    pub archive_cache_ttl: u64,
     pub health_check: bool,
     pub health_check_port: u16,
     pub issuer: Option<String>,
@@ -44,31 +44,31 @@ pub struct RunArgs {
 }
 
 async fn new_tls_config() -> Result<ServerTlsConfig> {
-    let cert_path = get_key_service_path();
+    let service_key_path = get_key_service_path();
 
-    if !cert_path.exists() {
+    if !service_key_path.exists() {
         return Err(anyhow::anyhow!(
             "public key not found - run 'vorpal system keys generate' or copy from agent"
         ));
     }
 
-    let private_key_path = get_key_service_key_path();
+    let service_private_key_path = get_key_service_key_path();
 
-    if !private_key_path.exists() {
+    if !service_private_key_path.exists() {
         return Err(anyhow::anyhow!(
             "private key not found - run 'vorpal system keys generate' or copy from agent"
         ));
     }
 
-    let cert = read_to_string(cert_path)
+    let service_key = read_to_string(service_key_path)
         .await
         .expect("failed to read public key");
 
-    let private_key = read_to_string(private_key_path)
+    let service_private_key = read_to_string(service_private_key_path)
         .await
         .expect("failed to read private key");
 
-    let config_identity = Identity::from_pem(cert, private_key);
+    let config_identity = Identity::from_pem(service_key, service_private_key);
 
     let config = ServerTlsConfig::new().identity(config_identity);
 
@@ -154,7 +154,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
         )
         .await?;
 
-        let archive_server = ArchiveServer::new(backend_archive, args.archive_check_cache_ttl);
+        let archive_server = ArchiveServer::new(backend_archive, args.archive_cache_ttl);
         let artifact_server = ArtifactServer::new(backend_artifact);
 
         if let Some(issuer) = &args.issuer {

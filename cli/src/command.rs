@@ -46,11 +46,15 @@ pub enum CommandSystemKeys {
 #[derive(Subcommand)]
 pub enum CommandSystemServices {
     Start {
+        /// TTL in seconds for caching archive check results. Set to 0 to disable caching.
+        #[arg(default_value = "300", long)]
+        archive_cache_ttl: u64,
+
         /// Enable the plaintext health-check listener
         #[arg(default_value_t = false, long)]
         health_check: bool,
 
-        /// Plaintext (non-TLS) port for gRPC health checks
+        /// Plaintext port for gRPC health checks
         #[arg(default_value = "23152", long)]
         health_check_port: u16,
 
@@ -80,10 +84,6 @@ pub enum CommandSystemServices {
 
         #[arg(default_value_t = false, long)]
         registry_backend_s3_force_path_style: bool,
-
-        /// TTL in seconds for caching archive check results. Set to 0 to disable caching.
-        #[arg(default_value = "300", long)]
-        archive_check_cache_ttl: u64,
     },
 }
 
@@ -96,18 +96,23 @@ pub enum CommandSystem {
         /// Prune all resources
         #[arg(default_value_t = false, long)]
         all: bool,
+
         /// Prune artifact aliases
         #[arg(long)]
         artifact_aliases: bool,
+
         /// Prune artifact archives
         #[arg(long)]
         artifact_archives: bool,
+
         /// Prune artifact configs
         #[arg(long)]
         artifact_configs: bool,
+
         /// Prune artifact outputs
         #[arg(long)]
         artifact_outputs: bool,
+
         /// Prune sandboxes
         #[arg(long)]
         sandboxes: bool,
@@ -598,7 +603,7 @@ pub async fn run() -> Result<()> {
 
             CommandSystem::Services(services) => match services {
                 CommandSystemServices::Start {
-                    archive_check_cache_ttl,
+                    archive_cache_ttl,
                     health_check,
                     health_check_port,
                     issuer,
@@ -612,7 +617,7 @@ pub async fn run() -> Result<()> {
                     services,
                 } => {
                     let run_args = start::RunArgs {
-                        archive_check_cache_ttl: *archive_check_cache_ttl,
+                        archive_cache_ttl: *archive_cache_ttl,
                         health_check: *health_check,
                         health_check_port: *health_check_port,
                         issuer: issuer.clone(),
