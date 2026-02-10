@@ -24,6 +24,7 @@ use vorpal_sdk::{
     context::{VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE},
 };
 
+mod agent;
 mod build;
 mod config;
 mod init;
@@ -124,6 +125,19 @@ pub enum CommandSystem {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Manage Vorpal agents
+    Agent {
+        /// Agent prompts (one per agent to spawn)
+        #[arg(required = true)]
+        prompts: Vec<String>,
+
+        /// Workspace directory for each prompt, matched by position (e.g. first --workspace
+        /// pairs with first prompt). If fewer --workspace flags than prompts are given, the
+        /// remaining prompts default to the current directory.
+        #[arg(long)]
+        workspace: Vec<PathBuf>,
+    },
+
     /// Build an artifact
     Build {
         /// Artifact name
@@ -266,25 +280,64 @@ pub async fn run() -> Result<()> {
 
     let Cli { command, level } = cli;
 
-    // Set up tracing subscriber
+    // Tracing to stderr corrupts the TUI display, so skip the subscriber
+    // for the agent command. The TUI renders all relevant state itself.
+    if !matches!(&command, Command::Agent { .. }) {
+        let subscriber_writer = std::io::stderr.with_max_level(level);
 
-    let subscriber_writer = std::io::stderr.with_max_level(level);
+        let mut subscriber = FmtSubscriber::builder()
+            .with_max_level(level)
+            .with_target(false)
+            .with_writer(subscriber_writer)
+            .without_time();
 
-    let mut subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
-        .with_target(false)
-        .with_writer(subscriber_writer)
-        .without_time();
+        if [Level::DEBUG, Level::TRACE].contains(&level) {
+            subscriber = subscriber.with_file(true).with_line_number(true);
+        }
 
-    if [Level::DEBUG, Level::TRACE].contains(&level) {
-        subscriber = subscriber.with_file(true).with_line_number(true);
+        let subscriber = subscriber.finish();
+
+        subscriber::set_global_default(subscriber).expect("setting default subscriber");
     }
 
-    let subscriber = subscriber.finish();
-
-    subscriber::set_global_default(subscriber).expect("setting default subscriber");
-
     match &command {
+        Command::Agent { prompts, workspace } => {
+            let cwd = current_dir().expect("failed to get current directory");
+
+            // Pad workspaces with "." for any prompts without an explicit workspace
+            let mut workspaces: Vec<PathBuf> = workspace.clone();
+
+            if workspaces.len() < prompts.len() {
+                let defaulted = prompts.len() - workspaces.len();
+                eprintln!(
+                    "Warning: {} prompt(s) have no --workspace flag; defaulting to current directory",
+                    defaulted
+                );
+            }
+
+            workspaces.resize(prompts.len(), PathBuf::from("."));
+
+            // Resolve relative paths to absolute
+            let workspaces: Vec<PathBuf> = workspaces
+                .into_iter()
+                .map(|w| {
+                    if w.is_absolute() {
+                        w.clean()
+                    } else {
+                        cwd.join(w).clean()
+                    }
+                })
+                .collect();
+
+            for ws in &workspaces {
+                if !ws.is_dir() {
+                    return Err(anyhow!("workspace is not a directory: {}", ws.display()));
+                }
+            }
+
+            agent::run(prompts.clone(), workspaces).await
+        }
+
         Command::Build {
             agent,
             config,

@@ -1,0 +1,247 @@
+//! Agent process manager.
+//!
+//! Handles spawning, monitoring, and terminating Claude Code child processes.
+//! Communicates agent output and lifecycle events to the TUI event loop via
+//! tokio channels.
+
+use super::parser::Parser;
+use super::state::{AppEvent, DisplayLine};
+use anyhow::{anyhow, Result};
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
+use tokio_stream::wrappers::LinesStream;
+use tokio_stream::StreamExt;
+use tracing::{debug, info, warn};
+
+/// Identifies whether a line originated from the child's stdout or stderr.
+#[derive(Debug, Clone, Copy)]
+enum LineSource {
+    Stdout,
+    Stderr,
+}
+
+/// Manages Claude Code child processes, spawning them and streaming their
+/// output as [`AppEvent`] values through a tokio channel.
+pub struct AgentManager {
+    /// Channel sender for dispatching events to the TUI event loop.
+    event_tx: mpsc::Sender<AppEvent>,
+    /// Monotonically increasing ID assigned to the next spawned agent.
+    next_id: usize,
+    /// Kill signal senders keyed by agent ID. Sending on a channel tells the
+    /// reader task to terminate the corresponding child process.
+    kill_senders: HashMap<usize, oneshot::Sender<()>>,
+    /// Tokio task handles for the reader/waiter tasks, keyed by agent ID.
+    handles: HashMap<usize, JoinHandle<()>>,
+}
+
+impl AgentManager {
+    /// Create a new manager that sends events through the given channel.
+    pub fn new(event_tx: mpsc::Sender<AppEvent>) -> Self {
+        Self {
+            event_tx,
+            next_id: 0,
+            kill_senders: HashMap::new(),
+            handles: HashMap::new(),
+        }
+    }
+
+    /// Spawn a new Claude Code instance. Returns the assigned `agent_id`.
+    ///
+    /// The process is started with `--output-format stream-json --print --verbose`
+    /// and its stdout/stderr are merged and parsed in a background tokio task.
+    /// Events are sent through the channel as [`AppEvent::AgentOutput`] and
+    /// [`AppEvent::AgentExited`].
+    pub async fn spawn(&mut self, prompt: &str, workspace: &Path) -> Result<usize> {
+        let agent_id = self.next_id;
+        self.next_id += 1;
+
+        info!(
+            agent_id,
+            workspace = %workspace.display(),
+            prompt,
+            "spawning claude agent"
+        );
+
+        let mut child = Command::new("claude")
+            .args([
+                "--include-partial-messages",
+                "--output-format",
+                "stream-json",
+                "--print",
+                "--verbose",
+                prompt,
+            ])
+            .current_dir(workspace)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| anyhow!("failed to spawn claude process: {e}"))?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture stderr"))?;
+
+        let (kill_tx, mut kill_rx) = oneshot::channel::<()>();
+        let tx = self.event_tx.clone();
+
+        let handle = tokio::spawn(async move {
+            // Tag each stream with its source so stderr lines can be styled
+            // differently from protocol errors on stdout.
+            let stdout_lines = LinesStream::new(BufReader::new(stdout).lines())
+                .map(|r| (LineSource::Stdout, r));
+            let stderr_lines = LinesStream::new(BufReader::new(stderr).lines())
+                .map(|r| (LineSource::Stderr, r));
+            // NOTE: `tokio_stream::StreamExt::merge` polls the left stream
+            // (stdout) before the right (stderr) on each iteration. Under heavy
+            // stdout traffic — typical with stream-json protocol — stderr lines
+            // may experience slight delivery delays. This is acceptable because
+            // stderr only carries informational log output. If stderr latency
+            // becomes a problem, consider `tokio::select!` over both streams
+            // independently or a fair merge implementation.
+            let mut merged = stdout_lines.merge(stderr_lines);
+            let mut parser = Parser::new();
+
+            loop {
+                tokio::select! {
+                    biased;
+
+                    // Check for kill signal first (higher priority than reading).
+                    _ = &mut kill_rx => {
+                        info!(agent_id, "kill signal received, terminating agent process");
+                        let _ = child.kill().await;
+                        break;
+                    }
+
+                    line = merged.next() => {
+                        match line {
+                            Some((source, Ok(text))) => {
+                                let display_lines = match source {
+                                    // Stdout carries the stream-json protocol;
+                                    // parse it normally.
+                                    LineSource::Stdout => parser.parse_line(&text),
+                                    // Stderr carries informational tracing/log
+                                    // output — render it as dim text, not as
+                                    // a parser error.
+                                    LineSource::Stderr => {
+                                        let trimmed = text.trim();
+                                        if trimmed.is_empty() {
+                                            Vec::new()
+                                        } else {
+                                            vec![DisplayLine::Stderr(text)]
+                                        }
+                                    }
+                                };
+                                for display_line in display_lines {
+                                    debug!(agent_id, ?display_line, "parsed output line");
+                                    let _ = tx.send(AppEvent::AgentOutput {
+                                        agent_id,
+                                        line: display_line,
+                                    }).await;
+                                }
+                            }
+                            Some((_source, Err(e))) => {
+                                warn!(agent_id, error = %e, "stream read error");
+                                let _ = tx.send(AppEvent::AgentOutput {
+                                    agent_id,
+                                    line: DisplayLine::Error(format!("Read error: {e}")),
+                                }).await;
+                            }
+                            None => {
+                                debug!(agent_id, "output streams closed");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Wait for the process to fully exit and retrieve the exit code.
+            let exit_code = child.wait().await.ok().and_then(|s| s.code());
+
+            info!(agent_id, ?exit_code, "agent process exited");
+
+            let _ = tx.send(AppEvent::AgentExited {
+                agent_id,
+                exit_code,
+            }).await;
+        });
+
+        self.kill_senders.insert(agent_id, kill_tx);
+        self.handles.insert(agent_id, handle);
+
+        Ok(agent_id)
+    }
+
+    /// Kill a specific agent by ID.
+    ///
+    /// Sends a kill signal to the agent's background task, which terminates the
+    /// child process. The reader task will send [`AppEvent::AgentExited`] once
+    /// the process has fully exited.
+    ///
+    /// # Borrow requirements
+    ///
+    /// This method takes `&mut self` because it removes the one-shot kill sender
+    /// from the internal `kill_senders` map via [`HashMap::remove`]. A
+    /// [`oneshot::Sender`] is consumed on send, so removal is the correct
+    /// semantic — each agent can only be killed once.
+    ///
+    /// If concurrent kill support is ever needed (e.g. from multiple tokio
+    /// tasks), the `kill_senders` field could be wrapped in a `Mutex` or
+    /// replaced with a `DashMap` to allow `&self` access. For now the single-
+    /// threaded TUI event loop is the only caller, so `&mut self` is fine.
+    pub async fn kill(&mut self, agent_id: usize) -> Result<()> {
+        info!(agent_id, "sending kill signal to agent");
+
+        let kill_tx = self
+            .kill_senders
+            .remove(&agent_id)
+            .ok_or_else(|| anyhow!("no agent with id {agent_id}"))?;
+
+        // Send the kill signal. If the receiver is already gone (task finished),
+        // this is harmless.
+        let _ = kill_tx.send(());
+
+        Ok(())
+    }
+
+    /// Clean up internal state for an agent that has exited.
+    ///
+    /// Should be called when an [`AppEvent::AgentExited`] event is received so
+    /// that the finished task handle is removed from the map, preventing
+    /// unbounded growth of `handles`.
+    pub fn notify_exited(&mut self, agent_id: usize) {
+        self.kill_senders.remove(&agent_id);
+        self.handles.remove(&agent_id);
+    }
+
+    /// Kill all agents and wait for all background tasks to complete.
+    pub async fn kill_all(&mut self) {
+        let count = self.kill_senders.len();
+        info!(count, "killing all agents");
+
+        // Send kill signals to all live agents.
+        for (_id, kill_tx) in self.kill_senders.drain() {
+            let _ = kill_tx.send(());
+        }
+
+        // Wait for all reader tasks to finish.
+        for (_id, handle) in self.handles.drain() {
+            if let Err(e) = handle.await {
+                warn!(error = %e, "agent task panicked during shutdown");
+            }
+        }
+
+        info!("all agent tasks completed");
+    }
+}
