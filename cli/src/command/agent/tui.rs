@@ -7,7 +7,7 @@
 use super::manager::{AgentManager, ClaudeOptions};
 use super::state::{
     AgentActivity, AgentEvent, AgentState, AgentStatus, App, DisplayLine, InputField, InputMode,
-    EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    InputOverrides, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::ui;
 use anyhow::Result;
@@ -533,29 +533,13 @@ async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) 
             if let Some(agent) = app.focused_agent() {
                 match (&agent.status, &agent.session_id) {
                     (AgentStatus::Exited(_), Some(_)) => {
-                        let agent_workspace = agent.workspace.display().to_string();
                         let agent_opts = agent.claude_options.clone();
+                        let agent_workspace = agent.workspace.clone();
                         app.respond_target = Some(agent.id);
-                        app.enter_input_mode();
-                        // Override the default-populated fields with the agent's
-                        // original workspace and Claude options.
-                        app.workspace_buffer = agent_workspace;
-                        app.workspace_cursor = app.workspace_buffer.len();
-                        app.permission_mode_buffer = agent_opts.permission_mode.unwrap_or_default();
-                        app.permission_mode_cursor = app.permission_mode_buffer.len();
-                        app.model_buffer = agent_opts.model.unwrap_or_default();
-                        app.model_cursor = app.model_buffer.len();
-                        app.effort_buffer = agent_opts.effort.unwrap_or_default();
-                        app.effort_cursor = app.effort_buffer.len();
-                        app.max_budget_buffer = agent_opts
-                            .max_budget_usd
-                            .map(|v| v.to_string())
-                            .unwrap_or_default();
-                        app.max_budget_cursor = app.max_budget_buffer.len();
-                        app.allowed_tools_buffer = agent_opts.allowed_tools.join(", ");
-                        app.allowed_tools_cursor = app.allowed_tools_buffer.len();
-                        app.add_dir_buffer = agent_opts.add_dirs.join(", ");
-                        app.add_dir_cursor = app.add_dir_buffer.len();
+                        app.enter_input_mode_with(Some(InputOverrides {
+                            claude_options: agent_opts,
+                            workspace: agent_workspace,
+                        }));
                     }
                     (AgentStatus::Running, _) => {
                         app.set_status_message("Agent is still running");
@@ -642,13 +626,16 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
                                 app.rebuild_agent_index();
                             }
                             // Resolve the new agent_id to a Vec index for focusing.
-                            if let Some(&idx) = app.agent_index_map().get(&agent_id) {
+                            if let Some(idx) = app.agent_vec_index(agent_id) {
                                 app.focus_agent(idx);
+                                app.set_status_message(format!("Resumed agent {}", idx + 1));
+                            } else {
+                                tracing::warn!(
+                                    agent_id,
+                                    "resumed agent but could not resolve Vec index"
+                                );
+                                app.set_status_message("Resumed agent (index not found)");
                             }
-                            app.set_status_message(format!(
-                                "Resumed agent (session {})",
-                                agent_id + 1
-                            ));
                         }
                         Err(e) => {
                             app.set_status_message(format!("Spawn failed: {e}"));

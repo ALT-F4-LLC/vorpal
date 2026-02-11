@@ -313,13 +313,13 @@ impl Parser {
                 self.last_session_id = session_id.clone();
                 let mut parts = Vec::new();
                 if let Some(sub) = subtype {
-                    parts.push(format!("Status: {sub}"));
+                    parts.push(format!("◈ Status: {sub}"));
                 }
                 if let Some(cost) = total_cost_usd {
-                    parts.push(format!("Cost: ${cost:.4}"));
+                    parts.push(format!("◇ Cost: ${cost:.4}"));
                 }
                 if let Some(sid) = session_id {
-                    parts.push(format!("Session: {sid}"));
+                    parts.push(format!("⊙ Session: {sid}"));
                 }
                 if parts.is_empty() {
                     Vec::new()
@@ -1026,9 +1026,9 @@ mod tests {
         assert_eq!(lines.len(), 1);
         match &lines[0] {
             DisplayLine::Result(s) => {
-                assert!(s.contains("Status: success"));
-                assert!(s.contains("Cost: $0.1600"));
-                assert!(s.contains("Session: abc-123"));
+                assert!(s.contains("◈ Status: success"));
+                assert!(s.contains("◇ Cost: $0.1600"));
+                assert!(s.contains("⊙ Session: abc-123"));
             }
             other => panic!("expected Result, got {:?}", other),
         }
@@ -1185,5 +1185,27 @@ mod tests {
 
         // Second call returns None again.
         assert_eq!(p.take_session_id(), None);
+    }
+
+    #[test]
+    fn take_session_id_ignores_non_result_events() {
+        let mut p = Parser::new();
+
+        // An assistant event that happens to contain a session_id field
+        // should not be captured.
+        p.parse_line(
+            r#"{"type":"assistant","message":{"content":[],"session_id":"should-ignore"}}"#,
+        );
+        assert_eq!(p.take_session_id(), None);
+
+        // A system event similarly should be ignored.
+        p.parse_line(r#"{"type":"system","message":"init","session_id":"also-ignore"}"#);
+        assert_eq!(p.take_session_id(), None);
+
+        // Confirm a result event still works after the ignored events.
+        p.parse_line(
+            r#"{"type":"result","subtype":"success","result":"Done.","total_cost_usd":0.01,"session_id":"real-id"}"#,
+        );
+        assert_eq!(p.take_session_id(), Some("real-id".to_string()));
     }
 }

@@ -128,7 +128,7 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
             };
             Line::from(vec![
                 Span::styled(format!(" {badge}"), Style::default().fg(badge_color)),
-                Span::raw(format!(" {num}: {label} ")),
+                Span::raw(format!(" {num}: ⌂ {label} ")),
             ])
         })
         .collect();
@@ -146,7 +146,17 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .borders(Borders::BOTTOM)
                 .border_style(Style::default().fg(Color::DarkGray))
-                .title(" Agents ")
+                .title(
+                    app.focused_agent()
+                        .map(|a| {
+                            format!(
+                                " ◆ Agent {} │ ⌂ {} ",
+                                app.focused + 1,
+                                workspace_label(&a.workspace)
+                            )
+                        })
+                        .unwrap_or_else(|| " Agents ".to_string()),
+                )
                 .title_style(
                     Style::default()
                         .fg(Color::White)
@@ -742,11 +752,11 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     Span::raw(" "),
                     activity_span,
                     sep.clone(),
-                    Span::raw(format!("Turns: {}", agent.turn_count)),
+                    Span::raw(format!("↻ Turns: {}", agent.turn_count)),
                     sep.clone(),
-                    Span::raw(format!("Tools: {}", agent.tool_count)),
+                    Span::raw(format!("⚒ Tools: {}", agent.tool_count)),
                     sep.clone(),
-                    Span::raw(format!("Scroll: {scroll_info}")),
+                    Span::raw(format!("⇕ Scroll: {scroll_info}")),
                 ];
 
                 if agent.has_new_output {
@@ -1022,11 +1032,12 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
                 .border_style(Style::default().fg(Color::Cyan))
                 .title(if let Some(target_id) = app.respond_target {
                     let label = app
-                        .agent_index_map()
-                        .get(&target_id)
-                        .and_then(|&idx| app.agents.get(idx))
-                        .map(|a| format!("{}", a.id + 1))
-                        .unwrap_or_else(|| "?".to_string());
+                        .agent_vec_index(target_id)
+                        .map(|idx| format!("{}", idx + 1))
+                        .unwrap_or_else(|| {
+                            tracing::debug!(target_id, "respond target has no Vec index");
+                            "?".to_string()
+                        });
                     format!(" Respond to Agent {} ", label)
                 } else {
                     " New Agent ".to_string()

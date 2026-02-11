@@ -24,6 +24,19 @@ pub const MODELS: &[&str] = &["claude-opus-4-6", "claude-sonnet-4-5", "claude-ha
 pub const EFFORT_LEVELS: &[&str] = &["high", "medium", "low"];
 
 // ---------------------------------------------------------------------------
+// InputOverrides
+// ---------------------------------------------------------------------------
+
+/// Overrides for pre-populating the input form when responding to an exited
+/// agent (rather than creating a brand-new agent from CLI defaults).
+pub struct InputOverrides {
+    /// Claude Code options to populate the form fields with.
+    pub claude_options: ClaudeOptions,
+    /// Workspace path to populate the workspace field with.
+    pub workspace: PathBuf,
+}
+
+// ---------------------------------------------------------------------------
 // AgentEvent
 // ---------------------------------------------------------------------------
 
@@ -440,9 +453,9 @@ impl App {
             .and_then(|idx| self.agents.get_mut(idx))
     }
 
-    /// Return a reference to the agent_id → Vec index map.
-    pub fn agent_index_map(&self) -> &HashMap<usize, usize> {
-        &self.agent_index
+    /// Look up the Vec index for an agent id.
+    pub fn agent_vec_index(&self, agent_id: usize) -> Option<usize> {
+        self.agent_index.get(&agent_id).copied()
     }
 
     /// Set a transient status message. It will auto-expire after
@@ -492,18 +505,31 @@ impl App {
 
     /// Enter prompt input mode, clearing any previous buffer content.
     ///
-    /// The workspace buffer is pre-populated with the default workspace path.
-    /// Claude option fields are pre-populated from the CLI defaults.
+    /// Pre-populates workspace and Claude option buffers from the CLI defaults.
     pub fn enter_input_mode(&mut self) {
+        self.enter_input_mode_with(None);
+    }
+
+    /// Enter prompt input mode with optional overrides for workspace and Claude
+    /// options. When `overrides` is `None`, buffers are populated from the CLI
+    /// defaults. When `Some`, the provided values are used instead (e.g., when
+    /// responding to an exited agent).
+    pub fn enter_input_mode_with(&mut self, overrides: Option<InputOverrides>) {
         self.input_mode = InputMode::Input;
         self.input_field = InputField::Prompt;
         self.input_buffer.clear();
         self.input_cursor = 0;
-        self.workspace_buffer = self.default_workspace.display().to_string();
-        self.workspace_cursor = self.workspace_buffer.len();
 
-        // Pre-populate Claude options from CLI defaults.
-        let opts = self.default_claude_options.clone();
+        let (opts, workspace_str) = match overrides {
+            Some(o) => (o.claude_options, o.workspace.display().to_string()),
+            None => (
+                self.default_claude_options.clone(),
+                self.default_workspace.display().to_string(),
+            ),
+        };
+
+        self.workspace_buffer = workspace_str;
+        self.workspace_cursor = self.workspace_buffer.len();
         self.permission_mode_buffer = opts.permission_mode.unwrap_or_default();
         self.permission_mode_cursor = self.permission_mode_buffer.len();
         self.model_buffer = opts.model.unwrap_or_default();
