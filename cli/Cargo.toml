@@ -43,6 +43,7 @@ tokio-stream = { version = "0.1.18", features = ["io-util", "net"] }
 tokio-tar = { version = "0.3.1" }
 tokio-util = { version = "0.7.18", features = ["compat"] }
 toml = { version = "0.9.11" }
+tui-markdown = { version = "0.3" }
 tonic = { version = "0.14.3", features = ["tls-ring"] }
 tonic-health = { version = "0.14.3" }
 tracing = { version = "0.1.44" }

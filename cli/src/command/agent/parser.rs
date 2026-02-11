@@ -319,31 +319,10 @@ impl Parser {
         }
     }
 
-    #[allow(dead_code)]
-    fn handle_assistant(&mut self, message: AssistantMessage) -> Vec<DisplayLine> {
-        let mut lines = Vec::new();
-        for block in message.content {
-            match block {
-                AssistantContentBlock::Text { text } => {
-                    for line in text.split('\n') {
-                        lines.push(DisplayLine::Text(line.to_string()));
-                    }
-                }
-                AssistantContentBlock::ToolUse { name, input } => {
-                    let input_preview = truncate_input(&input.to_string());
-                    lines.push(DisplayLine::ToolUse {
-                        tool: name,
-                        input_preview,
-                    });
-                }
-            }
-        }
-        lines
-    }
-
     fn handle_api_event(&mut self, event: ApiEvent) -> Vec<DisplayLine> {
         match event {
-            ApiEvent::MessageStart { .. } | ApiEvent::MessageStop => Vec::new(),
+            ApiEvent::MessageStart { .. } => vec![DisplayLine::TurnStart],
+            ApiEvent::MessageStop => Vec::new(),
 
             ApiEvent::MessageDelta { .. } => Vec::new(),
 
@@ -377,7 +356,8 @@ impl Parser {
             ContentBlock::ServerToolUse { name, input, .. } => {
                 // Server tool use arrives complete — no delta accumulation.
                 self.active_block = None;
-                let input_preview = truncate_input(&input.to_string());
+                let input_str = input.to_string();
+                let input_preview = format_tool_preview(&name, &input_str);
                 vec![DisplayLine::ToolUse {
                     tool: format!("server:{name}"),
                     input_preview,
@@ -386,7 +366,7 @@ impl Parser {
             ContentBlock::ServerToolResult { content, .. } => {
                 // Server tool result arrives complete — no delta accumulation.
                 self.active_block = None;
-                extract_tool_result_lines(&content, false)
+                extract_tool_result(&content, false).into_iter().collect()
             }
         }
     }
@@ -424,7 +404,7 @@ impl Parser {
                     .current_tool
                     .take()
                     .unwrap_or_else(|| "unknown".to_string());
-                let input_preview = truncate_input(&self.tool_input_buffer);
+                let input_preview = format_tool_preview(&tool, &self.tool_input_buffer);
                 self.tool_input_buffer.clear();
                 vec![DisplayLine::ToolUse {
                     tool,
@@ -483,7 +463,7 @@ impl Parser {
                 UserContentBlock::ToolResult {
                     content, is_error, ..
                 } => {
-                    lines.extend(extract_tool_result_lines(&content, is_error));
+                    lines.extend(extract_tool_result(&content, is_error));
                 }
                 UserContentBlock::Unknown => {}
             }
@@ -544,6 +524,119 @@ fn truncate_input(input: &str) -> String {
     format!("{}…", &input[..boundary])
 }
 
+/// Format a human-readable preview of a tool call's input parameters.
+///
+/// For known tools, extracts the most relevant fields and presents them
+/// clearly instead of showing raw JSON. Falls back to truncated raw input
+/// for unknown tools or when JSON parsing fails.
+fn format_tool_preview(tool: &str, raw_input: &str) -> String {
+    let value: serde_json::Value = match serde_json::from_str(raw_input) {
+        Ok(v) => v,
+        Err(_) => return truncate_input(raw_input),
+    };
+
+    let preview = match tool {
+        "Read" | "Write" | "Edit" => json_str(&value, "file_path")
+            .unwrap_or_default()
+            .to_string(),
+
+        "NotebookEdit" => json_str(&value, "notebook_path")
+            .unwrap_or_default()
+            .to_string(),
+
+        "Bash" => {
+            if let Some(desc) = json_str(&value, "description") {
+                desc.to_string()
+            } else {
+                json_str(&value, "command")
+                    .unwrap_or_default()
+                    .to_string()
+            }
+        }
+
+        "Grep" => format_grep_preview(&value),
+
+        "Glob" => {
+            let pattern = json_str(&value, "pattern").unwrap_or_default();
+            match json_str(&value, "path") {
+                Some(p) => format!("{pattern} in {p}"),
+                None => pattern.to_string(),
+            }
+        }
+
+        "WebSearch" | "web_search" => {
+            let query = json_str(&value, "query").unwrap_or_default();
+            format!("\"{query}\"")
+        }
+
+        "WebFetch" => json_str(&value, "url").unwrap_or_default().to_string(),
+
+        "Skill" => {
+            let skill = json_str(&value, "skill").unwrap_or_default();
+            match json_str(&value, "args") {
+                Some(args) => format!("{skill} {args}"),
+                None => skill.to_string(),
+            }
+        }
+
+        "Task" => {
+            let desc = json_str(&value, "description").unwrap_or_default();
+            let agent = json_str(&value, "subagent_type").unwrap_or_default();
+            if !agent.is_empty() && !desc.is_empty() {
+                format!("[{agent}] {desc}")
+            } else if !desc.is_empty() {
+                desc.to_string()
+            } else {
+                agent.to_string()
+            }
+        }
+
+        "AskUserQuestion" => {
+            if let Some(questions) = value.get("questions").and_then(|q| q.as_array()) {
+                if let Some(first) = questions.first() {
+                    if let Some(q) = first.get("question").and_then(|v| v.as_str()) {
+                        return truncate_input(q);
+                    }
+                }
+            }
+            truncate_input(raw_input)
+        }
+
+        "EnterPlanMode" | "ExitPlanMode" => String::new(),
+
+        _ => return truncate_input(raw_input),
+    };
+
+    if preview.is_empty() {
+        String::new()
+    } else {
+        truncate_input(&preview)
+    }
+}
+
+/// Format a preview for `Grep` tool calls.
+fn format_grep_preview(value: &serde_json::Value) -> String {
+    let pattern = json_str(value, "pattern").unwrap_or_default();
+    let mut result = format!("\"{pattern}\"");
+
+    if let Some(glob) = json_str(value, "glob") {
+        result.push_str(&format!(" --glob {glob}"));
+    }
+    if let Some(t) = json_str(value, "type") {
+        result.push_str(&format!(" --type {t}"));
+    }
+    if let Some(p) = json_str(value, "path") {
+        result.push_str(&format!(" in {p}"));
+    }
+
+    result
+}
+
+/// Extract a string value from a JSON object by key.
+fn json_str<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(|v| v.as_str())
+}
+
 /// Extract text from a tool result content value (string, array of blocks, or null).
 fn extract_tool_result_text(content: &serde_json::Value) -> String {
     match content {
@@ -562,18 +655,20 @@ fn extract_tool_result_text(content: &serde_json::Value) -> String {
     }
 }
 
-/// Convert tool result content into display lines, one per text line.
-fn extract_tool_result_lines(content: &serde_json::Value, is_error: bool) -> Vec<DisplayLine> {
+/// Convert tool result content into a single [`DisplayLine::ToolResult`].
+///
+/// The full multiline text is stored as-is in a single `DisplayLine`, so one
+/// tool invocation consumes only one ring-buffer slot regardless of how many
+/// lines the result contains.
+fn extract_tool_result(content: &serde_json::Value, is_error: bool) -> Option<DisplayLine> {
     let text = extract_tool_result_text(content);
     if text.is_empty() {
-        return Vec::new();
+        return None;
     }
-    text.split('\n')
-        .map(|line| DisplayLine::ToolResult {
-            content: line.to_string(),
-            is_error,
-        })
-        .collect()
+    Some(DisplayLine::ToolResult {
+        content: text,
+        is_error,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -692,7 +787,7 @@ mod tests {
             r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"/src/main.rs\"}"}}}"#,
         );
 
-        // Block stop emits the tool use.
+        // Block stop emits the tool use with a formatted preview.
         let lines = p.parse_line(
             r#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#,
         );
@@ -703,8 +798,8 @@ mod tests {
                 input_preview,
             } => {
                 assert_eq!(tool, "Read");
-                assert!(input_preview.contains("file_path"));
-                assert!(input_preview.contains("/src/main.rs"));
+                // Formatted preview shows just the file path, not raw JSON.
+                assert_eq!(input_preview, "/src/main.rs");
             }
             other => panic!("expected ToolUse, got {:?}", other),
         }
@@ -781,9 +876,7 @@ mod tests {
     #[test]
     fn system_unknown_subtype() {
         let mut p = Parser::new();
-        let lines = p.parse_line(
-            r#"{"type":"system","subtype":"something_else","data":123}"#,
-        );
+        let lines = p.parse_line(r#"{"type":"system","subtype":"something_else","data":123}"#);
         assert_eq!(lines.len(), 1);
         assert!(matches!(&lines[0], DisplayLine::System(s) if s.contains("something_else")));
     }
@@ -809,17 +902,21 @@ mod tests {
     // -- Message-level events produce nothing -----------------------------
 
     #[test]
-    fn message_start_and_stop_produce_nothing() {
+    fn message_start_emits_turn_start() {
         let mut p = Parser::new();
 
         let lines = p.parse_line(
             r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1}}}}"#,
         );
-        assert!(lines.is_empty());
+        assert_eq!(lines.len(), 1);
+        assert!(matches!(&lines[0], DisplayLine::TurnStart));
+    }
 
-        let lines = p.parse_line(
-            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
-        );
+    #[test]
+    fn message_stop_produces_nothing() {
+        let mut p = Parser::new();
+
+        let lines = p.parse_line(r#"{"type":"stream_event","event":{"type":"message_stop"}}"#);
         assert!(lines.is_empty());
     }
 
@@ -838,10 +935,11 @@ mod tests {
     fn full_text_and_tool_flow() {
         let mut p = Parser::new();
 
-        // message_start
-        p.parse_line(
-            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
-        );
+        // message_start emits TurnStart
+        let start_lines = p
+            .parse_line(r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#);
+        assert_eq!(start_lines.len(), 1);
+        assert!(matches!(&start_lines[0], DisplayLine::TurnStart));
 
         // text block
         p.parse_line(
@@ -873,9 +971,7 @@ mod tests {
         p.parse_line(
             r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}}"#,
         );
-        p.parse_line(
-            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
-        );
+        p.parse_line(r#"{"type":"stream_event","event":{"type":"message_stop"}}"#);
     }
 
     // -- Assistant event --------------------------------------------------
@@ -934,9 +1030,7 @@ mod tests {
     #[test]
     fn unknown_type_silently_ignored() {
         let mut p = Parser::new();
-        let lines = p.parse_line(
-            r#"{"type":"some_future_event","data":"whatever"}"#,
-        );
+        let lines = p.parse_line(r#"{"type":"some_future_event","data":"whatever"}"#);
         assert!(lines.is_empty());
     }
 
@@ -948,12 +1042,9 @@ mod tests {
         let lines = p.parse_line(
             r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"file contents here\nsecond line"}]}}"#,
         );
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 1);
         assert!(
-            matches!(&lines[0], DisplayLine::ToolResult { content, is_error } if content == "file contents here" && !is_error)
-        );
-        assert!(
-            matches!(&lines[1], DisplayLine::ToolResult { content, is_error } if content == "second line" && !is_error)
+            matches!(&lines[0], DisplayLine::ToolResult { content, is_error } if content == "file contents here\nsecond line" && !is_error)
         );
     }
 
@@ -1036,7 +1127,8 @@ mod tests {
                 input_preview,
             } => {
                 assert_eq!(tool, "server:web_search");
-                assert!(input_preview.contains("query"));
+                // Formatted preview for web_search shows quoted query.
+                assert_eq!(input_preview, "\"rust async\"");
             }
             other => panic!("expected ToolUse, got {:?}", other),
         }
@@ -1048,12 +1140,9 @@ mod tests {
         let lines = p.parse_line(
             r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"server_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"text","text":"search result line 1\nline 2"}]}}}"#,
         );
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 1);
         assert!(
-            matches!(&lines[0], DisplayLine::ToolResult { content, .. } if content == "search result line 1")
-        );
-        assert!(
-            matches!(&lines[1], DisplayLine::ToolResult { content, .. } if content == "line 2")
+            matches!(&lines[0], DisplayLine::ToolResult { content, .. } if content == "search result line 1\nline 2")
         );
     }
 }

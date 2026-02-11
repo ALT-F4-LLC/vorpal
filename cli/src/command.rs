@@ -128,7 +128,6 @@ pub enum Command {
     /// Manage Vorpal agents
     Agent {
         /// Agent prompts (one per agent to spawn)
-        #[arg(required = true)]
         prompts: Vec<String>,
 
         /// Workspace directory for each prompt, matched by position (e.g. first --workspace
@@ -307,7 +306,7 @@ pub async fn run() -> Result<()> {
             // Pad workspaces with "." for any prompts without an explicit workspace
             let mut workspaces: Vec<PathBuf> = workspace.clone();
 
-            if workspaces.len() < prompts.len() {
+            if !prompts.is_empty() && workspaces.len() < prompts.len() {
                 let defaulted = prompts.len() - workspaces.len();
                 eprintln!(
                     "Warning: {} prompt(s) have no --workspace flag; defaulting to current directory",

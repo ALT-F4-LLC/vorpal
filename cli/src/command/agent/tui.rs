@@ -5,7 +5,7 @@
 //! exit or panic.
 
 use super::manager::AgentManager;
-use super::state::{AgentState, AgentStatus, App, AppEvent};
+use super::state::{AgentActivity, AgentState, AgentStatus, App, AppEvent, InputMode};
 use super::ui;
 use anyhow::Result;
 use crossterm::{
@@ -113,7 +113,7 @@ pub async fn run(prompts: Vec<String>, workspaces: Vec<PathBuf>) -> Result<()> {
     const EVENT_CHANNEL_CAPACITY: usize = 10_000;
     let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(EVENT_CHANNEL_CAPACITY);
     let mut manager = AgentManager::new(event_tx);
-    let mut app = App::new();
+    let mut app = App::new(std::env::current_dir().unwrap_or_default());
 
     // Spawn initial agents from prompts/workspaces pairs.
     for (prompt, workspace) in prompts.iter().zip(workspaces.iter()) {
@@ -160,10 +160,15 @@ async fn event_loop(
     event_rx: &mut mpsc::Receiver<AppEvent>,
     reader: &mut EventStream,
 ) -> Result<()> {
+    let mut tick_interval = tokio::time::interval(Duration::from_millis(100));
+
     loop {
         terminal.draw(|frame| ui::render(app, frame))?;
 
         tokio::select! {
+            _ = tick_interval.tick() => {
+                app.tick = app.tick.wrapping_add(1);
+            }
             Some(event) = event_rx.recv() => {
                 handle_app_event(app, manager, event);
             }
@@ -240,6 +245,23 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AppEvent) 
     match event {
         AppEvent::AgentOutput { agent_id, line } => {
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
+                match &line {
+                    DisplayLine::TurnStart => {
+                        agent.activity = AgentActivity::Thinking;
+                        agent.turn_count += 1;
+                    }
+                    DisplayLine::ToolUse { tool, .. } => {
+                        agent.activity = AgentActivity::Tool(tool.clone());
+                        agent.tool_count += 1;
+                    }
+                    DisplayLine::Text(_) => {
+                        agent.activity = AgentActivity::Thinking;
+                    }
+                    DisplayLine::Result(_) => {
+                        agent.activity = AgentActivity::Done;
+                    }
+                    _ => {}
+                }
                 agent.push_line(line);
             }
         }
@@ -250,6 +272,7 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AppEvent) 
             info!(agent_id, ?exit_code, "agent exited");
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
                 agent.status = AgentStatus::Exited(exit_code);
+                agent.activity = AgentActivity::Done;
             }
             manager.notify_exited(agent_id);
         }
@@ -261,6 +284,18 @@ const GG_CHORD_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Handle a keyboard input event, dispatching to the appropriate action.
 async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) {
+    // In input mode, delegate all keys to the input handler.
+    if app.input_mode == InputMode::Input {
+        handle_input_mode(app, manager, key).await;
+        return;
+    }
+
+    // In confirm-close mode, intercept y/n/Esc before normal handling.
+    if app.confirm_close {
+        handle_confirm_close(app, manager, key).await;
+        return;
+    }
+
     // Clear a pending `g` chord on any key that isn't `g` itself.
     if key.code != KeyCode::Char('g') {
         app.pending_g = None;
@@ -273,10 +308,31 @@ async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) 
     }
 
     match key.code {
-        // Quit: q or Ctrl+C.
+        // Close focused agent tab: q.
+        //
+        // If the focused agent is still running, show a confirmation dialog
+        // before killing it. If the agent has already exited, close the tab
+        // immediately. When no agents remain the TUI exits.
         KeyCode::Char('q') => {
-            app.should_quit = true;
+            if let Some(agent) = app.focused_agent() {
+                match agent.status {
+                    AgentStatus::Running => {
+                        app.confirm_close = true;
+                    }
+                    AgentStatus::Exited(_) => {
+                        app.remove_agent(app.focused);
+                        if app.agents.is_empty() {
+                            app.should_quit = true;
+                        }
+                    }
+                }
+            } else {
+                // No agents — nothing to do, just quit.
+                app.should_quit = true;
+            }
         }
+
+        // Force quit all agents: Ctrl+C.
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.should_quit = true;
         }
@@ -385,15 +441,41 @@ async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) 
             }
         }
 
-        // Toggle compact tool result display.
+        // Cycle tool result display mode: compact → hidden → full.
         KeyCode::Char('r') => {
-            app.compact_results = !app.compact_results;
-            let mode = if app.compact_results {
-                "compact"
-            } else {
-                "full"
-            };
-            app.set_status_message(format!("Tool results: {mode}"));
+            app.result_display = app.result_display.next();
+            app.set_status_message(format!("Tool results: {}", app.result_display.label()));
+        }
+
+        // Copy focused agent output to system clipboard.
+        KeyCode::Char('y') => {
+            if let Some(agent) = app.focused_agent() {
+                let text = agent
+                    .output
+                    .iter()
+                    .map(display_line_to_text)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                match copy_to_clipboard(&text).await {
+                    Ok(()) => {
+                        let bytes = text.len();
+                        let size = if bytes >= 1024 {
+                            format!("{:.1} KB", bytes as f64 / 1024.0)
+                        } else {
+                            format!("{bytes} bytes")
+                        };
+                        app.set_status_message(format!("Copied {size} to clipboard"));
+                    }
+                    Err(e) => {
+                        app.set_status_message(format!("Copy failed: {e}"));
+                    }
+                }
+            }
+        }
+
+        // New agent: enter prompt input mode.
+        KeyCode::Char('n') => {
+            app.enter_input_mode();
         }
 
         // Toggle help overlay.
@@ -403,5 +485,224 @@ async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) 
 
         // All other keys: no-op.
         _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Input mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while in prompt input mode.
+///
+/// Supports text entry, cursor movement, backspace/delete, submission (Enter),
+/// and cancellation (Escape). On submit, spawns a new agent with the entered
+/// prompt and the default workspace directory.
+async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEvent) {
+    match key.code {
+        // Cancel input: Escape.
+        KeyCode::Esc => {
+            app.exit_input_mode();
+        }
+
+        // Submit prompt: Enter.
+        KeyCode::Enter => {
+            if let Some(prompt) = app.submit_input() {
+                let workspace = app.default_workspace.clone();
+                match manager.spawn(&prompt, &workspace).await {
+                    Ok(agent_id) => {
+                        app.add_agent(AgentState::new(agent_id, workspace, prompt.clone()));
+                        // Focus the newly added agent.
+                        let new_index = app.agents.len() - 1;
+                        app.focus_agent(new_index);
+                        app.set_status_message(format!("Spawned agent {}", agent_id + 1));
+                    }
+                    Err(e) => {
+                        app.set_status_message(format!("Spawn failed: {e}"));
+                    }
+                }
+            }
+        }
+
+        // Delete character before cursor: Backspace.
+        KeyCode::Backspace => {
+            if app.input_cursor > 0 {
+                // Find the previous char boundary for UTF-8 safety.
+                let prev = app.input_buffer[..app.input_cursor]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                app.input_buffer.remove(prev);
+                app.input_cursor = prev;
+            }
+        }
+
+        // Delete character at cursor: Delete.
+        KeyCode::Delete => {
+            if app.input_cursor < app.input_buffer.len() {
+                app.input_buffer.remove(app.input_cursor);
+            }
+        }
+
+        // Move cursor left (by one char, UTF-8 safe).
+        KeyCode::Left => {
+            if app.input_cursor > 0 {
+                app.input_cursor = app.input_buffer[..app.input_cursor]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+            }
+        }
+
+        // Move cursor right (by one char, UTF-8 safe).
+        KeyCode::Right => {
+            if app.input_cursor < app.input_buffer.len() {
+                app.input_cursor = app.input_buffer[app.input_cursor..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| app.input_cursor + i)
+                    .unwrap_or(app.input_buffer.len());
+            }
+        }
+
+        // Move cursor to start of line.
+        KeyCode::Home => {
+            app.input_cursor = 0;
+        }
+
+        // Move cursor to end of line.
+        KeyCode::End => {
+            app.input_cursor = app.input_buffer.len();
+        }
+
+        // Insert character at cursor position.
+        KeyCode::Char(c) => {
+            app.input_buffer.insert(app.input_cursor, c);
+            app.input_cursor += c.len_utf8();
+        }
+
+        // All other keys: no-op.
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Confirm-close handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while the confirm-close dialog is visible.
+///
+/// - `y` / `Y` — confirm: kill the focused agent, remove its tab, and dismiss
+///   the dialog. If the kill fails the tab is kept and an error is shown.
+///   If no agents remain the TUI exits.
+/// - Any other key — cancel and dismiss the dialog.
+async fn handle_confirm_close(app: &mut App, manager: &mut AgentManager, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            let mut should_remove = true;
+            if let Some(agent) = app.focused_agent() {
+                let agent_id = agent.id;
+                if matches!(agent.status, AgentStatus::Running) {
+                    if let Err(e) = manager.kill(agent_id).await {
+                        warn!(agent_id, error = %e, "failed to kill agent during close");
+                        app.set_status_message(format!("Kill failed: {e}"));
+                        should_remove = false;
+                    }
+                }
+            }
+            app.confirm_close = false;
+            if should_remove {
+                let idx = app.focused;
+                app.remove_agent(idx);
+                if app.agents.is_empty() {
+                    app.should_quit = true;
+                }
+            }
+        }
+        _ => {
+            app.confirm_close = false;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard
+// ---------------------------------------------------------------------------
+
+use super::state::DisplayLine;
+use super::ui::{BLOCK_MARKER, RESULT_CONNECTOR, SESSION_MARKER};
+
+/// Convert a [`DisplayLine`] to plain text for clipboard export.
+fn display_line_to_text(line: &DisplayLine) -> String {
+    match line {
+        DisplayLine::Text(s) | DisplayLine::System(s) | DisplayLine::Stderr(s) | DisplayLine::Error(s) => s.clone(),
+        DisplayLine::Thinking(s) => format!("{BLOCK_MARKER} {s}"),
+        DisplayLine::Result(s) => format!("{SESSION_MARKER} {s}"),
+        DisplayLine::ToolUse {
+            tool,
+            input_preview,
+        } => format!("{BLOCK_MARKER} {tool}({input_preview})"),
+        DisplayLine::ToolResult { content, is_error } => {
+            let prefix_first = if *is_error {
+                format!("  {RESULT_CONNECTOR}  [ERROR] ")
+            } else {
+                format!("  {RESULT_CONNECTOR}  ")
+            };
+            content
+                .lines()
+                .enumerate()
+                .map(|(i, line)| {
+                    if i == 0 {
+                        format!("{prefix_first}{line}")
+                    } else {
+                        format!("     {line}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        DisplayLine::TurnStart => String::new(),
+    }
+}
+
+/// Copy text to the system clipboard using platform-specific commands.
+async fn copy_to_clipboard(text: &str) -> Result<()> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    use tokio::process::Command;
+
+    let mut child = if cfg!(target_os = "macos") {
+        Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?
+    } else {
+        Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .or_else(|_| {
+                Command::new("xsel")
+                    .arg("--clipboard")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+            })?
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(text.as_bytes()).await?;
+    }
+
+    let status = child.wait().await?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("clipboard command exited with {status}")
     }
 }

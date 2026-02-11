@@ -81,7 +81,7 @@ impl AgentManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| anyhow!("failed to spawn claude process: {e}"))?;
+            .map_err(|e| anyhow!("failed to spawn claude process: {e}. Is 'claude' (Claude Code CLI) installed and on PATH?"))?;
 
         let stdout = child
             .stdout
@@ -98,10 +98,10 @@ impl AgentManager {
         let handle = tokio::spawn(async move {
             // Tag each stream with its source so stderr lines can be styled
             // differently from protocol errors on stdout.
-            let stdout_lines = LinesStream::new(BufReader::new(stdout).lines())
-                .map(|r| (LineSource::Stdout, r));
-            let stderr_lines = LinesStream::new(BufReader::new(stderr).lines())
-                .map(|r| (LineSource::Stderr, r));
+            let stdout_lines =
+                LinesStream::new(BufReader::new(stdout).lines()).map(|r| (LineSource::Stdout, r));
+            let stderr_lines =
+                LinesStream::new(BufReader::new(stderr).lines()).map(|r| (LineSource::Stderr, r));
             // NOTE: `tokio_stream::StreamExt::merge` polls the left stream
             // (stdout) before the right (stderr) on each iteration. Under heavy
             // stdout traffic — typical with stream-json protocol — stderr lines
@@ -171,10 +171,12 @@ impl AgentManager {
 
             info!(agent_id, ?exit_code, "agent process exited");
 
-            let _ = tx.send(AppEvent::AgentExited {
-                agent_id,
-                exit_code,
-            }).await;
+            let _ = tx
+                .send(AppEvent::AgentExited {
+                    agent_id,
+                    exit_code,
+                })
+                .await;
         });
 
         self.kill_senders.insert(agent_id, kill_tx);

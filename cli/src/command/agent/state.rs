@@ -52,6 +52,8 @@ pub enum DisplayLine {
     Result(String),
     /// Error messages (malformed stdout protocol lines).
     Error(String),
+    /// Marks the start of a new assistant turn (visual separator).
+    TurnStart,
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,65 @@ pub enum DisplayLine {
 pub enum AgentStatus {
     Running,
     Exited(Option<i32>),
+}
+
+// ---------------------------------------------------------------------------
+// AgentActivity
+// ---------------------------------------------------------------------------
+
+/// What the agent is currently doing, for status display.
+#[derive(Debug, Clone)]
+pub enum AgentActivity {
+    /// Waiting for the next event.
+    Idle,
+    /// Claude is generating a response.
+    Thinking,
+    /// Claude is executing a tool.
+    Tool(String),
+    /// The agent has finished (process exited).
+    Done,
+}
+
+// ---------------------------------------------------------------------------
+// InputMode
+// ---------------------------------------------------------------------------
+
+/// How tool result output is displayed in the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResultDisplay {
+    /// Show first few result lines per run, truncate long content.
+    Compact,
+    /// Hide result content entirely, show only byte count.
+    Hidden,
+    /// Show all result lines with full content.
+    Full,
+}
+
+impl ResultDisplay {
+    /// Cycle to the next display mode: Compact → Hidden → Full → Compact.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Compact => Self::Hidden,
+            Self::Hidden => Self::Full,
+            Self::Full => Self::Compact,
+        }
+    }
+
+    /// Human-readable label for status messages.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Hidden => "hidden",
+            Self::Full => "full",
+        }
+    }
+}
+
+/// Whether the TUI is in normal navigation mode or prompt input mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    Normal,
+    Input,
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +151,22 @@ pub struct AgentState {
     /// Set to `true` by [`push_line`] when `scroll_offset > 0`. Cleared when
     /// the user scrolls back to the bottom (`scroll_offset` returns to 0).
     pub has_new_output: bool,
+    /// Current activity of the agent (for status display).
+    pub activity: AgentActivity,
+    /// Number of assistant turns observed.
+    pub turn_count: usize,
+    /// Number of tool-use events observed.
+    pub tool_count: usize,
+    /// Monotonic counter incremented each time a line is pushed.
+    pub output_generation: u64,
+    /// Cached collapsed lines from the last render.
+    pub cached_lines: Option<Vec<ratatui::text::Line<'static>>>,
+    /// Cached wrapped row count from the last render.
+    pub cached_row_count: usize,
+    /// The output generation when the cache was last computed.
+    pub cache_generation: u64,
+    /// The result display mode when the cache was last computed.
+    pub cache_result_display: Option<ResultDisplay>,
 }
 
 impl AgentState {
@@ -103,6 +180,14 @@ impl AgentState {
             output: VecDeque::with_capacity(MAX_OUTPUT_LINES),
             scroll_offset: 0,
             has_new_output: false,
+            activity: AgentActivity::Idle,
+            turn_count: 0,
+            tool_count: 0,
+            output_generation: 0,
+            cached_lines: None,
+            cached_row_count: 0,
+            cache_generation: 0,
+            cache_result_display: None,
         }
     }
 
@@ -127,6 +212,7 @@ impl AgentState {
             }
         }
         self.output.push_back(line);
+        self.output_generation = self.output_generation.wrapping_add(1);
 
         // Flag new output when the user is scrolled away from the bottom.
         if self.scroll_offset > 0 {
@@ -141,6 +227,7 @@ impl AgentState {
     ///
     /// Uses [`VecDeque::range`] to read the correct window regardless of the
     /// ring buffer's internal layout — no contiguity requirement.
+    #[cfg(test)]
     pub fn visible_lines(&self, height: usize) -> Vec<&DisplayLine> {
         let len = self.output.len();
         if len == 0 || height == 0 {
@@ -173,8 +260,10 @@ pub struct App {
     pub should_quit: bool,
     /// Whether the help overlay is visible.
     pub show_help: bool,
-    /// Whether tool results are shown in compact (truncated) mode.
-    pub compact_results: bool,
+    /// Whether a confirmation dialog for closing the focused agent is visible.
+    pub confirm_close: bool,
+    /// How tool result output is displayed (compact, hidden, or full).
+    pub result_display: ResultDisplay,
     /// Transient status message shown in the status bar, with its creation time.
     /// Auto-expires after [`STATUS_MESSAGE_TTL`].
     status_message: Option<(String, Instant)>,
@@ -182,20 +271,36 @@ pub struct App {
     /// (scroll-to-top). Stores the [`Instant`] of the first `g` press so
     /// the input handler can enforce a timeout between the two presses.
     pub pending_g: Option<Instant>,
+    /// Current input mode (normal navigation vs. prompt input).
+    pub input_mode: InputMode,
+    /// Buffer for the prompt input text.
+    pub input_buffer: String,
+    /// Cursor position within `input_buffer`.
+    pub input_cursor: usize,
+    /// Monotonic tick counter, incremented each event-loop iteration.
+    pub tick: usize,
+    /// Default workspace directory for new agents.
+    pub default_workspace: PathBuf,
 }
 
 impl App {
     /// Create a new, empty application state.
-    pub fn new() -> Self {
+    pub fn new(default_workspace: PathBuf) -> Self {
         Self {
             agents: Vec::new(),
             agent_index: HashMap::new(),
             focused: 0,
             should_quit: false,
             show_help: false,
-            compact_results: false,
+            confirm_close: false,
+            result_display: ResultDisplay::Hidden,
             status_message: None,
             pending_g: None,
+            input_mode: InputMode::Normal,
+            input_buffer: String::new(),
+            input_cursor: 0,
+            tick: 0,
+            default_workspace,
         }
     }
 
@@ -259,11 +364,62 @@ impl App {
         }
     }
 
+    /// Enter prompt input mode, clearing any previous buffer content.
+    pub fn enter_input_mode(&mut self) {
+        self.input_mode = InputMode::Input;
+        self.input_buffer.clear();
+        self.input_cursor = 0;
+    }
+
+    /// Exit prompt input mode, clearing the buffer.
+    pub fn exit_input_mode(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.input_buffer.clear();
+        self.input_cursor = 0;
+    }
+
+    /// Submit the current input buffer.
+    ///
+    /// If the trimmed buffer is non-empty, returns `Some(trimmed_string)` and
+    /// exits input mode. Otherwise returns `None` (buffer stays intact so the
+    /// user can keep editing).
+    pub fn submit_input(&mut self) -> Option<String> {
+        let trimmed = self.input_buffer.trim().to_string();
+        if trimmed.is_empty() {
+            return None;
+        }
+        self.exit_input_mode();
+        Some(trimmed)
+    }
+
     /// Focus a specific agent by index. No-op if out of range.
     pub fn focus_agent(&mut self, index: usize) {
         if index < self.agents.len() {
             self.focused = index;
         }
+    }
+
+    /// Remove an agent by Vec index, rebuilding the id→index map.
+    ///
+    /// Returns the removed [`AgentState`] or `None` if the index is out of
+    /// range. After removal the focused index is clamped so it stays valid.
+    pub fn remove_agent(&mut self, index: usize) -> Option<AgentState> {
+        if index >= self.agents.len() {
+            return None;
+        }
+        let removed = self.agents.remove(index);
+        // Rebuild the index map since all indices after `index` shifted down.
+        self.agent_index.clear();
+        for (i, agent) in self.agents.iter().enumerate() {
+            self.agent_index.insert(agent.id, i);
+        }
+        // Clamp focused index to remain valid.
+        if self.agents.is_empty() {
+            self.focused = 0;
+        } else if self.focused >= self.agents.len() {
+            self.focused = self.agents.len() - 1;
+        }
+        Some(removed)
     }
 }
 
@@ -286,7 +442,7 @@ mod tests {
 
     /// Helper: create an App with `n` agents.
     fn app_with_agents(n: usize) -> App {
-        let mut app = App::new();
+        let mut app = App::new(PathBuf::from("/tmp/default"));
         for i in 0..n {
             app.add_agent(AgentState::new(
                 i,
@@ -295,6 +451,45 @@ mod tests {
             ));
         }
         app
+    }
+
+    // -- App: remove_agent ------------------------------------------------
+
+    #[test]
+    fn remove_agent_removes_and_reindexes() {
+        let mut app = app_with_agents(3);
+        let removed = app.remove_agent(1);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().id, 1);
+        assert_eq!(app.agents.len(), 2);
+        assert_eq!(app.agents[0].id, 0);
+        assert_eq!(app.agents[1].id, 2);
+        // Index map should be rebuilt.
+        assert_eq!(app.agent_index[&0], 0);
+        assert_eq!(app.agent_index[&2], 1);
+    }
+
+    #[test]
+    fn remove_agent_clamps_focused() {
+        let mut app = app_with_agents(3);
+        app.focused = 2;
+        app.remove_agent(2);
+        assert_eq!(app.focused, 1, "focused should clamp to last valid index");
+    }
+
+    #[test]
+    fn remove_last_agent_sets_focused_zero() {
+        let mut app = app_with_agents(1);
+        app.remove_agent(0);
+        assert!(app.agents.is_empty());
+        assert_eq!(app.focused, 0);
+    }
+
+    #[test]
+    fn remove_agent_out_of_range_returns_none() {
+        let mut app = app_with_agents(2);
+        assert!(app.remove_agent(5).is_none());
+        assert_eq!(app.agents.len(), 2);
     }
 
     // -- AgentState: push_line capacity -----------------------------------
@@ -437,9 +632,7 @@ mod tests {
         let visible = agent.visible_lines(10);
         assert_eq!(visible.len(), 10);
         // The first retained line is "line {overflow}".
-        assert!(
-            matches!(visible[0], DisplayLine::Text(ref t) if t == &format!("line {overflow}"))
-        );
+        assert!(matches!(visible[0], DisplayLine::Text(ref t) if t == &format!("line {overflow}")));
         assert!(
             matches!(visible[9], DisplayLine::Text(ref t) if t == &format!("line {}", overflow + 9))
         );
@@ -485,7 +678,7 @@ mod tests {
     #[test]
     fn next_agent_noop_when_empty() {
         // No agents — next_agent should not panic or change focused.
-        let mut app = App::new();
+        let mut app = App::new(PathBuf::from("/tmp/default"));
         app.next_agent();
         assert_eq!(app.focused, 0);
     }
@@ -493,7 +686,7 @@ mod tests {
     #[test]
     fn prev_agent_noop_when_empty() {
         // No agents — prev_agent should not panic or change focused.
-        let mut app = App::new();
+        let mut app = App::new(PathBuf::from("/tmp/default"));
         app.prev_agent();
         assert_eq!(app.focused, 0);
     }
@@ -526,7 +719,7 @@ mod tests {
 
     #[test]
     fn focused_agent_returns_none_when_empty() {
-        let app = App::new();
+        let app = App::new(PathBuf::from("/tmp/default"));
         assert!(app.focused_agent().is_none());
     }
 
@@ -538,5 +731,80 @@ mod tests {
             agent.push_line(DisplayLine::Text("mutated".to_string()));
         }
         assert_eq!(app.agents[0].output.len(), 1);
+    }
+
+    // -- App: input mode -----------------------------------------------------
+
+    #[test]
+    fn enter_input_mode_sets_state() {
+        let mut app = App::new(PathBuf::from("/tmp/default"));
+        app.enter_input_mode();
+
+        assert_eq!(app.input_mode, InputMode::Input);
+        assert!(app.input_buffer.is_empty());
+        assert_eq!(app.input_cursor, 0);
+    }
+
+    #[test]
+    fn enter_input_mode_clears_previous_buffer() {
+        let mut app = App::new(PathBuf::from("/tmp/default"));
+        app.input_buffer = "leftover".to_string();
+        app.input_cursor = 5;
+
+        app.enter_input_mode();
+
+        assert_eq!(app.input_mode, InputMode::Input);
+        assert!(app.input_buffer.is_empty());
+        assert_eq!(app.input_cursor, 0);
+    }
+
+    #[test]
+    fn exit_input_mode_restores_normal() {
+        let mut app = App::new(PathBuf::from("/tmp/default"));
+        app.enter_input_mode();
+        app.input_buffer = "some text".to_string();
+        app.input_cursor = 4;
+
+        app.exit_input_mode();
+
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.input_buffer.is_empty());
+        assert_eq!(app.input_cursor, 0);
+    }
+
+    #[test]
+    fn submit_input_returns_trimmed_text() {
+        let mut app = App::new(PathBuf::from("/tmp/default"));
+        app.enter_input_mode();
+        app.input_buffer = "  hello world  ".to_string();
+
+        let result = app.submit_input();
+        assert_eq!(result, Some("hello world".to_string()));
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.input_buffer.is_empty());
+        assert_eq!(app.input_cursor, 0);
+    }
+
+    #[test]
+    fn submit_input_returns_none_for_empty() {
+        let mut app = App::new(PathBuf::from("/tmp/default"));
+        app.enter_input_mode();
+        app.input_buffer = "".to_string();
+
+        let result = app.submit_input();
+        assert_eq!(result, None);
+        // Should remain in input mode when submission fails.
+        assert_eq!(app.input_mode, InputMode::Input);
+    }
+
+    #[test]
+    fn submit_input_returns_none_for_whitespace_only() {
+        let mut app = App::new(PathBuf::from("/tmp/default"));
+        app.enter_input_mode();
+        app.input_buffer = "   	  ".to_string();
+
+        let result = app.submit_input();
+        assert_eq!(result, None);
+        assert_eq!(app.input_mode, InputMode::Input);
     }
 }
