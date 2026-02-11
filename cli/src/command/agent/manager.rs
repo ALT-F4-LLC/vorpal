@@ -5,7 +5,7 @@
 //! tokio channels.
 
 use super::parser::Parser;
-use super::state::{AppEvent, DisplayLine};
+use super::state::{AgentEvent, DisplayLine};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::Path;
@@ -43,10 +43,10 @@ pub struct ClaudeOptions {
 }
 
 /// Manages Claude Code child processes, spawning them and streaming their
-/// output as [`AppEvent`] values through a tokio channel.
+/// output as [`AgentEvent`] values through a tokio channel.
 pub struct AgentManager {
     /// Channel sender for dispatching events to the TUI event loop.
-    event_tx: mpsc::Sender<AppEvent>,
+    event_tx: mpsc::Sender<AgentEvent>,
     /// Monotonically increasing ID assigned to the next spawned agent.
     next_id: usize,
     /// Kill signal senders keyed by agent ID. Sending on a channel tells the
@@ -58,7 +58,7 @@ pub struct AgentManager {
 
 impl AgentManager {
     /// Create a new manager that sends events through the given channel.
-    pub fn new(event_tx: mpsc::Sender<AppEvent>) -> Self {
+    pub fn new(event_tx: mpsc::Sender<AgentEvent>) -> Self {
         Self {
             event_tx,
             next_id: 0,
@@ -71,8 +71,8 @@ impl AgentManager {
     ///
     /// The process is started with `--output-format stream-json --print --verbose`
     /// and its stdout/stderr are merged and parsed in a background tokio task.
-    /// Events are sent through the channel as [`AppEvent::AgentOutput`] and
-    /// [`AppEvent::AgentExited`].
+    /// Events are sent through the channel as [`AgentEvent::Output`] and
+    /// [`AgentEvent::Exited`].
     pub async fn spawn(
         &mut self,
         prompt: &str,
@@ -87,6 +87,7 @@ impl AgentManager {
             agent_id,
             workspace = %workspace.display(),
             prompt,
+            ?session_id,
             "spawning claude agent"
         );
 
@@ -208,14 +209,14 @@ impl AgentManager {
                                 // event, emit it as a dedicated event so the
                                 // TUI can store it on the agent state.
                                 if let Some(session_id) = parser.take_session_id() {
-                                    let _ = tx.send(AppEvent::AgentSessionId {
+                                    let _ = tx.send(AgentEvent::SessionId {
                                         agent_id,
                                         session_id,
                                     }).await;
                                 }
                                 for display_line in display_lines {
                                     debug!(agent_id, ?display_line, "parsed output line");
-                                    let _ = tx.send(AppEvent::AgentOutput {
+                                    let _ = tx.send(AgentEvent::Output {
                                         agent_id,
                                         line: display_line,
                                     }).await;
@@ -223,7 +224,7 @@ impl AgentManager {
                             }
                             Some((_source, Err(e))) => {
                                 warn!(agent_id, error = %e, "stream read error");
-                                let _ = tx.send(AppEvent::AgentOutput {
+                                let _ = tx.send(AgentEvent::Output {
                                     agent_id,
                                     line: DisplayLine::Error(format!("Read error: {e}")),
                                 }).await;
@@ -243,7 +244,7 @@ impl AgentManager {
             info!(agent_id, ?exit_code, "agent process exited");
 
             let _ = tx
-                .send(AppEvent::AgentExited {
+                .send(AgentEvent::Exited {
                     agent_id,
                     exit_code,
                 })
@@ -259,7 +260,7 @@ impl AgentManager {
     /// Kill a specific agent by ID.
     ///
     /// Sends a kill signal to the agent's background task, which terminates the
-    /// child process. The reader task will send [`AppEvent::AgentExited`] once
+    /// child process. The reader task will send [`AgentEvent::Exited`] once
     /// the process has fully exited.
     ///
     /// # Borrow requirements
@@ -290,7 +291,7 @@ impl AgentManager {
 
     /// Clean up internal state for an agent that has exited.
     ///
-    /// Should be called when an [`AppEvent::AgentExited`] event is received so
+    /// Should be called when an [`AgentEvent::Exited`] event is received so
     /// that the finished task handle is removed from the map, preventing
     /// unbounded growth of `handles`.
     pub fn notify_exited(&mut self, agent_id: usize) {

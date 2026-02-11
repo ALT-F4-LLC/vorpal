@@ -6,7 +6,7 @@
 
 use super::manager::{AgentManager, ClaudeOptions};
 use super::state::{
-    AgentActivity, AgentState, AgentStatus, App, AppEvent, DisplayLine, InputField, InputMode,
+    AgentActivity, AgentEvent, AgentState, AgentStatus, App, DisplayLine, InputField, InputMode,
     EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::ui;
@@ -119,7 +119,7 @@ pub async fn run(
 
     // Set up the event channel and agent manager.
     const EVENT_CHANNEL_CAPACITY: usize = 10_000;
-    let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(EVENT_CHANNEL_CAPACITY);
+    let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(EVENT_CHANNEL_CAPACITY);
     let mut manager = AgentManager::new(event_tx);
     let mut app = App::new(
         std::env::current_dir().unwrap_or_default(),
@@ -128,8 +128,15 @@ pub async fn run(
 
     // Spawn initial agents from prompts/workspaces pairs.
     for (prompt, workspace) in prompts.iter().zip(workspaces.iter()) {
-        let agent_id = manager.spawn(prompt, workspace, &claude_options, None).await?;
-        app.add_agent(AgentState::new(agent_id, workspace.clone(), prompt.clone()));
+        let agent_id = manager
+            .spawn(prompt, workspace, &claude_options, None)
+            .await?;
+        app.add_agent(AgentState::new(
+            agent_id,
+            workspace.clone(),
+            prompt.clone(),
+            claude_options.clone(),
+        ));
     }
 
     // Create async event stream for crossterm terminal input.
@@ -168,7 +175,7 @@ async fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &mut App,
     manager: &mut AgentManager,
-    event_rx: &mut mpsc::Receiver<AppEvent>,
+    event_rx: &mut mpsc::Receiver<AgentEvent>,
     reader: &mut EventStream,
 ) -> Result<()> {
     let mut tick_interval = tokio::time::interval(Duration::from_millis(100));
@@ -252,9 +259,9 @@ fn scroll_by(app: &mut App, delta: isize) {
 // ---------------------------------------------------------------------------
 
 /// Handle an application event from the agent event channel.
-fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AppEvent) {
+fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent) {
     match event {
-        AppEvent::AgentOutput { agent_id, line } => {
+        AgentEvent::Output { agent_id, line } => {
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
                 match &line {
                     DisplayLine::TurnStart => {
@@ -276,7 +283,7 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AppEvent) 
                 agent.push_line(line);
             }
         }
-        AppEvent::AgentExited {
+        AgentEvent::Exited {
             agent_id,
             exit_code,
         } => {
@@ -287,12 +294,14 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AppEvent) 
             }
             manager.notify_exited(agent_id);
         }
-        AppEvent::AgentSessionId { agent_id, session_id } => {
+        AgentEvent::SessionId {
+            agent_id,
+            session_id,
+        } => {
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
                 agent.session_id = Some(session_id);
             }
         }
-
     }
 }
 
@@ -524,16 +533,35 @@ async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) 
             if let Some(agent) = app.focused_agent() {
                 match (&agent.status, &agent.session_id) {
                     (AgentStatus::Exited(_), Some(_)) => {
-                        app.respond_target = Some(app.focused);
+                        let agent_workspace = agent.workspace.display().to_string();
+                        let agent_opts = agent.claude_options.clone();
+                        app.respond_target = Some(agent.id);
                         app.enter_input_mode();
+                        // Override the default-populated fields with the agent's
+                        // original workspace and Claude options.
+                        app.workspace_buffer = agent_workspace;
+                        app.workspace_cursor = app.workspace_buffer.len();
+                        app.permission_mode_buffer = agent_opts.permission_mode.unwrap_or_default();
+                        app.permission_mode_cursor = app.permission_mode_buffer.len();
+                        app.model_buffer = agent_opts.model.unwrap_or_default();
+                        app.model_cursor = app.model_buffer.len();
+                        app.effort_buffer = agent_opts.effort.unwrap_or_default();
+                        app.effort_cursor = app.effort_buffer.len();
+                        app.max_budget_buffer = agent_opts
+                            .max_budget_usd
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        app.max_budget_cursor = app.max_budget_buffer.len();
+                        app.allowed_tools_buffer = agent_opts.allowed_tools.join(", ");
+                        app.allowed_tools_cursor = app.allowed_tools_buffer.len();
+                        app.add_dir_buffer = agent_opts.add_dirs.join(", ");
+                        app.add_dir_cursor = app.add_dir_buffer.len();
                     }
                     (AgentStatus::Running, _) => {
                         app.set_status_message("Agent is still running");
                     }
                     (_, None) => {
-                        app.set_status_message(
-                            "No session ID -- agent must complete first",
-                        );
+                        app.set_status_message("No session ID -- agent must complete first");
                     }
                 }
             }
@@ -583,14 +611,24 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
                         .clean()
                 };
 
-                if let Some(target_idx) = respond_target {
+                if let Some(target_id) = respond_target {
                     // Respond flow: resume an existing agent's session.
-                    let session_id = app.agents.get(target_idx)
+                    // Resolve the agent id to a Vec index at submit time via the
+                    // agent_index map. This is correct even if agents were added
+                    // or removed while the input overlay was open.
+                    let session_id = app
+                        .agent_by_id_mut(target_id)
                         .and_then(|a| a.session_id.clone());
                     let session_ref = session_id.as_deref();
-                    match manager.spawn(&prompt, &workspace, &claude_options, session_ref).await {
+                    // The old agent_id was already removed from the manager's tracking
+                    // when notify_exited() fired. spawn() registers the new agent_id
+                    // in kill_senders and handles, so no explicit cleanup is needed here.
+                    match manager
+                        .spawn(&prompt, &workspace, &claude_options, session_ref)
+                        .await
+                    {
                         Ok(agent_id) => {
-                            if let Some(agent) = app.agents.get_mut(target_idx) {
+                            if let Some(agent) = app.agent_by_id_mut(target_id) {
                                 // Preserve existing output; add a visual separator.
                                 agent.push_line(DisplayLine::TurnStart);
                                 agent.id = agent_id;
@@ -599,13 +637,17 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
                                 agent.prompt = prompt.clone();
                                 agent.scroll_offset = 0;
                                 agent.has_new_output = false;
+                                agent.cached_lines = None;
                                 // Rebuild agent_index since the id changed.
                                 app.rebuild_agent_index();
                             }
-                            app.focus_agent(target_idx);
+                            // Resolve the new agent_id to a Vec index for focusing.
+                            if let Some(&idx) = app.agent_index_map().get(&agent_id) {
+                                app.focus_agent(idx);
+                            }
                             app.set_status_message(format!(
-                                "Resumed agent {} (session)",
-                                target_idx + 1
+                                "Resumed agent (session {})",
+                                agent_id + 1
                             ));
                         }
                         Err(e) => {
@@ -614,9 +656,17 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
                     }
                 } else {
                     // New-agent flow (unchanged).
-                    match manager.spawn(&prompt, &workspace, &claude_options, None).await {
+                    match manager
+                        .spawn(&prompt, &workspace, &claude_options, None)
+                        .await
+                    {
                         Ok(agent_id) => {
-                            app.add_agent(AgentState::new(agent_id, workspace, prompt.clone()));
+                            app.add_agent(AgentState::new(
+                                agent_id,
+                                workspace,
+                                prompt.clone(),
+                                claude_options.clone(),
+                            ));
                             // Focus the newly added agent.
                             let new_index = app.agents.len() - 1;
                             app.focus_agent(new_index);

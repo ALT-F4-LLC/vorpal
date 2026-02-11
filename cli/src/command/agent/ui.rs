@@ -1020,8 +1020,14 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
-                .title(if let Some(idx) = app.respond_target {
-                    format!(" Respond to Agent {} ", idx + 1)
+                .title(if let Some(target_id) = app.respond_target {
+                    let label = app
+                        .agent_index_map()
+                        .get(&target_id)
+                        .and_then(|&idx| app.agents.get(idx))
+                        .map(|a| format!("{}", a.id + 1))
+                        .unwrap_or_else(|| "?".to_string());
+                    format!(" Respond to Agent {} ", label)
                 } else {
                     " New Agent ".to_string()
                 })

@@ -24,25 +24,21 @@ pub const MODELS: &[&str] = &["claude-opus-4-6", "claude-sonnet-4-5", "claude-ha
 pub const EFFORT_LEVELS: &[&str] = &["high", "medium", "low"];
 
 // ---------------------------------------------------------------------------
-// AppEvent
+// AgentEvent
 // ---------------------------------------------------------------------------
 
 /// Central event type for the TUI event loop.
 #[derive(Debug)]
-#[allow(clippy::enum_variant_names)]
-pub enum AppEvent {
+pub enum AgentEvent {
     /// Parsed output line from an agent process.
-    AgentOutput { agent_id: usize, line: DisplayLine },
+    Output { agent_id: usize, line: DisplayLine },
     /// An agent process terminated.
-    AgentExited {
+    Exited {
         agent_id: usize,
         exit_code: Option<i32>,
     },
     /// The session ID for an agent was resolved (from Claude Code result output).
-    AgentSessionId {
-        agent_id: usize,
-        session_id: String,
-    },
+    SessionId { agent_id: usize, session_id: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -228,11 +224,18 @@ pub struct AgentState {
     pub cache_result_display: Option<ResultDisplay>,
     /// Session ID returned by Claude Code (populated after the process exits).
     pub session_id: Option<String>,
+    /// Claude Code options used for this agent's original spawn.
+    pub claude_options: ClaudeOptions,
 }
 
 impl AgentState {
     /// Create a new agent state in the [`AgentStatus::Running`] state.
-    pub fn new(id: usize, workspace: PathBuf, prompt: String) -> Self {
+    pub fn new(
+        id: usize,
+        workspace: PathBuf,
+        prompt: String,
+        claude_options: ClaudeOptions,
+    ) -> Self {
         Self {
             id,
             workspace,
@@ -250,6 +253,7 @@ impl AgentState {
             cache_generation: 0,
             cache_result_display: None,
             session_id: None,
+            claude_options,
         }
     }
 
@@ -369,9 +373,11 @@ pub struct App {
     pub add_dir_buffer: String,
     /// Cursor position within `add_dir_buffer`.
     pub add_dir_cursor: usize,
-    /// When `Some(idx)`, the input overlay is a "respond" to the agent at `idx`
-    /// rather than a new-agent prompt. The target agent's session ID will be
-    /// passed to `AgentManager::spawn()` so Claude resumes the conversation.
+    /// When `Some(id)`, the input overlay is a "respond" to the agent with the
+    /// given `id` rather than a new-agent prompt. The target agent's session ID
+    /// will be passed to `AgentManager::spawn()` so Claude resumes the conversation.
+    /// Stores the agent's `id` (not Vec index) so the reference remains valid even
+    /// if agents are added or removed while the input overlay is open.
     pub respond_target: Option<usize>,
     /// Monotonic tick counter, incremented each event-loop iteration.
     pub tick: usize,
@@ -432,6 +438,11 @@ impl App {
             .get(&agent_id)
             .copied()
             .and_then(|idx| self.agents.get_mut(idx))
+    }
+
+    /// Return a reference to the agent_id → Vec index map.
+    pub fn agent_index_map(&self) -> &HashMap<usize, usize> {
+        &self.agent_index
     }
 
     /// Set a transient status message. It will auto-expire after
@@ -652,7 +663,12 @@ mod tests {
 
     /// Helper: create an AgentState with `n` text lines pushed.
     fn agent_with_lines(n: usize) -> AgentState {
-        let mut agent = AgentState::new(0, PathBuf::from("/tmp/test"), "test".to_string());
+        let mut agent = AgentState::new(
+            0,
+            PathBuf::from("/tmp/test"),
+            "test".to_string(),
+            ClaudeOptions::default(),
+        );
         for i in 0..n {
             agent.push_line(DisplayLine::Text(format!("line {i}")));
         }
@@ -667,6 +683,7 @@ mod tests {
                 i,
                 PathBuf::from(format!("/tmp/agent-{i}")),
                 format!("prompt {i}"),
+                ClaudeOptions::default(),
             ));
         }
         app
@@ -717,7 +734,12 @@ mod tests {
     fn push_line_capacity_is_respected() {
         // Push more than MAX_OUTPUT_LINES and verify the buffer is capped.
         let overflow = 100;
-        let mut agent = AgentState::new(0, PathBuf::from("/tmp/test"), "test".to_string());
+        let mut agent = AgentState::new(
+            0,
+            PathBuf::from("/tmp/test"),
+            "test".to_string(),
+            ClaudeOptions::default(),
+        );
 
         for i in 0..(MAX_OUTPUT_LINES + overflow) {
             agent.push_line(DisplayLine::Text(format!("line {i}")));
@@ -828,7 +850,12 @@ mod tests {
         // including when scrolled up into history.
         let overflow = 200;
         let total = MAX_OUTPUT_LINES + overflow;
-        let mut agent = AgentState::new(0, PathBuf::from("/tmp/test"), "test".to_string());
+        let mut agent = AgentState::new(
+            0,
+            PathBuf::from("/tmp/test"),
+            "test".to_string(),
+            ClaudeOptions::default(),
+        );
 
         for i in 0..total {
             agent.push_line(DisplayLine::Text(format!("line {i}")));

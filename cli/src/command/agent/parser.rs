@@ -1154,4 +1154,36 @@ mod tests {
             matches!(&lines[0], DisplayLine::ToolResult { content, .. } if content == "search result line 1\nline 2")
         );
     }
+
+    // -- take_session_id --------------------------------------------------
+
+    #[test]
+    fn take_session_id_returns_once_then_none() {
+        let mut p = Parser::new();
+
+        // Initially, no session ID is available.
+        assert_eq!(p.take_session_id(), None);
+
+        // Parse a result event with session_id "abc-123".
+        p.parse_line(
+            r#"{"type":"result","subtype":"success","result":"Done.","total_cost_usd":0.16,"session_id":"abc-123"}"#,
+        );
+
+        // First call returns the session ID.
+        assert_eq!(p.take_session_id(), Some("abc-123".to_string()));
+
+        // Second call returns None (take-once semantics).
+        assert_eq!(p.take_session_id(), None);
+
+        // Parse another result event with a different session ID.
+        p.parse_line(
+            r#"{"type":"result","subtype":"success","result":"Done.","total_cost_usd":0.05,"session_id":"def-456"}"#,
+        );
+
+        // First call returns the new session ID.
+        assert_eq!(p.take_session_id(), Some("def-456".to_string()));
+
+        // Second call returns None again.
+        assert_eq!(p.take_session_id(), None);
+    }
 }
