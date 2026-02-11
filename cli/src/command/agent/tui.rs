@@ -4,8 +4,11 @@
 //! dispatching input and agent events, and ensures proper terminal teardown on
 //! exit or panic.
 
-use super::manager::AgentManager;
-use super::state::{AgentActivity, AgentState, AgentStatus, App, AppEvent, InputMode};
+use super::manager::{AgentManager, ClaudeOptions};
+use super::state::{
+    AgentActivity, AgentState, AgentStatus, App, AppEvent, InputField, InputMode, EFFORT_LEVELS,
+    MODELS, PERMISSION_MODES,
+};
 use super::ui;
 use anyhow::Result;
 use crossterm::{
@@ -14,6 +17,7 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures_lite::StreamExt;
+use path_clean::PathClean;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, stdout, Stdout};
 use std::path::PathBuf;
@@ -100,7 +104,11 @@ impl Drop for PanicGuard {
 /// agents from the given prompts and workspaces, and enters the main event
 /// loop. On exit (normal, error, or panic), the terminal and panic hook are
 /// restored automatically via the guard's `Drop` implementation.
-pub async fn run(prompts: Vec<String>, workspaces: Vec<PathBuf>) -> Result<()> {
+pub async fn run(
+    prompts: Vec<String>,
+    workspaces: Vec<PathBuf>,
+    claude_options: ClaudeOptions,
+) -> Result<()> {
     info!(agent_count = prompts.len(), "starting agent TUI");
 
     // Install panic hook guard — restores the original hook on drop (RAII).
@@ -113,11 +121,14 @@ pub async fn run(prompts: Vec<String>, workspaces: Vec<PathBuf>) -> Result<()> {
     const EVENT_CHANNEL_CAPACITY: usize = 10_000;
     let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(EVENT_CHANNEL_CAPACITY);
     let mut manager = AgentManager::new(event_tx);
-    let mut app = App::new(std::env::current_dir().unwrap_or_default());
+    let mut app = App::new(
+        std::env::current_dir().unwrap_or_default(),
+        claude_options.clone(),
+    );
 
     // Spawn initial agents from prompts/workspaces pairs.
     for (prompt, workspace) in prompts.iter().zip(workspaces.iter()) {
-        let agent_id = manager.spawn(prompt, workspace).await?;
+        let agent_id = manager.spawn(prompt, workspace, &claude_options).await?;
         app.add_agent(AgentState::new(agent_id, workspace.clone(), prompt.clone()));
     }
 
@@ -448,14 +459,33 @@ async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) 
         }
 
         // Copy focused agent output to system clipboard.
+        //
+        // Uses the cached rendered lines (which respect the current
+        // ResultDisplay mode — compact/hidden/full) so the clipboard
+        // matches exactly what the user sees on screen.
         KeyCode::Char('y') => {
             if let Some(agent) = app.focused_agent() {
-                let text = agent
-                    .output
-                    .iter()
-                    .map(display_line_to_text)
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let text = if let Some(cached) = &agent.cached_lines {
+                    cached
+                        .iter()
+                        .map(|line| {
+                            line.spans
+                                .iter()
+                                .map(|span| span.content.as_ref())
+                                .collect::<String>()
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    // Fallback: no cached lines yet (shouldn't happen in
+                    // practice since rendering runs before input).
+                    agent
+                        .output
+                        .iter()
+                        .map(display_line_to_text)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
                 match copy_to_clipboard(&text).await {
                     Ok(()) => {
                         let bytes = text.len();
@@ -494,9 +524,9 @@ async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) 
 
 /// Handle keyboard input while in prompt input mode.
 ///
-/// Supports text entry, cursor movement, backspace/delete, submission (Enter),
-/// and cancellation (Escape). On submit, spawns a new agent with the entered
-/// prompt and the default workspace directory.
+/// Supports text entry, cursor movement, backspace/delete, field switching
+/// (Tab), submission (Enter), and cancellation (Escape). On submit, spawns a
+/// new agent with the entered prompt and workspace directory.
 async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEvent) {
     match key.code {
         // Cancel input: Escape.
@@ -504,11 +534,27 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
             app.exit_input_mode();
         }
 
-        // Submit prompt: Enter.
-        KeyCode::Enter => {
-            if let Some(prompt) = app.submit_input() {
-                let workspace = app.default_workspace.clone();
-                match manager.spawn(&prompt, &workspace).await {
+        // Cycle input fields forward (Tab) or backward (Shift+Tab).
+        KeyCode::Tab => {
+            app.next_input_field();
+        }
+        KeyCode::BackTab => {
+            app.prev_input_field();
+        }
+
+        // Ctrl+S: submit the form and spawn a new agent (from any field).
+        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some((prompt, workspace, claude_options)) = app.submit_input() {
+                // Resolve relative workspace paths to absolute.
+                let workspace = if workspace.is_absolute() {
+                    workspace.clean()
+                } else {
+                    std::env::current_dir()
+                        .unwrap_or_default()
+                        .join(&workspace)
+                        .clean()
+                };
+                match manager.spawn(&prompt, &workspace, &claude_options).await {
                     Ok(agent_id) => {
                         app.add_agent(AgentState::new(agent_id, workspace, prompt.clone()));
                         // Focus the newly added agent.
@@ -523,67 +569,141 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
             }
         }
 
-        // Delete character before cursor: Backspace.
-        KeyCode::Backspace => {
-            if app.input_cursor > 0 {
-                // Find the previous char boundary for UTF-8 safety.
-                let prev = app.input_buffer[..app.input_cursor]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                app.input_buffer.remove(prev);
-                app.input_cursor = prev;
+        // Enter key behaviour depends on the active field:
+        //   - Prompt: insert a newline (multiline prompt editing).
+        //   - Any other field: advance to the next field (same as Tab).
+        KeyCode::Enter => match app.input_field {
+            InputField::Prompt => {
+                app.input_buffer.insert(app.input_cursor, '\n');
+                app.input_cursor += '\n'.len_utf8();
+            }
+            _ => {
+                app.next_input_field();
+            }
+        },
+
+        // All text editing operations route to the active field's buffer.
+        code => {
+            // Selector fields (PermissionMode, Model, Effort) use Left/Right
+            // to cycle through predefined options instead of free-text editing.
+            let selector: Option<(&[&str], &mut String, &mut usize)> = match app.input_field {
+                InputField::PermissionMode => Some((
+                    PERMISSION_MODES,
+                    &mut app.permission_mode_buffer,
+                    &mut app.permission_mode_cursor,
+                )),
+                InputField::Model => Some((MODELS, &mut app.model_buffer, &mut app.model_cursor)),
+                InputField::Effort => Some((
+                    EFFORT_LEVELS,
+                    &mut app.effort_buffer,
+                    &mut app.effort_cursor,
+                )),
+                _ => None,
+            };
+            if let Some((options, buffer, cursor)) = selector {
+                let current_idx = options.iter().position(|m| *m == buffer.as_str());
+                match code {
+                    KeyCode::Left => {
+                        let new_idx = match current_idx {
+                            Some(0) | None => options.len() - 1,
+                            Some(i) => i - 1,
+                        };
+                        *buffer = options[new_idx].to_string();
+                        *cursor = buffer.len();
+                    }
+                    KeyCode::Right => {
+                        let new_idx = match current_idx {
+                            Some(i) if i + 1 < options.len() => i + 1,
+                            _ => 0,
+                        };
+                        *buffer = options[new_idx].to_string();
+                        *cursor = buffer.len();
+                    }
+                    _ => {}
+                }
+                return;
+            }
+
+            let (buffer, cursor) = match app.input_field {
+                InputField::Prompt => (&mut app.input_buffer, &mut app.input_cursor),
+                InputField::Workspace => (&mut app.workspace_buffer, &mut app.workspace_cursor),
+                InputField::PermissionMode => unreachable!("handled by selector above"),
+                InputField::Model => unreachable!("handled by selector above"),
+                InputField::Effort => unreachable!("handled by selector above"),
+                InputField::MaxBudgetUsd => {
+                    (&mut app.max_budget_buffer, &mut app.max_budget_cursor)
+                }
+                InputField::AllowedTools => {
+                    (&mut app.allowed_tools_buffer, &mut app.allowed_tools_cursor)
+                }
+                InputField::AddDir => (&mut app.add_dir_buffer, &mut app.add_dir_cursor),
+            };
+            match code {
+                // Delete character before cursor: Backspace.
+                KeyCode::Backspace => {
+                    if *cursor > 0 {
+                        // Find the previous char boundary for UTF-8 safety.
+                        let prev = buffer[..*cursor]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        buffer.remove(prev);
+                        *cursor = prev;
+                    }
+                }
+
+                // Delete character at cursor: Delete.
+                KeyCode::Delete => {
+                    if *cursor < buffer.len() {
+                        buffer.remove(*cursor);
+                    }
+                }
+
+                // Move cursor left (by one char, UTF-8 safe).
+                KeyCode::Left => {
+                    if *cursor > 0 {
+                        *cursor = buffer[..*cursor]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                    }
+                }
+
+                // Move cursor right (by one char, UTF-8 safe).
+                KeyCode::Right => {
+                    if *cursor < buffer.len() {
+                        let cur = *cursor;
+                        let len = buffer.len();
+                        *cursor = buffer[cur..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| cur + i)
+                            .unwrap_or(len);
+                    }
+                }
+
+                // Move cursor to start of line.
+                KeyCode::Home => {
+                    *cursor = 0;
+                }
+
+                // Move cursor to end of line.
+                KeyCode::End => {
+                    *cursor = buffer.len();
+                }
+
+                // Insert character at cursor position.
+                KeyCode::Char(c) => {
+                    buffer.insert(*cursor, c);
+                    *cursor += c.len_utf8();
+                }
+
+                // All other keys: no-op.
+                _ => {}
             }
         }
-
-        // Delete character at cursor: Delete.
-        KeyCode::Delete => {
-            if app.input_cursor < app.input_buffer.len() {
-                app.input_buffer.remove(app.input_cursor);
-            }
-        }
-
-        // Move cursor left (by one char, UTF-8 safe).
-        KeyCode::Left => {
-            if app.input_cursor > 0 {
-                app.input_cursor = app.input_buffer[..app.input_cursor]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-            }
-        }
-
-        // Move cursor right (by one char, UTF-8 safe).
-        KeyCode::Right => {
-            if app.input_cursor < app.input_buffer.len() {
-                app.input_cursor = app.input_buffer[app.input_cursor..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| app.input_cursor + i)
-                    .unwrap_or(app.input_buffer.len());
-            }
-        }
-
-        // Move cursor to start of line.
-        KeyCode::Home => {
-            app.input_cursor = 0;
-        }
-
-        // Move cursor to end of line.
-        KeyCode::End => {
-            app.input_cursor = app.input_buffer.len();
-        }
-
-        // Insert character at cursor position.
-        KeyCode::Char(c) => {
-            app.input_buffer.insert(app.input_cursor, c);
-            app.input_cursor += c.len_utf8();
-        }
-
-        // All other keys: no-op.
-        _ => {}
     }
 }
 
@@ -636,7 +756,10 @@ use super::ui::{BLOCK_MARKER, RESULT_CONNECTOR, SESSION_MARKER};
 /// Convert a [`DisplayLine`] to plain text for clipboard export.
 fn display_line_to_text(line: &DisplayLine) -> String {
     match line {
-        DisplayLine::Text(s) | DisplayLine::System(s) | DisplayLine::Stderr(s) | DisplayLine::Error(s) => s.clone(),
+        DisplayLine::Text(s)
+        | DisplayLine::System(s)
+        | DisplayLine::Stderr(s)
+        | DisplayLine::Error(s) => s.clone(),
         DisplayLine::Thinking(s) => format!("{BLOCK_MARKER} {s}"),
         DisplayLine::Result(s) => format!("{SESSION_MARKER} {s}"),
         DisplayLine::ToolUse {

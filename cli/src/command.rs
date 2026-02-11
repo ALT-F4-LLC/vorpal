@@ -135,6 +135,30 @@ pub enum Command {
         /// remaining prompts default to the current directory.
         #[arg(long)]
         workspace: Vec<PathBuf>,
+
+        /// Claude Code permission mode (e.g. "acceptEdits", "plan", "bypassPermissions")
+        #[arg(default_value = "acceptEdits", long)]
+        permission_mode: Option<String>,
+
+        /// Claude Code allowed tools (can be repeated, e.g. --allowed-tools Edit --allowed-tools Write)
+        #[arg(long)]
+        allowed_tools: Vec<String>,
+
+        /// Claude Code model (e.g. "claude-sonnet-4-5-20250929", "claude-opus-4-6")
+        #[arg(default_value = "claude-opus-4-6", long)]
+        model: Option<String>,
+
+        /// Claude Code effort level (e.g. "low", "medium", "high")
+        #[arg(default_value = "high", long)]
+        effort: Option<String>,
+
+        /// Claude Code maximum budget in USD
+        #[arg(long)]
+        max_budget_usd: Option<f64>,
+
+        /// Additional directories for Claude Code context (can be repeated)
+        #[arg(long)]
+        add_dir: Vec<String>,
     },
 
     /// Build an artifact
@@ -300,7 +324,16 @@ pub async fn run() -> Result<()> {
     }
 
     match &command {
-        Command::Agent { prompts, workspace } => {
+        Command::Agent {
+            prompts,
+            workspace,
+            permission_mode,
+            allowed_tools,
+            model,
+            effort,
+            max_budget_usd,
+            add_dir,
+        } => {
             let cwd = current_dir().expect("failed to get current directory");
 
             // Pad workspaces with "." for any prompts without an explicit workspace
@@ -334,7 +367,16 @@ pub async fn run() -> Result<()> {
                 }
             }
 
-            agent::run(prompts.clone(), workspaces).await
+            let claude_options = agent::ClaudeOptions {
+                permission_mode: permission_mode.clone(),
+                allowed_tools: allowed_tools.clone(),
+                model: model.clone(),
+                effort: effort.clone(),
+                max_budget_usd: *max_budget_usd,
+                add_dirs: add_dir.clone(),
+            };
+
+            agent::run(prompts.clone(), workspaces, claude_options).await
         }
 
         Command::Build {

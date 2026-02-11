@@ -25,6 +25,23 @@ enum LineSource {
     Stderr,
 }
 
+/// Passthrough options forwarded to each spawned Claude Code process.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ClaudeOptions {
+    /// Maps to `--permission-mode` (e.g. "acceptEdits", "plan", "bypassPermissions").
+    pub permission_mode: Option<String>,
+    /// Maps to `--allowedTools` (repeated). Note: camelCase on the Claude CLI side.
+    pub allowed_tools: Vec<String>,
+    /// Maps to `--model` (e.g. "sonnet", "opus").
+    pub model: Option<String>,
+    /// Maps to `--effort` (e.g. "low", "medium", "high").
+    pub effort: Option<String>,
+    /// Maps to `--max-budget-usd`.
+    pub max_budget_usd: Option<f64>,
+    /// Maps to `--add-dir` (repeated).
+    pub add_dirs: Vec<String>,
+}
+
 /// Manages Claude Code child processes, spawning them and streaming their
 /// output as [`AppEvent`] values through a tokio channel.
 pub struct AgentManager {
@@ -56,7 +73,12 @@ impl AgentManager {
     /// and its stdout/stderr are merged and parsed in a background tokio task.
     /// Events are sent through the channel as [`AppEvent::AgentOutput`] and
     /// [`AppEvent::AgentExited`].
-    pub async fn spawn(&mut self, prompt: &str, workspace: &Path) -> Result<usize> {
+    pub async fn spawn(
+        &mut self,
+        prompt: &str,
+        workspace: &Path,
+        claude_options: &ClaudeOptions,
+    ) -> Result<usize> {
         let agent_id = self.next_id;
         self.next_id += 1;
 
@@ -67,15 +89,49 @@ impl AgentManager {
             "spawning claude agent"
         );
 
+        let mut args = vec![
+            "--include-partial-messages".to_string(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--print".to_string(),
+            "--verbose".to_string(),
+        ];
+
+        if let Some(ref mode) = claude_options.permission_mode {
+            args.push("--permission-mode".to_string());
+            args.push(mode.clone());
+        }
+
+        for tool in &claude_options.allowed_tools {
+            args.push("--allowedTools".to_string());
+            args.push(tool.clone());
+        }
+
+        if let Some(ref model) = claude_options.model {
+            args.push("--model".to_string());
+            args.push(model.clone());
+        }
+
+        if let Some(ref effort) = claude_options.effort {
+            args.push("--effort".to_string());
+            args.push(effort.clone());
+        }
+
+        if let Some(budget) = claude_options.max_budget_usd {
+            args.push("--max-budget-usd".to_string());
+            args.push(budget.to_string());
+        }
+
+        for dir in &claude_options.add_dirs {
+            args.push("--add-dir".to_string());
+            args.push(dir.clone());
+        }
+
+        // Prompt must always be the last positional argument.
+        args.push(prompt.to_string());
+
         let mut child = Command::new("claude")
-            .args([
-                "--include-partial-messages",
-                "--output-format",
-                "stream-json",
-                "--print",
-                "--verbose",
-                prompt,
-            ])
+            .args(&args)
             .current_dir(workspace)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

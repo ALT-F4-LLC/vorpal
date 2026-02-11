@@ -9,4 +9,5 @@ mod state;
 mod tui;
 mod ui;
 
+pub use manager::ClaudeOptions;
 pub use tui::run;

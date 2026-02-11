@@ -3,7 +3,10 @@
 //! Builds the ratatui widget tree from application state: tab bar, content
 //! area with scrollable output, status bar, and help overlay.
 
-use super::state::{AgentActivity, AgentStatus, App, DisplayLine, InputMode, ResultDisplay};
+use super::state::{
+    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, ResultDisplay,
+    EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -389,28 +392,58 @@ fn collapse_tool_results<'a>(lines: &[&'a DisplayLine], mode: ResultDisplay) -> 
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            let rendered = tui_markdown::from_str(&markdown);
-            // Prefix first non-empty line with ⏺ marker, rest with indent.
-            // Convert spans to owned data since `markdown` is a local.
-            let mut is_first = true;
+            let preprocessed = preprocess_markdown_tables(&markdown);
+            let rendered = tui_markdown::from_str(&preprocessed);
+            // Prefix only the very first non-empty line with a ⏺ marker.
+            // All subsequent lines (including those after blank lines) use
+            // continuation indentation. This matches Claude Code's own
+            // rendering style where each assistant text block gets a single
+            // leading marker.
+            //
+            // Horizontal rules (`---`) are detected and rendered as Unicode
+            // box-drawing separators instead of literal `---` text.
+            let mut need_marker = true;
             for line in rendered.lines {
-                if line.width() == 0 {
+                // Detect horizontal rules: a single span whose trimmed
+                // content is exactly `---` (what tui_markdown emits for
+                // thematic breaks).
+                let is_hr = line.spans.len() == 1 && line.spans[0].content.trim() == "---";
+
+                if is_hr {
+                    let prefix = if need_marker {
+                        need_marker = false;
+                        Span::styled(format!("{BLOCK_MARKER} "), Style::default().fg(Color::Cyan))
+                    } else {
+                        Span::raw(CONTINUATION_INDENT)
+                    };
+                    out.push(Line::from(vec![
+                        prefix,
+                        Span::styled(
+                            "──────────────────────────────",
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]));
+                } else if line.width() == 0 {
                     out.push(Line::from(""));
-                } else if is_first {
+                } else if need_marker {
+                    need_marker = false;
                     let mut spans: Vec<Span<'static>> = vec![Span::styled(
                         format!("{BLOCK_MARKER} "),
                         Style::default().fg(Color::Cyan),
                     )];
-                    spans.extend(line.spans.into_iter().map(|s| {
-                        Span::styled(s.content.into_owned(), s.style)
-                    }));
+                    spans.extend(
+                        line.spans
+                            .into_iter()
+                            .map(|s| Span::styled(s.content.into_owned(), s.style)),
+                    );
                     out.push(Line::from(spans));
-                    is_first = false;
                 } else {
                     let mut spans: Vec<Span<'static>> = vec![Span::raw(CONTINUATION_INDENT)];
-                    spans.extend(line.spans.into_iter().map(|s| {
-                        Span::styled(s.content.into_owned(), s.style)
-                    }));
+                    spans.extend(
+                        line.spans
+                            .into_iter()
+                            .map(|s| Span::styled(s.content.into_owned(), s.style)),
+                    );
                     out.push(Line::from(spans));
                 }
             }
@@ -480,9 +513,7 @@ fn render_tool_result(
     if is_error {
         spans.push(Span::styled(
             "[ERROR] ",
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ));
     }
     spans.push(Span::styled(
@@ -516,6 +547,47 @@ fn strip_leading_empty_after_turn_start<'a>(lines: &[&'a DisplayLine]) -> Vec<&'
                 out.push(*dl);
             }
         }
+    }
+
+    out
+}
+
+/// Wrap markdown table blocks in fenced code blocks so `tui_markdown` renders
+/// them as preformatted text instead of dropping/concatenating the cells.
+///
+/// Consecutive lines starting with `|` are treated as a table block. Each block
+/// is wrapped with triple-backtick fences so the pipe-aligned rows survive
+/// rendering intact.
+fn preprocess_markdown_tables(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_table = false;
+
+    for line in input.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('|') {
+            if !in_table {
+                out.push_str("```\n");
+                in_table = true;
+            }
+            out.push_str(line);
+            out.push('\n');
+        } else {
+            if in_table {
+                out.push_str("```\n");
+                in_table = false;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+
+    if in_table {
+        out.push_str("```\n");
+    }
+
+    // Remove trailing newline added by our loop if the input didn't end with one.
+    if !input.ends_with('\n') && out.ends_with('\n') {
+        out.pop();
     }
 
     out
@@ -733,66 +805,206 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 // Input overlay
 // ---------------------------------------------------------------------------
 
-/// Render a centered input overlay for entering a new agent prompt.
+/// Return the label style for a field — cyan/bold when active, dimmed otherwise.
+fn field_label_style(active: bool) -> Style {
+    if active {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    }
+}
+
+/// Render a centered input overlay for entering a new agent prompt, workspace,
+/// and Claude Code options.
 fn render_input(app: &App, frame: &mut Frame, area: Rect) {
-    let popup = centered_rect(60, 40, area);
+    // Compute inner width from the percentage-based horizontal layout so we
+    // can calculate how many rows the input text will wrap to. The inner
+    // content width is the popup width minus 2 (left + right border).
+    let popup_width = (area.width as u32 * 60 / 100) as usize;
+    let inner_width = popup_width.saturating_sub(2);
+
+    // Count wrapped rows for each input field.
+    let prompt_rows = wrapped_input_rows(&app.input_buffer, inner_width);
+    let workspace_rows = wrapped_input_rows(&app.workspace_buffer, inner_width);
+
+    // Layout: label + prompt + blank + label + workspace + blank
+    //       + header + 6×(label + value) + blank + footer
+    let option_rows = 1 + 6 * 2; // header + 6 fields × (label + value)
+    let content_rows = 1 + prompt_rows + 1 + 1 + workspace_rows + 1 + option_rows + 1 + 1;
+    let popup_height = (content_rows + 2).min(area.height as usize) as u16;
+
+    let popup = centered_rect_fixed_height(60, popup_height, area);
 
     // Clear the area behind the popup.
     frame.render_widget(Clear, popup);
 
-    // Calculate inner dimensions (after borders) for scroll math.
-    let inner_width = popup.width.saturating_sub(2) as usize;
     let inner_height = popup.height.saturating_sub(2) as usize;
 
-    // Build the input line with a cursor indicator.
-    let before_cursor = &app.input_buffer[..app.input_cursor];
-    let after_cursor = &app.input_buffer[app.input_cursor..];
+    // Build input lines — only the active field shows a cursor.
+    let prompt_lines = build_input_field_lines(
+        &app.input_buffer,
+        app.input_cursor,
+        app.input_field == InputField::Prompt,
+    );
+    let workspace_lines = build_input_field_lines(
+        &app.workspace_buffer,
+        app.workspace_cursor,
+        app.input_field == InputField::Workspace,
+    );
 
-    // Find the next char boundary after the cursor for safe slicing.
-    let cursor_char_len = after_cursor.chars().next().map_or(0, |c| c.len_utf8());
+    // Claude option fields — selector fields use build_selector, others show
+    // "(unset)" placeholder when empty and inactive.
+    let perm_lines = build_selector(
+        PERMISSION_MODES,
+        &app.permission_mode_buffer,
+        app.input_field == InputField::PermissionMode,
+    );
+    let model_lines = build_selector(
+        MODELS,
+        &app.model_buffer,
+        app.input_field == InputField::Model,
+    );
+    let effort_lines = build_selector(
+        EFFORT_LEVELS,
+        &app.effort_buffer,
+        app.input_field == InputField::Effort,
+    );
+    let budget_lines = build_optional_field_lines(
+        &app.max_budget_buffer,
+        app.max_budget_cursor,
+        app.input_field == InputField::MaxBudgetUsd,
+    );
+    let tools_lines = build_optional_field_lines(
+        &app.allowed_tools_buffer,
+        app.allowed_tools_cursor,
+        app.input_field == InputField::AllowedTools,
+    );
+    let dir_lines = build_optional_field_lines(
+        &app.add_dir_buffer,
+        app.add_dir_cursor,
+        app.input_field == InputField::AddDir,
+    );
 
-    let input_line = Line::from(vec![
-        Span::raw(before_cursor),
-        Span::styled(
-            if after_cursor.is_empty() {
-                " ".to_string()
-            } else {
-                after_cursor[..cursor_char_len].to_string()
-            },
-            Style::default().bg(Color::White).fg(Color::Black),
-        ),
-        Span::raw(after_cursor[cursor_char_len..].to_string()),
-    ]);
+    // Footer hint varies by active field.
+    let footer = match app.input_field {
+        InputField::Prompt => "Enter: newline  |  ^S: submit  |  Tab: next  |  Esc: cancel",
+        InputField::PermissionMode | InputField::Model | InputField::Effort => {
+            "◀/▶: select  |  Enter/Tab: next  |  ^S: submit  |  Esc: cancel"
+        }
+        _ => "Enter/Tab: next  |  ^S: submit  |  Esc: cancel",
+    };
 
-    // Center header and hint lines individually so the input text stays
-    // left-aligned for natural word-wrap behaviour.
-    let text = vec![
-        Line::from(Span::styled(
-            "Enter prompt for new agent:",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .alignment(Alignment::Center),
-        Line::from(""),
-        input_line,
-        Line::from(""),
-        Line::from(Span::styled(
-            "Enter: submit  |  Esc: cancel",
-            Style::default().fg(Color::DarkGray),
-        ))
-        .alignment(Alignment::Center),
-    ];
+    let mut text = Vec::new();
+    text.push(Line::from(Span::styled(
+        "Prompt:",
+        field_label_style(app.input_field == InputField::Prompt),
+    )));
+    text.extend(prompt_lines);
+    text.push(Line::from(""));
+    text.push(Line::from(Span::styled(
+        "Workspace:",
+        field_label_style(app.input_field == InputField::Workspace),
+    )));
+    text.extend(workspace_lines);
+    text.push(Line::from(""));
 
-    // When the input text wraps, scroll the paragraph so the cursor row
-    // stays visible. The input line starts at visual row 2 (header + blank).
-    let chars_before_cursor = before_cursor.chars().count();
+    // Claude options header.
+    text.push(Line::from(Span::styled(
+        "── Claude Options ──",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+    )));
+
+    text.push(Line::from(Span::styled(
+        "Permission Mode:",
+        field_label_style(app.input_field == InputField::PermissionMode),
+    )));
+    text.extend(perm_lines);
+    text.push(Line::from(Span::styled(
+        "Model:",
+        field_label_style(app.input_field == InputField::Model),
+    )));
+    text.extend(model_lines);
+    text.push(Line::from(Span::styled(
+        "Effort:",
+        field_label_style(app.input_field == InputField::Effort),
+    )));
+    text.extend(effort_lines);
+    text.push(Line::from(Span::styled(
+        "Max Budget USD:",
+        field_label_style(app.input_field == InputField::MaxBudgetUsd),
+    )));
+    text.extend(budget_lines);
+    text.push(Line::from(Span::styled(
+        "Allowed Tools (comma-separated):",
+        field_label_style(app.input_field == InputField::AllowedTools),
+    )));
+    text.extend(tools_lines);
+    text.push(Line::from(Span::styled(
+        "Add Dir (comma-separated):",
+        field_label_style(app.input_field == InputField::AddDir),
+    )));
+    text.extend(dir_lines);
+
+    text.push(Line::from(""));
+    text.push(
+        Line::from(Span::styled(footer, Style::default().fg(Color::DarkGray)))
+            .alignment(Alignment::Center),
+    );
+
+    // Scroll so the cursor in the active field stays visible.
+    //
+    // Compute the wrapped row the cursor occupies, accounting for explicit
+    // newlines in the buffer.
+    let (active_buffer, active_cursor) = match app.input_field {
+        InputField::Prompt => (&app.input_buffer, app.input_cursor),
+        InputField::Workspace => (&app.workspace_buffer, app.workspace_cursor),
+        InputField::PermissionMode => (&app.permission_mode_buffer, app.permission_mode_cursor),
+        InputField::Model => (&app.model_buffer, app.model_cursor),
+        InputField::Effort => (&app.effort_buffer, app.effort_cursor),
+        InputField::MaxBudgetUsd => (&app.max_budget_buffer, app.max_budget_cursor),
+        InputField::AllowedTools => (&app.allowed_tools_buffer, app.allowed_tools_cursor),
+        InputField::AddDir => (&app.add_dir_buffer, app.add_dir_cursor),
+    };
     let cursor_wrapped_row = if inner_width > 0 {
-        chars_before_cursor / inner_width
+        let before = &active_buffer[..active_cursor];
+        let segments: Vec<&str> = before.split('\n').collect();
+        let mut row = 0;
+        for (i, seg) in segments.iter().enumerate() {
+            let chars = seg.chars().count();
+            if i < segments.len() - 1 {
+                row += chars.max(1).div_ceil(inner_width);
+            } else {
+                row += chars / inner_width;
+            }
+        }
+        row
     } else {
         0
     };
-    let cursor_absolute_row = 2 + cursor_wrapped_row;
+
+    // Compute the absolute row of the cursor within the full text layout.
+    // This is cumulative: each field occupies (label_row + value_rows).
+    let cursor_absolute_row = {
+        // Rows consumed by: Prompt label(1) + prompt_rows + blank(1) +
+        //                   Workspace label(1) + workspace_rows + blank(1) +
+        //                   header(1) + ... option fields ...
+        let after_workspace = 1 + prompt_rows + 1 + 1 + workspace_rows + 1 + 1;
+        // Each option field is label(1) + value(1) = 2 rows.
+        match app.input_field {
+            InputField::Prompt => 1 + cursor_wrapped_row,
+            InputField::Workspace => 1 + prompt_rows + 2 + cursor_wrapped_row,
+            InputField::PermissionMode => after_workspace + 1 + cursor_wrapped_row,
+            InputField::Model => after_workspace + 2 + 1 + cursor_wrapped_row,
+            InputField::Effort => after_workspace + 4 + 1 + cursor_wrapped_row,
+            InputField::MaxBudgetUsd => after_workspace + 6 + 1 + cursor_wrapped_row,
+            InputField::AllowedTools => after_workspace + 8 + 1 + cursor_wrapped_row,
+            InputField::AddDir => after_workspace + 10 + 1 + cursor_wrapped_row,
+        }
+    };
     let scroll_y = if cursor_absolute_row >= inner_height {
         (cursor_absolute_row - inner_height + 1) as u16
     } else {
@@ -818,6 +1030,130 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(input_widget, popup);
 }
 
+/// Count how many terminal rows an input string occupies when wrapped to `width`.
+///
+/// Accounts for explicit newlines: each `\n`-delimited segment is wrapped
+/// independently, and the results are summed.
+fn wrapped_input_rows(text: &str, width: usize) -> usize {
+    if width == 0 {
+        return text.split('\n').count().max(1);
+    }
+    text.split('\n')
+        .map(|line| {
+            let chars = line.chars().count().max(1); // empty line still takes 1 row
+            chars.div_ceil(width)
+        })
+        .sum::<usize>()
+        .max(1)
+}
+
+/// Build a horizontal selector row from a list of options.
+///
+/// Displays all options inline with `│` separators. The currently selected
+/// option is highlighted (cyan when active, white when inactive).
+fn build_selector(options: &[&str], current: &str, active: bool) -> Vec<Line<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    for (i, option) in options.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+        }
+
+        let is_selected = *option == current;
+
+        if is_selected {
+            spans.push(Span::styled(
+                option.to_string(),
+                Style::default()
+                    .fg(if active { Color::Cyan } else { Color::White })
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+            ));
+        } else {
+            spans.push(Span::styled(
+                option.to_string(),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+
+    vec![Line::from(spans)]
+}
+
+/// Build input field lines for an optional Claude option.
+///
+/// Shows a dim "(unset)" placeholder when the buffer is empty and the field is
+/// not active. Otherwise delegates to [`build_input_field_lines`].
+fn build_optional_field_lines(buffer: &str, cursor: usize, active: bool) -> Vec<Line<'static>> {
+    if buffer.is_empty() && !active {
+        vec![Line::from(Span::styled(
+            "(unset)",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ))]
+    } else {
+        build_input_field_lines(buffer, cursor, active)
+    }
+}
+
+/// Build one or more input field lines with optional cursor highlight.
+///
+/// Splits the buffer on `\n` so that multiline content (e.g. the prompt
+/// field) renders correctly. The cursor highlight block is placed on the
+/// appropriate segment.
+fn build_input_field_lines(buffer: &str, cursor: usize, active: bool) -> Vec<Line<'static>> {
+    let segments: Vec<&str> = buffer.split('\n').collect();
+
+    if !active {
+        return segments
+            .iter()
+            .map(|s| Line::from(Span::raw(s.to_string())))
+            .collect();
+    }
+
+    let mut result = Vec::with_capacity(segments.len());
+    let mut byte_offset: usize = 0;
+    let mut cursor_placed = false;
+
+    for (i, segment) in segments.iter().enumerate() {
+        let seg_start = byte_offset;
+        let seg_end = seg_start + segment.len();
+
+        // Place the cursor highlight on the first matching segment.
+        let cursor_here = !cursor_placed && cursor >= seg_start && cursor <= seg_end;
+
+        if cursor_here {
+            cursor_placed = true;
+            let local = cursor - seg_start;
+            let before = &segment[..local];
+            let after = &segment[local..];
+            let clen = after.chars().next().map_or(0, |c| c.len_utf8());
+
+            result.push(Line::from(vec![
+                Span::raw(before.to_string()),
+                Span::styled(
+                    if after.is_empty() {
+                        " ".to_string()
+                    } else {
+                        after[..clen].to_string()
+                    },
+                    Style::default().bg(Color::White).fg(Color::Black),
+                ),
+                Span::raw(after.get(clen..).unwrap_or("").to_string()),
+            ]));
+        } else {
+            result.push(Line::from(Span::raw(segment.to_string())));
+        }
+
+        // Advance past this segment + the '\n' separator.
+        if i < segments.len() - 1 {
+            byte_offset = seg_end + 1;
+        }
+    }
+
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Confirm-close overlay
 // ---------------------------------------------------------------------------
@@ -838,10 +1174,8 @@ fn render_confirm_close(app: &App, frame: &mut Frame, area: Rect) {
         ))
         .alignment(Alignment::Center),
         Line::from(""),
-        Line::from("Closing will stop the Claude")
-            .alignment(Alignment::Center),
-        Line::from("instance for this tab.")
-            .alignment(Alignment::Center),
+        Line::from("Closing will stop the Claude").alignment(Alignment::Center),
+        Line::from("instance for this tab.").alignment(Alignment::Center),
         Line::from(""),
         Line::from(vec![
             Span::raw("Close anyway? "),
@@ -854,9 +1188,7 @@ fn render_confirm_close(app: &App, frame: &mut Frame, area: Rect) {
             Span::raw("/"),
             Span::styled(
                 "n",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
         ])
         .alignment(Alignment::Center),
@@ -891,38 +1223,59 @@ fn render_help(frame: &mut Frame, area: Rect) {
     // Clear the area behind the popup.
     frame.render_widget(Clear, popup);
 
-    let help_text = vec![
-        Line::from(Span::styled(
-            "Keybindings",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        help_line("Tab / l", "Next agent"),
-        help_line("Shift+Tab / h", "Previous agent"),
-        help_line("1-9", "Focus agent by number"),
-        help_line("n", "New agent (enter prompt)"),
-        help_line("x", "Kill focused agent"),
-        help_line("y", "Copy output to clipboard"),
-        help_line("j / Down", "Scroll down (toward latest)"),
-        help_line("k / Up", "Scroll up (into history)"),
-        help_line("Ctrl+D / PgDn", "Half-page down"),
-        help_line("Ctrl+U / PgUp", "Half-page up"),
-        help_line("Ctrl+F", "Full-page down"),
-        help_line("Ctrl+B", "Full-page up"),
-        help_line("gg", "Scroll to top"),
-        help_line("G", "Jump to bottom (latest)"),
-        help_line("r", "Toggle compact results"),
-        help_line("q", "Close focused tab"),
-        help_line("Ctrl+C", "Quit all agents"),
-        help_line("?", "Toggle this help"),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Press ? to close",
-            Style::default().fg(Color::DarkGray),
-        )),
+    // Key-description pairs for the help table.
+    const KEY_COL_WIDTH: usize = 16;
+    const GAP: usize = 2;
+    let bindings: Vec<(&str, &str)> = vec![
+        ("Tab / l", "Next agent"),
+        ("Shift+Tab / h", "Previous agent"),
+        ("1-9", "Focus agent by number"),
+        ("n", "New agent (prompt + workspace)"),
+        ("x", "Kill focused agent"),
+        ("y", "Copy output to clipboard"),
+        ("j / Down", "Scroll down (toward latest)"),
+        ("k / Up", "Scroll up (into history)"),
+        ("Ctrl+D / PgDn", "Half-page down"),
+        ("Ctrl+U / PgUp", "Half-page up"),
+        ("Ctrl+F", "Full-page down"),
+        ("Ctrl+B", "Full-page up"),
+        ("gg", "Scroll to top"),
+        ("G", "Jump to bottom (latest)"),
+        ("r", "Toggle compact results"),
+        ("q", "Close focused tab"),
+        ("Ctrl+C", "Quit all agents"),
+        ("?", "Toggle this help"),
     ];
+
+    // Compute the maximum line width so every line can be padded equally.
+    // Each line is: KEY_COL_WIDTH + GAP + desc.len()
+    let max_desc_len = bindings.iter().map(|(_, d)| d.len()).max().unwrap_or(0);
+    let max_line_width = KEY_COL_WIDTH + GAP + max_desc_len;
+
+    // Build keybinding lines, each padded to the same total width.
+    let mut help_text: Vec<Line<'_>> = Vec::new();
+
+    help_text.push(help_line_padded("Keybindings", max_line_width));
+    help_text.push(Line::from(" ".repeat(max_line_width)));
+
+    for (key, desc) in &bindings {
+        let key_span = Span::styled(
+            format!("{key:>width$}", width = KEY_COL_WIDTH),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+        let used = KEY_COL_WIDTH + GAP + desc.len();
+        let trailing = max_line_width.saturating_sub(used);
+        let mut spans = vec![key_span, Span::raw("  "), Span::raw(*desc)];
+        if trailing > 0 {
+            spans.push(Span::raw(" ".repeat(trailing)));
+        }
+        help_text.push(Line::from(spans));
+    }
+
+    help_text.push(Line::from(" ".repeat(max_line_width)));
+    help_text.push(help_line_padded("Press ? to close", max_line_width));
 
     let help = Paragraph::new(help_text)
         .alignment(Alignment::Center)
@@ -942,17 +1295,26 @@ fn render_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(help, popup);
 }
 
-/// Build a single help line with a key and description.
-fn help_line<'a>(key: &'a str, desc: &'a str) -> Line<'a> {
+/// Build a centered label line padded to `width` so it aligns with the
+/// keybinding block when `Alignment::Center` is applied.
+fn help_line_padded<'a>(text: &'a str, width: usize) -> Line<'a> {
+    let text_len = text.len();
+    let total_pad = width.saturating_sub(text_len);
+    let left_pad = total_pad / 2;
+    let right_pad = total_pad - left_pad;
     Line::from(vec![
+        Span::raw(" ".repeat(left_pad)),
         Span::styled(
-            format!("{key:>16}"),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+            text,
+            if text == "Press ? to close" {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            },
         ),
-        Span::raw("  "),
-        Span::raw(desc),
+        Span::raw(" ".repeat(right_pad)),
     ])
 }
 
@@ -963,6 +1325,24 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         Constraint::Percentage((100 - percent_y) / 2),
         Constraint::Percentage(percent_y),
         Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(area);
+
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(vertical[1])[1]
+}
+
+/// Compute a centered rectangle with `percent_x`% width and a fixed `height`
+/// in rows, vertically centered in `area`.
+fn centered_rect_fixed_height(percent_x: u16, height: u16, area: Rect) -> Rect {
+    let vertical = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(height),
+        Constraint::Fill(1),
     ])
     .split(area);
 

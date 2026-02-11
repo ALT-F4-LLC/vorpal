@@ -548,9 +548,7 @@ fn format_tool_preview(tool: &str, raw_input: &str) -> String {
             if let Some(desc) = json_str(&value, "description") {
                 desc.to_string()
             } else {
-                json_str(&value, "command")
-                    .unwrap_or_default()
-                    .to_string()
+                json_str(&value, "command").unwrap_or_default().to_string()
             }
         }
 

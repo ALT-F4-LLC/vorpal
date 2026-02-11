@@ -3,6 +3,7 @@
 //! Defines the core state structures shared across the TUI: application state,
 //! per-agent state, display lines, and event types.
 
+use super::manager::ClaudeOptions;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -12,6 +13,15 @@ const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(3);
 
 /// Maximum number of output lines retained per agent.
 pub const MAX_OUTPUT_LINES: usize = 10_000;
+
+/// Valid Claude Code permission modes for the selector.
+pub const PERMISSION_MODES: &[&str] = &["acceptEdits", "default", "plan", "bypassPermissions"];
+
+/// Available Claude model options for the selector.
+pub const MODELS: &[&str] = &["claude-opus-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"];
+
+/// Available effort levels for the selector.
+pub const EFFORT_LEVELS: &[&str] = &["high", "medium", "low"];
 
 // ---------------------------------------------------------------------------
 // AppEvent
@@ -124,6 +134,49 @@ impl ResultDisplay {
 pub enum InputMode {
     Normal,
     Input,
+}
+
+/// Which field is active in the new-agent input overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputField {
+    Prompt,
+    Workspace,
+    PermissionMode,
+    Model,
+    Effort,
+    MaxBudgetUsd,
+    AllowedTools,
+    AddDir,
+}
+
+impl InputField {
+    /// Advance to the next field in tab order.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Prompt => Self::Workspace,
+            Self::Workspace => Self::PermissionMode,
+            Self::PermissionMode => Self::Model,
+            Self::Model => Self::Effort,
+            Self::Effort => Self::MaxBudgetUsd,
+            Self::MaxBudgetUsd => Self::AllowedTools,
+            Self::AllowedTools => Self::AddDir,
+            Self::AddDir => Self::Prompt,
+        }
+    }
+
+    /// Go to the previous field in tab order.
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Prompt => Self::AddDir,
+            Self::Workspace => Self::Prompt,
+            Self::PermissionMode => Self::Workspace,
+            Self::Model => Self::PermissionMode,
+            Self::Effort => Self::Model,
+            Self::MaxBudgetUsd => Self::Effort,
+            Self::AllowedTools => Self::MaxBudgetUsd,
+            Self::AddDir => Self::AllowedTools,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,15 +330,47 @@ pub struct App {
     pub input_buffer: String,
     /// Cursor position within `input_buffer`.
     pub input_cursor: usize,
+    /// Which input field is currently active (prompt or workspace).
+    pub input_field: InputField,
+    /// Buffer for the workspace input text.
+    pub workspace_buffer: String,
+    /// Cursor position within `workspace_buffer`.
+    pub workspace_cursor: usize,
+    /// Buffer for permission mode input.
+    pub permission_mode_buffer: String,
+    /// Cursor position within `permission_mode_buffer`.
+    pub permission_mode_cursor: usize,
+    /// Buffer for model input.
+    pub model_buffer: String,
+    /// Cursor position within `model_buffer`.
+    pub model_cursor: usize,
+    /// Buffer for effort input.
+    pub effort_buffer: String,
+    /// Cursor position within `effort_buffer`.
+    pub effort_cursor: usize,
+    /// Buffer for max budget USD input.
+    pub max_budget_buffer: String,
+    /// Cursor position within `max_budget_buffer`.
+    pub max_budget_cursor: usize,
+    /// Buffer for allowed tools input (comma-separated).
+    pub allowed_tools_buffer: String,
+    /// Cursor position within `allowed_tools_buffer`.
+    pub allowed_tools_cursor: usize,
+    /// Buffer for add-dir input (comma-separated).
+    pub add_dir_buffer: String,
+    /// Cursor position within `add_dir_buffer`.
+    pub add_dir_cursor: usize,
     /// Monotonic tick counter, incremented each event-loop iteration.
     pub tick: usize,
     /// Default workspace directory for new agents.
     pub default_workspace: PathBuf,
+    /// Default Claude Code options (from CLI flags), used to pre-populate input fields.
+    pub default_claude_options: ClaudeOptions,
 }
 
 impl App {
     /// Create a new, empty application state.
-    pub fn new(default_workspace: PathBuf) -> Self {
+    pub fn new(default_workspace: PathBuf, default_claude_options: ClaudeOptions) -> Self {
         Self {
             agents: Vec::new(),
             agent_index: HashMap::new(),
@@ -299,8 +384,24 @@ impl App {
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
             input_cursor: 0,
+            input_field: InputField::Prompt,
+            workspace_buffer: String::new(),
+            workspace_cursor: 0,
+            permission_mode_buffer: String::new(),
+            permission_mode_cursor: 0,
+            model_buffer: String::new(),
+            model_cursor: 0,
+            effort_buffer: String::new(),
+            effort_cursor: 0,
+            max_budget_buffer: String::new(),
+            max_budget_cursor: 0,
+            allowed_tools_buffer: String::new(),
+            allowed_tools_cursor: 0,
+            add_dir_buffer: String::new(),
+            add_dir_cursor: 0,
             tick: 0,
             default_workspace,
+            default_claude_options,
         }
     }
 
@@ -365,31 +466,123 @@ impl App {
     }
 
     /// Enter prompt input mode, clearing any previous buffer content.
+    ///
+    /// The workspace buffer is pre-populated with the default workspace path.
+    /// Claude option fields are pre-populated from the CLI defaults.
     pub fn enter_input_mode(&mut self) {
         self.input_mode = InputMode::Input;
+        self.input_field = InputField::Prompt;
         self.input_buffer.clear();
         self.input_cursor = 0;
+        self.workspace_buffer = self.default_workspace.display().to_string();
+        self.workspace_cursor = self.workspace_buffer.len();
+
+        // Pre-populate Claude options from CLI defaults.
+        let opts = self.default_claude_options.clone();
+        self.permission_mode_buffer = opts.permission_mode.unwrap_or_default();
+        self.permission_mode_cursor = self.permission_mode_buffer.len();
+        self.model_buffer = opts.model.unwrap_or_default();
+        self.model_cursor = self.model_buffer.len();
+        self.effort_buffer = opts.effort.unwrap_or_default();
+        self.effort_cursor = self.effort_buffer.len();
+        self.max_budget_buffer = opts
+            .max_budget_usd
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        self.max_budget_cursor = self.max_budget_buffer.len();
+        self.allowed_tools_buffer = opts.allowed_tools.join(", ");
+        self.allowed_tools_cursor = self.allowed_tools_buffer.len();
+        self.add_dir_buffer = opts.add_dirs.join(", ");
+        self.add_dir_cursor = self.add_dir_buffer.len();
     }
 
-    /// Exit prompt input mode, clearing the buffer.
+    /// Exit prompt input mode, clearing all buffers.
     pub fn exit_input_mode(&mut self) {
         self.input_mode = InputMode::Normal;
+        self.input_field = InputField::Prompt;
         self.input_buffer.clear();
         self.input_cursor = 0;
+        self.workspace_buffer.clear();
+        self.workspace_cursor = 0;
+        self.permission_mode_buffer.clear();
+        self.permission_mode_cursor = 0;
+        self.model_buffer.clear();
+        self.model_cursor = 0;
+        self.effort_buffer.clear();
+        self.effort_cursor = 0;
+        self.max_budget_buffer.clear();
+        self.max_budget_cursor = 0;
+        self.allowed_tools_buffer.clear();
+        self.allowed_tools_cursor = 0;
+        self.add_dir_buffer.clear();
+        self.add_dir_cursor = 0;
     }
 
-    /// Submit the current input buffer.
+    /// Submit the current input buffers.
     ///
-    /// If the trimmed buffer is non-empty, returns `Some(trimmed_string)` and
-    /// exits input mode. Otherwise returns `None` (buffer stays intact so the
-    /// user can keep editing).
-    pub fn submit_input(&mut self) -> Option<String> {
-        let trimmed = self.input_buffer.trim().to_string();
-        if trimmed.is_empty() {
+    /// If the trimmed prompt is non-empty, returns
+    /// `Some((prompt, workspace, claude_options))` and exits input mode. If the
+    /// workspace buffer is empty, the default workspace is used. Claude option
+    /// fields are parsed from their buffers (empty = default/None). Returns
+    /// `None` when the prompt is empty (buffers stay intact so the user can
+    /// keep editing).
+    pub fn submit_input(&mut self) -> Option<(String, PathBuf, ClaudeOptions)> {
+        let prompt = self.input_buffer.trim().to_string();
+        if prompt.is_empty() {
             return None;
         }
+        let workspace_str = self.workspace_buffer.trim();
+        let workspace = if workspace_str.is_empty() {
+            self.default_workspace.clone()
+        } else {
+            PathBuf::from(workspace_str)
+        };
+
+        let non_empty = |s: &str| {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
+
+        let claude_options = ClaudeOptions {
+            permission_mode: non_empty(&self.permission_mode_buffer),
+            model: non_empty(&self.model_buffer),
+            effort: non_empty(&self.effort_buffer),
+            max_budget_usd: self
+                .max_budget_buffer
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|v| *v > 0.0),
+            allowed_tools: self
+                .allowed_tools_buffer
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            add_dirs: self
+                .add_dir_buffer
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+        };
+
         self.exit_input_mode();
-        Some(trimmed)
+        Some((prompt, workspace, claude_options))
+    }
+
+    /// Advance to the next input field (Tab).
+    pub fn next_input_field(&mut self) {
+        self.input_field = self.input_field.next();
+    }
+
+    /// Go to the previous input field (Shift+Tab).
+    pub fn prev_input_field(&mut self) {
+        self.input_field = self.input_field.prev();
     }
 
     /// Focus a specific agent by index. No-op if out of range.
@@ -442,7 +635,7 @@ mod tests {
 
     /// Helper: create an App with `n` agents.
     fn app_with_agents(n: usize) -> App {
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         for i in 0..n {
             app.add_agent(AgentState::new(
                 i,
@@ -678,7 +871,7 @@ mod tests {
     #[test]
     fn next_agent_noop_when_empty() {
         // No agents — next_agent should not panic or change focused.
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.next_agent();
         assert_eq!(app.focused, 0);
     }
@@ -686,7 +879,7 @@ mod tests {
     #[test]
     fn prev_agent_noop_when_empty() {
         // No agents — prev_agent should not panic or change focused.
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.prev_agent();
         assert_eq!(app.focused, 0);
     }
@@ -719,7 +912,7 @@ mod tests {
 
     #[test]
     fn focused_agent_returns_none_when_empty() {
-        let app = App::new(PathBuf::from("/tmp/default"));
+        let app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         assert!(app.focused_agent().is_none());
     }
 
@@ -737,49 +930,66 @@ mod tests {
 
     #[test]
     fn enter_input_mode_sets_state() {
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
 
         assert_eq!(app.input_mode, InputMode::Input);
+        assert_eq!(app.input_field, InputField::Prompt);
         assert!(app.input_buffer.is_empty());
         assert_eq!(app.input_cursor, 0);
+        assert_eq!(app.workspace_buffer, "/tmp/default");
+        assert_eq!(app.workspace_cursor, "/tmp/default".len());
     }
 
     #[test]
     fn enter_input_mode_clears_previous_buffer() {
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.input_buffer = "leftover".to_string();
         app.input_cursor = 5;
+        app.workspace_buffer = "/old/path".to_string();
+        app.workspace_cursor = 3;
+        app.input_field = InputField::Workspace;
 
         app.enter_input_mode();
 
         assert_eq!(app.input_mode, InputMode::Input);
+        assert_eq!(app.input_field, InputField::Prompt);
         assert!(app.input_buffer.is_empty());
         assert_eq!(app.input_cursor, 0);
+        assert_eq!(app.workspace_buffer, "/tmp/default");
+        assert_eq!(app.workspace_cursor, "/tmp/default".len());
     }
 
     #[test]
     fn exit_input_mode_restores_normal() {
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
         app.input_buffer = "some text".to_string();
         app.input_cursor = 4;
+        app.workspace_buffer = "/some/path".to_string();
+        app.workspace_cursor = 5;
+        app.input_field = InputField::Workspace;
 
         app.exit_input_mode();
 
         assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.input_field, InputField::Prompt);
         assert!(app.input_buffer.is_empty());
         assert_eq!(app.input_cursor, 0);
+        assert!(app.workspace_buffer.is_empty());
+        assert_eq!(app.workspace_cursor, 0);
     }
 
     #[test]
     fn submit_input_returns_trimmed_text() {
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
         app.input_buffer = "  hello world  ".to_string();
 
         let result = app.submit_input();
-        assert_eq!(result, Some("hello world".to_string()));
+        let (prompt, workspace, _opts) = result.expect("should return Some");
+        assert_eq!(prompt, "hello world");
+        assert_eq!(workspace, PathBuf::from("/tmp/default"));
         assert_eq!(app.input_mode, InputMode::Normal);
         assert!(app.input_buffer.is_empty());
         assert_eq!(app.input_cursor, 0);
@@ -787,7 +997,7 @@ mod tests {
 
     #[test]
     fn submit_input_returns_none_for_empty() {
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
         app.input_buffer = "".to_string();
 
@@ -799,12 +1009,61 @@ mod tests {
 
     #[test]
     fn submit_input_returns_none_for_whitespace_only() {
-        let mut app = App::new(PathBuf::from("/tmp/default"));
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
         app.input_buffer = "   	  ".to_string();
 
         let result = app.submit_input();
         assert_eq!(result, None);
         assert_eq!(app.input_mode, InputMode::Input);
+    }
+
+    #[test]
+    fn submit_input_uses_custom_workspace() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        app.enter_input_mode();
+        app.input_buffer = "my prompt".to_string();
+        app.workspace_buffer = "/custom/path".to_string();
+
+        let result = app.submit_input();
+        let (prompt, workspace, _opts) = result.expect("should return Some");
+        assert_eq!(prompt, "my prompt");
+        assert_eq!(workspace, PathBuf::from("/custom/path"));
+    }
+
+    #[test]
+    fn submit_input_falls_back_to_default_workspace() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        app.enter_input_mode();
+        app.input_buffer = "my prompt".to_string();
+        app.workspace_buffer = "   ".to_string(); // whitespace-only
+
+        let result = app.submit_input();
+        let (prompt, workspace, _opts) = result.expect("should return Some");
+        assert_eq!(prompt, "my prompt");
+        assert_eq!(workspace, PathBuf::from("/tmp/default"));
+    }
+
+    #[test]
+    fn input_field_cycles_forward_and_backward() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        app.enter_input_mode();
+
+        assert_eq!(app.input_field, InputField::Prompt);
+        app.next_input_field();
+        assert_eq!(app.input_field, InputField::Workspace);
+        app.next_input_field();
+        assert_eq!(app.input_field, InputField::PermissionMode);
+        // Cycle backward.
+        app.prev_input_field();
+        assert_eq!(app.input_field, InputField::Workspace);
+        app.prev_input_field();
+        assert_eq!(app.input_field, InputField::Prompt);
+        // Wrap backward from Prompt → AddDir.
+        app.prev_input_field();
+        assert_eq!(app.input_field, InputField::AddDir);
+        // Wrap forward from AddDir → Prompt.
+        app.next_input_field();
+        assert_eq!(app.input_field, InputField::Prompt);
     }
 }
