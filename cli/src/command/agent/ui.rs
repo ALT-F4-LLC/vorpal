@@ -772,6 +772,8 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     let hints = Line::from(vec![
         Span::styled(" n", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(":new  "),
+        Span::styled("s", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(":respond  "),
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(":switch  "),
         Span::styled("x", Style::default().add_modifier(Modifier::BOLD)),
@@ -1018,7 +1020,11 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan))
-                .title(" New Agent ")
+                .title(if let Some(idx) = app.respond_target {
+                    format!(" Respond to Agent {} ", idx + 1)
+                } else {
+                    " New Agent ".to_string()
+                })
                 .title_style(
                     Style::default()
                         .fg(Color::Cyan)
@@ -1231,6 +1237,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         ("Shift+Tab / h", "Previous agent"),
         ("1-9", "Focus agent by number"),
         ("n", "New agent (prompt + workspace)"),
+        ("s", "Respond to exited agent (session)"),
         ("x", "Kill focused agent"),
         ("y", "Copy output to clipboard"),
         ("j / Down", "Scroll down (toward latest)"),

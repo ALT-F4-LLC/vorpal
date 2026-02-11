@@ -6,8 +6,8 @@
 
 use super::manager::{AgentManager, ClaudeOptions};
 use super::state::{
-    AgentActivity, AgentState, AgentStatus, App, AppEvent, InputField, InputMode, EFFORT_LEVELS,
-    MODELS, PERMISSION_MODES,
+    AgentActivity, AgentState, AgentStatus, App, AppEvent, DisplayLine, InputField, InputMode,
+    EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::ui;
 use anyhow::Result;
@@ -128,7 +128,7 @@ pub async fn run(
 
     // Spawn initial agents from prompts/workspaces pairs.
     for (prompt, workspace) in prompts.iter().zip(workspaces.iter()) {
-        let agent_id = manager.spawn(prompt, workspace, &claude_options).await?;
+        let agent_id = manager.spawn(prompt, workspace, &claude_options, None).await?;
         app.add_agent(AgentState::new(agent_id, workspace.clone(), prompt.clone()));
     }
 
@@ -287,6 +287,12 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AppEvent) 
             }
             manager.notify_exited(agent_id);
         }
+        AppEvent::AgentSessionId { agent_id, session_id } => {
+            if let Some(agent) = app.agent_by_id_mut(agent_id) {
+                agent.session_id = Some(session_id);
+            }
+        }
+
     }
 }
 
@@ -513,6 +519,26 @@ async fn handle_input(app: &mut App, manager: &mut AgentManager, key: KeyEvent) 
             app.show_help = !app.show_help;
         }
 
+        // Respond to an exited agent (resume with session ID).
+        KeyCode::Char('s') => {
+            if let Some(agent) = app.focused_agent() {
+                match (&agent.status, &agent.session_id) {
+                    (AgentStatus::Exited(_), Some(_)) => {
+                        app.respond_target = Some(app.focused);
+                        app.enter_input_mode();
+                    }
+                    (AgentStatus::Running, _) => {
+                        app.set_status_message("Agent is still running");
+                    }
+                    (_, None) => {
+                        app.set_status_message(
+                            "No session ID -- agent must complete first",
+                        );
+                    }
+                }
+            }
+        }
+
         // All other keys: no-op.
         _ => {}
     }
@@ -542,8 +568,10 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
             app.prev_input_field();
         }
 
-        // Ctrl+S: submit the form and spawn a new agent (from any field).
+        // Ctrl+S: submit the form and spawn a new agent (or respond to an
+        // existing one if `respond_target` is set).
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let respond_target = app.respond_target;
             if let Some((prompt, workspace, claude_options)) = app.submit_input() {
                 // Resolve relative workspace paths to absolute.
                 let workspace = if workspace.is_absolute() {
@@ -554,16 +582,49 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
                         .join(&workspace)
                         .clean()
                 };
-                match manager.spawn(&prompt, &workspace, &claude_options).await {
-                    Ok(agent_id) => {
-                        app.add_agent(AgentState::new(agent_id, workspace, prompt.clone()));
-                        // Focus the newly added agent.
-                        let new_index = app.agents.len() - 1;
-                        app.focus_agent(new_index);
-                        app.set_status_message(format!("Spawned agent {}", agent_id + 1));
+
+                if let Some(target_idx) = respond_target {
+                    // Respond flow: resume an existing agent's session.
+                    let session_id = app.agents.get(target_idx)
+                        .and_then(|a| a.session_id.clone());
+                    let session_ref = session_id.as_deref();
+                    match manager.spawn(&prompt, &workspace, &claude_options, session_ref).await {
+                        Ok(agent_id) => {
+                            if let Some(agent) = app.agents.get_mut(target_idx) {
+                                // Preserve existing output; add a visual separator.
+                                agent.push_line(DisplayLine::TurnStart);
+                                agent.id = agent_id;
+                                agent.status = AgentStatus::Running;
+                                agent.activity = AgentActivity::Idle;
+                                agent.prompt = prompt.clone();
+                                agent.scroll_offset = 0;
+                                agent.has_new_output = false;
+                                // Rebuild agent_index since the id changed.
+                                app.rebuild_agent_index();
+                            }
+                            app.focus_agent(target_idx);
+                            app.set_status_message(format!(
+                                "Resumed agent {} (session)",
+                                target_idx + 1
+                            ));
+                        }
+                        Err(e) => {
+                            app.set_status_message(format!("Spawn failed: {e}"));
+                        }
                     }
-                    Err(e) => {
-                        app.set_status_message(format!("Spawn failed: {e}"));
+                } else {
+                    // New-agent flow (unchanged).
+                    match manager.spawn(&prompt, &workspace, &claude_options, None).await {
+                        Ok(agent_id) => {
+                            app.add_agent(AgentState::new(agent_id, workspace, prompt.clone()));
+                            // Focus the newly added agent.
+                            let new_index = app.agents.len() - 1;
+                            app.focus_agent(new_index);
+                            app.set_status_message(format!("Spawned agent {}", agent_id + 1));
+                        }
+                        Err(e) => {
+                            app.set_status_message(format!("Spawn failed: {e}"));
+                        }
                     }
                 }
             }
@@ -750,7 +811,6 @@ async fn handle_confirm_close(app: &mut App, manager: &mut AgentManager, key: Ke
 // Clipboard
 // ---------------------------------------------------------------------------
 
-use super::state::DisplayLine;
 use super::ui::{BLOCK_MARKER, RESULT_CONNECTOR, SESSION_MARKER};
 
 /// Convert a [`DisplayLine`] to plain text for clipboard export.

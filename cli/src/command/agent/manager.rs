@@ -78,6 +78,7 @@ impl AgentManager {
         prompt: &str,
         workspace: &Path,
         claude_options: &ClaudeOptions,
+        session_id: Option<&str>,
     ) -> Result<usize> {
         let agent_id = self.next_id;
         self.next_id += 1;
@@ -125,6 +126,11 @@ impl AgentManager {
         for dir in &claude_options.add_dirs {
             args.push("--add-dir".to_string());
             args.push(dir.clone());
+        }
+
+        if let Some(sid) = session_id {
+            args.push("--resume".to_string());
+            args.push(sid.to_string());
         }
 
         // Prompt must always be the last positional argument.
@@ -198,6 +204,15 @@ impl AgentManager {
                                         }
                                     }
                                 };
+                                // If the parser saw a session_id in a result
+                                // event, emit it as a dedicated event so the
+                                // TUI can store it on the agent state.
+                                if let Some(session_id) = parser.take_session_id() {
+                                    let _ = tx.send(AppEvent::AgentSessionId {
+                                        agent_id,
+                                        session_id,
+                                    }).await;
+                                }
                                 for display_line in display_lines {
                                     debug!(agent_id, ?display_line, "parsed output line");
                                     let _ = tx.send(AppEvent::AgentOutput {

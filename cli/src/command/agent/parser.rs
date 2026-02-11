@@ -241,12 +241,22 @@ pub struct Parser {
     tool_input_buffer: String,
     /// Tracks whether the current content block is text, tool_use, or thinking.
     active_block: Option<ActiveBlock>,
+    /// The last session ID seen in a `result` event, ready to be taken by the caller.
+    last_session_id: Option<String>,
 }
 
 impl Parser {
     /// Create a new parser with empty accumulation state.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Take the last session ID seen in a `result` event, if any.
+    ///
+    /// Returns `Some(session_id)` exactly once per result event — subsequent
+    /// calls return `None` until another result event is parsed.
+    pub fn take_session_id(&mut self) -> Option<String> {
+        self.last_session_id.take()
     }
 
     /// Parse a single JSON line and return zero or more [`DisplayLine`] values.
@@ -300,6 +310,7 @@ impl Parser {
                 session_id,
                 ..
             } => {
+                self.last_session_id = session_id.clone();
                 let mut parts = Vec::new();
                 if let Some(sub) = subtype {
                     parts.push(format!("Status: {sub}"));

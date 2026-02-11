@@ -29,6 +29,7 @@ pub const EFFORT_LEVELS: &[&str] = &["high", "medium", "low"];
 
 /// Central event type for the TUI event loop.
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum AppEvent {
     /// Parsed output line from an agent process.
     AgentOutput { agent_id: usize, line: DisplayLine },
@@ -36,6 +37,11 @@ pub enum AppEvent {
     AgentExited {
         agent_id: usize,
         exit_code: Option<i32>,
+    },
+    /// The session ID for an agent was resolved (from Claude Code result output).
+    AgentSessionId {
+        agent_id: usize,
+        session_id: String,
     },
 }
 
@@ -220,6 +226,8 @@ pub struct AgentState {
     pub cache_generation: u64,
     /// The result display mode when the cache was last computed.
     pub cache_result_display: Option<ResultDisplay>,
+    /// Session ID returned by Claude Code (populated after the process exits).
+    pub session_id: Option<String>,
 }
 
 impl AgentState {
@@ -241,6 +249,7 @@ impl AgentState {
             cached_row_count: 0,
             cache_generation: 0,
             cache_result_display: None,
+            session_id: None,
         }
     }
 
@@ -360,6 +369,10 @@ pub struct App {
     pub add_dir_buffer: String,
     /// Cursor position within `add_dir_buffer`.
     pub add_dir_cursor: usize,
+    /// When `Some(idx)`, the input overlay is a "respond" to the agent at `idx`
+    /// rather than a new-agent prompt. The target agent's session ID will be
+    /// passed to `AgentManager::spawn()` so Claude resumes the conversation.
+    pub respond_target: Option<usize>,
     /// Monotonic tick counter, incremented each event-loop iteration.
     pub tick: usize,
     /// Default workspace directory for new agents.
@@ -399,6 +412,7 @@ impl App {
             allowed_tools_cursor: 0,
             add_dir_buffer: String::new(),
             add_dir_cursor: 0,
+            respond_target: None,
             tick: 0,
             default_workspace,
             default_claude_options,
@@ -516,6 +530,7 @@ impl App {
         self.allowed_tools_cursor = 0;
         self.add_dir_buffer.clear();
         self.add_dir_cursor = 0;
+        self.respond_target = None;
     }
 
     /// Submit the current input buffers.
@@ -589,6 +604,17 @@ impl App {
     pub fn focus_agent(&mut self, index: usize) {
         if index < self.agents.len() {
             self.focused = index;
+        }
+    }
+
+    /// Rebuild the `agent_id → Vec index` map.
+    ///
+    /// Must be called whenever an agent's `id` is changed in place (e.g. when
+    /// resuming a session replaces the id with the new process's id).
+    pub fn rebuild_agent_index(&mut self) {
+        self.agent_index.clear();
+        for (i, agent) in self.agents.iter().enumerate() {
+            self.agent_index.insert(agent.id, i);
         }
     }
 
