@@ -26,10 +26,6 @@ pub fn get_root_store_dir_path() -> PathBuf {
 
 // Key paths
 
-pub fn get_key_ca_path() -> PathBuf {
-    get_root_key_dir_path().join("ca").with_extension("pem")
-}
-
 pub fn get_key_ca_key_path() -> PathBuf {
     get_root_key_dir_path().join("ca").with_extension("key.pem")
 }

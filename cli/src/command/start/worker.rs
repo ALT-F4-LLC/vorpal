@@ -5,7 +5,7 @@ use crate::command::{
         notary,
         paths::{
             get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
-            get_file_paths, get_key_ca_path, get_key_service_key_path, set_timestamps,
+            get_file_paths, get_key_service_key_path, set_timestamps,
         },
         temps::{create_sandbox_dir, create_sandbox_file},
     },
@@ -26,7 +26,7 @@ use tokio_stream::{
 };
 use tonic::{
     metadata::{Ascii, MetadataValue},
-    transport::{Certificate, Channel, ClientTlsConfig},
+    transport::Channel,
     Code::NotFound,
     Request, Response, Status,
 };
@@ -45,6 +45,7 @@ use vorpal_sdk::{
         },
     },
     artifact::system::get_system_default,
+    context::get_client_tls_config,
 };
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
@@ -148,24 +149,9 @@ async fn pull_source(
     }
 
     // Create authenticated archive client
-    let ca_pem_path = get_key_ca_path();
-
-    if !ca_pem_path.exists() {
-        return Err(Status::internal(format!(
-            "CA certificate not found: {}",
-            ca_pem_path.display()
-        )));
-    }
-
-    let service_ca_pem = read(ca_pem_path)
+    let service_tls = get_client_tls_config()
         .await
-        .map_err(|e| Status::internal(format!("failed to read CA certificate: {}", e)))?;
-
-    let service_ca = Certificate::from_pem(service_ca_pem);
-
-    let service_tls = ClientTlsConfig::new()
-        .ca_certificate(service_ca)
-        .domain_name("localhost");
+        .map_err(|e| Status::internal(format!("failed to get client TLS config: {e}")))?;
 
     let client_uri = registry
         .parse::<Uri>()
@@ -746,24 +732,9 @@ async fn build_artifact(
         // Upload archive
 
         // Create authenticated archive client for pushing
-        let ca_pem_path = get_key_ca_path();
-
-        if !ca_pem_path.exists() {
-            return Err(Status::internal(format!(
-                "CA certificate not found: {}",
-                ca_pem_path.display()
-            )));
-        }
-
-        let service_ca_pem = read(ca_pem_path)
+        let service_tls = get_client_tls_config()
             .await
-            .map_err(|e| Status::internal(format!("failed to read CA certificate: {}", e)))?;
-
-        let service_ca = Certificate::from_pem(service_ca_pem);
-
-        let service_tls = ClientTlsConfig::new()
-            .ca_certificate(service_ca)
-            .domain_name("localhost");
+            .map_err(|e| Status::internal(format!("failed to get client TLS config: {e}")))?;
 
         let client_uri = registry
             .parse::<Uri>()
@@ -815,24 +786,9 @@ async fn build_artifact(
         // Store artifact in registry
 
         // Create authenticated artifact client
-        let ca_pem_path = get_key_ca_path();
-
-        if !ca_pem_path.exists() {
-            return Err(Status::internal(format!(
-                "CA certificate not found: {}",
-                ca_pem_path.display()
-            )));
-        }
-
-        let service_ca_pem = read(ca_pem_path)
+        let service_tls = get_client_tls_config()
             .await
-            .map_err(|e| Status::internal(format!("failed to read CA certificate: {}", e)))?;
-
-        let service_ca = Certificate::from_pem(service_ca_pem);
-
-        let service_tls = ClientTlsConfig::new()
-            .ca_certificate(service_ca)
-            .domain_name("localhost");
+            .map_err(|e| Status::internal(format!("failed to get client TLS config: {e}")))?;
 
         let client_uri = registry
             .parse::<Uri>()
