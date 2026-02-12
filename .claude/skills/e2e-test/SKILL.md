@@ -12,9 +12,9 @@ Run end-to-end tests to validate that Vorpal services start correctly and can su
 
 1. **Build the project** (if not already built)
 2. **Start backend services** in background using `run_in_background: true`
-3. **Wait for services** to be ready on port 23152
+3. **Wait for services** to be ready on port 23153
 4. **Run artifact build** against the services
-5. **Stop all services** on port 23152
+5. **Stop all services** on port 23153
 6. **Report results**
 
 ## Execution Instructions
@@ -39,10 +39,10 @@ The service logs will stream to the shell output for review.
 
 ### Step 3: Wait for services
 
-Wait for port 23152 to be available (up to 60 seconds):
+Wait for port 23153 to be available (up to 60 seconds):
 
 ```bash
-for i in {1..60}; do nc -z localhost 23152 2>/dev/null && echo "Services ready after ${i}s" && break; [ $i -eq 60 ] && echo "ERROR: Services failed to start" && exit 1; sleep 1; done
+for i in {1..60}; do nc -z localhost 23153 2>/dev/null && echo "Services ready after ${i}s" && break; [ $i -eq 60 ] && echo "ERROR: Services failed to start" && exit 1; sleep 1; done
 ```
 
 ### Step 4: Run artifact build
@@ -61,10 +61,10 @@ make VORPAL_ARTIFACT="<artifact-name>" vorpal
 
 ### Step 5: Stop services
 
-After the build completes (success or failure), stop all services on port 23152:
+After the build completes (success or failure), stop all services on port 23153:
 
 ```bash
-lsof -ti:23152 | xargs kill 2>/dev/null || true
+lsof -ti:23153 | xargs kill 2>/dev/null || true
 ```
 
 ### Step 6: Report results
@@ -82,6 +82,6 @@ The skill accepts an optional artifact name. Default is `vorpal`:
 
 ## Troubleshooting
 
-- **Port in use**: `lsof -ti:23152 | xargs kill`
+- **Port in use**: `lsof -ti:23153 | xargs kill`
 - **Build fails**: Run `make build` first
 - **Services crash**: Review shell output for error messages
