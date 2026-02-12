@@ -4,7 +4,7 @@ use crate::command::{
         archives::unpack_zstd,
         paths::{
             get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
-            get_file_paths, get_key_ca_path, set_timestamps,
+            get_file_paths, set_timestamps,
         },
     },
     VorpalConfigSource,
@@ -16,11 +16,8 @@ use std::{
     path::{Path, PathBuf},
     process::exit,
 };
-use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
-use tonic::{
-    transport::{Certificate, Channel, ClientTlsConfig},
-    Code, Request,
-};
+use tokio::fs::{create_dir_all, remove_dir_all, remove_file, write};
+use tonic::{transport::Channel, Code, Request};
 use tracing::{error, info};
 use vorpal_sdk::{
     api::{
@@ -38,7 +35,7 @@ use vorpal_sdk::{
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
     },
-    context::{client_auth_header, ConfigContext},
+    context::{client_auth_header, get_client_tls_config, ConfigContext},
 };
 
 pub struct RunArgsArtifact {
@@ -279,13 +276,7 @@ pub async fn run(
 ) -> Result<()> {
     // Setup service clients
 
-    let client_ca_pem_path = get_key_ca_path();
-    let client_ca_pem = read(client_ca_pem_path).await?;
-    let client_ca = Certificate::from_pem(client_ca_pem);
-
-    let client_tls = ClientTlsConfig::new()
-        .ca_certificate(client_ca)
-        .domain_name("localhost");
+    let client_tls = get_client_tls_config().await?;
 
     let client_agent_uri = service
         .agent

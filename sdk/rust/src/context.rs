@@ -10,7 +10,7 @@ use crate::{
     artifact::system::get_system,
     cli::{Cli, Command},
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use http::uri::{InvalidUri, Uri};
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, RefreshToken, TokenResponse, TokenUrl};
@@ -228,15 +228,7 @@ pub async fn get_context() -> Result<ConfigContext> {
             port,
             registry,
         } => {
-            let service_ca_pem = read("/var/lib/vorpal/key/ca.pem")
-                .await
-                .expect("failed to read CA certificate");
-
-            let service_ca = Certificate::from_pem(service_ca_pem);
-
-            let service_tls = ClientTlsConfig::new()
-                .ca_certificate(service_ca)
-                .domain_name("localhost");
+            let service_tls = get_client_tls_config().await?;
 
             let client_agent_uri = agent
                 .parse::<Uri>()
@@ -519,10 +511,30 @@ pub fn get_root_key_dir_path() -> PathBuf {
     get_root_dir_path().join("key")
 }
 
+pub fn get_key_ca_path() -> PathBuf {
+    get_root_key_dir_path().join("ca").with_extension("pem")
+}
+
 pub fn get_key_credentials_path() -> PathBuf {
     get_root_key_dir_path()
         .join("credentials")
         .with_extension("json")
+}
+
+pub async fn get_client_tls_config() -> Result<ClientTlsConfig> {
+    let mut client_tls_config = ClientTlsConfig::new();
+
+    let ca_pem_path = get_key_ca_path();
+
+    if ca_pem_path.exists() {
+        let ca_pem = read(&ca_pem_path)
+            .await
+            .with_context(|| format!("failed to read CA certificate: {}", ca_pem_path.display()))?;
+
+        client_tls_config = client_tls_config.ca_certificate(Certificate::from_pem(ca_pem));
+    }
+
+    Ok(client_tls_config)
 }
 
 /// Refreshes an expired access token using the refresh token

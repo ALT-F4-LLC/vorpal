@@ -5,8 +5,8 @@ use crate::command::{
         hashes::get_source_digest,
         notary,
         paths::{
-            copy_files, get_file_paths, get_key_ca_path, get_key_service_key_path,
-            get_key_service_public_path, set_timestamps,
+            copy_files, get_file_paths, get_key_service_key_path, get_key_service_public_path,
+            set_timestamps,
         },
         temps::{create_sandbox_dir, create_sandbox_file},
     },
@@ -22,10 +22,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
-use tonic::{
-    transport::{Certificate, Channel, ClientTlsConfig},
-    Code, Request, Response, Status,
-};
+use tonic::{transport::Channel, Code, Request, Response, Status};
 use tracing::{info, warn};
 use url::Url;
 use vorpal_sdk::{
@@ -38,7 +35,7 @@ use vorpal_sdk::{
         },
         artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactStepSecret},
     },
-    context::client_auth_header,
+    context::{client_auth_header, get_client_tls_config},
 };
 
 #[derive(PartialEq)]
@@ -60,21 +57,7 @@ pub async fn build_source(
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
     // Create authenticated archive client first
-    let ca_pem_path = get_key_ca_path();
-
-    if !ca_pem_path.exists() {
-        bail!("CA certificate not found: {}", ca_pem_path.display());
-    }
-
-    let service_ca_pem = read(ca_pem_path)
-        .await
-        .expect("failed to read CA certificate");
-
-    let service_ca = Certificate::from_pem(service_ca_pem);
-
-    let service_tls = ClientTlsConfig::new()
-        .ca_certificate(service_ca)
-        .domain_name("localhost");
+    let service_tls = get_client_tls_config().await?;
 
     let service_uri = registry
         .parse::<Uri>()
