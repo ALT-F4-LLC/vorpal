@@ -29,6 +29,14 @@ pub(super) const SESSION_MARKER: &str = "✻";
 /// Indentation that matches the width of `⏺ ` (marker + space).
 const CONTINUATION_INDENT: &str = "  ";
 
+/// Minimum terminal width required for the TUI.
+const MIN_WIDTH: u16 = 40;
+/// Minimum terminal height required for the TUI.
+const MIN_HEIGHT: u16 = 8;
+
+/// Terminal width at which the full (untruncated) hint bar is shown.
+const FULL_HINTS_WIDTH: u16 = 120;
+
 // ---------------------------------------------------------------------------
 // Tool color mapping
 // ---------------------------------------------------------------------------
@@ -58,11 +66,14 @@ fn tool_color(tool: &str) -> Color {
 pub fn render(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
 
-    // Gracefully handle absurdly small terminals — just clear and bail.
-    if area.height < 5 || area.width < 10 {
-        let msg = Paragraph::new("Terminal too small")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Red));
+    // Gracefully handle terminals below minimum usable size — clear and bail.
+    if area.height < MIN_HEIGHT || area.width < MIN_WIDTH {
+        let msg = Paragraph::new(format!(
+            "Terminal too small (min {}x{})",
+            MIN_WIDTH, MIN_HEIGHT
+        ))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Red));
         frame.render_widget(msg, area);
         return;
     }
@@ -109,7 +120,7 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
         return;
     }
 
-    let titles: Vec<Line<'_>> = app
+    let all_titles: Vec<Line<'_>> = app
         .agents
         .iter()
         .enumerate()
@@ -133,8 +144,29 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
-    let tabs = Tabs::new(titles)
-        .select(app.focused)
+    // Compute visible tab window that fits within the available width.
+    // Each tab has its content width plus a 1-char divider between tabs.
+    // Reserve some width for the block border (2 chars).
+    let available = area.width.saturating_sub(2) as usize;
+    let tab_widths: Vec<usize> = all_titles.iter().map(|t| t.width()).collect();
+
+    let (titles, select_index) = visible_tab_window(&tab_widths, app.focused, available);
+
+    let visible_titles: Vec<Line<'_>> = titles
+        .iter()
+        .map(|entry| match entry {
+            VisibleTab::Tab(idx) => all_titles[*idx].clone(),
+            VisibleTab::Overflow(n) => Line::from(Span::styled(
+                format!(" +{n} more "),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )),
+        })
+        .collect();
+
+    let tabs = Tabs::new(visible_titles)
+        .select(select_index)
         .highlight_style(
             Style::default()
                 .fg(Color::Cyan)
@@ -176,6 +208,106 @@ fn workspace_label(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or(full)
+}
+
+/// Entry in a visible tab window — either a real tab or an overflow indicator.
+enum VisibleTab {
+    /// Index into the full `all_titles` vec.
+    Tab(usize),
+    /// Number of hidden tabs represented by this overflow indicator.
+    Overflow(usize),
+}
+
+/// Compute the window of tabs to display given the available width.
+///
+/// Returns a list of [`VisibleTab`] entries and the index within that list
+/// corresponding to the focused tab. The focused tab is always included.
+/// When all tabs don't fit, a `+N more` overflow indicator is appended or
+/// prepended (or both).
+fn visible_tab_window(
+    tab_widths: &[usize],
+    focused: usize,
+    available: usize,
+) -> (Vec<VisibleTab>, usize) {
+    let n = tab_widths.len();
+    if n == 0 {
+        return (Vec::new(), 0);
+    }
+
+    // Clamp focused index so an out-of-bounds value doesn't panic.
+    let focused = focused.min(n - 1);
+
+    // The divider "|" between tabs takes 1 char.
+    let total: usize = tab_widths.iter().sum::<usize>() + n.saturating_sub(1);
+    if total <= available {
+        // Everything fits — return all tabs as-is.
+        let entries: Vec<VisibleTab> = (0..n).map(VisibleTab::Tab).collect();
+        return (entries, focused);
+    }
+
+    // Compute overflow indicator width from the actual format string so it
+    // stays correct if the format or tab count changes.
+    let overflow_width = |hidden: usize| format!(" +{hidden} more ").len();
+
+    // Greedily expand a window around the focused tab.
+    let mut start = focused;
+    let mut end = focused; // inclusive
+    let mut used = tab_widths[focused];
+
+    // Try to expand right first, then left, alternating.
+    loop {
+        let mut grew = false;
+
+        // Try right.
+        if end + 1 < n {
+            // divider + tab width
+            let cost = 1 + tab_widths[end + 1];
+            let left_reserve = if start > 0 { overflow_width(start) + 1 } else { 0 };
+            let right_reserve = if end + 2 < n { overflow_width(n - end - 2) + 1 } else { 0 };
+            if used + cost + left_reserve + right_reserve <= available {
+                end += 1;
+                used += cost;
+                grew = true;
+            }
+        }
+
+        // Try left.
+        if start > 0 {
+            // divider + tab width
+            let cost = 1 + tab_widths[start - 1];
+            let left_reserve = if start > 1 { overflow_width(start - 1) + 1 } else { 0 };
+            let right_reserve = if end + 1 < n { overflow_width(n - end - 1) + 1 } else { 0 };
+            if used + cost + left_reserve + right_reserve <= available {
+                start -= 1;
+                used += cost;
+                grew = true;
+            }
+        }
+
+        if !grew {
+            break;
+        }
+    }
+
+    let mut entries = Vec::new();
+    let mut select_index = 0;
+
+    if start > 0 {
+        entries.push(VisibleTab::Overflow(start));
+    }
+
+    for idx in start..=end {
+        if idx == focused {
+            select_index = entries.len();
+        }
+        entries.push(VisibleTab::Tab(idx));
+    }
+
+    if end + 1 < n {
+        entries.push(VisibleTab::Overflow(n - end - 1));
+    }
+
+    (entries, select_index)
 }
 
 // ---------------------------------------------------------------------------
@@ -778,39 +910,112 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         Paragraph::new(status_line).style(Style::default().bg(Color::DarkGray).fg(Color::White));
     frame.render_widget(status_paragraph, rows[0]);
 
-    // Line 2: keybinding hints
-    let hints = Line::from(vec![
-        Span::styled(" n", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":new  "),
-        Span::styled("s", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":respond  "),
-        Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":switch  "),
-        Span::styled("x", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":kill  "),
-        Span::styled("y", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":copy  "),
-        Span::styled("r", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":results  "),
-        Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":close  "),
-        Span::styled("^C", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":quit  "),
-        Span::styled("j/k", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":scroll  "),
-        Span::styled("^D/^U", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":page  "),
-        Span::styled("gg", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":top  "),
-        Span::styled("G", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":bottom  "),
-        Span::styled("?", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(":help"),
-    ]);
+    // Line 2: keybinding hints — priority-ordered, truncated to fit width.
+    let hints = build_hint_bar(area.width);
 
     let hints_paragraph =
         Paragraph::new(hints).style(Style::default().bg(Color::Black).fg(Color::DarkGray));
     frame.render_widget(hints_paragraph, rows[1]);
+}
+
+/// Build the hint bar line, fitting as many priority-ordered hints as possible.
+///
+/// At [`FULL_HINTS_WIDTH`]+ columns all hints are shown. Below that, hints are
+/// added in priority order and a trailing `?:more` is appended when any are
+/// truncated.
+fn build_hint_bar(width: u16) -> Line<'static> {
+    // Priority-ordered hint list. Each entry: (key, description, trailing_gap).
+    // The trailing gap is the two-space separator that follows each hint.
+    const HINTS: &[(&str, &str)] = &[
+        ("n", "new"),
+        ("s", "respond"),
+        ("Tab", "switch"),
+        ("x", "kill"),
+        ("q", "close"),
+        ("?", "help"),
+        ("y", "copy"),
+        ("r", "results"),
+        ("^C", "quit"),
+        ("j/k", "scroll"),
+        ("^D/^U", "page"),
+        ("gg", "top"),
+        ("G", "bottom"),
+    ];
+
+    // At wide terminals, show every hint without truncation.
+    if width >= FULL_HINTS_WIDTH {
+        let mut spans = Vec::new();
+        spans.push(Span::raw(" "));
+        for (i, (key, desc)) in HINTS.iter().enumerate() {
+            spans.push(Span::styled(
+                key.to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            if i + 1 < HINTS.len() {
+                spans.push(Span::raw(format!(":{desc}  ")));
+            } else {
+                spans.push(Span::raw(format!(":{desc}")));
+            }
+        }
+        return Line::from(spans);
+    }
+
+    // Narrow terminal: fit as many hints as possible, append "?:more" if
+    // any were truncated.
+    let available = width.saturating_sub(1) as usize; // 1 for leading space
+    // The truncation indicator "?:more" is always preceded by a 2-char
+    // separator ("  ") inherited from the last shown hint's trailing gap.
+    // We reserve the indicator width only (6 chars); the separator is already
+    // accounted for in `with_sep` of the preceding hint.
+    let more_hint_width = "?:more".len();
+
+    let mut spans = Vec::new();
+    spans.push(Span::raw(" "));
+    let mut used: usize = 1; // leading space
+
+    for (shown, (key, desc)) in HINTS.iter().enumerate() {
+        // Width of this hint: key + ":" + desc.
+        let hint_text_width = key.len() + 1 + desc.len();
+        let is_last = shown + 1 == HINTS.len();
+        // Only add the 2-char separator when this isn't the last hint.
+        let with_sep = hint_text_width + if is_last { 0 } else { 2 };
+
+        // Check if this hint fits. If there are remaining hints after this one,
+        // we must also reserve space for the "?:more" truncation indicator.
+        // The 2-char separator before "?:more" comes from this hint's own
+        // trailing "  " (included in `with_sep`), so we only reserve for the
+        // indicator text itself.
+        let remaining_after = HINTS.len() - shown - 1;
+        let reserve = if remaining_after > 0 {
+            more_hint_width
+        } else {
+            0
+        };
+
+        if used + with_sep + reserve > available && remaining_after > 0 {
+            // Doesn't fit — append truncation indicator and stop.
+            // The previous hint's trailing "  " separator provides the gap.
+            spans.push(Span::styled(
+                "?".to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::raw(":more"));
+            break;
+        }
+
+        spans.push(Span::styled(
+            key.to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        if !is_last {
+            spans.push(Span::raw(format!(":{desc}  ")));
+        } else {
+            spans.push(Span::raw(format!(":{desc}")));
+        }
+        used += with_sep;
+    }
+
+    Line::from(spans)
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,7 +1484,12 @@ fn render_help(frame: &mut Frame, area: Rect) {
     // Build keybinding lines, each padded to the same total width.
     let mut help_text: Vec<Line<'_>> = Vec::new();
 
-    help_text.push(help_line_padded("Keybindings", max_line_width));
+    let heading_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let footer_style = Style::default().fg(Color::DarkGray);
+
+    help_text.push(help_line_padded("Keybindings", max_line_width, heading_style));
     help_text.push(Line::from(" ".repeat(max_line_width)));
 
     for (key, desc) in &bindings {
@@ -1299,7 +1509,13 @@ fn render_help(frame: &mut Frame, area: Rect) {
     }
 
     help_text.push(Line::from(" ".repeat(max_line_width)));
-    help_text.push(help_line_padded("Press ? to close", max_line_width));
+    help_text.push(help_line_padded(
+        &format!("Min terminal size: {}x{}", MIN_WIDTH, MIN_HEIGHT),
+        max_line_width,
+        heading_style,
+    ));
+    help_text.push(Line::from(" ".repeat(max_line_width)));
+    help_text.push(help_line_padded("Press ? to close", max_line_width, footer_style));
 
     let help = Paragraph::new(help_text)
         .alignment(Alignment::Center)
@@ -1321,23 +1537,14 @@ fn render_help(frame: &mut Frame, area: Rect) {
 
 /// Build a centered label line padded to `width` so it aligns with the
 /// keybinding block when `Alignment::Center` is applied.
-fn help_line_padded<'a>(text: &'a str, width: usize) -> Line<'a> {
+fn help_line_padded(text: &str, width: usize, style: Style) -> Line<'static> {
     let text_len = text.len();
     let total_pad = width.saturating_sub(text_len);
     let left_pad = total_pad / 2;
     let right_pad = total_pad - left_pad;
     Line::from(vec![
         Span::raw(" ".repeat(left_pad)),
-        Span::styled(
-            text,
-            if text == "Press ? to close" {
-                Style::default().fg(Color::DarkGray)
-            } else {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            },
-        ),
+        Span::styled(text.to_string(), style),
         Span::raw(" ".repeat(right_pad)),
     ])
 }
