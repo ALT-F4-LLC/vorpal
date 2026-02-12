@@ -1,0 +1,293 @@
+//! Theme system for the agent TUI.
+//!
+//! Extracts all color constants into a [`Theme`] struct so that every color in
+//! the TUI is driven by the active theme rather than hardcoded values.
+//! Ships with two built-in themes ([`Theme::dark`] and [`Theme::light`]) and
+//! supports runtime cycling via the `t` keybinding.
+
+use ratatui::style::Color;
+
+/// All semantic color roles used by the TUI.
+///
+/// Each field maps to a specific visual element. Rendering code reads from
+/// the active `Theme` instead of using inline `Color::*` constants.
+#[derive(Debug, Clone)]
+pub struct Theme {
+    /// Display name shown in the status bar when cycling themes.
+    pub name: &'static str,
+
+    // -- Tool category colors ------------------------------------------------
+    pub tool_read: Color,
+    pub tool_write: Color,
+    pub tool_bash: Color,
+    pub tool_web: Color,
+    pub tool_default: Color,
+
+    // -- Tab bar -------------------------------------------------------------
+    pub tab_no_agents: Color,
+    pub tab_border: Color,
+    pub tab_badge_success: Color,
+    pub tab_badge_error: Color,
+    pub tab_badge_idle: Color,
+    pub tab_badge_spinner: Color,
+    pub tab_highlight: Color,
+    pub tab_text: Color,
+    pub tab_overflow: Color,
+    pub tab_title: Color,
+
+    // -- Terminal too small message -------------------------------------------
+    pub terminal_too_small: Color,
+
+    // -- Content area --------------------------------------------------------
+    pub content_empty: Color,
+    pub block_marker: Color,
+    pub text_hr: Color,
+    pub tool_input_preview: Color,
+    pub thinking_color: Color,
+    pub result_marker: Color,
+    pub result_text: Color,
+    pub system_text: Color,
+    pub stderr_text: Color,
+    pub error_text: Color,
+    pub tool_result_connector: Color,
+    pub tool_result_text: Color,
+    pub tool_result_error: Color,
+    pub tool_result_hidden: Color,
+
+    // -- Status bar ----------------------------------------------------------
+    pub status_bar_bg: Color,
+    pub status_bar_fg: Color,
+    pub status_message: Color,
+    pub status_no_agent: Color,
+    pub activity_idle: Color,
+    pub activity_thinking: Color,
+    pub activity_tool: Color,
+    pub activity_done: Color,
+    pub status_separator: Color,
+    pub new_output: Color,
+    pub hint_bar_bg: Color,
+    pub hint_bar_fg: Color,
+
+    // -- Input overlay -------------------------------------------------------
+    pub field_label_active: Color,
+    pub field_label_inactive: Color,
+    pub input_border: Color,
+    pub input_title: Color,
+    pub input_bg: Color,
+    pub input_fg: Color,
+    pub cursor_bg: Color,
+    pub cursor_fg: Color,
+    pub selector_separator: Color,
+    pub selector_active: Color,
+    pub selector_inactive: Color,
+    pub selector_option_dim: Color,
+    pub option_unset: Color,
+    pub options_header: Color,
+
+    // -- Help overlay --------------------------------------------------------
+    pub help_border: Color,
+    pub help_title: Color,
+    pub help_heading: Color,
+    pub help_key: Color,
+    pub help_footer: Color,
+    pub help_bg: Color,
+    pub help_fg: Color,
+
+    // -- Confirm close dialog ------------------------------------------------
+    pub confirm_border: Color,
+    pub confirm_title: Color,
+    pub confirm_text: Color,
+    pub confirm_yes: Color,
+    pub confirm_no: Color,
+    pub confirm_bg: Color,
+    pub confirm_fg: Color,
+}
+
+impl Theme {
+    /// The default dark theme — matches the original hardcoded colors.
+    pub fn dark() -> Self {
+        Self {
+            name: "dark",
+
+            tool_read: Color::Green,
+            tool_write: Color::Yellow,
+            tool_bash: Color::Magenta,
+            tool_web: Color::Blue,
+            tool_default: Color::Cyan,
+
+            tab_no_agents: Color::DarkGray,
+            tab_border: Color::DarkGray,
+            tab_badge_success: Color::Green,
+            tab_badge_error: Color::Red,
+            tab_badge_idle: Color::DarkGray,
+            tab_badge_spinner: Color::Cyan,
+            tab_highlight: Color::Cyan,
+            tab_text: Color::White,
+            tab_overflow: Color::DarkGray,
+            tab_title: Color::White,
+
+            terminal_too_small: Color::Red,
+
+            content_empty: Color::DarkGray,
+            block_marker: Color::Cyan,
+            text_hr: Color::DarkGray,
+            tool_input_preview: Color::DarkGray,
+            thinking_color: Color::Magenta,
+            result_marker: Color::Blue,
+            result_text: Color::Blue,
+            system_text: Color::DarkGray,
+            stderr_text: Color::DarkGray,
+            error_text: Color::Red,
+            tool_result_connector: Color::DarkGray,
+            tool_result_text: Color::Gray,
+            tool_result_error: Color::Red,
+            tool_result_hidden: Color::Gray,
+
+            status_bar_bg: Color::DarkGray,
+            status_bar_fg: Color::White,
+            status_message: Color::Yellow,
+            status_no_agent: Color::DarkGray,
+            activity_idle: Color::DarkGray,
+            activity_thinking: Color::Yellow,
+            activity_tool: Color::Cyan,
+            activity_done: Color::Green,
+            status_separator: Color::DarkGray,
+            new_output: Color::Yellow,
+            hint_bar_bg: Color::Black,
+            hint_bar_fg: Color::DarkGray,
+
+            field_label_active: Color::Cyan,
+            field_label_inactive: Color::DarkGray,
+            input_border: Color::Cyan,
+            input_title: Color::Cyan,
+            input_bg: Color::Black,
+            input_fg: Color::White,
+            cursor_bg: Color::White,
+            cursor_fg: Color::Black,
+            selector_separator: Color::DarkGray,
+            selector_active: Color::Cyan,
+            selector_inactive: Color::White,
+            selector_option_dim: Color::DarkGray,
+            option_unset: Color::DarkGray,
+            options_header: Color::DarkGray,
+
+            help_border: Color::Cyan,
+            help_title: Color::Cyan,
+            help_heading: Color::Cyan,
+            help_key: Color::Yellow,
+            help_footer: Color::DarkGray,
+            help_bg: Color::Black,
+            help_fg: Color::White,
+
+            confirm_border: Color::Yellow,
+            confirm_title: Color::Yellow,
+            confirm_text: Color::Yellow,
+            confirm_yes: Color::Green,
+            confirm_no: Color::Red,
+            confirm_bg: Color::Black,
+            confirm_fg: Color::White,
+        }
+    }
+
+    /// A light theme optimized for light terminal backgrounds.
+    pub fn light() -> Self {
+        Self {
+            name: "light",
+
+            tool_read: Color::Green,
+            tool_write: Color::Rgb(180, 130, 0),
+            tool_bash: Color::Magenta,
+            tool_web: Color::Blue,
+            tool_default: Color::Rgb(0, 140, 140),
+
+            tab_no_agents: Color::Gray,
+            tab_border: Color::Gray,
+            tab_badge_success: Color::Green,
+            tab_badge_error: Color::Red,
+            tab_badge_idle: Color::Gray,
+            tab_badge_spinner: Color::Rgb(0, 140, 140),
+            tab_highlight: Color::Rgb(0, 140, 140),
+            tab_text: Color::Black,
+            tab_overflow: Color::Gray,
+            tab_title: Color::Black,
+
+            terminal_too_small: Color::Red,
+
+            content_empty: Color::Gray,
+            block_marker: Color::Rgb(0, 140, 140),
+            text_hr: Color::Gray,
+            tool_input_preview: Color::Gray,
+            thinking_color: Color::Magenta,
+            result_marker: Color::Blue,
+            result_text: Color::Blue,
+            system_text: Color::Gray,
+            stderr_text: Color::Gray,
+            error_text: Color::Red,
+            tool_result_connector: Color::Gray,
+            tool_result_text: Color::DarkGray,
+            tool_result_error: Color::Red,
+            tool_result_hidden: Color::DarkGray,
+
+            status_bar_bg: Color::Rgb(220, 220, 220),
+            status_bar_fg: Color::Black,
+            status_message: Color::Rgb(180, 130, 0),
+            status_no_agent: Color::Gray,
+            activity_idle: Color::Gray,
+            activity_thinking: Color::Rgb(180, 130, 0),
+            activity_tool: Color::Rgb(0, 140, 140),
+            activity_done: Color::Green,
+            status_separator: Color::Gray,
+            new_output: Color::Rgb(180, 130, 0),
+            hint_bar_bg: Color::Rgb(240, 240, 240),
+            hint_bar_fg: Color::Gray,
+
+            field_label_active: Color::Rgb(0, 140, 140),
+            field_label_inactive: Color::Gray,
+            input_border: Color::Rgb(0, 140, 140),
+            input_title: Color::Rgb(0, 140, 140),
+            input_bg: Color::White,
+            input_fg: Color::Black,
+            cursor_bg: Color::Black,
+            cursor_fg: Color::White,
+            selector_separator: Color::Gray,
+            selector_active: Color::Rgb(0, 140, 140),
+            selector_inactive: Color::Black,
+            selector_option_dim: Color::Gray,
+            option_unset: Color::Gray,
+            options_header: Color::Gray,
+
+            help_border: Color::Rgb(0, 140, 140),
+            help_title: Color::Rgb(0, 140, 140),
+            help_heading: Color::Rgb(0, 140, 140),
+            help_key: Color::Rgb(180, 130, 0),
+            help_footer: Color::Gray,
+            help_bg: Color::White,
+            help_fg: Color::Black,
+
+            confirm_border: Color::Rgb(180, 130, 0),
+            confirm_title: Color::Rgb(180, 130, 0),
+            confirm_text: Color::Rgb(180, 130, 0),
+            confirm_yes: Color::Green,
+            confirm_no: Color::Red,
+            confirm_bg: Color::White,
+            confirm_fg: Color::Black,
+        }
+    }
+
+    /// All built-in themes, in cycling order.
+    pub fn builtins() -> &'static [fn() -> Theme] {
+        &[Theme::dark, Theme::light]
+    }
+
+    /// Return a display color based on the tool category.
+    pub fn tool_color(&self, tool: &str) -> Color {
+        let name = tool.strip_prefix("server:").unwrap_or(tool);
+        match name {
+            "Read" | "Grep" | "Glob" => self.tool_read,
+            "Write" | "Edit" | "NotebookEdit" => self.tool_write,
+            "Bash" => self.tool_bash,
+            "WebSearch" | "WebFetch" | "web_search" => self.tool_web,
+            _ => self.tool_default,
+        }
+    }
+}

@@ -7,8 +7,9 @@ use super::state::{
     AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, ResultDisplay,
     EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
+use super::theme::Theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
@@ -38,23 +39,6 @@ const MIN_HEIGHT: u16 = 8;
 const FULL_HINTS_WIDTH: u16 = 120;
 
 // ---------------------------------------------------------------------------
-// Tool color mapping
-// ---------------------------------------------------------------------------
-
-/// Return a display color based on the tool category.
-fn tool_color(tool: &str) -> Color {
-    // Strip "server:" prefix for matching.
-    let name = tool.strip_prefix("server:").unwrap_or(tool);
-    match name {
-        "Read" | "Grep" | "Glob" => Color::Green,
-        "Write" | "Edit" | "NotebookEdit" => Color::Yellow,
-        "Bash" => Color::Magenta,
-        "WebSearch" | "WebFetch" | "web_search" => Color::Blue,
-        _ => Color::Cyan,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Main render entry point
 // ---------------------------------------------------------------------------
 
@@ -65,6 +49,7 @@ fn tool_color(tool: &str) -> Color {
 /// on top of the full terminal area.
 pub fn render(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
+    let theme = &app.theme;
 
     // Gracefully handle terminals below minimum usable size — clear and bail.
     if area.height < MIN_HEIGHT || area.width < MIN_WIDTH {
@@ -73,7 +58,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             MIN_WIDTH, MIN_HEIGHT
         ))
         .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::Red));
+        .style(Style::default().fg(theme.terminal_too_small));
         frame.render_widget(msg, area);
         return;
     }
@@ -90,7 +75,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     render_status(app, frame, chunks[2]);
 
     if app.show_help {
-        render_help(frame, area);
+        render_help(&app.theme, frame, area);
     }
 
     if app.confirm_close {
@@ -108,13 +93,15 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
 /// Render the tab bar showing one tab per agent with status badges.
 fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+
     if app.agents.is_empty() {
         let hint = Paragraph::new(" [No agents] — press 'n' to start one")
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(theme.tab_no_agents))
             .block(
                 Block::default()
                     .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::DarkGray)),
+                    .border_style(Style::default().fg(theme.tab_border)),
             );
         frame.render_widget(hint, area);
         return;
@@ -128,13 +115,15 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
             let label = workspace_label(&agent.workspace);
             let num = i + 1;
             let (badge, badge_color) = match (&agent.status, &agent.activity) {
-                (AgentStatus::Exited(Some(0)), _) => (CHECK_MARK, Color::Green),
-                (AgentStatus::Exited(_), _) => (CROSS_MARK, Color::Red),
-                (AgentStatus::Running, AgentActivity::Idle) => (CIRCLE, Color::DarkGray),
-                (AgentStatus::Running, AgentActivity::Done) => (CHECK_MARK, Color::Green),
+                (AgentStatus::Exited(Some(0)), _) => (CHECK_MARK, theme.tab_badge_success),
+                (AgentStatus::Exited(_), _) => (CROSS_MARK, theme.tab_badge_error),
+                (AgentStatus::Running, AgentActivity::Idle) => (CIRCLE, theme.tab_badge_idle),
+                (AgentStatus::Running, AgentActivity::Done) => {
+                    (CHECK_MARK, theme.tab_badge_success)
+                }
                 (AgentStatus::Running, _) => {
                     let frame_idx = app.tick % SPINNER_FRAMES.len();
-                    (SPINNER_FRAMES[frame_idx], Color::Cyan)
+                    (SPINNER_FRAMES[frame_idx], theme.tab_badge_spinner)
                 }
             };
             Line::from(vec![
@@ -159,7 +148,7 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
             VisibleTab::Overflow(n) => Line::from(Span::styled(
                 format!(" +{n} more "),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme.tab_overflow)
                     .add_modifier(Modifier::DIM),
             )),
         })
@@ -169,15 +158,15 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
         .select(select_index)
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme.tab_highlight)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED),
         )
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(theme.tab_text))
         .divider(Span::raw("|"))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(Color::DarkGray))
+                .border_style(Style::default().fg(theme.tab_border))
                 .title(
                     app.focused_agent()
                         .map(|a| {
@@ -191,7 +180,7 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
                 )
                 .title_style(
                     Style::default()
-                        .fg(Color::White)
+                        .fg(theme.tab_title)
                         .add_modifier(Modifier::BOLD),
                 ),
         );
@@ -262,8 +251,16 @@ fn visible_tab_window(
         if end + 1 < n {
             // divider + tab width
             let cost = 1 + tab_widths[end + 1];
-            let left_reserve = if start > 0 { overflow_width(start) + 1 } else { 0 };
-            let right_reserve = if end + 2 < n { overflow_width(n - end - 2) + 1 } else { 0 };
+            let left_reserve = if start > 0 {
+                overflow_width(start) + 1
+            } else {
+                0
+            };
+            let right_reserve = if end + 2 < n {
+                overflow_width(n - end - 2) + 1
+            } else {
+                0
+            };
             if used + cost + left_reserve + right_reserve <= available {
                 end += 1;
                 used += cost;
@@ -275,8 +272,16 @@ fn visible_tab_window(
         if start > 0 {
             // divider + tab width
             let cost = 1 + tab_widths[start - 1];
-            let left_reserve = if start > 1 { overflow_width(start - 1) + 1 } else { 0 };
-            let right_reserve = if end + 1 < n { overflow_width(n - end - 1) + 1 } else { 0 };
+            let left_reserve = if start > 1 {
+                overflow_width(start - 1) + 1
+            } else {
+                0
+            };
+            let right_reserve = if end + 1 < n {
+                overflow_width(n - end - 1) + 1
+            } else {
+                0
+            };
             if used + cost + left_reserve + right_reserve <= available {
                 start -= 1;
                 used += cost;
@@ -319,12 +324,13 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
     let block = Block::default().borders(Borders::NONE);
 
     let inner = block.inner(area);
+    let theme = &app.theme;
 
     match app.focused_agent() {
         None => {
             let msg = Paragraph::new("No agents yet — press 'n' to start one")
                 .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::DarkGray))
+                .style(Style::default().fg(theme.content_empty))
                 .block(block);
             frame.render_widget(msg, area);
         }
@@ -336,7 +342,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             if agent.output.is_empty() {
                 let msg = Paragraph::new("Waiting for output...")
                     .alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::DarkGray))
+                    .style(Style::default().fg(theme.content_empty))
                     .block(block);
                 frame.render_widget(msg, area);
                 return;
@@ -350,7 +356,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             if !cache_hit {
                 // Recompute collapsed lines and row count.
                 let all_lines: Vec<&DisplayLine> = agent.output.iter().collect();
-                let collapsed = collapse_tool_results(&all_lines, app.result_display);
+                let collapsed = collapse_tool_results(&all_lines, app.result_display, theme);
                 let row_count = wrapped_row_count(&collapsed, inner.width);
                 let owned = lines_to_static(collapsed);
 
@@ -421,21 +427,71 @@ const COMPACT_RESULT_RUN_MAX: usize = 3;
 /// In all modes, consecutive tool result runs are tracked so that only the
 /// first line displays the `⎿` connector; continuation lines use matching
 /// whitespace indentation (Claude Code style).
-fn collapse_tool_results<'a>(lines: &[&'a DisplayLine], mode: ResultDisplay) -> Vec<Line<'a>> {
-    // Strip leading empty Text lines that immediately follow a TurnStart.
-    // Claude often starts a response with "\n\n" which produces empty Text("")
-    // lines — these look fine mid-conversation but create visual noise at the
-    // start of the first turn.
+///
+/// Internally this is a three-stage pipeline:
+/// 1. [`strip_leading_empty_after_turn_start`] — remove visual noise
+/// 2. [`collapse_results`] — group lines into [`CollapsedBlock`]s
+/// 3. [`render_to_spans`] — convert blocks into styled ratatui [`Line`]s
+fn collapse_tool_results<'a>(
+    lines: &[&'a DisplayLine],
+    mode: ResultDisplay,
+    theme: &Theme,
+) -> Vec<Line<'a>> {
     let stripped = strip_leading_empty_after_turn_start(lines);
-    let lines = &stripped;
+    let blocks = collapse_results(&stripped, mode);
+    render_to_spans(&blocks, theme)
+}
 
-    let mut out = Vec::with_capacity(lines.len());
+// ---------------------------------------------------------------------------
+// Pipeline stage 2: collapse into intermediate representation
+// ---------------------------------------------------------------------------
+
+/// Intermediate representation produced by [`collapse_results`].
+///
+/// Each variant captures the data needed by [`render_to_spans`] without
+/// embedding any display logic, making both stages independently testable.
+#[derive(Debug, Clone)]
+enum CollapsedBlock<'a> {
+    /// A run of consecutive tool results, already collapsed per the display mode.
+    ToolResultRun(ToolResultRun<'a>),
+    /// A run of consecutive text lines joined into markdown.
+    TextRun(String),
+    /// Any other single [`DisplayLine`] (ToolUse, Thinking, etc.).
+    Single(&'a DisplayLine),
+}
+
+/// Collapsed representation of a consecutive run of [`DisplayLine::ToolResult`]s.
+#[derive(Debug, Clone, PartialEq)]
+enum ToolResultRun<'a> {
+    /// Mode was [`ResultDisplay::Hidden`]: just the byte-count summary.
+    Hidden { total_bytes: usize },
+    /// Mode was [`ResultDisplay::Compact`]: up to [`COMPACT_RESULT_RUN_MAX`]
+    /// visible lines, plus a count of hidden lines (may be 0).
+    Compact {
+        visible: Vec<ToolResultLine<'a>>,
+        hidden_count: usize,
+    },
+    /// Mode was [`ResultDisplay::Full`]: every line from every entry.
+    Full { lines: Vec<ToolResultLine<'a>> },
+}
+
+/// A single text line extracted from a `ToolResult`'s content.
+#[derive(Debug, Clone, PartialEq)]
+struct ToolResultLine<'a> {
+    text: &'a str,
+    is_error: bool,
+}
+
+/// Group consecutive [`DisplayLine`]s into [`CollapsedBlock`]s.
+///
+/// ToolResult runs are measured and collapsed according to `mode`. Text runs
+/// are gathered and joined. All other line types pass through as `Single`.
+fn collapse_results<'a>(lines: &[&'a DisplayLine], mode: ResultDisplay) -> Vec<CollapsedBlock<'a>> {
+    let mut blocks = Vec::with_capacity(lines.len());
     let mut i = 0;
 
     while i < lines.len() {
         if matches!(lines[i], DisplayLine::ToolResult { .. }) {
-            // Measure the consecutive ToolResult run. Each entry may
-            // contain multiple newline-separated lines of content.
             let run_start = i;
             let mut total_bytes: usize = 0;
             let mut total_lines: usize = 0;
@@ -449,79 +505,52 @@ fn collapse_tool_results<'a>(lines: &[&'a DisplayLine], mode: ResultDisplay) -> 
                 }
             }
 
-            match mode {
-                ResultDisplay::Hidden => {
-                    // Replace the entire run with a byte-count summary.
-                    let size = if total_bytes >= 1024 {
-                        format!("{:.1} KB", total_bytes as f64 / 1024.0)
-                    } else {
-                        format!("{total_bytes} bytes")
-                    };
-                    out.push(Line::from(Span::styled(
-                        format!("  {RESULT_CONNECTOR}  {size} (press 'r' to cycle view)"),
-                        Style::default().fg(Color::Gray),
-                    )));
-                }
+            let run = match mode {
+                ResultDisplay::Hidden => ToolResultRun::Hidden { total_bytes },
                 ResultDisplay::Compact => {
-                    // Show up to COMPACT_RESULT_RUN_MAX lines across all
-                    // entries in the run, then collapse the rest.
-                    let mut lines_shown: usize = 0;
-                    let mut first_line_overall = true;
-                    for dl in &lines[run_start..i] {
+                    let mut visible = Vec::new();
+                    'outer_compact: for dl in &lines[run_start..i] {
                         if let DisplayLine::ToolResult {
                             content, is_error, ..
                         } = dl
                         {
                             for text_line in content.lines() {
-                                if lines_shown >= COMPACT_RESULT_RUN_MAX {
-                                    break;
+                                if visible.len() >= COMPACT_RESULT_RUN_MAX {
+                                    break 'outer_compact;
                                 }
-                                out.extend(render_tool_result(
-                                    text_line,
-                                    *is_error,
-                                    mode,
-                                    first_line_overall,
-                                ));
-                                first_line_overall = false;
-                                lines_shown += 1;
+                                visible.push(ToolResultLine {
+                                    text: text_line,
+                                    is_error: *is_error,
+                                });
                             }
                         }
-                        if lines_shown >= COMPACT_RESULT_RUN_MAX {
-                            break;
-                        }
                     }
-                    let hidden = total_lines.saturating_sub(COMPACT_RESULT_RUN_MAX);
-                    if hidden > 0 {
-                        out.push(Line::from(Span::styled(
-                            format!(
-                                "  {RESULT_CONNECTOR}  ... {hidden} more lines hidden (press 'r' to cycle view)"
-                            ),
-                            Style::default().fg(Color::Gray),
-                        )));
+                    let hidden_count = total_lines.saturating_sub(COMPACT_RESULT_RUN_MAX);
+                    ToolResultRun::Compact {
+                        visible,
+                        hidden_count,
                     }
                 }
                 ResultDisplay::Full => {
-                    let mut first_line_overall = true;
+                    let mut all = Vec::new();
                     for dl in &lines[run_start..i] {
                         if let DisplayLine::ToolResult {
                             content, is_error, ..
                         } = dl
                         {
                             for text_line in content.lines() {
-                                out.extend(render_tool_result(
-                                    text_line,
-                                    *is_error,
-                                    mode,
-                                    first_line_overall,
-                                ));
-                                first_line_overall = false;
+                                all.push(ToolResultLine {
+                                    text: text_line,
+                                    is_error: *is_error,
+                                });
                             }
                         }
                     }
+                    ToolResultRun::Full { lines: all }
                 }
-            }
+            };
+            blocks.push(CollapsedBlock::ToolResultRun(run));
         } else if matches!(lines[i], DisplayLine::Text(_)) {
-            // Gather consecutive Text lines into a single markdown string.
             let run_start = i;
             while i < lines.len() && matches!(lines[i], DisplayLine::Text(_)) {
                 i += 1;
@@ -534,68 +563,151 @@ fn collapse_tool_results<'a>(lines: &[&'a DisplayLine], mode: ResultDisplay) -> 
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            let preprocessed = preprocess_markdown_tables(&markdown);
-            let rendered = tui_markdown::from_str(&preprocessed);
-            // Prefix only the very first non-empty line with a ⏺ marker.
-            // All subsequent lines (including those after blank lines) use
-            // continuation indentation. This matches Claude Code's own
-            // rendering style where each assistant text block gets a single
-            // leading marker.
-            //
-            // Horizontal rules (`---`) are detected and rendered as Unicode
-            // box-drawing separators instead of literal `---` text.
-            let mut need_marker = true;
-            for line in rendered.lines {
-                // Detect horizontal rules: a single span whose trimmed
-                // content is exactly `---` (what tui_markdown emits for
-                // thematic breaks).
-                let is_hr = line.spans.len() == 1 && line.spans[0].content.trim() == "---";
-
-                if is_hr {
-                    let prefix = if need_marker {
-                        need_marker = false;
-                        Span::styled(format!("{BLOCK_MARKER} "), Style::default().fg(Color::Cyan))
-                    } else {
-                        Span::raw(CONTINUATION_INDENT)
-                    };
-                    out.push(Line::from(vec![
-                        prefix,
-                        Span::styled(
-                            "──────────────────────────────",
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]));
-                } else if line.width() == 0 {
-                    out.push(Line::from(""));
-                } else if need_marker {
-                    need_marker = false;
-                    let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                        format!("{BLOCK_MARKER} "),
-                        Style::default().fg(Color::Cyan),
-                    )];
-                    spans.extend(
-                        line.spans
-                            .into_iter()
-                            .map(|s| Span::styled(s.content.into_owned(), s.style)),
-                    );
-                    out.push(Line::from(spans));
-                } else {
-                    let mut spans: Vec<Span<'static>> = vec![Span::raw(CONTINUATION_INDENT)];
-                    spans.extend(
-                        line.spans
-                            .into_iter()
-                            .map(|s| Span::styled(s.content.into_owned(), s.style)),
-                    );
-                    out.push(Line::from(spans));
-                }
-            }
+            blocks.push(CollapsedBlock::TextRun(markdown));
         } else {
-            out.extend(display_line_to_lines(lines[i]));
+            blocks.push(CollapsedBlock::Single(lines[i]));
             i += 1;
         }
     }
 
+    blocks
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline stage 3: render collapsed blocks to ratatui spans
+// ---------------------------------------------------------------------------
+
+/// Convert a sequence of [`CollapsedBlock`]s into styled ratatui [`Line`]s.
+fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme) -> Vec<Line<'a>> {
+    let mut out: Vec<Line<'a>> = Vec::new();
+
+    for block in blocks {
+        match block {
+            CollapsedBlock::ToolResultRun(run) => {
+                render_tool_result_run(run, &mut out, theme);
+            }
+            CollapsedBlock::TextRun(markdown) => {
+                render_text_run(markdown, &mut out, theme);
+            }
+            CollapsedBlock::Single(dl) => {
+                out.extend(display_line_to_lines(dl, theme));
+            }
+        }
+    }
+
     out
+}
+
+/// Render a collapsed tool result run into output lines.
+fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, theme: &Theme) {
+    match run {
+        ToolResultRun::Hidden { total_bytes } => {
+            let size = if *total_bytes >= 1024 {
+                format!("{:.1} KB", *total_bytes as f64 / 1024.0)
+            } else {
+                format!("{total_bytes} bytes")
+            };
+            out.push(Line::from(Span::styled(
+                format!("  {RESULT_CONNECTOR}  {size} (press 'r' to cycle view)"),
+                Style::default().fg(theme.tool_result_hidden),
+            )));
+        }
+        ToolResultRun::Compact {
+            visible,
+            hidden_count,
+        } => {
+            for (idx, trl) in visible.iter().enumerate() {
+                out.extend(render_tool_result(
+                    trl.text,
+                    trl.is_error,
+                    ResultDisplay::Compact,
+                    idx == 0,
+                    theme,
+                ));
+            }
+            if *hidden_count > 0 {
+                out.push(Line::from(Span::styled(
+                    format!(
+                        "  {RESULT_CONNECTOR}  ... {hidden_count} more lines hidden (press 'r' to cycle view)"
+                    ),
+                    Style::default().fg(theme.tool_result_hidden),
+                )));
+            }
+        }
+        ToolResultRun::Full { lines } => {
+            for (idx, trl) in lines.iter().enumerate() {
+                out.extend(render_tool_result(
+                    trl.text,
+                    trl.is_error,
+                    ResultDisplay::Full,
+                    idx == 0,
+                    theme,
+                ));
+            }
+        }
+    }
+}
+
+/// Render a markdown text run into output lines with block marker prefixes.
+fn render_text_run<'a>(markdown: &str, out: &mut Vec<Line<'a>>, theme: &Theme) {
+    let preprocessed = preprocess_markdown_tables(markdown);
+    let rendered = tui_markdown::from_str(&preprocessed);
+    // Prefix only the very first non-empty line with a ⏺ marker.
+    // All subsequent lines (including those after blank lines) use
+    // continuation indentation. This matches Claude Code's own
+    // rendering style where each assistant text block gets a single
+    // leading marker.
+    //
+    // Horizontal rules (`---`) are detected and rendered as Unicode
+    // box-drawing separators instead of literal `---` text.
+    let mut need_marker = true;
+    for line in rendered.lines {
+        // Detect horizontal rules: a single span whose trimmed
+        // content is exactly `---` (what tui_markdown emits for
+        // thematic breaks).
+        let is_hr = line.spans.len() == 1 && line.spans[0].content.trim() == "---";
+
+        if is_hr {
+            let prefix = if need_marker {
+                need_marker = false;
+                Span::styled(
+                    format!("{BLOCK_MARKER} "),
+                    Style::default().fg(theme.block_marker),
+                )
+            } else {
+                Span::raw(CONTINUATION_INDENT)
+            };
+            out.push(Line::from(vec![
+                prefix,
+                Span::styled(
+                    "──────────────────────────────",
+                    Style::default().fg(theme.text_hr),
+                ),
+            ]));
+        } else if line.width() == 0 {
+            out.push(Line::from(""));
+        } else if need_marker {
+            need_marker = false;
+            let mut spans: Vec<Span<'static>> = vec![Span::styled(
+                format!("{BLOCK_MARKER} "),
+                Style::default().fg(theme.block_marker),
+            )];
+            spans.extend(
+                line.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.into_owned(), s.style)),
+            );
+            out.push(Line::from(spans));
+        } else {
+            let mut spans: Vec<Span<'static>> = vec![Span::raw(CONTINUATION_INDENT)];
+            spans.extend(
+                line.spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content.into_owned(), s.style)),
+            );
+            out.push(Line::from(spans));
+        }
+    }
 }
 
 /// Convert a vector of [`Line`]s with borrowed data into fully-owned
@@ -626,6 +738,7 @@ fn render_tool_result(
     is_error: bool,
     mode: ResultDisplay,
     first_in_run: bool,
+    theme: &Theme,
 ) -> Vec<Line<'static>> {
     /// Indentation that matches the width of `  ⎿  `.
     const CONTINUATION_INDENT: &str = "     ";
@@ -645,7 +758,7 @@ fn render_tool_result(
     let prefix = if first_in_run {
         Span::styled(
             format!("  {RESULT_CONNECTOR}  "),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.tool_result_connector),
         )
     } else {
         Span::raw(CONTINUATION_INDENT)
@@ -655,12 +768,14 @@ fn render_tool_result(
     if is_error {
         spans.push(Span::styled(
             "[ERROR] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.tool_result_error)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     spans.push(Span::styled(
         display_content,
-        Style::default().fg(Color::Gray),
+        Style::default().fg(theme.tool_result_text),
     ));
     vec![Line::from(spans)]
 }
@@ -741,7 +856,7 @@ fn preprocess_markdown_tables(input: &str) -> String {
 /// [`DisplayLine::ToolResult`], which are rendered inline (via
 /// `tui_markdown`) and by [`render_tool_result`] respectively with
 /// run-position awareness.
-fn display_line_to_lines(dl: &DisplayLine) -> Vec<Line<'_>> {
+fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>> {
     match dl {
         // Text is handled by render_text_line() for run tracking.
         DisplayLine::Text(_) => Vec::new(),
@@ -750,7 +865,7 @@ fn display_line_to_lines(dl: &DisplayLine) -> Vec<Line<'_>> {
             tool,
             input_preview,
         } => {
-            let color = tool_color(tool);
+            let color = theme.tool_color(tool);
             let mut spans = vec![
                 Span::styled(
                     format!("{BLOCK_MARKER} "),
@@ -764,7 +879,7 @@ fn display_line_to_lines(dl: &DisplayLine) -> Vec<Line<'_>> {
             if !input_preview.is_empty() {
                 spans.push(Span::styled(
                     format!("({input_preview})"),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.tool_input_preview),
                 ));
             }
             vec![Line::from(spans)]
@@ -776,12 +891,12 @@ fn display_line_to_lines(dl: &DisplayLine) -> Vec<Line<'_>> {
         DisplayLine::Thinking(s) => vec![Line::from(vec![
             Span::styled(
                 format!("{BLOCK_MARKER} "),
-                Style::default().fg(Color::Magenta),
+                Style::default().fg(theme.thinking_color),
             ),
             Span::styled(
                 s.as_str(),
                 Style::default()
-                    .fg(Color::Magenta)
+                    .fg(theme.thinking_color)
                     .add_modifier(Modifier::DIM | Modifier::ITALIC),
             ),
         ])],
@@ -790,29 +905,31 @@ fn display_line_to_lines(dl: &DisplayLine) -> Vec<Line<'_>> {
             Span::styled(
                 format!("{SESSION_MARKER} "),
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(theme.result_marker)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(s.as_str(), Style::default().fg(Color::Blue)),
+            Span::styled(s.as_str(), Style::default().fg(theme.result_text)),
         ])],
 
         DisplayLine::System(s) => vec![Line::from(Span::styled(
             s.as_str(),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme.system_text)
                 .add_modifier(Modifier::ITALIC),
         ))],
 
         DisplayLine::Stderr(s) => vec![Line::from(Span::styled(
             s.as_str(),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme.stderr_text)
                 .add_modifier(Modifier::DIM),
         ))],
 
         DisplayLine::Error(s) => vec![Line::from(Span::styled(
             s.as_str(),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.error_text)
+                .add_modifier(Modifier::BOLD),
         ))],
 
         DisplayLine::TurnStart => vec![Line::from("")],
@@ -825,6 +942,8 @@ fn display_line_to_lines(dl: &DisplayLine) -> Vec<Line<'_>> {
 
 /// Render the two-line status bar at the bottom.
 fn render_status(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+
     // Split the 2-line area into two 1-line rows.
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
 
@@ -835,7 +954,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
             Span::styled(
                 msg,
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme.status_message)
                     .add_modifier(Modifier::BOLD),
             ),
         ])
@@ -843,24 +962,24 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         match app.focused_agent() {
             None => Line::from(Span::styled(
                 " No agent",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.status_no_agent),
             )),
             Some(agent) => {
                 let (activity_label, activity_color) = match &agent.activity {
-                    AgentActivity::Idle => ("Idle", Color::DarkGray),
-                    AgentActivity::Thinking => ("Thinking", Color::Yellow),
+                    AgentActivity::Idle => ("Idle", theme.activity_idle),
+                    AgentActivity::Thinking => ("Thinking", theme.activity_thinking),
                     AgentActivity::Tool(_) => {
                         // Handled specially below for the formatted span.
-                        ("", Color::Cyan)
+                        ("", theme.activity_tool)
                     }
-                    AgentActivity::Done => ("Done", Color::Green),
+                    AgentActivity::Done => ("Done", theme.activity_done),
                 };
 
                 let activity_span = if let AgentActivity::Tool(name) = &agent.activity {
                     Span::styled(
                         format!("{ARROW_RIGHT} {name}"),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(theme.activity_tool)
                             .add_modifier(Modifier::BOLD),
                     )
                 } else {
@@ -872,7 +991,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     )
                 };
 
-                let sep = Span::styled(" | ", Style::default().fg(Color::DarkGray));
+                let sep = Span::styled(" | ", Style::default().fg(theme.status_separator));
 
                 let scroll_info = if agent.scroll_offset == 0 {
                     "bottom".to_string()
@@ -896,7 +1015,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     spans.push(Span::styled(
                         "\u{2193} new output",
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(theme.new_output)
                             .add_modifier(Modifier::BOLD),
                     ));
                 }
@@ -906,15 +1025,18 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         }
     };
 
-    let status_paragraph =
-        Paragraph::new(status_line).style(Style::default().bg(Color::DarkGray).fg(Color::White));
+    let status_paragraph = Paragraph::new(status_line).style(
+        Style::default()
+            .bg(theme.status_bar_bg)
+            .fg(theme.status_bar_fg),
+    );
     frame.render_widget(status_paragraph, rows[0]);
 
     // Line 2: keybinding hints — priority-ordered, truncated to fit width.
     let hints = build_hint_bar(area.width);
 
     let hints_paragraph =
-        Paragraph::new(hints).style(Style::default().bg(Color::Black).fg(Color::DarkGray));
+        Paragraph::new(hints).style(Style::default().bg(theme.hint_bar_bg).fg(theme.hint_bar_fg));
     frame.render_widget(hints_paragraph, rows[1]);
 }
 
@@ -935,6 +1057,7 @@ fn build_hint_bar(width: u16) -> Line<'static> {
         ("?", "help"),
         ("y", "copy"),
         ("r", "results"),
+        ("t", "theme"),
         ("^C", "quit"),
         ("j/k", "scroll"),
         ("^D/^U", "page"),
@@ -963,10 +1086,10 @@ fn build_hint_bar(width: u16) -> Line<'static> {
     // Narrow terminal: fit as many hints as possible, append "?:more" if
     // any were truncated.
     let available = width.saturating_sub(1) as usize; // 1 for leading space
-    // The truncation indicator "?:more" is always preceded by a 2-char
-    // separator ("  ") inherited from the last shown hint's trailing gap.
-    // We reserve the indicator width only (6 chars); the separator is already
-    // accounted for in `with_sep` of the preceding hint.
+                                                      // The truncation indicator "?:more" is always preceded by a 2-char
+                                                      // separator ("  ") inherited from the last shown hint's trailing gap.
+                                                      // We reserve the indicator width only (6 chars); the separator is already
+                                                      // accounted for in `with_sep` of the preceding hint.
     let more_hint_width = "?:more".len();
 
     let mut spans = Vec::new();
@@ -1022,20 +1145,22 @@ fn build_hint_bar(width: u16) -> Line<'static> {
 // Input overlay
 // ---------------------------------------------------------------------------
 
-/// Return the label style for a field — cyan/bold when active, dimmed otherwise.
-fn field_label_style(active: bool) -> Style {
+/// Return the label style for a field — highlighted/bold when active, dimmed otherwise.
+fn field_label_style(active: bool, theme: &Theme) -> Style {
     if active {
         Style::default()
-            .fg(Color::Cyan)
+            .fg(theme.field_label_active)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme.field_label_inactive)
     }
 }
 
 /// Render a centered input overlay for entering a new agent prompt, workspace,
 /// and Claude Code options.
 fn render_input(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+
     // Compute inner width from the percentage-based horizontal layout so we
     // can calculate how many rows the input text will wrap to. The inner
     // content width is the popup width minus 2 (left + right border).
@@ -1043,8 +1168,8 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
     let inner_width = popup_width.saturating_sub(2);
 
     // Count wrapped rows for each input field.
-    let prompt_rows = wrapped_input_rows(&app.input_buffer, inner_width);
-    let workspace_rows = wrapped_input_rows(&app.workspace_buffer, inner_width);
+    let prompt_rows = wrapped_input_rows(app.input.text(), inner_width);
+    let workspace_rows = wrapped_input_rows(app.workspace.text(), inner_width);
 
     // Layout: label + prompt + blank + label + workspace + blank
     //       + header + 6×(label + value) + blank + footer
@@ -1061,47 +1186,55 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
 
     // Build input lines — only the active field shows a cursor.
     let prompt_lines = build_input_field_lines(
-        &app.input_buffer,
-        app.input_cursor,
+        app.input.text(),
+        app.input.cursor_pos(),
         app.input_field == InputField::Prompt,
+        theme,
     );
     let workspace_lines = build_input_field_lines(
-        &app.workspace_buffer,
-        app.workspace_cursor,
+        app.workspace.text(),
+        app.workspace.cursor_pos(),
         app.input_field == InputField::Workspace,
+        theme,
     );
 
     // Claude option fields — selector fields use build_selector, others show
     // "(unset)" placeholder when empty and inactive.
     let perm_lines = build_selector(
         PERMISSION_MODES,
-        &app.permission_mode_buffer,
+        app.permission_mode.text(),
         app.input_field == InputField::PermissionMode,
+        theme,
     );
     let model_lines = build_selector(
         MODELS,
-        &app.model_buffer,
+        app.model.text(),
         app.input_field == InputField::Model,
+        theme,
     );
     let effort_lines = build_selector(
         EFFORT_LEVELS,
-        &app.effort_buffer,
+        app.effort.text(),
         app.input_field == InputField::Effort,
+        theme,
     );
     let budget_lines = build_optional_field_lines(
-        &app.max_budget_buffer,
-        app.max_budget_cursor,
+        app.max_budget.text(),
+        app.max_budget.cursor_pos(),
         app.input_field == InputField::MaxBudgetUsd,
+        theme,
     );
     let tools_lines = build_optional_field_lines(
-        &app.allowed_tools_buffer,
-        app.allowed_tools_cursor,
+        app.allowed_tools.text(),
+        app.allowed_tools.cursor_pos(),
         app.input_field == InputField::AllowedTools,
+        theme,
     );
     let dir_lines = build_optional_field_lines(
-        &app.add_dir_buffer,
-        app.add_dir_cursor,
+        app.add_dir.text(),
+        app.add_dir.cursor_pos(),
         app.input_field == InputField::AddDir,
+        theme,
     );
 
     // Footer hint varies by active field.
@@ -1116,13 +1249,13 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
     let mut text = Vec::new();
     text.push(Line::from(Span::styled(
         "Prompt:",
-        field_label_style(app.input_field == InputField::Prompt),
+        field_label_style(app.input_field == InputField::Prompt, theme),
     )));
     text.extend(prompt_lines);
     text.push(Line::from(""));
     text.push(Line::from(Span::styled(
         "Workspace:",
-        field_label_style(app.input_field == InputField::Workspace),
+        field_label_style(app.input_field == InputField::Workspace, theme),
     )));
     text.extend(workspace_lines);
     text.push(Line::from(""));
@@ -1131,44 +1264,44 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
     text.push(Line::from(Span::styled(
         "── Claude Options ──",
         Style::default()
-            .fg(Color::DarkGray)
+            .fg(theme.options_header)
             .add_modifier(Modifier::DIM),
     )));
 
     text.push(Line::from(Span::styled(
         "Permission Mode:",
-        field_label_style(app.input_field == InputField::PermissionMode),
+        field_label_style(app.input_field == InputField::PermissionMode, theme),
     )));
     text.extend(perm_lines);
     text.push(Line::from(Span::styled(
         "Model:",
-        field_label_style(app.input_field == InputField::Model),
+        field_label_style(app.input_field == InputField::Model, theme),
     )));
     text.extend(model_lines);
     text.push(Line::from(Span::styled(
         "Effort:",
-        field_label_style(app.input_field == InputField::Effort),
+        field_label_style(app.input_field == InputField::Effort, theme),
     )));
     text.extend(effort_lines);
     text.push(Line::from(Span::styled(
         "Max Budget USD:",
-        field_label_style(app.input_field == InputField::MaxBudgetUsd),
+        field_label_style(app.input_field == InputField::MaxBudgetUsd, theme),
     )));
     text.extend(budget_lines);
     text.push(Line::from(Span::styled(
         "Allowed Tools (comma-separated):",
-        field_label_style(app.input_field == InputField::AllowedTools),
+        field_label_style(app.input_field == InputField::AllowedTools, theme),
     )));
     text.extend(tools_lines);
     text.push(Line::from(Span::styled(
         "Add Dir (comma-separated):",
-        field_label_style(app.input_field == InputField::AddDir),
+        field_label_style(app.input_field == InputField::AddDir, theme),
     )));
     text.extend(dir_lines);
 
     text.push(Line::from(""));
     text.push(
-        Line::from(Span::styled(footer, Style::default().fg(Color::DarkGray)))
+        Line::from(Span::styled(footer, Style::default().fg(theme.help_footer)))
             .alignment(Alignment::Center),
     );
 
@@ -1176,16 +1309,17 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
     //
     // Compute the wrapped row the cursor occupies, accounting for explicit
     // newlines in the buffer.
-    let (active_buffer, active_cursor) = match app.input_field {
-        InputField::Prompt => (&app.input_buffer, app.input_cursor),
-        InputField::Workspace => (&app.workspace_buffer, app.workspace_cursor),
-        InputField::PermissionMode => (&app.permission_mode_buffer, app.permission_mode_cursor),
-        InputField::Model => (&app.model_buffer, app.model_cursor),
-        InputField::Effort => (&app.effort_buffer, app.effort_cursor),
-        InputField::MaxBudgetUsd => (&app.max_budget_buffer, app.max_budget_cursor),
-        InputField::AllowedTools => (&app.allowed_tools_buffer, app.allowed_tools_cursor),
-        InputField::AddDir => (&app.add_dir_buffer, app.add_dir_cursor),
+    let active_buf = match app.input_field {
+        InputField::Prompt => &app.input,
+        InputField::Workspace => &app.workspace,
+        InputField::PermissionMode => &app.permission_mode,
+        InputField::Model => &app.model,
+        InputField::Effort => &app.effort,
+        InputField::MaxBudgetUsd => &app.max_budget,
+        InputField::AllowedTools => &app.allowed_tools,
+        InputField::AddDir => &app.add_dir,
     };
+    let (active_buffer, active_cursor) = (active_buf.text(), active_buf.cursor_pos());
     let cursor_wrapped_row = if inner_width > 0 {
         let before = &active_buffer[..active_cursor];
         let segments: Vec<&str> = before.split('\n').collect();
@@ -1234,7 +1368,7 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
+                .border_style(Style::default().fg(theme.input_border))
                 .title(if let Some(target_id) = app.respond_target {
                     let label = app
                         .agent_vec_index(target_id)
@@ -1249,11 +1383,11 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
                 })
                 .title_style(
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme.input_title)
                         .add_modifier(Modifier::BOLD),
                 ),
         )
-        .style(Style::default().bg(Color::Black).fg(Color::White));
+        .style(Style::default().bg(theme.input_bg).fg(theme.input_fg));
 
     frame.render_widget(input_widget, popup);
 }
@@ -1279,12 +1413,20 @@ fn wrapped_input_rows(text: &str, width: usize) -> usize {
 ///
 /// Displays all options inline with `│` separators. The currently selected
 /// option is highlighted (cyan when active, white when inactive).
-fn build_selector(options: &[&str], current: &str, active: bool) -> Vec<Line<'static>> {
+fn build_selector(
+    options: &[&str],
+    current: &str,
+    active: bool,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     for (i, option) in options.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                " │ ",
+                Style::default().fg(theme.selector_separator),
+            ));
         }
 
         let is_selected = *option == current;
@@ -1293,13 +1435,17 @@ fn build_selector(options: &[&str], current: &str, active: bool) -> Vec<Line<'st
             spans.push(Span::styled(
                 option.to_string(),
                 Style::default()
-                    .fg(if active { Color::Cyan } else { Color::White })
+                    .fg(if active {
+                        theme.selector_active
+                    } else {
+                        theme.selector_inactive
+                    })
                     .add_modifier(Modifier::BOLD | Modifier::REVERSED),
             ));
         } else {
             spans.push(Span::styled(
                 option.to_string(),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.selector_option_dim),
             ));
         }
     }
@@ -1311,16 +1457,21 @@ fn build_selector(options: &[&str], current: &str, active: bool) -> Vec<Line<'st
 ///
 /// Shows a dim "(unset)" placeholder when the buffer is empty and the field is
 /// not active. Otherwise delegates to [`build_input_field_lines`].
-fn build_optional_field_lines(buffer: &str, cursor: usize, active: bool) -> Vec<Line<'static>> {
+fn build_optional_field_lines(
+    buffer: &str,
+    cursor: usize,
+    active: bool,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
     if buffer.is_empty() && !active {
         vec![Line::from(Span::styled(
             "(unset)",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme.option_unset)
                 .add_modifier(Modifier::DIM),
         ))]
     } else {
-        build_input_field_lines(buffer, cursor, active)
+        build_input_field_lines(buffer, cursor, active, theme)
     }
 }
 
@@ -1329,7 +1480,12 @@ fn build_optional_field_lines(buffer: &str, cursor: usize, active: bool) -> Vec<
 /// Splits the buffer on `\n` so that multiline content (e.g. the prompt
 /// field) renders correctly. The cursor highlight block is placed on the
 /// appropriate segment.
-fn build_input_field_lines(buffer: &str, cursor: usize, active: bool) -> Vec<Line<'static>> {
+fn build_input_field_lines(
+    buffer: &str,
+    cursor: usize,
+    active: bool,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
     let segments: Vec<&str> = buffer.split('\n').collect();
 
     if !active {
@@ -1365,7 +1521,7 @@ fn build_input_field_lines(buffer: &str, cursor: usize, active: bool) -> Vec<Lin
                     } else {
                         after[..clen].to_string()
                     },
-                    Style::default().bg(Color::White).fg(Color::Black),
+                    Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
                 ),
                 Span::raw(after.get(clen..).unwrap_or("").to_string()),
             ]));
@@ -1388,6 +1544,7 @@ fn build_input_field_lines(buffer: &str, cursor: usize, active: bool) -> Vec<Lin
 
 /// Render a confirmation dialog when the user tries to close a running agent.
 fn render_confirm_close(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
     let popup = centered_rect(50, 30, area);
     frame.render_widget(Clear, popup);
 
@@ -1397,7 +1554,7 @@ fn render_confirm_close(app: &App, frame: &mut Frame, area: Rect) {
         Line::from(Span::styled(
             format!("Agent {agent_num} is still running."),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme.confirm_text)
                 .add_modifier(Modifier::BOLD),
         ))
         .alignment(Alignment::Center),
@@ -1410,13 +1567,15 @@ fn render_confirm_close(app: &App, frame: &mut Frame, area: Rect) {
             Span::styled(
                 "y",
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(theme.confirm_yes)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("/"),
             Span::styled(
                 "n",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.confirm_no)
+                    .add_modifier(Modifier::BOLD),
             ),
         ])
         .alignment(Alignment::Center),
@@ -1427,15 +1586,15 @@ fn render_confirm_close(app: &App, frame: &mut Frame, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow))
+                .border_style(Style::default().fg(theme.confirm_border))
                 .title(" Confirm Close ")
                 .title_style(
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(theme.confirm_title)
                         .add_modifier(Modifier::BOLD),
                 ),
         )
-        .style(Style::default().bg(Color::Black).fg(Color::White));
+        .style(Style::default().bg(theme.confirm_bg).fg(theme.confirm_fg));
 
     frame.render_widget(confirm, popup);
 }
@@ -1445,7 +1604,7 @@ fn render_confirm_close(app: &App, frame: &mut Frame, area: Rect) {
 // ---------------------------------------------------------------------------
 
 /// Render a centered help overlay showing all keybindings.
-fn render_help(frame: &mut Frame, area: Rect) {
+fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
     let popup = centered_rect(60, 70, area);
 
     // Clear the area behind the popup.
@@ -1471,6 +1630,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         ("gg", "Scroll to top"),
         ("G", "Jump to bottom (latest)"),
         ("r", "Toggle compact results"),
+        ("t", "Cycle color theme"),
         ("q", "Close focused tab"),
         ("Ctrl+C", "Quit all agents"),
         ("?", "Toggle this help"),
@@ -1485,18 +1645,22 @@ fn render_help(frame: &mut Frame, area: Rect) {
     let mut help_text: Vec<Line<'_>> = Vec::new();
 
     let heading_style = Style::default()
-        .fg(Color::Cyan)
+        .fg(theme.help_heading)
         .add_modifier(Modifier::BOLD);
-    let footer_style = Style::default().fg(Color::DarkGray);
+    let footer_style = Style::default().fg(theme.help_footer);
 
-    help_text.push(help_line_padded("Keybindings", max_line_width, heading_style));
+    help_text.push(help_line_padded(
+        "Keybindings",
+        max_line_width,
+        heading_style,
+    ));
     help_text.push(Line::from(" ".repeat(max_line_width)));
 
     for (key, desc) in &bindings {
         let key_span = Span::styled(
             format!("{key:>width$}", width = KEY_COL_WIDTH),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme.help_key)
                 .add_modifier(Modifier::BOLD),
         );
         let used = KEY_COL_WIDTH + GAP + desc.len();
@@ -1515,22 +1679,26 @@ fn render_help(frame: &mut Frame, area: Rect) {
         heading_style,
     ));
     help_text.push(Line::from(" ".repeat(max_line_width)));
-    help_text.push(help_line_padded("Press ? to close", max_line_width, footer_style));
+    help_text.push(help_line_padded(
+        "Press ? to close",
+        max_line_width,
+        footer_style,
+    ));
 
     let help = Paragraph::new(help_text)
         .alignment(Alignment::Center)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
+                .border_style(Style::default().fg(theme.help_border))
                 .title(" Help ")
                 .title_style(
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme.help_title)
                         .add_modifier(Modifier::BOLD),
                 ),
         )
-        .style(Style::default().bg(Color::Black).fg(Color::White));
+        .style(Style::default().bg(theme.help_bg).fg(theme.help_fg));
 
     frame.render_widget(help, popup);
 }
@@ -1583,4 +1751,362 @@ fn centered_rect_fixed_height(percent_x: u16, height: u16, area: Rect) -> Rect {
         Constraint::Percentage((100 - percent_x) / 2),
     ])
     .split(vertical[1])[1]
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create the default dark theme for tests.
+    fn test_theme() -> Theme {
+        Theme::dark()
+    }
+
+    // -----------------------------------------------------------------------
+    // strip_leading_empty_after_turn_start tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn strip_empty_preserves_non_turn_start_lines() {
+        let lines = vec![
+            DisplayLine::Text("hello".into()),
+            DisplayLine::Text("world".into()),
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let result = strip_leading_empty_after_turn_start(&refs);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn strip_empty_removes_empty_text_after_turn_start() {
+        let lines = vec![
+            DisplayLine::TurnStart,
+            DisplayLine::Text("".into()),
+            DisplayLine::Text("".into()),
+            DisplayLine::Text("hello".into()),
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let result = strip_leading_empty_after_turn_start(&refs);
+        // TurnStart + "hello" (two empty lines removed)
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], DisplayLine::TurnStart));
+        assert!(matches!(result[1], DisplayLine::Text(ref s) if s == "hello"));
+    }
+
+    #[test]
+    fn strip_empty_keeps_empty_text_not_after_turn_start() {
+        let lines = vec![
+            DisplayLine::Text("first".into()),
+            DisplayLine::Text("".into()),
+            DisplayLine::Text("second".into()),
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let result = strip_leading_empty_after_turn_start(&refs);
+        assert_eq!(result.len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // collapse_results tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn collapse_results_groups_consecutive_tool_results_hidden() {
+        let lines = vec![
+            DisplayLine::ToolResult {
+                content: "abc".into(),
+                is_error: false,
+            },
+            DisplayLine::ToolResult {
+                content: "defgh".into(),
+                is_error: false,
+            },
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let blocks = collapse_results(&refs, ResultDisplay::Hidden);
+
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            CollapsedBlock::ToolResultRun(ToolResultRun::Hidden { total_bytes }) => {
+                assert_eq!(*total_bytes, 8); // "abc" + "defgh"
+            }
+            other => panic!("expected Hidden, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn collapse_results_groups_consecutive_tool_results_full() {
+        let lines = vec![
+            DisplayLine::ToolResult {
+                content: "line1\nline2".into(),
+                is_error: false,
+            },
+            DisplayLine::ToolResult {
+                content: "line3".into(),
+                is_error: true,
+            },
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let blocks = collapse_results(&refs, ResultDisplay::Full);
+
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            CollapsedBlock::ToolResultRun(ToolResultRun::Full { lines }) => {
+                assert_eq!(lines.len(), 3);
+                assert_eq!(lines[0].text, "line1");
+                assert!(!lines[0].is_error);
+                assert_eq!(lines[1].text, "line2");
+                assert!(!lines[1].is_error);
+                assert_eq!(lines[2].text, "line3");
+                assert!(lines[2].is_error);
+            }
+            other => panic!("expected Full, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn collapse_results_compact_truncates_long_runs() {
+        // Create a run with more lines than COMPACT_RESULT_RUN_MAX.
+        let lines = vec![DisplayLine::ToolResult {
+            content: "a\nb\nc\nd\ne".into(),
+            is_error: false,
+        }];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let blocks = collapse_results(&refs, ResultDisplay::Compact);
+
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            CollapsedBlock::ToolResultRun(ToolResultRun::Compact {
+                visible,
+                hidden_count,
+            }) => {
+                assert_eq!(visible.len(), COMPACT_RESULT_RUN_MAX);
+                assert_eq!(*hidden_count, 5 - COMPACT_RESULT_RUN_MAX);
+            }
+            other => panic!("expected Compact, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn collapse_results_groups_text_runs() {
+        let lines = vec![
+            DisplayLine::Text("hello".into()),
+            DisplayLine::Text("world".into()),
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let blocks = collapse_results(&refs, ResultDisplay::Full);
+
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            CollapsedBlock::TextRun(md) => {
+                assert_eq!(md, "hello\nworld");
+            }
+            other => panic!("expected TextRun, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn collapse_results_single_variants_pass_through() {
+        let lines = vec![
+            DisplayLine::System("sys".into()),
+            DisplayLine::Error("err".into()),
+            DisplayLine::TurnStart,
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let blocks = collapse_results(&refs, ResultDisplay::Full);
+
+        assert_eq!(blocks.len(), 3);
+        assert!(matches!(blocks[0], CollapsedBlock::Single(_)));
+        assert!(matches!(blocks[1], CollapsedBlock::Single(_)));
+        assert!(matches!(blocks[2], CollapsedBlock::Single(_)));
+    }
+
+    #[test]
+    fn collapse_results_interleaved_types() {
+        let lines = vec![
+            DisplayLine::Text("text1".into()),
+            DisplayLine::ToolUse {
+                tool: "Read".into(),
+                input_preview: "file.rs".into(),
+            },
+            DisplayLine::ToolResult {
+                content: "content".into(),
+                is_error: false,
+            },
+            DisplayLine::Text("text2".into()),
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let blocks = collapse_results(&refs, ResultDisplay::Full);
+
+        assert_eq!(blocks.len(), 4);
+        assert!(matches!(blocks[0], CollapsedBlock::TextRun(_)));
+        assert!(matches!(blocks[1], CollapsedBlock::Single(_)));
+        assert!(matches!(blocks[2], CollapsedBlock::ToolResultRun(_)));
+        assert!(matches!(blocks[3], CollapsedBlock::TextRun(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // render_to_spans tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn render_tool_result_hidden_shows_byte_count() {
+        let blocks = vec![CollapsedBlock::ToolResultRun(ToolResultRun::Hidden {
+            total_bytes: 42,
+        })];
+        let lines = render_to_spans(&blocks, &test_theme());
+        assert_eq!(lines.len(), 1);
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("42 bytes"));
+        assert!(text.contains("press 'r'"));
+    }
+
+    #[test]
+    fn render_tool_result_hidden_formats_kb() {
+        let blocks = vec![CollapsedBlock::ToolResultRun(ToolResultRun::Hidden {
+            total_bytes: 2048,
+        })];
+        let lines = render_to_spans(&blocks, &test_theme());
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("2.0 KB"));
+    }
+
+    #[test]
+    fn render_tool_result_full_shows_all_lines() {
+        let blocks = vec![CollapsedBlock::ToolResultRun(ToolResultRun::Full {
+            lines: vec![
+                ToolResultLine {
+                    text: "first",
+                    is_error: false,
+                },
+                ToolResultLine {
+                    text: "second",
+                    is_error: false,
+                },
+            ],
+        })];
+        let output = render_to_spans(&blocks, &test_theme());
+        assert_eq!(output.len(), 2);
+        // First line should have the connector prefix.
+        let first_text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(first_text.contains(RESULT_CONNECTOR));
+        assert!(first_text.contains("first"));
+    }
+
+    #[test]
+    fn render_tool_result_compact_shows_hidden_count() {
+        let blocks = vec![CollapsedBlock::ToolResultRun(ToolResultRun::Compact {
+            visible: vec![
+                ToolResultLine {
+                    text: "a",
+                    is_error: false,
+                },
+                ToolResultLine {
+                    text: "b",
+                    is_error: false,
+                },
+            ],
+            hidden_count: 5,
+        })];
+        let output = render_to_spans(&blocks, &test_theme());
+        // 2 visible lines + 1 "more lines hidden" line
+        assert_eq!(output.len(), 3);
+        let last_text: String = output[2].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(last_text.contains("5 more lines hidden"));
+    }
+
+    #[test]
+    fn render_tool_result_compact_no_hidden_line_when_zero() {
+        let blocks = vec![CollapsedBlock::ToolResultRun(ToolResultRun::Compact {
+            visible: vec![ToolResultLine {
+                text: "only",
+                is_error: false,
+            }],
+            hidden_count: 0,
+        })];
+        let output = render_to_spans(&blocks, &test_theme());
+        assert_eq!(output.len(), 1);
+    }
+
+    #[test]
+    fn render_text_run_adds_block_marker() {
+        let blocks = vec![CollapsedBlock::TextRun("hello world".into())];
+        let output = render_to_spans(&blocks, &test_theme());
+        assert!(!output.is_empty());
+        let first_text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(first_text.contains(BLOCK_MARKER));
+        assert!(first_text.contains("hello world"));
+    }
+
+    #[test]
+    fn render_single_system_line() {
+        let dl = DisplayLine::System("system msg".into());
+        let blocks = vec![CollapsedBlock::Single(&dl)];
+        let output = render_to_spans(&blocks, &test_theme());
+        assert_eq!(output.len(), 1);
+        let text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("system msg"));
+    }
+
+    #[test]
+    fn render_single_error_line() {
+        let dl = DisplayLine::Error("error msg".into());
+        let blocks = vec![CollapsedBlock::Single(&dl)];
+        let output = render_to_spans(&blocks, &test_theme());
+        assert_eq!(output.len(), 1);
+        let text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("error msg"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Full pipeline (collapse_tool_results) integration tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn full_pipeline_empty_input() {
+        let lines: Vec<&DisplayLine> = vec![];
+        let result = collapse_tool_results(&lines, ResultDisplay::Full, &test_theme());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn full_pipeline_hidden_mode_replaces_results() {
+        let lines = vec![
+            DisplayLine::ToolResult {
+                content: "abc".into(),
+                is_error: false,
+            },
+            DisplayLine::ToolResult {
+                content: "def".into(),
+                is_error: false,
+            },
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let output = collapse_tool_results(&refs, ResultDisplay::Hidden, &test_theme());
+        assert_eq!(output.len(), 1);
+        let text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("6 bytes"));
+    }
+
+    #[test]
+    fn full_pipeline_strips_empty_after_turn_start() {
+        let lines = vec![
+            DisplayLine::TurnStart,
+            DisplayLine::Text("".into()),
+            DisplayLine::Text("content".into()),
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let output = collapse_tool_results(&refs, ResultDisplay::Full, &test_theme());
+        // TurnStart produces 1 empty line, then "content" produces 1 line with marker.
+        // The empty Text("") should be stripped.
+        let all_text: String = output
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref().to_string()))
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(all_text.contains("content"));
+    }
 }

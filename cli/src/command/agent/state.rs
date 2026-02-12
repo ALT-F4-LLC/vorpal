@@ -4,6 +4,7 @@
 //! per-agent state, display lines, and event types.
 
 use super::manager::ClaudeOptions;
+use super::theme::Theme;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -22,6 +23,110 @@ pub const MODELS: &[&str] = &["claude-opus-4-6", "claude-sonnet-4-5", "claude-ha
 
 /// Available effort levels for the selector.
 pub const EFFORT_LEVELS: &[&str] = &["high", "medium", "low"];
+
+// ---------------------------------------------------------------------------
+// InputBuffer
+// ---------------------------------------------------------------------------
+
+/// A text buffer with an associated cursor position.
+///
+/// Encapsulates the two fields that every input form field needs (the text
+/// content and the byte-offset cursor) together with UTF-8-safe mutation
+/// methods. Adding a new form field now requires only one `InputBuffer`
+/// field instead of a `String` + `usize` pair.
+#[derive(Debug, Clone, Default)]
+pub struct InputBuffer {
+    text: String,
+    cursor: usize,
+}
+
+impl InputBuffer {
+    /// Create an empty buffer.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Return the text content.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Return the current cursor byte-offset.
+    pub fn cursor_pos(&self) -> usize {
+        self.cursor
+    }
+
+    /// Replace the buffer contents and place the cursor at the end.
+    pub fn set_text(&mut self, s: impl Into<String>) {
+        self.text = s.into();
+        self.cursor = self.text.len();
+    }
+
+    /// Clear the buffer and reset the cursor to 0.
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+    }
+
+    /// Insert a character at the current cursor position and advance.
+    pub fn insert_char(&mut self, c: char) {
+        self.text.insert(self.cursor, c);
+        self.cursor += c.len_utf8();
+    }
+
+    /// Delete the character before the cursor (Backspace).
+    pub fn delete_char(&mut self) {
+        if self.cursor > 0 {
+            let prev = self.text[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.text.remove(prev);
+            self.cursor = prev;
+        }
+    }
+
+    /// Delete the character at the cursor (Delete key).
+    pub fn delete_char_forward(&mut self) {
+        if self.cursor < self.text.len() {
+            self.text.remove(self.cursor);
+        }
+    }
+
+    /// Move the cursor one character to the left.
+    pub fn move_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor = self.text[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+        }
+    }
+
+    /// Move the cursor one character to the right.
+    pub fn move_right(&mut self) {
+        if self.cursor < self.text.len() {
+            let cur = self.cursor;
+            self.cursor = self.text[cur..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| cur + i)
+                .unwrap_or(self.text.len());
+        }
+    }
+
+    /// Move the cursor to the start of the buffer.
+    pub fn move_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    /// Move the cursor to the end of the buffer.
+    pub fn move_end(&mut self) {
+        self.cursor = self.text.len();
+    }
+}
 
 // ---------------------------------------------------------------------------
 // InputOverrides
@@ -352,40 +457,24 @@ pub struct App {
     pub pending_g: Option<Instant>,
     /// Current input mode (normal navigation vs. prompt input).
     pub input_mode: InputMode,
-    /// Buffer for the prompt input text.
-    pub input_buffer: String,
-    /// Cursor position within `input_buffer`.
-    pub input_cursor: usize,
-    /// Which input field is currently active (prompt or workspace).
+    /// Which input field is currently active.
     pub input_field: InputField,
-    /// Buffer for the workspace input text.
-    pub workspace_buffer: String,
-    /// Cursor position within `workspace_buffer`.
-    pub workspace_cursor: usize,
-    /// Buffer for permission mode input.
-    pub permission_mode_buffer: String,
-    /// Cursor position within `permission_mode_buffer`.
-    pub permission_mode_cursor: usize,
-    /// Buffer for model input.
-    pub model_buffer: String,
-    /// Cursor position within `model_buffer`.
-    pub model_cursor: usize,
-    /// Buffer for effort input.
-    pub effort_buffer: String,
-    /// Cursor position within `effort_buffer`.
-    pub effort_cursor: usize,
-    /// Buffer for max budget USD input.
-    pub max_budget_buffer: String,
-    /// Cursor position within `max_budget_buffer`.
-    pub max_budget_cursor: usize,
-    /// Buffer for allowed tools input (comma-separated).
-    pub allowed_tools_buffer: String,
-    /// Cursor position within `allowed_tools_buffer`.
-    pub allowed_tools_cursor: usize,
-    /// Buffer for add-dir input (comma-separated).
-    pub add_dir_buffer: String,
-    /// Cursor position within `add_dir_buffer`.
-    pub add_dir_cursor: usize,
+    /// Prompt input buffer.
+    pub input: InputBuffer,
+    /// Workspace input buffer.
+    pub workspace: InputBuffer,
+    /// Permission mode input buffer.
+    pub permission_mode: InputBuffer,
+    /// Model input buffer.
+    pub model: InputBuffer,
+    /// Effort input buffer.
+    pub effort: InputBuffer,
+    /// Max budget USD input buffer.
+    pub max_budget: InputBuffer,
+    /// Allowed tools input buffer (comma-separated).
+    pub allowed_tools: InputBuffer,
+    /// Add-dir input buffer (comma-separated).
+    pub add_dir: InputBuffer,
     /// When `Some(id)`, the input overlay is a "respond" to the agent with the
     /// given `id` rather than a new-agent prompt. The target agent's session ID
     /// will be passed to `AgentManager::spawn()` so Claude resumes the conversation.
@@ -398,6 +487,10 @@ pub struct App {
     pub default_workspace: PathBuf,
     /// Default Claude Code options (from CLI flags), used to pre-populate input fields.
     pub default_claude_options: ClaudeOptions,
+    /// Active color theme for the TUI.
+    pub theme: Theme,
+    /// Index into [`Theme::builtins()`] for cycling.
+    pub theme_index: usize,
 }
 
 impl App {
@@ -414,27 +507,21 @@ impl App {
             status_message: None,
             pending_g: None,
             input_mode: InputMode::Normal,
-            input_buffer: String::new(),
-            input_cursor: 0,
             input_field: InputField::Prompt,
-            workspace_buffer: String::new(),
-            workspace_cursor: 0,
-            permission_mode_buffer: String::new(),
-            permission_mode_cursor: 0,
-            model_buffer: String::new(),
-            model_cursor: 0,
-            effort_buffer: String::new(),
-            effort_cursor: 0,
-            max_budget_buffer: String::new(),
-            max_budget_cursor: 0,
-            allowed_tools_buffer: String::new(),
-            allowed_tools_cursor: 0,
-            add_dir_buffer: String::new(),
-            add_dir_cursor: 0,
+            input: InputBuffer::new(),
+            workspace: InputBuffer::new(),
+            permission_mode: InputBuffer::new(),
+            model: InputBuffer::new(),
+            effort: InputBuffer::new(),
+            max_budget: InputBuffer::new(),
+            allowed_tools: InputBuffer::new(),
+            add_dir: InputBuffer::new(),
             respond_target: None,
             tick: 0,
             default_workspace,
             default_claude_options,
+            theme: Theme::dark(),
+            theme_index: 0,
         }
     }
 
@@ -517,8 +604,7 @@ impl App {
     pub fn enter_input_mode_with(&mut self, overrides: Option<InputOverrides>) {
         self.input_mode = InputMode::Input;
         self.input_field = InputField::Prompt;
-        self.input_buffer.clear();
-        self.input_cursor = 0;
+        self.input.clear();
 
         let (opts, workspace_str) = match overrides {
             Some(o) => (o.claude_options, o.workspace.display().to_string()),
@@ -528,45 +614,32 @@ impl App {
             ),
         };
 
-        self.workspace_buffer = workspace_str;
-        self.workspace_cursor = self.workspace_buffer.len();
-        self.permission_mode_buffer = opts.permission_mode.unwrap_or_default();
-        self.permission_mode_cursor = self.permission_mode_buffer.len();
-        self.model_buffer = opts.model.unwrap_or_default();
-        self.model_cursor = self.model_buffer.len();
-        self.effort_buffer = opts.effort.unwrap_or_default();
-        self.effort_cursor = self.effort_buffer.len();
-        self.max_budget_buffer = opts
-            .max_budget_usd
-            .map(|v| v.to_string())
-            .unwrap_or_default();
-        self.max_budget_cursor = self.max_budget_buffer.len();
-        self.allowed_tools_buffer = opts.allowed_tools.join(", ");
-        self.allowed_tools_cursor = self.allowed_tools_buffer.len();
-        self.add_dir_buffer = opts.add_dirs.join(", ");
-        self.add_dir_cursor = self.add_dir_buffer.len();
+        self.workspace.set_text(workspace_str);
+        self.permission_mode
+            .set_text(opts.permission_mode.unwrap_or_default());
+        self.model.set_text(opts.model.unwrap_or_default());
+        self.effort.set_text(opts.effort.unwrap_or_default());
+        self.max_budget.set_text(
+            opts.max_budget_usd
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+        );
+        self.allowed_tools.set_text(opts.allowed_tools.join(", "));
+        self.add_dir.set_text(opts.add_dirs.join(", "));
     }
 
     /// Exit prompt input mode, clearing all buffers.
     pub fn exit_input_mode(&mut self) {
         self.input_mode = InputMode::Normal;
         self.input_field = InputField::Prompt;
-        self.input_buffer.clear();
-        self.input_cursor = 0;
-        self.workspace_buffer.clear();
-        self.workspace_cursor = 0;
-        self.permission_mode_buffer.clear();
-        self.permission_mode_cursor = 0;
-        self.model_buffer.clear();
-        self.model_cursor = 0;
-        self.effort_buffer.clear();
-        self.effort_cursor = 0;
-        self.max_budget_buffer.clear();
-        self.max_budget_cursor = 0;
-        self.allowed_tools_buffer.clear();
-        self.allowed_tools_cursor = 0;
-        self.add_dir_buffer.clear();
-        self.add_dir_cursor = 0;
+        self.input.clear();
+        self.workspace.clear();
+        self.permission_mode.clear();
+        self.model.clear();
+        self.effort.clear();
+        self.max_budget.clear();
+        self.allowed_tools.clear();
+        self.add_dir.clear();
         self.respond_target = None;
     }
 
@@ -579,11 +652,11 @@ impl App {
     /// `None` when the prompt is empty (buffers stay intact so the user can
     /// keep editing).
     pub fn submit_input(&mut self) -> Option<(String, PathBuf, ClaudeOptions)> {
-        let prompt = self.input_buffer.trim().to_string();
+        let prompt = self.input.text().trim().to_string();
         if prompt.is_empty() {
             return None;
         }
-        let workspace_str = self.workspace_buffer.trim();
+        let workspace_str = self.workspace.text().trim();
         let workspace = if workspace_str.is_empty() {
             self.default_workspace.clone()
         } else {
@@ -600,23 +673,26 @@ impl App {
         };
 
         let claude_options = ClaudeOptions {
-            permission_mode: non_empty(&self.permission_mode_buffer),
-            model: non_empty(&self.model_buffer),
-            effort: non_empty(&self.effort_buffer),
+            permission_mode: non_empty(self.permission_mode.text()),
+            model: non_empty(self.model.text()),
+            effort: non_empty(self.effort.text()),
             max_budget_usd: self
-                .max_budget_buffer
+                .max_budget
+                .text()
                 .trim()
                 .parse::<f64>()
                 .ok()
                 .filter(|v| *v > 0.0),
             allowed_tools: self
-                .allowed_tools_buffer
+                .allowed_tools
+                .text()
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect(),
             add_dirs: self
-                .add_dir_buffer
+                .add_dir
+                .text()
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
@@ -635,6 +711,17 @@ impl App {
     /// Go to the previous input field (Shift+Tab).
     pub fn prev_input_field(&mut self) {
         self.input_field = self.input_field.prev();
+    }
+
+    /// Cycle to the next built-in theme.
+    pub fn cycle_theme(&mut self) {
+        let builtins = Theme::builtins();
+        self.theme_index = (self.theme_index + 1) % builtins.len();
+        self.theme = builtins[self.theme_index]();
+        // Invalidate all agent caches so the new theme colors take effect.
+        for agent in &mut self.agents {
+            agent.cached_lines = None;
+        }
     }
 
     /// Focus a specific agent by index. No-op if out of range.
@@ -1014,71 +1101,67 @@ mod tests {
 
         assert_eq!(app.input_mode, InputMode::Input);
         assert_eq!(app.input_field, InputField::Prompt);
-        assert!(app.input_buffer.is_empty());
-        assert_eq!(app.input_cursor, 0);
-        assert_eq!(app.workspace_buffer, "/tmp/default");
-        assert_eq!(app.workspace_cursor, "/tmp/default".len());
+        assert!(app.input.text().is_empty());
+        assert_eq!(app.input.cursor_pos(), 0);
+        assert_eq!(app.workspace.text(), "/tmp/default");
+        assert_eq!(app.workspace.cursor_pos(), "/tmp/default".len());
     }
 
     #[test]
     fn enter_input_mode_clears_previous_buffer() {
         let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
-        app.input_buffer = "leftover".to_string();
-        app.input_cursor = 5;
-        app.workspace_buffer = "/old/path".to_string();
-        app.workspace_cursor = 3;
+        app.input.set_text("leftover");
+        app.workspace.set_text("/old/path");
         app.input_field = InputField::Workspace;
 
         app.enter_input_mode();
 
         assert_eq!(app.input_mode, InputMode::Input);
         assert_eq!(app.input_field, InputField::Prompt);
-        assert!(app.input_buffer.is_empty());
-        assert_eq!(app.input_cursor, 0);
-        assert_eq!(app.workspace_buffer, "/tmp/default");
-        assert_eq!(app.workspace_cursor, "/tmp/default".len());
+        assert!(app.input.text().is_empty());
+        assert_eq!(app.input.cursor_pos(), 0);
+        assert_eq!(app.workspace.text(), "/tmp/default");
+        assert_eq!(app.workspace.cursor_pos(), "/tmp/default".len());
     }
 
     #[test]
     fn exit_input_mode_restores_normal() {
         let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
-        app.input_buffer = "some text".to_string();
-        app.input_cursor = 4;
-        app.workspace_buffer = "/some/path".to_string();
-        app.workspace_cursor = 5;
+        app.input.set_text("some text");
+        app.workspace.set_text("/some/path");
         app.input_field = InputField::Workspace;
 
         app.exit_input_mode();
 
         assert_eq!(app.input_mode, InputMode::Normal);
         assert_eq!(app.input_field, InputField::Prompt);
-        assert!(app.input_buffer.is_empty());
-        assert_eq!(app.input_cursor, 0);
-        assert!(app.workspace_buffer.is_empty());
-        assert_eq!(app.workspace_cursor, 0);
+        assert!(app.input.text().is_empty());
+        assert_eq!(app.input.cursor_pos(), 0);
+        assert!(app.workspace.text().is_empty());
+        assert_eq!(app.workspace.cursor_pos(), 0);
     }
 
     #[test]
     fn submit_input_returns_trimmed_text() {
         let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
-        app.input_buffer = "  hello world  ".to_string();
+        app.input.set_text("  hello world  ");
 
         let result = app.submit_input();
         let (prompt, workspace, _opts) = result.expect("should return Some");
         assert_eq!(prompt, "hello world");
         assert_eq!(workspace, PathBuf::from("/tmp/default"));
         assert_eq!(app.input_mode, InputMode::Normal);
-        assert!(app.input_buffer.is_empty());
-        assert_eq!(app.input_cursor, 0);
+        assert!(app.input.text().is_empty());
+        assert_eq!(app.input.cursor_pos(), 0);
     }
 
     #[test]
     fn submit_input_returns_none_for_empty() {
         let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
-        app.input_buffer = "".to_string();
+        // input is already empty after enter_input_mode
 
         let result = app.submit_input();
         assert_eq!(result, None);
@@ -1090,7 +1173,7 @@ mod tests {
     fn submit_input_returns_none_for_whitespace_only() {
         let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
-        app.input_buffer = "   	  ".to_string();
+        app.input.set_text("   \t  ");
 
         let result = app.submit_input();
         assert_eq!(result, None);
@@ -1101,8 +1184,8 @@ mod tests {
     fn submit_input_uses_custom_workspace() {
         let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
-        app.input_buffer = "my prompt".to_string();
-        app.workspace_buffer = "/custom/path".to_string();
+        app.input.set_text("my prompt");
+        app.workspace.set_text("/custom/path");
 
         let result = app.submit_input();
         let (prompt, workspace, _opts) = result.expect("should return Some");
@@ -1114,8 +1197,8 @@ mod tests {
     fn submit_input_falls_back_to_default_workspace() {
         let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
-        app.input_buffer = "my prompt".to_string();
-        app.workspace_buffer = "   ".to_string(); // whitespace-only
+        app.input.set_text("my prompt");
+        app.workspace.set_text("   "); // whitespace-only
 
         let result = app.submit_input();
         let (prompt, workspace, _opts) = result.expect("should return Some");
