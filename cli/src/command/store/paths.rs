@@ -12,6 +12,19 @@ pub fn get_root_dir_path() -> PathBuf {
     Path::new("/var/lib/vorpal").to_path_buf()
 }
 
+pub fn get_socket_path() -> PathBuf {
+    if let Ok(path) = std::env::var("VORPAL_SOCKET_PATH") {
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    get_root_dir_path().join("vorpal.sock")
+}
+
+pub fn get_lock_path() -> PathBuf {
+    get_root_dir_path().join("vorpal.lock")
+}
+
 pub fn get_root_key_dir_path() -> PathBuf {
     get_root_dir_path().join("key")
 }

@@ -276,8 +276,19 @@ func getTransportCredentials(address string) (credentials.TransportCredentials, 
 
 // BuildClientConn creates a gRPC client connection for the given address.
 // It auto-detects the transport based on the URI scheme (http:// = plaintext,
-// https:// = TLS with optional CA cert).
+// https:// = TLS with optional CA cert, unix:// = UDS with plaintext).
 func BuildClientConn(address string) (*grpc.ClientConn, error) {
+	if strings.HasPrefix(address, "unix://") {
+		conn, err := grpc.NewClient(
+			address,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to unix socket %s: %w", address, err)
+		}
+		return conn, nil
+	}
+
 	creds, host, err := getTransportCredentials(address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure transport for %s: %w", address, err)

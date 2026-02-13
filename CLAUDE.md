@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Vorpal
 
-Vorpal is a distributed, language-agnostic artifact build and execution system. It uses gRPC services (agent, registry, worker) to build, store, and run artifacts across multiple platforms (aarch64-darwin, aarch64-linux, x86_64-darwin, x86_64-linux). Services run in plaintext mode by default; mutual TLS is available via the `--tls` flag for production deployments.
+Vorpal is a distributed, language-agnostic artifact build and execution system. It uses gRPC services (agent, registry, worker) to build, store, and run artifacts across multiple platforms (aarch64-darwin, aarch64-linux, x86_64-darwin, x86_64-linux). Services communicate over a Unix domain socket (UDS) by default at `/var/lib/vorpal/vorpal.sock`. TCP mode is available via `--port` for network access, and mutual TLS is available via `--tls` for production deployments.
 
 ## Build & Development Commands
 
@@ -34,14 +34,15 @@ Workspace crates: `vorpal-cli`, `vorpal-sdk`, `vorpal-config`
 ### Running Vorpal Locally
 
 ```bash
-# 1. Start all services (agent + registry + worker on port 23153, plaintext by default)
+# Default (UDS) — services listen on /var/lib/vorpal/vorpal.sock
 make vorpal-start
-
-# 2. Build an artifact
 make vorpal                              # builds default (vorpal)
 make VORPAL_ARTIFACT=vorpal-shell vorpal # builds specific artifact
 
-# Optional: enable TLS (requires generating keys first)
+# TCP mode — services listen on a TCP port
+make vorpal-start VORPAL_FLAGS="--port 23153"
+
+# TLS mode — requires generating keys first (implies TCP, defaults to port 23151)
 cargo run --bin vorpal -- system keys generate
 make vorpal-start VORPAL_FLAGS="--tls"
 ```
@@ -72,7 +73,13 @@ go build ./...
 
 ### Service Architecture
 
-All three services run on the same port (default 23153). By default, services use plaintext (HTTP); pass `--tls` to enable mutual TLS:
+All three services run on the same endpoint. By default, services listen on a Unix domain socket at `/var/lib/vorpal/vorpal.sock`. Pass `--port` to switch to TCP mode, or `--tls` to enable mutual TLS over TCP. Three transport modes are available:
+
+| Mode | Flag | Address Example |
+|---|---|---|
+| UDS (default) | *(none)* | `unix:///var/lib/vorpal/vorpal.sock` |
+| Plaintext TCP | `--port 23153` | `http://localhost:23153` |
+| TLS TCP | `--tls` | `https://localhost:23151` |
 
 1. **Agent** (`AgentService::PrepareArtifact`) - Prepares/stages artifacts locally, manages sandboxes
 2. **Registry** (`ArtifactService` + `ArchiveService`) - Stores artifact metadata and binary archives (local or S3 backend). Archives use zstd compression with chunked streaming.
@@ -110,9 +117,15 @@ Source of truth: `sdk/rust/api/` with five proto files (agent, archive, artifact
 - `Vorpal.go.toml` - Go artifact build config (used for SDK parity testing)
 - `rust-toolchain.toml` - Pinned to Rust 1.89.0
 
-### TLS
+### Transport Modes
 
-TLS is optional. By default, services start in plaintext mode (HTTP) for local development. To enable TLS, pass `--tls` to `vorpal system services start` and use `https://` addresses for client connections. TLS keys/certs are managed via `vorpal system keys generate` and stored in `/var/lib/vorpal/`. The shared TLS client config helper is in the SDK (`get_client_tls_config()` in Rust, `getTransportCredentials()` in Go). Both SDKs auto-detect the transport based on the address scheme (`http://` = plaintext, `https://` = TLS). CA certificate is optional when using TLS (falls back to system trust store).
+Vorpal supports three transport modes:
+
+- **UDS (default)** -- Services listen on `/var/lib/vorpal/vorpal.sock`. No flags required. This is the recommended mode for local development. Clients connect using `unix:///var/lib/vorpal/vorpal.sock`. Override the socket path with `VORPAL_SOCKET_PATH` env var.
+- **Plaintext TCP** -- Pass `--port <N>` to `vorpal system services start` to listen on a TCP port. Clients connect using `http://` addresses (e.g., `http://localhost:23153`).
+- **TLS TCP** -- Pass `--tls` to enable mutual TLS. This implies TCP mode and defaults to port 23151. Clients connect using `https://` addresses. TLS keys/certs are managed via `vorpal system keys generate` and stored in `/var/lib/vorpal/`.
+
+Both Rust and Go SDKs auto-detect the transport based on the address scheme: `unix://` = UDS, `http://` = plaintext TCP, `https://` = TLS TCP. The shared TLS client config helper is in the SDK (`get_client_tls_config()` in Rust, `getTransportCredentials()` in Go). CA certificate is optional when using TLS (falls back to system trust store).
 
 ### Artifact Store
 

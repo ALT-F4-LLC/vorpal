@@ -104,10 +104,10 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- build --agent "http://localhost:23153" --registry "http://localhost:23153" --worker "http://localhost:23153" $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- build $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start --health-check --health-check-port "23154" --port "23153" $(VORPAL_FLAGS)
+	cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start $(VORPAL_FLAGS)
 
 # Lima environment
 

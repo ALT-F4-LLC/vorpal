@@ -66,8 +66,10 @@ pub enum CommandSystemServices {
         #[arg(long)]
         issuer_client_secret: Option<String>,
 
-        #[arg(default_value = "23151", long)]
-        port: u16,
+        /// TCP port to listen on. If omitted, listens on a Unix domain socket
+        /// (default: /var/lib/vorpal/vorpal.sock, override: VORPAL_SOCKET_PATH env var)
+        #[arg(long)]
+        port: Option<u16>,
 
         #[arg(default_value = "agent,registry,worker", long)]
         services: String,
@@ -128,7 +130,7 @@ pub enum Command {
         /// Artifact name
         name: String,
 
-        /// Artifact agent address
+        /// Artifact agent address (VORPAL_SOCKET_PATH env var overrides default socket path)
         #[arg(default_value_t = get_default_address(), long)]
         agent: String,
 
@@ -156,7 +158,7 @@ pub enum Command {
         #[arg(default_value_t = false, long)]
         rebuild: bool,
 
-        // Registry address
+        /// Registry address (VORPAL_SOCKET_PATH env var overrides default socket path)
         #[arg(default_value_t = get_default_address(), global = true, long)]
         registry: String,
 
@@ -172,7 +174,7 @@ pub enum Command {
         #[arg(long)]
         variable: Vec<String>,
 
-        /// Artifact worker address
+        /// Artifact worker address (VORPAL_SOCKET_PATH env var overrides default socket path)
         #[arg(default_value_t = get_default_address(), long)]
         worker: String,
     },
@@ -196,7 +198,7 @@ pub enum Command {
         #[arg(default_value_t = get_default_namespace(), long)]
         namespace: String,
 
-        /// Registry address
+        /// Registry address (VORPAL_SOCKET_PATH env var overrides default socket path)
         #[arg(default_value_t = get_default_address(), long)]
         registry: String,
     },
@@ -215,7 +217,7 @@ pub enum Command {
         #[arg(long, default_value = "cli")]
         issuer_client_id: String,
 
-        // Registry address
+        /// Registry address (VORPAL_SOCKET_PATH env var overrides default socket path)
         #[arg(default_value_t = get_default_address(), global = true, long)]
         registry: String,
     },
@@ -234,7 +236,7 @@ pub enum Command {
         #[arg(long)]
         bin: Option<String>,
 
-        /// Registry address
+        /// Registry address (VORPAL_SOCKET_PATH env var overrides default socket path)
         #[arg(default_value_t = get_default_address(), long)]
         registry: String,
     },

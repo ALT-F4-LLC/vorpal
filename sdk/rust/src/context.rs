@@ -525,8 +525,29 @@ async fn get_client_tls_config(uri: &str) -> Result<Option<ClientTlsConfig>> {
 }
 
 pub async fn build_channel(uri: &str) -> Result<Channel> {
+    // Handle Unix domain socket connections
+    if uri.starts_with("unix://") {
+        let socket_path = uri.strip_prefix("unix://").unwrap().to_string();
+
+        // Dummy URI required by tonic's channel builder; ignored when using a custom connector.
+        // Uses connect_with_connector_lazy so the channel is created immediately and the
+        // actual connection is deferred until the first RPC call, avoiding startup races
+        // when the client is created before the server socket is ready.
+        let channel = Channel::from_static("http://[::]:50051")
+            .connect_with_connector_lazy(tower::service_fn(move |_: tonic::transport::Uri| {
+                let path = socket_path.clone();
+                async move {
+                    Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
+                        tokio::net::UnixStream::connect(path).await?,
+                    ))
+                }
+            }));
+
+        return Ok(channel);
+    }
+
     if !uri.starts_with("http://") && !uri.starts_with("https://") {
-        bail!("URI must start with http:// or https://: {}", uri);
+        bail!("URI must start with http://, https://, or unix://: {}", uri);
     }
 
     let parsed_uri = uri

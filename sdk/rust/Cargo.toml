@@ -11,6 +11,7 @@ version = "0.1.0"
 anyhow = { version = "1.0.100" }
 clap = { version = "4.5.57", features = ["derive"] }
 http = { version = "1.4.0" }
+hyper-util = { version = "0.1.20" }
 indoc = { version = "2.0.7" }
 oauth2 = { version = "5.0.0", features = ["reqwest"] }
 prost = { version = "0.14.3" }
@@ -21,6 +22,7 @@ sha256 = { version = "1.6.0" }
 tokio = { version = "1.49.0", features = ["process", "rt-multi-thread"] }
 toml = { version = "0.9.11" }
 tonic = { version = "0.14.3", features = ["tls-ring"] }
+tower = { version = "0.5.3" }
 tonic-prost = { version = "0.14.3" }
 tracing = { version = "0.1.44" }
 
