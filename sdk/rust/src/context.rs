@@ -533,15 +533,16 @@ pub async fn build_channel(uri: &str) -> Result<Channel> {
         // Uses connect_with_connector_lazy so the channel is created immediately and the
         // actual connection is deferred until the first RPC call, avoiding startup races
         // when the client is created before the server socket is ready.
-        let channel = Channel::from_static("http://[::]:50051")
-            .connect_with_connector_lazy(tower::service_fn(move |_: tonic::transport::Uri| {
+        let channel = Channel::from_static("http://[::]:50051").connect_with_connector_lazy(
+            tower::service_fn(move |_: tonic::transport::Uri| {
                 let path = socket_path.clone();
                 async move {
                     Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
                         tokio::net::UnixStream::connect(path).await?,
                     ))
                 }
-            }));
+            }),
+        );
 
         return Ok(channel);
     }

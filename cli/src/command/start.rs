@@ -6,7 +6,9 @@ use crate::command::{
         },
         worker::WorkerServer,
     },
-    store::paths::{get_key_service_key_path, get_key_service_path, get_lock_path, get_socket_path},
+    store::paths::{
+        get_key_service_key_path, get_key_service_path, get_lock_path, get_socket_path,
+    },
 };
 use anyhow::{bail, Result};
 use fs4::fs_std::FileExt;
@@ -63,13 +65,17 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
         ));
     }
 
-    let cert = read_to_string(&cert_path)
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to read public key {}: {}", cert_path.display(), err))?;
+    let cert = read_to_string(&cert_path).await.map_err(|err| {
+        anyhow::anyhow!("failed to read public key {}: {}", cert_path.display(), err)
+    })?;
 
-    let private_key = read_to_string(&private_key_path)
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to read private key {}: {}", private_key_path.display(), err))?;
+    let private_key = read_to_string(&private_key_path).await.map_err(|err| {
+        anyhow::anyhow!(
+            "failed to read private key {}: {}",
+            private_key_path.display(),
+            err
+        )
+    })?;
 
     let config_identity = Identity::from_pem(cert, private_key);
 
@@ -124,7 +130,11 @@ pub async fn run(args: RunArgs) -> Result<()> {
             .tls_config(tls_config)?
             .add_service(health_service)
     } else {
-        let transport = if effective_port.is_some() { "plaintext TCP" } else { "Unix domain socket" };
+        let transport = if effective_port.is_some() {
+            "plaintext TCP"
+        } else {
+            "Unix domain socket"
+        };
         info!("TLS disabled, using {} for main listener", transport);
         Server::builder().add_service(health_service)
     };
@@ -307,9 +317,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
             None
         };
 
-    let mut sigterm =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .map_err(|err| anyhow::anyhow!("failed to register SIGTERM handler: {}", err))?;
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|err| anyhow::anyhow!("failed to register SIGTERM handler: {}", err))?;
 
     // Bind and serve: UDS when no port specified, TCP otherwise
     let result = if let Some(port) = effective_port {
@@ -345,11 +354,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
             )
         })?;
         let acquired = lock_file.try_lock_exclusive().map_err(|err| {
-            anyhow::anyhow!(
-                "failed to acquire lock on {}: {}",
-                lock_path.display(),
-                err
-            )
+            anyhow::anyhow!("failed to acquire lock on {}: {}", lock_path.display(), err)
         })?;
         if !acquired {
             bail!(
@@ -427,11 +432,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
         info!("listening on unix socket: {}", socket_path.display());
         let main_incoming = UnixListenerStream::new(uds_listener);
         let cleanup_path = socket_path.clone();
-        let result = serve_with_shutdown(
-            router.serve_with_incoming(main_incoming),
-            &mut sigterm,
-        )
-        .await;
+        let result =
+            serve_with_shutdown(router.serve_with_incoming(main_incoming), &mut sigterm).await;
         // Clean up socket and lock files on shutdown (covers both clean exit and signal)
         if let Err(err) = tokio::fs::remove_file(&cleanup_path).await {
             warn!("failed to remove socket file on shutdown: {}", err);
