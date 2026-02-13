@@ -682,7 +682,7 @@ impl<'a> UserEnvironment<'a> {
 }
 
 pub fn get_default_address() -> String {
-    "https://localhost:23151".to_string()
+    "http://localhost:23151".to_string()
 }
 
 pub fn get_env_key(digest: &String) -> String {

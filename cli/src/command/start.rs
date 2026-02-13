@@ -41,6 +41,7 @@ pub struct RunArgs {
     pub registry_backend_s3_bucket: Option<String>,
     pub registry_backend_s3_force_path_style: bool,
     pub services: Vec<String>,
+    pub tls: bool,
 }
 
 async fn new_tls_config() -> Result<ServerTlsConfig> {
@@ -84,13 +85,18 @@ pub async fn run(args: RunArgs) -> Result<()> {
         );
     }
 
-    let tls_config = new_tls_config().await?;
-
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
-    let mut router = Server::builder()
-        .tls_config(tls_config)?
-        .add_service(health_service);
+    let mut router = if args.tls {
+        info!("TLS enabled for main listener");
+        let tls_config = new_tls_config().await?;
+        Server::builder()
+            .tls_config(tls_config)?
+            .add_service(health_service)
+    } else {
+        info!("TLS disabled, using plaintext for main listener");
+        Server::builder().add_service(health_service)
+    };
 
     let health_prepared = if args.health_check {
         let health_service_plaintext =

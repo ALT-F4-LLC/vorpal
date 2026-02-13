@@ -6,14 +6,13 @@ use crate::command::store::{
     },
 };
 use anyhow::{anyhow, bail, Context, Result};
-use http::uri::Uri;
 use std::{
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
     process::Command,
 };
 use tokio::fs::{create_dir_all, read_to_string, write};
-use tonic::{transport::Channel, Code, Request};
+use tonic::{Code, Request};
 use tracing::{debug, info};
 use vorpal_sdk::{
     api::{
@@ -23,7 +22,7 @@ use vorpal_sdk::{
         },
     },
     artifact::system::get_system_default,
-    context::{client_auth_header, get_client_tls_config, parse_artifact_alias},
+    context::{build_channel, client_auth_header, parse_artifact_alias},
 };
 
 async fn get_alias_from_registry(
@@ -33,18 +32,7 @@ async fn get_alias_from_registry(
     system: ArtifactSystem,
     tag: &str,
 ) -> Result<String> {
-    let client_tls = get_client_tls_config().await?;
-
-    let client_uri = registry
-        .parse::<Uri>()
-        .map_err(|e| anyhow!("invalid registry address: {}", e))?;
-
-    let client_channel = Channel::builder(client_uri)
-        .tls_config(client_tls)?
-        .connect()
-        .await
-        .with_context(|| format!("failed to connect to registry: {}", registry))?;
-
+    let client_channel = build_channel(registry).await?;
     let mut client = ArtifactServiceClient::new(client_channel);
 
     let request = GetArtifactAliasRequest {
@@ -108,22 +96,7 @@ async fn pull_artifact_from_registry(
     namespace: &str,
     output_path: &std::path::Path,
 ) -> Result<()> {
-    // Setup TLS with CA certificate
-
-    let client_tls = get_client_tls_config().await?;
-
-    // Connect to registry archive service
-
-    let client_uri = registry
-        .parse::<Uri>()
-        .map_err(|e| anyhow!("invalid registry address: {}", e))?;
-
-    let client_channel = Channel::builder(client_uri)
-        .tls_config(client_tls)?
-        .connect()
-        .await
-        .with_context(|| format!("failed to connect to registry: {}", registry))?;
-
+    let client_channel = build_channel(registry).await?;
     let mut client_archive = ArchiveServiceClient::new(client_channel);
 
     // Pull archive from registry

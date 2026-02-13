@@ -13,7 +13,6 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
-use http::uri::{InvalidUri, Uri};
 use sha256::digest;
 use std::path::Path;
 use tokio::{
@@ -22,7 +21,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
-use tonic::{transport::Channel, Code, Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 use tracing::{info, warn};
 use url::Url;
 use vorpal_sdk::{
@@ -35,7 +34,7 @@ use vorpal_sdk::{
         },
         artifact::{Artifact, ArtifactSource, ArtifactStep, ArtifactStepSecret},
     },
-    context::{client_auth_header, get_client_tls_config},
+    context::{build_channel, client_auth_header},
 };
 
 #[derive(PartialEq)]
@@ -57,18 +56,7 @@ pub async fn build_source(
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
     // Create authenticated archive client first
-    let service_tls = get_client_tls_config().await?;
-
-    let service_uri = registry
-        .parse::<Uri>()
-        .map_err(|e: InvalidUri| anyhow!("failed to parse registry URI: {}", e))?;
-
-    let channel = Channel::builder(service_uri)
-        .tls_config(service_tls)
-        .map_err(|e| anyhow!("failed to create tls config: {}", e))?
-        .connect()
-        .await
-        .map_err(|e| anyhow!("failed to connect to registry: {}", e))?;
+    let channel = build_channel(&registry).await?;
 
     let client_auth_header = client_auth_header(&registry)
         .await

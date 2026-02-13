@@ -228,25 +228,8 @@ pub async fn get_context() -> Result<ConfigContext> {
             port,
             registry,
         } => {
-            let service_tls = get_client_tls_config().await?;
-
-            let client_agent_uri = agent
-                .parse::<Uri>()
-                .map_err(|e: InvalidUri| anyhow::anyhow!("invalid agent address: {}", e))?;
-
-            let client_agent_channel = Channel::builder(client_agent_uri)
-                .tls_config(service_tls.clone())?
-                .connect()
-                .await?;
-
-            let client_registry_uri = registry
-                .parse::<Uri>()
-                .map_err(|e: InvalidUri| anyhow::anyhow!("invalid artifact address: {}", e))?;
-
-            let client_registry_channel = Channel::builder(client_registry_uri)
-                .tls_config(service_tls)?
-                .connect()
-                .await?;
+            let client_agent_channel = build_channel(&agent).await?;
+            let client_registry_channel = build_channel(&registry).await?;
 
             let client_agent = AgentServiceClient::new(client_agent_channel);
             let client_artifact = ArtifactServiceClient::new(client_registry_channel);
@@ -521,7 +504,11 @@ pub fn get_key_credentials_path() -> PathBuf {
         .with_extension("json")
 }
 
-pub async fn get_client_tls_config() -> Result<ClientTlsConfig> {
+async fn get_client_tls_config(uri: &str) -> Result<Option<ClientTlsConfig>> {
+    if uri.starts_with("http://") {
+        return Ok(None);
+    }
+
     let mut client_tls_config = ClientTlsConfig::new();
 
     let ca_pem_path = get_key_ca_path();
@@ -534,7 +521,30 @@ pub async fn get_client_tls_config() -> Result<ClientTlsConfig> {
         client_tls_config = client_tls_config.ca_certificate(Certificate::from_pem(ca_pem));
     }
 
-    Ok(client_tls_config)
+    Ok(Some(client_tls_config))
+}
+
+pub async fn build_channel(uri: &str) -> Result<Channel> {
+    if !uri.starts_with("http://") && !uri.starts_with("https://") {
+        bail!("URI must start with http:// or https://: {}", uri);
+    }
+
+    let parsed_uri = uri
+        .parse::<Uri>()
+        .map_err(|e: InvalidUri| anyhow!("invalid URI: {}", e))?;
+
+    let tls_config = get_client_tls_config(uri).await?;
+
+    let mut endpoint = Channel::builder(parsed_uri);
+
+    if let Some(tls) = tls_config {
+        endpoint = endpoint.tls_config(tls)?;
+    }
+
+    endpoint
+        .connect()
+        .await
+        .with_context(|| format!("failed to connect to {}", uri))
 }
 
 /// Refreshes an expired access token using the refresh token

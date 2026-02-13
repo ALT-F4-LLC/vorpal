@@ -1,25 +1,12 @@
 use anyhow::Result;
-use http::uri::Uri;
-use tonic::{transport::Channel, Request};
+use tonic::Request;
 use vorpal_sdk::{
     api::artifact::{artifact_service_client::ArtifactServiceClient, ArtifactRequest},
-    context::get_client_tls_config,
+    context::build_channel,
 };
 
 pub async fn run(digest: &str, namespace: &str, registry: &str) -> Result<()> {
-    // Setup TLS with CA certificate
-
-    let client_tls = get_client_tls_config().await?;
-
-    // Parse registry URI and create authenticated channel
-
-    let client_uri = registry.parse::<Uri>()?;
-
-    let client_channel = Channel::builder(client_uri)
-        .tls_config(client_tls)?
-        .connect()
-        .await?;
-
+    let client_channel = build_channel(registry).await?;
     let mut client = ArtifactServiceClient::new(client_channel);
 
     // Create request

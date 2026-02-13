@@ -11,7 +11,6 @@ use crate::command::{
     },
 };
 use anyhow::Result;
-use http::uri::Uri;
 use sha256::digest;
 use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio};
 use tokio::{
@@ -26,7 +25,6 @@ use tokio_stream::{
 };
 use tonic::{
     metadata::{Ascii, MetadataValue},
-    transport::Channel,
     Code::NotFound,
     Request, Response, Status,
 };
@@ -45,7 +43,7 @@ use vorpal_sdk::{
         },
     },
     artifact::system::get_system_default,
-    context::get_client_tls_config,
+    context::build_channel,
 };
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
@@ -149,24 +147,9 @@ async fn pull_source(
     }
 
     // Create authenticated archive client
-    let service_tls = get_client_tls_config()
+    let client_archive_channel = build_channel(&registry)
         .await
-        .map_err(|e| Status::internal(format!("failed to get client TLS config: {e}")))?;
-
-    let client_uri = registry
-        .parse::<Uri>()
-        .map_err(|e| Status::invalid_argument(format!("invalid registry uri: {e}")))?;
-
-    let client_archive_channel = Channel::builder(client_uri)
-        .tls_config(service_tls)
-        .map_err(|err| {
-            Status::internal(format!("failed to create archive client tls config: {err}"))
-        })?
-        .connect()
-        .await
-        .map_err(|err| {
-            Status::internal(format!("failed to create archive client channel: {err}"))
-        })?;
+        .map_err(|e| Status::internal(format!("failed to connect to registry: {e}")))?;
 
     // Create client with authorization interceptor if token is available
     let mut client_archive = ArchiveServiceClient::with_interceptor(
@@ -732,24 +715,9 @@ async fn build_artifact(
         // Upload archive
 
         // Create authenticated archive client for pushing
-        let service_tls = get_client_tls_config()
+        let client_archive_channel = build_channel(&registry)
             .await
-            .map_err(|e| Status::internal(format!("failed to get client TLS config: {e}")))?;
-
-        let client_uri = registry
-            .parse::<Uri>()
-            .map_err(|e| Status::invalid_argument(format!("invalid registry uri: {e}")))?;
-
-        let client_archive_channel = Channel::builder(client_uri.clone())
-            .tls_config(service_tls.clone())
-            .map_err(|err| {
-                Status::internal(format!("failed to create archive client tls config: {err}"))
-            })?
-            .connect()
-            .await
-            .map_err(|err| {
-                Status::internal(format!("failed to create archive client channel: {err}"))
-            })?;
+            .map_err(|e| Status::internal(format!("failed to connect to registry: {e}")))?;
 
         // Create client with authorization interceptor for pushing if token is available
         let mut client_archive = ArchiveServiceClient::with_interceptor(
@@ -786,26 +754,9 @@ async fn build_artifact(
         // Store artifact in registry
 
         // Create authenticated artifact client
-        let service_tls = get_client_tls_config()
+        let client_artifact_channel = build_channel(&registry)
             .await
-            .map_err(|e| Status::internal(format!("failed to get client TLS config: {e}")))?;
-
-        let client_uri = registry
-            .parse::<Uri>()
-            .map_err(|e| Status::invalid_argument(format!("invalid registry uri: {e}")))?;
-
-        let client_artifact_channel = Channel::builder(client_uri)
-            .tls_config(service_tls)
-            .map_err(|err| {
-                Status::internal(format!(
-                    "failed to create artifact client tls config: {err}"
-                ))
-            })?
-            .connect()
-            .await
-            .map_err(|err| {
-                Status::internal(format!("failed to create artifact client channel: {err}"))
-            })?;
+            .map_err(|e| Status::internal(format!("failed to connect to registry: {e}")))?;
 
         // Create client with authorization interceptor if token is available
         let mut client_artifact = ArtifactServiceClient::with_interceptor(

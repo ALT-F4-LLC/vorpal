@@ -81,6 +81,10 @@ pub enum CommandSystemServices {
         #[arg(default_value_t = false, long)]
         registry_backend_s3_force_path_style: bool,
 
+        /// Enable TLS for the main gRPC listener (requires keys in /var/lib/vorpal/key/)
+        #[arg(default_value_t = false, long)]
+        tls: bool,
+
         /// TTL in seconds for caching archive check results. Set to 0 to disable caching.
         #[arg(default_value = "300", long)]
         archive_check_cache_ttl: u64,
@@ -610,6 +614,7 @@ pub async fn run() -> Result<()> {
                     registry_backend_s3_bucket,
                     registry_backend_s3_force_path_style,
                     services,
+                    tls,
                 } => {
                     let run_args = start::RunArgs {
                         archive_check_cache_ttl: *archive_check_cache_ttl,
@@ -624,6 +629,7 @@ pub async fn run() -> Result<()> {
                         registry_backend_s3_bucket: registry_backend_s3_bucket.clone(),
                         registry_backend_s3_force_path_style: *registry_backend_s3_force_path_style,
                         services: services.split(',').map(|s| s.to_string()).collect(),
+                        tls: *tls,
                     };
 
                     start::run(run_args).await
