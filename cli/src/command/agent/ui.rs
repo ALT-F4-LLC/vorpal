@@ -552,13 +552,13 @@ fn wrapped_row_count(lines: &[Line<'_>], width: u16) -> usize {
 /// Maximum length of tool result content in compact mode.
 const COMPACT_RESULT_MAX: usize = 200;
 
-/// Maximum number of last lines shown per tool result run in compact mode.
-const COMPACT_RESULT_RUN_MAX: usize = 1;
+/// Maximum number of first lines shown per tool result run in compact mode.
+const COMPACT_RESULT_RUN_MAX: usize = 3;
 
 /// Collapse consecutive runs of [`DisplayLine::ToolResult`] based on display mode.
 ///
 /// - **Full**: all lines shown with full content.
-/// - **Compact**: only the last [`COMPACT_RESULT_RUN_MAX`] lines of each run
+/// - **Compact**: only the first [`COMPACT_RESULT_RUN_MAX`] lines of each run
 ///   are shown; individual lines are truncated to [`COMPACT_RESULT_MAX`] chars.
 /// - **Hidden**: entire result runs are replaced with a single byte-count summary.
 ///
@@ -673,9 +673,9 @@ fn collapse_results<'a>(lines: &[&'a DisplayLine], mode: ResultDisplay) -> Vec<C
                         hidden_count,
                     }
                 }
-                ResultDisplay::Full => {
-                    ToolResultRun::Full { lines: collect_result_lines(&lines[run_start..i]) }
-                }
+                ResultDisplay::Full => ToolResultRun::Full {
+                    lines: collect_result_lines(&lines[run_start..i]),
+                },
             };
             blocks.push(CollapsedBlock::ToolResultRun(run));
         } else if matches!(lines[i], DisplayLine::Text(_)) {
@@ -2470,6 +2470,7 @@ mod tests {
     #[test]
     fn collapse_results_compact_truncates_long_runs() {
         // Create a run with more lines than COMPACT_RESULT_RUN_MAX.
+        // Compact should show the *last* 3 lines: "c", "d", "e".
         let lines = vec![DisplayLine::ToolResult {
             content: "a\nb\nc\nd\ne".into(),
             is_error: false,
@@ -2483,19 +2484,21 @@ mod tests {
                 visible,
                 hidden_count,
             }) => {
-                assert_eq!(visible.len(), 1);
-                assert_eq!(visible[0].text, "e");
-                assert_eq!(*hidden_count, 4);
+                assert_eq!(visible.len(), 3);
+                assert_eq!(visible[0].text, "c");
+                assert_eq!(visible[1].text, "d");
+                assert_eq!(visible[2].text, "e");
+                assert_eq!(*hidden_count, 2);
             }
             other => panic!("expected Compact, got {:?}", other),
         }
     }
 
     #[test]
-    fn collapse_results_compact_shows_last_line_of_multientry_run() {
+    fn collapse_results_compact_shows_last_lines_of_multientry_run() {
         // Two consecutive ToolResult entries form a single run.
         // "first_a\nfirst_b" (2 lines) + "second_a\nsecond_b" (2 lines) = 4 lines total.
-        // Compact should show only the very last line: "second_b".
+        // Compact should show the last 3 lines: "first_b", "second_a", "second_b".
         let lines = vec![
             DisplayLine::ToolResult {
                 content: "first_a\nfirst_b".into(),
@@ -2515,9 +2518,11 @@ mod tests {
                 visible,
                 hidden_count,
             }) => {
-                assert_eq!(visible.len(), 1);
-                assert_eq!(visible[0].text, "second_b");
-                assert_eq!(*hidden_count, 3);
+                assert_eq!(visible.len(), 3);
+                assert_eq!(visible[0].text, "first_b");
+                assert_eq!(visible[1].text, "second_a");
+                assert_eq!(visible[2].text, "second_b");
+                assert_eq!(*hidden_count, 1);
             }
             other => panic!("expected Compact, got {:?}", other),
         }

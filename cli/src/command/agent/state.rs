@@ -327,7 +327,7 @@ pub enum AgentActivity {
 /// How tool result output is displayed in the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResultDisplay {
-    /// Show latest result line per run, truncate long content.
+    /// Show first few result lines per run, truncate long content.
     Compact,
     /// Hide result content entirely, show only byte count.
     Hidden,
