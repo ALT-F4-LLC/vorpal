@@ -12,17 +12,92 @@ use std::time::{Duration, Instant};
 /// How long a transient status message remains visible.
 const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(3);
 
+/// How long a toast notification remains visible before auto-dismissing.
+const TOAST_TTL: Duration = Duration::from_secs(5);
+
 /// Maximum number of output lines retained per agent.
 pub const MAX_OUTPUT_LINES: usize = 10_000;
 
 /// Valid Claude Code permission modes for the selector.
-pub const PERMISSION_MODES: &[&str] = &["acceptEdits", "default", "plan", "bypassPermissions"];
+pub const PERMISSION_MODES: &[&str] = &["default", "plan", "acceptEdits", "bypassPermissions"];
 
 /// Available Claude model options for the selector.
 pub const MODELS: &[&str] = &["claude-opus-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"];
 
 /// Available effort levels for the selector.
 pub const EFFORT_LEVELS: &[&str] = &["high", "medium", "low"];
+
+// ---------------------------------------------------------------------------
+// Command palette
+// ---------------------------------------------------------------------------
+
+/// A command registered in the palette.
+#[derive(Debug, Clone, Copy)]
+pub struct PaletteCommand {
+    /// The command name (what the user types).
+    pub name: &'static str,
+    /// Short description shown in the dropdown.
+    pub description: &'static str,
+}
+
+/// All available palette commands, in display order.
+pub const COMMANDS: &[PaletteCommand] = &[
+    PaletteCommand {
+        name: "kill",
+        description: "Kill the focused agent",
+    },
+    PaletteCommand {
+        name: "new",
+        description: "Create a new agent",
+    },
+    PaletteCommand {
+        name: "respond",
+        description: "Respond to an exited agent",
+    },
+    PaletteCommand {
+        name: "search",
+        description: "Search agent output",
+    },
+    PaletteCommand {
+        name: "help",
+        description: "Show keybinding help",
+    },
+    PaletteCommand {
+        name: "quit",
+        description: "Close the focused tab",
+    },
+];
+
+/// Return the commands whose names fuzzy-match the given query.
+///
+/// A "fuzzy match" means the query characters appear in order within the
+/// command name, not necessarily contiguous. An empty query matches all
+/// commands.
+pub fn filter_commands(query: &str) -> Vec<&'static PaletteCommand> {
+    if query.is_empty() {
+        return COMMANDS.iter().collect();
+    }
+    let query_lower = query.to_lowercase();
+    COMMANDS
+        .iter()
+        .filter(|cmd| fuzzy_matches(cmd.name, &query_lower))
+        .collect()
+}
+
+/// Returns true if all characters in `query` appear in order within `text`.
+fn fuzzy_matches(text: &str, query: &str) -> bool {
+    let mut text_chars = text.chars();
+    for qc in query.chars() {
+        loop {
+            match text_chars.next() {
+                Some(tc) if tc.to_lowercase().next() == Some(qc) => break,
+                Some(_) => continue,
+                None => return false,
+            }
+        }
+    }
+    true
+}
 
 // ---------------------------------------------------------------------------
 // InputBuffer
@@ -160,6 +235,37 @@ pub enum AgentEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+
+/// The kind of toast notification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToastKind {
+    /// Agent completed successfully (exit code 0).
+    Success,
+    /// Agent failed (non-zero or unknown exit code).
+    Error,
+}
+
+/// A transient toast notification displayed when a background agent completes.
+#[derive(Debug, Clone)]
+pub struct Toast {
+    /// Human-readable message (e.g. "Agent 3 completed").
+    pub message: String,
+    /// Whether this is a success or error toast.
+    pub kind: ToastKind,
+    /// When the toast was created (for auto-dismiss).
+    pub created_at: Instant,
+}
+
+impl Toast {
+    /// Returns `true` if this toast has exceeded its display duration.
+    pub fn is_expired(&self) -> bool {
+        self.created_at.elapsed() >= TOAST_TTL
+    }
+}
+
+// ---------------------------------------------------------------------------
 // DisplayLine
 // ---------------------------------------------------------------------------
 
@@ -249,11 +355,13 @@ impl ResultDisplay {
     }
 }
 
-/// Whether the TUI is in normal navigation mode or prompt input mode.
+/// Whether the TUI is in normal navigation mode, prompt input mode, search mode, or command mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
     Input,
+    Search,
+    Command,
 }
 
 /// Which field is active in the new-agent input overlay.
@@ -344,6 +452,8 @@ pub struct AgentState {
     pub session_id: Option<String>,
     /// Claude Code options used for this agent's original spawn.
     pub claude_options: ClaudeOptions,
+    /// Timestamp when the agent was started, for elapsed time display.
+    pub started_at: Instant,
 }
 
 impl AgentState {
@@ -372,6 +482,7 @@ impl AgentState {
             cache_result_display: None,
             session_id: None,
             claude_options,
+            started_at: Instant::now(),
         }
     }
 
@@ -491,6 +602,44 @@ pub struct App {
     pub theme: Theme,
     /// Index into [`Theme::builtins()`] for cycling.
     pub theme_index: usize,
+    /// Queue of active toast notifications (newest last).
+    pub toasts: Vec<Toast>,
+    /// Set of agent IDs that have unread completion events.
+    ///
+    /// An ID is added when an unfocused agent exits, and removed when
+    /// the user switches to that agent's tab.
+    pub unread_agents: std::collections::HashSet<usize>,
+
+    /// Whether the input form is in quick-launch mode (prompt-only, minimal
+    /// fields) vs advanced mode (all 8 fields). Defaults to `true` when
+    /// opening a new agent form via `n`.
+    pub quick_launch: bool,
+
+    // -- Search state --------------------------------------------------------
+    /// Search query input buffer (used in [`InputMode::Search`]).
+    pub search_query: InputBuffer,
+    /// Cached list of match positions: `(line_index, start_byte, end_byte)` tuples
+    /// into the cached rendered lines. Byte offsets refer to the original (not
+    /// lowercased) flattened span text, so they can safely be used for slicing.
+    /// Recomputed when the query or output changes.
+    pub search_matches: Vec<(usize, usize, usize)>,
+    /// Index into `search_matches` for the currently focused match.
+    pub search_match_index: usize,
+    /// The output generation when search matches were last computed, for
+    /// invalidation when new output arrives.
+    pub search_cache_generation: u64,
+
+    // -- Command palette state ------------------------------------------------
+    /// Command input buffer (used in [`InputMode::Command`]).
+    pub command_input: InputBuffer,
+    /// Index of the currently selected command in the filtered list.
+    pub command_selected: usize,
+    /// Transient error message from executing an unknown command.
+    pub command_error: Option<String>,
+    /// Cached filtered command list, recomputed on each keypress in command mode.
+    /// Used by both the input handler and the render function so the filter only
+    /// runs once per event.
+    pub command_filtered: Vec<&'static PaletteCommand>,
 }
 
 impl App {
@@ -522,6 +671,17 @@ impl App {
             default_claude_options,
             theme: Theme::dark(),
             theme_index: 0,
+            toasts: Vec::new(),
+            unread_agents: std::collections::HashSet::new(),
+            quick_launch: true,
+            search_query: InputBuffer::new(),
+            search_matches: Vec::new(),
+            search_match_index: 0,
+            search_cache_generation: 0,
+            command_input: InputBuffer::new(),
+            command_selected: 0,
+            command_error: None,
+            command_filtered: COMMANDS.iter().collect(),
         }
     }
 
@@ -573,13 +733,19 @@ impl App {
     }
 
     /// Cycle focus to the next agent (wraps around).
+    ///
+    /// Clears the unread indicator for the newly focused agent.
     pub fn next_agent(&mut self) {
         if !self.agents.is_empty() {
             self.focused = (self.focused + 1) % self.agents.len();
+            let agent_id = self.agents[self.focused].id;
+            self.unread_agents.remove(&agent_id);
         }
     }
 
     /// Cycle focus to the previous agent (wraps around).
+    ///
+    /// Clears the unread indicator for the newly focused agent.
     pub fn prev_agent(&mut self) {
         if !self.agents.is_empty() {
             self.focused = if self.focused == 0 {
@@ -587,6 +753,8 @@ impl App {
             } else {
                 self.focused - 1
             };
+            let agent_id = self.agents[self.focused].id;
+            self.unread_agents.remove(&agent_id);
         }
     }
 
@@ -605,6 +773,9 @@ impl App {
         self.input_mode = InputMode::Input;
         self.input_field = InputField::Prompt;
         self.input.clear();
+        // New agents start in quick-launch mode; respond uses advanced mode
+        // since the user likely wants to tweak options.
+        self.quick_launch = overrides.is_none();
 
         let (opts, workspace_str) = match overrides {
             Some(o) => (o.claude_options, o.workspace.display().to_string()),
@@ -641,6 +812,7 @@ impl App {
         self.allowed_tools.clear();
         self.add_dir.clear();
         self.respond_target = None;
+        self.quick_launch = true;
     }
 
     /// Submit the current input buffers.
@@ -704,13 +876,31 @@ impl App {
     }
 
     /// Advance to the next input field (Tab).
+    ///
+    /// In quick-launch mode, cycles only between Prompt and Workspace.
     pub fn next_input_field(&mut self) {
-        self.input_field = self.input_field.next();
+        if self.quick_launch {
+            self.input_field = match self.input_field {
+                InputField::Prompt => InputField::Workspace,
+                _ => InputField::Prompt,
+            };
+        } else {
+            self.input_field = self.input_field.next();
+        }
     }
 
     /// Go to the previous input field (Shift+Tab).
+    ///
+    /// In quick-launch mode, cycles only between Prompt and Workspace.
     pub fn prev_input_field(&mut self) {
-        self.input_field = self.input_field.prev();
+        if self.quick_launch {
+            self.input_field = match self.input_field {
+                InputField::Workspace => InputField::Prompt,
+                _ => InputField::Workspace,
+            };
+        } else {
+            self.input_field = self.input_field.prev();
+        }
     }
 
     /// Cycle to the next built-in theme.
@@ -725,9 +915,180 @@ impl App {
     }
 
     /// Focus a specific agent by index. No-op if out of range.
+    ///
+    /// Clears the unread indicator for the newly focused agent.
     pub fn focus_agent(&mut self, index: usize) {
         if index < self.agents.len() {
             self.focused = index;
+            let agent_id = self.agents[index].id;
+            self.unread_agents.remove(&agent_id);
+        }
+    }
+
+    /// Push a toast notification onto the queue.
+    pub fn push_toast(&mut self, message: String, kind: ToastKind) {
+        self.toasts.push(Toast {
+            message,
+            kind,
+            created_at: Instant::now(),
+        });
+    }
+
+    /// Remove all expired toasts from the queue.
+    pub fn expire_toasts(&mut self) {
+        self.toasts.retain(|t| !t.is_expired());
+    }
+
+    /// Dismiss all active toasts immediately (e.g. on keypress).
+    pub fn dismiss_toasts(&mut self) {
+        self.toasts.clear();
+    }
+
+    /// Enter search mode, clearing any previous search state.
+    pub fn enter_search_mode(&mut self) {
+        self.input_mode = InputMode::Search;
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_match_index = 0;
+        self.search_cache_generation = 0;
+    }
+
+    /// Exit search mode, clearing the query and match state.
+    pub fn exit_search_mode(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_match_index = 0;
+        self.search_cache_generation = 0;
+    }
+
+    /// Enter command palette mode, clearing any previous command state.
+    pub fn enter_command_mode(&mut self) {
+        self.input_mode = InputMode::Command;
+        self.command_input.clear();
+        self.command_selected = 0;
+        self.command_error = None;
+        self.command_filtered = filter_commands("");
+    }
+
+    /// Exit command palette mode, clearing the input and selection.
+    pub fn exit_command_mode(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.command_input.clear();
+        self.command_selected = 0;
+        self.command_error = None;
+        self.command_filtered = Vec::new();
+    }
+
+    /// Recompute the cached filtered command list from the current input.
+    pub fn refilter_commands(&mut self) {
+        self.command_filtered = filter_commands(self.command_input.text());
+    }
+
+    /// Recompute search matches against the focused agent's cached lines.
+    ///
+    /// Stores `(line_index, start_byte, end_byte)` tuples for every substring
+    /// match. Byte offsets refer to the original (not lowercased) flattened
+    /// span text so they are safe to use for slicing in highlight rendering.
+    /// Called when the query changes or the output generation advances.
+    pub fn recompute_search_matches(&mut self) {
+        self.search_matches.clear();
+        self.search_match_index = 0;
+
+        let query = self.search_query.text().to_string();
+        if query.is_empty() {
+            return;
+        }
+
+        let query_lower = query.to_lowercase();
+
+        if let Some(agent) = self.agents.get(self.focused) {
+            if let Some(cached) = &agent.cached_lines {
+                self.search_cache_generation = agent.output_generation;
+                for (line_idx, line) in cached.iter().enumerate() {
+                    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+
+                    // Build a byte-offset mapping from the lowercased text back
+                    // to the original text so highlights land on correct char
+                    // boundaries even when lowercasing changes byte lengths.
+                    //
+                    // Assumption: `char::to_lowercase()` never produces fewer
+                    // bytes than the original char. This holds for all Unicode
+                    // codepoints — lowercasing can expand (e.g. İ → i̇) but
+                    // never contracts, so the sentinel at the end is always
+                    // correct.
+                    let text_lower = text.to_lowercase();
+                    let mut lower_to_orig: Vec<usize> = Vec::with_capacity(text_lower.len() + 1);
+                    for (orig_byte, ch) in text.char_indices() {
+                        for lower_ch in ch.to_lowercase() {
+                            for _ in 0..lower_ch.len_utf8() {
+                                lower_to_orig.push(orig_byte);
+                            }
+                        }
+                    }
+                    lower_to_orig.push(text.len()); // sentinel for end-of-string
+
+                    let mut start = 0;
+                    while let Some(pos) = text_lower[start..].find(&query_lower) {
+                        let lower_start = start + pos;
+                        let lower_end = lower_start + query_lower.len();
+                        let orig_start = lower_to_orig[lower_start];
+                        let orig_end = if lower_end < lower_to_orig.len() {
+                            lower_to_orig[lower_end]
+                        } else {
+                            text.len()
+                        };
+                        self.search_matches.push((line_idx, orig_start, orig_end));
+                        start = lower_end;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Jump to the next search match, wrapping around at the end.
+    pub fn search_next(&mut self, viewport_height: usize) {
+        if !self.search_matches.is_empty() {
+            self.search_match_index = (self.search_match_index + 1) % self.search_matches.len();
+            self.scroll_to_current_match(viewport_height);
+        }
+    }
+
+    /// Jump to the previous search match, wrapping around at the beginning.
+    pub fn search_prev(&mut self, viewport_height: usize) {
+        if !self.search_matches.is_empty() {
+            self.search_match_index = if self.search_match_index == 0 {
+                self.search_matches.len() - 1
+            } else {
+                self.search_match_index - 1
+            };
+            self.scroll_to_current_match(viewport_height);
+        }
+    }
+
+    /// Scroll the viewport so the current search match is visible.
+    ///
+    /// `viewport_height` is the number of content rows visible in the output
+    /// area (terminal rows minus chrome). The caller should provide this from
+    /// [`super::input::viewport_height()`] to avoid a redundant syscall here.
+    pub fn scroll_to_current_match(&mut self, viewport_height: usize) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        let (match_line, _, _) = self.search_matches[self.search_match_index];
+        if let Some(agent) = self.agents.get_mut(self.focused) {
+            let total_rows = agent.cached_row_count;
+            let height = viewport_height.max(1);
+            let max_offset = total_rows.saturating_sub(height);
+            // Convert match_line (from-top) to scroll_offset (from-bottom).
+            // scroll_offset 0 = bottom; max_offset = top.
+            // We want the match roughly centered in the viewport.
+            let from_top = match_line.saturating_sub(height / 2);
+            let desired_offset = max_offset.saturating_sub(from_top);
+            agent.scroll_offset = desired_offset.min(max_offset);
+            if agent.scroll_offset == 0 {
+                agent.has_new_output = false;
+            }
         }
     }
 
@@ -756,6 +1117,8 @@ impl App {
         for (i, agent) in self.agents.iter().enumerate() {
             self.agent_index.insert(agent.id, i);
         }
+        // Remove the agent's ID from unread tracking.
+        self.unread_agents.remove(&removed.id);
         // Clamp focused index to remain valid.
         if self.agents.is_empty() {
             self.focused = 0;
@@ -1207,9 +1570,10 @@ mod tests {
     }
 
     #[test]
-    fn input_field_cycles_forward_and_backward() {
+    fn input_field_cycles_forward_and_backward_advanced() {
         let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
         app.enter_input_mode();
+        app.quick_launch = false; // advanced mode cycles all 8 fields
 
         assert_eq!(app.input_field, InputField::Prompt);
         app.next_input_field();
@@ -1227,5 +1591,90 @@ mod tests {
         // Wrap forward from AddDir → Prompt.
         app.next_input_field();
         assert_eq!(app.input_field, InputField::Prompt);
+    }
+
+    #[test]
+    fn input_field_cycles_quick_launch() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        app.enter_input_mode();
+        assert!(app.quick_launch, "new agent form defaults to quick launch");
+
+        assert_eq!(app.input_field, InputField::Prompt);
+        app.next_input_field();
+        assert_eq!(app.input_field, InputField::Workspace);
+        // Wrap forward from Workspace → Prompt.
+        app.next_input_field();
+        assert_eq!(app.input_field, InputField::Prompt);
+        // Wrap backward from Prompt → Workspace.
+        app.prev_input_field();
+        assert_eq!(app.input_field, InputField::Workspace);
+        app.prev_input_field();
+        assert_eq!(app.input_field, InputField::Prompt);
+    }
+
+    // -- fuzzy_matches -------------------------------------------------------
+
+    #[test]
+    fn fuzzy_matches_exact() {
+        assert!(fuzzy_matches("kill", "kill"));
+    }
+
+    #[test]
+    fn fuzzy_matches_subsequence() {
+        assert!(fuzzy_matches("respond", "rsp"));
+    }
+
+    #[test]
+    fn fuzzy_matches_no_match() {
+        assert!(!fuzzy_matches("kill", "z"));
+    }
+
+    #[test]
+    fn fuzzy_matches_empty_query() {
+        assert!(fuzzy_matches("anything", ""));
+    }
+
+    #[test]
+    fn fuzzy_matches_case_insensitive() {
+        assert!(fuzzy_matches("Help", "help"));
+        assert!(fuzzy_matches("QUIT", "quit"));
+    }
+
+    #[test]
+    fn fuzzy_matches_query_longer_than_text() {
+        assert!(!fuzzy_matches("hi", "help"));
+    }
+
+    #[test]
+    fn fuzzy_matches_single_char() {
+        assert!(fuzzy_matches("search", "s"));
+        assert!(!fuzzy_matches("kill", "z"));
+    }
+
+    #[test]
+    fn fuzzy_matches_order_matters() {
+        // Characters must appear in order: "lk" cannot match "kill".
+        assert!(!fuzzy_matches("kill", "lk"));
+    }
+
+    // -- filter_commands -----------------------------------------------------
+
+    #[test]
+    fn filter_commands_empty_query_returns_all() {
+        let results = filter_commands("");
+        assert_eq!(results.len(), COMMANDS.len());
+    }
+
+    #[test]
+    fn filter_commands_exact_match() {
+        let results = filter_commands("kill");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "kill");
+    }
+
+    #[test]
+    fn filter_commands_no_match() {
+        let results = filter_commands("zzz");
+        assert!(results.is_empty());
     }
 }

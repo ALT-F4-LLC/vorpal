@@ -7,7 +7,9 @@
 
 use super::input;
 use super::manager::{AgentManager, ClaudeOptions};
-use super::state::{AgentActivity, AgentEvent, AgentState, AgentStatus, App, DisplayLine};
+use super::state::{
+    AgentActivity, AgentEvent, AgentState, AgentStatus, App, DisplayLine, ToastKind,
+};
 use super::ui;
 use anyhow::Result;
 use crossterm::{
@@ -203,6 +205,7 @@ async fn event_loop(
         tokio::select! {
             _ = tick_interval.tick() => {
                 app.tick = app.tick.wrapping_add(1);
+                app.expire_toasts();
                 needs_draw = true;
             }
             Some(event) = event_rx.recv() => {
@@ -275,11 +278,40 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent
             exit_code,
         } => {
             info!(agent_id, ?exit_code, "agent exited");
+
+            // Determine the Vec index and whether this agent is unfocused
+            // before mutating state so we can generate a toast.
+            let vec_index = app.agent_vec_index(agent_id);
+            let is_unfocused = vec_index.is_some_and(|idx| idx != app.focused);
+
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
                 agent.status = AgentStatus::Exited(exit_code);
                 agent.activity = AgentActivity::Done;
             }
             manager.notify_exited(agent_id);
+
+            // Toast + unread indicator for unfocused agents.
+            if is_unfocused {
+                if let Some(idx) = vec_index {
+                    let agent_num = idx + 1;
+                    let (msg, kind) = match exit_code {
+                        Some(0) => (
+                            format!("Agent {agent_num} completed successfully"),
+                            ToastKind::Success,
+                        ),
+                        Some(code) => (
+                            format!("Agent {agent_num} failed (exit code {code})"),
+                            ToastKind::Error,
+                        ),
+                        None => (
+                            format!("Agent {agent_num} exited (unknown status)"),
+                            ToastKind::Error,
+                        ),
+                    };
+                    app.push_toast(msg, kind);
+                    app.unread_agents.insert(agent_id);
+                }
+            }
         }
         AgentEvent::SessionId {
             agent_id,

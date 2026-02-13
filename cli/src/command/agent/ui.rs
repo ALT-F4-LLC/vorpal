@@ -4,8 +4,8 @@
 //! area with scrollable output, status bar, and help overlay.
 
 use super::state::{
-    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, ResultDisplay,
-    EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, ResultDisplay, ToastKind,
+    COMMANDS, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::theme::Theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -85,6 +85,18 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     if app.input_mode == InputMode::Input {
         render_input(app, frame, area);
     }
+
+    if app.input_mode == InputMode::Search {
+        render_search_bar(app, frame, chunks[2]);
+    }
+
+    if app.input_mode == InputMode::Command {
+        render_command_palette(app, frame, chunks[2]);
+    }
+
+    if !app.toasts.is_empty() {
+        render_toast(app, frame, area);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -126,10 +138,16 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
                     (SPINNER_FRAMES[frame_idx], theme.tab_badge_spinner)
                 }
             };
-            Line::from(vec![
+            let mut spans = vec![
                 Span::styled(format!(" {badge}"), Style::default().fg(badge_color)),
                 Span::raw(format!(" {num}: ⌂ {label} ")),
-            ])
+            ];
+            // Append unread dot for agents with unread completion events.
+            if app.unread_agents.contains(&agent.id) {
+                spans.push(Span::styled(CIRCLE, Style::default().fg(theme.tab_unread)));
+                spans.push(Span::raw(" "));
+            }
+            Line::from(spans)
         })
         .collect();
 
@@ -328,11 +346,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
 
     match app.focused_agent() {
         None => {
-            let msg = Paragraph::new("No agents yet — press 'n' to start one")
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(theme.content_empty))
-                .block(block);
-            frame.render_widget(msg, area);
+            render_welcome(theme, frame, area);
         }
         Some(_) => {
             let height = inner.height as usize;
@@ -340,10 +354,16 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             let agent = &app.agents[focused];
 
             if agent.output.is_empty() {
-                let msg = Paragraph::new("Waiting for output...")
-                    .alignment(Alignment::Center)
-                    .style(Style::default().fg(theme.content_empty))
-                    .block(block);
+                let spinner_frame = SPINNER_FRAMES[app.tick % SPINNER_FRAMES.len()];
+                let msg = Paragraph::new(Line::from(vec![
+                    Span::styled(spinner_frame, Style::default().fg(theme.tab_badge_spinner)),
+                    Span::styled(
+                        " Agent is starting... waiting for output",
+                        Style::default().fg(theme.content_empty),
+                    ),
+                ]))
+                .alignment(Alignment::Center)
+                .block(block);
                 frame.render_widget(msg, area);
                 return;
             }
@@ -367,6 +387,15 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
                 agent_mut.cache_result_display = Some(app.result_display);
             }
 
+            // Recompute search matches if the output has changed since last computation.
+            // Done before taking an immutable borrow on the agent.
+            {
+                let gen = app.agents[focused].output_generation;
+                if !app.search_query.text().is_empty() && gen != app.search_cache_generation {
+                    app.recompute_search_matches();
+                }
+            }
+
             let agent = &app.agents[focused];
             let cached = agent.cached_lines.as_ref().unwrap();
             let total_rows = agent.cached_row_count;
@@ -378,7 +407,20 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             let clamped_offset = agent.scroll_offset.min(max_scroll);
             let scroll_y = max_scroll.saturating_sub(clamped_offset) as u16;
 
-            let paragraph = Paragraph::new(cached.clone())
+            // Apply search highlighting if there are active search matches.
+            let display_lines =
+                if !app.search_matches.is_empty() && !app.search_query.text().is_empty() {
+                    apply_search_highlights(
+                        cached,
+                        &app.search_matches,
+                        app.search_match_index,
+                        &app.theme,
+                    )
+                } else {
+                    cached.clone()
+                };
+
+            let paragraph = Paragraph::new(display_lines)
                 .block(block)
                 .wrap(Wrap { trim: false })
                 .scroll((scroll_y, 0));
@@ -386,6 +428,102 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             frame.render_widget(paragraph, area);
         }
     }
+}
+
+/// Render a centered welcome screen when no agents exist.
+///
+/// Displays the tool name, a brief description, and the most important
+/// keybindings to help new users get started quickly.
+fn render_welcome(theme: &Theme, frame: &mut Frame, area: Rect) {
+    // Welcome content height: title(1) + blank(1) + border(1) + blank(1) +
+    //   description(2) + blank(1) + keybindings header(1) + blank(1) +
+    //   3 keybindings + blank(1) + border(1) + blank(1) + footer(1) = ~16 rows
+    // Plus 2 for the outer block borders = 18 total.
+    let popup_height: u16 = 18;
+    let popup_width: u16 = 50;
+
+    // Center the popup in the content area.
+    let popup = centered_rect_fixed_height(
+        // Convert fixed width to a percentage of the area, clamped to [30, 80].
+        ((popup_width as u32 * 100 / area.width.max(1) as u32) as u16).clamp(30, 80),
+        popup_height.min(area.height),
+        area,
+    );
+
+    let title_style = Style::default()
+        .fg(theme.welcome_title)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(theme.welcome_description);
+    let key_style = Style::default()
+        .fg(theme.welcome_key)
+        .add_modifier(Modifier::BOLD);
+    let key_desc_style = Style::default().fg(theme.welcome_key_desc);
+    let border_line_style = Style::default().fg(theme.welcome_border);
+
+    let mut text = vec![
+        // Title block.
+        Line::from(""),
+        Line::from(Span::styled("Vorpal Agent Manager", title_style)).alignment(Alignment::Center),
+        Line::from(""),
+        Line::from(Span::styled(
+            "────────────────────────────",
+            border_line_style,
+        ))
+        .alignment(Alignment::Center),
+        Line::from(""),
+        // Description.
+        Line::from(Span::styled(
+            "Launch and manage multiple Claude Code",
+            desc_style,
+        ))
+        .alignment(Alignment::Center),
+        Line::from(Span::styled(
+            "agents from a single terminal interface.",
+            desc_style,
+        ))
+        .alignment(Alignment::Center),
+        Line::from(""),
+        // Quick-start keybindings header.
+        Line::from(Span::styled("Quick Start", title_style)).alignment(Alignment::Center),
+        Line::from(""),
+    ];
+
+    let bindings: &[(&str, &str)] = &[
+        ("  n  ", "Create a new agent"),
+        ("  ?  ", "Show all keybindings"),
+        ("  q  ", "Quit"),
+    ];
+
+    for (key, desc) in bindings {
+        text.push(
+            Line::from(vec![
+                Span::styled(*key, key_style),
+                Span::styled(*desc, key_desc_style),
+            ])
+            .alignment(Alignment::Center),
+        );
+    }
+
+    text.push(Line::from(""));
+    text.push(
+        Line::from(Span::styled(
+            "Press 'n' to get started",
+            Style::default()
+                .fg(theme.welcome_title)
+                .add_modifier(Modifier::DIM),
+        ))
+        .alignment(Alignment::Center),
+    );
+
+    let welcome = Paragraph::new(text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.welcome_border))
+            .title(" Welcome ")
+            .title_style(title_style),
+    );
+
+    frame.render_widget(welcome, popup);
 }
 
 /// Compute the total number of terminal rows needed to display `lines` in a
@@ -940,6 +1078,29 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
 // Status bar
 // ---------------------------------------------------------------------------
 
+/// Format a [`Duration`] as a compact elapsed time string.
+///
+/// - Under 1 minute: `0:42`
+/// - Under 1 hour: `1m23s`
+/// - Under 24 hours: `1h05m`
+/// - 24 hours or more: `1d2h`
+fn format_elapsed(d: std::time::Duration) -> String {
+    let total_secs = d.as_secs();
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let secs = total_secs % 60;
+    if days > 0 {
+        format!("{d}d{h}h", d = days, h = hours)
+    } else if hours > 0 {
+        format!("{h}h{m:02}m", h = hours, m = mins)
+    } else if mins > 0 {
+        format!("{m}m{s:02}s", m = mins, s = secs)
+    } else {
+        format!("0:{s:02}", s = secs)
+    }
+}
+
 /// Render the two-line status bar at the bottom.
 fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
@@ -993,6 +1154,9 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 
                 let sep = Span::styled(" | ", Style::default().fg(theme.status_separator));
 
+                let elapsed = agent.started_at.elapsed();
+                let elapsed_str = format_elapsed(elapsed);
+
                 let scroll_info = if agent.scroll_offset == 0 {
                     "bottom".to_string()
                 } else {
@@ -1002,6 +1166,8 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 let mut spans = vec![
                     Span::raw(" "),
                     activity_span,
+                    sep.clone(),
+                    Span::raw(format!("⏱ {elapsed_str}")),
                     sep.clone(),
                     Span::raw(format!("↻ Turns: {}", agent.turn_count)),
                     sep.clone(),
@@ -1051,6 +1217,8 @@ fn build_hint_bar(width: u16) -> Line<'static> {
     const HINTS: &[(&str, &str)] = &[
         ("n", "new"),
         ("s", "respond"),
+        (":", "command"),
+        ("/", "search"),
         ("Tab", "switch"),
         ("x", "kill"),
         ("q", "close"),
@@ -1171,19 +1339,6 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
     let prompt_rows = wrapped_input_rows(app.input.text(), inner_width);
     let workspace_rows = wrapped_input_rows(app.workspace.text(), inner_width);
 
-    // Layout: label + prompt + blank + label + workspace + blank
-    //       + header + 6×(label + value) + blank + footer
-    let option_rows = 1 + 6 * 2; // header + 6 fields × (label + value)
-    let content_rows = 1 + prompt_rows + 1 + 1 + workspace_rows + 1 + option_rows + 1 + 1;
-    let popup_height = (content_rows + 2).min(area.height as usize) as u16;
-
-    let popup = centered_rect_fixed_height(60, popup_height, area);
-
-    // Clear the area behind the popup.
-    frame.render_widget(Clear, popup);
-
-    let inner_height = popup.height.saturating_sub(2) as usize;
-
     // Build input lines — only the active field shows a cursor.
     let prompt_lines = build_input_field_lines(
         app.input.text(),
@@ -1198,54 +1353,6 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
         theme,
     );
 
-    // Claude option fields — selector fields use build_selector, others show
-    // "(unset)" placeholder when empty and inactive.
-    let perm_lines = build_selector(
-        PERMISSION_MODES,
-        app.permission_mode.text(),
-        app.input_field == InputField::PermissionMode,
-        theme,
-    );
-    let model_lines = build_selector(
-        MODELS,
-        app.model.text(),
-        app.input_field == InputField::Model,
-        theme,
-    );
-    let effort_lines = build_selector(
-        EFFORT_LEVELS,
-        app.effort.text(),
-        app.input_field == InputField::Effort,
-        theme,
-    );
-    let budget_lines = build_optional_field_lines(
-        app.max_budget.text(),
-        app.max_budget.cursor_pos(),
-        app.input_field == InputField::MaxBudgetUsd,
-        theme,
-    );
-    let tools_lines = build_optional_field_lines(
-        app.allowed_tools.text(),
-        app.allowed_tools.cursor_pos(),
-        app.input_field == InputField::AllowedTools,
-        theme,
-    );
-    let dir_lines = build_optional_field_lines(
-        app.add_dir.text(),
-        app.add_dir.cursor_pos(),
-        app.input_field == InputField::AddDir,
-        theme,
-    );
-
-    // Footer hint varies by active field.
-    let footer = match app.input_field {
-        InputField::Prompt => "Enter: newline  |  ^S: submit  |  Tab: next  |  Esc: cancel",
-        InputField::PermissionMode | InputField::Model | InputField::Effort => {
-            "◀/▶: select  |  Enter/Tab: next  |  ^S: submit  |  Esc: cancel"
-        }
-        _ => "Enter/Tab: next  |  ^S: submit  |  Esc: cancel",
-    };
-
     let mut text = Vec::new();
     text.push(Line::from(Span::styled(
         "Prompt:",
@@ -1258,52 +1365,132 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
         field_label_style(app.input_field == InputField::Workspace, theme),
     )));
     text.extend(workspace_lines);
-    text.push(Line::from(""));
 
-    // Claude options header.
-    text.push(Line::from(Span::styled(
-        "── Claude Options ──",
-        Style::default()
-            .fg(theme.options_header)
-            .add_modifier(Modifier::DIM),
-    )));
+    // In advanced mode, also show the 6 Claude option fields.
+    let option_rows = if app.quick_launch {
+        0
+    } else {
+        text.push(Line::from(""));
 
-    text.push(Line::from(Span::styled(
-        "Permission Mode:",
-        field_label_style(app.input_field == InputField::PermissionMode, theme),
-    )));
-    text.extend(perm_lines);
-    text.push(Line::from(Span::styled(
-        "Model:",
-        field_label_style(app.input_field == InputField::Model, theme),
-    )));
-    text.extend(model_lines);
-    text.push(Line::from(Span::styled(
-        "Effort:",
-        field_label_style(app.input_field == InputField::Effort, theme),
-    )));
-    text.extend(effort_lines);
-    text.push(Line::from(Span::styled(
-        "Max Budget USD:",
-        field_label_style(app.input_field == InputField::MaxBudgetUsd, theme),
-    )));
-    text.extend(budget_lines);
-    text.push(Line::from(Span::styled(
-        "Allowed Tools (comma-separated):",
-        field_label_style(app.input_field == InputField::AllowedTools, theme),
-    )));
-    text.extend(tools_lines);
-    text.push(Line::from(Span::styled(
-        "Add Dir (comma-separated):",
-        field_label_style(app.input_field == InputField::AddDir, theme),
-    )));
-    text.extend(dir_lines);
+        // Claude option fields — selector fields use build_selector, others show
+        // "(unset)" placeholder when empty and inactive.
+        let perm_lines = build_selector(
+            PERMISSION_MODES,
+            app.permission_mode.text(),
+            app.input_field == InputField::PermissionMode,
+            theme,
+        );
+        let model_lines = build_selector(
+            MODELS,
+            app.model.text(),
+            app.input_field == InputField::Model,
+            theme,
+        );
+        let effort_lines = build_selector(
+            EFFORT_LEVELS,
+            app.effort.text(),
+            app.input_field == InputField::Effort,
+            theme,
+        );
+        let budget_lines = build_optional_field_lines(
+            app.max_budget.text(),
+            app.max_budget.cursor_pos(),
+            app.input_field == InputField::MaxBudgetUsd,
+            theme,
+        );
+        let tools_lines = build_optional_field_lines(
+            app.allowed_tools.text(),
+            app.allowed_tools.cursor_pos(),
+            app.input_field == InputField::AllowedTools,
+            theme,
+        );
+        let dir_lines = build_optional_field_lines(
+            app.add_dir.text(),
+            app.add_dir.cursor_pos(),
+            app.input_field == InputField::AddDir,
+            theme,
+        );
+
+        // Claude options header.
+        text.push(Line::from(Span::styled(
+            "── Claude Options ──",
+            Style::default()
+                .fg(theme.options_header)
+                .add_modifier(Modifier::DIM),
+        )));
+
+        text.push(Line::from(Span::styled(
+            "Permission Mode:",
+            field_label_style(app.input_field == InputField::PermissionMode, theme),
+        )));
+        text.extend(perm_lines);
+        text.push(Line::from(Span::styled(
+            "Model:",
+            field_label_style(app.input_field == InputField::Model, theme),
+        )));
+        text.extend(model_lines);
+        text.push(Line::from(Span::styled(
+            "Effort:",
+            field_label_style(app.input_field == InputField::Effort, theme),
+        )));
+        text.extend(effort_lines);
+        text.push(Line::from(Span::styled(
+            "Max Budget USD:",
+            field_label_style(app.input_field == InputField::MaxBudgetUsd, theme),
+        )));
+        text.extend(budget_lines);
+        text.push(Line::from(Span::styled(
+            "Allowed Tools (comma-separated):",
+            field_label_style(app.input_field == InputField::AllowedTools, theme),
+        )));
+        text.extend(tools_lines);
+        text.push(Line::from(Span::styled(
+            "Add Dir (comma-separated):",
+            field_label_style(app.input_field == InputField::AddDir, theme),
+        )));
+        text.extend(dir_lines);
+
+        1 + 6 * 2 // header + 6 fields x (label + value)
+    };
+
+    // Footer hint varies by mode and active field.
+    let footer = if app.quick_launch {
+        "Enter: launch  |  Tab: next  |  ^E: advanced  |  Esc: cancel"
+    } else {
+        match app.input_field {
+            InputField::Prompt => {
+                "Enter: newline  |  ^S: submit  |  Tab: next  |  ^E: quick  |  Esc: cancel"
+            }
+            InputField::PermissionMode | InputField::Model | InputField::Effort => {
+                "◀/▶: select  |  Enter/Tab: next  |  ^S: submit  |  ^E: quick  |  Esc: cancel"
+            }
+            _ => "Enter/Tab: next  |  ^S: submit  |  ^E: quick  |  Esc: cancel",
+        }
+    };
 
     text.push(Line::from(""));
     text.push(
         Line::from(Span::styled(footer, Style::default().fg(theme.help_footer)))
             .alignment(Alignment::Center),
     );
+
+    // Compute popup height based on content.
+    let content_rows = if app.quick_launch {
+        // Prompt label(1) + prompt_rows + blank(1) + Workspace label(1)
+        // + workspace_rows + blank(1) + footer(1)
+        1 + prompt_rows + 1 + 1 + workspace_rows + 1 + 1
+    } else {
+        // Quick fields + blank + options header + options + blank + footer
+        1 + prompt_rows + 1 + 1 + workspace_rows + 1 + option_rows + 1 + 1
+    };
+    let popup_height = (content_rows + 2).min(area.height as usize) as u16;
+
+    let popup = centered_rect_fixed_height(60, popup_height, area);
+
+    // Clear the area behind the popup.
+    frame.render_widget(Clear, popup);
+
+    let inner_height = popup.height.saturating_sub(2) as usize;
 
     // Scroll so the cursor in the active field stays visible.
     //
@@ -1339,10 +1526,19 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
 
     // Compute the absolute row of the cursor within the full text layout.
     // This is cumulative: each field occupies (label_row + value_rows).
-    let cursor_absolute_row = {
-        // Rows consumed by: Prompt label(1) + prompt_rows + blank(1) +
-        //                   Workspace label(1) + workspace_rows + blank(1) +
-        //                   header(1) + ... option fields ...
+    let cursor_absolute_row = if app.quick_launch {
+        // Quick mode: Prompt label(1) + prompt_rows + blank(1)
+        //             + Workspace label(1) + workspace_rows
+        match app.input_field {
+            InputField::Prompt => 1 + cursor_wrapped_row,
+            InputField::Workspace => 1 + prompt_rows + 2 + cursor_wrapped_row,
+            // Other fields are not reachable in quick mode, but handle gracefully.
+            _ => 1 + cursor_wrapped_row,
+        }
+    } else {
+        // Advanced mode: Prompt label(1) + prompt_rows + blank(1) +
+        //                Workspace label(1) + workspace_rows + blank(1) +
+        //                header(1) + ... option fields ...
         let after_workspace = 1 + prompt_rows + 1 + 1 + workspace_rows + 1 + 1;
         // Each option field is label(1) + value(1) = 2 rows.
         match app.input_field {
@@ -1362,6 +1558,22 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
         0
     };
 
+    // Title includes a mode indicator and context.
+    let title = if let Some(target_id) = app.respond_target {
+        let label = app
+            .agent_vec_index(target_id)
+            .map(|idx| format!("{}", idx + 1))
+            .unwrap_or_else(|| {
+                tracing::debug!(target_id, "respond target has no Vec index");
+                "?".to_string()
+            });
+        format!(" Respond to Agent {} ", label)
+    } else if app.quick_launch {
+        " New Agent (quick) ".to_string()
+    } else {
+        " New Agent (advanced) ".to_string()
+    };
+
     let input_widget = Paragraph::new(text)
         .wrap(Wrap { trim: false })
         .scroll((scroll_y, 0))
@@ -1369,18 +1581,7 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.input_border))
-                .title(if let Some(target_id) = app.respond_target {
-                    let label = app
-                        .agent_vec_index(target_id)
-                        .map(|idx| format!("{}", idx + 1))
-                        .unwrap_or_else(|| {
-                            tracing::debug!(target_id, "respond target has no Vec index");
-                            "?".to_string()
-                        });
-                    format!(" Respond to Agent {} ", label)
-                } else {
-                    " New Agent ".to_string()
-                })
+                .title(title)
                 .title_style(
                     Style::default()
                         .fg(theme.input_title)
@@ -1617,10 +1818,13 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
         ("Tab / l", "Next agent"),
         ("Shift+Tab / h", "Previous agent"),
         ("1-9", "Focus agent by number"),
-        ("n", "New agent (prompt + workspace)"),
+        ("n", "New agent (quick launch)"),
         ("s", "Respond to exited agent (session)"),
         ("x", "Kill focused agent"),
         ("y", "Copy output to clipboard"),
+        (":", "Open command palette"),
+        ("/", "Search output"),
+        ("n / N", "Next / previous match (in search)"),
         ("j / Down", "Scroll down (toward latest)"),
         ("k / Up", "Scroll up (into history)"),
         ("Ctrl+D / PgDn", "Half-page down"),
@@ -1666,6 +1870,34 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
         let used = KEY_COL_WIDTH + GAP + desc.len();
         let trailing = max_line_width.saturating_sub(used);
         let mut spans = vec![key_span, Span::raw("  "), Span::raw(*desc)];
+        if trailing > 0 {
+            spans.push(Span::raw(" ".repeat(trailing)));
+        }
+        help_text.push(Line::from(spans));
+    }
+
+    help_text.push(Line::from(" ".repeat(max_line_width)));
+    help_text.push(help_line_padded(
+        "Commands (: to open)",
+        max_line_width,
+        heading_style,
+    ));
+    help_text.push(Line::from(" ".repeat(max_line_width)));
+
+    for cmd in COMMANDS {
+        let key_span = Span::styled(
+            format!(
+                "{:>width$}",
+                format!(":{}", cmd.name),
+                width = KEY_COL_WIDTH
+            ),
+            Style::default()
+                .fg(theme.help_key)
+                .add_modifier(Modifier::BOLD),
+        );
+        let used = KEY_COL_WIDTH + GAP + cmd.description.len();
+        let trailing = max_line_width.saturating_sub(used);
+        let mut spans = vec![key_span, Span::raw("  "), Span::raw(cmd.description)];
         if trailing > 0 {
             spans.push(Span::raw(" ".repeat(trailing)));
         }
@@ -1751,6 +1983,384 @@ fn centered_rect_fixed_height(percent_x: u16, height: u16, area: Rect) -> Rect {
         Constraint::Percentage((100 - percent_x) / 2),
     ])
     .split(vertical[1])[1]
+}
+
+// ---------------------------------------------------------------------------
+// Search bar and highlighting
+// ---------------------------------------------------------------------------
+
+/// Render the search bar overlay on top of the status area (replaces the
+/// hint bar row).
+fn render_search_bar(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+
+    // The status area is 2 rows. Render the search bar on the second row
+    // (the hint bar position).
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
+
+    let query = app.search_query.text();
+    let match_info = if query.is_empty() {
+        String::new()
+    } else if app.search_matches.is_empty() {
+        " [no matches]".to_string()
+    } else {
+        format!(
+            " [{} of {}]",
+            app.search_match_index + 1,
+            app.search_matches.len()
+        )
+    };
+
+    let cursor_pos = app.search_query.cursor_pos();
+    let before = &query[..cursor_pos];
+    let after = &query[cursor_pos..];
+    let cursor_char_len = after.chars().next().map_or(0, |c| c.len_utf8());
+
+    let mut spans = vec![
+        Span::styled(
+            "/",
+            Style::default()
+                .fg(theme.search_bar_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(before.to_string()),
+    ];
+
+    // Cursor block.
+    spans.push(Span::styled(
+        if after.is_empty() {
+            " ".to_string()
+        } else {
+            after[..cursor_char_len].to_string()
+        },
+        Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
+    ));
+    if cursor_char_len < after.len() {
+        spans.push(Span::raw(after[cursor_char_len..].to_string()));
+    }
+
+    spans.push(Span::styled(
+        match_info,
+        Style::default().fg(theme.search_bar_fg),
+    ));
+
+    let search_line = Line::from(spans);
+    let search_paragraph = Paragraph::new(search_line)
+        .style(Style::default().bg(theme.hint_bar_bg).fg(theme.hint_bar_fg));
+    frame.render_widget(search_paragraph, rows[1]);
+}
+
+// ---------------------------------------------------------------------------
+// Command palette overlay
+// ---------------------------------------------------------------------------
+
+/// Render the command palette: an input bar at the bottom with a filtered
+/// dropdown of matching commands above it.
+fn render_command_palette(app: &App, frame: &mut Frame, status_area: Rect) {
+    let theme = &app.theme;
+
+    // The status area is 2 rows. Render the command bar on the second row
+    // (the hint bar position), same as the search bar.
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(status_area);
+
+    let query = app.command_input.text();
+    let filtered = &app.command_filtered;
+
+    // -- Dropdown above the status bar ----------------------------------------
+    if !filtered.is_empty() {
+        let dropdown_height = filtered.len().min(8) as u16;
+        let dropdown_y = status_area.y.saturating_sub(dropdown_height);
+        let dropdown_area = Rect::new(0, dropdown_y, status_area.width, dropdown_height);
+
+        frame.render_widget(Clear, dropdown_area);
+
+        let mut dropdown_lines: Vec<Line<'static>> = Vec::new();
+        for (i, cmd) in filtered.iter().enumerate() {
+            let is_selected = i == app.command_selected;
+            let (name_style, desc_style) = if is_selected {
+                (
+                    Style::default()
+                        .fg(theme.command_selected_fg)
+                        .bg(theme.command_selected_bg)
+                        .add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.command_desc_fg)
+                        .bg(theme.command_selected_bg),
+                )
+            } else {
+                (
+                    Style::default()
+                        .fg(theme.command_match_fg)
+                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme.command_desc_fg),
+                )
+            };
+
+            dropdown_lines.push(Line::from(vec![
+                Span::styled(if is_selected { " > " } else { "   " }, name_style),
+                Span::styled(format!(":{}", cmd.name), name_style),
+                Span::styled(format!("  {}", cmd.description), desc_style),
+            ]));
+        }
+
+        let dropdown = Paragraph::new(dropdown_lines).style(Style::default().bg(theme.hint_bar_bg));
+        frame.render_widget(dropdown, dropdown_area);
+    }
+
+    // -- Command input bar (bottom row) ---------------------------------------
+    let cursor_pos = app.command_input.cursor_pos();
+    let before = &query[..cursor_pos];
+    let after = &query[cursor_pos..];
+    let cursor_char_len = after.chars().next().map_or(0, |c| c.len_utf8());
+
+    let mut spans = vec![
+        Span::styled(
+            ":",
+            Style::default()
+                .fg(theme.command_bar_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(before.to_string()),
+    ];
+
+    // Cursor block.
+    spans.push(Span::styled(
+        if after.is_empty() {
+            " ".to_string()
+        } else {
+            after[..cursor_char_len].to_string()
+        },
+        Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
+    ));
+    if cursor_char_len < after.len() {
+        spans.push(Span::raw(after[cursor_char_len..].to_string()));
+    }
+
+    // Show error message if present.
+    if let Some(err) = &app.command_error {
+        spans.push(Span::styled(
+            format!("  {err}"),
+            Style::default().fg(theme.command_error_fg),
+        ));
+    }
+
+    let command_line = Line::from(spans);
+    let command_paragraph = Paragraph::new(command_line)
+        .style(Style::default().bg(theme.hint_bar_bg).fg(theme.hint_bar_fg));
+    frame.render_widget(command_paragraph, rows[1]);
+}
+
+/// Apply search match highlighting to cached lines.
+///
+/// Returns a new vector of lines with matching substrings highlighted.
+/// The current match uses a distinct (brighter) style so the user can
+/// see which match is focused. Each match is a `(line_index, start_byte,
+/// end_byte)` tuple with byte offsets into the original flattened span text.
+fn apply_search_highlights(
+    lines: &[Line<'static>],
+    matches: &[(usize, usize, usize)],
+    current_match_idx: usize,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    // Build a lookup: line_index → list of (start_byte, end_byte, is_current).
+    let mut match_map: std::collections::HashMap<usize, Vec<(usize, usize, bool)>> =
+        std::collections::HashMap::new();
+    for (i, &(line_idx, start, end)) in matches.iter().enumerate() {
+        match_map
+            .entry(line_idx)
+            .or_default()
+            .push((start, end, i == current_match_idx));
+    }
+
+    let highlight_style = Style::default()
+        .bg(theme.search_highlight_bg)
+        .fg(theme.search_highlight_fg);
+    let current_style = Style::default()
+        .bg(theme.search_current_bg)
+        .fg(theme.search_current_fg)
+        .add_modifier(Modifier::BOLD);
+
+    lines
+        .iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            if let Some(line_matches) = match_map.get(&idx) {
+                highlight_line(line, line_matches, highlight_style, current_style)
+            } else {
+                line.clone()
+            }
+        })
+        .collect()
+}
+
+/// Highlight matching substrings in a single line.
+///
+/// Operates on the flattened text of all spans, then re-splits into spans
+/// preserving original styles for non-matched regions. Each match is a
+/// `(start_byte, end_byte, is_current)` tuple with byte offsets into the
+/// flattened span text.
+fn highlight_line(
+    line: &Line<'static>,
+    matches: &[(usize, usize, bool)],
+    highlight_style: Style,
+    current_style: Style,
+) -> Line<'static> {
+    // Flatten spans into a list of (byte_range, style, text) segments.
+    let mut flat: Vec<(usize, usize, Style, String)> = Vec::new();
+    let mut offset = 0;
+    for span in &line.spans {
+        let text = span.content.to_string();
+        let len = text.len();
+        flat.push((offset, offset + len, span.style, text));
+        offset += len;
+    }
+
+    if flat.is_empty() {
+        return line.clone();
+    }
+
+    let total_len = offset;
+
+    // Build a sorted list of highlight ranges.
+    let mut highlights: Vec<(usize, usize, Style)> = matches
+        .iter()
+        .filter_map(|&(start, end, is_current)| {
+            if end <= total_len {
+                Some((
+                    start,
+                    end,
+                    if is_current {
+                        current_style
+                    } else {
+                        highlight_style
+                    },
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    highlights.sort_by_key(|&(start, _, _)| start);
+
+    // Re-build spans by walking through the flat segments and splitting
+    // where highlights begin/end.
+    let mut result_spans: Vec<Span<'static>> = Vec::new();
+
+    for (seg_start, seg_end, seg_style, seg_text) in &flat {
+        let mut pos = *seg_start;
+        let seg_bytes = seg_text.as_bytes();
+
+        for &(hl_start, hl_end, hl_style) in &highlights {
+            // Skip highlights that don't overlap this segment.
+            if hl_end <= pos || hl_start >= *seg_end {
+                continue;
+            }
+
+            // Emit non-highlighted prefix within this segment.
+            if hl_start > pos {
+                let local_start = pos - seg_start;
+                let local_end = hl_start - seg_start;
+                if local_end <= seg_bytes.len() {
+                    result_spans.push(Span::styled(
+                        seg_text[local_start..local_end].to_string(),
+                        *seg_style,
+                    ));
+                }
+                pos = hl_start;
+            }
+
+            // Emit the highlighted portion within this segment.
+            let hl_local_start = pos.saturating_sub(*seg_start);
+            let hl_local_end = hl_end.min(*seg_end) - seg_start;
+            if hl_local_end <= seg_bytes.len() && hl_local_start < hl_local_end {
+                result_spans.push(Span::styled(
+                    seg_text[hl_local_start..hl_local_end].to_string(),
+                    hl_style,
+                ));
+            }
+            pos = hl_end.min(*seg_end);
+        }
+
+        // Emit any remaining non-highlighted suffix.
+        if pos < *seg_end {
+            let local_start = pos - seg_start;
+            result_spans.push(Span::styled(
+                seg_text[local_start..].to_string(),
+                *seg_style,
+            ));
+        }
+    }
+
+    Line::from(result_spans)
+}
+
+// ---------------------------------------------------------------------------
+// Toast notification overlay
+// ---------------------------------------------------------------------------
+
+/// Maximum number of toasts to display simultaneously.
+const MAX_VISIBLE_TOASTS: usize = 3;
+
+/// Render up to [`MAX_VISIBLE_TOASTS`] toast notifications stacked vertically
+/// in the top-right corner of the terminal, just below the tab bar.
+fn render_toast(app: &App, frame: &mut Frame, area: Rect) {
+    if app.toasts.is_empty() {
+        return;
+    }
+
+    let theme = &app.theme;
+
+    // Show the most recent toasts (newest last in the Vec, rendered top-to-bottom).
+    let visible_start = app.toasts.len().saturating_sub(MAX_VISIBLE_TOASTS);
+    let visible = &app.toasts[visible_start..];
+
+    // Each toast is 3 rows tall (top border + content + bottom border).
+    let toast_height: u16 = 3;
+    let mut y = 3_u16.min(area.height.saturating_sub(toast_height));
+
+    for toast in visible.iter().rev() {
+        if y + toast_height > area.height {
+            break;
+        }
+
+        let icon = match toast.kind {
+            ToastKind::Success => CHECK_MARK,
+            ToastKind::Error => CROSS_MARK,
+        };
+        let icon_color = match toast.kind {
+            ToastKind::Success => theme.toast_success,
+            ToastKind::Error => theme.toast_error,
+        };
+
+        let content = Line::from(vec![
+            Span::styled(
+                format!(" {icon} "),
+                Style::default().fg(icon_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(toast.message.as_str(), Style::default().fg(theme.toast_fg)),
+            Span::raw(" "),
+        ]);
+
+        // Width: icon (3) + message + trailing space + borders (2).
+        let text_width = 3 + toast.message.len() + 1;
+        let popup_width = (text_width + 2).min(area.width as usize) as u16;
+
+        let x = area.width.saturating_sub(popup_width).saturating_sub(1);
+        let popup = Rect::new(x, y, popup_width, toast_height);
+
+        frame.render_widget(Clear, popup);
+
+        let widget = Paragraph::new(content)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.toast_border)),
+            )
+            .style(Style::default().bg(theme.toast_bg));
+
+        frame.render_widget(widget, popup);
+        y += toast_height;
+    }
 }
 
 // ---------------------------------------------------------------------------

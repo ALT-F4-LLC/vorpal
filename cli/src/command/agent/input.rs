@@ -27,7 +27,7 @@ use tracing::warn;
 /// Queries the current terminal size via crossterm and subtracts the fixed
 /// chrome: 3 rows for the tab bar and 2 rows for the status bar. Falls back
 /// to a sensible default when the terminal size cannot be determined.
-fn viewport_height() -> usize {
+pub(super) fn viewport_height() -> usize {
     let (_cols, rows) = terminal::size().unwrap_or((80, 24));
     // 3 rows tab bar + 2 rows status bar = 5 rows of chrome.
     (rows as usize).saturating_sub(5).max(1)
@@ -57,6 +57,84 @@ fn scroll_by(app: &mut App, delta: isize) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared actions (used by both keybindings and command palette)
+// ---------------------------------------------------------------------------
+
+/// Kill the focused agent (shared by `x` key and `:kill` command).
+async fn action_kill(app: &mut App, manager: &mut AgentManager) {
+    if let Some(agent) = app.focused_agent() {
+        let agent_id = agent.id;
+        match manager.kill(agent_id).await {
+            Ok(()) => {
+                app.set_status_message(format!("Sent kill signal to agent {}", agent_id + 1));
+            }
+            Err(e) => {
+                app.set_status_message(format!("Kill failed: {e}"));
+            }
+        }
+    } else {
+        app.set_status_message("No agent to kill");
+    }
+}
+
+/// Close the focused agent tab (shared by `q` key and `:quit` command).
+///
+/// If the focused agent is still running, shows a confirmation dialog.
+/// If the agent has exited, removes the tab immediately. When no agents
+/// remain the TUI exits.
+fn action_quit_tab(app: &mut App) {
+    if let Some(agent) = app.focused_agent() {
+        match agent.status {
+            AgentStatus::Running => {
+                app.confirm_close = true;
+            }
+            AgentStatus::Exited(_) => {
+                app.remove_agent(app.focused);
+                if app.agents.is_empty() {
+                    app.should_quit = true;
+                }
+            }
+        }
+    } else {
+        app.should_quit = true;
+    }
+}
+
+/// Enter respond mode for the focused exited agent (shared by `s` key and `:respond` command).
+fn action_respond(app: &mut App) {
+    if let Some(agent) = app.focused_agent() {
+        match (&agent.status, &agent.session_id) {
+            (AgentStatus::Exited(_), Some(_)) => {
+                let agent_opts = agent.claude_options.clone();
+                let agent_workspace = agent.workspace.clone();
+                app.respond_target = Some(agent.id);
+                app.enter_input_mode_with(Some(InputOverrides {
+                    claude_options: agent_opts,
+                    workspace: agent_workspace,
+                }));
+            }
+            (AgentStatus::Running, _) => {
+                app.set_status_message("Agent is still running");
+            }
+            (_, None) => {
+                app.set_status_message("No session ID -- agent must complete first");
+            }
+        }
+    } else {
+        app.set_status_message("No agent to respond to");
+    }
+}
+
+/// Enter search mode for the focused agent (shared by `/` key and `:search` command).
+fn action_search(app: &mut App) {
+    if app.focused_agent().is_some() {
+        app.enter_search_mode();
+    } else {
+        app.set_status_message("No agent to search");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -68,6 +146,23 @@ const GG_CHORD_TIMEOUT: Duration = Duration::from_secs(1);
 ///
 /// This is the single entry point called from the event loop in `tui.rs`.
 pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent) {
+    // Dismiss any active toast notifications on any keypress.
+    if !app.toasts.is_empty() {
+        app.dismiss_toasts();
+    }
+
+    // In search mode, delegate all keys to the search handler.
+    if app.input_mode == InputMode::Search {
+        handle_search_mode(app, key);
+        return;
+    }
+
+    // In command mode, delegate all keys to the command handler.
+    if app.input_mode == InputMode::Command {
+        handle_command_mode(app, manager, key).await;
+        return;
+    }
+
     // In input mode, delegate all keys to the input handler.
     if app.input_mode == InputMode::Input {
         handle_input_mode(app, manager, key).await;
@@ -91,29 +186,18 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         return;
     }
 
+    // Clear search highlights with Escape when not in any overlay.
+    if key.code == KeyCode::Esc && !app.search_matches.is_empty() {
+        app.search_matches.clear();
+        app.search_query.clear();
+        app.search_match_index = 0;
+        return;
+    }
+
     match key.code {
         // Close focused agent tab: q.
-        //
-        // If the focused agent is still running, show a confirmation dialog
-        // before killing it. If the agent has already exited, close the tab
-        // immediately. When no agents remain the TUI exits.
         KeyCode::Char('q') => {
-            if let Some(agent) = app.focused_agent() {
-                match agent.status {
-                    AgentStatus::Running => {
-                        app.confirm_close = true;
-                    }
-                    AgentStatus::Exited(_) => {
-                        app.remove_agent(app.focused);
-                        if app.agents.is_empty() {
-                            app.should_quit = true;
-                        }
-                    }
-                }
-            } else {
-                // No agents — nothing to do, just quit.
-                app.should_quit = true;
-            }
+            action_quit_tab(app);
         }
 
         // Force quit all agents: Ctrl+C.
@@ -199,30 +283,9 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             }
         }
 
-        // Kill focused agent.
-        //
-        // NOTE: `app.focused_agent()` borrows `app` immutably and
-        // `manager.kill()` borrows `manager` mutably — these are
-        // independent objects so there is no conflict. We copy
-        // `agent_id` out before calling `kill()` to avoid holding
-        // the immutable `app` reference across the mutable
-        // `manager` call. If `kill()` ever needs an `&AgentState`
-        // parameter this pattern must be revisited.
+        // Kill focused agent: x.
         KeyCode::Char('x') => {
-            if let Some(agent) = app.focused_agent() {
-                let agent_id = agent.id;
-                match manager.kill(agent_id).await {
-                    Ok(()) => {
-                        app.set_status_message(format!(
-                            "Sent kill signal to agent {}",
-                            agent_id + 1
-                        ));
-                    }
-                    Err(e) => {
-                        app.set_status_message(format!("Kill failed: {e}"));
-                    }
-                }
-            }
+            action_kill(app, manager).await;
         }
 
         // Cycle tool result display mode: compact → hidden → full.
@@ -282,9 +345,22 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             }
         }
 
-        // New agent: enter prompt input mode.
+        // Next search match / new agent.
+        // When search matches are active, `n` jumps to the next match.
+        // Otherwise, `n` opens the new agent input form.
         KeyCode::Char('n') => {
-            app.enter_input_mode();
+            if !app.search_matches.is_empty() {
+                app.search_next(viewport_height());
+            } else {
+                app.enter_input_mode();
+            }
+        }
+
+        // Previous search match (Shift+N).
+        KeyCode::Char('N') => {
+            if !app.search_matches.is_empty() {
+                app.search_prev(viewport_height());
+            }
         }
 
         // Toggle help overlay.
@@ -292,27 +368,19 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             app.show_help = !app.show_help;
         }
 
-        // Respond to an exited agent (resume with session ID).
+        // Respond to an exited agent (resume with session ID): s.
         KeyCode::Char('s') => {
-            if let Some(agent) = app.focused_agent() {
-                match (&agent.status, &agent.session_id) {
-                    (AgentStatus::Exited(_), Some(_)) => {
-                        let agent_opts = agent.claude_options.clone();
-                        let agent_workspace = agent.workspace.clone();
-                        app.respond_target = Some(agent.id);
-                        app.enter_input_mode_with(Some(InputOverrides {
-                            claude_options: agent_opts,
-                            workspace: agent_workspace,
-                        }));
-                    }
-                    (AgentStatus::Running, _) => {
-                        app.set_status_message("Agent is still running");
-                    }
-                    (_, None) => {
-                        app.set_status_message("No session ID -- agent must complete first");
-                    }
-                }
-            }
+            action_respond(app);
+        }
+
+        // Enter search mode: /.
+        KeyCode::Char('/') => {
+            action_search(app);
+        }
+
+        // Enter command mode: :.
+        KeyCode::Char(':') => {
+            app.enter_command_mode();
         }
 
         // All other keys: no-op.
@@ -344,104 +412,48 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
             app.prev_input_field();
         }
 
+        // Ctrl+E: toggle between quick-launch and advanced input modes.
+        KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.quick_launch = !app.quick_launch;
+            // When switching to quick mode, clamp the focused field to one
+            // that's visible (Prompt or Workspace).
+            if app.quick_launch
+                && !matches!(app.input_field, InputField::Prompt | InputField::Workspace)
+            {
+                app.input_field = InputField::Prompt;
+            }
+            let mode = if app.quick_launch {
+                "quick"
+            } else {
+                "advanced"
+            };
+            app.set_status_message(format!("Input mode: {mode}"));
+        }
+
         // Ctrl+S: submit the form and spawn a new agent (or respond to an
         // existing one if `respond_target` is set).
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            let respond_target = app.respond_target;
-            if let Some((prompt, workspace, claude_options)) = app.submit_input() {
-                // Resolve relative workspace paths to absolute.
-                let workspace = if workspace.is_absolute() {
-                    workspace.clean()
-                } else {
-                    std::env::current_dir()
-                        .unwrap_or_default()
-                        .join(&workspace)
-                        .clean()
-                };
+            submit_and_spawn(app, manager).await;
+        }
 
-                if let Some(target_id) = respond_target {
-                    // Respond flow: resume an existing agent's session.
-                    // Resolve the agent id to a Vec index at submit time via the
-                    // agent_index map. This is correct even if agents were added
-                    // or removed while the input overlay was open.
-                    let session_id = app
-                        .agent_by_id_mut(target_id)
-                        .and_then(|a| a.session_id.clone());
-                    let session_ref = session_id.as_deref();
-                    // The old agent_id was already removed from the manager's tracking
-                    // when notify_exited() fired. spawn() registers the new agent_id
-                    // in kill_senders and handles, so no explicit cleanup is needed here.
-                    match manager
-                        .spawn(&prompt, &workspace, &claude_options, session_ref)
-                        .await
-                    {
-                        Ok(agent_id) => {
-                            if let Some(agent) = app.agent_by_id_mut(target_id) {
-                                // Preserve existing output; add a visual separator.
-                                agent.push_line(DisplayLine::TurnStart);
-                                agent.id = agent_id;
-                                agent.status = AgentStatus::Running;
-                                agent.activity = AgentActivity::Idle;
-                                agent.prompt = prompt.clone();
-                                agent.scroll_offset = 0;
-                                agent.has_new_output = false;
-                                agent.cached_lines = None;
-                                // Rebuild agent_index since the id changed.
-                                app.rebuild_agent_index();
-                            }
-                            // Resolve the new agent_id to a Vec index for focusing.
-                            if let Some(idx) = app.agent_vec_index(agent_id) {
-                                app.focus_agent(idx);
-                                app.set_status_message(format!("Resumed agent {}", idx + 1));
-                            } else {
-                                tracing::warn!(
-                                    agent_id,
-                                    "resumed agent but could not resolve Vec index"
-                                );
-                                app.set_status_message("Resumed agent (index not found)");
-                            }
-                        }
-                        Err(e) => {
-                            app.set_status_message(format!("Spawn failed: {e}"));
-                        }
+        // Enter key behaviour depends on the active field and mode:
+        //   - Quick-launch mode: submit the form (launch immediately).
+        //   - Advanced mode, Prompt field: insert a newline (multiline editing).
+        //   - Advanced mode, any other field: advance to the next field (Tab).
+        KeyCode::Enter => {
+            if app.quick_launch {
+                submit_and_spawn(app, manager).await;
+            } else {
+                match app.input_field {
+                    InputField::Prompt => {
+                        app.input.insert_char('\n');
                     }
-                } else {
-                    // New-agent flow (unchanged).
-                    match manager
-                        .spawn(&prompt, &workspace, &claude_options, None)
-                        .await
-                    {
-                        Ok(agent_id) => {
-                            app.add_agent(super::state::AgentState::new(
-                                agent_id,
-                                workspace,
-                                prompt.clone(),
-                                claude_options.clone(),
-                            ));
-                            // Focus the newly added agent.
-                            let new_index = app.agents.len() - 1;
-                            app.focus_agent(new_index);
-                            app.set_status_message(format!("Spawned agent {}", agent_id + 1));
-                        }
-                        Err(e) => {
-                            app.set_status_message(format!("Spawn failed: {e}"));
-                        }
+                    _ => {
+                        app.next_input_field();
                     }
                 }
             }
         }
-
-        // Enter key behaviour depends on the active field:
-        //   - Prompt: insert a newline (multiline prompt editing).
-        //   - Any other field: advance to the next field (same as Tab).
-        KeyCode::Enter => match app.input_field {
-            InputField::Prompt => {
-                app.input.insert_char('\n');
-            }
-            _ => {
-                app.next_input_field();
-            }
-        },
 
         // All text editing operations route to the active field's buffer.
         code => {
@@ -501,6 +513,89 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
 }
 
 // ---------------------------------------------------------------------------
+// Submit + spawn helper
+// ---------------------------------------------------------------------------
+
+/// Submit the current input form and spawn (or resume) an agent.
+///
+/// Extracts the respond-target before calling `submit_input()` so the
+/// borrow of `app` is released before spawning. Shared by both the
+/// `Ctrl+S` and quick-launch `Enter` key paths.
+async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) {
+    let respond_target = app.respond_target;
+    let Some((prompt, workspace, claude_options)) = app.submit_input() else {
+        app.set_status_message("Prompt cannot be empty");
+        return;
+    };
+    // Resolve relative workspace paths to absolute.
+    let workspace = if workspace.is_absolute() {
+        workspace.clean()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_default()
+            .join(&workspace)
+            .clean()
+    };
+
+    if let Some(target_id) = respond_target {
+        // Respond flow: resume an existing agent's session.
+        let session_id = app
+            .agent_by_id_mut(target_id)
+            .and_then(|a| a.session_id.clone());
+        let session_ref = session_id.as_deref();
+        match manager
+            .spawn(&prompt, &workspace, &claude_options, session_ref)
+            .await
+        {
+            Ok(agent_id) => {
+                if let Some(agent) = app.agent_by_id_mut(target_id) {
+                    agent.push_line(DisplayLine::TurnStart);
+                    agent.id = agent_id;
+                    agent.status = AgentStatus::Running;
+                    agent.activity = AgentActivity::Idle;
+                    agent.prompt = prompt.clone();
+                    agent.scroll_offset = 0;
+                    agent.has_new_output = false;
+                    agent.cached_lines = None;
+                    app.rebuild_agent_index();
+                }
+                if let Some(idx) = app.agent_vec_index(agent_id) {
+                    app.focus_agent(idx);
+                    app.set_status_message(format!("Resumed agent {}", idx + 1));
+                } else {
+                    tracing::warn!(agent_id, "resumed agent but could not resolve Vec index");
+                    app.set_status_message("Resumed agent (index not found)");
+                }
+            }
+            Err(e) => {
+                app.set_status_message(format!("Spawn failed: {e}"));
+            }
+        }
+    } else {
+        // New-agent flow.
+        match manager
+            .spawn(&prompt, &workspace, &claude_options, None)
+            .await
+        {
+            Ok(agent_id) => {
+                app.add_agent(super::state::AgentState::new(
+                    agent_id,
+                    workspace,
+                    prompt.clone(),
+                    claude_options.clone(),
+                ));
+                let new_index = app.agents.len() - 1;
+                app.focus_agent(new_index);
+                app.set_status_message(format!("Spawned agent {}", agent_id + 1));
+            }
+            Err(e) => {
+                app.set_status_message(format!("Spawn failed: {e}"));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Confirm-close handler
 // ---------------------------------------------------------------------------
 
@@ -536,6 +631,177 @@ async fn handle_confirm_close(app: &mut App, manager: &mut AgentManager, key: Ke
         _ => {
             app.confirm_close = false;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Search mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while in search mode.
+///
+/// Supports text entry for the search query, `n`/`N` to jump between matches,
+/// `Enter` to confirm and stay in search highlighting mode, and `Escape` to
+/// clear the search and return to normal mode.
+fn handle_search_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Exit search mode: Escape.
+        KeyCode::Esc => {
+            app.exit_search_mode();
+        }
+
+        // Confirm search and return to normal mode, keeping highlights.
+        KeyCode::Enter => {
+            if !app.search_matches.is_empty() {
+                app.scroll_to_current_match(viewport_height());
+            }
+            app.input_mode = InputMode::Normal;
+        }
+
+        // Next match: n or Ctrl+N (also works while typing).
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_next(viewport_height());
+        }
+
+        // Previous match: Ctrl+P.
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.search_prev(viewport_height());
+        }
+
+        // Text editing for the search query.
+        KeyCode::Backspace => {
+            app.search_query.delete_char();
+            app.recompute_search_matches();
+        }
+        KeyCode::Delete => {
+            app.search_query.delete_char_forward();
+            app.recompute_search_matches();
+        }
+        KeyCode::Left => {
+            app.search_query.move_left();
+        }
+        KeyCode::Right => {
+            app.search_query.move_right();
+        }
+        KeyCode::Home => {
+            app.search_query.move_home();
+        }
+        KeyCode::End => {
+            app.search_query.move_end();
+        }
+        KeyCode::Char(c) => {
+            app.search_query.insert_char(c);
+            app.recompute_search_matches();
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while in command palette mode.
+///
+/// Supports text entry for the command name, arrow keys to navigate the
+/// filtered command list, `Tab` for completion, `Enter` to execute, and
+/// `Escape` to cancel.
+async fn handle_command_mode(app: &mut App, manager: &mut AgentManager, key: KeyEvent) {
+    match key.code {
+        // Exit command mode: Escape.
+        KeyCode::Esc => {
+            app.exit_command_mode();
+        }
+
+        // Execute the selected command or typed text: Enter.
+        KeyCode::Enter => {
+            if app.command_filtered.is_empty() {
+                // No matching command — show error.
+                let input = app.command_input.text().to_string();
+                app.command_error = Some(format!("Unknown command: {input}"));
+            } else {
+                let selected = app.command_selected.min(app.command_filtered.len() - 1);
+                let cmd_name = app.command_filtered[selected].name;
+                app.exit_command_mode();
+                execute_command(app, manager, cmd_name).await;
+            }
+        }
+
+        // Tab completion: fill in the selected command name.
+        KeyCode::Tab => {
+            if !app.command_filtered.is_empty() {
+                let selected = app.command_selected.min(app.command_filtered.len() - 1);
+                app.command_input
+                    .set_text(app.command_filtered[selected].name);
+                app.command_selected = 0;
+                app.command_error = None;
+                app.refilter_commands();
+            }
+        }
+
+        // Navigate filtered list: Up.
+        KeyCode::Up => {
+            if !app.command_filtered.is_empty() {
+                app.command_selected = if app.command_selected == 0 {
+                    app.command_filtered.len() - 1
+                } else {
+                    app.command_selected - 1
+                };
+            }
+        }
+
+        // Navigate filtered list: Down.
+        KeyCode::Down => {
+            if !app.command_filtered.is_empty() {
+                app.command_selected = (app.command_selected + 1) % app.command_filtered.len();
+            }
+        }
+
+        // Text editing for the command input.
+        KeyCode::Backspace => {
+            app.command_input.delete_char();
+            app.command_selected = 0;
+            app.command_error = None;
+            app.refilter_commands();
+        }
+        KeyCode::Delete => {
+            app.command_input.delete_char_forward();
+            app.command_selected = 0;
+            app.command_error = None;
+            app.refilter_commands();
+        }
+        KeyCode::Left => {
+            app.command_input.move_left();
+        }
+        KeyCode::Right => {
+            app.command_input.move_right();
+        }
+        KeyCode::Home => {
+            app.command_input.move_home();
+        }
+        KeyCode::End => {
+            app.command_input.move_end();
+        }
+        KeyCode::Char(c) => {
+            app.command_input.insert_char(c);
+            app.command_selected = 0;
+            app.command_error = None;
+            app.refilter_commands();
+        }
+        _ => {}
+    }
+}
+
+/// Execute a named command from the palette.
+async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) {
+    match name {
+        "kill" => action_kill(app, manager).await,
+        "new" => app.enter_input_mode(),
+        "respond" => action_respond(app),
+        "search" => action_search(app),
+        "help" => app.show_help = !app.show_help,
+        "quit" => action_quit_tab(app),
+        _ => app.set_status_message(format!("Unknown command: {name}")),
     }
 }
 

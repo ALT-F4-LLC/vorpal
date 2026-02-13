@@ -136,8 +136,8 @@ pub enum Command {
         #[arg(long)]
         workspace: Vec<PathBuf>,
 
-        /// Claude Code permission mode (e.g. "acceptEdits", "plan", "bypassPermissions")
-        #[arg(default_value = "acceptEdits", long)]
+        /// Claude Code permission mode (e.g. "default", "acceptEdits", "plan", "bypassPermissions")
+        #[arg(default_value = "default", long)]
         permission_mode: Option<String>,
 
         /// Claude Code allowed tools (can be repeated, e.g. --allowed-tools Edit --allowed-tools Write)

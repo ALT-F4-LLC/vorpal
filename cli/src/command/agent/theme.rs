@@ -101,6 +101,38 @@ pub struct Theme {
     pub confirm_no: Color,
     pub confirm_bg: Color,
     pub confirm_fg: Color,
+
+    // -- Welcome screen ------------------------------------------------------
+    pub welcome_title: Color,
+    pub welcome_description: Color,
+    pub welcome_key: Color,
+    pub welcome_key_desc: Color,
+    pub welcome_border: Color,
+
+    // -- Toast notifications -------------------------------------------------
+    pub toast_bg: Color,
+    pub toast_fg: Color,
+    pub toast_border: Color,
+    pub toast_success: Color,
+    pub toast_error: Color,
+
+    // -- Tab unread indicator ------------------------------------------------
+    pub tab_unread: Color,
+
+    // -- Search mode ---------------------------------------------------------
+    pub search_highlight_bg: Color,
+    pub search_highlight_fg: Color,
+    pub search_current_bg: Color,
+    pub search_current_fg: Color,
+    pub search_bar_fg: Color,
+
+    // -- Command palette -----------------------------------------------------
+    pub command_bar_fg: Color,
+    pub command_match_fg: Color,
+    pub command_selected_bg: Color,
+    pub command_selected_fg: Color,
+    pub command_desc_fg: Color,
+    pub command_error_fg: Color,
 }
 
 impl Theme {
@@ -186,6 +218,33 @@ impl Theme {
             confirm_no: Color::Red,
             confirm_bg: Color::Black,
             confirm_fg: Color::White,
+
+            welcome_title: Color::Cyan,
+            welcome_description: Color::Gray,
+            welcome_key: Color::Yellow,
+            welcome_key_desc: Color::DarkGray,
+            welcome_border: Color::DarkGray,
+
+            toast_bg: Color::Black,
+            toast_fg: Color::White,
+            toast_border: Color::Yellow,
+            toast_success: Color::Green,
+            toast_error: Color::Red,
+
+            tab_unread: Color::Yellow,
+
+            search_highlight_bg: Color::Yellow,
+            search_highlight_fg: Color::Black,
+            search_current_bg: Color::Rgb(255, 165, 0), // orange
+            search_current_fg: Color::Black,
+            search_bar_fg: Color::Cyan,
+
+            command_bar_fg: Color::Cyan,
+            command_match_fg: Color::Yellow,
+            command_selected_bg: Color::DarkGray,
+            command_selected_fg: Color::White,
+            command_desc_fg: Color::Gray,
+            command_error_fg: Color::Red,
         }
     }
 
@@ -271,6 +330,33 @@ impl Theme {
             confirm_no: Color::Red,
             confirm_bg: Color::White,
             confirm_fg: Color::Black,
+
+            welcome_title: Color::Rgb(0, 140, 140),
+            welcome_description: Color::DarkGray,
+            welcome_key: Color::Rgb(180, 130, 0),
+            welcome_key_desc: Color::Gray,
+            welcome_border: Color::Gray,
+
+            toast_bg: Color::White,
+            toast_fg: Color::Black,
+            toast_border: Color::Rgb(180, 130, 0),
+            toast_success: Color::Green,
+            toast_error: Color::Red,
+
+            tab_unread: Color::Rgb(180, 130, 0),
+
+            search_highlight_bg: Color::Rgb(180, 130, 0),
+            search_highlight_fg: Color::Black,
+            search_current_bg: Color::Rgb(255, 100, 0),
+            search_current_fg: Color::White,
+            search_bar_fg: Color::Rgb(0, 140, 140),
+
+            command_bar_fg: Color::Rgb(0, 140, 140),
+            command_match_fg: Color::Rgb(180, 130, 0),
+            command_selected_bg: Color::Rgb(220, 220, 220),
+            command_selected_fg: Color::Black,
+            command_desc_fg: Color::DarkGray,
+            command_error_fg: Color::Red,
         }
     }
 
