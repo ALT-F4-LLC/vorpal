@@ -42,7 +42,7 @@ If the artifact name is not in this list, report an error and list the valid opt
 Execute:
 
 ```bash
-vorpal build "<artifact-name>"
+make VORPAL_ARTIFACT="<artifact-name>" vorpal
 ```
 
 Capture the output and extract the digest from the build result. The digest appears in the output as a hash value.
@@ -52,7 +52,7 @@ Capture the output and extract the digest from the build result. The digest appe
 Execute:
 
 ```bash
-vorpal build --config 'Vorpal.go.toml' "<artifact-name>"
+make VORPAL_ARTIFACT="<artifact-name>" VORPAL_FLAGS="--config 'Vorpal.go.toml'" vorpal
 ```
 
 Capture the output and extract the digest from the build result.

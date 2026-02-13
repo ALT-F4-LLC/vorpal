@@ -2,73 +2,83 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## What is Vorpal
+
+Vorpal is a distributed, language-agnostic artifact build and execution system. It uses gRPC services (agent, registry, worker) to build, store, and run artifacts across multiple platforms (aarch64-darwin, aarch64-linux, x86_64-darwin, x86_64-linux). Services run in plaintext mode by default; mutual TLS is available via the `--tls` flag for production deployments.
+
 ## Build & Development Commands
 
 ```bash
 # Setup development environment (installs rustup, protoc, terraform)
 ./script/dev.sh make build
 
-# Common make targets
-make build          # Build all crates (debug)
-make check          # Type check
-make format         # Check formatting (cargo fmt --all --check)
-make lint           # Run clippy (--deny warnings)
-make test           # Run tests
+make build          # Build all workspace crates (debug)
+make build TARGET=release  # Build release (offline, requires vendored deps)
+make check          # cargo check
+make format         # cargo fmt --all --check
+make lint           # cargo clippy -- --deny warnings
+make test           # cargo test
 make clean          # Remove build artifacts
-
-# Release builds
-make build TARGET=release
-make test TARGET=release
-
-# Run Vorpal services locally
-make vorpal-start   # Starts agent, registry, worker on https://localhost:23153
-
-# Build using Vorpal (self-hosting)
-make vorpal         # Builds the "vorpal" artifact
-
-# Generate Go protobuf bindings from Rust proto definitions
-make generate
-
-# Vendored builds (offline)
-make vendor
+make vendor         # Vendor Cargo dependencies for offline builds
 make .cargo         # Configure cargo to use vendored deps
+make generate       # Regenerate Go protobuf code from proto files
 ```
 
-## Architecture
-
-Vorpal is a distributed build system with Rust and Go SDKs. Components communicate via gRPC (protobuf definitions in `sdk/rust/api/`).
-
-### Workspace Structure
-
-```
-cli/                    # Main CLI binary (orchestrator)
-config/                 # Configuration crate (vorpal-config)
-sdk/
-  rust/                 # vorpal-sdk crate
-    api/                # Protobuf definitions (source of truth)
-    src/
-      artifact/         # Artifact builders (rust, go, linux, oci, tools)
-      context.rs        # Build context management
-  go/
-    pkg/
-      api/              # Generated Go protobuf bindings
-      artifact/         # Go artifact builders (mirrors Rust SDK)
-      config/           # Go context/config helpers
+Running a single test:
+```bash
+cargo test -p <crate-name> <test_name>
 ```
 
-### Key Concepts
+Workspace crates: `vorpal-cli`, `vorpal-sdk`, `vorpal-config`
+
+### Running Vorpal Locally
+
+```bash
+# 1. Start all services (agent + registry + worker on port 23153, plaintext by default)
+make vorpal-start
+
+# 2. Build an artifact
+make vorpal                              # builds default (vorpal)
+make VORPAL_ARTIFACT=vorpal-shell vorpal # builds specific artifact
+
+# Optional: enable TLS (requires generating keys first)
+cargo run --bin vorpal -- system keys generate
+make vorpal-start VORPAL_FLAGS="--tls"
+```
+
+### Go SDK
+
+```bash
+cd sdk/go
+go test ./...
+go build ./...
+```
+
+## Key Concepts
 
 - **Artifact**: Hermetic, reproducible build output. Defined via `Artifact::new()` with steps and target systems.
 - **ArtifactStep**: Individual build step with entrypoint, arguments, environment, and dependencies.
 - **Context**: Build session that collects artifacts and runs them against services.
 - **Systems**: Target platforms (`Aarch64Darwin`, `Aarch64Linux`, `X8664Darwin`, `X8664Linux`).
 
+## Architecture
+
+### Workspace Structure
+
+- **`cli/`** (`vorpal-cli`) - CLI binary (`vorpal`). Orchestrates builds, runs artifacts, manages services and TLS keys. Entry point: `cli/src/main.rs`, commands in `cli/src/command/`.
+- **`sdk/rust/`** (`vorpal-sdk`) - Rust SDK. Contains protobuf definitions (`sdk/rust/api/*.proto`), artifact builders, and `ConfigContext` for service communication.
+- **`sdk/go/`** - Go SDK. Mirrors the Rust SDK. Generated protobuf code in `sdk/go/pkg/api/`, artifact builders in `sdk/go/pkg/artifact/`.
+- **`config/`** (`vorpal-config`) - Vorpal's own build configuration. Defines artifacts like `vorpal`, `vorpal-shell`, `vorpal-release`, `vorpal-container-image`.
+
 ### Service Architecture
 
-- **CLI**: Orchestrates builds, talks to services
-- **Agent service**: Filesystem/sandbox tasks (localhost)
-- **Registry service**: Persists artifacts (can be S3-backed)
-- **Worker service**: Executes steps in isolated environments
+All three services run on the same port (default 23153). By default, services use plaintext (HTTP); pass `--tls` to enable mutual TLS:
+
+1. **Agent** (`AgentService::PrepareArtifact`) - Prepares/stages artifacts locally, manages sandboxes
+2. **Registry** (`ArtifactService` + `ArchiveService`) - Stores artifact metadata and binary archives (local or S3 backend). Archives use zstd compression with chunked streaming.
+3. **Worker** (`WorkerService::BuildArtifact`) - Executes build steps in isolated environments, pushes results to registry
+
+Service implementations: `cli/src/command/start/` (agent.rs, registry.rs, worker.rs)
 
 ### SDK Patterns
 
@@ -85,6 +95,28 @@ artifact.NewArtifact("name", steps, systems).Build(ctx)
 ```
 
 Pre-built artifact helpers exist for common tools (crane, gh, git, protoc, rust-toolchain, etc.) and language builds (Rust, Go).
+
+### Build Flow
+
+CLI reads `Vorpal.toml` → connects to Agent (prepare) → Worker (build steps) → Registry (store archive + metadata) → returns digest
+
+### Protobuf Definitions
+
+Source of truth: `sdk/rust/api/` with five proto files (agent, archive, artifact, context, worker). Rust code is generated at build time via `sdk/rust/build.rs` using tonic-prost. Go code is generated via `make generate` using protoc.
+
+### Configuration Files
+
+- `Vorpal.toml` - Rust artifact build config
+- `Vorpal.go.toml` - Go artifact build config (used for SDK parity testing)
+- `rust-toolchain.toml` - Pinned to Rust 1.89.0
+
+### TLS
+
+TLS is optional. By default, services start in plaintext mode (HTTP) for local development. To enable TLS, pass `--tls` to `vorpal system services start` and use `https://` addresses for client connections. TLS keys/certs are managed via `vorpal system keys generate` and stored in `/var/lib/vorpal/`. The shared TLS client config helper is in the SDK (`get_client_tls_config()` in Rust, `getTransportCredentials()` in Go). Both SDKs auto-detect the transport based on the address scheme (`http://` = plaintext, `https://` = TLS). CA certificate is optional when using TLS (falls back to system trust store).
+
+### Artifact Store
+
+Artifacts are stored under `/var/lib/vorpal/` with archives, hashes, sandboxes, and notary data managed by the store module (`cli/src/command/store/`).
 
 ## Running Artifacts
 
@@ -103,30 +135,10 @@ vorpal run team/my-tool:v2.0            # namespace, name, and tag
 vorpal run my-tool --bin my-tool-helper -- --verbose
 
 # Use a specific registry
-vorpal run rsync --registry https://registry.example.com:23151
+vorpal run rsync --registry http://registry.example.com:23151
 ```
 
 Resolution order: local alias file → registry lookup → error with build hint.
-
-## Testing
-
-```bash
-cargo test                           # All tests
-cargo test --package vorpal-sdk      # SDK tests only
-cargo test test_name                 # Single test
-```
-
-## Protobuf Workflow
-
-Proto files live in `sdk/rust/api/`. Rust bindings are generated at build time via `tonic-prost-build`. Go bindings must be regenerated manually:
-
-```bash
-make generate  # Regenerates sdk/go/pkg/api/ from sdk/rust/api/
-```
-
-## Rust Toolchain
-
-Pinned to Rust 1.89.0 via `rust-toolchain.toml`. Components: clippy, rust-analyzer, rustfmt.
 
 ## Lima (Linux VM Development)
 
