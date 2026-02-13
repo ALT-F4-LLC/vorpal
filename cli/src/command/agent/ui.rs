@@ -552,14 +552,14 @@ fn wrapped_row_count(lines: &[Line<'_>], width: u16) -> usize {
 /// Maximum length of tool result content in compact mode.
 const COMPACT_RESULT_MAX: usize = 200;
 
-/// Maximum number of consecutive tool result lines shown before collapsing.
-const COMPACT_RESULT_RUN_MAX: usize = 3;
+/// Maximum number of last lines shown per tool result run in compact mode.
+const COMPACT_RESULT_RUN_MAX: usize = 1;
 
 /// Collapse consecutive runs of [`DisplayLine::ToolResult`] based on display mode.
 ///
 /// - **Full**: all lines shown with full content.
-/// - **Compact**: runs longer than [`COMPACT_RESULT_RUN_MAX`] are collapsed;
-///   individual lines are truncated to [`COMPACT_RESULT_MAX`] chars.
+/// - **Compact**: only the last [`COMPACT_RESULT_RUN_MAX`] lines of each run
+///   are shown; individual lines are truncated to [`COMPACT_RESULT_MAX`] chars.
 /// - **Hidden**: entire result runs are replaced with a single byte-count summary.
 ///
 /// In all modes, consecutive tool result runs are tracked so that only the
@@ -643,48 +643,38 @@ fn collapse_results<'a>(lines: &[&'a DisplayLine], mode: ResultDisplay) -> Vec<C
                 }
             }
 
+            let collect_result_lines = |slice: &[&'a DisplayLine]| {
+                let mut out = Vec::new();
+                for dl in slice {
+                    if let DisplayLine::ToolResult {
+                        content, is_error, ..
+                    } = dl
+                    {
+                        for text_line in content.lines() {
+                            out.push(ToolResultLine {
+                                text: text_line,
+                                is_error: *is_error,
+                            });
+                        }
+                    }
+                }
+                out
+            };
+
             let run = match mode {
                 ResultDisplay::Hidden => ToolResultRun::Hidden { total_bytes },
                 ResultDisplay::Compact => {
-                    let mut visible = Vec::new();
-                    'outer_compact: for dl in &lines[run_start..i] {
-                        if let DisplayLine::ToolResult {
-                            content, is_error, ..
-                        } = dl
-                        {
-                            for text_line in content.lines() {
-                                if visible.len() >= COMPACT_RESULT_RUN_MAX {
-                                    break 'outer_compact;
-                                }
-                                visible.push(ToolResultLine {
-                                    text: text_line,
-                                    is_error: *is_error,
-                                });
-                            }
-                        }
-                    }
-                    let hidden_count = total_lines.saturating_sub(COMPACT_RESULT_RUN_MAX);
+                    let all = collect_result_lines(&lines[run_start..i]);
+                    let skip = all.len().saturating_sub(COMPACT_RESULT_RUN_MAX);
+                    let visible: Vec<_> = all.into_iter().skip(skip).collect();
+                    let hidden_count = total_lines.saturating_sub(visible.len());
                     ToolResultRun::Compact {
                         visible,
                         hidden_count,
                     }
                 }
                 ResultDisplay::Full => {
-                    let mut all = Vec::new();
-                    for dl in &lines[run_start..i] {
-                        if let DisplayLine::ToolResult {
-                            content, is_error, ..
-                        } = dl
-                        {
-                            for text_line in content.lines() {
-                                all.push(ToolResultLine {
-                                    text: text_line,
-                                    is_error: *is_error,
-                                });
-                            }
-                        }
-                    }
-                    ToolResultRun::Full { lines: all }
+                    ToolResultRun::Full { lines: collect_result_lines(&lines[run_start..i]) }
                 }
             };
             blocks.push(CollapsedBlock::ToolResultRun(run));
@@ -2493,8 +2483,65 @@ mod tests {
                 visible,
                 hidden_count,
             }) => {
-                assert_eq!(visible.len(), COMPACT_RESULT_RUN_MAX);
-                assert_eq!(*hidden_count, 5 - COMPACT_RESULT_RUN_MAX);
+                assert_eq!(visible.len(), 1);
+                assert_eq!(visible[0].text, "e");
+                assert_eq!(*hidden_count, 4);
+            }
+            other => panic!("expected Compact, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn collapse_results_compact_shows_last_line_of_multientry_run() {
+        // Two consecutive ToolResult entries form a single run.
+        // "first_a\nfirst_b" (2 lines) + "second_a\nsecond_b" (2 lines) = 4 lines total.
+        // Compact should show only the very last line: "second_b".
+        let lines = vec![
+            DisplayLine::ToolResult {
+                content: "first_a\nfirst_b".into(),
+                is_error: false,
+            },
+            DisplayLine::ToolResult {
+                content: "second_a\nsecond_b".into(),
+                is_error: false,
+            },
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let blocks = collapse_results(&refs, ResultDisplay::Compact);
+
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            CollapsedBlock::ToolResultRun(ToolResultRun::Compact {
+                visible,
+                hidden_count,
+            }) => {
+                assert_eq!(visible.len(), 1);
+                assert_eq!(visible[0].text, "second_b");
+                assert_eq!(*hidden_count, 3);
+            }
+            other => panic!("expected Compact, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn collapse_results_compact_single_line_shows_it() {
+        // A run with exactly one line should show that line with hidden_count 0.
+        let lines = vec![DisplayLine::ToolResult {
+            content: "only_line".into(),
+            is_error: false,
+        }];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+        let blocks = collapse_results(&refs, ResultDisplay::Compact);
+
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            CollapsedBlock::ToolResultRun(ToolResultRun::Compact {
+                visible,
+                hidden_count,
+            }) => {
+                assert_eq!(visible.len(), 1);
+                assert_eq!(visible[0].text, "only_line");
+                assert_eq!(*hidden_count, 0);
             }
             other => panic!("expected Compact, got {:?}", other),
         }
@@ -2609,22 +2656,16 @@ mod tests {
     #[test]
     fn render_tool_result_compact_shows_hidden_count() {
         let blocks = vec![CollapsedBlock::ToolResultRun(ToolResultRun::Compact {
-            visible: vec![
-                ToolResultLine {
-                    text: "a",
-                    is_error: false,
-                },
-                ToolResultLine {
-                    text: "b",
-                    is_error: false,
-                },
-            ],
+            visible: vec![ToolResultLine {
+                text: "last_line",
+                is_error: false,
+            }],
             hidden_count: 5,
         })];
         let output = render_to_spans(&blocks, &test_theme());
-        // 2 visible lines + 1 "more lines hidden" line
-        assert_eq!(output.len(), 3);
-        let last_text: String = output[2].spans.iter().map(|s| s.content.as_ref()).collect();
+        // 1 visible line + 1 "more lines hidden" line
+        assert_eq!(output.len(), 2);
+        let last_text: String = output[1].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(last_text.contains("5 more lines hidden"));
     }
 
