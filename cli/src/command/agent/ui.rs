@@ -4,8 +4,8 @@
 //! area with scrollable output, status bar, and help overlay.
 
 use super::state::{
-    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, ResultDisplay, ToastKind,
-    COMMANDS, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, ResultDisplay, SplitPane,
+    ToastKind, COMMANDS, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::theme::Theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -63,16 +63,58 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         return;
     }
 
+    // When the sidebar is visible, split horizontally first: sidebar | main.
+    // The sidebar width is ~30 columns, clamped so it never exceeds 40% of
+    // the terminal width.
+    let sidebar_width: u16 = if app.sidebar_visible {
+        30.min(area.width * 2 / 5)
+    } else {
+        0
+    };
+
+    let h_chunks = if sidebar_width > 0 {
+        Layout::horizontal([Constraint::Length(sidebar_width), Constraint::Fill(1)]).split(area)
+    } else {
+        // No sidebar — the main area gets the full width.
+        Layout::horizontal([Constraint::Length(0), Constraint::Fill(1)]).split(area)
+    };
+
+    let sidebar_area = h_chunks[0];
+    let main_area = h_chunks[1];
+
     let chunks = Layout::vertical([
         Constraint::Length(3), // tab bar
         Constraint::Fill(1),   // content
         Constraint::Length(2), // status bar
     ])
-    .split(area);
+    .split(main_area);
+
+    // Store the content area rect for mouse scroll hit-testing.
+    app.content_rect = Some(chunks[1]);
 
     render_tabs(app, frame, chunks[0]);
-    render_content(app, frame, chunks[1]);
+
+    // In split-pane mode, divide the content area into two side-by-side panes.
+    if app.split_enabled {
+        if let Some(right_idx) = app.split_right_agent_index() {
+            let split_chunks =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(chunks[1]);
+            let left_focused = app.split_focused_pane == SplitPane::Left;
+            render_content_pane(app, frame, split_chunks[0], app.focused, left_focused);
+            render_content_pane(app, frame, split_chunks[1], right_idx, !left_focused);
+        } else {
+            render_content(app, frame, chunks[1]);
+        }
+    } else {
+        render_content(app, frame, chunks[1]);
+    }
+
     render_status(app, frame, chunks[2]);
+
+    if app.sidebar_visible && sidebar_width > 0 {
+        render_sidebar(app, frame, sidebar_area);
+    }
 
     if app.show_help {
         render_help(&app.theme, frame, area);
@@ -82,8 +124,22 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         render_confirm_close(app, frame, area);
     }
 
+    if app.input_mode == InputMode::TemplatePicker {
+        render_template_picker(app, frame, area);
+    }
+
     if app.input_mode == InputMode::Input {
         render_input(app, frame, area);
+    }
+
+    if app.input_mode == InputMode::SaveTemplate {
+        render_input(app, frame, area);
+        render_save_template_dialog(app, frame, area);
+    }
+
+    if app.input_mode == InputMode::HistorySearch {
+        render_input(app, frame, area);
+        render_history_search(app, frame, area);
     }
 
     if app.input_mode == InputMode::Search {
@@ -104,8 +160,14 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 // ---------------------------------------------------------------------------
 
 /// Render the tab bar showing one tab per agent with status badges.
-fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
+///
+/// Also updates [`App::tab_rects`] with the click regions for each visible
+/// tab so mouse input can map clicks to agent indices.
+fn render_tabs(app: &mut App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
+
+    // Clear previous tab rects.
+    app.tab_rects.clear();
 
     if app.agents.is_empty() {
         let hint = Paragraph::new(" [No agents] — press 'n' to start one")
@@ -158,6 +220,25 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
     let tab_widths: Vec<usize> = all_titles.iter().map(|t| t.width()).collect();
 
     let (titles, select_index) = visible_tab_window(&tab_widths, app.focused, available);
+
+    // Compute click regions for each visible tab. The block has no left
+    // border (Borders::BOTTOM only), so tabs start at area.x. Each tab
+    // occupies its width in columns, separated by a 1-char divider.
+    {
+        let mut x = area.x;
+        for entry in &titles {
+            let w = match entry {
+                VisibleTab::Tab(idx) => all_titles[*idx].width(),
+                VisibleTab::Overflow(n) => format!(" +{n} more ").len(),
+            };
+            if let VisibleTab::Tab(idx) = entry {
+                app.tab_rects
+                    .push((Rect::new(x, area.y, w as u16, area.height), *idx));
+            }
+            // Advance past this tab + 1-char divider.
+            x += w as u16 + 1;
+        }
+    }
 
     let visible_titles: Vec<Line<'_>> = titles
         .iter()
@@ -334,6 +415,207 @@ fn visible_tab_window(
 }
 
 // ---------------------------------------------------------------------------
+// Sidebar panel
+// ---------------------------------------------------------------------------
+
+/// Render the agent sidebar panel showing per-agent status information.
+///
+/// Each agent entry displays: status icon, agent number, workspace name,
+/// current activity, and elapsed time. The sidebar-selected agent is
+/// highlighted; the focused agent (whose output is in the main content
+/// area) is marked with an arrow indicator.
+fn render_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+
+    // Clear previous sidebar rects.
+    app.sidebar_rects.clear();
+
+    if app.agents.is_empty() {
+        let empty = Paragraph::new(" No agents")
+            .style(Style::default().fg(theme.sidebar_dim))
+            .block(
+                Block::default()
+                    .borders(Borders::RIGHT)
+                    .border_style(Style::default().fg(theme.sidebar_border))
+                    .title(" Agents ")
+                    .title_style(
+                        Style::default()
+                            .fg(theme.sidebar_title)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+            );
+        frame.render_widget(empty, area);
+        return;
+    }
+
+    // Inner width available for text (area minus right border).
+    let inner_width = area.width.saturating_sub(1) as usize;
+
+    // Display agents in creation order (matching tab bar and 1-9 keybindings)
+    // so the sidebar indices stay consistent with the rest of the UI.
+    let indices: Vec<usize> = (0..app.agents.len()).collect();
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    // Track (start_line, agent_index) for click regions.
+    let mut entry_positions: Vec<(usize, usize)> = Vec::new();
+
+    for &idx in &indices {
+        let agent = &app.agents[idx];
+        let is_focused = idx == app.focused;
+        let is_selected = idx == app.sidebar_selected;
+
+        let entry_start = lines.len();
+
+        // Status icon.
+        let (icon, icon_color) = match (&agent.status, &agent.activity) {
+            (AgentStatus::Exited(Some(0)), _) => (CHECK_MARK, theme.sidebar_status_done),
+            (AgentStatus::Exited(_), _) => (CROSS_MARK, theme.sidebar_status_error),
+            (AgentStatus::Running, AgentActivity::Idle) => (CIRCLE, theme.sidebar_dim),
+            (AgentStatus::Running, AgentActivity::Done) => (CHECK_MARK, theme.sidebar_status_done),
+            (AgentStatus::Running, _) => {
+                let frame_idx = app.tick % SPINNER_FRAMES.len();
+                (SPINNER_FRAMES[frame_idx], theme.sidebar_status_running)
+            }
+        };
+
+        // Focus indicator.
+        let focus_indicator = if is_focused { ARROW_RIGHT } else { " " };
+
+        // Agent name: number + workspace basename.
+        let label = workspace_label(&agent.workspace);
+        let num = idx + 1;
+
+        // Activity label.
+        let activity = match &agent.activity {
+            AgentActivity::Idle => "idle".to_string(),
+            AgentActivity::Thinking => "thinking".to_string(),
+            AgentActivity::Tool(name) => {
+                if name.len() > 10 {
+                    format!("{}...", &name[..10])
+                } else {
+                    name.clone()
+                }
+            }
+            AgentActivity::Done => "done".to_string(),
+        };
+
+        // Elapsed time.
+        let elapsed = format_elapsed(agent.started_at.elapsed());
+
+        // First line: focus indicator + icon + number: name.
+        let name_text = format!("{num}: {label}");
+        // Truncate name to fit.
+        let max_name = inner_width.saturating_sub(5); // " > X N: "
+        let display_name = if name_text.len() > max_name {
+            format!("{}\u{2026}", &name_text[..max_name.saturating_sub(1)])
+        } else {
+            name_text
+        };
+
+        let row_style = if is_selected {
+            Style::default()
+                .bg(theme.sidebar_selected_bg)
+                .fg(theme.sidebar_selected_fg)
+        } else {
+            Style::default().fg(theme.sidebar_fg)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!("{focus_indicator} "), row_style),
+            Span::styled(format!("{icon} "), Style::default().fg(icon_color)),
+            Span::styled(display_name, row_style.add_modifier(Modifier::BOLD)),
+        ]));
+
+        // Second line: activity + elapsed (indented).
+        let detail = format!("    {activity} | {elapsed}");
+        let detail_style = if is_selected {
+            Style::default()
+                .bg(theme.sidebar_selected_bg)
+                .fg(theme.sidebar_dim)
+        } else {
+            Style::default().fg(theme.sidebar_dim)
+        };
+        lines.push(Line::from(Span::styled(detail, detail_style)));
+
+        // Prompt snippet (third line, truncated).
+        let prompt_snippet = agent.prompt.lines().next().unwrap_or("");
+        let max_snippet = inner_width.saturating_sub(5);
+        let snippet = if prompt_snippet.len() > max_snippet {
+            format!(
+                "    \"{}\u{2026}\"",
+                &prompt_snippet[..max_snippet.saturating_sub(2)]
+            )
+        } else if !prompt_snippet.is_empty() {
+            format!("    \"{prompt_snippet}\"")
+        } else {
+            String::new()
+        };
+        if !snippet.is_empty() {
+            let snippet_style = if is_selected {
+                Style::default()
+                    .bg(theme.sidebar_selected_bg)
+                    .fg(theme.sidebar_dim)
+                    .add_modifier(Modifier::ITALIC)
+            } else {
+                Style::default()
+                    .fg(theme.sidebar_dim)
+                    .add_modifier(Modifier::ITALIC)
+            };
+            lines.push(Line::from(Span::styled(snippet, snippet_style)));
+        }
+
+        entry_positions.push((entry_start, idx));
+
+        // Blank separator between agents.
+        lines.push(Line::from(""));
+    }
+
+    // Remove trailing blank line.
+    if lines.last().is_some_and(|l| l.width() == 0) {
+        lines.pop();
+    }
+
+    // Compute sidebar click regions. The block has a top border (title row)
+    // so inner content starts at area.y + 1. Each line is one row.
+    {
+        let inner_y = area.y + 1; // below block title
+        let inner_w = area.width.saturating_sub(1); // minus right border
+        let total_lines = lines.len();
+        for (i, &(start_line, agent_idx)) in entry_positions.iter().enumerate() {
+            let end_line = if i + 1 < entry_positions.len() {
+                // Next entry's start minus the blank separator.
+                entry_positions[i + 1].0.saturating_sub(1)
+            } else {
+                total_lines
+            };
+            let row_start = inner_y + start_line as u16;
+            let row_count = (end_line - start_line) as u16;
+            if row_start + row_count <= area.y + area.height {
+                app.sidebar_rects
+                    .push((Rect::new(area.x, row_start, inner_w, row_count), agent_idx));
+            }
+        }
+    }
+
+    let title = format!(" Agents ({}) ", app.agents.len());
+    let sidebar = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::RIGHT)
+                .border_style(Style::default().fg(theme.sidebar_border))
+                .title(title)
+                .title_style(
+                    Style::default()
+                        .fg(theme.sidebar_title)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .style(Style::default().bg(theme.sidebar_bg).fg(theme.sidebar_fg));
+
+    frame.render_widget(sidebar, area);
+}
+
+// ---------------------------------------------------------------------------
 // Content area
 // ---------------------------------------------------------------------------
 
@@ -368,24 +650,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
                 return;
             }
 
-            // Check if cached data is still valid.
-            let cache_hit = agent.cached_lines.is_some()
-                && agent.cache_generation == agent.output_generation
-                && agent.cache_result_display == Some(app.result_display);
-
-            if !cache_hit {
-                // Recompute collapsed lines and row count.
-                let all_lines: Vec<&DisplayLine> = agent.output.iter().collect();
-                let collapsed = collapse_tool_results(&all_lines, app.result_display, theme);
-                let row_count = wrapped_row_count(&collapsed, inner.width);
-                let owned = lines_to_static(collapsed);
-
-                let agent_mut = &mut app.agents[focused];
-                agent_mut.cached_lines = Some(owned);
-                agent_mut.cached_row_count = row_count;
-                agent_mut.cache_generation = agent_mut.output_generation;
-                agent_mut.cache_result_display = Some(app.result_display);
-            }
+            ensure_agent_cache(app, focused, inner.width);
 
             // Recompute search matches if the output has changed since last computation.
             // Done before taking an immutable borrow on the agent.
@@ -408,6 +673,8 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             let scroll_y = max_scroll.saturating_sub(clamped_offset) as u16;
 
             // Apply search highlighting if there are active search matches.
+            // Otherwise, borrow from the cache to avoid deep-cloning every
+            // Span/String each frame.
             let display_lines =
                 if !app.search_matches.is_empty() && !app.search_query.text().is_empty() {
                     apply_search_highlights(
@@ -417,7 +684,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
                         &app.theme,
                     )
                 } else {
-                    cached.clone()
+                    borrow_cached_lines(cached)
                 };
 
             let paragraph = Paragraph::new(display_lines)
@@ -428,6 +695,144 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             frame.render_widget(paragraph, area);
         }
     }
+}
+
+/// Create borrowed [`Line`]s from cached `Line<'static>` values.
+///
+/// Each [`Span`] borrows its string content via `Cow::Borrowed` from the
+/// original cached span, avoiding the deep `String` clone that a plain
+/// `Vec::clone()` would perform. New `Vec` containers are still allocated
+/// for the line and span lists, but the (typically large) string payloads
+/// are shared.
+fn borrow_cached_lines<'a>(cached: &'a [Line<'static>]) -> Vec<Line<'a>> {
+    cached
+        .iter()
+        .map(|line| {
+            Line::from(
+                line.spans
+                    .iter()
+                    .map(|span| Span::styled(span.content.as_ref(), span.style))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect()
+}
+
+/// Ensure the agent's cached lines are up to date. Rebuilds if stale.
+fn ensure_agent_cache(app: &mut App, agent_idx: usize, inner_width: u16) {
+    let agent = &app.agents[agent_idx];
+    let cache_hit = agent.cached_lines.is_some()
+        && agent.cache_generation == agent.output_generation
+        && agent.cache_result_display == Some(app.result_display)
+        && agent.cache_section_overrides_generation == agent.section_overrides_generation;
+
+    if !cache_hit {
+        let all_lines: Vec<&DisplayLine> = agent.output.iter().collect();
+        let collapsed = collapse_tool_results(
+            &all_lines,
+            app.result_display,
+            &agent.section_overrides,
+            &app.theme,
+        );
+        let row_count = wrapped_row_count(&collapsed, inner_width);
+        let owned = lines_to_static(collapsed);
+
+        let agent_mut = &mut app.agents[agent_idx];
+        agent_mut.cached_lines = Some(owned);
+        agent_mut.cached_row_count = row_count;
+        agent_mut.cache_generation = agent_mut.output_generation;
+        agent_mut.cache_result_display = Some(app.result_display);
+        agent_mut.cache_section_overrides_generation = agent_mut.section_overrides_generation;
+    }
+}
+
+/// Render a single agent's output into a split pane with a bordered frame.
+///
+/// `agent_idx` is the Vec index of the agent to display. `is_focused` controls
+/// whether the border is highlighted (bright) to indicate pane focus.
+fn render_content_pane(
+    app: &mut App,
+    frame: &mut Frame,
+    area: Rect,
+    agent_idx: usize,
+    is_focused: bool,
+) {
+    let theme = &app.theme;
+
+    let agent = match app.agents.get(agent_idx) {
+        Some(a) => a,
+        None => return,
+    };
+
+    let label = workspace_label(&agent.workspace);
+    let agent_num = agent_idx + 1;
+    let title = format!(" Agent {agent_num}: {label} ");
+
+    let border_color = if is_focused {
+        theme.tab_highlight
+    } else {
+        theme.tab_border
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(border_color)
+                .add_modifier(if is_focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        )
+        .title(title)
+        .title_style(
+            Style::default()
+                .fg(if is_focused {
+                    theme.tab_highlight
+                } else {
+                    theme.tab_text
+                })
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let inner = block.inner(area);
+
+    if agent.output.is_empty() {
+        let spinner_frame = SPINNER_FRAMES[app.tick % SPINNER_FRAMES.len()];
+        let msg = Paragraph::new(Line::from(vec![
+            Span::styled(spinner_frame, Style::default().fg(theme.tab_badge_spinner)),
+            Span::styled(
+                " Waiting for output...",
+                Style::default().fg(theme.content_empty),
+            ),
+        ]))
+        .alignment(Alignment::Center)
+        .block(block);
+        frame.render_widget(msg, area);
+        return;
+    }
+
+    let height = inner.height as usize;
+
+    ensure_agent_cache(app, agent_idx, inner.width);
+
+    let agent = &app.agents[agent_idx];
+    let cached = agent.cached_lines.as_ref().unwrap();
+    let total_rows = agent.cached_row_count;
+
+    let max_scroll = total_rows.saturating_sub(height);
+    let clamped_offset = agent.scroll_offset.min(max_scroll);
+    let scroll_y = max_scroll.saturating_sub(clamped_offset) as u16;
+
+    let display_lines = borrow_cached_lines(cached);
+
+    let paragraph = Paragraph::new(display_lines)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll_y, 0));
+
+    frame.render_widget(paragraph, area);
 }
 
 /// Render a centered welcome screen when no agents exist.
@@ -566,6 +971,9 @@ const COMPACT_RESULT_RUN_MAX: usize = 3;
 /// first line displays the `⎿` connector; continuation lines use matching
 /// whitespace indentation (Claude Code style).
 ///
+/// `section_overrides` maps sequential ToolUse section indices to per-section
+/// display modes that override the global `mode`.
+///
 /// Internally this is a three-stage pipeline:
 /// 1. [`strip_leading_empty_after_turn_start`] — remove visual noise
 /// 2. [`collapse_results`] — group lines into [`CollapsedBlock`]s
@@ -573,10 +981,11 @@ const COMPACT_RESULT_RUN_MAX: usize = 3;
 fn collapse_tool_results<'a>(
     lines: &[&'a DisplayLine],
     mode: ResultDisplay,
+    section_overrides: &std::collections::HashMap<usize, ResultDisplay>,
     theme: &Theme,
 ) -> Vec<Line<'a>> {
     let stripped = strip_leading_empty_after_turn_start(lines);
-    let blocks = collapse_results(&stripped, mode);
+    let blocks = collapse_results(&stripped, mode, section_overrides);
     render_to_spans(&blocks, theme)
 }
 
@@ -592,9 +1001,14 @@ fn collapse_tool_results<'a>(
 enum CollapsedBlock<'a> {
     /// A run of consecutive tool results, already collapsed per the display mode.
     ToolResultRun(ToolResultRun<'a>),
+    /// A ToolUse header with its effective display mode.
+    ToolUseHeader {
+        dl: &'a DisplayLine,
+        effective_mode: ResultDisplay,
+    },
     /// A run of consecutive text lines joined into markdown.
     TextRun(String),
-    /// Any other single [`DisplayLine`] (ToolUse, Thinking, etc.).
+    /// Any other single [`DisplayLine`] (Thinking, System, etc.).
     Single(&'a DisplayLine),
 }
 
@@ -620,63 +1034,109 @@ struct ToolResultLine<'a> {
     is_error: bool,
 }
 
-/// Group consecutive [`DisplayLine`]s into [`CollapsedBlock`]s.
+/// Consume a consecutive run of [`DisplayLine::ToolResult`]s starting at
+/// `start` and produce a [`ToolResultRun`] collapsed per `mode`.
 ///
-/// ToolResult runs are measured and collapsed according to `mode`. Text runs
-/// are gathered and joined. All other line types pass through as `Single`.
-fn collapse_results<'a>(lines: &[&'a DisplayLine], mode: ResultDisplay) -> Vec<CollapsedBlock<'a>> {
-    let mut blocks = Vec::with_capacity(lines.len());
-    let mut i = 0;
-
+/// Returns the constructed run and the new index after the last consumed
+/// `ToolResult` line. Both the ToolUse-preceded path and the orphan path
+/// in [`collapse_results`] delegate to this helper.
+fn consume_tool_result_run<'a>(
+    lines: &[&'a DisplayLine],
+    start: usize,
+    mode: ResultDisplay,
+) -> (ToolResultRun<'a>, usize) {
+    let mut i = start;
+    let mut total_bytes: usize = 0;
+    let mut total_lines: usize = 0;
     while i < lines.len() {
-        if matches!(lines[i], DisplayLine::ToolResult { .. }) {
-            let run_start = i;
-            let mut total_bytes: usize = 0;
-            let mut total_lines: usize = 0;
-            while i < lines.len() {
-                if let DisplayLine::ToolResult { content, .. } = lines[i] {
-                    total_bytes += content.len();
-                    total_lines += content.lines().count().max(1);
-                    i += 1;
-                } else {
-                    break;
+        if let DisplayLine::ToolResult { content, .. } = lines[i] {
+            total_bytes += content.len();
+            total_lines += content.lines().count().max(1);
+            i += 1;
+        } else {
+            break;
+        }
+    }
+
+    let collect_result_lines = || {
+        let mut out = Vec::new();
+        for dl in &lines[start..i] {
+            if let DisplayLine::ToolResult {
+                content, is_error, ..
+            } = dl
+            {
+                for text_line in content.lines() {
+                    out.push(ToolResultLine {
+                        text: text_line,
+                        is_error: *is_error,
+                    });
                 }
             }
+        }
+        out
+    };
 
-            let collect_result_lines = |slice: &[&'a DisplayLine]| {
-                let mut out = Vec::new();
-                for dl in slice {
-                    if let DisplayLine::ToolResult {
-                        content, is_error, ..
-                    } = dl
-                    {
-                        for text_line in content.lines() {
-                            out.push(ToolResultLine {
-                                text: text_line,
-                                is_error: *is_error,
-                            });
-                        }
-                    }
-                }
-                out
-            };
+    let run = match mode {
+        ResultDisplay::Hidden => ToolResultRun::Hidden { total_bytes },
+        ResultDisplay::Compact => {
+            let all = collect_result_lines();
+            let skip = all.len().saturating_sub(COMPACT_RESULT_RUN_MAX);
+            let visible: Vec<_> = all.into_iter().skip(skip).collect();
+            let hidden_count = total_lines.saturating_sub(visible.len());
+            ToolResultRun::Compact {
+                visible,
+                hidden_count,
+            }
+        }
+        ResultDisplay::Full => ToolResultRun::Full {
+            lines: collect_result_lines(),
+        },
+    };
 
-            let run = match mode {
-                ResultDisplay::Hidden => ToolResultRun::Hidden { total_bytes },
-                ResultDisplay::Compact => {
-                    let all = collect_result_lines(&lines[run_start..i]);
-                    let skip = all.len().saturating_sub(COMPACT_RESULT_RUN_MAX);
-                    let visible: Vec<_> = all.into_iter().skip(skip).collect();
-                    let hidden_count = total_lines.saturating_sub(visible.len());
-                    ToolResultRun::Compact {
-                        visible,
-                        hidden_count,
-                    }
-                }
-                ResultDisplay::Full => ToolResultRun::Full {
-                    lines: collect_result_lines(&lines[run_start..i]),
-                },
-            };
+    (run, i)
+}
+
+/// Group consecutive [`DisplayLine`]s into [`CollapsedBlock`]s.
+///
+/// ToolResult runs are measured and collapsed according to their effective
+/// display mode (per-section override if present, otherwise `global_mode`).
+/// ToolUse headers are emitted as `ToolUseHeader` blocks with their
+/// effective mode. Text runs are gathered and joined. All other line types
+/// pass through as `Single`.
+fn collapse_results<'a>(
+    lines: &[&'a DisplayLine],
+    global_mode: ResultDisplay,
+    section_overrides: &std::collections::HashMap<usize, ResultDisplay>,
+) -> Vec<CollapsedBlock<'a>> {
+    let mut blocks = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    // Sequential counter for ToolUse sections.
+    let mut section_counter: usize = 0;
+
+    while i < lines.len() {
+        if matches!(lines[i], DisplayLine::ToolUse { .. }) {
+            let current_section = section_counter;
+            section_counter += 1;
+            let effective_mode = section_overrides
+                .get(&current_section)
+                .copied()
+                .unwrap_or(global_mode);
+            blocks.push(CollapsedBlock::ToolUseHeader {
+                dl: lines[i],
+                effective_mode,
+            });
+            i += 1;
+
+            // Now consume the following ToolResult run (if any).
+            if i < lines.len() && matches!(lines[i], DisplayLine::ToolResult { .. }) {
+                let (run, new_i) = consume_tool_result_run(lines, i, effective_mode);
+                i = new_i;
+                blocks.push(CollapsedBlock::ToolResultRun(run));
+            }
+        } else if matches!(lines[i], DisplayLine::ToolResult { .. }) {
+            // Orphan ToolResult without a preceding ToolUse — use global mode.
+            let (run, new_i) = consume_tool_result_run(lines, i, global_mode);
+            i = new_i;
             blocks.push(CollapsedBlock::ToolResultRun(run));
         } else if matches!(lines[i], DisplayLine::Text(_)) {
             let run_start = i;
@@ -713,6 +1173,15 @@ fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme) -> Vec<Line
         match block {
             CollapsedBlock::ToolResultRun(run) => {
                 render_tool_result_run(run, &mut out, theme);
+            }
+            CollapsedBlock::ToolUseHeader {
+                dl, effective_mode, ..
+            } => {
+                out.extend(display_line_to_lines_with_indicator(
+                    dl,
+                    *effective_mode,
+                    theme,
+                ));
             }
             CollapsedBlock::TextRun(markdown) => {
                 render_text_run(markdown, &mut out, theme);
@@ -978,6 +1447,57 @@ fn preprocess_markdown_tables(input: &str) -> String {
     out
 }
 
+/// Collapse indicator characters.
+const CHEVRON_EXPANDED: &str = "\u{25BC}"; // ▼
+const CHEVRON_COLLAPSED: &str = "\u{25B6}"; // ▶
+
+/// Render a ToolUse header line with a collapse/expand indicator.
+///
+/// Shows a chevron (▼ for full/expanded, ▶ for compact/hidden/collapsed) after
+/// the tool name to indicate the display state of the following result section.
+fn display_line_to_lines_with_indicator<'a>(
+    dl: &'a DisplayLine,
+    effective_mode: ResultDisplay,
+    theme: &Theme,
+) -> Vec<Line<'a>> {
+    if let DisplayLine::ToolUse {
+        tool,
+        input_preview,
+    } = dl
+    {
+        let color = theme.tool_color(tool);
+        let chevron = match effective_mode {
+            ResultDisplay::Full => CHEVRON_EXPANDED,
+            ResultDisplay::Compact | ResultDisplay::Hidden => CHEVRON_COLLAPSED,
+        };
+        let mut spans = vec![
+            Span::styled(
+                format!("{BLOCK_MARKER} "),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                tool.to_string(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+        ];
+        if !input_preview.is_empty() {
+            spans.push(Span::styled(
+                format!("({input_preview})"),
+                Style::default().fg(theme.tool_input_preview),
+            ));
+        }
+        spans.push(Span::styled(
+            format!(" {chevron}"),
+            Style::default()
+                .fg(theme.tool_result_hidden)
+                .add_modifier(Modifier::DIM),
+        ));
+        vec![Line::from(spans)]
+    } else {
+        display_line_to_lines(dl, theme)
+    }
+}
+
 /// Convert a [`DisplayLine`] to one or more styled ratatui [`Line`]s.
 ///
 /// Handles all variants except [`DisplayLine::Text`] and
@@ -1215,6 +1735,8 @@ fn build_hint_bar(width: u16) -> Line<'static> {
         ("?", "help"),
         ("y", "copy"),
         ("r", "results"),
+        ("b", "sidebar"),
+        ("|", "split"),
         ("t", "theme"),
         ("^C", "quit"),
         ("j/k", "scroll"),
@@ -1316,7 +1838,10 @@ fn field_label_style(active: bool, theme: &Theme) -> Style {
 
 /// Render a centered input overlay for entering a new agent prompt, workspace,
 /// and Claude Code options.
-fn render_input(app: &App, frame: &mut Frame, area: Rect) {
+///
+/// Also updates [`App::input_field_rects`] with the click regions for each
+/// field so mouse clicks can focus the correct input field.
+fn render_input(app: &mut App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
 
     // Compute inner width from the percentage-based horizontal layout so we
@@ -1445,16 +1970,16 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
 
     // Footer hint varies by mode and active field.
     let footer = if app.quick_launch {
-        "Enter: launch  |  Tab: next  |  ^E: advanced  |  Esc: cancel"
+        "Enter: launch  |  Tab: next  |  ^E: advanced  |  ^P: templates  |  Esc: cancel"
     } else {
         match app.input_field {
             InputField::Prompt => {
-                "Enter: newline  |  ^S: submit  |  Tab: next  |  ^E: quick  |  Esc: cancel"
+                "Enter: newline  |  ^S: submit  |  ^P: templates  |  ^T: save  |  ^E: quick  |  Esc: cancel"
             }
             InputField::PermissionMode | InputField::Model | InputField::Effort => {
-                "◀/▶: select  |  Enter/Tab: next  |  ^S: submit  |  ^E: quick  |  Esc: cancel"
+                "◀/▶: select  |  ^S: submit  |  ^P: templates  |  ^T: save  |  ^E: quick  |  Esc: cancel"
             }
-            _ => "Enter/Tab: next  |  ^S: submit  |  ^E: quick  |  Esc: cancel",
+            _ => "^S: submit  |  ^P: templates  |  ^T: save  |  ^E: quick  |  Esc: cancel",
         }
     };
 
@@ -1547,6 +2072,68 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         0
     };
+
+    // Compute input field click regions for mouse support.
+    // Each field spans its label row + value rows. The popup inner area
+    // starts at (popup.x + 1, popup.y + 1) and is offset by scroll_y.
+    {
+        app.input_field_rects.clear();
+        let inner_x = popup.x + 1;
+        let inner_y = popup.y + 1;
+        let inner_w = popup.width.saturating_sub(2);
+
+        // Helper: convert a content row to a screen y, returning None if scrolled off.
+        let screen_y = |content_row: usize| -> Option<u16> {
+            let scrolled = content_row as i32 - scroll_y as i32;
+            if scrolled >= 0 && scrolled < inner_height as i32 {
+                Some(inner_y + scrolled as u16)
+            } else {
+                None
+            }
+        };
+
+        // Prompt: label at row 0, value rows 1..1+prompt_rows.
+        let prompt_start = 0_usize;
+        let prompt_end = 1 + prompt_rows;
+        // Workspace: label at prompt_end+1, value rows prompt_end+2..
+        let ws_label = prompt_end + 1;
+        let ws_end = ws_label + 1 + workspace_rows;
+
+        let fields_quick: &[(usize, usize, InputField)] = &[
+            (prompt_start, prompt_end, InputField::Prompt),
+            (ws_label, ws_end, InputField::Workspace),
+        ];
+
+        let register =
+            |start: usize, end: usize, field: InputField, rects: &mut Vec<(Rect, InputField)>| {
+                if let (Some(sy), Some(ey)) = (screen_y(start), screen_y(end.saturating_sub(1))) {
+                    let h = ey - sy + 1;
+                    rects.push((Rect::new(inner_x, sy, inner_w, h), field));
+                }
+            };
+
+        for &(start, end, field) in fields_quick {
+            register(start, end, field, &mut app.input_field_rects);
+        }
+
+        if !app.quick_launch {
+            // Advanced mode fields start after workspace + blank + header.
+            let base = ws_end + 1 + 1; // blank + header
+            let adv_fields: &[(usize, InputField)] = &[
+                (0, InputField::PermissionMode),
+                (2, InputField::Model),
+                (4, InputField::Effort),
+                (6, InputField::MaxBudgetUsd),
+                (8, InputField::AllowedTools),
+                (10, InputField::AddDir),
+            ];
+            for &(offset, field) in adv_fields {
+                let start = base + offset;
+                let end = start + 2;
+                register(start, end, field, &mut app.input_field_rects);
+            }
+        }
+    }
 
     // Title includes a mode indicator and context.
     let title = if let Some(target_id) = app.respond_target {
@@ -1730,6 +2317,172 @@ fn build_input_field_lines(
 }
 
 // ---------------------------------------------------------------------------
+// Template picker overlay
+// ---------------------------------------------------------------------------
+
+/// Render the template picker overlay shown when the user presses `n`.
+///
+/// Displays a list of available templates with "Blank" as the first option.
+/// The user navigates with Up/Down and selects with Enter.
+fn render_template_picker(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+
+    // Build the list of items: "Blank" + all templates.
+    let total = 1 + app.template_list.len();
+    let content_rows = total + 3; // items + blank + footer + header-gap
+    let popup_height = (content_rows + 2).min(area.height as usize) as u16;
+
+    let popup = centered_rect_fixed_height(50, popup_height, area);
+    frame.render_widget(Clear, popup);
+
+    let mut text = Vec::new();
+
+    // "Blank" option.
+    let blank_style = if app.template_selected == 0 {
+        Style::default()
+            .fg(theme.input_fg)
+            .bg(theme.selector_active)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.input_fg)
+    };
+    text.push(Line::from(Span::styled(
+        "  (blank) -- start from scratch",
+        blank_style,
+    )));
+
+    // Template entries.
+    for (i, tmpl) in app.template_list.iter().enumerate() {
+        let is_selected = app.template_selected == i + 1;
+        let label = if tmpl.builtin {
+            format!(
+                "  {} [built-in]{}",
+                tmpl.name,
+                tmpl.permission_mode
+                    .as_deref()
+                    .map(|pm| format!("  ({})", pm))
+                    .unwrap_or_default()
+            )
+        } else {
+            format!(
+                "  {}{}",
+                tmpl.name,
+                tmpl.permission_mode
+                    .as_deref()
+                    .map(|pm| format!("  ({})", pm))
+                    .unwrap_or_default()
+            )
+        };
+
+        let style = if is_selected {
+            Style::default()
+                .fg(theme.input_fg)
+                .bg(theme.selector_active)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.input_fg)
+        };
+
+        text.push(Line::from(Span::styled(label, style)));
+    }
+
+    // Footer.
+    text.push(Line::from(""));
+    text.push(
+        Line::from(Span::styled(
+            "Up/Down: navigate  |  Enter: select  |  d: delete  |  Esc: cancel",
+            Style::default().fg(theme.help_footer),
+        ))
+        .alignment(Alignment::Center),
+    );
+
+    let picker = Paragraph::new(text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.input_border))
+                .title(" Select Template ")
+                .title_style(
+                    Style::default()
+                        .fg(theme.input_title)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .style(Style::default().bg(theme.input_bg).fg(theme.input_fg));
+
+    frame.render_widget(picker, popup);
+}
+
+// ---------------------------------------------------------------------------
+// Save-template dialog overlay
+// ---------------------------------------------------------------------------
+
+/// Render the save-template name dialog on top of the input form.
+fn render_save_template_dialog(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+    let popup = centered_rect_fixed_height(50, 7, area);
+    frame.render_widget(Clear, popup);
+
+    let name_text = app.template_name_input.text();
+    let cursor = app.template_name_input.cursor_pos();
+
+    let name_line = if name_text.is_empty() {
+        vec![Span::styled(
+            " ",
+            Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
+        )]
+    } else {
+        let before = &name_text[..cursor];
+        let after = &name_text[cursor..];
+        let clen = after.chars().next().map_or(0, |c| c.len_utf8());
+        vec![
+            Span::raw(before.to_string()),
+            Span::styled(
+                if after.is_empty() {
+                    " ".to_string()
+                } else {
+                    after[..clen].to_string()
+                },
+                Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
+            ),
+            Span::raw(after.get(clen..).unwrap_or("").to_string()),
+        ]
+    };
+
+    let text = vec![
+        Line::from(Span::styled(
+            "Template name:",
+            Style::default()
+                .fg(theme.field_label_active)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(name_line),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter: save  |  Esc: cancel",
+            Style::default().fg(theme.help_footer),
+        ))
+        .alignment(Alignment::Center),
+    ];
+
+    let dialog = Paragraph::new(text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.input_border))
+                .title(" Save Template ")
+                .title_style(
+                    Style::default()
+                        .fg(theme.input_title)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .style(Style::default().bg(theme.input_bg).fg(theme.input_fg));
+
+    frame.render_widget(dialog, popup);
+}
+
+// ---------------------------------------------------------------------------
 // Confirm-close overlay
 // ---------------------------------------------------------------------------
 
@@ -1824,6 +2577,10 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
         ("gg", "Scroll to top"),
         ("G", "Jump to bottom (latest)"),
         ("r", "Toggle compact results"),
+        ("b", "Toggle sidebar panel"),
+        ("J / K", "Navigate sidebar selection"),
+        ("|", "Toggle split-pane view"),
+        ("`", "Switch split-pane focus"),
         ("t", "Cycle color theme"),
         ("q", "Close focused tab"),
         ("Ctrl+C", "Quit all agents"),
@@ -2140,6 +2897,177 @@ fn render_command_palette(app: &App, frame: &mut Frame, status_area: Rect) {
     frame.render_widget(command_paragraph, rows[1]);
 }
 
+// ---------------------------------------------------------------------------
+// History search overlay
+// ---------------------------------------------------------------------------
+
+/// Maximum number of history entries shown in the Ctrl+R search dropdown.
+const MAX_VISIBLE_HISTORY: usize = 10;
+
+/// Render the Ctrl+R history search overlay on top of the input form.
+///
+/// Shows a search bar and a filtered list of previous prompts. The currently
+/// selected entry is highlighted.
+fn render_history_search(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+
+    let visible_count = app.history_search_results.len().min(MAX_VISIBLE_HISTORY);
+    // Height: 1 search bar + visible entries + 2 border rows.
+    let popup_height = (visible_count as u16 + 3).min(area.height);
+
+    let popup = centered_rect_fixed_height(60, popup_height, area);
+
+    frame.render_widget(Clear, popup);
+
+    if popup.height < 3 || popup.width < 10 {
+        return;
+    }
+
+    let inner_area = Rect::new(
+        popup.x + 1,
+        popup.y + 1,
+        popup.width.saturating_sub(2),
+        popup.height.saturating_sub(2),
+    );
+
+    // Render the border block.
+    let border_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.input_border))
+        .title(" History Search (Ctrl+R) ")
+        .title_style(
+            Style::default()
+                .fg(theme.input_title)
+                .add_modifier(Modifier::BOLD),
+        )
+        .style(Style::default().bg(theme.input_bg).fg(theme.input_fg));
+    frame.render_widget(border_block, popup);
+
+    if inner_area.height == 0 || inner_area.width == 0 {
+        return;
+    }
+
+    // Split inner area: 1 row for search bar, rest for results.
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).split(inner_area);
+
+    // Render search input bar.
+    let query = app.history_search_query.text();
+    let cursor_pos = app.history_search_query.cursor_pos();
+    let before = &query[..cursor_pos];
+    let after = &query[cursor_pos..];
+    let cursor_char_len = after.chars().next().map_or(0, |c| c.len_utf8());
+
+    let mut search_spans = vec![
+        Span::styled(
+            "search: ",
+            Style::default()
+                .fg(theme.search_bar_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(before.to_string()),
+    ];
+    search_spans.push(Span::styled(
+        if after.is_empty() {
+            " ".to_string()
+        } else {
+            after[..cursor_char_len].to_string()
+        },
+        Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
+    ));
+    if cursor_char_len < after.len() {
+        search_spans.push(Span::raw(after[cursor_char_len..].to_string()));
+    }
+
+    let match_info = if app.history_search_results.is_empty() && !query.is_empty() {
+        " [no matches]".to_string()
+    } else if !app.history_search_results.is_empty() {
+        format!(
+            " [{}/{}]",
+            app.history_search_selected + 1,
+            app.history_search_results.len()
+        )
+    } else {
+        String::new()
+    };
+    search_spans.push(Span::styled(
+        match_info,
+        Style::default().fg(theme.search_bar_fg),
+    ));
+
+    let search_line = Line::from(search_spans);
+    let search_paragraph =
+        Paragraph::new(search_line).style(Style::default().bg(theme.input_bg).fg(theme.input_fg));
+    frame.render_widget(search_paragraph, rows[0]);
+
+    // Render filtered results.
+    let results_height = rows[1].height as usize;
+    if results_height == 0 {
+        return;
+    }
+    let max_width = rows[1].width as usize;
+
+    let entries = app.history.entries();
+    let results = &app.history_search_results;
+    let selected = app.history_search_selected;
+
+    // Window the results around the selected entry.
+    let start = if selected >= results_height {
+        selected - results_height + 1
+    } else {
+        0
+    };
+    let end = (start + results_height).min(results.len());
+
+    let mut result_lines: Vec<Line<'static>> = Vec::new();
+    for (display_idx, &entry_idx) in results[start..end].iter().enumerate() {
+        let abs_idx = start + display_idx;
+        let is_selected = abs_idx == selected;
+
+        if let Some(entry) = entries.get(entry_idx) {
+            // Truncate prompt to fit in the available width.
+            let prompt_display = entry.prompt.replace('\n', " ");
+            let truncated = if prompt_display.len() > max_width.saturating_sub(4) {
+                let boundary = prompt_display
+                    .char_indices()
+                    .take_while(|&(i, _)| i < max_width.saturating_sub(5))
+                    .last()
+                    .map_or(0, |(i, c)| i + c.len_utf8());
+                format!("{}\u{2026}", &prompt_display[..boundary])
+            } else {
+                prompt_display
+            };
+
+            let (prefix_style, text_style) = if is_selected {
+                (
+                    Style::default()
+                        .fg(theme.command_selected_fg)
+                        .bg(theme.command_selected_bg)
+                        .add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.command_selected_fg)
+                        .bg(theme.command_selected_bg),
+                )
+            } else {
+                (
+                    Style::default()
+                        .fg(theme.command_match_fg)
+                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme.command_desc_fg),
+                )
+            };
+
+            result_lines.push(Line::from(vec![
+                Span::styled(if is_selected { " > " } else { "   " }, prefix_style),
+                Span::styled(truncated, text_style),
+            ]));
+        }
+    }
+
+    let results_paragraph =
+        Paragraph::new(result_lines).style(Style::default().bg(theme.input_bg).fg(theme.input_fg));
+    frame.render_widget(results_paragraph, rows[1]);
+}
+
 /// Apply search match highlighting to cached lines.
 ///
 /// Returns a new vector of lines with matching substrings highlighted.
@@ -2426,7 +3354,11 @@ mod tests {
             },
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let blocks = collapse_results(&refs, ResultDisplay::Hidden);
+        let blocks = collapse_results(
+            &refs,
+            ResultDisplay::Hidden,
+            &std::collections::HashMap::new(),
+        );
 
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
@@ -2450,7 +3382,11 @@ mod tests {
             },
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let blocks = collapse_results(&refs, ResultDisplay::Full);
+        let blocks = collapse_results(
+            &refs,
+            ResultDisplay::Full,
+            &std::collections::HashMap::new(),
+        );
 
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
@@ -2476,7 +3412,11 @@ mod tests {
             is_error: false,
         }];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let blocks = collapse_results(&refs, ResultDisplay::Compact);
+        let blocks = collapse_results(
+            &refs,
+            ResultDisplay::Compact,
+            &std::collections::HashMap::new(),
+        );
 
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
@@ -2510,7 +3450,11 @@ mod tests {
             },
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let blocks = collapse_results(&refs, ResultDisplay::Compact);
+        let blocks = collapse_results(
+            &refs,
+            ResultDisplay::Compact,
+            &std::collections::HashMap::new(),
+        );
 
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
@@ -2536,7 +3480,11 @@ mod tests {
             is_error: false,
         }];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let blocks = collapse_results(&refs, ResultDisplay::Compact);
+        let blocks = collapse_results(
+            &refs,
+            ResultDisplay::Compact,
+            &std::collections::HashMap::new(),
+        );
 
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
@@ -2559,7 +3507,11 @@ mod tests {
             DisplayLine::Text("world".into()),
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let blocks = collapse_results(&refs, ResultDisplay::Full);
+        let blocks = collapse_results(
+            &refs,
+            ResultDisplay::Full,
+            &std::collections::HashMap::new(),
+        );
 
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
@@ -2578,7 +3530,11 @@ mod tests {
             DisplayLine::TurnStart,
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let blocks = collapse_results(&refs, ResultDisplay::Full);
+        let blocks = collapse_results(
+            &refs,
+            ResultDisplay::Full,
+            &std::collections::HashMap::new(),
+        );
 
         assert_eq!(blocks.len(), 3);
         assert!(matches!(blocks[0], CollapsedBlock::Single(_)));
@@ -2601,11 +3557,16 @@ mod tests {
             DisplayLine::Text("text2".into()),
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let blocks = collapse_results(&refs, ResultDisplay::Full);
+        let blocks = collapse_results(
+            &refs,
+            ResultDisplay::Full,
+            &std::collections::HashMap::new(),
+        );
 
+        // TextRun, ToolUseHeader, ToolResultRun, TextRun
         assert_eq!(blocks.len(), 4);
         assert!(matches!(blocks[0], CollapsedBlock::TextRun(_)));
-        assert!(matches!(blocks[1], CollapsedBlock::Single(_)));
+        assert!(matches!(blocks[1], CollapsedBlock::ToolUseHeader { .. }));
         assert!(matches!(blocks[2], CollapsedBlock::ToolResultRun(_)));
         assert!(matches!(blocks[3], CollapsedBlock::TextRun(_)));
     }
@@ -2724,7 +3685,9 @@ mod tests {
     #[test]
     fn full_pipeline_empty_input() {
         let lines: Vec<&DisplayLine> = vec![];
-        let result = collapse_tool_results(&lines, ResultDisplay::Full, &test_theme());
+        let no_overrides = std::collections::HashMap::new();
+        let result =
+            collapse_tool_results(&lines, ResultDisplay::Full, &no_overrides, &test_theme());
         assert!(result.is_empty());
     }
 
@@ -2741,7 +3704,9 @@ mod tests {
             },
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let output = collapse_tool_results(&refs, ResultDisplay::Hidden, &test_theme());
+        let no_overrides = std::collections::HashMap::new();
+        let output =
+            collapse_tool_results(&refs, ResultDisplay::Hidden, &no_overrides, &test_theme());
         assert_eq!(output.len(), 1);
         let text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("6 bytes"));
@@ -2755,7 +3720,9 @@ mod tests {
             DisplayLine::Text("content".into()),
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let output = collapse_tool_results(&refs, ResultDisplay::Full, &test_theme());
+        let no_overrides = std::collections::HashMap::new();
+        let output =
+            collapse_tool_results(&refs, ResultDisplay::Full, &no_overrides, &test_theme());
         // TurnStart produces 1 empty line, then "content" produces 1 line with marker.
         // The empty Text("") should be stripped.
         let all_text: String = output
@@ -2764,5 +3731,41 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
         assert!(all_text.contains("content"));
+    }
+
+    #[test]
+    fn collapse_results_respects_section_override() {
+        let lines = vec![
+            DisplayLine::ToolUse {
+                tool: "Read".into(),
+                input_preview: "file.rs".into(),
+            },
+            DisplayLine::ToolResult {
+                content: "line1\nline2\nline3".into(),
+                is_error: false,
+            },
+        ];
+        let refs: Vec<&DisplayLine> = lines.iter().collect();
+
+        // Global mode is Full, but override section 0 to Hidden.
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert(0, ResultDisplay::Hidden);
+
+        let blocks = collapse_results(&refs, ResultDisplay::Full, &overrides);
+
+        // Should have ToolUseHeader + ToolResultRun.
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            CollapsedBlock::ToolUseHeader { effective_mode, .. } => {
+                assert_eq!(*effective_mode, ResultDisplay::Hidden);
+            }
+            other => panic!("expected ToolUseHeader, got {:?}", other),
+        }
+        match &blocks[1] {
+            CollapsedBlock::ToolResultRun(ToolResultRun::Hidden { total_bytes }) => {
+                assert_eq!(*total_bytes, 17); // "line1\nline2\nline3"
+            }
+            other => panic!("expected Hidden ToolResultRun, got {:?}", other),
+        }
     }
 }

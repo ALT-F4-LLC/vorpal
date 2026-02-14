@@ -5,9 +5,12 @@
 
 use super::manager::ClaudeOptions;
 use super::theme::Theme;
+use ratatui::layout::Rect;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use tracing::warn;
 
 /// How long a transient status message remains visible.
 const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(3);
@@ -204,6 +207,324 @@ impl InputBuffer {
 }
 
 // ---------------------------------------------------------------------------
+// PromptHistory
+// ---------------------------------------------------------------------------
+
+/// Maximum number of history entries kept per workspace.
+const MAX_HISTORY_ENTRIES: usize = 500;
+
+/// A single saved prompt history entry, storing the full agent configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    /// The prompt text.
+    pub prompt: String,
+    /// The workspace path used.
+    pub workspace: String,
+    /// Permission mode option.
+    pub permission_mode: Option<String>,
+    /// Model option.
+    pub model: Option<String>,
+    /// Effort option.
+    pub effort: Option<String>,
+    /// Max budget USD option.
+    pub max_budget_usd: Option<f64>,
+    /// Allowed tools (comma-separated were parsed to Vec).
+    pub allowed_tools: Vec<String>,
+    /// Additional directories.
+    pub add_dirs: Vec<String>,
+}
+
+/// Persistent prompt history, scoped to a workspace directory.
+///
+/// History is stored as a JSON file at `~/.config/vorpal/history/<hash>.json`
+/// where `<hash>` is a hex-encoded hash of the workspace path, ensuring
+/// different directories have independent histories.
+#[derive(Debug)]
+pub struct PromptHistory {
+    /// Loaded history entries (oldest first).
+    entries: Vec<HistoryEntry>,
+    /// Path to the history file on disk.
+    file_path: PathBuf,
+}
+
+impl PromptHistory {
+    /// Load (or create) history for the given workspace directory.
+    pub fn load(workspace: &std::path::Path) -> Self {
+        let file_path = Self::history_file_path(workspace);
+        let entries = if file_path.exists() {
+            match std::fs::read_to_string(&file_path) {
+                Ok(data) => serde_json::from_str::<Vec<HistoryEntry>>(&data).unwrap_or_default(),
+                Err(e) => {
+                    warn!(?e, "failed to read history file");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        Self { entries, file_path }
+    }
+
+    /// Append an entry and persist to disk.
+    pub fn push(&mut self, entry: HistoryEntry) {
+        // Deduplicate: remove the most recent entry with the same prompt text.
+        if let Some(pos) = self.entries.iter().rposition(|e| e.prompt == entry.prompt) {
+            self.entries.remove(pos);
+        }
+        self.entries.push(entry);
+        // Trim to capacity.
+        if self.entries.len() > MAX_HISTORY_ENTRIES {
+            let excess = self.entries.len() - MAX_HISTORY_ENTRIES;
+            self.entries.drain(..excess);
+        }
+        self.save();
+    }
+
+    /// Return all entries (oldest first).
+    pub fn entries(&self) -> &[HistoryEntry] {
+        &self.entries
+    }
+
+    /// Persist entries to disk.
+    ///
+    /// Serialization happens synchronously (fast, <1ms for 500 entries),
+    /// then the directory creation and atomic file write are offloaded to a
+    /// background thread to avoid blocking the event loop.
+    ///
+    /// The write is atomic: data is written to a temporary file in the same
+    /// directory and then renamed into place, preventing truncated files if
+    /// two saves race or the process is interrupted mid-write.
+    fn save(&self) {
+        let data = match serde_json::to_string_pretty(&self.entries) {
+            Ok(d) => d,
+            Err(e) => {
+                warn!(?e, "failed to serialize history");
+                return;
+            }
+        };
+        let file_path = self.file_path.clone();
+        std::thread::spawn(move || {
+            let Some(parent) = file_path.parent() else {
+                warn!("history file has no parent directory");
+                return;
+            };
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                warn!(?e, "failed to create history directory");
+                return;
+            }
+            // Write to a temporary file then atomically rename to avoid
+            // partial writes from concurrent saves or interrupted I/O.
+            let tmp_path = file_path.with_extension("tmp");
+            if let Err(e) = std::fs::write(&tmp_path, data) {
+                warn!(?e, "failed to write history temp file");
+                return;
+            }
+            if let Err(e) = std::fs::rename(&tmp_path, &file_path) {
+                warn!(?e, "failed to rename history temp file");
+                // Clean up the temp file on rename failure.
+                let _ = std::fs::remove_file(&tmp_path);
+            }
+        });
+    }
+
+    /// Compute the history file path for a workspace.
+    fn history_file_path(workspace: &std::path::Path) -> PathBuf {
+        let workspace_str = workspace.display().to_string();
+        // Simple hash: use the workspace path bytes to produce a hex string.
+        let hash = Self::simple_hash(&workspace_str);
+        let config_dir = dirs_config_path();
+        config_dir.join("history").join(format!("{hash:016x}.json"))
+    }
+
+    /// Simple non-cryptographic hash for workspace path keying.
+    fn simple_hash(s: &str) -> u64 {
+        // FNV-1a 64-bit hash.
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for byte in s.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
+}
+
+/// Return the Vorpal config directory path (`~/.config/vorpal`).
+fn dirs_config_path() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        PathBuf::from(home).join(".config").join("vorpal")
+    } else {
+        PathBuf::from(".config").join("vorpal")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AgentTemplate / TemplateStore
+// ---------------------------------------------------------------------------
+
+/// A saved agent configuration template.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTemplate {
+    /// Human-readable template name.
+    pub name: String,
+    /// Optional prompt to pre-fill.
+    #[serde(default)]
+    pub prompt: String,
+    /// Permission mode option.
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    /// Model option.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Effort option.
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// Max budget USD option.
+    #[serde(default)]
+    pub max_budget_usd: Option<f64>,
+    /// Allowed tools (comma-separated were parsed to Vec).
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    /// Additional directories.
+    #[serde(default)]
+    pub add_dirs: Vec<String>,
+    /// Whether this is a built-in (non-deletable) template.
+    #[serde(default)]
+    pub builtin: bool,
+}
+
+/// Return the built-in templates that ship with the TUI.
+fn builtin_templates() -> Vec<AgentTemplate> {
+    vec![
+        AgentTemplate {
+            name: "reviewer".to_string(),
+            prompt: String::new(),
+            permission_mode: Some("plan".to_string()),
+            model: None,
+            effort: Some("high".to_string()),
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            add_dirs: Vec::new(),
+            builtin: true,
+        },
+        AgentTemplate {
+            name: "builder".to_string(),
+            prompt: String::new(),
+            permission_mode: Some("bypassPermissions".to_string()),
+            model: None,
+            effort: Some("high".to_string()),
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            add_dirs: Vec::new(),
+            builtin: true,
+        },
+        AgentTemplate {
+            name: "researcher".to_string(),
+            prompt: String::new(),
+            permission_mode: Some("plan".to_string()),
+            model: None,
+            effort: Some("medium".to_string()),
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            add_dirs: Vec::new(),
+            builtin: true,
+        },
+    ]
+}
+
+/// Persistent storage for agent configuration templates.
+///
+/// Templates are stored as a JSON file at `~/.config/vorpal/templates.json`.
+/// Built-in templates are always available and cannot be overwritten by
+/// user templates with the same name.
+#[derive(Debug)]
+pub struct TemplateStore {
+    /// User-saved templates (loaded from disk).
+    user_templates: Vec<AgentTemplate>,
+    /// Path to the templates file on disk.
+    file_path: PathBuf,
+}
+
+impl TemplateStore {
+    /// Load templates from disk.
+    pub fn load() -> Self {
+        let file_path = dirs_config_path().join("templates.json");
+        let user_templates = if file_path.exists() {
+            match std::fs::read_to_string(&file_path) {
+                Ok(data) => serde_json::from_str::<Vec<AgentTemplate>>(&data).unwrap_or_default(),
+                Err(e) => {
+                    warn!(?e, "failed to read templates file");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        Self {
+            user_templates,
+            file_path,
+        }
+    }
+
+    /// Return all templates as owned values: built-ins first, then user-saved.
+    pub fn all_templates_owned(&self) -> Vec<AgentTemplate> {
+        let mut result = builtin_templates();
+        result.extend(self.user_templates.iter().cloned());
+        result
+    }
+
+    /// Save a new user template. If a user template with the same name exists,
+    /// it is replaced.
+    pub fn save_template(&mut self, template: AgentTemplate) -> bool {
+        // Reject if the name collides with a built-in template.
+        if builtin_templates().iter().any(|b| b.name == template.name) {
+            return false;
+        }
+        if let Some(pos) = self
+            .user_templates
+            .iter()
+            .position(|t| t.name == template.name)
+        {
+            self.user_templates[pos] = template;
+        } else {
+            self.user_templates.push(template);
+        }
+        self.persist();
+        true
+    }
+
+    /// Delete a user template by name. Returns true if found and removed.
+    pub fn delete_template(&mut self, name: &str) -> bool {
+        if let Some(pos) = self.user_templates.iter().position(|t| t.name == name) {
+            self.user_templates.remove(pos);
+            self.persist();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Persist user templates to disk.
+    fn persist(&self) {
+        if let Some(parent) = self.file_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                warn!(?e, "failed to create templates directory");
+                return;
+            }
+        }
+        match serde_json::to_string_pretty(&self.user_templates) {
+            Ok(data) => {
+                if let Err(e) = std::fs::write(&self.file_path, data) {
+                    warn!(?e, "failed to write templates file");
+                }
+            }
+            Err(e) => {
+                warn!(?e, "failed to serialize templates");
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // InputOverrides
 // ---------------------------------------------------------------------------
 
@@ -355,13 +676,26 @@ impl ResultDisplay {
     }
 }
 
-/// Whether the TUI is in normal navigation mode, prompt input mode, search mode, or command mode.
+/// Which pane has focus in split-pane mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitPane {
+    /// The left (primary) pane.
+    Left,
+    /// The right (secondary) pane.
+    Right,
+}
+
+/// Whether the TUI is in normal navigation mode, prompt input mode, search mode, command mode,
+/// history search mode, template picker, or save-template dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
     Input,
     Search,
     Command,
+    HistorySearch,
+    TemplatePicker,
+    SaveTemplate,
 }
 
 /// Which field is active in the new-agent input overlay.
@@ -454,6 +788,21 @@ pub struct AgentState {
     pub claude_options: ClaudeOptions,
     /// Timestamp when the agent was started, for elapsed time display.
     pub started_at: Instant,
+    /// Per-section display mode overrides for individual tool result blocks.
+    ///
+    /// Keys are the sequential index of the ToolUse line in the output
+    /// (0-based, counting only `DisplayLine::ToolUse` variants). When a
+    /// section has an entry here, it overrides the global `ResultDisplay`
+    /// mode for that specific tool result run. Cleared when the global
+    /// `r` key cycles the display mode.
+    pub section_overrides: HashMap<usize, ResultDisplay>,
+    /// The result display overrides generation when the cache was last computed.
+    ///
+    /// Incremented each time `section_overrides` is modified so the render
+    /// cache can detect staleness.
+    pub section_overrides_generation: u64,
+    /// The section overrides generation when the cache was last computed.
+    pub cache_section_overrides_generation: u64,
 }
 
 impl AgentState {
@@ -483,6 +832,9 @@ impl AgentState {
             session_id: None,
             claude_options,
             started_at: Instant::now(),
+            section_overrides: HashMap::new(),
+            section_overrides_generation: 0,
+            cache_section_overrides_generation: 0,
         }
     }
 
@@ -512,6 +864,39 @@ impl AgentState {
         // Flag new output when the user is scrolled away from the bottom.
         if self.scroll_offset > 0 {
             self.has_new_output = true;
+        }
+    }
+
+    /// Toggle the display mode override for a specific tool section.
+    ///
+    /// If the section currently has an override, it cycles to the next mode.
+    /// If the section has no override, it starts by cycling from the given
+    /// `global_mode` to the next mode. This creates a per-section override
+    /// that differs from the global default.
+    pub fn toggle_section(&mut self, section_index: usize, global_mode: ResultDisplay) {
+        let current = self
+            .section_overrides
+            .get(&section_index)
+            .copied()
+            .unwrap_or(global_mode);
+        let next = current.next();
+        if next == global_mode {
+            // If cycling back to the global mode, remove the override.
+            self.section_overrides.remove(&section_index);
+        } else {
+            self.section_overrides.insert(section_index, next);
+        }
+        self.section_overrides_generation = self.section_overrides_generation.wrapping_add(1);
+        // Invalidate cache since section display changed.
+        self.cached_lines = None;
+    }
+
+    /// Clear all per-section display overrides (used when the global mode changes).
+    pub fn clear_section_overrides(&mut self) {
+        if !self.section_overrides.is_empty() {
+            self.section_overrides.clear();
+            self.section_overrides_generation = self.section_overrides_generation.wrapping_add(1);
+            self.cached_lines = None;
         }
     }
 
@@ -615,6 +1000,20 @@ pub struct App {
     /// opening a new agent form via `n`.
     pub quick_launch: bool,
 
+    // -- Template state --------------------------------------------------------
+    /// Persistent template store for saving/loading agent configurations.
+    pub templates: TemplateStore,
+    /// Cached list of templates for the picker (built-ins + user-saved).
+    pub template_list: Vec<AgentTemplate>,
+    /// Index of the currently selected template in the picker.
+    pub template_selected: usize,
+    /// Input buffer for the save-template name dialog.
+    pub template_name_input: InputBuffer,
+    /// Whether the template picker was opened from within the input form
+    /// (via Ctrl+P). When true, cancelling the picker returns to input mode
+    /// instead of normal mode.
+    pub template_picker_from_input: bool,
+
     // -- Search state --------------------------------------------------------
     /// Search query input buffer (used in [`InputMode::Search`]).
     pub search_query: InputBuffer,
@@ -640,11 +1039,68 @@ pub struct App {
     /// Used by both the input handler and the render function so the filter only
     /// runs once per event.
     pub command_filtered: Vec<&'static PaletteCommand>,
+
+    // -- Sidebar state ---------------------------------------------------------
+    /// Whether the agent sidebar panel is visible.
+    pub sidebar_visible: bool,
+    /// Selected agent index within the sidebar (for keyboard navigation).
+    /// This is independent of `focused` — the sidebar selection can move
+    /// without changing the focused agent until Enter is pressed.
+    pub sidebar_selected: usize,
+
+    // -- History state -----------------------------------------------------------
+    /// Persistent prompt history for the current workspace.
+    pub history: PromptHistory,
+    /// Current position in the history when cycling with Up/Down arrows in
+    /// input mode. `None` means the user is editing a new prompt (not
+    /// browsing history). `Some(i)` is an index into the history entries
+    /// (0 = most recent).
+    pub history_index: Option<usize>,
+    /// Saved prompt text before the user started browsing history, so it can
+    /// be restored when they press Down past the most recent entry.
+    pub history_stash: String,
+    /// Search query for Ctrl+R history search.
+    pub history_search_query: InputBuffer,
+    /// Filtered history results for Ctrl+R search (newest first).
+    pub history_search_results: Vec<usize>,
+    /// Selected index within `history_search_results`.
+    pub history_search_selected: usize,
+
+    // -- Split-pane state -------------------------------------------------------
+    /// Whether split-pane mode is active (two agents side by side).
+    pub split_enabled: bool,
+    /// Vec index of the agent displayed in the right pane. When `None`, the
+    /// right pane shows the next agent after `focused` (wrapping).
+    pub split_right_index: Option<usize>,
+    /// Which pane currently has focus: `Left` or `Right`.
+    pub split_focused_pane: SplitPane,
+
+    // -- Mouse state -----------------------------------------------------------
+    /// Whether mouse capture is enabled. When true, crossterm captures mouse
+    /// events (clicks, scroll). Defaults to `true`.
+    pub mouse_enabled: bool,
+    /// Cached tab click regions from the last render. Each entry maps a visible
+    /// tab's rendered [`Rect`] to the corresponding agent Vec index. Updated by
+    /// [`super::ui::render_tabs`] on every frame so click hit-testing stays
+    /// current even after tab additions/removals or terminal resizes.
+    pub tab_rects: Vec<(Rect, usize)>,
+    /// Cached content area [`Rect`] from the last render. Used by mouse scroll
+    /// handling to limit scroll events to the output viewport.
+    pub content_rect: Option<Rect>,
+    /// Cached sidebar agent entry regions from the last render. Each entry
+    /// maps a rendered [`Rect`] to the corresponding agent Vec index so
+    /// mouse clicks can focus the correct agent from the sidebar.
+    pub sidebar_rects: Vec<(Rect, usize)>,
+    /// Cached input field regions from the last render of the input overlay.
+    /// Maps each rendered field's [`Rect`] to its [`InputField`] variant so
+    /// mouse clicks can focus the correct field.
+    pub input_field_rects: Vec<(Rect, InputField)>,
 }
 
 impl App {
     /// Create a new, empty application state.
     pub fn new(default_workspace: PathBuf, default_claude_options: ClaudeOptions) -> Self {
+        let history = PromptHistory::load(&default_workspace);
         Self {
             agents: Vec::new(),
             agent_index: HashMap::new(),
@@ -674,6 +1130,11 @@ impl App {
             toasts: Vec::new(),
             unread_agents: std::collections::HashSet::new(),
             quick_launch: true,
+            templates: TemplateStore::load(),
+            template_list: Vec::new(),
+            template_selected: 0,
+            template_name_input: InputBuffer::new(),
+            template_picker_from_input: false,
             search_query: InputBuffer::new(),
             search_matches: Vec::new(),
             search_match_index: 0,
@@ -682,6 +1143,22 @@ impl App {
             command_selected: 0,
             command_error: None,
             command_filtered: COMMANDS.iter().collect(),
+            sidebar_visible: false,
+            sidebar_selected: 0,
+            history,
+            history_index: None,
+            history_stash: String::new(),
+            history_search_query: InputBuffer::new(),
+            history_search_results: Vec::new(),
+            history_search_selected: 0,
+            split_enabled: false,
+            split_right_index: None,
+            split_focused_pane: SplitPane::Left,
+            mouse_enabled: true,
+            tab_rects: Vec::new(),
+            content_rect: None,
+            sidebar_rects: Vec::new(),
+            input_field_rects: Vec::new(),
         }
     }
 
@@ -773,6 +1250,9 @@ impl App {
         self.input_mode = InputMode::Input;
         self.input_field = InputField::Prompt;
         self.input.clear();
+        // Reset history browsing state.
+        self.history_index = None;
+        self.history_stash.clear();
         // New agents start in quick-launch mode; respond uses advanced mode
         // since the user likely wants to tweak options.
         self.quick_launch = overrides.is_none();
@@ -813,6 +1293,168 @@ impl App {
         self.add_dir.clear();
         self.respond_target = None;
         self.quick_launch = true;
+        self.history_index = None;
+        self.history_stash.clear();
+    }
+
+    // -- Template methods ------------------------------------------------------
+
+    /// Enter template picker mode. Refreshes the template list and resets
+    /// the selection to the first item (the "Blank" option is item 0).
+    ///
+    /// When `from_input` is true, the picker was opened from within the input
+    /// form (via Ctrl+P), so cancelling returns to input mode. When false
+    /// (opened from normal mode), cancelling returns to normal mode.
+    pub fn enter_template_picker(&mut self, from_input: bool) {
+        self.template_list = self.templates.all_templates_owned();
+        self.template_selected = 0;
+        self.template_picker_from_input = from_input;
+        self.input_mode = InputMode::TemplatePicker;
+    }
+
+    /// Exit template picker mode.
+    ///
+    /// Returns to input mode if the picker was opened from the input form,
+    /// otherwise returns to normal mode.
+    pub fn exit_template_picker(&mut self) {
+        if self.template_picker_from_input {
+            self.input_mode = InputMode::Input;
+        } else {
+            self.input_mode = InputMode::Normal;
+        }
+        self.template_list.clear();
+        self.template_selected = 0;
+        self.template_picker_from_input = false;
+    }
+
+    /// Select the current template and enter input mode with its values
+    /// pre-filled. Index 0 is "Blank" (opens the default form). Indices
+    /// 1..N correspond to `template_list[i - 1]`.
+    ///
+    /// When the picker was opened from within the input form, "Blank"
+    /// returns to the existing form without resetting fields.
+    pub fn select_template(&mut self) {
+        let from_input = self.template_picker_from_input;
+        self.template_picker_from_input = false;
+
+        if self.template_selected == 0 {
+            // "Blank" option.
+            self.template_list.clear();
+            if from_input {
+                // Return to the existing input form without resetting.
+                self.input_mode = InputMode::Input;
+            } else {
+                self.enter_input_mode();
+            }
+            return;
+        }
+        let idx = self.template_selected - 1;
+        if let Some(template) = self.template_list.get(idx).cloned() {
+            self.template_list.clear();
+            self.apply_template(&template);
+        } else if from_input {
+            self.input_mode = InputMode::Input;
+        } else {
+            self.enter_input_mode();
+        }
+    }
+
+    /// Apply a template's values to the input form and enter input mode.
+    fn apply_template(&mut self, template: &AgentTemplate) {
+        self.input_mode = InputMode::Input;
+        self.input_field = InputField::Prompt;
+        self.history_index = None;
+        self.history_stash.clear();
+        // Template always opens in advanced mode so the user can see all
+        // pre-filled fields.
+        self.quick_launch = false;
+
+        self.input.set_text(&template.prompt);
+        self.workspace
+            .set_text(self.default_workspace.display().to_string());
+        self.permission_mode
+            .set_text(template.permission_mode.as_deref().unwrap_or_default());
+        self.model
+            .set_text(template.model.as_deref().unwrap_or_default());
+        self.effort
+            .set_text(template.effort.as_deref().unwrap_or_default());
+        self.max_budget.set_text(
+            template
+                .max_budget_usd
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+        );
+        self.allowed_tools
+            .set_text(template.allowed_tools.join(", "));
+        self.add_dir.set_text(template.add_dirs.join(", "));
+    }
+
+    /// Enter save-template mode from the input form. The user provides a
+    /// name for the template to be saved.
+    pub fn enter_save_template(&mut self) {
+        self.input_mode = InputMode::SaveTemplate;
+        self.template_name_input.clear();
+    }
+
+    /// Exit save-template mode, returning to input mode without saving.
+    pub fn exit_save_template(&mut self) {
+        self.input_mode = InputMode::Input;
+        self.template_name_input.clear();
+    }
+
+    /// Save the current input form values as a named template.
+    pub fn save_current_as_template(&mut self) {
+        let name = self.template_name_input.text().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+
+        let non_empty = |s: &str| {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
+
+        let template = AgentTemplate {
+            name: name.clone(),
+            prompt: self.input.text().to_string(),
+            permission_mode: non_empty(self.permission_mode.text()),
+            model: non_empty(self.model.text()),
+            effort: non_empty(self.effort.text()),
+            max_budget_usd: self
+                .max_budget
+                .text()
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|v| *v > 0.0),
+            allowed_tools: self
+                .allowed_tools
+                .text()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            add_dirs: self
+                .add_dir
+                .text()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            builtin: false,
+        };
+
+        if !self.templates.save_template(template) {
+            self.set_status_message(format!("Cannot overwrite built-in template '{name}'"));
+            return;
+        }
+        self.template_name_input.clear();
+        self.input_mode = InputMode::Input;
+        self.set_status_message(format!("Template '{name}' saved"));
     }
 
     /// Submit the current input buffers.
@@ -985,6 +1627,147 @@ impl App {
         self.command_filtered = filter_commands(self.command_input.text());
     }
 
+    // -- History methods -------------------------------------------------------
+
+    /// Save a prompt and its configuration to persistent history.
+    pub fn save_to_history(
+        &mut self,
+        prompt: &str,
+        workspace: &std::path::Path,
+        claude_options: &ClaudeOptions,
+    ) {
+        let entry = HistoryEntry {
+            prompt: prompt.to_string(),
+            workspace: workspace.display().to_string(),
+            permission_mode: claude_options.permission_mode.clone(),
+            model: claude_options.model.clone(),
+            effort: claude_options.effort.clone(),
+            max_budget_usd: claude_options.max_budget_usd,
+            allowed_tools: claude_options.allowed_tools.clone(),
+            add_dirs: claude_options.add_dirs.clone(),
+        };
+        self.history.push(entry);
+    }
+
+    /// Navigate to the previous (older) history entry from the prompt field.
+    ///
+    /// On the first Up press, stashes the current prompt text and loads the
+    /// most recent history entry. Subsequent Up presses move further back.
+    pub fn history_prev(&mut self) {
+        let entries = self.history.entries();
+        if entries.is_empty() {
+            return;
+        }
+        match self.history_index {
+            None => {
+                // Stash current input and go to most recent entry.
+                self.history_stash = self.input.text().to_string();
+                let idx = 0; // 0 = most recent (we index from the end)
+                self.history_index = Some(idx);
+                self.apply_history_entry(entries.len() - 1 - idx);
+            }
+            Some(idx) => {
+                let new_idx = idx + 1;
+                if new_idx < entries.len() {
+                    self.history_index = Some(new_idx);
+                    self.apply_history_entry(entries.len() - 1 - new_idx);
+                }
+                // If already at the oldest entry, do nothing.
+            }
+        }
+    }
+
+    /// Navigate to the next (newer) history entry from the prompt field.
+    ///
+    /// When the user presses Down past the most recent entry, the stashed
+    /// original prompt text is restored.
+    pub fn history_next(&mut self) {
+        let entries = self.history.entries();
+        match self.history_index {
+            None => {
+                // Not browsing history — do nothing.
+            }
+            Some(0) => {
+                // At most recent entry — restore stashed text.
+                self.history_index = None;
+                self.input.set_text(&self.history_stash);
+            }
+            Some(idx) => {
+                let new_idx = idx - 1;
+                self.history_index = Some(new_idx);
+                self.apply_history_entry(entries.len() - 1 - new_idx);
+            }
+        }
+    }
+
+    /// Apply a history entry at the given absolute index (into entries vec)
+    /// to the input form fields.
+    fn apply_history_entry(&mut self, entry_idx: usize) {
+        if let Some(entry) = self.history.entries().get(entry_idx) {
+            self.input.set_text(&entry.prompt);
+            self.workspace.set_text(&entry.workspace);
+            self.permission_mode
+                .set_text(entry.permission_mode.as_deref().unwrap_or(""));
+            self.model.set_text(entry.model.as_deref().unwrap_or(""));
+            self.effort.set_text(entry.effort.as_deref().unwrap_or(""));
+            self.max_budget.set_text(
+                entry
+                    .max_budget_usd
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+            );
+            self.allowed_tools.set_text(entry.allowed_tools.join(", "));
+            self.add_dir.set_text(entry.add_dirs.join(", "));
+        }
+    }
+
+    /// Enter history search mode (Ctrl+R from input mode).
+    pub fn enter_history_search(&mut self) {
+        self.input_mode = InputMode::HistorySearch;
+        self.history_search_query.clear();
+        self.history_search_results = (0..self.history.entries().len()).rev().collect();
+        self.history_search_selected = 0;
+    }
+
+    /// Exit history search mode, returning to input mode.
+    pub fn exit_history_search(&mut self) {
+        self.input_mode = InputMode::Input;
+        self.history_search_query.clear();
+        self.history_search_results.clear();
+        self.history_search_selected = 0;
+    }
+
+    /// Recompute the history search results from the current query.
+    pub fn refilter_history_search(&mut self) {
+        let query = self.history_search_query.text().to_string();
+        let entries = self.history.entries();
+        if query.is_empty() {
+            self.history_search_results = (0..entries.len()).rev().collect();
+        } else {
+            let query_lower = query.to_lowercase();
+            self.history_search_results = entries
+                .iter()
+                .enumerate()
+                .rev()
+                .filter(|(_, e)| fuzzy_matches(&e.prompt.to_lowercase(), &query_lower))
+                .map(|(i, _)| i)
+                .collect();
+        }
+        self.history_search_selected = 0;
+    }
+
+    /// Select a history entry from the search results and populate the form.
+    pub fn select_history_search_entry(&mut self) {
+        if let Some(&entry_idx) = self
+            .history_search_results
+            .get(self.history_search_selected)
+        {
+            self.apply_history_entry(entry_idx);
+            self.history_index = None; // Reset browsing state.
+        }
+        self.exit_history_search();
+    }
+
     /// Recompute search matches against the focused agent's cached lines.
     ///
     /// Stores `(line_index, start_byte, end_byte)` tuples for every substring
@@ -1092,6 +1875,43 @@ impl App {
         }
     }
 
+    /// Return the Vec index of the agent displayed in the right split pane.
+    ///
+    /// Uses `split_right_index` if set; otherwise defaults to the agent after
+    /// `focused` (wrapping). Returns `None` if fewer than 2 agents exist.
+    pub fn split_right_agent_index(&self) -> Option<usize> {
+        if self.agents.len() < 2 {
+            return None;
+        }
+        if let Some(idx) = self.split_right_index {
+            if idx < self.agents.len() && idx != self.focused {
+                return Some(idx);
+            }
+        }
+        Some((self.focused + 1) % self.agents.len())
+    }
+
+    /// Return a reference to the agent currently active in the focused split pane.
+    ///
+    /// In split mode, returns the right-pane agent when `split_focused_pane` is
+    /// `Right`; otherwise returns the left (primary focused) agent. Outside split
+    /// mode, always returns the primary focused agent.
+    pub fn active_agent_index(&self) -> Option<usize> {
+        if self.split_enabled && self.split_focused_pane == SplitPane::Right {
+            self.split_right_agent_index().or(Some(self.focused))
+        } else if !self.agents.is_empty() {
+            Some(self.focused)
+        } else {
+            None
+        }
+    }
+
+    /// Return a mutable reference to the agent in the currently active split pane.
+    pub fn active_agent_mut(&mut self) -> Option<&mut AgentState> {
+        let idx = self.active_agent_index()?;
+        self.agents.get_mut(idx)
+    }
+
     /// Rebuild the `agent_id → Vec index` map.
     ///
     /// Must be called whenever an agent's `id` is changed in place (e.g. when
@@ -1119,11 +1939,27 @@ impl App {
         }
         // Remove the agent's ID from unread tracking.
         self.unread_agents.remove(&removed.id);
-        // Clamp focused index to remain valid.
+        // Clamp focused and sidebar_selected indices to remain valid.
         if self.agents.is_empty() {
             self.focused = 0;
-        } else if self.focused >= self.agents.len() {
-            self.focused = self.agents.len() - 1;
+            self.sidebar_selected = 0;
+        } else {
+            if self.focused >= self.agents.len() {
+                self.focused = self.agents.len() - 1;
+            }
+            if self.sidebar_selected >= self.agents.len() {
+                self.sidebar_selected = self.agents.len() - 1;
+            }
+        }
+        // Disable split mode if fewer than 2 agents remain.
+        if self.agents.len() < 2 {
+            self.split_enabled = false;
+            self.split_right_index = None;
+            self.split_focused_pane = SplitPane::Left;
+        } else if let Some(ri) = self.split_right_index {
+            if ri >= self.agents.len() || ri == self.focused {
+                self.split_right_index = None;
+            }
         }
         Some(removed)
     }
@@ -1676,5 +2512,194 @@ mod tests {
     fn filter_commands_no_match() {
         let results = filter_commands("zzz");
         assert!(results.is_empty());
+    }
+
+    // -- history navigation --------------------------------------------------
+
+    #[test]
+    fn history_prev_next_cycles_entries() {
+        let mut app = App::new(
+            PathBuf::from("/tmp/test-history-prev-next"),
+            ClaudeOptions::default(),
+        );
+        app.enter_input_mode();
+
+        // Manually insert history entries.
+        app.history.push(HistoryEntry {
+            prompt: "first".into(),
+            workspace: "/tmp/test-history-prev-next".into(),
+            permission_mode: None,
+            model: None,
+            effort: None,
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            add_dirs: Vec::new(),
+        });
+        app.history.push(HistoryEntry {
+            prompt: "second".into(),
+            workspace: "/tmp/test-history-prev-next".into(),
+            permission_mode: None,
+            model: None,
+            effort: None,
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            add_dirs: Vec::new(),
+        });
+
+        app.input.set_text("current");
+
+        // Up → most recent ("second")
+        app.history_prev();
+        assert_eq!(app.input.text(), "second");
+        assert_eq!(app.history_index, Some(0));
+
+        // Up again → older ("first")
+        app.history_prev();
+        assert_eq!(app.input.text(), "first");
+        assert_eq!(app.history_index, Some(1));
+
+        // Down → back to "second"
+        app.history_next();
+        assert_eq!(app.input.text(), "second");
+        assert_eq!(app.history_index, Some(0));
+
+        // Down again → restore stashed "current"
+        app.history_next();
+        assert_eq!(app.input.text(), "current");
+        assert_eq!(app.history_index, None);
+    }
+
+    #[test]
+    fn history_prev_on_empty_history_is_noop() {
+        let mut app = App::new(
+            PathBuf::from("/tmp/test-history-empty"),
+            ClaudeOptions::default(),
+        );
+        app.enter_input_mode();
+        app.input.set_text("my prompt");
+
+        app.history_prev();
+        assert_eq!(app.input.text(), "my prompt");
+        assert_eq!(app.history_index, None);
+    }
+
+    #[test]
+    fn apply_history_entry_clears_missing_fields() {
+        let mut app = App::new(
+            PathBuf::from("/tmp/test-history-clears"),
+            ClaudeOptions::default(),
+        );
+        app.enter_input_mode();
+
+        // Pre-fill some fields.
+        app.model.set_text("opus");
+        app.effort.set_text("high");
+        app.max_budget.set_text("5.0");
+
+        // Insert a history entry with no optional fields.
+        app.history.push(HistoryEntry {
+            prompt: "bare prompt".into(),
+            workspace: "/tmp/test-history-clears".into(),
+            permission_mode: None,
+            model: None,
+            effort: None,
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            add_dirs: Vec::new(),
+        });
+
+        // Navigate to it.
+        app.history_prev();
+        assert_eq!(app.input.text(), "bare prompt");
+        // Fields should be cleared, not retain previous values.
+        assert_eq!(app.model.text(), "");
+        assert_eq!(app.effort.text(), "");
+        assert_eq!(app.max_budget.text(), "");
+    }
+
+    // -- template store ------------------------------------------------------
+
+    #[test]
+    fn template_store_rejects_builtin_name() {
+        let mut store = TemplateStore::load();
+        let result = store.save_template(AgentTemplate {
+            name: "reviewer".into(),
+            prompt: "custom".into(),
+            permission_mode: None,
+            model: None,
+            effort: None,
+            max_budget_usd: None,
+            allowed_tools: Vec::new(),
+            add_dirs: Vec::new(),
+            builtin: false,
+        });
+        assert!(!result, "should reject saving with built-in name");
+    }
+
+    // -- split pane ----------------------------------------------------------
+
+    #[test]
+    fn split_right_agent_index_defaults_to_next() {
+        let mut app = App::new(PathBuf::from("/tmp/ws"), ClaudeOptions::default());
+        app.agents.push(AgentState::new(
+            1,
+            PathBuf::from("/tmp/ws"),
+            "a".into(),
+            ClaudeOptions::default(),
+        ));
+        app.agents.push(AgentState::new(
+            2,
+            PathBuf::from("/tmp/ws"),
+            "b".into(),
+            ClaudeOptions::default(),
+        ));
+        app.agents.push(AgentState::new(
+            3,
+            PathBuf::from("/tmp/ws"),
+            "c".into(),
+            ClaudeOptions::default(),
+        ));
+        app.focused = 0;
+
+        assert_eq!(app.split_right_agent_index(), Some(1));
+
+        app.focused = 2;
+        assert_eq!(app.split_right_agent_index(), Some(0)); // wraps
+    }
+
+    #[test]
+    fn split_right_agent_index_none_with_one_agent() {
+        let mut app = App::new(PathBuf::from("/tmp/ws"), ClaudeOptions::default());
+        app.agents.push(AgentState::new(
+            1,
+            PathBuf::from("/tmp/ws"),
+            "a".into(),
+            ClaudeOptions::default(),
+        ));
+        assert_eq!(app.split_right_agent_index(), None);
+    }
+
+    // -- sidebar sync --------------------------------------------------------
+
+    #[test]
+    fn remove_agent_clamps_sidebar_selected() {
+        let mut app = App::new(PathBuf::from("/tmp/ws"), ClaudeOptions::default());
+        app.agents.push(AgentState::new(
+            1,
+            PathBuf::from("/tmp/ws"),
+            "a".into(),
+            ClaudeOptions::default(),
+        ));
+        app.agents.push(AgentState::new(
+            2,
+            PathBuf::from("/tmp/ws"),
+            "b".into(),
+            ClaudeOptions::default(),
+        ));
+        app.rebuild_agent_index();
+        app.sidebar_selected = 1;
+
+        app.remove_agent(1);
+        assert!(app.sidebar_selected < app.agents.len());
     }
 }

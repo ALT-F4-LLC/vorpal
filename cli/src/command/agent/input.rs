@@ -1,17 +1,18 @@
-//! Keyboard input handling for the agent TUI.
+//! Keyboard and mouse input handling for the agent TUI.
 //!
-//! Contains all input-dispatch logic for the three input modes: normal
-//! browsing, prompt input, and confirm-close. The single public entry
-//! point [`handle_key`] is called from the event loop in `tui.rs`.
+//! Contains all input-dispatch logic for the input modes: normal browsing,
+//! prompt input, search, command palette, history search, and confirm-close.
+//! The public entry points [`handle_key`] and [`handle_mouse`] are called
+//! from the event loop in `tui.rs`.
 
 use super::manager::AgentManager;
 use super::state::{
-    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, InputOverrides,
+    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, InputOverrides, SplitPane,
     EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::ui::{BLOCK_MARKER, RESULT_CONNECTOR, SESSION_MARKER};
 use crossterm::{
-    event::{KeyCode, KeyEvent, KeyModifiers},
+    event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind},
     terminal,
 };
 use path_clean::PathClean;
@@ -37,13 +38,16 @@ pub(super) fn viewport_height() -> usize {
 // Scroll helper
 // ---------------------------------------------------------------------------
 
-/// Scroll the focused agent's output by the given signed delta.
+/// Scroll the active pane's agent output by the given signed delta.
 ///
 /// A negative `delta` scrolls toward newer output (decreases `scroll_offset`),
 /// while a positive `delta` scrolls toward older output (increases
 /// `scroll_offset`). Clamps the offset to the valid range.
+///
+/// In split-pane mode, scrolls the agent in the focused pane rather than
+/// always scrolling the primary focused agent.
 fn scroll_by(app: &mut App, delta: isize) {
-    if let Some(agent) = app.focused_agent_mut() {
+    if let Some(agent) = app.active_agent_mut() {
         if delta < 0 {
             agent.scroll_offset = agent.scroll_offset.saturating_sub((-delta) as usize);
             if agent.scroll_offset == 0 {
@@ -157,9 +161,27 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         return;
     }
 
+    // In history search mode, delegate all keys to the history search handler.
+    if app.input_mode == InputMode::HistorySearch {
+        handle_history_search_mode(app, key);
+        return;
+    }
+
     // In command mode, delegate all keys to the command handler.
     if app.input_mode == InputMode::Command {
         handle_command_mode(app, manager, key).await;
+        return;
+    }
+
+    // In template picker mode, delegate all keys to the template handler.
+    if app.input_mode == InputMode::TemplatePicker {
+        handle_template_mode(app, key);
+        return;
+    }
+
+    // In save-template mode, delegate all keys to the save-template handler.
+    if app.input_mode == InputMode::SaveTemplate {
+        handle_save_template_mode(app, key);
         return;
     }
 
@@ -208,17 +230,46 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         // Next agent: Tab or l.
         KeyCode::Tab | KeyCode::Char('l') => {
             app.next_agent();
+            // Keep sidebar selection in sync with focused agent.
+            if app.sidebar_visible {
+                app.sidebar_selected = app.focused;
+            }
         }
 
         // Previous agent: Shift+Tab or h.
         KeyCode::BackTab | KeyCode::Char('h') => {
             app.prev_agent();
+            // Keep sidebar selection in sync with focused agent.
+            if app.sidebar_visible {
+                app.sidebar_selected = app.focused;
+            }
         }
 
         // Focus agent by number (1-9).
         KeyCode::Char(c @ '1'..='9') => {
             let index = (c as usize) - ('1' as usize);
             app.focus_agent(index);
+            // Keep sidebar selection in sync with focused agent.
+            if app.sidebar_visible {
+                app.sidebar_selected = app.focused;
+            }
+        }
+
+        // Sidebar navigation: J moves selection down, K moves selection up.
+        // Enter on sidebar selection focuses that agent.
+        KeyCode::Char('J') if app.sidebar_visible => {
+            if !app.agents.is_empty() {
+                app.sidebar_selected = (app.sidebar_selected + 1) % app.agents.len();
+            }
+        }
+        KeyCode::Char('K') if app.sidebar_visible => {
+            if !app.agents.is_empty() {
+                app.sidebar_selected = if app.sidebar_selected == 0 {
+                    app.agents.len() - 1
+                } else {
+                    app.sidebar_selected - 1
+                };
+            }
         }
 
         // Scroll down toward latest (decrease scroll_offset).
@@ -259,7 +310,7 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
 
         // Jump to bottom (latest output).
         KeyCode::Char('G') => {
-            if let Some(agent) = app.focused_agent_mut() {
+            if let Some(agent) = app.active_agent_mut() {
                 agent.scroll_offset = 0;
                 agent.has_new_output = false;
             }
@@ -273,7 +324,7 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             {
                 // Second `g` within timeout — complete the chord.
                 app.pending_g = None;
-                if let Some(agent) = app.focused_agent_mut() {
+                if let Some(agent) = app.active_agent_mut() {
                     let max_offset = agent.output.len().saturating_sub(viewport_height());
                     agent.scroll_offset = max_offset;
                 }
@@ -289,8 +340,14 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         }
 
         // Cycle tool result display mode: compact → hidden → full.
+        // Also clears all per-section overrides so every section resets
+        // to the new global mode.
         KeyCode::Char('r') => {
             app.result_display = app.result_display.next();
+            // Clear per-section overrides so all sections follow the new global mode.
+            for agent in &mut app.agents {
+                agent.clear_section_overrides();
+            }
             app.set_status_message(format!("Tool results: {}", app.result_display.label()));
         }
 
@@ -300,13 +357,14 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             app.set_status_message(format!("Theme: {}", app.theme.name));
         }
 
-        // Copy focused agent output to system clipboard.
+        // Copy the active pane's agent output to system clipboard.
         //
         // Uses the cached rendered lines (which respect the current
         // ResultDisplay mode — compact/hidden/full) so the clipboard
         // matches exactly what the user sees on screen.
         KeyCode::Char('y') => {
-            if let Some(agent) = app.focused_agent() {
+            let active_idx = app.active_agent_index();
+            if let Some(agent) = active_idx.and_then(|i| app.agents.get(i)) {
                 let text = if let Some(cached) = &agent.cached_lines {
                     cached
                         .iter()
@@ -347,7 +405,7 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
 
         // Next search match / new agent.
         // When search matches are active, `n` jumps to the next match.
-        // Otherwise, `n` opens the new agent input form.
+        // Otherwise, `n` opens the quick prompt input form directly.
         KeyCode::Char('n') => {
             if !app.search_matches.is_empty() {
                 app.search_next(viewport_height());
@@ -360,6 +418,47 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         KeyCode::Char('N') => {
             if !app.search_matches.is_empty() {
                 app.search_prev(viewport_height());
+            }
+        }
+
+        // Toggle split-pane mode: |.
+        KeyCode::Char('|') => {
+            if app.agents.len() >= 2 {
+                app.split_enabled = !app.split_enabled;
+                if app.split_enabled {
+                    app.split_focused_pane = SplitPane::Left;
+                    // Default right pane to the next agent after focused.
+                    app.split_right_index = None;
+                    app.set_status_message("Split-pane enabled");
+                } else {
+                    app.split_right_index = None;
+                    app.split_focused_pane = SplitPane::Left;
+                    app.set_status_message("Split-pane disabled");
+                }
+            } else {
+                app.set_status_message("Need at least 2 agents for split view");
+            }
+        }
+
+        // Switch focus between split panes: `.
+        KeyCode::Char('`') if app.split_enabled => {
+            app.split_focused_pane = match app.split_focused_pane {
+                SplitPane::Left => SplitPane::Right,
+                SplitPane::Right => SplitPane::Left,
+            };
+            let pane_label = match app.split_focused_pane {
+                SplitPane::Left => "left",
+                SplitPane::Right => "right",
+            };
+            app.set_status_message(format!("Focus: {pane_label} pane"));
+        }
+
+        // Toggle sidebar panel: b.
+        KeyCode::Char('b') => {
+            app.sidebar_visible = !app.sidebar_visible;
+            // Sync sidebar selection with current focus when opening.
+            if app.sidebar_visible {
+                app.sidebar_selected = app.focused;
             }
         }
 
@@ -383,9 +482,121 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             app.enter_command_mode();
         }
 
+        // Enter: sidebar agent focus or tool result section toggle.
+        //
+        // When the sidebar is visible and the sidebar selection differs
+        // from the focused agent, Enter focuses the sidebar-selected
+        // agent. Otherwise, falls through to the section toggle behavior.
+        KeyCode::Enter => {
+            if app.sidebar_visible && app.sidebar_selected != app.focused {
+                app.focus_agent(app.sidebar_selected);
+            } else if let Some(section_idx) = find_section_at_viewport_top(app) {
+                let global = app.result_display;
+                if let Some(agent) = app.focused_agent_mut() {
+                    agent.toggle_section(section_idx, global);
+                    let mode = agent
+                        .section_overrides
+                        .get(&section_idx)
+                        .copied()
+                        .unwrap_or(global);
+                    app.set_status_message(format!(
+                        "Section {}: {}",
+                        section_idx + 1,
+                        mode.label()
+                    ));
+                }
+            }
+        }
+
         // All other keys: no-op.
         _ => {}
     }
+}
+
+// ---------------------------------------------------------------------------
+// Section toggle helper
+// ---------------------------------------------------------------------------
+
+/// Find the tool section index at the top of the current viewport.
+///
+/// Scans the focused agent's output to find the ToolUse header line whose
+/// associated tool result content is visible at or near the top of the
+/// viewport. Returns the section index (0-based count of ToolUse lines from
+/// the start of output) suitable for use as a key into `section_overrides`.
+///
+/// The algorithm:
+/// 1. Determine which raw output lines are visible in the viewport.
+/// 2. Scan from the top of the visible region looking for a ToolUse line.
+/// 3. If found, count how many ToolUse lines precede it to get the section index.
+/// 4. If no ToolUse is visible at the top, scan slightly above the viewport
+///    (the ToolUse header may have scrolled just out of view while its results
+///    are still visible).
+fn find_section_at_viewport_top(app: &App) -> Option<usize> {
+    let agent = app.focused_agent()?;
+    let len = agent.output.len();
+    if len == 0 {
+        return None;
+    }
+
+    let height = viewport_height();
+    let max_offset = len.saturating_sub(height);
+    let offset = agent.scroll_offset.min(max_offset);
+    let end = len.saturating_sub(offset);
+    let start = end.saturating_sub(height);
+
+    // First, scan visible lines from the top for a ToolUse header.
+    for idx in start..end {
+        if matches!(agent.output[idx], DisplayLine::ToolUse { .. }) {
+            return Some(count_tool_use_before(agent, idx));
+        }
+        // If we hit a non-ToolResult, non-ToolUse line after scanning a few
+        // lines, stop looking forward — the top of the viewport is in the
+        // middle of text content, not near a tool section.
+        if !matches!(
+            agent.output[idx],
+            DisplayLine::ToolResult { .. } | DisplayLine::ToolUse { .. }
+        ) && idx > start + 2
+        {
+            break;
+        }
+    }
+
+    // If the top of the viewport shows ToolResult lines but the ToolUse header
+    // has scrolled just above, scan backwards from `start` to find it.
+    if start > 0
+        && matches!(
+            agent.output.get(start),
+            Some(DisplayLine::ToolResult { .. })
+        )
+    {
+        let search_from = start.saturating_sub(1);
+        for idx in (0..=search_from).rev() {
+            if matches!(agent.output[idx], DisplayLine::ToolUse { .. }) {
+                return Some(count_tool_use_before(agent, idx));
+            }
+            // Stop if we hit something that isn't part of this tool section.
+            if !matches!(agent.output[idx], DisplayLine::ToolResult { .. }) {
+                break;
+            }
+        }
+    }
+
+    None
+}
+
+/// Count the number of ToolUse lines in the output before (and including)
+/// the given index, returning a 0-based section index.
+fn count_tool_use_before(agent: &super::state::AgentState, target_idx: usize) -> usize {
+    let mut count = 0;
+    for idx in 0..=target_idx {
+        if matches!(agent.output[idx], DisplayLine::ToolUse { .. }) {
+            if idx == target_idx {
+                return count;
+            }
+            count += 1;
+        }
+    }
+    count
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +639,21 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
                 "advanced"
             };
             app.set_status_message(format!("Input mode: {mode}"));
+        }
+
+        // Ctrl+R: open history search overlay.
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.enter_history_search();
+        }
+
+        // Ctrl+T: save current form as a named template.
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.enter_save_template();
+        }
+
+        // Ctrl+P: open the template picker from within the input form.
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.enter_template_picker(true);
         }
 
         // Ctrl+S: submit the form and spawn a new agent (or respond to an
@@ -488,6 +714,21 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
                 return;
             }
 
+            // Up/Down on the Prompt field cycle through history.
+            if app.input_field == InputField::Prompt {
+                match code {
+                    KeyCode::Up => {
+                        app.history_prev();
+                        return;
+                    }
+                    KeyCode::Down => {
+                        app.history_next();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+
             let buf = match app.input_field {
                 InputField::Prompt => &mut app.input,
                 InputField::Workspace => &mut app.workspace,
@@ -505,7 +746,13 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
                 KeyCode::Right => buf.move_right(),
                 KeyCode::Home => buf.move_home(),
                 KeyCode::End => buf.move_end(),
-                KeyCode::Char(c) => buf.insert_char(c),
+                KeyCode::Char(c) => {
+                    // Reset history browsing when the user types a character.
+                    if app.input_field == InputField::Prompt {
+                        app.history_index = None;
+                    }
+                    buf.insert_char(c);
+                }
                 _ => {}
             }
         }
@@ -548,6 +795,9 @@ async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) {
             .await
         {
             Ok(agent_id) => {
+                // Save to history on successful spawn.
+                app.save_to_history(&prompt, &workspace, &claude_options);
+
                 if let Some(agent) = app.agent_by_id_mut(target_id) {
                     agent.push_line(DisplayLine::TurnStart);
                     agent.id = agent_id;
@@ -578,6 +828,9 @@ async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) {
             .await
         {
             Ok(agent_id) => {
+                // Save to history on successful spawn.
+                app.save_to_history(&prompt, &workspace, &claude_options);
+
                 app.add_agent(super::state::AgentState::new(
                     agent_id,
                     workspace,
@@ -631,6 +884,105 @@ async fn handle_confirm_close(app: &mut App, manager: &mut AgentManager, key: Ke
         _ => {
             app.confirm_close = false;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Template picker mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while in template picker mode.
+///
+/// The picker shows a list: "Blank" at index 0, then all templates.
+/// Up/Down navigate, Enter selects, Escape cancels. `d` deletes a user
+/// template (built-ins cannot be deleted).
+fn handle_template_mode(app: &mut App, key: KeyEvent) {
+    // Total items = 1 (Blank) + template_list.len()
+    let total = 1 + app.template_list.len();
+
+    match key.code {
+        // Exit template picker: Escape.
+        KeyCode::Esc => {
+            app.exit_template_picker();
+        }
+
+        // Select the current template or "Blank": Enter.
+        KeyCode::Enter => {
+            app.select_template();
+        }
+
+        // Navigate up.
+        KeyCode::Up | KeyCode::Char('k') => {
+            if total > 0 {
+                app.template_selected = if app.template_selected == 0 {
+                    total - 1
+                } else {
+                    app.template_selected - 1
+                };
+            }
+        }
+
+        // Navigate down.
+        KeyCode::Down | KeyCode::Char('j') => {
+            if total > 0 {
+                app.template_selected = (app.template_selected + 1) % total;
+            }
+        }
+
+        // Delete user template: d (only for non-built-in templates).
+        KeyCode::Char('d') => {
+            if app.template_selected > 0 {
+                let idx = app.template_selected - 1;
+                if let Some(tmpl) = app.template_list.get(idx) {
+                    if tmpl.builtin {
+                        app.set_status_message("Cannot delete built-in template");
+                    } else {
+                        let name = tmpl.name.clone();
+                        app.templates.delete_template(&name);
+                        app.template_list = app.templates.all_templates_owned();
+                        // Clamp selection.
+                        let new_total = 1 + app.template_list.len();
+                        if app.template_selected >= new_total {
+                            app.template_selected = new_total.saturating_sub(1);
+                        }
+                        app.set_status_message(format!("Deleted template '{name}'"));
+                    }
+                }
+            }
+        }
+
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Save-template mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while in save-template name dialog.
+///
+/// The user types a template name and presses Enter to save, or Escape to cancel.
+fn handle_save_template_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Cancel: Escape.
+        KeyCode::Esc => {
+            app.exit_save_template();
+        }
+
+        // Save the template: Enter.
+        KeyCode::Enter => {
+            app.save_current_as_template();
+        }
+
+        // Text editing for the template name.
+        KeyCode::Backspace => app.template_name_input.delete_char(),
+        KeyCode::Delete => app.template_name_input.delete_char_forward(),
+        KeyCode::Left => app.template_name_input.move_left(),
+        KeyCode::Right => app.template_name_input.move_right(),
+        KeyCode::Home => app.template_name_input.move_home(),
+        KeyCode::End => app.template_name_input.move_end(),
+        KeyCode::Char(c) => app.template_name_input.insert_char(c),
+        _ => {}
     }
 }
 
@@ -692,6 +1044,74 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char(c) => {
             app.search_query.insert_char(c);
             app.recompute_search_matches();
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// History search mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while in history search mode (Ctrl+R overlay).
+///
+/// Supports fuzzy-searching through prompt history. Up/Down navigate the
+/// filtered results, Enter selects an entry, and Escape cancels.
+fn handle_history_search_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Exit history search: Escape.
+        KeyCode::Esc => {
+            app.exit_history_search();
+        }
+
+        // Select the current entry and populate the form: Enter.
+        KeyCode::Enter => {
+            app.select_history_search_entry();
+        }
+
+        // Navigate results: Up.
+        KeyCode::Up => {
+            if !app.history_search_results.is_empty() {
+                app.history_search_selected = if app.history_search_selected == 0 {
+                    app.history_search_results.len() - 1
+                } else {
+                    app.history_search_selected - 1
+                };
+            }
+        }
+
+        // Navigate results: Down.
+        KeyCode::Down => {
+            if !app.history_search_results.is_empty() {
+                app.history_search_selected =
+                    (app.history_search_selected + 1) % app.history_search_results.len();
+            }
+        }
+
+        // Text editing for the search query.
+        KeyCode::Backspace => {
+            app.history_search_query.delete_char();
+            app.refilter_history_search();
+        }
+        KeyCode::Delete => {
+            app.history_search_query.delete_char_forward();
+            app.refilter_history_search();
+        }
+        KeyCode::Left => {
+            app.history_search_query.move_left();
+        }
+        KeyCode::Right => {
+            app.history_search_query.move_right();
+        }
+        KeyCode::Home => {
+            app.history_search_query.move_home();
+        }
+        KeyCode::End => {
+            app.history_search_query.move_end();
+        }
+        KeyCode::Char(c) => {
+            app.history_search_query.insert_char(c);
+            app.refilter_history_search();
         }
         _ => {}
     }
@@ -803,6 +1223,116 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
         "quit" => action_quit_tab(app),
         _ => app.set_status_message(format!("Unknown command: {name}")),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Mouse handler
+// ---------------------------------------------------------------------------
+
+/// Handle a mouse input event. Returns `true` if the event caused a state
+/// change that requires a redraw.
+///
+/// Supports:
+/// - Left-click on tabs to switch agents
+/// - Scroll wheel in the content area to scroll output
+/// - Left-click on input form fields to focus them
+///
+/// Mouse events are ignored when [`App::mouse_enabled`] is false (checked by
+/// the caller in the event loop).
+pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
+    match event.kind {
+        // Left-click: tab switching, input field focus, dismiss overlays.
+        MouseEventKind::Down(MouseButton::Left) => {
+            let col = event.column;
+            let row = event.row;
+
+            // Dismiss toasts on any click.
+            if !app.toasts.is_empty() {
+                app.dismiss_toasts();
+            }
+
+            // If in input mode, check if the click lands on an input field.
+            if app.input_mode == InputMode::Input {
+                for &(rect, field) in &app.input_field_rects {
+                    if rect_contains(rect, col, row) {
+                        app.input_field = field;
+                        return true;
+                    }
+                }
+                // Click outside the input overlay dismisses it.
+                return false;
+            }
+
+            // Dismiss help overlay on click.
+            if app.show_help {
+                app.show_help = false;
+                return true;
+            }
+
+            // Dismiss confirm-close on click outside.
+            if app.confirm_close {
+                app.confirm_close = false;
+                return true;
+            }
+
+            // Check sidebar click regions.
+            if app.sidebar_visible {
+                for &(rect, agent_index) in &app.sidebar_rects {
+                    if rect_contains(rect, col, row) {
+                        app.focus_agent(agent_index);
+                        app.sidebar_selected = agent_index;
+                        return true;
+                    }
+                }
+            }
+
+            // Check tab click regions.
+            for &(rect, agent_index) in &app.tab_rects {
+                if rect_contains(rect, col, row) {
+                    app.focus_agent(agent_index);
+                    if app.sidebar_visible {
+                        app.sidebar_selected = agent_index;
+                    }
+                    return true;
+                }
+            }
+
+            false
+        }
+
+        // Scroll up (toward older output).
+        MouseEventKind::ScrollUp => {
+            if let Some(content_rect) = app.content_rect {
+                if rect_contains(content_rect, event.column, event.row) {
+                    scroll_by(app, 3);
+                    return true;
+                }
+            }
+            false
+        }
+
+        // Scroll down (toward newer output).
+        MouseEventKind::ScrollDown => {
+            if let Some(content_rect) = app.content_rect {
+                if rect_contains(content_rect, event.column, event.row) {
+                    scroll_by(app, -3);
+                    return true;
+                }
+            }
+            false
+        }
+
+        // All other mouse events (drag, move, right-click, middle-click) are
+        // intentionally ignored. Middle-click paste is handled by the terminal
+        // emulator directly and does not generate a crossterm event, so it
+        // continues to work normally.
+        _ => false,
+    }
+}
+
+/// Test whether a point (col, row) falls within a [`ratatui::layout::Rect`].
+fn rect_contains(rect: ratatui::layout::Rect, col: u16, row: u16) -> bool {
+    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
 }
 
 // ---------------------------------------------------------------------------

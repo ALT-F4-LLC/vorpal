@@ -126,6 +126,18 @@ pub struct Theme {
     pub search_current_fg: Color,
     pub search_bar_fg: Color,
 
+    // -- Sidebar panel --------------------------------------------------------
+    pub sidebar_bg: Color,
+    pub sidebar_fg: Color,
+    pub sidebar_border: Color,
+    pub sidebar_title: Color,
+    pub sidebar_selected_bg: Color,
+    pub sidebar_selected_fg: Color,
+    pub sidebar_status_running: Color,
+    pub sidebar_status_done: Color,
+    pub sidebar_status_error: Color,
+    pub sidebar_dim: Color,
+
     // -- Command palette -----------------------------------------------------
     pub command_bar_fg: Color,
     pub command_match_fg: Color,
@@ -239,6 +251,17 @@ impl Theme {
             search_current_fg: Color::Black,
             search_bar_fg: Color::Cyan,
 
+            sidebar_bg: Color::Black,
+            sidebar_fg: Color::White,
+            sidebar_border: Color::DarkGray,
+            sidebar_title: Color::Cyan,
+            sidebar_selected_bg: Color::DarkGray,
+            sidebar_selected_fg: Color::White,
+            sidebar_status_running: Color::Cyan,
+            sidebar_status_done: Color::Green,
+            sidebar_status_error: Color::Red,
+            sidebar_dim: Color::DarkGray,
+
             command_bar_fg: Color::Cyan,
             command_match_fg: Color::Yellow,
             command_selected_bg: Color::DarkGray,
@@ -350,6 +373,17 @@ impl Theme {
             search_current_bg: Color::Rgb(255, 100, 0),
             search_current_fg: Color::White,
             search_bar_fg: Color::Rgb(0, 140, 140),
+
+            sidebar_bg: Color::White,
+            sidebar_fg: Color::Black,
+            sidebar_border: Color::Gray,
+            sidebar_title: Color::Rgb(0, 140, 140),
+            sidebar_selected_bg: Color::Rgb(220, 220, 220),
+            sidebar_selected_fg: Color::Black,
+            sidebar_status_running: Color::Rgb(0, 140, 140),
+            sidebar_status_done: Color::Green,
+            sidebar_status_error: Color::Red,
+            sidebar_dim: Color::Gray,
 
             command_bar_fg: Color::Rgb(0, 140, 140),
             command_match_fg: Color::Rgb(180, 130, 0),

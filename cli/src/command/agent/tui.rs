@@ -13,7 +13,7 @@ use super::state::{
 use super::ui;
 use anyhow::Result;
 use crossterm::{
-    event::{Event, EventStream, KeyEventKind},
+    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind},
     execute,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -31,11 +31,12 @@ use tracing::{debug, info, warn};
 
 /// Initialize the terminal for TUI rendering.
 ///
-/// Enables raw mode and switches to the alternate screen.
+/// Enables raw mode, switches to the alternate screen, and enables mouse
+/// capture so click and scroll events are delivered to the event loop.
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
@@ -43,10 +44,15 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
 
 /// Restore the terminal to its original state.
 ///
-/// Disables raw mode, leaves the alternate screen, and shows the cursor.
+/// Disables mouse capture, disables raw mode, leaves the alternate screen,
+/// and shows the cursor.
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     terminal::disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }
@@ -75,7 +81,7 @@ impl PanicGuard {
         let original = std::panic::take_hook();
         std::panic::set_hook(Box::new(|panic_info| {
             let _ = terminal::disable_raw_mode();
-            let _ = execute!(io::stdout(), LeaveAlternateScreen);
+            let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
             eprintln!("{panic_info}");
         }));
         Self {
@@ -218,6 +224,11 @@ async fn event_loop(
                         // Only handle key press events (ignore release/repeat).
                         if key_event.kind == KeyEventKind::Press {
                             input::handle_key(app, manager, key_event).await;
+                            needs_draw = true;
+                        }
+                    }
+                    Ok(Event::Mouse(mouse_event)) if app.mouse_enabled => {
+                        if input::handle_mouse(app, mouse_event).await {
                             needs_draw = true;
                         }
                     }
