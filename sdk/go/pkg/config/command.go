@@ -26,6 +26,9 @@ func NewCommand() (*command, error) {
 
 	defaultSocket := "unix:///var/lib/vorpal/vorpal.sock"
 	if envSocket := os.Getenv("VORPAL_SOCKET_PATH"); envSocket != "" && strings.TrimSpace(envSocket) != "" {
+		if !strings.HasPrefix(envSocket, "/") {
+			return nil, fmt.Errorf("VORPAL_SOCKET_PATH must be an absolute path, got: %s", envSocket)
+		}
 		defaultSocket = "unix://" + envSocket
 	}
 

@@ -505,7 +505,7 @@ pub fn get_key_credentials_path() -> PathBuf {
 }
 
 async fn get_client_tls_config(uri: &str) -> Result<Option<ClientTlsConfig>> {
-    if uri.starts_with("http://") {
+    if uri.starts_with("http://") || uri.starts_with("unix://") {
         return Ok(None);
     }
 
