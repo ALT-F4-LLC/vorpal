@@ -140,7 +140,7 @@ jobs:
           tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
-      - uses: ALT-F4-LLC/setup-vorpal-action@feature/optional-tls
+      - uses: ALT-F4-LLC/setup-vorpal-action@main
         with:
           registry-backend: s3
           registry-backend-s3-bucket: altf4llc-vorpal-registry
@@ -261,7 +261,7 @@ jobs:
           tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
-      - uses: ALT-F4-LLC/setup-vorpal-action@feature/optional-tls
+      - uses: ALT-F4-LLC/setup-vorpal-action@main
         with:
           registry-backend: s3
           registry-backend-s3-bucket: altf4llc-vorpal-registry
