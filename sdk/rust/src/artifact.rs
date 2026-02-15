@@ -682,7 +682,12 @@ impl<'a> UserEnvironment<'a> {
 }
 
 pub fn get_default_address() -> String {
-    "https://localhost:23151".to_string()
+    if let Ok(path) = std::env::var("VORPAL_SOCKET_PATH") {
+        if !path.is_empty() {
+            return format!("unix://{}", path);
+        }
+    }
+    "unix:///var/lib/vorpal/vorpal.sock".to_string()
 }
 
 pub fn get_env_key(digest: &String) -> String {

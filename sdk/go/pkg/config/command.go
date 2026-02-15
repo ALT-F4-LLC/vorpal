@@ -24,7 +24,15 @@ func NewCommand() (*command, error) {
 
 	var startVariable []string
 
-	startAgent := startCmd.String("agent", "https://localhost:23151", "agent to use")
+	defaultSocket := "unix:///var/lib/vorpal/vorpal.sock"
+	if envSocket := os.Getenv("VORPAL_SOCKET_PATH"); envSocket != "" && strings.TrimSpace(envSocket) != "" {
+		if !strings.HasPrefix(envSocket, "/") {
+			return nil, fmt.Errorf("VORPAL_SOCKET_PATH must be an absolute path, got: %s", envSocket)
+		}
+		defaultSocket = "unix://" + envSocket
+	}
+
+	startAgent := startCmd.String("agent", defaultSocket, "agent to use")
 	startArtifact := startCmd.String("artifact", "", "artifact to use")
 	startArtifactContext := startCmd.String("artifact-context", "", "artifact context to use")
 	startArtifactNamespace := startCmd.String("artifact-namespace", "", "artifact namespace to use")
@@ -32,7 +40,7 @@ func NewCommand() (*command, error) {
 	startArtifactUnlock := startCmd.Bool("artifact-unlock", false, "unlock lockfile")
 	startCmd.Var(newStringSliceValue(&startVariable), "artifact-variable", "variables to use (key=value)")
 	startPort := startCmd.Int("port", 0, "port to listen on")
-	startRegistry := startCmd.String("registry", "https://localhost:23151", "registry to use")
+	startRegistry := startCmd.String("registry", defaultSocket, "registry to use")
 
 	switch os.Args[1] {
 	case "start":

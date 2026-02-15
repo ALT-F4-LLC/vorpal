@@ -17,6 +17,7 @@ aws-sdk-s3 = { version = "1.96.0" }
 base64 = { version = "0.22.1" }
 clap = { version = "4.5.57" }
 filetime = { version = "0.2.27" }
+fs4 = { version = "0.13.1" }
 futures-lite = { version = "2.6.1" }
 http = { version = "1.4.0" }
 infer = { version = "0.19.0" }
@@ -36,7 +37,7 @@ serde = { version = "1.0.228", features = ["serde_derive"] }
 serde_json = { version = "1.0.149" }
 sha256 = { version = "1.6.0" }
 thiserror = { version = "2.0.18" }
-tokio = { version = "1.49.0", features = ["net", "process", "rt-multi-thread"] }
+tokio = { version = "1.49.0", features = ["net", "process", "rt-multi-thread", "signal"] }
 tokio-stream = { version = "0.1.18", features = ["io-util", "net"] }
 tokio-tar = { version = "0.3.1" }
 tokio-util = { version = "0.7.18", features = ["compat"] }

@@ -19,15 +19,7 @@ Run end-to-end tests to validate that Vorpal services start correctly and can su
 
 ## Execution Instructions
 
-### Step 1: Build if needed
-
-Check if the debug binary exists. If not, build the project:
-
-```bash
-[ -f target/debug/vorpal ] || make build
-```
-
-### Step 2: Start services in background
+### Step 1: Start services in background
 
 Use the Bash tool with `run_in_background: true` to start services:
 
@@ -37,7 +29,7 @@ make vorpal-start
 
 The service logs will stream to the shell output for review.
 
-### Step 3: Wait for services
+### Step 2: Wait for services
 
 Wait for port 23153 to be available (up to 60 seconds):
 
@@ -45,7 +37,7 @@ Wait for port 23153 to be available (up to 60 seconds):
 for i in {1..60}; do nc -z localhost 23153 2>/dev/null && echo "Services ready after ${i}s" && break; [ $i -eq 60 ] && echo "ERROR: Services failed to start" && exit 1; sleep 1; done
 ```
 
-### Step 4: Run artifact build
+### Step 3: Run artifact build
 
 Build the artifact against the running services. Default artifact is `vorpal-shell`:
 
@@ -59,7 +51,7 @@ To test with a different artifact:
 make VORPAL_ARTIFACT="<artifact-name>" vorpal
 ```
 
-### Step 5: Stop services
+### Step 4: Stop services
 
 After the build completes (success or failure), stop all services on port 23153:
 
@@ -67,7 +59,7 @@ After the build completes (success or failure), stop all services on port 23153:
 lsof -ti:23153 | xargs kill 2>/dev/null || true
 ```
 
-### Step 6: Report results
+### Step 5: Report results
 
 - If build succeeded, report "E2E TEST PASSED"
 - If build failed, review the service logs in the shell output and the build error messages
