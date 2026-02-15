@@ -346,14 +346,14 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
         // Acquire advisory lock to prevent TOCTOU races with stale socket detection.
         // The lock is held for the lifetime of the server (released on drop).
-        let lock_file = std::fs::File::create(&lock_path).map_err(|err| {
+        let _lock_file = std::fs::File::create(&lock_path).map_err(|err| {
             anyhow::anyhow!(
                 "failed to create lock file {}: {}",
                 lock_path.display(),
                 err
             )
         })?;
-        let acquired = lock_file.try_lock_exclusive().map_err(|err| {
+        let acquired = _lock_file.try_lock_exclusive().map_err(|err| {
             anyhow::anyhow!("failed to acquire lock on {}: {}", lock_path.display(), err)
         })?;
         if !acquired {
@@ -434,12 +434,13 @@ pub async fn run(args: RunArgs) -> Result<()> {
         let cleanup_path = socket_path.clone();
         let result =
             serve_with_shutdown(router.serve_with_incoming(main_incoming), &mut sigterm).await;
-        // Clean up socket and lock files on shutdown (covers both clean exit and signal)
+        // Clean up socket file on shutdown (covers both clean exit and signal).
+        // The lock file is intentionally left on disk — the advisory lock is
+        // released automatically when _lock_file is dropped at the end of this
+        // block. Deleting it here would race with a new instance creating a
+        // fresh inode and acquiring its own lock.
         if let Err(err) = tokio::fs::remove_file(&cleanup_path).await {
             warn!("failed to remove socket file on shutdown: {}", err);
-        }
-        if let Err(err) = tokio::fs::remove_file(&lock_path).await {
-            warn!("failed to remove lock file on shutdown: {}", err);
         }
         result
     };
