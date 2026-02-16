@@ -4,8 +4,8 @@
 //! area with scrollable output, status bar, and help overlay.
 
 use super::state::{
-    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, ResultDisplay, SplitPane,
-    ToastKind, COMMANDS, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    self, AgentActivity, AgentStatus, App, DiffLine, DisplayLine, InputField, InputMode,
+    ResultDisplay, SplitPane, ToastKind, COMMANDS, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::theme::Theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -118,6 +118,14 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     if app.show_help {
         render_help(&app.theme, frame, area);
+    }
+
+    if app.show_graph {
+        render_graph(app, frame, area);
+    }
+
+    if app.show_dashboard {
+        render_dashboard(app, frame, area);
     }
 
     if app.confirm_close {
@@ -296,6 +304,17 @@ fn workspace_label(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or(full)
+}
+
+/// Truncate a string to at most `max_chars` **characters** (not bytes), appending
+/// `suffix` when truncation occurs. This is UTF-8 safe — it never splits a
+/// multi-byte character.
+fn truncate_chars(s: &str, max_chars: usize, suffix: &str) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let truncated: String = s.chars().take(max_chars).collect();
+    format!("{truncated}{suffix}")
 }
 
 /// Entry in a visible tab window — either a real tab or an overflow indicator.
@@ -489,13 +508,7 @@ fn render_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
         let activity = match &agent.activity {
             AgentActivity::Idle => "idle".to_string(),
             AgentActivity::Thinking => "thinking".to_string(),
-            AgentActivity::Tool(name) => {
-                if name.len() > 10 {
-                    format!("{}...", &name[..10])
-                } else {
-                    name.clone()
-                }
-            }
+            AgentActivity::Tool(name) => truncate_chars(name, 10, "..."),
             AgentActivity::Done => "done".to_string(),
         };
 
@@ -1008,6 +1021,12 @@ enum CollapsedBlock<'a> {
     },
     /// A run of consecutive text lines joined into markdown.
     TextRun(String),
+    /// An inline diff result from an Edit tool.
+    DiffBlock {
+        diff_ops: &'a [DiffLine],
+        file_path: &'a str,
+        effective_mode: ResultDisplay,
+    },
     /// Any other single [`DisplayLine`] (Thinking, System, etc.).
     Single(&'a DisplayLine),
 }
@@ -1037,6 +1056,10 @@ struct ToolResultLine<'a> {
 /// Consume a consecutive run of [`DisplayLine::ToolResult`]s starting at
 /// `start` and produce a [`ToolResultRun`] collapsed per `mode`.
 ///
+/// When `has_diff` is true and `mode` is [`ResultDisplay::Diff`], the result
+/// content is hidden (replaced by a DiffBlock). When `has_diff` is false,
+/// Diff mode falls through to Compact so non-Edit tools still show output.
+///
 /// Returns the constructed run and the new index after the last consumed
 /// `ToolResult` line. Both the ToolUse-preceded path and the orphan path
 /// in [`collapse_results`] delegate to this helper.
@@ -1044,6 +1067,7 @@ fn consume_tool_result_run<'a>(
     lines: &[&'a DisplayLine],
     start: usize,
     mode: ResultDisplay,
+    has_diff: bool,
 ) -> (ToolResultRun<'a>, usize) {
     let mut i = start;
     let mut total_bytes: usize = 0;
@@ -1076,7 +1100,17 @@ fn consume_tool_result_run<'a>(
         out
     };
 
-    let run = match mode {
+    // In Diff mode, only hide results when a DiffBlock was actually emitted
+    // (i.e. the tool was an Edit). For non-Edit tools, fall through to Compact.
+    let effective_mode = if mode == ResultDisplay::Diff && has_diff {
+        ResultDisplay::Hidden
+    } else if mode == ResultDisplay::Diff {
+        ResultDisplay::Compact
+    } else {
+        mode
+    };
+
+    let run = match effective_mode {
         ResultDisplay::Hidden => ToolResultRun::Hidden { total_bytes },
         ResultDisplay::Compact => {
             let all = collect_result_lines();
@@ -1088,7 +1122,7 @@ fn consume_tool_result_run<'a>(
                 hidden_count,
             }
         }
-        ResultDisplay::Full => ToolResultRun::Full {
+        ResultDisplay::Full | ResultDisplay::Diff => ToolResultRun::Full {
             lines: collect_result_lines(),
         },
     };
@@ -1127,15 +1161,33 @@ fn collapse_results<'a>(
             });
             i += 1;
 
+            // Consume a DiffResult if present (emitted by the parser for Edit tools).
+            let mut has_diff = false;
+            if i < lines.len() {
+                if let DisplayLine::DiffResult {
+                    diff_ops,
+                    file_path,
+                } = lines[i]
+                {
+                    blocks.push(CollapsedBlock::DiffBlock {
+                        diff_ops,
+                        file_path,
+                        effective_mode,
+                    });
+                    has_diff = true;
+                    i += 1;
+                }
+            }
+
             // Now consume the following ToolResult run (if any).
             if i < lines.len() && matches!(lines[i], DisplayLine::ToolResult { .. }) {
-                let (run, new_i) = consume_tool_result_run(lines, i, effective_mode);
+                let (run, new_i) = consume_tool_result_run(lines, i, effective_mode, has_diff);
                 i = new_i;
                 blocks.push(CollapsedBlock::ToolResultRun(run));
             }
         } else if matches!(lines[i], DisplayLine::ToolResult { .. }) {
             // Orphan ToolResult without a preceding ToolUse — use global mode.
-            let (run, new_i) = consume_tool_result_run(lines, i, global_mode);
+            let (run, new_i) = consume_tool_result_run(lines, i, global_mode, false);
             i = new_i;
             blocks.push(CollapsedBlock::ToolResultRun(run));
         } else if matches!(lines[i], DisplayLine::Text(_)) {
@@ -1182,6 +1234,13 @@ fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme) -> Vec<Line
                     *effective_mode,
                     theme,
                 ));
+            }
+            CollapsedBlock::DiffBlock {
+                diff_ops,
+                file_path,
+                effective_mode,
+            } => {
+                render_diff_block(diff_ops, file_path, *effective_mode, &mut out, theme);
             }
             CollapsedBlock::TextRun(markdown) => {
                 render_text_run(markdown, &mut out, theme);
@@ -1243,6 +1302,92 @@ fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, 
             }
         }
     }
+}
+
+/// Render an inline diff block from pre-computed [`DiffLine`] operations.
+///
+/// When `effective_mode` is [`ResultDisplay::Diff`], produces a unified-diff-style
+/// output with deletions in red and additions in green. In other modes, the diff
+/// block is silently skipped (the accompanying ToolResult handles display).
+fn render_diff_block<'a>(
+    diff_ops: &[DiffLine],
+    file_path: &str,
+    effective_mode: ResultDisplay,
+    out: &mut Vec<Line<'a>>,
+    theme: &Theme,
+) {
+    if effective_mode != ResultDisplay::Diff {
+        return;
+    }
+
+    let diff_indent = "     ";
+
+    // Header line showing the file path.
+    out.push(Line::from(vec![
+        Span::styled(
+            format!("  {RESULT_CONNECTOR}  "),
+            Style::default().fg(theme.tool_result_connector),
+        ),
+        Span::styled(
+            format!("diff {file_path}"),
+            Style::default()
+                .fg(theme.diff_header_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    for op in diff_ops {
+        match op {
+            DiffLine::Equal(line) => {
+                out.push(Line::from(vec![
+                    Span::raw(diff_indent.to_string()),
+                    Span::styled(
+                        format!("  {line}"),
+                        Style::default().fg(theme.diff_context_fg),
+                    ),
+                ]));
+            }
+            DiffLine::Delete(line) => {
+                out.push(Line::from(vec![
+                    Span::raw(diff_indent.to_string()),
+                    Span::styled(
+                        format!("- {line}"),
+                        Style::default().fg(theme.diff_deletion_fg),
+                    ),
+                ]));
+            }
+            DiffLine::Insert(line) => {
+                out.push(Line::from(vec![
+                    Span::raw(diff_indent.to_string()),
+                    Span::styled(
+                        format!("+ {line}"),
+                        Style::default().fg(theme.diff_addition_fg),
+                    ),
+                ]));
+            }
+        }
+    }
+
+    // Summary line.
+    let additions = diff_ops
+        .iter()
+        .filter(|op| matches!(op, DiffLine::Insert(_)))
+        .count();
+    let deletions = diff_ops
+        .iter()
+        .filter(|op| matches!(op, DiffLine::Delete(_)))
+        .count();
+    out.push(Line::from(vec![
+        Span::raw(diff_indent.to_string()),
+        Span::styled(
+            format!("+{additions}"),
+            Style::default().fg(theme.diff_addition_fg),
+        ),
+        Span::styled(
+            format!(" -{deletions}"),
+            Style::default().fg(theme.diff_deletion_fg),
+        ),
+    ]));
 }
 
 /// Render a markdown text run into output lines with block marker prefixes.
@@ -1467,7 +1612,7 @@ fn display_line_to_lines_with_indicator<'a>(
     {
         let color = theme.tool_color(tool);
         let chevron = match effective_mode {
-            ResultDisplay::Full => CHEVRON_EXPANDED,
+            ResultDisplay::Full | ResultDisplay::Diff => CHEVRON_EXPANDED,
             ResultDisplay::Compact | ResultDisplay::Hidden => CHEVRON_COLLAPSED,
         };
         let mut spans = vec![
@@ -1581,6 +1726,39 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
         ))],
 
         DisplayLine::TurnStart => vec![Line::from("")],
+
+        // DiffResult is handled by render_diff_block() via CollapsedBlock::DiffBlock.
+        DisplayLine::DiffResult { .. } => Vec::new(),
+
+        DisplayLine::AgentMessage {
+            sender,
+            recipient,
+            content,
+        } => {
+            // Envelope marker with blue styling to visually distinguish
+            // inter-agent messages from regular tool output.
+            let arrow = format!("@{sender} \u{2192} @{recipient}");
+            vec![Line::from(vec![
+                Span::styled(
+                    "\u{2709} ",
+                    Style::default()
+                        .fg(theme.result_marker)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    arrow,
+                    Style::default()
+                        .fg(theme.result_marker)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(": {content}"),
+                    Style::default()
+                        .fg(theme.result_text)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ])]
+        }
     }
 }
 
@@ -1736,6 +1914,8 @@ fn build_hint_bar(width: u16) -> Line<'static> {
         ("y", "copy"),
         ("r", "results"),
         ("b", "sidebar"),
+        ("v", "graph"),
+        ("D", "dashboard"),
         ("|", "split"),
         ("t", "theme"),
         ("^C", "quit"),
@@ -2544,6 +2724,383 @@ fn render_confirm_close(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 // ---------------------------------------------------------------------------
+// Dependency graph overlay
+// ---------------------------------------------------------------------------
+
+/// Render a visual dependency graph showing agent nodes and communication edges.
+///
+/// Agents are displayed as labeled nodes arranged in a column. Directed edges
+/// between agents represent inter-agent messages detected from
+/// `DisplayLine::AgentMessage` events. Edge labels show the message count.
+///
+/// The graph is computed on each render from the agents' output buffers,
+/// ensuring it always reflects the current state.
+fn render_graph(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+    let popup = centered_rect(70, 80, area);
+
+    // Clear the area behind the popup.
+    frame.render_widget(Clear, popup);
+
+    // Collect edges by scanning all agents' output for AgentMessage lines.
+    let mut edge_counts: std::collections::HashMap<(usize, usize), usize> =
+        std::collections::HashMap::new();
+
+    for (agent_idx, agent) in app.agents.iter().enumerate() {
+        for line in &agent.output {
+            if let DisplayLine::AgentMessage {
+                sender, recipient, ..
+            } = line
+            {
+                // Resolve sender and recipient to agent indices.
+                let sender_idx = app
+                    .agents
+                    .iter()
+                    .position(|a| state::agent_name_matches(&a.name, sender));
+                let recipient_idx = app
+                    .agents
+                    .iter()
+                    .position(|a| state::agent_name_matches(&a.name, recipient));
+
+                if let (Some(s), Some(r)) = (sender_idx, recipient_idx) {
+                    // Only count each message once: count from the sender's
+                    // perspective (avoid double-counting from recipient's copy).
+                    if agent_idx == s && s != r {
+                        *edge_counts.entry((s, r)).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    let heading_style = Style::default()
+        .fg(theme.help_heading)
+        .add_modifier(Modifier::BOLD);
+
+    lines.push(Line::from(Span::styled(
+        "Agent Dependency Graph",
+        heading_style,
+    )));
+    lines.push(Line::from(""));
+
+    if app.agents.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No agents running",
+            Style::default().fg(theme.content_empty),
+        )));
+    } else {
+        // Render agent nodes.
+        lines.push(Line::from(Span::styled("Nodes", heading_style)));
+        lines.push(Line::from(""));
+
+        for (idx, agent) in app.agents.iter().enumerate() {
+            let label = workspace_label(&agent.workspace);
+            let num = idx + 1;
+
+            let (status_icon, icon_color) = match (&agent.status, &agent.activity) {
+                (AgentStatus::Exited(Some(0)), _) => (CHECK_MARK, theme.tab_badge_success),
+                (AgentStatus::Exited(_), _) => (CROSS_MARK, theme.tab_badge_error),
+                (AgentStatus::Running, AgentActivity::Idle) => (CIRCLE, theme.tab_badge_idle),
+                (AgentStatus::Running, AgentActivity::Done) => {
+                    (CHECK_MARK, theme.tab_badge_success)
+                }
+                (AgentStatus::Running, _) => {
+                    let frame_idx = app.tick % SPINNER_FRAMES.len();
+                    (SPINNER_FRAMES[frame_idx], theme.tab_badge_spinner)
+                }
+            };
+
+            // Count connections for this agent.
+            let outgoing: usize = edge_counts
+                .iter()
+                .filter(|((s, _), _)| *s == idx)
+                .map(|(_, c)| c)
+                .sum();
+            let incoming: usize = edge_counts
+                .iter()
+                .filter(|((_, r), _)| *r == idx)
+                .map(|(_, c)| c)
+                .sum();
+
+            let conn_info = if outgoing > 0 || incoming > 0 {
+                format!("  [{ARROW_RIGHT}{outgoing} \u{25C0}{incoming}]")
+            } else {
+                String::new()
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {status_icon} "), Style::default().fg(icon_color)),
+                Span::styled(
+                    format!("[{num}] {label}"),
+                    Style::default()
+                        .fg(theme.tab_text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(conn_info, Style::default().fg(theme.result_marker)),
+            ]));
+        }
+
+        // Render edges.
+        if !edge_counts.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("Edges", heading_style)));
+            lines.push(Line::from(""));
+
+            // Sort edges by sender index for stable display.
+            let mut sorted_edges: Vec<_> = edge_counts.iter().collect();
+            sorted_edges.sort_by_key(|((s, r), _)| (*s, *r));
+
+            for ((s_idx, r_idx), count) in sorted_edges {
+                let s_label = workspace_label(&app.agents[*s_idx].workspace);
+                let r_label = workspace_label(&app.agents[*r_idx].workspace);
+                let s_num = s_idx + 1;
+                let r_num = r_idx + 1;
+
+                let count_label = if *count == 1 {
+                    "1 message".to_string()
+                } else {
+                    format!("{count} messages")
+                };
+
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(
+                        format!("[{s_num}] {s_label}"),
+                        Style::default().fg(theme.result_marker),
+                    ),
+                    Span::styled(
+                        " \u{2500}\u{2500}\u{25B6} ",
+                        Style::default()
+                            .fg(theme.tab_badge_spinner)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("[{r_num}] {r_label}"),
+                        Style::default().fg(theme.result_marker),
+                    ),
+                    Span::styled(
+                        format!("  ({count_label})"),
+                        Style::default().fg(theme.tool_result_hidden),
+                    ),
+                ]));
+            }
+        } else {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "No inter-agent communication detected yet.",
+                Style::default().fg(theme.content_empty),
+            )));
+            lines.push(Line::from(Span::styled(
+                "Edges appear when agents send messages to each other.",
+                Style::default().fg(theme.content_empty),
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Press 'v' to close",
+        Style::default().fg(theme.help_footer),
+    )));
+
+    let graph = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.help_border))
+                .title(" Dependency Graph ")
+                .title_style(
+                    Style::default()
+                        .fg(theme.help_title)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .style(Style::default().bg(theme.help_bg).fg(theme.help_fg));
+
+    frame.render_widget(graph, popup);
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard overlay
+// ---------------------------------------------------------------------------
+
+/// Render the aggregate dashboard overlay showing all agent stats in a table.
+///
+/// Displays a table with one row per agent (status, activity, turns, tools,
+/// elapsed time) plus aggregate totals at the bottom. The currently selected
+/// row is highlighted and pressing Enter focuses that agent.
+fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+    let popup = centered_rect(80, 80, area);
+
+    // Clear the area behind the popup.
+    frame.render_widget(Clear, popup);
+
+    let heading_style = Style::default()
+        .fg(theme.help_heading)
+        .add_modifier(Modifier::BOLD);
+    let header_style = Style::default()
+        .fg(theme.help_key)
+        .add_modifier(Modifier::BOLD);
+    let footer_style = Style::default().fg(theme.help_footer);
+    let dim_style = Style::default().fg(theme.sidebar_dim);
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    lines.push(Line::from(Span::styled("Agent Dashboard", heading_style)));
+    lines.push(Line::from(""));
+
+    if app.agents.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No agents running. Press 'n' to create one.",
+            Style::default().fg(theme.content_empty),
+        )));
+    } else {
+        // Table header.
+        lines.push(Line::from(vec![Span::styled(
+            format!(
+                " {:<3} {:<2} {:<16} {:<12} {:>6} {:>6} {:>8} ",
+                "#", "", "WORKSPACE", "ACTIVITY", "TURNS", "TOOLS", "ELAPSED"
+            ),
+            header_style,
+        )]));
+        lines.push(Line::from(Span::styled(
+            format!(
+                " {}",
+                "\u{2500}".repeat(popup.width.saturating_sub(4) as usize)
+            ),
+            dim_style,
+        )));
+
+        // Aggregate accumulators.
+        let mut total_turns: usize = 0;
+        let mut total_tools: usize = 0;
+        let mut running_count: usize = 0;
+        let mut done_count: usize = 0;
+        let mut error_count: usize = 0;
+
+        for (idx, agent) in app.agents.iter().enumerate() {
+            let is_selected = idx == app.dashboard_selected;
+
+            let num = idx + 1;
+
+            let (status_icon, icon_color) = match (&agent.status, &agent.activity) {
+                (AgentStatus::Exited(Some(0)), _) => {
+                    done_count += 1;
+                    (CHECK_MARK, theme.tab_badge_success)
+                }
+                (AgentStatus::Exited(_), _) => {
+                    error_count += 1;
+                    (CROSS_MARK, theme.tab_badge_error)
+                }
+                (AgentStatus::Running, AgentActivity::Idle) => {
+                    running_count += 1;
+                    (CIRCLE, theme.tab_badge_idle)
+                }
+                (AgentStatus::Running, AgentActivity::Done) => {
+                    done_count += 1;
+                    (CHECK_MARK, theme.tab_badge_success)
+                }
+                (AgentStatus::Running, _) => {
+                    running_count += 1;
+                    let frame_idx = app.tick % SPINNER_FRAMES.len();
+                    (SPINNER_FRAMES[frame_idx], theme.tab_badge_spinner)
+                }
+            };
+
+            let activity_label = match &agent.activity {
+                AgentActivity::Idle => "idle".to_string(),
+                AgentActivity::Thinking => "thinking".to_string(),
+                AgentActivity::Tool(name) => truncate_chars(name, 10, "..."),
+                AgentActivity::Done => "done".to_string(),
+            };
+
+            let label = workspace_label(&agent.workspace);
+            let display_label = truncate_chars(&label, 16, "\u{2026}");
+
+            let elapsed = format_elapsed(agent.started_at.elapsed());
+
+            total_turns += agent.turn_count;
+            total_tools += agent.tool_count;
+
+            let row_text = format!(" {:<3} ", num,);
+            let rest_text = format!(
+                " {:<16} {:<12} {:>6} {:>6} {:>8} ",
+                display_label, activity_label, agent.turn_count, agent.tool_count, elapsed,
+            );
+
+            let row_style = if is_selected {
+                Style::default()
+                    .bg(theme.sidebar_selected_bg)
+                    .fg(theme.sidebar_selected_fg)
+            } else {
+                Style::default().fg(theme.help_fg)
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(row_text, row_style),
+                Span::styled(status_icon.to_string(), Style::default().fg(icon_color)),
+                Span::styled(rest_text, row_style),
+            ]));
+        }
+
+        // Separator.
+        lines.push(Line::from(Span::styled(
+            format!(
+                " {}",
+                "\u{2500}".repeat(popup.width.saturating_sub(4) as usize)
+            ),
+            dim_style,
+        )));
+
+        // Aggregate totals row.
+        lines.push(Line::from(vec![Span::styled(
+            format!(
+                " {:<3} {:<2} {:<16} {:<12} {:>6} {:>6} {:>8} ",
+                "\u{03A3}", // Sigma
+                "",
+                format!("{}R {}D {}E", running_count, done_count, error_count),
+                "",
+                total_turns,
+                total_tools,
+                "",
+            ),
+            Style::default()
+                .fg(theme.help_heading)
+                .add_modifier(Modifier::BOLD),
+        )]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("j/k", footer_style.add_modifier(Modifier::BOLD)),
+        Span::styled(":navigate  ", footer_style),
+        Span::styled("Enter", footer_style.add_modifier(Modifier::BOLD)),
+        Span::styled(":focus  ", footer_style),
+        Span::styled("D/Esc", footer_style.add_modifier(Modifier::BOLD)),
+        Span::styled(":close", footer_style),
+    ]));
+
+    let dashboard = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.help_border))
+                .title(" Dashboard ")
+                .title_style(
+                    Style::default()
+                        .fg(theme.help_title)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .style(Style::default().bg(theme.help_bg).fg(theme.help_fg));
+
+    frame.render_widget(dashboard, popup);
+}
+
+// ---------------------------------------------------------------------------
 // Help overlay
 // ---------------------------------------------------------------------------
 
@@ -2578,6 +3135,8 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
         ("G", "Jump to bottom (latest)"),
         ("r", "Toggle compact results"),
         ("b", "Toggle sidebar panel"),
+        ("v", "Toggle dependency graph"),
+        ("D", "Toggle aggregate dashboard"),
         ("J / K", "Navigate sidebar selection"),
         ("|", "Toggle split-pane view"),
         ("`", "Switch split-pane focus"),

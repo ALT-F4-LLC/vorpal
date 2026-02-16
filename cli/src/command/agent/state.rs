@@ -62,6 +62,10 @@ pub const COMMANDS: &[PaletteCommand] = &[
         description: "Search agent output",
     },
     PaletteCommand {
+        name: "dashboard",
+        description: "Toggle aggregate dashboard",
+    },
+    PaletteCommand {
         name: "help",
         description: "Show keybinding help",
     },
@@ -590,6 +594,80 @@ impl Toast {
 // DisplayLine
 // ---------------------------------------------------------------------------
 
+/// A single operation in a pre-computed line-level diff.
+#[derive(Debug, Clone)]
+pub enum DiffLine {
+    /// Line present in both old and new text.
+    Equal(String),
+    /// Line removed from old text.
+    Delete(String),
+    /// Line added in new text.
+    Insert(String),
+}
+
+/// Maximum line count (per side) for the LCS-based diff algorithm.
+/// Beyond this threshold we fall back to a simple delete-all/insert-all
+/// to avoid O(N*M) memory and CPU cost.
+const DIFF_MAX_LINES: usize = 500;
+
+/// Compute a line-level diff between `old_text` and `new_text` using the
+/// longest common subsequence algorithm.
+///
+/// Returns a sequence of [`DiffLine`]s representing equal, deleted, and
+/// inserted lines. When either side exceeds [`DIFF_MAX_LINES`], falls back
+/// to showing all old lines as deletions followed by all new lines as
+/// insertions to avoid excessive memory allocation.
+pub fn compute_line_diff(old_text: &str, new_text: &str) -> Vec<DiffLine> {
+    let old: Vec<&str> = old_text.lines().collect();
+    let new: Vec<&str> = new_text.lines().collect();
+    let n = old.len();
+    let m = new.len();
+
+    // Guard against pathological inputs that would allocate an N*M table.
+    if n > DIFF_MAX_LINES || m > DIFF_MAX_LINES {
+        let mut ops = Vec::with_capacity(n + m);
+        for line in &old {
+            ops.push(DiffLine::Delete((*line).to_string()));
+        }
+        for line in &new {
+            ops.push(DiffLine::Insert((*line).to_string()));
+        }
+        return ops;
+    }
+
+    // Build the LCS table.
+    let mut table = vec![vec![0u32; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            if old[i] == new[j] {
+                table[i][j] = table[i + 1][j + 1] + 1;
+            } else {
+                table[i][j] = table[i + 1][j].max(table[i][j + 1]);
+            }
+        }
+    }
+
+    // Backtrack to produce diff ops.
+    let mut ops = Vec::new();
+    let mut i = 0;
+    let mut j = 0;
+    while i < n || j < m {
+        if i < n && j < m && old[i] == new[j] {
+            ops.push(DiffLine::Equal(old[i].to_string()));
+            i += 1;
+            j += 1;
+        } else if j < m && (i >= n || table[i][j + 1] >= table[i + 1][j]) {
+            ops.push(DiffLine::Insert(new[j].to_string()));
+            j += 1;
+        } else {
+            ops.push(DiffLine::Delete(old[i].to_string()));
+            i += 1;
+        }
+    }
+
+    ops
+}
+
 /// A single line of rendered output.
 #[derive(Debug, Clone)]
 pub enum DisplayLine {
@@ -603,6 +681,13 @@ pub enum DisplayLine {
     Stderr(String),
     /// Tool result output (what a tool returned).
     ToolResult { content: String, is_error: bool },
+    /// Inline diff result from an Edit tool call, with pre-computed diff ops.
+    DiffResult {
+        /// Pre-computed line-level diff operations.
+        diff_ops: Vec<DiffLine>,
+        /// The file path that was edited.
+        file_path: String,
+    },
     /// Thinking block content (Claude's internal reasoning).
     Thinking(String),
     /// Session result summary (cost, session ID).
@@ -611,6 +696,15 @@ pub enum DisplayLine {
     Error(String),
     /// Marks the start of a new assistant turn (visual separator).
     TurnStart,
+    /// An inter-agent message (sent or received between collaborating agents).
+    AgentMessage {
+        /// The agent that sent the message.
+        sender: String,
+        /// The agent that received the message.
+        recipient: String,
+        /// The message content (may be a summary or full text).
+        content: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -654,15 +748,18 @@ pub enum ResultDisplay {
     Hidden,
     /// Show all result lines with full content.
     Full,
+    /// Show colored inline diff for Edit/Write tool results.
+    Diff,
 }
 
 impl ResultDisplay {
-    /// Cycle to the next display mode: Compact → Hidden → Full → Compact.
+    /// Cycle to the next display mode: Compact → Hidden → Full → Diff → Compact.
     pub fn next(self) -> Self {
         match self {
             Self::Compact => Self::Hidden,
             Self::Hidden => Self::Full,
-            Self::Full => Self::Compact,
+            Self::Full => Self::Diff,
+            Self::Diff => Self::Compact,
         }
     }
 
@@ -672,6 +769,7 @@ impl ResultDisplay {
             Self::Compact => "compact",
             Self::Hidden => "hidden",
             Self::Full => "full",
+            Self::Diff => "diff",
         }
     }
 }
@@ -750,6 +848,11 @@ impl InputField {
 pub struct AgentState {
     /// Unique agent identifier.
     pub id: usize,
+    /// Unique display name for this agent, derived from the workspace
+    /// directory basename. When multiple agents share the same basename,
+    /// a numeric suffix is appended (e.g. `frontend`, `frontend-2`).
+    /// Used for inter-agent message routing and graph display.
+    pub name: String,
     /// Working directory for this agent.
     pub workspace: PathBuf,
     /// The prompt this agent was started with.
@@ -807,14 +910,19 @@ pub struct AgentState {
 
 impl AgentState {
     /// Create a new agent state in the [`AgentStatus::Running`] state.
+    ///
+    /// The `name` should be a unique display name for this agent. Use
+    /// [`App::add_agent`] which generates unique names automatically.
     pub fn new(
         id: usize,
+        name: String,
         workspace: PathBuf,
         prompt: String,
         claude_options: ClaudeOptions,
     ) -> Self {
         Self {
             id,
+            name,
             workspace,
             prompt,
             status: AgentStatus::Running,
@@ -1075,6 +1183,16 @@ pub struct App {
     /// Which pane currently has focus: `Left` or `Right`.
     pub split_focused_pane: SplitPane,
 
+    // -- Graph state -----------------------------------------------------------
+    /// Whether the dependency graph overlay is visible.
+    pub show_graph: bool,
+
+    // -- Dashboard state -------------------------------------------------------
+    /// Whether the aggregate dashboard overlay is visible.
+    pub show_dashboard: bool,
+    /// Selected agent row in the dashboard (for Enter-to-focus navigation).
+    pub dashboard_selected: usize,
+
     // -- Mouse state -----------------------------------------------------------
     /// Whether mouse capture is enabled. When true, crossterm captures mouse
     /// events (clicks, scroll). Defaults to `true`.
@@ -1154,6 +1272,9 @@ impl App {
             split_enabled: false,
             split_right_index: None,
             split_focused_pane: SplitPane::Left,
+            show_graph: false,
+            show_dashboard: false,
+            dashboard_selected: 0,
             mouse_enabled: true,
             tab_rects: Vec::new(),
             content_rect: None,
@@ -1162,8 +1283,34 @@ impl App {
         }
     }
 
-    /// Add an agent and maintain the id → index mapping.
-    pub fn add_agent(&mut self, agent: AgentState) {
+    /// Add an agent, assigning it a unique name derived from its workspace
+    /// basename, and maintain the id → index mapping.
+    ///
+    /// If another agent already has the same basename, a numeric suffix is
+    /// appended (e.g. `frontend-2`, `frontend-3`) to guarantee uniqueness.
+    pub fn add_agent(&mut self, mut agent: AgentState) {
+        // Derive a unique name from the workspace basename.
+        let base = agent
+            .workspace
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("agent-{}", agent.id + 1));
+
+        let name = if self.agents.iter().any(|a| a.name == base) {
+            // Find the next available suffix.
+            let mut n = 2;
+            loop {
+                let candidate = format!("{base}-{n}");
+                if !self.agents.iter().any(|a| a.name == candidate) {
+                    break candidate;
+                }
+                n += 1;
+            }
+        } else {
+            base
+        };
+
+        agent.name = name;
         let index = self.agents.len();
         self.agent_index.insert(agent.id, index);
         self.agents.push(agent);
@@ -1966,6 +2113,20 @@ impl App {
 }
 
 // ---------------------------------------------------------------------------
+// Shared utilities
+// ---------------------------------------------------------------------------
+
+/// Check whether an agent's unique name matches the given name
+/// (case-insensitive).
+///
+/// This is used for inter-agent message routing and graph edge resolution.
+/// Because [`App::add_agent`] guarantees unique names (appending suffixes
+/// for duplicates), this will match at most one agent.
+pub fn agent_name_matches(agent_name: &str, target: &str) -> bool {
+    agent_name.eq_ignore_ascii_case(target)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1977,6 +2138,7 @@ mod tests {
     fn agent_with_lines(n: usize) -> AgentState {
         let mut agent = AgentState::new(
             0,
+            "test".to_string(),
             PathBuf::from("/tmp/test"),
             "test".to_string(),
             ClaudeOptions::default(),
@@ -1993,6 +2155,7 @@ mod tests {
         for i in 0..n {
             app.add_agent(AgentState::new(
                 i,
+                String::new(),
                 PathBuf::from(format!("/tmp/agent-{i}")),
                 format!("prompt {i}"),
                 ClaudeOptions::default(),
@@ -2048,6 +2211,7 @@ mod tests {
         let overflow = 100;
         let mut agent = AgentState::new(
             0,
+            "test".to_string(),
             PathBuf::from("/tmp/test"),
             "test".to_string(),
             ClaudeOptions::default(),
@@ -2164,6 +2328,7 @@ mod tests {
         let total = MAX_OUTPUT_LINES + overflow;
         let mut agent = AgentState::new(
             0,
+            "test".to_string(),
             PathBuf::from("/tmp/test"),
             "test".to_string(),
             ClaudeOptions::default(),
@@ -2643,18 +2808,21 @@ mod tests {
         let mut app = App::new(PathBuf::from("/tmp/ws"), ClaudeOptions::default());
         app.agents.push(AgentState::new(
             1,
+            "a".to_string(),
             PathBuf::from("/tmp/ws"),
             "a".into(),
             ClaudeOptions::default(),
         ));
         app.agents.push(AgentState::new(
             2,
+            "b".to_string(),
             PathBuf::from("/tmp/ws"),
             "b".into(),
             ClaudeOptions::default(),
         ));
         app.agents.push(AgentState::new(
             3,
+            "c".to_string(),
             PathBuf::from("/tmp/ws"),
             "c".into(),
             ClaudeOptions::default(),
@@ -2672,6 +2840,7 @@ mod tests {
         let mut app = App::new(PathBuf::from("/tmp/ws"), ClaudeOptions::default());
         app.agents.push(AgentState::new(
             1,
+            "a".to_string(),
             PathBuf::from("/tmp/ws"),
             "a".into(),
             ClaudeOptions::default(),
@@ -2686,12 +2855,14 @@ mod tests {
         let mut app = App::new(PathBuf::from("/tmp/ws"), ClaudeOptions::default());
         app.agents.push(AgentState::new(
             1,
+            "a".to_string(),
             PathBuf::from("/tmp/ws"),
             "a".into(),
             ClaudeOptions::default(),
         ));
         app.agents.push(AgentState::new(
             2,
+            "b".to_string(),
             PathBuf::from("/tmp/ws"),
             "b".into(),
             ClaudeOptions::default(),

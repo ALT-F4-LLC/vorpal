@@ -8,7 +8,7 @@
 use super::input;
 use super::manager::{AgentManager, ClaudeOptions};
 use super::state::{
-    AgentActivity, AgentEvent, AgentState, AgentStatus, App, DisplayLine, ToastKind,
+    self, AgentActivity, AgentEvent, AgentState, AgentStatus, App, DisplayLine, ToastKind,
 };
 use super::ui;
 use anyhow::Result;
@@ -139,6 +139,7 @@ pub async fn run(
             .await?;
         app.add_agent(AgentState::new(
             agent_id,
+            String::new(),
             workspace.clone(),
             prompt.clone(),
             claude_options.clone(),
@@ -262,7 +263,31 @@ async fn event_loop(
 /// Handle an application event from the agent event channel.
 fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent) {
     match event {
-        AgentEvent::Output { agent_id, line } => {
+        AgentEvent::Output { agent_id, mut line } => {
+            // Fix the placeholder "agent" sender on AgentMessage lines by
+            // resolving the sending agent's unique name.
+            if let DisplayLine::AgentMessage { sender, .. } = &mut line {
+                if sender == "agent" {
+                    let actual = app
+                        .agent_by_id_mut(agent_id)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| format!("agent-{}", agent_id + 1));
+                    *sender = actual;
+                }
+            }
+
+            // Extract cross-agent delivery data before pushing to the sender.
+            let cross_delivery = if let DisplayLine::AgentMessage {
+                sender,
+                recipient,
+                content,
+            } = &line
+            {
+                Some((sender.clone(), recipient.clone(), content.clone()))
+            } else {
+                None
+            };
+
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
                 match &line {
                     DisplayLine::TurnStart => {
@@ -282,6 +307,25 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent
                     _ => {}
                 }
                 agent.push_line(line);
+            }
+
+            // Deliver a copy of the message to the recipient agent's output
+            // so inter-agent messages are visible on both sides.
+            if let Some((sender, recipient, content)) = cross_delivery {
+                let recipient_idx = app
+                    .agents
+                    .iter()
+                    .position(|a| state::agent_name_matches(&a.name, &recipient));
+                if let Some(idx) = recipient_idx {
+                    let recv_id = app.agents[idx].id;
+                    if recv_id != agent_id {
+                        app.agents[idx].push_line(DisplayLine::AgentMessage {
+                            sender,
+                            recipient,
+                            content,
+                        });
+                    }
+                }
             }
         }
         AgentEvent::Exited {

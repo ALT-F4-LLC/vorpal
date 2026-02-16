@@ -138,6 +138,12 @@ pub struct Theme {
     pub sidebar_status_error: Color,
     pub sidebar_dim: Color,
 
+    // -- Diff view -----------------------------------------------------------
+    pub diff_addition_fg: Color,
+    pub diff_deletion_fg: Color,
+    pub diff_header_fg: Color,
+    pub diff_context_fg: Color,
+
     // -- Command palette -----------------------------------------------------
     pub command_bar_fg: Color,
     pub command_match_fg: Color,
@@ -262,6 +268,11 @@ impl Theme {
             sidebar_status_error: Color::Red,
             sidebar_dim: Color::DarkGray,
 
+            diff_addition_fg: Color::Green,
+            diff_deletion_fg: Color::Red,
+            diff_header_fg: Color::Cyan,
+            diff_context_fg: Color::DarkGray,
+
             command_bar_fg: Color::Cyan,
             command_match_fg: Color::Yellow,
             command_selected_bg: Color::DarkGray,
@@ -384,6 +395,11 @@ impl Theme {
             sidebar_status_done: Color::Green,
             sidebar_status_error: Color::Red,
             sidebar_dim: Color::Gray,
+
+            diff_addition_fg: Color::Green,
+            diff_deletion_fg: Color::Red,
+            diff_header_fg: Color::Rgb(0, 140, 140),
+            diff_context_fg: Color::Gray,
 
             command_bar_fg: Color::Rgb(0, 140, 140),
             command_match_fg: Color::Rgb(180, 130, 0),

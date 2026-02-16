@@ -7,8 +7,8 @@
 
 use super::manager::AgentManager;
 use super::state::{
-    AgentActivity, AgentStatus, App, DisplayLine, InputField, InputMode, InputOverrides, SplitPane,
-    EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    AgentActivity, AgentStatus, App, DiffLine, DisplayLine, InputField, InputMode, InputOverrides,
+    SplitPane, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::ui::{BLOCK_MARKER, RESULT_CONNECTOR, SESSION_MARKER};
 use crossterm::{
@@ -208,6 +208,44 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         return;
     }
 
+    // Dismiss dependency graph overlay with Escape before processing other keys.
+    if app.show_graph && key.code == KeyCode::Esc {
+        app.show_graph = false;
+        return;
+    }
+
+    // Dismiss dashboard overlay with Escape before processing other keys.
+    if app.show_dashboard && key.code == KeyCode::Esc {
+        app.show_dashboard = false;
+        return;
+    }
+
+    // When the dashboard overlay is visible, intercept navigation keys.
+    if app.show_dashboard && !app.agents.is_empty() {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                app.dashboard_selected = (app.dashboard_selected + 1) % app.agents.len();
+                return;
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                app.dashboard_selected = if app.dashboard_selected == 0 {
+                    app.agents.len() - 1
+                } else {
+                    app.dashboard_selected - 1
+                };
+                return;
+            }
+            KeyCode::Enter => {
+                let idx = app.dashboard_selected;
+                app.focus_agent(idx);
+                app.show_dashboard = false;
+                app.set_status_message(format!("Focused agent {}", idx + 1));
+                return;
+            }
+            _ => {}
+        }
+    }
+
     // Clear search highlights with Escape when not in any overlay.
     if key.code == KeyCode::Esc && !app.search_matches.is_empty() {
         app.search_matches.clear();
@@ -403,6 +441,22 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             }
         }
 
+        // Export the focused agent's session to a Markdown file.
+        KeyCode::Char('e') => {
+            if let Some(agent) = app.focused_agent() {
+                match super::export::export_session(agent) {
+                    Ok(path) => {
+                        app.set_status_message(format!("Exported to {}", path.display()));
+                    }
+                    Err(e) => {
+                        app.set_status_message(format!("Export failed: {e}"));
+                    }
+                }
+            } else {
+                app.set_status_message("No agent to export");
+            }
+        }
+
         // Next search match / new agent.
         // When search matches are active, `n` jumps to the next match.
         // Otherwise, `n` opens the quick prompt input form directly.
@@ -459,6 +513,29 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             // Sync sidebar selection with current focus when opening.
             if app.sidebar_visible {
                 app.sidebar_selected = app.focused;
+            }
+        }
+
+        // Toggle dependency graph overlay: v.
+        KeyCode::Char('v') => {
+            app.show_graph = !app.show_graph;
+            if app.show_graph {
+                app.show_dashboard = false;
+                app.set_status_message("Dependency graph visible");
+            } else {
+                app.set_status_message("Dependency graph hidden");
+            }
+        }
+
+        // Toggle aggregate dashboard overlay: D (Shift+d).
+        KeyCode::Char('D') => {
+            app.show_dashboard = !app.show_dashboard;
+            if app.show_dashboard {
+                app.show_graph = false;
+                app.dashboard_selected = app.focused.min(app.agents.len().saturating_sub(1));
+                app.set_status_message("Dashboard visible");
+            } else {
+                app.set_status_message("Dashboard hidden");
             }
         }
 
@@ -833,6 +910,7 @@ async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) {
 
                 app.add_agent(super::state::AgentState::new(
                     agent_id,
+                    String::new(),
                     workspace,
                     prompt.clone(),
                     claude_options.clone(),
@@ -1219,6 +1297,13 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
         "new" => app.enter_input_mode(),
         "respond" => action_respond(app),
         "search" => action_search(app),
+        "dashboard" => {
+            app.show_dashboard = !app.show_dashboard;
+            if app.show_dashboard {
+                app.show_graph = false;
+                app.dashboard_selected = app.focused.min(app.agents.len().saturating_sub(1));
+            }
+        }
         "help" => app.show_help = !app.show_help,
         "quit" => action_quit_tab(app),
         _ => app.set_status_message(format!("Unknown command: {name}")),
@@ -1372,6 +1457,25 @@ fn display_line_to_text(line: &DisplayLine) -> String {
                 .join("\n")
         }
         DisplayLine::TurnStart => String::new(),
+        DisplayLine::DiffResult {
+            diff_ops,
+            file_path,
+        } => {
+            let mut out = format!("  {RESULT_CONNECTOR}  diff {file_path}\n");
+            for op in diff_ops {
+                match op {
+                    DiffLine::Equal(line) => out.push_str(&format!("       {line}\n")),
+                    DiffLine::Delete(line) => out.push_str(&format!("     - {line}\n")),
+                    DiffLine::Insert(line) => out.push_str(&format!("     + {line}\n")),
+                }
+            }
+            out
+        }
+        DisplayLine::AgentMessage {
+            sender,
+            recipient,
+            content,
+        } => format!("[{sender} -> {recipient}] {content}"),
     }
 }
 

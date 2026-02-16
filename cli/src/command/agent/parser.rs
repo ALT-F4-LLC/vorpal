@@ -4,7 +4,7 @@
 //! JSON output into structured [`DisplayLine`](super::state::DisplayLine) values
 //! for rendering in the TUI.
 
-use super::state::DisplayLine;
+use super::state::{compute_line_diff, DisplayLine};
 use serde::Deserialize;
 use tracing::debug;
 
@@ -243,6 +243,17 @@ pub struct Parser {
     active_block: Option<ActiveBlock>,
     /// The last session ID seen in a `result` event, ready to be taken by the caller.
     last_session_id: Option<String>,
+    /// The last completed Edit tool's input parameters, used to generate
+    /// [`DisplayLine::DiffResult`] when the corresponding tool result arrives.
+    last_edit_input: Option<EditInput>,
+}
+
+/// Captured input parameters from an Edit tool call.
+#[derive(Debug, Clone, Default)]
+struct EditInput {
+    file_path: String,
+    old_string: String,
+    new_string: String,
 }
 
 impl Parser {
@@ -416,11 +427,37 @@ impl Parser {
                     .take()
                     .unwrap_or_else(|| "unknown".to_string());
                 let input_preview = format_tool_preview(&tool, &self.tool_input_buffer);
+
+                // Capture Edit tool input for diff generation.
+                if tool == "Edit" {
+                    self.last_edit_input = parse_edit_input(&self.tool_input_buffer);
+                } else {
+                    self.last_edit_input = None;
+                }
+
+                // Detect SendMessage tool calls for inter-agent messaging.
+                let agent_msg = if tool == "SendMessage" {
+                    parse_agent_message(&self.tool_input_buffer)
+                } else {
+                    None
+                };
+
                 self.tool_input_buffer.clear();
-                vec![DisplayLine::ToolUse {
+
+                let mut lines = vec![DisplayLine::ToolUse {
                     tool,
                     input_preview,
-                }]
+                }];
+
+                if let Some((sender, recipient, content)) = agent_msg {
+                    lines.push(DisplayLine::AgentMessage {
+                        sender,
+                        recipient,
+                        content,
+                    });
+                }
+
+                lines
             }
             Some(ActiveBlock::Thinking) => {
                 // Flush any remaining thinking text in the buffer.
@@ -467,6 +504,11 @@ impl Parser {
     }
 
     /// Handle a `user` message, extracting tool result content.
+    ///
+    /// When the most recent tool was an Edit and we captured its input
+    /// parameters, a [`DisplayLine::DiffResult`] is emitted alongside the
+    /// regular [`DisplayLine::ToolResult`] so the diff view has structured
+    /// data to render.
     fn handle_user_message(&mut self, message: UserMessage) -> Vec<DisplayLine> {
         let mut lines = Vec::new();
         for block in message.content {
@@ -474,6 +516,20 @@ impl Parser {
                 UserContentBlock::ToolResult {
                     content, is_error, ..
                 } => {
+                    // Emit a DiffResult if we have captured Edit input.
+                    if !is_error {
+                        if let Some(edit) = self.last_edit_input.take() {
+                            let diff_ops =
+                                compute_line_diff(&edit.old_string, &edit.new_string);
+                            lines.push(DisplayLine::DiffResult {
+                                diff_ops,
+                                file_path: edit.file_path,
+                            });
+                        }
+                    } else {
+                        // Clear on error — the diff is not meaningful.
+                        self.last_edit_input = None;
+                    }
                     lines.extend(extract_tool_result(&content, is_error));
                 }
                 UserContentBlock::Unknown => {}
@@ -611,6 +667,17 @@ fn format_tool_preview(tool: &str, raw_input: &str) -> String {
             truncate_input(raw_input)
         }
 
+        "SendMessage" => {
+            let msg_type = json_str(&value, "type").unwrap_or("message");
+            let recipient = json_str(&value, "recipient").unwrap_or("?");
+            let summary = json_str(&value, "summary").unwrap_or("");
+            if !summary.is_empty() {
+                format!("{msg_type} to @{recipient}: {summary}")
+            } else {
+                format!("{msg_type} to @{recipient}")
+            }
+        }
+
         "EnterPlanMode" | "ExitPlanMode" => String::new(),
 
         _ => return truncate_input(raw_input),
@@ -662,6 +729,53 @@ fn extract_tool_result_text(content: &serde_json::Value) -> String {
         serde_json::Value::Null => String::new(),
         other => other.to_string(),
     }
+}
+
+/// Parse the accumulated JSON input from an Edit tool call into structured
+/// parameters for diff generation.
+///
+/// Returns `Some(EditInput)` when the JSON contains `file_path`, `old_string`,
+/// and `new_string` fields. Returns `None` on parse failure or missing fields.
+fn parse_edit_input(raw_json: &str) -> Option<EditInput> {
+    let value: serde_json::Value = serde_json::from_str(raw_json).ok()?;
+    let file_path = json_str(&value, "file_path")?.to_string();
+    let old_string = json_str(&value, "old_string")?.to_string();
+    let new_string = json_str(&value, "new_string")?.to_string();
+    Some(EditInput {
+        file_path,
+        old_string,
+        new_string,
+    })
+}
+
+/// Parse the accumulated JSON input from a SendMessage tool call into
+/// inter-agent message fields.
+///
+/// Returns `Some((sender, recipient, content))` when the JSON contains the
+/// expected fields. The `sender` is inferred as "agent" since the sending
+/// agent's name is not included in the tool call itself — the caller can
+/// override it if the agent identity is known. The `recipient` comes from
+/// the tool input's `recipient` field, and the `content` from the `content`
+/// or `summary` field.
+fn parse_agent_message(raw_json: &str) -> Option<(String, String, String)> {
+    let value: serde_json::Value = serde_json::from_str(raw_json).ok()?;
+    let msg_type = json_str(&value, "type").unwrap_or("message");
+    // Only process direct messages and broadcasts, not shutdown responses etc.
+    if msg_type != "message" && msg_type != "broadcast" {
+        return None;
+    }
+    let recipient = json_str(&value, "recipient")
+        .unwrap_or(if msg_type == "broadcast" { "all" } else { "?" })
+        .to_string();
+    // Prefer summary for a concise display, fall back to full content.
+    let content = json_str(&value, "summary")
+        .or_else(|| json_str(&value, "content"))
+        .unwrap_or("")
+        .to_string();
+    if content.is_empty() {
+        return None;
+    }
+    Some(("agent".to_string(), recipient, content))
 }
 
 /// Convert tool result content into a single [`DisplayLine::ToolResult`].
