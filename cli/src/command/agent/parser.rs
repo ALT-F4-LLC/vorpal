@@ -112,15 +112,46 @@ enum UserContentBlock {
     Unknown,
 }
 
+/// Token usage data extracted from a single assistant turn.
+///
+/// Populated from `message_start` (input tokens) and `message_delta` (output
+/// tokens) API events. Available to callers via [`Parser::take_usage`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// Usage counters nested inside a `message_start` message payload.
+#[derive(Debug, Deserialize)]
+struct MessageStartUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    output_tokens: u64,
+}
+
+/// The `message` payload inside a `message_start` event, carrying usage data.
+#[derive(Debug, Deserialize)]
+struct MessageStartPayload {
+    #[serde(default)]
+    usage: Option<MessageStartUsage>,
+}
+
+/// Usage counters at the top level of a `message_delta` event.
+#[derive(Debug, Deserialize)]
+struct MessageDeltaUsage {
+    #[serde(default)]
+    output_tokens: u64,
+}
+
 /// Anthropic streaming API event, nested inside a `stream_event` line.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 enum ApiEvent {
     #[serde(rename = "message_start")]
-    MessageStart {
-        #[allow(dead_code)]
-        message: serde_json::Value,
-    },
+    MessageStart { message: MessageStartPayload },
     #[serde(rename = "content_block_start")]
     ContentBlockStart {
         #[allow(dead_code)]
@@ -143,8 +174,7 @@ enum ApiEvent {
         #[allow(dead_code)]
         delta: serde_json::Value,
         #[serde(default)]
-        #[allow(dead_code)]
-        usage: serde_json::Value,
+        usage: Option<MessageDeltaUsage>,
     },
     #[serde(rename = "message_stop")]
     MessageStop,
@@ -246,6 +276,13 @@ pub struct Parser {
     /// The last completed Edit tool's input parameters, used to generate
     /// [`DisplayLine::DiffResult`] when the corresponding tool result arrives.
     last_edit_input: Option<EditInput>,
+    /// Input tokens from the most recent `message_start`, held until
+    /// `message_delta` provides the output token count to complete the pair.
+    last_input_tokens: Option<u64>,
+    /// Per-turn token usage, ready to be taken by the caller.
+    last_usage: Option<TokenUsage>,
+    /// Cumulative cost from the most recent `result` event, ready to be taken.
+    last_cost: Option<f64>,
 }
 
 /// Captured input parameters from an Edit tool call.
@@ -268,6 +305,22 @@ impl Parser {
     /// calls return `None` until another result event is parsed.
     pub fn take_session_id(&mut self) -> Option<String> {
         self.last_session_id.take()
+    }
+
+    /// Take the token usage from the most recent assistant turn, if available.
+    ///
+    /// Returns `Some(TokenUsage)` exactly once per turn — subsequent calls
+    /// return `None` until the next `message_start`/`message_delta` pair.
+    pub fn take_usage(&mut self) -> Option<TokenUsage> {
+        self.last_usage.take()
+    }
+
+    /// Take the cumulative cost from the most recent `result` event, if any.
+    ///
+    /// Returns `Some(cost)` exactly once per result event — subsequent calls
+    /// return `None` until another result event is parsed.
+    pub fn take_cost(&mut self) -> Option<f64> {
+        self.last_cost.take()
     }
 
     /// Parse a single JSON line and return zero or more [`DisplayLine`] values.
@@ -322,6 +375,7 @@ impl Parser {
                 ..
             } => {
                 self.last_session_id = session_id.clone();
+                self.last_cost = total_cost_usd;
                 let mut parts = Vec::new();
                 if let Some(sub) = subtype {
                     parts.push(format!("◈ Status: {sub}"));
@@ -343,10 +397,24 @@ impl Parser {
 
     fn handle_api_event(&mut self, event: ApiEvent) -> Vec<DisplayLine> {
         match event {
-            ApiEvent::MessageStart { .. } => vec![DisplayLine::TurnStart],
+            ApiEvent::MessageStart { message } => {
+                if let Some(usage) = message.usage {
+                    self.last_input_tokens = Some(usage.input_tokens);
+                }
+                vec![DisplayLine::TurnStart]
+            }
             ApiEvent::MessageStop => Vec::new(),
 
-            ApiEvent::MessageDelta { .. } => Vec::new(),
+            ApiEvent::MessageDelta { usage, .. } => {
+                if let Some(delta_usage) = usage {
+                    let input_tokens = self.last_input_tokens.take().unwrap_or(0);
+                    self.last_usage = Some(TokenUsage {
+                        input_tokens,
+                        output_tokens: delta_usage.output_tokens,
+                    });
+                }
+                Vec::new()
+            }
 
             ApiEvent::ContentBlockStart { content_block, .. } => {
                 self.handle_content_block_start(content_block)
@@ -1321,5 +1389,251 @@ mod tests {
             r#"{"type":"result","subtype":"success","result":"Done.","total_cost_usd":0.01,"session_id":"real-id"}"#,
         );
         assert_eq!(p.take_session_id(), Some("real-id".to_string()));
+    }
+
+    // -- Token usage extraction -------------------------------------------
+
+    #[test]
+    fn message_start_extracts_input_tokens() {
+        let mut p = Parser::new();
+
+        // message_start stores input_tokens but usage is not yet complete
+        // (output_tokens come from message_delta).
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":150,"output_tokens":1}}}}"#,
+        );
+
+        // Usage is not available until message_delta completes the pair.
+        assert_eq!(p.take_usage(), None);
+
+        // Feed message_delta to complete the usage pair.
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":25}}}"#,
+        );
+
+        let usage = p.take_usage();
+        assert_eq!(
+            usage,
+            Some(TokenUsage {
+                input_tokens: 150,
+                output_tokens: 25,
+            })
+        );
+    }
+
+    #[test]
+    fn message_delta_extracts_output_tokens() {
+        let mut p = Parser::new();
+
+        // Feed message_start with input_tokens.
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_456","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1}}}}"#,
+        );
+
+        // Feed message_delta with output_tokens.
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}}"#,
+        );
+
+        let usage = p.take_usage();
+        assert_eq!(
+            usage,
+            Some(TokenUsage {
+                input_tokens: 10,
+                output_tokens: 42,
+            })
+        );
+    }
+
+    #[test]
+    fn take_usage_returns_once_then_none() {
+        let mut p = Parser::new();
+
+        // Initially no usage.
+        assert_eq!(p.take_usage(), None);
+
+        // Feed a complete message_start + message_delta pair.
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_789","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":1}}}}"#,
+        );
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":50}}}"#,
+        );
+
+        // First call returns the usage.
+        assert_eq!(
+            p.take_usage(),
+            Some(TokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+            })
+        );
+
+        // Second call returns None (take-once semantics).
+        assert_eq!(p.take_usage(), None);
+
+        // Feed another turn.
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_790","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":200,"output_tokens":1}}}}"#,
+        );
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":75}}}"#,
+        );
+
+        // First call returns the new usage.
+        assert_eq!(
+            p.take_usage(),
+            Some(TokenUsage {
+                input_tokens: 200,
+                output_tokens: 75,
+            })
+        );
+
+        // Second call returns None again.
+        assert_eq!(p.take_usage(), None);
+    }
+
+    #[test]
+    fn result_event_extracts_cost() {
+        let mut p = Parser::new();
+
+        p.parse_line(
+            r#"{"type":"result","subtype":"success","result":"Done.","total_cost_usd":0.1234,"session_id":"sess-1"}"#,
+        );
+
+        assert_eq!(p.take_cost(), Some(0.1234));
+    }
+
+    #[test]
+    fn take_cost_returns_once_then_none() {
+        let mut p = Parser::new();
+
+        // Initially no cost.
+        assert_eq!(p.take_cost(), None);
+
+        // Parse a result event with cost.
+        p.parse_line(
+            r#"{"type":"result","subtype":"success","result":"Done.","total_cost_usd":0.05,"session_id":"sess-2"}"#,
+        );
+
+        // First call returns the cost.
+        assert_eq!(p.take_cost(), Some(0.05));
+
+        // Second call returns None.
+        assert_eq!(p.take_cost(), None);
+
+        // Parse another result event with a different cost.
+        p.parse_line(
+            r#"{"type":"result","subtype":"success","result":"Done.","total_cost_usd":0.12,"session_id":"sess-3"}"#,
+        );
+
+        // First call returns the new cost.
+        assert_eq!(p.take_cost(), Some(0.12));
+
+        // Second call returns None again.
+        assert_eq!(p.take_cost(), None);
+    }
+
+    #[test]
+    fn full_turn_token_extraction() {
+        let mut p = Parser::new();
+
+        // message_start with input tokens
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_full","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":500,"output_tokens":1}}}}"#,
+        );
+
+        // content_block_start (text)
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+        );
+
+        // content_block_delta (text)
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world\n"}}}"#,
+        );
+
+        // content_block_stop
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+        );
+
+        // message_delta with output tokens
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":123}}}"#,
+        );
+
+        // message_stop
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
+        );
+
+        // result event with cost
+        p.parse_line(
+            r#"{"type":"result","subtype":"success","result":"Done.","total_cost_usd":0.0567,"session_id":"sess-full"}"#,
+        );
+
+        // Verify token usage from the turn.
+        let usage = p.take_usage();
+        assert_eq!(
+            usage,
+            Some(TokenUsage {
+                input_tokens: 500,
+                output_tokens: 123,
+            })
+        );
+
+        // Verify cost from the result event.
+        assert_eq!(p.take_cost(), Some(0.0567));
+
+        // Verify session ID as well.
+        assert_eq!(p.take_session_id(), Some("sess-full".to_string()));
+    }
+
+    #[test]
+    fn message_start_missing_usage_field() {
+        let mut p = Parser::new();
+
+        // message_start with no usage field at all (empty message object).
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
+        );
+
+        // No panic, no usage stored.
+        assert_eq!(p.take_usage(), None);
+
+        // Feed a message_delta -- since no input_tokens were stored, the
+        // usage should still be produced with input_tokens defaulting to 0.
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}}"#,
+        );
+
+        let usage = p.take_usage();
+        assert_eq!(
+            usage,
+            Some(TokenUsage {
+                input_tokens: 0,
+                output_tokens: 10,
+            })
+        );
+    }
+
+    #[test]
+    fn message_delta_missing_usage_field() {
+        let mut p = Parser::new();
+
+        // Feed message_start with input tokens.
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_no_delta_usage","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":50,"output_tokens":1}}}}"#,
+        );
+
+        // Feed message_delta with NO usage field.
+        p.parse_line(
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"}}}"#,
+        );
+
+        // No usage should be produced because the delta had no usage.
+        // The input_tokens remain in last_input_tokens, unused.
+        assert_eq!(p.take_usage(), None);
     }
 }

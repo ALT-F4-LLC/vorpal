@@ -376,5 +376,19 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent
                 agent.session_id = Some(session_id);
             }
         }
+        AgentEvent::UsageUpdate {
+            agent_id,
+            input_tokens,
+            output_tokens,
+            total_cost_usd,
+        } => {
+            if let Some(agent) = app.agent_by_id_mut(agent_id) {
+                agent.input_tokens += input_tokens;
+                agent.output_tokens += output_tokens;
+                if let Some(cost) = total_cost_usd {
+                    agent.total_cost_usd += cost;
+                }
+            }
+        }
     }
 }

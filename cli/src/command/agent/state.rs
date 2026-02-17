@@ -557,6 +557,13 @@ pub enum AgentEvent {
     },
     /// The session ID for an agent was resolved (from Claude Code result output).
     SessionId { agent_id: usize, session_id: String },
+    /// Per-turn token usage and session cost extracted from Claude Code events.
+    UsageUpdate {
+        agent_id: usize,
+        input_tokens: u64,
+        output_tokens: u64,
+        total_cost_usd: Option<f64>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -891,6 +898,12 @@ pub struct AgentState {
     pub claude_options: ClaudeOptions,
     /// Timestamp when the agent was started, for elapsed time display.
     pub started_at: Instant,
+    /// Cumulative input tokens across all turns.
+    pub input_tokens: u64,
+    /// Cumulative output tokens across all turns.
+    pub output_tokens: u64,
+    /// Cumulative cost in USD across all invocations.
+    pub total_cost_usd: f64,
     /// Per-section display mode overrides for individual tool result blocks.
     ///
     /// Keys are the sequential index of the ToolUse line in the output
@@ -938,6 +951,9 @@ impl AgentState {
             cache_generation: 0,
             cache_result_display: None,
             session_id: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_cost_usd: 0.0,
             claude_options,
             started_at: Instant::now(),
             section_overrides: HashMap::new(),

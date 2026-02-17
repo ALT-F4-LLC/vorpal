@@ -214,6 +214,14 @@ impl AgentManager {
                                         session_id,
                                     }).await;
                                 }
+                                if let Some(usage) = parser.take_usage() {
+                                    let _ = tx.send(AgentEvent::UsageUpdate {
+                                        agent_id,
+                                        input_tokens: usage.input_tokens,
+                                        output_tokens: usage.output_tokens,
+                                        total_cost_usd: parser.take_cost(),
+                                    }).await;
+                                }
                                 for display_line in display_lines {
                                     debug!(agent_id, ?display_line, "parsed output line");
                                     let _ = tx.send(AgentEvent::Output {

@@ -1766,6 +1766,21 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
 // Status bar
 // ---------------------------------------------------------------------------
 
+/// Format a token count as a compact human-readable string.
+///
+/// - Under 1,000: `999`
+/// - Under 1,000,000: `12.5K`
+/// - 1,000,000 or more: `1.5M`
+fn format_token_count(count: u64) -> String {
+    if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}K", count as f64 / 1_000.0)
+    } else {
+        count.to_string()
+    }
+}
+
 /// Format a [`Duration`] as a compact elapsed time string.
 ///
 /// - Under 1 minute: `0:42`
@@ -1860,9 +1875,25 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     Span::raw(format!("↻ Turns: {}", agent.turn_count)),
                     sep.clone(),
                     Span::raw(format!("⚒ Tools: {}", agent.tool_count)),
-                    sep.clone(),
-                    Span::raw(format!("⇕ Scroll: {scroll_info}")),
                 ];
+
+                if agent.input_tokens != 0
+                    || agent.output_tokens != 0
+                    || agent.total_cost_usd != 0.0
+                {
+                    let input = format_token_count(agent.input_tokens);
+                    let output = format_token_count(agent.output_tokens);
+                    spans.push(sep.clone());
+                    spans.push(Span::raw(format!("⊘ Tokens: {input}in / {output}out")));
+                    spans.push(sep.clone());
+                    spans.push(Span::raw(format!(
+                        "◇ Cost: ${:.2}",
+                        agent.total_cost_usd
+                    )));
+                }
+
+                spans.push(sep.clone());
+                spans.push(Span::raw(format!("⇕ Scroll: {scroll_info}")));
 
                 if agent.has_new_output {
                     spans.push(sep);
@@ -4326,5 +4357,37 @@ mod tests {
             }
             other => panic!("expected Hidden ToolResultRun, got {:?}", other),
         }
+    }
+
+    // -- format_token_count -----------------------------------------------
+
+    #[test]
+    fn format_token_count_zero() {
+        assert_eq!(format_token_count(0), "0");
+    }
+
+    #[test]
+    fn format_token_count_under_thousand() {
+        assert_eq!(format_token_count(999), "999");
+    }
+
+    #[test]
+    fn format_token_count_exactly_thousand() {
+        assert_eq!(format_token_count(1000), "1.0K");
+    }
+
+    #[test]
+    fn format_token_count_thousands() {
+        assert_eq!(format_token_count(12500), "12.5K");
+    }
+
+    #[test]
+    fn format_token_count_exactly_million() {
+        assert_eq!(format_token_count(1_000_000), "1.0M");
+    }
+
+    #[test]
+    fn format_token_count_millions() {
+        assert_eq!(format_token_count(1_500_000), "1.5M");
     }
 }
