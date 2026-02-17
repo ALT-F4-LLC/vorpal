@@ -896,8 +896,10 @@ pub struct AgentState {
     pub session_id: Option<String>,
     /// Claude Code options used for this agent's original spawn.
     pub claude_options: ClaudeOptions,
-    /// Timestamp when the agent was started, for elapsed time display.
-    pub started_at: Instant,
+    /// Accumulated active running time from previous running segments.
+    pub accumulated_active: Duration,
+    /// When the current running segment started (`Some` while Running, `None` while Exited).
+    pub running_since: Option<Instant>,
     /// Cumulative input tokens across all turns.
     pub input_tokens: u64,
     /// Cumulative output tokens across all turns.
@@ -955,11 +957,38 @@ impl AgentState {
             output_tokens: 0,
             total_cost_usd: 0.0,
             claude_options,
-            started_at: Instant::now(),
+            accumulated_active: Duration::ZERO,
+            running_since: Some(Instant::now()),
             section_overrides: HashMap::new(),
             section_overrides_generation: 0,
             cache_section_overrides_generation: 0,
         }
+    }
+
+    /// Return the total active running time for this agent.
+    ///
+    /// If the agent is currently running, this includes the time since the
+    /// current running segment started. If the agent is stopped/exited,
+    /// this returns only the accumulated time from previous segments.
+    pub fn active_elapsed(&self) -> Duration {
+        let current_segment = self
+            .running_since
+            .map(|since| since.elapsed())
+            .unwrap_or(Duration::ZERO);
+        self.accumulated_active + current_segment
+    }
+
+    /// Bank the current running segment into accumulated time and clear the running instant.
+    /// Call this when the agent transitions to Exited.
+    pub fn pause_timer(&mut self) {
+        if let Some(since) = self.running_since.take() {
+            self.accumulated_active += since.elapsed();
+        }
+    }
+
+    /// Start a new running segment. Call this when the agent is resumed.
+    pub fn resume_timer(&mut self) {
+        self.running_since = Some(Instant::now());
     }
 
     /// Append a line to the output buffer, trimming from the front when over capacity.
@@ -2888,5 +2917,123 @@ mod tests {
 
         app.remove_agent(1);
         assert!(app.sidebar_selected < app.agents.len());
+    }
+
+    // -- AgentState: active-time tracking (pause/resume timer) ----------------
+
+    #[test]
+    fn active_elapsed_starts_from_creation() {
+        let agent = agent_with_lines(0);
+        assert!(
+            agent.running_since.is_some(),
+            "new agent should have running_since set"
+        );
+        // A freshly created agent in Running state should already be accumulating time.
+        let elapsed = agent.active_elapsed();
+        assert!(
+            elapsed > Duration::ZERO,
+            "active_elapsed should be non-zero immediately after creation"
+        );
+    }
+
+    #[test]
+    fn pause_timer_banks_accumulated_time() {
+        let mut agent = agent_with_lines(0);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        agent.pause_timer();
+
+        assert!(
+            agent.running_since.is_none(),
+            "running_since should be None after pause"
+        );
+        assert!(
+            agent.accumulated_active > Duration::ZERO,
+            "accumulated_active should be banked after pause"
+        );
+        // With no running segment, active_elapsed equals accumulated_active.
+        assert_eq!(
+            agent.active_elapsed(),
+            agent.accumulated_active,
+            "active_elapsed should equal accumulated_active when paused"
+        );
+    }
+
+    #[test]
+    fn resume_timer_starts_new_segment() {
+        let mut agent = agent_with_lines(0);
+        agent.pause_timer();
+        let banked = agent.accumulated_active;
+
+        agent.resume_timer();
+
+        assert!(
+            agent.running_since.is_some(),
+            "running_since should be Some after resume"
+        );
+        assert!(
+            agent.active_elapsed() >= banked,
+            "active_elapsed should be >= accumulated_active after resume"
+        );
+    }
+
+    #[test]
+    fn pause_resume_cycle_accumulates_correctly() {
+        let mut agent = agent_with_lines(0);
+
+        // First cycle: run briefly, then pause.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        agent.pause_timer();
+        let after_first_pause = agent.accumulated_active;
+        assert!(
+            after_first_pause > Duration::ZERO,
+            "accumulated should be > 0 after first pause"
+        );
+
+        // Second cycle: resume, run briefly, then pause again.
+        agent.resume_timer();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        agent.pause_timer();
+        let after_second_pause = agent.accumulated_active;
+        assert!(
+            after_second_pause > after_first_pause,
+            "accumulated should grow across pause/resume cycles"
+        );
+    }
+
+    #[test]
+    fn pause_timer_idempotent() {
+        let mut agent = agent_with_lines(0);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        agent.pause_timer();
+        let first_accumulated = agent.accumulated_active;
+
+        // Second pause should be a no-op.
+        agent.pause_timer();
+        assert_eq!(
+            agent.accumulated_active, first_accumulated,
+            "double pause should not change accumulated_active"
+        );
+    }
+
+    #[test]
+    fn resume_timer_replaces_running_since() {
+        let agent = agent_with_lines(0);
+        let original = agent
+            .running_since
+            .expect("new agent should have running_since");
+
+        // Small delay so the replacement instant is distinguishable.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let mut agent = agent;
+        agent.resume_timer();
+        let replaced = agent
+            .running_since
+            .expect("running_since should be Some after resume");
+        assert!(
+            replaced > original,
+            "resume_timer should replace running_since with a more recent Instant"
+        );
     }
 }

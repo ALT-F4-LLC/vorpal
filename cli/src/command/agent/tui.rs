@@ -342,6 +342,7 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
                 agent.status = AgentStatus::Exited(exit_code);
                 agent.activity = AgentActivity::Done;
+                agent.pause_timer();
             }
             manager.notify_exited(agent_id);
 

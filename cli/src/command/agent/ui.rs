@@ -513,7 +513,7 @@ fn render_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
         };
 
         // Elapsed time.
-        let elapsed = format_elapsed(agent.started_at.elapsed());
+        let elapsed = format_elapsed(agent.active_elapsed());
 
         // First line: focus indicator + icon + number: name.
         let name_text = format!("{num}: {label}");
@@ -1857,7 +1857,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 
                 let sep = Span::styled(" | ", Style::default().fg(theme.status_separator));
 
-                let elapsed = agent.started_at.elapsed();
+                let elapsed = agent.active_elapsed();
                 let elapsed_str = format_elapsed(elapsed);
 
                 let scroll_info = if agent.scroll_offset == 0 {
@@ -3051,7 +3051,7 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
             let label = workspace_label(&agent.workspace);
             let display_label = truncate_chars(&label, 16, "\u{2026}");
 
-            let elapsed = format_elapsed(agent.started_at.elapsed());
+            let elapsed = format_elapsed(agent.active_elapsed());
 
             total_turns += agent.turn_count;
             total_tools += agent.tool_count;

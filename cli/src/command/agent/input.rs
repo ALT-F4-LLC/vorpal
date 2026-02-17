@@ -884,6 +884,7 @@ async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) {
                     agent.scroll_offset = 0;
                     agent.has_new_output = false;
                     agent.cached_lines = None;
+                    agent.resume_timer();
                     app.rebuild_agent_index();
                 }
                 if let Some(idx) = app.agent_vec_index(agent_id) {
