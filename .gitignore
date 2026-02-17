@@ -2,6 +2,7 @@
 .cargo
 .env
 .env.*
+/.docket
 /dist
 target
 vendor
