@@ -51,7 +51,7 @@ pub enum CommandSystemServices {
         #[arg(default_value_t = false, long)]
         health_check: bool,
 
-        /// Plaintext port for gRPC health checks
+        /// Plaintext (non-TLS) port for gRPC health checks
         #[arg(default_value = "23152", long)]
         health_check_port: u16,
 
@@ -87,10 +87,6 @@ pub enum CommandSystemServices {
         /// Enable TLS for the main gRPC listener (requires keys in /var/lib/vorpal/key/)
         #[arg(default_value_t = false, long)]
         tls: bool,
-
-        /// TTL in seconds for caching archive check results. Set to 0 to disable caching.
-        #[arg(default_value = "300", long)]
-        archive_check_cache_ttl: u64,
     },
 }
 
@@ -103,23 +99,18 @@ pub enum CommandSystem {
         /// Prune all resources
         #[arg(default_value_t = false, long)]
         all: bool,
-
         /// Prune artifact aliases
         #[arg(long)]
         artifact_aliases: bool,
-
         /// Prune artifact archives
         #[arg(long)]
         artifact_archives: bool,
-
         /// Prune artifact configs
         #[arg(long)]
         artifact_configs: bool,
-
         /// Prune artifact outputs
         #[arg(long)]
         artifact_outputs: bool,
-
         /// Prune sandboxes
         #[arg(long)]
         sandboxes: bool,
@@ -327,7 +318,6 @@ pub async fn run() -> Result<()> {
     // for the agent command. The TUI renders all relevant state itself.
     if !matches!(&command, Command::Agent { .. }) {
         let subscriber_writer = std::io::stderr.with_max_level(level);
-
         let mut subscriber = FmtSubscriber::builder()
             .with_max_level(level)
             .with_target(false)
@@ -342,10 +332,6 @@ pub async fn run() -> Result<()> {
 
         subscriber::set_global_default(subscriber).expect("setting default subscriber");
     }
-
-    let subscriber = subscriber.finish();
-
-    subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     // Extract the config path from commands that have one, before resolving settings
     let config_for_settings = match &command {

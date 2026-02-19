@@ -49,17 +49,17 @@ pub struct RunArgs {
 }
 
 async fn new_tls_config() -> Result<ServerTlsConfig> {
-    let service_key_path = get_key_service_path();
+    let cert_path = get_key_service_path();
 
-    if !service_key_path.exists() {
+    if !cert_path.exists() {
         return Err(anyhow::anyhow!(
             "public key not found - run 'vorpal system keys generate' or copy from agent"
         ));
     }
 
-    let service_private_key_path = get_key_service_key_path();
+    let private_key_path = get_key_service_key_path();
 
-    if !service_private_key_path.exists() {
+    if !private_key_path.exists() {
         return Err(anyhow::anyhow!(
             "private key not found - run 'vorpal system keys generate' or copy from agent"
         ));
@@ -77,7 +77,7 @@ async fn new_tls_config() -> Result<ServerTlsConfig> {
         )
     })?;
 
-    let config_identity = Identity::from_pem(service_key, service_private_key);
+    let config_identity = Identity::from_pem(cert, private_key);
 
     let config = ServerTlsConfig::new().identity(config_identity);
 
