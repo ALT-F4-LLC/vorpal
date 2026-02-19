@@ -1886,10 +1886,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     spans.push(sep.clone());
                     spans.push(Span::raw(format!("⊘ Tokens: {input}in / {output}out")));
                     spans.push(sep.clone());
-                    spans.push(Span::raw(format!(
-                        "◇ Cost: ${:.2}",
-                        agent.total_cost_usd
-                    )));
+                    spans.push(Span::raw(format!("◇ Cost: ${:.2}", agent.total_cost_usd)));
                 }
 
                 spans.push(sep.clone());

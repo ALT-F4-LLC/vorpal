@@ -587,8 +587,7 @@ impl Parser {
                     // Emit a DiffResult if we have captured Edit input.
                     if !is_error {
                         if let Some(edit) = self.last_edit_input.take() {
-                            let diff_ops =
-                                compute_line_diff(&edit.old_string, &edit.new_string);
+                            let diff_ops = compute_line_diff(&edit.old_string, &edit.new_string);
                             lines.push(DisplayLine::DiffResult {
                                 diff_ops,
                                 file_path: edit.file_path,
@@ -1554,9 +1553,7 @@ mod tests {
         );
 
         // content_block_stop
-        p.parse_line(
-            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
-        );
+        p.parse_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
 
         // message_delta with output tokens
         p.parse_line(
@@ -1564,9 +1561,7 @@ mod tests {
         );
 
         // message_stop
-        p.parse_line(
-            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
-        );
+        p.parse_line(r#"{"type":"stream_event","event":{"type":"message_stop"}}"#);
 
         // result event with cost
         p.parse_line(
@@ -1595,9 +1590,7 @@ mod tests {
         let mut p = Parser::new();
 
         // message_start with no usage field at all (empty message object).
-        p.parse_line(
-            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
-        );
+        p.parse_line(r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#);
 
         // No panic, no usage stored.
         assert_eq!(p.take_usage(), None);

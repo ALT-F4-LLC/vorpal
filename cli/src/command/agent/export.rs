@@ -59,12 +59,7 @@ pub fn export_session(agent: &AgentState) -> Result<PathBuf, String> {
     writeln!(md, "| Status | {} |", escape_table_cell(&status_str)).unwrap();
 
     if let Some(ref session_id) = agent.session_id {
-        writeln!(
-            md,
-            "| Session ID | `{}` |",
-            escape_table_cell(session_id)
-        )
-        .unwrap();
+        writeln!(md, "| Session ID | `{}` |", escape_table_cell(session_id)).unwrap();
     }
 
     let opts = &agent.claude_options;
