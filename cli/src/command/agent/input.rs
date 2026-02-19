@@ -380,7 +380,7 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         // Cycle tool result display mode: compact → hidden → full.
         // Also clears all per-section overrides so every section resets
         // to the new global mode.
-        KeyCode::Char('r') => {
+        KeyCode::Char('s') => {
             app.result_display = app.result_display.next();
             // Clear per-section overrides so all sections follow the new global mode.
             for agent in &mut app.agents {
@@ -544,8 +544,8 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             app.show_help = !app.show_help;
         }
 
-        // Respond to an exited agent (resume with session ID): s.
-        KeyCode::Char('s') => {
+        // Respond to an exited agent (resume with session ID): r.
+        KeyCode::Char('r') => {
             action_respond(app);
         }
 

@@ -1926,7 +1926,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 fn build_hint_bar(_width: u16) -> Line<'static> {
     const HINTS: &[(&str, &str)] = &[
         ("n", "new"),
-        ("s", "respond"),
+        ("r", "respond"),
         (":", "command"),
         ("/", "search"),
         ("Tab", "switch"),
@@ -3069,7 +3069,7 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
             "Agent Management",
             vec![
                 ("n", "New agent (quick launch)"),
-                ("s", "Respond to exited agent"),
+                ("r", "Respond to exited agent"),
                 ("x", "Kill focused agent"),
                 ("q", "Close focused tab"),
                 ("Ctrl+C", "Quit all agents"),
@@ -3104,7 +3104,7 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
                 ("D", "Toggle aggregate dashboard"),
                 ("|", "Toggle split-pane view"),
                 ("`", "Switch split-pane focus"),
-                ("r", "Cycle tool result display"),
+                ("s", "Cycle tool result display"),
                 ("t", "Cycle color theme"),
             ],
         ),
