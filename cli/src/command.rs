@@ -4,7 +4,6 @@ use crate::command::{
 };
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
-use config::VorpalConfig;
 use oauth2::{
     basic::BasicClient, AuthUrl, ClientId, DeviceAuthorizationUrl, Scope,
     StandardDeviceAuthorizationResponse, TokenResponse, TokenUrl,
@@ -12,11 +11,7 @@ use oauth2::{
 use path_clean::PathClean;
 use rustls::crypto::ring;
 use std::{collections::BTreeMap, env::current_dir, path::PathBuf, process::exit};
-use tokio::{
-    fs::{read, write},
-    time::sleep,
-};
-use toml::from_str;
+use tokio::{fs::write, time::sleep};
 use tracing::{error, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::{
@@ -26,6 +21,7 @@ use vorpal_sdk::{
 
 mod build;
 mod config;
+mod config_cmd;
 mod init;
 mod inspect;
 mod lock;
@@ -179,6 +175,20 @@ pub enum Command {
         worker: String,
     },
 
+    /// Manage configuration settings
+    Config {
+        /// Apply to user-level config (~/.vorpal/settings.json) instead of project-level
+        #[arg(long)]
+        user: bool,
+
+        /// Path to the project-level configuration file
+        #[arg(default_value = "Vorpal.toml", long)]
+        config: PathBuf,
+
+        #[command(subcommand)]
+        action: config_cmd::ConfigAction,
+    },
+
     /// Initialize Vorpal in a directory
     Init {
         /// Project name
@@ -285,10 +295,40 @@ pub async fn run() -> Result<()> {
 
     subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
+    // Extract the config path from commands that have one, before resolving settings
+    let config_for_settings = match &command {
+        Command::Build { config, .. } | Command::Config { config, .. } => config.clone(),
+        _ => PathBuf::from("Vorpal.toml"),
+    };
+
+    // Resolve layered settings (user config + project config + built-in defaults).
+    // If config loading fails (e.g. malformed file), fall back to built-in defaults
+    // so that the CLI still works without a valid config.
+    let (resolved, project_config) =
+        config::resolve_config(&config_for_settings).unwrap_or_else(|_| {
+            let defaults = config::VorpalConfig::defaults();
+            let resolved = config::ResolvedSettings::resolve(
+                &defaults,
+                &config::VorpalConfig::default(),
+                &config::VorpalConfig::default(),
+            );
+            (resolved, config::VorpalConfig::default())
+        });
+
+    // Helper: if the parsed value matches the hardcoded clap default, substitute the
+    // resolved settings value. This ensures explicit CLI flags always win, while
+    // config-file values override built-in defaults.
+    let apply_default = |parsed: &str, clap_default: &str, resolved_value: &str| -> String {
+        if parsed == clap_default {
+            resolved_value.to_string()
+        } else {
+            parsed.to_string()
+        }
+    };
+
     match &command {
         Command::Build {
             agent,
-            config,
             context,
             export,
             name,
@@ -300,99 +340,78 @@ pub async fn run() -> Result<()> {
             unlock,
             variable,
             worker,
+            ..
         } => {
+            // Apply resolved settings as fallbacks for hardcoded clap defaults
+            let default_addr = get_default_address();
+            let default_ns = get_default_namespace();
+
+            // Agent and worker are local services — they should NOT inherit the
+            // `registry` setting. Only override them when the user passes an
+            // explicit --agent / --worker flag.
+            let effective_agent = agent.to_string();
+            let effective_registry =
+                apply_default(registry, &default_addr, &resolved.registry.value);
+            let effective_worker = worker.to_string();
+            let effective_namespace =
+                apply_default(namespace, &default_ns, &resolved.namespace.value);
+
             if name.is_empty() {
                 error!("no name specified");
 
                 exit(1);
             }
 
-            // Set default configurations
+            // Use the project config already loaded during resolution
+
+            let config_language = resolved.language.value.clone();
+            let config_name = resolved.name.value.clone();
 
             let mut config_environments = Vec::new();
-            let mut config_language = "rust".to_string();
-            let mut config_name = "vorpal".to_string();
             let mut config_source_go_directory = None;
             let mut config_source_includes = Vec::new();
             let mut config_source_rust_bin = None;
             let mut config_source_rust_packages = None;
             let mut config_source_script = None;
 
-            // Load project configuration
-
-            let mut config_path = config.to_path_buf();
-
-            if !config.is_absolute() {
-                let current_dir = current_dir().expect("failed to get current directory");
-
-                config_path = current_dir.join(config).clean().to_path_buf();
-            }
-
-            config_path = config_path.clean();
-
-            // Load project configuration value, if exists
-
-            let config = match read(&config_path).await {
-                Err(e) => Err(anyhow!("Failed to read {}: {}", config_path.display(), e)),
-
-                Ok(toml_bytes) => {
-                    let toml_str = String::from_utf8_lossy(&toml_bytes);
-
-                    match from_str::<VorpalConfig>(&toml_str) {
-                        Err(e) => Err(anyhow!("Failed to parse: {}", e)),
-                        Ok(toml) => Ok(toml),
-                    }
-                }
-            }?;
-
-            if let Some(environments) = config.environments {
+            if let Some(environments) = &project_config.environments {
                 if !environments.is_empty() {
-                    config_environments = environments;
+                    config_environments = environments.clone();
                 }
             }
 
-            if let Some(language) = config.language {
-                config_language = language;
-            }
-
-            if let Some(name) = config.name {
-                if !name.is_empty() {
-                    config_name = name;
-                }
-            }
-
-            if let Some(config_source) = config.source {
-                if let Some(config_source_go) = config_source.go {
-                    if let Some(directory) = config_source_go.directory {
+            if let Some(config_source) = &project_config.source {
+                if let Some(config_source_go) = &config_source.go {
+                    if let Some(directory) = &config_source_go.directory {
                         if !directory.is_empty() {
-                            config_source_go_directory = Some(directory);
+                            config_source_go_directory = Some(directory.clone());
                         }
                     }
                 }
 
-                if let Some(includes) = config_source.includes {
+                if let Some(includes) = &config_source.includes {
                     if !includes.is_empty() {
-                        config_source_includes = includes;
+                        config_source_includes = includes.clone();
                     }
                 }
 
-                if let Some(config_source_rust) = config_source.rust {
-                    if let Some(ca_source_rust_bin) = config_source_rust.bin {
+                if let Some(config_source_rust) = &config_source.rust {
+                    if let Some(ca_source_rust_bin) = &config_source_rust.bin {
                         if !ca_source_rust_bin.is_empty() {
-                            config_source_rust_bin = Some(ca_source_rust_bin);
+                            config_source_rust_bin = Some(ca_source_rust_bin.clone());
                         }
                     }
 
-                    if let Some(packages) = config_source_rust.packages {
+                    if let Some(packages) = &config_source_rust.packages {
                         if !packages.is_empty() {
-                            config_source_rust_packages = Some(packages);
+                            config_source_rust_packages = Some(packages.clone());
                         }
                     }
                 }
 
-                if let Some(script) = config_source.script {
+                if let Some(script) = &config_source.script {
                     if !script.is_empty() {
-                        config_source_script = Some(script);
+                        config_source_script = Some(script.clone());
                     }
                 }
             };
@@ -416,7 +435,7 @@ pub async fn run() -> Result<()> {
                 context: context.clone(),
                 export: *export,
                 name: name.clone(),
-                namespace: namespace.clone(),
+                namespace: effective_namespace.clone(),
                 path: *path,
                 rebuild: *rebuild,
                 system: system.clone(),
@@ -443,13 +462,25 @@ pub async fn run() -> Result<()> {
             };
 
             let run_service = build::RunArgsService {
-                agent: agent.to_string(),
-                registry: registry.to_string(),
-                worker: worker.to_string(),
+                agent: effective_agent,
+                registry: effective_registry,
+                worker: effective_worker,
             };
 
             build::run(run_artifact, run_config, run_service).await
         }
+
+        Command::Config {
+            user,
+            config,
+            action,
+        } => match action {
+            config_cmd::ConfigAction::Set { key, value } => {
+                config_cmd::handle_set(key, value, *user, config)
+            }
+            config_cmd::ConfigAction::Get { key } => config_cmd::handle_get(key, *user, config),
+            config_cmd::ConfigAction::Show => config_cmd::handle_show(config),
+        },
 
         Command::Init { name, path } => init::run(name, path).await,
 
@@ -457,7 +488,16 @@ pub async fn run() -> Result<()> {
             digest,
             namespace,
             registry,
-        } => inspect::run(digest, namespace, registry).await,
+        } => {
+            let effective_registry =
+                apply_default(registry, &get_default_address(), &resolved.registry.value);
+            let effective_namespace = apply_default(
+                namespace,
+                &get_default_namespace(),
+                &resolved.namespace.value,
+            );
+            inspect::run(digest, &effective_namespace, &effective_registry).await
+        }
 
         Command::Login {
             issuer,
@@ -465,9 +505,14 @@ pub async fn run() -> Result<()> {
             issuer_client_id,
             registry,
         } => {
+            let effective_issuer = issuer.clone();
+            let effective_issuer_client_id = issuer_client_id.clone();
+            let effective_registry =
+                apply_default(registry, &get_default_address(), &resolved.registry.value);
+
             let discovery_url = format!(
                 "{}/.well-known/openid-configuration",
-                issuer.trim_end_matches('/')
+                effective_issuer.trim_end_matches('/')
             );
 
             let doc: serde_json::Value = reqwest::get(&discovery_url)
@@ -488,8 +533,8 @@ pub async fn run() -> Result<()> {
 
             let client_device_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
 
-            let client = BasicClient::new(ClientId::new(issuer_client_id.to_string()))
-                .set_auth_uri(AuthUrl::new(issuer.to_string())?)
+            let client = BasicClient::new(ClientId::new(effective_issuer_client_id.clone()))
+                .set_auth_uri(AuthUrl::new(effective_issuer.clone())?)
                 .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
                 .set_device_authorization_url(client_device_url);
 
@@ -549,7 +594,7 @@ pub async fn run() -> Result<()> {
             let content = VorpalCredentialsContent {
                 access_token: access_token.to_string(),
                 audience: issuer_audience.clone(),
-                client_id: issuer_client_id.clone(),
+                client_id: effective_issuer_client_id.clone(),
                 expires_in,
                 issued_at: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -564,8 +609,8 @@ pub async fn run() -> Result<()> {
             let mut issuer_map = BTreeMap::new();
             let mut registry_map = BTreeMap::new();
 
-            issuer_map.insert(issuer.to_string(), content);
-            registry_map.insert(registry.to_string(), issuer.to_string());
+            issuer_map.insert(effective_issuer.clone(), content);
+            registry_map.insert(effective_registry.clone(), effective_issuer.clone());
 
             let credentials = VorpalCredentials {
                 issuer: issuer_map,
@@ -584,7 +629,11 @@ pub async fn run() -> Result<()> {
             args,
             bin,
             registry,
-        } => run::run(alias, args, bin.as_deref(), registry).await,
+        } => {
+            let effective_registry =
+                apply_default(registry, &get_default_address(), &resolved.registry.value);
+            run::run(alias, args, bin.as_deref(), &effective_registry).await
+        }
 
         Command::System(system) => match system {
             CommandSystem::Keys(keys) => match keys {

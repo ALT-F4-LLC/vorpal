@@ -1,0 +1,151 @@
+use anyhow::{anyhow, Result};
+use clap::Subcommand;
+use std::path::Path;
+
+use crate::command::config::{
+    get_user_config_path, load_user_config, resolve_config, save_project_config, save_user_config,
+    VorpalConfig,
+};
+
+/// Subcommands for `vorpal config`.
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Set a configuration value
+    Set {
+        /// Configuration key (e.g., registry, namespace, language)
+        key: String,
+        /// Value to set
+        value: String,
+    },
+    /// Get a configuration value
+    Get {
+        /// Configuration key
+        key: String,
+    },
+    /// Show all configuration values with their sources
+    Show,
+}
+
+/// Handle `vorpal config set <key> <value>`.
+///
+/// When `user_level` is true, writes to `~/.vorpal/settings.json`.
+/// Otherwise, writes the key-value pair directly to the project-level
+/// config file at `config_path` (typically `Vorpal.toml`).
+pub fn handle_set(key: &str, value: &str, user_level: bool, config_path: &Path) -> Result<()> {
+    // Validate the key name
+    if !VorpalConfig::field_names().contains(&key) {
+        return Err(anyhow!(
+            "unknown setting key '{}'. Valid keys: {}",
+            key,
+            VorpalConfig::field_names().join(", ")
+        ));
+    }
+
+    if user_level {
+        let path = get_user_config_path();
+        let mut config = load_user_config(&path)?;
+        config
+            .set_by_name(key, value.to_string())
+            .map_err(|e| anyhow!("{}", e))?;
+        save_user_config(&path, &config)?;
+        println!("Set {} = {} (user: {})", key, value, path.display());
+    } else {
+        save_project_config(config_path, key, value)?;
+        println!(
+            "Set {} = {} (project: {})",
+            key,
+            value,
+            config_path.display()
+        );
+    }
+    Ok(())
+}
+
+/// Handle `vorpal config get <key>`.
+///
+/// Resolves the value across all layers and prints it along with the source.
+pub fn handle_get(key: &str, _user_level: bool, config_path: &Path) -> Result<()> {
+    // Validate the key name before resolving
+    if !VorpalConfig::field_names().contains(&key) {
+        return Err(anyhow!(
+            "unknown setting key '{}'. Valid keys: {}",
+            key,
+            VorpalConfig::field_names().join(", ")
+        ));
+    }
+
+    let (resolved, _) = resolve_config(config_path)?;
+    match resolved.get_by_name(key) {
+        Some(rv) => {
+            println!("{} = {} ({})", key, rv.value, rv.source);
+            Ok(())
+        }
+        None => Err(anyhow!(
+            "unknown setting key '{}'. Valid keys: {}",
+            key,
+            VorpalConfig::field_names().join(", ")
+        )),
+    }
+}
+
+/// Handle `vorpal config show`.
+///
+/// Prints all configuration values in a table with KEY, VALUE, and SOURCE columns.
+pub fn handle_show(config_path: &Path) -> Result<()> {
+    let (resolved, _) = resolve_config(config_path)?;
+    let names = VorpalConfig::field_names();
+
+    // Collect rows to compute column widths
+    let mut rows: Vec<(&str, String, String)> = Vec::with_capacity(names.len());
+    for &name in names {
+        if let Some(rv) = resolved.get_by_name(name) {
+            rows.push((name, rv.value.clone(), rv.source.to_string()));
+        }
+    }
+
+    // Column headers
+    let header_key = "KEY";
+    let header_value = "VALUE";
+    let header_source = "SOURCE";
+
+    let key_width = rows
+        .iter()
+        .map(|(k, _, _)| k.len())
+        .max()
+        .unwrap_or(0)
+        .max(header_key.len());
+    let value_width = rows
+        .iter()
+        .map(|(_, v, _)| v.len())
+        .max()
+        .unwrap_or(0)
+        .max(header_value.len());
+    let source_width = rows
+        .iter()
+        .map(|(_, _, s)| s.len())
+        .max()
+        .unwrap_or(0)
+        .max(header_source.len());
+
+    // Print header
+    println!(
+        "{:<key_width$}  {:<value_width$}  {:<source_width$}",
+        header_key, header_value, header_source,
+    );
+    println!(
+        "{:<key_width$}  {:<value_width$}  {:<source_width$}",
+        "-".repeat(key_width),
+        "-".repeat(value_width),
+        "-".repeat(source_width),
+    );
+
+    // Print rows
+    for (key, value, source) in &rows {
+        println!(
+            "{:<key_width$}  {:<value_width$}  {:<source_width$}",
+            key, value, source,
+        );
+    }
+
+    Ok(())
+}
