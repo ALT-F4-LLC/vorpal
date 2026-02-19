@@ -31,10 +31,10 @@ mod init;
 mod inspect;
 mod lock;
 mod run;
+pub mod settings;
 mod start;
 mod store;
 mod system;
-pub mod settings;
 
 pub fn get_default_namespace() -> String {
     DEFAULT_NAMESPACE.to_string()
@@ -507,8 +507,11 @@ pub async fn run() -> Result<()> {
         } => {
             let effective_registry =
                 apply_default(registry, &get_default_address(), &resolved.registry.value);
-            let effective_namespace =
-                apply_default(namespace, &get_default_namespace(), &resolved.namespace.value);
+            let effective_namespace = apply_default(
+                namespace,
+                &get_default_namespace(),
+                &resolved.namespace.value,
+            );
             inspect::run(digest, &effective_namespace, &effective_registry).await
         }
 
@@ -551,11 +554,10 @@ pub async fn run() -> Result<()> {
 
             let client_device_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
 
-            let client =
-                BasicClient::new(ClientId::new(effective_issuer_client_id.clone()))
-                    .set_auth_uri(AuthUrl::new(effective_issuer.clone())?)
-                    .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
-                    .set_device_authorization_url(client_device_url);
+            let client = BasicClient::new(ClientId::new(effective_issuer_client_id.clone()))
+                .set_auth_uri(AuthUrl::new(effective_issuer.clone())?)
+                .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
+                .set_device_authorization_url(client_device_url);
 
             let http_client = reqwest::ClientBuilder::new()
                 .redirect(reqwest::redirect::Policy::none())

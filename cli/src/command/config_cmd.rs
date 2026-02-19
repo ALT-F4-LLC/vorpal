@@ -232,11 +232,7 @@ mod tests {
             let expected = defaults
                 .get_by_name(name)
                 .expect("defaults should have all fields");
-            assert_eq!(
-                rv.value, *expected,
-                "field '{}' value mismatch",
-                name
-            );
+            assert_eq!(rv.value, *expected, "field '{}' value mismatch", name);
         }
     }
 
@@ -401,16 +397,8 @@ mod tests {
             let rv = resolved
                 .get_by_name(key)
                 .unwrap_or_else(|| panic!("resolved should contain key '{}'", key));
-            assert_eq!(
-                rv.value, *exp_value,
-                "value mismatch for key '{}'",
-                key
-            );
-            assert_eq!(
-                rv.source, *exp_source,
-                "source mismatch for key '{}'",
-                key
-            );
+            assert_eq!(rv.value, *exp_value, "value mismatch for key '{}'", key);
+            assert_eq!(rv.source, *exp_source, "source mismatch for key '{}'", key);
         }
 
         // Verify field_names covers all 6
@@ -506,9 +494,7 @@ target = "release"
         // [settings] section present with new value
         let settings_table = table.get("settings").expect("[settings] should exist");
         assert_eq!(
-            settings_table
-                .get("namespace")
-                .and_then(|v| v.as_str()),
+            settings_table.get("namespace").and_then(|v| v.as_str()),
             Some("test-ns")
         );
 
