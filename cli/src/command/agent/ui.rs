@@ -3055,52 +3055,84 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
 
 /// Render a centered help overlay showing all keybindings.
 fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
-    let popup = centered_rect(60, 70, area);
+    let popup = centered_rect(60, 80, area);
 
     // Clear the area behind the popup.
     frame.render_widget(Clear, popup);
 
-    // Key-description pairs for the help table.
+    // Key-description pairs for the help table, grouped by category.
     const KEY_COL_WIDTH: usize = 16;
     const GAP: usize = 2;
-    let bindings: Vec<(&str, &str)> = vec![
-        ("Tab / l", "Next agent"),
-        ("Shift+Tab / h", "Previous agent"),
-        ("1-9", "Focus agent by number"),
-        ("n", "New agent (quick launch)"),
-        ("s", "Respond to exited agent (session)"),
-        ("x", "Kill focused agent"),
-        ("y", "Copy output to clipboard"),
-        (":", "Open command palette"),
-        ("/", "Search output"),
-        ("n / N", "Next / previous match (in search)"),
-        ("j / Down", "Scroll down (toward latest)"),
-        ("k / Up", "Scroll up (into history)"),
-        ("Ctrl+D / PgDn", "Half-page down"),
-        ("Ctrl+U / PgUp", "Half-page up"),
-        ("Ctrl+F", "Full-page down"),
-        ("Ctrl+B", "Full-page up"),
-        ("gg", "Scroll to top"),
-        ("G", "Jump to bottom (latest)"),
-        ("r", "Toggle compact results"),
-        ("b", "Toggle sidebar panel"),
-        ("v", "Toggle dependency graph"),
-        ("D", "Toggle aggregate dashboard"),
-        ("J / K", "Navigate sidebar selection"),
-        ("|", "Toggle split-pane view"),
-        ("`", "Switch split-pane focus"),
-        ("t", "Cycle color theme"),
-        ("q", "Close focused tab"),
-        ("Ctrl+C", "Quit all agents"),
-        ("?", "Toggle this help"),
+
+    let sections: Vec<(&str, Vec<(&str, &str)>)> = vec![
+        (
+            "Agent Management",
+            vec![
+                ("n", "New agent (quick launch)"),
+                ("s", "Respond to exited agent"),
+                ("x", "Kill focused agent"),
+                ("q", "Close focused tab"),
+                ("Ctrl+C", "Quit all agents"),
+            ],
+        ),
+        (
+            "Navigation",
+            vec![
+                ("Tab / l", "Next agent"),
+                ("Shift+Tab / h", "Previous agent"),
+                ("1-9", "Focus agent by number"),
+            ],
+        ),
+        (
+            "Scrolling",
+            vec![
+                ("j / Down", "Scroll down"),
+                ("k / Up", "Scroll up"),
+                ("Ctrl+D / PgDn", "Half-page down"),
+                ("Ctrl+U / PgUp", "Half-page up"),
+                ("Ctrl+F", "Full-page down"),
+                ("Ctrl+B", "Full-page up"),
+                ("gg", "Scroll to top"),
+                ("G", "Jump to bottom"),
+            ],
+        ),
+        (
+            "Views & Panels",
+            vec![
+                ("b", "Toggle sidebar panel"),
+                ("v", "Toggle dependency graph"),
+                ("D", "Toggle aggregate dashboard"),
+                ("|", "Toggle split-pane view"),
+                ("`", "Switch split-pane focus"),
+                ("r", "Cycle tool result display"),
+                ("t", "Cycle color theme"),
+            ],
+        ),
+        (
+            "Tools",
+            vec![
+                (":", "Open command palette"),
+                ("/", "Search output"),
+                ("n / N", "Next/previous match (in search)"),
+                ("y", "Copy output to clipboard"),
+                ("e", "Export session to Markdown"),
+                ("Enter", "Toggle tool result section"),
+                ("J / K", "Navigate sidebar selection"),
+                ("?", "Toggle this help"),
+            ],
+        ),
     ];
 
-    // Compute the maximum line width so every line can be padded equally.
-    // Each line is: KEY_COL_WIDTH + GAP + desc.len()
-    let max_desc_len = bindings.iter().map(|(_, d)| d.len()).max().unwrap_or(0);
+    // Compute the maximum line width across all sections so every line
+    // can be padded equally.
+    let max_desc_len = sections
+        .iter()
+        .flat_map(|(_, bindings)| bindings.iter().map(|(_, d)| d.len()))
+        .max()
+        .unwrap_or(0);
     let max_line_width = KEY_COL_WIDTH + GAP + max_desc_len;
 
-    // Build keybinding lines, each padded to the same total width.
+    // Build help lines with section headings and keybinding rows.
     let mut help_text: Vec<Line<'_>> = Vec::new();
 
     let heading_style = Style::default()
@@ -3108,27 +3140,31 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
         .add_modifier(Modifier::BOLD);
     let footer_style = Style::default().fg(theme.help_footer);
 
-    help_text.push(help_line_padded(
-        "Keybindings",
-        max_line_width,
-        heading_style,
-    ));
-    help_text.push(Line::from(" ".repeat(max_line_width)));
+    for (section_title, bindings) in &sections {
+        // Blank line before each section heading.
+        help_text.push(Line::from(" ".repeat(max_line_width)));
+        help_text.push(help_line_padded(
+            section_title,
+            max_line_width,
+            heading_style,
+        ));
+        help_text.push(Line::from(" ".repeat(max_line_width)));
 
-    for (key, desc) in &bindings {
-        let key_span = Span::styled(
-            format!("{key:>width$}", width = KEY_COL_WIDTH),
-            Style::default()
-                .fg(theme.help_key)
-                .add_modifier(Modifier::BOLD),
-        );
-        let used = KEY_COL_WIDTH + GAP + desc.len();
-        let trailing = max_line_width.saturating_sub(used);
-        let mut spans = vec![key_span, Span::raw("  "), Span::raw(*desc)];
-        if trailing > 0 {
-            spans.push(Span::raw(" ".repeat(trailing)));
+        for (key, desc) in bindings {
+            let key_span = Span::styled(
+                format!("{key:>width$}", width = KEY_COL_WIDTH),
+                Style::default()
+                    .fg(theme.help_key)
+                    .add_modifier(Modifier::BOLD),
+            );
+            let used = KEY_COL_WIDTH + GAP + desc.len();
+            let trailing = max_line_width.saturating_sub(used);
+            let mut spans = vec![key_span, Span::raw("  "), Span::raw(*desc)];
+            if trailing > 0 {
+                spans.push(Span::raw(" ".repeat(trailing)));
+            }
+            help_text.push(Line::from(spans));
         }
-        help_text.push(Line::from(spans));
     }
 
     help_text.push(Line::from(" ".repeat(max_line_width)));
