@@ -303,14 +303,13 @@ pub fn save_project_settings(path: &Path, settings: &Settings) -> Result<()> {
 /// Convenience function: load all layers and resolve them.
 ///
 /// Loads built-in defaults, user settings from `get_user_settings_path()`,
-/// and project settings from `./Vorpal.toml` in the current directory.
-pub fn resolve_settings() -> Result<ResolvedSettings> {
+/// and project settings from the file at `config_path`.
+pub fn resolve_settings(config_path: &Path) -> Result<ResolvedSettings> {
     let defaults = Settings::defaults();
     let user_path = get_user_settings_path();
     let user = load_user_settings(&user_path)?;
 
-    let project_path = PathBuf::from("Vorpal.toml");
-    let project = load_project_settings(&project_path)?;
+    let project = load_project_settings(config_path)?;
 
     Ok(ResolvedSettings::resolve(&defaults, &user, &project))
 }

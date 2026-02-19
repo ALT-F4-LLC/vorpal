@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::command::settings::{
     get_user_settings_path, load_project_settings, load_user_settings, resolve_settings,
@@ -29,8 +29,9 @@ pub enum ConfigAction {
 /// Handle `vorpal config set <key> <value>`.
 ///
 /// When `user_level` is true, writes to `~/.vorpal/settings.json`.
-/// Otherwise, writes to `./Vorpal.toml` under the `[settings]` section.
-pub fn handle_set(key: &str, value: &str, user_level: bool) -> Result<()> {
+/// Otherwise, writes to the project-level config file at `config_path`
+/// (typically `Vorpal.toml`) under the `[settings]` section.
+pub fn handle_set(key: &str, value: &str, user_level: bool, config_path: &Path) -> Result<()> {
     if user_level {
         let path = get_user_settings_path();
         let mut settings = load_user_settings(&path)?;
@@ -40,13 +41,17 @@ pub fn handle_set(key: &str, value: &str, user_level: bool) -> Result<()> {
         save_user_settings(&path, &settings)?;
         println!("Set {} = {} (user: {})", key, value, path.display());
     } else {
-        let path = PathBuf::from("Vorpal.toml");
-        let mut settings = load_project_settings(&path)?;
+        let mut settings = load_project_settings(config_path)?;
         settings
             .set_by_name(key, value.to_string())
             .map_err(|e| anyhow!("{}", e))?;
-        save_project_settings(&path, &settings)?;
-        println!("Set {} = {} (project: {})", key, value, path.display());
+        save_project_settings(config_path, &settings)?;
+        println!(
+            "Set {} = {} (project: {})",
+            key,
+            value,
+            config_path.display()
+        );
     }
     Ok(())
 }
@@ -54,7 +59,7 @@ pub fn handle_set(key: &str, value: &str, user_level: bool) -> Result<()> {
 /// Handle `vorpal config get <key>`.
 ///
 /// Resolves the value across all layers and prints it along with the source.
-pub fn handle_get(key: &str, _user_level: bool) -> Result<()> {
+pub fn handle_get(key: &str, _user_level: bool, config_path: &Path) -> Result<()> {
     // Validate the key name before resolving
     if !Settings::field_names().contains(&key) {
         return Err(anyhow!(
@@ -64,7 +69,7 @@ pub fn handle_get(key: &str, _user_level: bool) -> Result<()> {
         ));
     }
 
-    let resolved = resolve_settings()?;
+    let resolved = resolve_settings(config_path)?;
     match resolved.get_by_name(key) {
         Some(rv) => {
             println!("{} = {} ({})", key, rv.value, rv.source);
@@ -81,8 +86,8 @@ pub fn handle_get(key: &str, _user_level: bool) -> Result<()> {
 /// Handle `vorpal config show`.
 ///
 /// Prints all configuration values in a table with KEY, VALUE, and SOURCE columns.
-pub fn handle_show() -> Result<()> {
-    let resolved = resolve_settings()?;
+pub fn handle_show(config_path: &Path) -> Result<()> {
+    let resolved = resolve_settings(config_path)?;
     let names = Settings::field_names();
 
     // Collect rows to compute column widths

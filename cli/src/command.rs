@@ -187,6 +187,10 @@ pub enum Command {
         #[arg(long)]
         user: bool,
 
+        /// Path to the project-level configuration file
+        #[arg(default_value = "Vorpal.toml", long)]
+        config: PathBuf,
+
         #[command(subcommand)]
         action: config_cmd::ConfigAction,
     },
@@ -300,7 +304,7 @@ pub async fn run() -> Result<()> {
     // Resolve layered settings (user config + project config + built-in defaults).
     // If config loading fails (e.g. malformed file), fall back to built-in defaults
     // so that the CLI still works without a valid config.
-    let resolved = settings::resolve_settings().unwrap_or_else(|_| {
+    let resolved = settings::resolve_settings(std::path::Path::new("Vorpal.toml")).unwrap_or_else(|_| {
         let defaults = settings::Settings::defaults();
         settings::ResolvedSettings::resolve(
             &defaults,
@@ -490,12 +494,16 @@ pub async fn run() -> Result<()> {
             build::run(run_artifact, run_config, run_service).await
         }
 
-        Command::Config { user, action } => match action {
+        Command::Config {
+            user,
+            config,
+            action,
+        } => match action {
             config_cmd::ConfigAction::Set { key, value } => {
-                config_cmd::handle_set(key, value, *user)
+                config_cmd::handle_set(key, value, *user, config)
             }
-            config_cmd::ConfigAction::Get { key } => config_cmd::handle_get(key, *user),
-            config_cmd::ConfigAction::Show => config_cmd::handle_show(),
+            config_cmd::ConfigAction::Get { key } => config_cmd::handle_get(key, *user, config),
+            config_cmd::ConfigAction::Show => config_cmd::handle_show(config),
         },
 
         Command::Init { name, path } => init::run(name, path).await,
