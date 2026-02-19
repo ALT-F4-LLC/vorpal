@@ -1307,6 +1307,100 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
         }
         "help" => app.show_help = !app.show_help,
         "quit" => action_quit_tab(app),
+        "copy" => {
+            let active_idx = app.active_agent_index();
+            if let Some(agent) = active_idx.and_then(|i| app.agents.get(i)) {
+                let text = if let Some(cached) = &agent.cached_lines {
+                    cached
+                        .iter()
+                        .map(|line| {
+                            line.spans
+                                .iter()
+                                .map(|span| span.content.as_ref())
+                                .collect::<String>()
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    agent
+                        .output
+                        .iter()
+                        .map(display_line_to_text)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+                match copy_to_clipboard(&text).await {
+                    Ok(()) => {
+                        let bytes = text.len();
+                        let size = if bytes >= 1024 {
+                            format!("{:.1} KB", bytes as f64 / 1024.0)
+                        } else {
+                            format!("{bytes} bytes")
+                        };
+                        app.set_status_message(format!("Copied {size} to clipboard"));
+                    }
+                    Err(e) => {
+                        app.set_status_message(format!("Copy failed: {e}"));
+                    }
+                }
+            }
+        }
+        "export" => {
+            if let Some(agent) = app.focused_agent() {
+                match super::export::export_session(agent) {
+                    Ok(path) => {
+                        app.set_status_message(format!("Exported to {}", path.display()));
+                    }
+                    Err(e) => {
+                        app.set_status_message(format!("Export failed: {e}"));
+                    }
+                }
+            } else {
+                app.set_status_message("No agent to export");
+            }
+        }
+        "results" => {
+            app.result_display = app.result_display.next();
+            for agent in &mut app.agents {
+                agent.clear_section_overrides();
+            }
+            app.set_status_message(format!("Tool results: {}", app.result_display.label()));
+        }
+        "sidebar" => {
+            app.sidebar_visible = !app.sidebar_visible;
+            if app.sidebar_visible {
+                app.sidebar_selected = app.focused;
+            }
+        }
+        "graph" => {
+            app.show_graph = !app.show_graph;
+            if app.show_graph {
+                app.show_dashboard = false;
+                app.set_status_message("Dependency graph visible");
+            } else {
+                app.set_status_message("Dependency graph hidden");
+            }
+        }
+        "split" => {
+            if app.agents.len() >= 2 {
+                app.split_enabled = !app.split_enabled;
+                if app.split_enabled {
+                    app.split_focused_pane = SplitPane::Left;
+                    app.split_right_index = None;
+                    app.set_status_message("Split-pane enabled");
+                } else {
+                    app.split_right_index = None;
+                    app.split_focused_pane = SplitPane::Left;
+                    app.set_status_message("Split-pane disabled");
+                }
+            } else {
+                app.set_status_message("Need at least 2 agents for split view");
+            }
+        }
+        "theme" => {
+            app.cycle_theme();
+            app.set_status_message(format!("Theme: {}", app.theme.name));
+        }
         _ => app.set_status_message(format!("Unknown command: {name}")),
     }
 }

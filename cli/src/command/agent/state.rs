@@ -73,6 +73,34 @@ pub const COMMANDS: &[PaletteCommand] = &[
         name: "quit",
         description: "Close the focused tab",
     },
+    PaletteCommand {
+        name: "copy",
+        description: "Copy output to clipboard",
+    },
+    PaletteCommand {
+        name: "export",
+        description: "Export session to Markdown",
+    },
+    PaletteCommand {
+        name: "results",
+        description: "Cycle tool result display",
+    },
+    PaletteCommand {
+        name: "sidebar",
+        description: "Toggle sidebar panel",
+    },
+    PaletteCommand {
+        name: "graph",
+        description: "Toggle dependency graph",
+    },
+    PaletteCommand {
+        name: "split",
+        description: "Toggle split-pane view",
+    },
+    PaletteCommand {
+        name: "theme",
+        description: "Cycle color theme",
+    },
 ];
 
 /// Return the commands whose names fuzzy-match the given query.
