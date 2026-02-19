@@ -35,9 +35,6 @@ const MIN_WIDTH: u16 = 40;
 /// Minimum terminal height required for the TUI.
 const MIN_HEIGHT: u16 = 8;
 
-/// Terminal width at which the full (untruncated) hint bar is shown.
-const FULL_HINTS_WIDTH: u16 = 120;
-
 // ---------------------------------------------------------------------------
 // Main render entry point
 // ---------------------------------------------------------------------------
@@ -1922,110 +1919,34 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(hints_paragraph, rows[1]);
 }
 
-/// Build the hint bar line, fitting as many priority-ordered hints as possible.
+/// Build the hint bar line with essential hotkeys.
 ///
-/// At [`FULL_HINTS_WIDTH`]+ columns all hints are shown. Below that, hints are
-/// added in priority order and a trailing `?:more` is appended when any are
-/// truncated.
-fn build_hint_bar(width: u16) -> Line<'static> {
-    // Priority-ordered hint list. Each entry: (key, description, trailing_gap).
-    // The trailing gap is the two-space separator that follows each hint.
+/// The reduced set of ~7 hints fits comfortably at 80 columns, so no
+/// truncation logic is needed.
+fn build_hint_bar(_width: u16) -> Line<'static> {
     const HINTS: &[(&str, &str)] = &[
         ("n", "new"),
         ("s", "respond"),
         (":", "command"),
         ("/", "search"),
         ("Tab", "switch"),
-        ("x", "kill"),
         ("q", "close"),
         ("?", "help"),
-        ("y", "copy"),
-        ("r", "results"),
-        ("b", "sidebar"),
-        ("v", "graph"),
-        ("D", "dashboard"),
-        ("|", "split"),
-        ("t", "theme"),
-        ("^C", "quit"),
-        ("j/k", "scroll"),
-        ("^D/^U", "page"),
-        ("gg", "top"),
-        ("G", "bottom"),
     ];
-
-    // At wide terminals, show every hint without truncation.
-    if width >= FULL_HINTS_WIDTH {
-        let mut spans = Vec::new();
-        spans.push(Span::raw(" "));
-        for (i, (key, desc)) in HINTS.iter().enumerate() {
-            spans.push(Span::styled(
-                key.to_string(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
-            if i + 1 < HINTS.len() {
-                spans.push(Span::raw(format!(":{desc}  ")));
-            } else {
-                spans.push(Span::raw(format!(":{desc}")));
-            }
-        }
-        return Line::from(spans);
-    }
-
-    // Narrow terminal: fit as many hints as possible, append "?:more" if
-    // any were truncated.
-    let available = width.saturating_sub(1) as usize; // 1 for leading space
-                                                      // The truncation indicator "?:more" is always preceded by a 2-char
-                                                      // separator ("  ") inherited from the last shown hint's trailing gap.
-                                                      // We reserve the indicator width only (6 chars); the separator is already
-                                                      // accounted for in `with_sep` of the preceding hint.
-    let more_hint_width = "?:more".len();
 
     let mut spans = Vec::new();
     spans.push(Span::raw(" "));
-    let mut used: usize = 1; // leading space
-
-    for (shown, (key, desc)) in HINTS.iter().enumerate() {
-        // Width of this hint: key + ":" + desc.
-        let hint_text_width = key.len() + 1 + desc.len();
-        let is_last = shown + 1 == HINTS.len();
-        // Only add the 2-char separator when this isn't the last hint.
-        let with_sep = hint_text_width + if is_last { 0 } else { 2 };
-
-        // Check if this hint fits. If there are remaining hints after this one,
-        // we must also reserve space for the "?:more" truncation indicator.
-        // The 2-char separator before "?:more" comes from this hint's own
-        // trailing "  " (included in `with_sep`), so we only reserve for the
-        // indicator text itself.
-        let remaining_after = HINTS.len() - shown - 1;
-        let reserve = if remaining_after > 0 {
-            more_hint_width
-        } else {
-            0
-        };
-
-        if used + with_sep + reserve > available && remaining_after > 0 {
-            // Doesn't fit — append truncation indicator and stop.
-            // The previous hint's trailing "  " separator provides the gap.
-            spans.push(Span::styled(
-                "?".to_string(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::raw(":more"));
-            break;
-        }
-
+    for (i, (key, desc)) in HINTS.iter().enumerate() {
         spans.push(Span::styled(
             key.to_string(),
             Style::default().add_modifier(Modifier::BOLD),
         ));
-        if !is_last {
+        if i + 1 < HINTS.len() {
             spans.push(Span::raw(format!(":{desc}  ")));
         } else {
             spans.push(Span::raw(format!(":{desc}")));
         }
-        used += with_sep;
     }
-
     Line::from(spans)
 }
 
