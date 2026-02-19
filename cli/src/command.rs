@@ -304,14 +304,15 @@ pub async fn run() -> Result<()> {
     // Resolve layered settings (user config + project config + built-in defaults).
     // If config loading fails (e.g. malformed file), fall back to built-in defaults
     // so that the CLI still works without a valid config.
-    let resolved = settings::resolve_settings(std::path::Path::new("Vorpal.toml")).unwrap_or_else(|_| {
-        let defaults = settings::Settings::defaults();
-        settings::ResolvedSettings::resolve(
-            &defaults,
-            &settings::Settings::default(),
-            &settings::Settings::default(),
-        )
-    });
+    let resolved =
+        settings::resolve_settings(std::path::Path::new("Vorpal.toml")).unwrap_or_else(|_| {
+            let defaults = settings::Settings::defaults();
+            settings::ResolvedSettings::resolve(
+                &defaults,
+                &settings::Settings::default(),
+                &settings::Settings::default(),
+            )
+        });
 
     // Helper: if the parsed value matches the hardcoded clap default, substitute the
     // resolved settings value. This ensures explicit CLI flags always win, while
