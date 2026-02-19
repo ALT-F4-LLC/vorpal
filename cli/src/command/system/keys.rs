@@ -1,5 +1,5 @@
 use crate::command::store::paths::{
-    get_key_ca_key_path, get_key_ca_path, get_key_service_key_path, get_key_service_path,
+    get_key_ca_key_path, get_key_service_key_path, get_key_service_path,
     get_key_service_public_path, get_key_service_secret_path, get_root_key_dir_path,
 };
 use anyhow::Result;
@@ -10,6 +10,7 @@ use rcgen::{
 use tokio::fs::{create_dir_all, read_to_string, write};
 use tracing::info;
 use uuid::Uuid;
+use vorpal_sdk::context::get_key_ca_path;
 
 pub async fn generate() -> Result<()> {
     let key_dir_path = get_root_key_dir_path();

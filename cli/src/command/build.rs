@@ -4,23 +4,19 @@ use crate::command::{
         archives::unpack_zstd,
         paths::{
             get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
-            get_file_paths, get_key_ca_path, set_timestamps,
+            get_file_paths, set_timestamps,
         },
     },
     VorpalConfigSource,
 };
 use anyhow::{anyhow, bail, Result};
-use http::uri::{InvalidUri, Uri};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     process::exit,
 };
-use tokio::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
-use tonic::{
-    transport::{Certificate, Channel, ClientTlsConfig},
-    Code, Request,
-};
+use tokio::fs::{create_dir_all, remove_dir_all, remove_file, write};
+use tonic::{transport::Channel, Code, Request};
 use tracing::{error, info};
 use vorpal_sdk::{
     api::{
@@ -38,7 +34,7 @@ use vorpal_sdk::{
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
     },
-    context::{client_auth_header, ConfigContext},
+    context::{build_channel, client_auth_header, ConfigContext},
 };
 
 pub struct RunArgsArtifact {
@@ -279,33 +275,8 @@ pub async fn run(
 ) -> Result<()> {
     // Setup service clients
 
-    let client_ca_pem_path = get_key_ca_path();
-    let client_ca_pem = read(client_ca_pem_path).await?;
-    let client_ca = Certificate::from_pem(client_ca_pem);
-
-    let client_tls = ClientTlsConfig::new()
-        .ca_certificate(client_ca)
-        .domain_name("localhost");
-
-    let client_agent_uri = service
-        .agent
-        .parse::<Uri>()
-        .map_err(|e: InvalidUri| anyhow::anyhow!("invalid agent address: {}", e))?;
-
-    let client_artifact_uri = service
-        .registry
-        .parse::<Uri>()
-        .map_err(|e: InvalidUri| anyhow::anyhow!("invalid artifact address: {}", e))?;
-
-    let client_agent_channel = Channel::builder(client_agent_uri)
-        .tls_config(client_tls.clone())?
-        .connect()
-        .await?;
-
-    let client_artifact_channel = Channel::builder(client_artifact_uri)
-        .tls_config(client_tls.clone())?
-        .connect()
-        .await?;
+    let client_agent_channel = build_channel(&service.agent).await?;
+    let client_artifact_channel = build_channel(&service.registry).await?;
 
     let client_agent = AgentServiceClient::new(client_agent_channel);
     let client_artifact = ArtifactServiceClient::new(client_artifact_channel);
@@ -416,28 +387,10 @@ pub async fn run(
 
     // Prepare lock path early for incremental artifact updates
 
-    let client_archive_uri = service
-        .registry
-        .parse::<Uri>()
-        .map_err(|e: InvalidUri| anyhow::anyhow!("invalid archive address: {}", e))?;
-
-    let client_archive_channel = Channel::builder(client_archive_uri)
-        .tls_config(client_tls.clone())?
-        .connect()
-        .await?;
-
+    let client_archive_channel = build_channel(&service.registry).await?;
     let mut client_archive = ArchiveServiceClient::new(client_archive_channel);
 
-    let client_worker_uri = service
-        .worker
-        .parse::<Uri>()
-        .map_err(|e: InvalidUri| anyhow::anyhow!("invalid worker address: {}", e))?;
-
-    let client_worker_channel = Channel::builder(client_worker_uri)
-        .tls_config(client_tls.clone())?
-        .connect()
-        .await?;
-
+    let client_worker_channel = build_channel(&service.worker).await?;
     let mut client_worker = WorkerServiceClient::new(client_worker_channel);
 
     // Build config dependencies first to ensure config binary exists

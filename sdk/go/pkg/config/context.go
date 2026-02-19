@@ -22,6 +22,7 @@ import (
 	apiContext "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -241,6 +242,69 @@ func ClientAuthHeader(registry string) (string, error) {
 	return fmt.Sprintf("Bearer %s", issuerCredentials.AccessToken), nil
 }
 
+// getTransportCredentials returns the appropriate gRPC transport credentials
+// and host string based on the URI scheme. For https:// addresses, it loads
+// the CA certificate (falling back to system trust if unavailable). For http://
+// addresses, it uses insecure (plaintext) credentials.
+func getTransportCredentials(address string) (credentials.TransportCredentials, string, error) {
+	if !strings.HasPrefix(address, "http://") && !strings.HasPrefix(address, "https://") {
+		return nil, "", fmt.Errorf("address must start with http:// or https://: %s", address)
+	}
+
+	if strings.HasPrefix(address, "https://") {
+		host := strings.TrimPrefix(address, "https://")
+
+		tlsConfig := &tls.Config{}
+
+		caCertPath := GetKeyCaPath()
+		caCert, err := os.ReadFile(caCertPath)
+		if err == nil {
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				log.Printf("WARNING: CA certificate at %s could not be parsed, falling back to system trust store", caCertPath)
+			} else {
+				tlsConfig.RootCAs = caCertPool
+			}
+		}
+
+		return credentials.NewTLS(tlsConfig), host, nil
+	}
+
+	host := strings.TrimPrefix(address, "http://")
+	return insecure.NewCredentials(), host, nil
+}
+
+// BuildClientConn creates a gRPC client connection for the given address.
+// It auto-detects the transport based on the URI scheme (http:// = plaintext,
+// https:// = TLS with optional CA cert, unix:// = UDS with plaintext).
+func BuildClientConn(address string) (*grpc.ClientConn, error) {
+	if strings.HasPrefix(address, "unix://") {
+		conn, err := grpc.NewClient(
+			address,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to unix socket %s: %w", address, err)
+		}
+		return conn, nil
+	}
+
+	creds, host, err := getTransportCredentials(address)
+	if err != nil {
+		return nil, fmt.Errorf("failed to configure transport for %s: %w", address, err)
+	}
+
+	conn, err := grpc.NewClient(
+		host,
+		grpc.WithTransportCredentials(creds),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to %s: %w", address, err)
+	}
+
+	return conn, nil
+}
+
 func GetContext() *ConfigContext {
 	cmd, err := NewCommand()
 	if err != nil {
@@ -259,39 +323,14 @@ func GetContext() *ConfigContext {
 
 	// Auth headers will be added per-request using ClientAuthHeader
 
-	caCert, err := os.ReadFile("/var/lib/vorpal/key/ca.pem")
-	if err != nil {
-		log.Fatalf("Failed to read CA certificate: %v", err)
-	}
-
-	caCertPool := x509.NewCertPool()
-	if !caCertPool.AppendCertsFromPEM(caCert) {
-		log.Fatal("Failed to append CA certificate")
-	}
-
-	credentials := credentials.NewTLS(&tls.Config{
-		RootCAs:    caCertPool,
-		ServerName: "localhost",
-	})
-
-	agentHost := strings.ReplaceAll(cmd.Agent, "https://", "")
-
-	clientConnAgent, err := grpc.NewClient(
-		agentHost,
-		grpc.WithTransportCredentials(credentials),
-	)
+	clientConnAgent, err := BuildClientConn(cmd.Agent)
 	if err != nil {
 		log.Fatalf("failed to connect to agent: %v", err)
 	}
 
-	registryHost := strings.ReplaceAll(cmd.Registry, "https://", "")
-
-	clientConnArtifact, err := grpc.NewClient(
-		registryHost,
-		grpc.WithTransportCredentials(credentials),
-	)
+	clientConnArtifact, err := BuildClientConn(cmd.Registry)
 	if err != nil {
-		log.Fatalf("failed to connect to agent: %v", err)
+		log.Fatalf("failed to connect to registry: %v", err)
 	}
 
 	return &ConfigContext{

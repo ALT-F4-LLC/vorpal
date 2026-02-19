@@ -2,21 +2,17 @@ use crate::command::store::{
     archives::unpack_zstd,
     paths::{
         get_artifact_alias_path, get_artifact_archive_path, get_artifact_output_path,
-        get_file_paths, get_key_ca_path, set_timestamps,
+        get_file_paths, set_timestamps,
     },
 };
 use anyhow::{anyhow, bail, Context, Result};
-use http::uri::Uri;
 use std::{
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
     process::Command,
 };
-use tokio::fs::{create_dir_all, read, read_to_string, write};
-use tonic::{
-    transport::{Certificate, Channel, ClientTlsConfig},
-    Code, Request,
-};
+use tokio::fs::{create_dir_all, read_to_string, write};
+use tonic::{Code, Request};
 use tracing::{debug, info};
 use vorpal_sdk::{
     api::{
@@ -26,7 +22,7 @@ use vorpal_sdk::{
         },
     },
     artifact::system::get_system_default,
-    context::{client_auth_header, parse_artifact_alias},
+    context::{build_channel, client_auth_header, parse_artifact_alias},
 };
 
 async fn get_alias_from_registry(
@@ -36,29 +32,7 @@ async fn get_alias_from_registry(
     system: ArtifactSystem,
     tag: &str,
 ) -> Result<String> {
-    let client_ca_pem_path = get_key_ca_path();
-    let client_ca_pem = read(&client_ca_pem_path).await.with_context(|| {
-        format!(
-            "failed to read CA certificate: {}",
-            client_ca_pem_path.display()
-        )
-    })?;
-    let client_ca = Certificate::from_pem(client_ca_pem);
-
-    let client_tls = ClientTlsConfig::new()
-        .ca_certificate(client_ca)
-        .domain_name("localhost");
-
-    let client_uri = registry
-        .parse::<Uri>()
-        .map_err(|e| anyhow!("invalid registry address: {}", e))?;
-
-    let client_channel = Channel::builder(client_uri)
-        .tls_config(client_tls)?
-        .connect()
-        .await
-        .with_context(|| format!("failed to connect to registry: {}", registry))?;
-
+    let client_channel = build_channel(registry).await?;
     let mut client = ArtifactServiceClient::new(client_channel);
 
     let request = GetArtifactAliasRequest {
@@ -122,33 +96,7 @@ async fn pull_artifact_from_registry(
     namespace: &str,
     output_path: &std::path::Path,
 ) -> Result<()> {
-    // Setup TLS with CA certificate
-
-    let client_ca_pem_path = get_key_ca_path();
-    let client_ca_pem = read(&client_ca_pem_path).await.with_context(|| {
-        format!(
-            "failed to read CA certificate: {}",
-            client_ca_pem_path.display()
-        )
-    })?;
-    let client_ca = Certificate::from_pem(client_ca_pem);
-
-    let client_tls = ClientTlsConfig::new()
-        .ca_certificate(client_ca)
-        .domain_name("localhost");
-
-    // Connect to registry archive service
-
-    let client_uri = registry
-        .parse::<Uri>()
-        .map_err(|e| anyhow!("invalid registry address: {}", e))?;
-
-    let client_channel = Channel::builder(client_uri)
-        .tls_config(client_tls)?
-        .connect()
-        .await
-        .with_context(|| format!("failed to connect to registry: {}", registry))?;
-
+    let client_channel = build_channel(registry).await?;
     let mut client_archive = ArchiveServiceClient::new(client_channel);
 
     // Pull archive from registry

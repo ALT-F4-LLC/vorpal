@@ -10,7 +10,7 @@ use crate::{
     artifact::system::get_system,
     cli::{Cli, Command},
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use http::uri::{InvalidUri, Uri};
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, RefreshToken, TokenResponse, TokenUrl};
@@ -228,33 +228,8 @@ pub async fn get_context() -> Result<ConfigContext> {
             port,
             registry,
         } => {
-            let service_ca_pem = read("/var/lib/vorpal/key/ca.pem")
-                .await
-                .expect("failed to read CA certificate");
-
-            let service_ca = Certificate::from_pem(service_ca_pem);
-
-            let service_tls = ClientTlsConfig::new()
-                .ca_certificate(service_ca)
-                .domain_name("localhost");
-
-            let client_agent_uri = agent
-                .parse::<Uri>()
-                .map_err(|e: InvalidUri| anyhow::anyhow!("invalid agent address: {}", e))?;
-
-            let client_agent_channel = Channel::builder(client_agent_uri)
-                .tls_config(service_tls.clone())?
-                .connect()
-                .await?;
-
-            let client_registry_uri = registry
-                .parse::<Uri>()
-                .map_err(|e: InvalidUri| anyhow::anyhow!("invalid artifact address: {}", e))?;
-
-            let client_registry_channel = Channel::builder(client_registry_uri)
-                .tls_config(service_tls)?
-                .connect()
-                .await?;
+            let client_agent_channel = build_channel(&agent).await?;
+            let client_registry_channel = build_channel(&registry).await?;
 
             let client_agent = AgentServiceClient::new(client_agent_channel);
             let client_artifact = ArtifactServiceClient::new(client_registry_channel);
@@ -519,10 +494,79 @@ pub fn get_root_key_dir_path() -> PathBuf {
     get_root_dir_path().join("key")
 }
 
+pub fn get_key_ca_path() -> PathBuf {
+    get_root_key_dir_path().join("ca").with_extension("pem")
+}
+
 pub fn get_key_credentials_path() -> PathBuf {
     get_root_key_dir_path()
         .join("credentials")
         .with_extension("json")
+}
+
+async fn get_client_tls_config(uri: &str) -> Result<Option<ClientTlsConfig>> {
+    if uri.starts_with("http://") || uri.starts_with("unix://") {
+        return Ok(None);
+    }
+
+    let ca_pem_path = get_key_ca_path();
+
+    let client_tls_config = if ca_pem_path.exists() {
+        let ca_pem = read(&ca_pem_path)
+            .await
+            .with_context(|| format!("failed to read CA certificate: {}", ca_pem_path.display()))?;
+
+        ClientTlsConfig::new().ca_certificate(Certificate::from_pem(ca_pem))
+    } else {
+        ClientTlsConfig::new().with_native_roots()
+    };
+
+    Ok(Some(client_tls_config))
+}
+
+pub async fn build_channel(uri: &str) -> Result<Channel> {
+    // Handle Unix domain socket connections
+    if uri.starts_with("unix://") {
+        let socket_path = uri.strip_prefix("unix://").unwrap().to_string();
+
+        // Dummy URI required by tonic's channel builder; ignored when using a custom connector.
+        // Uses connect_with_connector_lazy so the channel is created immediately and the
+        // actual connection is deferred until the first RPC call, avoiding startup races
+        // when the client is created before the server socket is ready.
+        let channel = Channel::from_static("http://[::]:50051").connect_with_connector_lazy(
+            tower::service_fn(move |_: tonic::transport::Uri| {
+                let path = socket_path.clone();
+                async move {
+                    Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
+                        tokio::net::UnixStream::connect(path).await?,
+                    ))
+                }
+            }),
+        );
+
+        return Ok(channel);
+    }
+
+    if !uri.starts_with("http://") && !uri.starts_with("https://") {
+        bail!("URI must start with http://, https://, or unix://: {}", uri);
+    }
+
+    let parsed_uri = uri
+        .parse::<Uri>()
+        .map_err(|e: InvalidUri| anyhow!("invalid URI: {}", e))?;
+
+    let tls_config = get_client_tls_config(uri).await?;
+
+    let mut endpoint = Channel::builder(parsed_uri);
+
+    if let Some(tls) = tls_config {
+        endpoint = endpoint.tls_config(tls)?;
+    }
+
+    endpoint
+        .connect()
+        .await
+        .with_context(|| format!("failed to connect to {}", uri))
 }
 
 /// Refreshes an expired access token using the refresh token

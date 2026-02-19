@@ -24,3 +24,8 @@ var getKeyCredentialsPathFunc = getKeyCredentialsPathDefault
 func GetKeyCredentialsPath() string {
 	return getKeyCredentialsPathFunc()
 }
+
+// GetKeyCaPath returns the path to the CA certificate
+func GetKeyCaPath() string {
+	return filepath.Join(GetRootKeyDirPath(), "ca.pem")
+}
