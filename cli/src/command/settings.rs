@@ -57,40 +57,9 @@ impl Settings {
         }
     }
 
-    /// Merge two layers. Values in `other` override values in `self`.
-    ///
-    /// If a field is `Some` in `other`, the result uses `other`'s value;
-    /// otherwise it keeps `self`'s value.
-    pub fn merge(&self, other: &Self) -> Self {
-        Self {
-            registry: other.registry.clone().or_else(|| self.registry.clone()),
-            namespace: other.namespace.clone().or_else(|| self.namespace.clone()),
-            language: other.language.clone().or_else(|| self.language.clone()),
-            issuer: other.issuer.clone().or_else(|| self.issuer.clone()),
-            issuer_client_id: other
-                .issuer_client_id
-                .clone()
-                .or_else(|| self.issuer_client_id.clone()),
-            name: other.name.clone().or_else(|| self.name.clone()),
-        }
-    }
-
     /// Returns the list of all valid setting key names.
     pub fn field_names() -> &'static [&'static str] {
         Self::FIELD_NAMES
-    }
-
-    /// Look up a setting value by its key name.
-    pub fn get_by_name(&self, name: &str) -> Option<&String> {
-        match name {
-            "registry" => self.registry.as_ref(),
-            "namespace" => self.namespace.as_ref(),
-            "language" => self.language.as_ref(),
-            "issuer" => self.issuer.as_ref(),
-            "issuer_client_id" => self.issuer_client_id.as_ref(),
-            "name" => self.name.as_ref(),
-            _ => None,
-        }
     }
 
     /// Set a setting value by its key name.
