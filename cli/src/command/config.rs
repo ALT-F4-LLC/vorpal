@@ -65,12 +65,7 @@ pub struct VorpalConfig {
 }
 
 impl VorpalConfig {
-    const SETTINGS_FIELD_NAMES: &[&str] = &[
-        "registry",
-        "namespace",
-        "language",
-        "name",
-    ];
+    const SETTINGS_FIELD_NAMES: &[&str] = &["registry", "namespace", "language", "name"];
 
     /// Returns the built-in defaults for settings fields.
     pub fn defaults() -> Self {
