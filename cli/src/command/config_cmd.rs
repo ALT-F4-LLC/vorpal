@@ -2,9 +2,9 @@ use anyhow::{anyhow, Result};
 use clap::Subcommand;
 use std::path::Path;
 
-use crate::command::settings::{
-    get_user_settings_path, load_project_settings, load_user_settings, resolve_settings,
-    save_project_settings, save_user_settings, Settings,
+use crate::command::config::{
+    get_user_config_path, load_user_config, resolve_config, save_project_config, save_user_config,
+    VorpalConfig,
 };
 
 /// Subcommands for `vorpal config`.
@@ -29,23 +29,28 @@ pub enum ConfigAction {
 /// Handle `vorpal config set <key> <value>`.
 ///
 /// When `user_level` is true, writes to `~/.vorpal/settings.json`.
-/// Otherwise, writes to the project-level config file at `config_path`
-/// (typically `Vorpal.toml`) under the `[settings]` section.
+/// Otherwise, writes the key-value pair directly to the project-level
+/// config file at `config_path` (typically `Vorpal.toml`).
 pub fn handle_set(key: &str, value: &str, user_level: bool, config_path: &Path) -> Result<()> {
+    // Validate the key name
+    if !VorpalConfig::field_names().contains(&key) {
+        return Err(anyhow!(
+            "unknown setting key '{}'. Valid keys: {}",
+            key,
+            VorpalConfig::field_names().join(", ")
+        ));
+    }
+
     if user_level {
-        let path = get_user_settings_path();
-        let mut settings = load_user_settings(&path)?;
-        settings
+        let path = get_user_config_path();
+        let mut config = load_user_config(&path)?;
+        config
             .set_by_name(key, value.to_string())
             .map_err(|e| anyhow!("{}", e))?;
-        save_user_settings(&path, &settings)?;
+        save_user_config(&path, &config)?;
         println!("Set {} = {} (user: {})", key, value, path.display());
     } else {
-        let mut settings = load_project_settings(config_path)?;
-        settings
-            .set_by_name(key, value.to_string())
-            .map_err(|e| anyhow!("{}", e))?;
-        save_project_settings(config_path, &settings)?;
+        save_project_config(config_path, key, value)?;
         println!(
             "Set {} = {} (project: {})",
             key,
@@ -61,15 +66,15 @@ pub fn handle_set(key: &str, value: &str, user_level: bool, config_path: &Path) 
 /// Resolves the value across all layers and prints it along with the source.
 pub fn handle_get(key: &str, _user_level: bool, config_path: &Path) -> Result<()> {
     // Validate the key name before resolving
-    if !Settings::field_names().contains(&key) {
+    if !VorpalConfig::field_names().contains(&key) {
         return Err(anyhow!(
             "unknown setting key '{}'. Valid keys: {}",
             key,
-            Settings::field_names().join(", ")
+            VorpalConfig::field_names().join(", ")
         ));
     }
 
-    let resolved = resolve_settings(config_path)?;
+    let (resolved, _) = resolve_config(config_path)?;
     match resolved.get_by_name(key) {
         Some(rv) => {
             println!("{} = {} ({})", key, rv.value, rv.source);
@@ -78,7 +83,7 @@ pub fn handle_get(key: &str, _user_level: bool, config_path: &Path) -> Result<()
         None => Err(anyhow!(
             "unknown setting key '{}'. Valid keys: {}",
             key,
-            Settings::field_names().join(", ")
+            VorpalConfig::field_names().join(", ")
         )),
     }
 }
@@ -87,8 +92,8 @@ pub fn handle_get(key: &str, _user_level: bool, config_path: &Path) -> Result<()
 ///
 /// Prints all configuration values in a table with KEY, VALUE, and SOURCE columns.
 pub fn handle_show(config_path: &Path) -> Result<()> {
-    let resolved = resolve_settings(config_path)?;
-    let names = Settings::field_names();
+    let (resolved, _) = resolve_config(config_path)?;
+    let names = VorpalConfig::field_names();
 
     // Collect rows to compute column widths
     let mut rows: Vec<(&str, String, String)> = Vec::with_capacity(names.len());

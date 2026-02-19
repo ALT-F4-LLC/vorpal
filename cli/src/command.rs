@@ -4,7 +4,6 @@ use crate::command::{
 };
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
-use config::VorpalConfig;
 use oauth2::{
     basic::BasicClient, AuthUrl, ClientId, DeviceAuthorizationUrl, Scope,
     StandardDeviceAuthorizationResponse, TokenResponse, TokenUrl,
@@ -12,11 +11,7 @@ use oauth2::{
 use path_clean::PathClean;
 use rustls::crypto::ring;
 use std::{collections::BTreeMap, env::current_dir, path::PathBuf, process::exit};
-use tokio::{
-    fs::{read, write},
-    time::sleep,
-};
-use toml::from_str;
+use tokio::{fs::write, time::sleep};
 use tracing::{error, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::{
@@ -31,7 +26,6 @@ mod init;
 mod inspect;
 mod lock;
 mod run;
-pub mod settings;
 mod start;
 mod store;
 mod system;
@@ -310,14 +304,16 @@ pub async fn run() -> Result<()> {
     // Resolve layered settings (user config + project config + built-in defaults).
     // If config loading fails (e.g. malformed file), fall back to built-in defaults
     // so that the CLI still works without a valid config.
-    let resolved = settings::resolve_settings(&config_for_settings).unwrap_or_else(|_| {
-        let defaults = settings::Settings::defaults();
-        settings::ResolvedSettings::resolve(
-            &defaults,
-            &settings::Settings::default(),
-            &settings::Settings::default(),
-        )
-    });
+    let (resolved, project_config) =
+        config::resolve_config(&config_for_settings).unwrap_or_else(|_| {
+            let defaults = config::VorpalConfig::defaults();
+            let resolved = config::ResolvedSettings::resolve(
+                &defaults,
+                &config::VorpalConfig::default(),
+                &config::VorpalConfig::default(),
+            );
+            (resolved, config::VorpalConfig::default())
+        });
 
     // Helper: if the parsed value matches the hardcoded clap default, substitute the
     // resolved settings value. This ensures explicit CLI flags always win, while
@@ -333,7 +329,7 @@ pub async fn run() -> Result<()> {
     match &command {
         Command::Build {
             agent,
-            config,
+            config: _,
             context,
             export,
             name,
@@ -366,82 +362,56 @@ pub async fn run() -> Result<()> {
                 exit(1);
             }
 
-            // Set default configurations
+            // Use the project config already loaded during resolution
 
-            let mut config_environments = Vec::new();
             let config_language = resolved.language.value.clone();
             let config_name = resolved.name.value.clone();
+
+            let mut config_environments = Vec::new();
             let mut config_source_go_directory = None;
             let mut config_source_includes = Vec::new();
             let mut config_source_rust_bin = None;
             let mut config_source_rust_packages = None;
             let mut config_source_script = None;
 
-            // Load project configuration
-
-            let mut config_path = config.to_path_buf();
-
-            if !config.is_absolute() {
-                let current_dir = current_dir().expect("failed to get current directory");
-
-                config_path = current_dir.join(config).clean().to_path_buf();
-            }
-
-            config_path = config_path.clean();
-
-            // Load project configuration value, if exists
-
-            let config = match read(&config_path).await {
-                Err(e) => Err(anyhow!("Failed to read {}: {}", config_path.display(), e)),
-
-                Ok(toml_bytes) => {
-                    let toml_str = String::from_utf8_lossy(&toml_bytes);
-
-                    match from_str::<VorpalConfig>(&toml_str) {
-                        Err(e) => Err(anyhow!("Failed to parse: {}", e)),
-                        Ok(toml) => Ok(toml),
-                    }
-                }
-            }?;
-
-            if let Some(environments) = config.environments {
+            if let Some(environments) = &project_config.environments {
                 if !environments.is_empty() {
-                    config_environments = environments;
+                    config_environments = environments.clone();
                 }
             }
 
-            if let Some(config_source) = config.source {
-                if let Some(config_source_go) = config_source.go {
-                    if let Some(directory) = config_source_go.directory {
+            if let Some(config_source) = &project_config.source {
+                if let Some(config_source_go) = &config_source.go {
+                    if let Some(directory) = &config_source_go.directory {
                         if !directory.is_empty() {
-                            config_source_go_directory = Some(directory);
+                            config_source_go_directory = Some(directory.clone());
                         }
                     }
                 }
 
-                if let Some(includes) = config_source.includes {
+                if let Some(includes) = &config_source.includes {
                     if !includes.is_empty() {
-                        config_source_includes = includes;
+                        config_source_includes = includes.clone();
                     }
                 }
 
-                if let Some(config_source_rust) = config_source.rust {
-                    if let Some(ca_source_rust_bin) = config_source_rust.bin {
+                if let Some(config_source_rust) = &config_source.rust {
+                    if let Some(ca_source_rust_bin) = &config_source_rust.bin {
                         if !ca_source_rust_bin.is_empty() {
-                            config_source_rust_bin = Some(ca_source_rust_bin);
+                            config_source_rust_bin = Some(ca_source_rust_bin.clone());
                         }
                     }
 
-                    if let Some(packages) = config_source_rust.packages {
+                    if let Some(packages) = &config_source_rust.packages {
                         if !packages.is_empty() {
-                            config_source_rust_packages = Some(packages);
+                            config_source_rust_packages = Some(packages.clone());
                         }
                     }
                 }
 
-                if let Some(script) = config_source.script {
+                if let Some(script) = &config_source.script {
                     if !script.is_empty() {
-                        config_source_script = Some(script);
+                        config_source_script = Some(script.clone());
                     }
                 }
             };
