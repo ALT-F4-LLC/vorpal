@@ -1,8 +1,15 @@
+[settings]
 language = "rust"
 name = "vorpal-config"
 
 [source]
-includes = ["config", "sdk/rust"]
+includes = [
+    "config",
+    "sdk/rust",
+]
 
 [source.rust]
-packages = ["vorpal-config", "vorpal-sdk"]
+packages = [
+    "vorpal-config",
+    "vorpal-sdk",
+]

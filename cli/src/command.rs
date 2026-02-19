@@ -26,6 +26,7 @@ use vorpal_sdk::{
 
 mod build;
 mod config;
+mod config_cmd;
 mod init;
 mod inspect;
 mod lock;
@@ -33,6 +34,7 @@ mod run;
 mod start;
 mod store;
 mod system;
+pub mod settings;
 
 pub fn get_default_namespace() -> String {
     DEFAULT_NAMESPACE.to_string()
@@ -179,6 +181,16 @@ pub enum Command {
         worker: String,
     },
 
+    /// Manage configuration settings
+    Config {
+        /// Apply to user-level config (~/.vorpal/settings.json) instead of project-level
+        #[arg(long)]
+        user: bool,
+
+        #[command(subcommand)]
+        action: config_cmd::ConfigAction,
+    },
+
     /// Initialize Vorpal in a directory
     Init {
         /// Project name
@@ -285,6 +297,29 @@ pub async fn run() -> Result<()> {
 
     subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
+    // Resolve layered settings (user config + project config + built-in defaults).
+    // If config loading fails (e.g. malformed file), fall back to built-in defaults
+    // so that the CLI still works without a valid config.
+    let resolved = settings::resolve_settings().unwrap_or_else(|_| {
+        let defaults = settings::Settings::defaults();
+        settings::ResolvedSettings::resolve(
+            &defaults,
+            &settings::Settings::default(),
+            &settings::Settings::default(),
+        )
+    });
+
+    // Helper: if the parsed value matches the hardcoded clap default, substitute the
+    // resolved settings value. This ensures explicit CLI flags always win, while
+    // config-file values override built-in defaults.
+    let apply_default = |parsed: &str, clap_default: &str, resolved_value: &str| -> String {
+        if parsed == clap_default {
+            resolved_value.to_string()
+        } else {
+            parsed.to_string()
+        }
+    };
+
     match &command {
         Command::Build {
             agent,
@@ -301,6 +336,20 @@ pub async fn run() -> Result<()> {
             variable,
             worker,
         } => {
+            // Apply resolved settings as fallbacks for hardcoded clap defaults
+            let default_addr = get_default_address();
+            let default_ns = get_default_namespace();
+
+            // Agent and worker are local services — they should NOT inherit the
+            // `registry` setting. Only override them when the user passes an
+            // explicit --agent / --worker flag.
+            let effective_agent = agent.to_string();
+            let effective_registry =
+                apply_default(registry, &default_addr, &resolved.registry.value);
+            let effective_worker = worker.to_string();
+            let effective_namespace =
+                apply_default(namespace, &default_ns, &resolved.namespace.value);
+
             if name.is_empty() {
                 error!("no name specified");
 
@@ -310,8 +359,8 @@ pub async fn run() -> Result<()> {
             // Set default configurations
 
             let mut config_environments = Vec::new();
-            let mut config_language = "rust".to_string();
-            let mut config_name = "vorpal".to_string();
+            let config_language = resolved.language.value.clone();
+            let config_name = resolved.name.value.clone();
             let mut config_source_go_directory = None;
             let mut config_source_includes = Vec::new();
             let mut config_source_rust_bin = None;
@@ -348,16 +397,6 @@ pub async fn run() -> Result<()> {
             if let Some(environments) = config.environments {
                 if !environments.is_empty() {
                     config_environments = environments;
-                }
-            }
-
-            if let Some(language) = config.language {
-                config_language = language;
-            }
-
-            if let Some(name) = config.name {
-                if !name.is_empty() {
-                    config_name = name;
                 }
             }
 
@@ -416,7 +455,7 @@ pub async fn run() -> Result<()> {
                 context: context.clone(),
                 export: *export,
                 name: name.clone(),
-                namespace: namespace.clone(),
+                namespace: effective_namespace.clone(),
                 path: *path,
                 rebuild: *rebuild,
                 system: system.clone(),
@@ -443,13 +482,21 @@ pub async fn run() -> Result<()> {
             };
 
             let run_service = build::RunArgsService {
-                agent: agent.to_string(),
-                registry: registry.to_string(),
-                worker: worker.to_string(),
+                agent: effective_agent,
+                registry: effective_registry,
+                worker: effective_worker,
             };
 
             build::run(run_artifact, run_config, run_service).await
         }
+
+        Command::Config { user, action } => match action {
+            config_cmd::ConfigAction::Set { key, value } => {
+                config_cmd::handle_set(key, value, *user)
+            }
+            config_cmd::ConfigAction::Get { key } => config_cmd::handle_get(key, *user),
+            config_cmd::ConfigAction::Show => config_cmd::handle_show(),
+        },
 
         Command::Init { name, path } => init::run(name, path).await,
 
@@ -457,7 +504,13 @@ pub async fn run() -> Result<()> {
             digest,
             namespace,
             registry,
-        } => inspect::run(digest, namespace, registry).await,
+        } => {
+            let effective_registry =
+                apply_default(registry, &get_default_address(), &resolved.registry.value);
+            let effective_namespace =
+                apply_default(namespace, &get_default_namespace(), &resolved.namespace.value);
+            inspect::run(digest, &effective_namespace, &effective_registry).await
+        }
 
         Command::Login {
             issuer,
@@ -465,9 +518,19 @@ pub async fn run() -> Result<()> {
             issuer_client_id,
             registry,
         } => {
+            let effective_issuer = apply_default(
+                issuer,
+                "http://localhost:8080/realms/vorpal",
+                &resolved.issuer.value,
+            );
+            let effective_issuer_client_id =
+                apply_default(issuer_client_id, "cli", &resolved.issuer_client_id.value);
+            let effective_registry =
+                apply_default(registry, &get_default_address(), &resolved.registry.value);
+
             let discovery_url = format!(
                 "{}/.well-known/openid-configuration",
-                issuer.trim_end_matches('/')
+                effective_issuer.trim_end_matches('/')
             );
 
             let doc: serde_json::Value = reqwest::get(&discovery_url)
@@ -488,10 +551,11 @@ pub async fn run() -> Result<()> {
 
             let client_device_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
 
-            let client = BasicClient::new(ClientId::new(issuer_client_id.to_string()))
-                .set_auth_uri(AuthUrl::new(issuer.to_string())?)
-                .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
-                .set_device_authorization_url(client_device_url);
+            let client =
+                BasicClient::new(ClientId::new(effective_issuer_client_id.clone()))
+                    .set_auth_uri(AuthUrl::new(effective_issuer.clone())?)
+                    .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
+                    .set_device_authorization_url(client_device_url);
 
             let http_client = reqwest::ClientBuilder::new()
                 .redirect(reqwest::redirect::Policy::none())
@@ -549,7 +613,7 @@ pub async fn run() -> Result<()> {
             let content = VorpalCredentialsContent {
                 access_token: access_token.to_string(),
                 audience: issuer_audience.clone(),
-                client_id: issuer_client_id.clone(),
+                client_id: effective_issuer_client_id.clone(),
                 expires_in,
                 issued_at: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -564,8 +628,8 @@ pub async fn run() -> Result<()> {
             let mut issuer_map = BTreeMap::new();
             let mut registry_map = BTreeMap::new();
 
-            issuer_map.insert(issuer.to_string(), content);
-            registry_map.insert(registry.to_string(), issuer.to_string());
+            issuer_map.insert(effective_issuer.clone(), content);
+            registry_map.insert(effective_registry.clone(), effective_issuer.clone());
 
             let credentials = VorpalCredentials {
                 issuer: issuer_map,
@@ -584,7 +648,11 @@ pub async fn run() -> Result<()> {
             args,
             bin,
             registry,
-        } => run::run(alias, args, bin.as_deref(), registry).await,
+        } => {
+            let effective_registry =
+                apply_default(registry, &get_default_address(), &resolved.registry.value);
+            run::run(alias, args, bin.as_deref(), &effective_registry).await
+        }
 
         Command::System(system) => match system {
             CommandSystem::Keys(keys) => match keys {

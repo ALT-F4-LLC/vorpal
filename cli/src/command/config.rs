@@ -35,8 +35,6 @@ pub struct VorpalConfigSource {
 #[derive(Clone, Debug, Deserialize)]
 pub struct VorpalConfig {
     pub environments: Option<Vec<String>>,
-    pub language: Option<String>,
-    pub name: Option<String>,
     pub source: Option<VorpalConfigSource>,
 }
 
