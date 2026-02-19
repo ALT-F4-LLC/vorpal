@@ -329,7 +329,6 @@ pub async fn run() -> Result<()> {
     match &command {
         Command::Build {
             agent,
-            config: _,
             context,
             export,
             name,
@@ -341,6 +340,7 @@ pub async fn run() -> Result<()> {
             unlock,
             variable,
             worker,
+            ..
         } => {
             // Apply resolved settings as fallbacks for hardcoded clap defaults
             let default_addr = get_default_address();
