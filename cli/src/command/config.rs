@@ -4,8 +4,7 @@ use port_selector::random_free_port;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fmt,
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -164,11 +163,7 @@ impl ResolvedSettings {
     /// Resolve three layers into a single `ResolvedSettings`.
     ///
     /// Precedence (highest to lowest): `project` > `user` > `defaults`.
-    pub fn resolve(
-        defaults: &VorpalConfig,
-        user: &VorpalConfig,
-        project: &VorpalConfig,
-    ) -> Self {
+    pub fn resolve(defaults: &VorpalConfig, user: &VorpalConfig, project: &VorpalConfig) -> Self {
         fn pick(
             default: &Option<String>,
             user: &Option<String>,
@@ -277,8 +272,8 @@ pub fn save_user_config(path: &Path, config: &VorpalConfig) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create directory {}", parent.display()))?;
     }
-    let json = serde_json::to_string_pretty(config)
-        .context("failed to serialize user config to JSON")?;
+    let json =
+        serde_json::to_string_pretty(config).context("failed to serialize user config to JSON")?;
     fs::write(path, json)
         .with_context(|| format!("failed to write user config to {}", path.display()))?;
     Ok(())
