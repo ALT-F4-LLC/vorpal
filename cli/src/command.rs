@@ -505,13 +505,8 @@ pub async fn run() -> Result<()> {
             issuer_client_id,
             registry,
         } => {
-            let effective_issuer = apply_default(
-                issuer,
-                "http://localhost:8080/realms/vorpal",
-                &resolved.issuer.value,
-            );
-            let effective_issuer_client_id =
-                apply_default(issuer_client_id, "cli", &resolved.issuer_client_id.value);
+            let effective_issuer = issuer.clone();
+            let effective_issuer_client_id = issuer_client_id.clone();
             let effective_registry =
                 apply_default(registry, &get_default_address(), &resolved.registry.value);
 

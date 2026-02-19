@@ -55,10 +55,6 @@ pub struct VorpalConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub issuer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub issuer_client_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
     // Build config fields
@@ -73,8 +69,6 @@ impl VorpalConfig {
         "registry",
         "namespace",
         "language",
-        "issuer",
-        "issuer_client_id",
         "name",
     ];
 
@@ -84,8 +78,6 @@ impl VorpalConfig {
             registry: Some("unix:///var/lib/vorpal/vorpal.sock".to_string()),
             namespace: Some("library".to_string()),
             language: Some("rust".to_string()),
-            issuer: Some("http://localhost:8080/realms/vorpal".to_string()),
-            issuer_client_id: Some("cli".to_string()),
             name: Some("vorpal".to_string()),
             environments: None,
             source: None,
@@ -103,8 +95,6 @@ impl VorpalConfig {
             "registry" => self.registry = Some(value),
             "namespace" => self.namespace = Some(value),
             "language" => self.language = Some(value),
-            "issuer" => self.issuer = Some(value),
-            "issuer_client_id" => self.issuer_client_id = Some(value),
             "name" => self.name = Some(value),
             _ => {
                 return Err(format!(
@@ -154,8 +144,6 @@ pub struct ResolvedSettings {
     pub registry: ResolvedValue,
     pub namespace: ResolvedValue,
     pub language: ResolvedValue,
-    pub issuer: ResolvedValue,
-    pub issuer_client_id: ResolvedValue,
     pub name: ResolvedValue,
 }
 
@@ -196,12 +184,6 @@ impl ResolvedSettings {
             registry: pick(&defaults.registry, &user.registry, &project.registry),
             namespace: pick(&defaults.namespace, &user.namespace, &project.namespace),
             language: pick(&defaults.language, &user.language, &project.language),
-            issuer: pick(&defaults.issuer, &user.issuer, &project.issuer),
-            issuer_client_id: pick(
-                &defaults.issuer_client_id,
-                &user.issuer_client_id,
-                &project.issuer_client_id,
-            ),
             name: pick(&defaults.name, &user.name, &project.name),
         }
     }
@@ -212,8 +194,6 @@ impl ResolvedSettings {
             "registry" => Some(&self.registry),
             "namespace" => Some(&self.namespace),
             "language" => Some(&self.language),
-            "issuer" => Some(&self.issuer),
-            "issuer_client_id" => Some(&self.issuer_client_id),
             "name" => Some(&self.name),
             _ => None,
         }
