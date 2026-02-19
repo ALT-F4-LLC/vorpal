@@ -368,13 +368,6 @@ pub async fn build_source(
 
         let request = Request::new(tokio_stream::iter(source_stream));
 
-        // request.metadata_mut().insert(
-        //     "authorization",
-        //     format!("Bearer {}", service_secret)
-        //         .parse()
-        //         .expect("failed to set authorization header"),
-        // );
-
         client_archive.push(request).await.expect("failed to push");
 
         remove_file(&source_sandbox_archive).await?;

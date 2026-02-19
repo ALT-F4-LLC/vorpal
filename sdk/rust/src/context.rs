@@ -509,17 +509,17 @@ async fn get_client_tls_config(uri: &str) -> Result<Option<ClientTlsConfig>> {
         return Ok(None);
     }
 
-    let mut client_tls_config = ClientTlsConfig::new();
-
     let ca_pem_path = get_key_ca_path();
 
-    if ca_pem_path.exists() {
+    let client_tls_config = if ca_pem_path.exists() {
         let ca_pem = read(&ca_pem_path)
             .await
             .with_context(|| format!("failed to read CA certificate: {}", ca_pem_path.display()))?;
 
-        client_tls_config = client_tls_config.ca_certificate(Certificate::from_pem(ca_pem));
-    }
+        ClientTlsConfig::new().ca_certificate(Certificate::from_pem(ca_pem))
+    } else {
+        ClientTlsConfig::new().with_native_roots()
+    };
 
     Ok(Some(client_tls_config))
 }
