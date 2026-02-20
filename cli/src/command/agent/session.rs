@@ -215,6 +215,7 @@ pub fn load_session_conversation(file_path: &Path) -> Vec<DisplayLine> {
     let mut lines = Vec::new();
     // Tracks the last Edit tool's (old_string, new_string, file_path) for diff generation.
     let mut last_edit_input: Option<(String, String, String)> = None;
+    let mut turn_count: usize = 0;
 
     for line in content.lines() {
         let val: serde_json::Value = match serde_json::from_str(line) {
@@ -294,6 +295,10 @@ pub fn load_session_conversation(file_path: &Path) -> Vec<DisplayLine> {
                 }
             }
             "assistant" => {
+                turn_count += 1;
+                lines.push(DisplayLine::TurnStart {
+                    turn_number: Some(turn_count),
+                });
                 if let Some(message) = val.get("message") {
                     if let Some(content_arr) = message.get("content").and_then(|c| c.as_array()) {
                         for block in content_arr {
