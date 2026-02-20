@@ -252,8 +252,8 @@ async fn event_loop(
             Some(result) = reader.next() => {
                 match result {
                     Ok(Event::Key(key_event)) => {
-                        // Only handle key press events (ignore release/repeat).
-                        if key_event.kind == KeyEventKind::Press {
+                        // Handle key press and repeat events (ignore release).
+                        if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                             input::handle_key(app, manager, key_event).await;
                             needs_draw = true;
                         }
