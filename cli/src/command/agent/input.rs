@@ -8,7 +8,7 @@
 use super::manager::AgentManager;
 use super::state::{
     AgentActivity, AgentState, AgentStatus, App, DiffLine, DisplayLine, InputField, InputMode,
-    InputOverrides, SplitPane, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    SplitPane, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::ui::{BLOCK_MARKER, RESULT_CONNECTOR, SESSION_MARKER};
 use crossterm::{
@@ -169,7 +169,7 @@ fn action_quit_tab(app: &mut App) {
             AgentStatus::Running => {
                 app.confirm_close = true;
             }
-            AgentStatus::Exited(_) => {
+            AgentStatus::Pending | AgentStatus::Exited(_) => {
                 app.remove_agent(app.focused);
                 if app.agents.is_empty() {
                     app.should_quit = true;
@@ -192,6 +192,9 @@ fn action_edit(app: &mut App) {
             }
             (AgentStatus::Running, _) => {
                 app.set_status_message("Agent is still running");
+            }
+            (AgentStatus::Pending, _) => {
+                app.set_status_message("Agent is pending — submit a prompt first");
             }
             (_, None) => {
                 app.set_status_message("No session ID -- agent must complete first");
@@ -565,12 +568,23 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
 
         // Next search match / new agent.
         // When search matches are active, `n` jumps to the next match.
-        // Otherwise, `n` opens the quick prompt input form directly.
+        // Otherwise, `n` creates a blank pending agent tab with inline chat.
         KeyCode::Char('n') => {
             if !app.search_matches.is_empty() {
                 app.search_next(viewport_height());
             } else {
-                app.enter_input_mode();
+                let agent_id = manager.allocate_id();
+                let agent = AgentState::new_pending(
+                    agent_id,
+                    String::new(),
+                    app.default_workspace.clone(),
+                    app.default_claude_options.clone(),
+                );
+                app.add_agent(agent);
+                let new_index = app.agents.len() - 1;
+                app.focus_agent(new_index);
+                app.input_mode = InputMode::Chat;
+                app.set_status_message(format!("New agent {}", agent_id + 1));
             }
         }
 
@@ -954,7 +968,7 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
             .and_then(|a| a.session_id.clone());
         let session_ref = session_id.as_deref();
         match manager
-            .spawn(&prompt, &workspace, &claude_options, session_ref)
+            .spawn(&prompt, &workspace, &claude_options, session_ref, None)
             .await
         {
             Ok(agent_id) => {
@@ -992,7 +1006,7 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
     } else {
         // New-agent flow.
         match manager
-            .spawn(&prompt, &workspace, &claude_options, None)
+            .spawn(&prompt, &workspace, &claude_options, None, None)
             .await
         {
             Ok(agent_id) => {
@@ -1226,30 +1240,71 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
             app.input_mode = InputMode::Normal;
             app.set_status_message(format!("Message queued ({queue_len} pending)"));
         }
+        AgentStatus::Pending => {
+            // First message to a pending agent — spawn the process.
+            let workspace = agent.workspace.clone();
+            let claude_options = agent.claude_options.clone();
+            let pending_id = agent.id;
+
+            match manager.spawn(&text, &workspace, &claude_options, None, Some(pending_id)).await {
+                Ok(new_agent_id) => {
+                    app.save_to_history(&text, &workspace, &claude_options);
+                    let agent_mut = app.agents.get_mut(app.focused).unwrap();
+                    agent_mut.activate_after_spawn(new_agent_id, text, false);
+                    app.rebuild_agent_index();
+                    app.finish_chat_submit();
+                    app.set_status_message(format!("Spawned agent {}", app.focused + 1));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("Spawn failed: {e}"));
+                    // Transition to Exited so the tab badge reflects the failure,
+                    // and push the error into the output buffer so the user can
+                    // see what went wrong after the status message expires.
+                    if let Some(agent_mut) = app.agents.get_mut(app.focused) {
+                        agent_mut.push_line(DisplayLine::System(format!(
+                            "Spawn failed: {e}"
+                        )));
+                        agent_mut.status = AgentStatus::Exited(None);
+                    }
+                }
+            }
+        }
         AgentStatus::Exited(_) => {
             if agent.session_id.is_none() {
                 app.set_status_message("No session ID — agent must complete first.");
                 return;
             }
-            // Set up the respond flow: populate the standard input form
-            // from the focused agent's options and inject the chat text as
-            // the prompt, then trigger submit_and_spawn().
-            let agent_opts = agent.claude_options.clone();
-            let agent_workspace = agent.workspace.clone();
-            app.respond_target = Some(agent.id);
-            app.enter_input_mode_with(Some(InputOverrides {
-                claude_options: agent_opts,
-                workspace: agent_workspace,
-            }));
-            // Overwrite the prompt field with our chat text.
-            app.input.set_text(&text);
-            // Clear the inline chat buffer and reset history state.
-            app.chat_input.clear();
-            app.chat_history_index = None;
-            app.chat_history_stash.clear();
-            // submit_and_spawn will call exit_input_mode() internally
-            // (via submit_input()), restoring InputMode::Normal.
-            submit_and_spawn(app, manager).await;
+            // Respond flow: spawn directly with the agent's existing options
+            // and session, bypassing the InputMode::Input popup entirely.
+            let workspace = agent.workspace.clone();
+            let claude_options = agent.claude_options.clone();
+            let session_id = agent.session_id.clone();
+            let target_id = agent.id;
+
+            match manager
+                .spawn(&text, &workspace, &claude_options, session_id.as_deref(), None)
+                .await
+            {
+                Ok(new_agent_id) => {
+                    app.save_to_history(&text, &workspace, &claude_options);
+                    if let Some(agent_mut) = app.agent_by_id_mut(target_id) {
+                        agent_mut.activate_after_spawn(new_agent_id, text, true);
+                        app.rebuild_agent_index();
+                    } else {
+                        tracing::warn!(target_id, "agent disappeared before spawn completed");
+                    }
+                    app.finish_chat_submit();
+                    app.set_status_message(format!("Resumed agent {}", app.focused + 1));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("Spawn failed: {e}"));
+                    if let Some(agent_mut) = app.agent_by_id_mut(target_id) {
+                        agent_mut.push_line(DisplayLine::System(format!(
+                            "Resume failed: {e}"
+                        )));
+                    }
+                }
+            }
         }
     }
 }

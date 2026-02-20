@@ -52,6 +52,7 @@ pub fn export_session(agent: &AgentState) -> Result<PathBuf, String> {
     .unwrap();
 
     let status_str = match &agent.status {
+        AgentStatus::Pending => "Pending".to_string(),
         AgentStatus::Running => "Running".to_string(),
         AgentStatus::Exited(Some(code)) => format!("Exited (code {code})"),
         AgentStatus::Exited(None) => "Exited".to_string(),

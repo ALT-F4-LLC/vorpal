@@ -165,7 +165,7 @@ pub async fn run(
     // Spawn initial agents from prompts/workspaces pairs.
     for (prompt, workspace) in prompts.iter().zip(workspaces.iter()) {
         let agent_id = manager
-            .spawn(prompt, workspace, &claude_options, None)
+            .spawn(prompt, workspace, &claude_options, None, None)
             .await?;
         app.add_agent(AgentState::new(
             agent_id,
@@ -442,7 +442,7 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
                         let remaining = agent.message_queue.len();
 
                         match manager
-                            .spawn(&queued_msg, &workspace, &opts, session_id.as_deref())
+                            .spawn(&queued_msg, &workspace, &opts, session_id.as_deref(), None)
                             .await
                         {
                             Ok(new_agent_id) => {

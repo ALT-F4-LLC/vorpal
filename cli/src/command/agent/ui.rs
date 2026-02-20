@@ -224,6 +224,7 @@ fn render_tabs(app: &mut App, frame: &mut Frame, area: Rect) {
             let label = workspace_label(&agent.workspace);
             let num = i + 1;
             let (badge, badge_color) = match (&agent.status, &agent.activity) {
+                (&AgentStatus::Pending, _) => ("\u{25CB}", theme.tab_badge_idle), // ○
                 (AgentStatus::Exited(Some(0)), _) => (CHECK_MARK, theme.tab_badge_success),
                 (AgentStatus::Exited(_), _) => (CROSS_MARK, theme.tab_badge_error),
                 (AgentStatus::Running, AgentActivity::Idle) => (CIRCLE, theme.tab_badge_idle),
@@ -514,6 +515,7 @@ fn render_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
 
         // Status icon.
         let (icon, icon_color) = match (&agent.status, &agent.activity) {
+            (&AgentStatus::Pending, _) => ("\u{25CB}", theme.sidebar_dim), // ○
             (AgentStatus::Exited(Some(0)), _) => (CHECK_MARK, theme.sidebar_status_done),
             (AgentStatus::Exited(_), _) => (CROSS_MARK, theme.sidebar_status_error),
             (AgentStatus::Running, AgentActivity::Idle) => (CIRCLE, theme.sidebar_dim),
@@ -659,6 +661,19 @@ fn render_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
 // Content area
 // ---------------------------------------------------------------------------
 
+/// Render a centered placeholder message for pending agents.
+fn render_pending_placeholder(theme: &Theme, frame: &mut Frame, area: Rect, block: Block<'_>) {
+    let msg = Paragraph::new(Line::from(Span::styled(
+        "Type a message below to start this agent",
+        Style::default()
+            .fg(theme.content_empty)
+            .add_modifier(Modifier::DIM),
+    )))
+    .alignment(Alignment::Center)
+    .block(block);
+    frame.render_widget(msg, area);
+}
+
 /// Render the main content area with the focused agent's output.
 fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
     let block = Block::default().borders(Borders::NONE);
@@ -674,6 +689,11 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             let height = inner.height as usize;
             let focused = app.focused;
             let agent = &app.agents[focused];
+
+            if matches!(agent.status, AgentStatus::Pending) {
+                render_pending_placeholder(theme, frame, area, block);
+                return;
+            }
 
             if agent.output.is_empty() {
                 let spinner_frame = SPINNER_FRAMES[app.tick % SPINNER_FRAMES.len()];
@@ -954,6 +974,11 @@ fn render_content_pane(
         );
 
     let inner = block.inner(area);
+
+    if matches!(agent.status, AgentStatus::Pending) {
+        render_pending_placeholder(theme, frame, area, block);
+        return;
+    }
 
     if agent.output.is_empty() {
         let spinner_frame = SPINNER_FRAMES[app.tick % SPINNER_FRAMES.len()];
@@ -2133,11 +2158,19 @@ fn render_inline_input(app: &App, frame: &mut Frame, area: Rect) {
         .map(|a| matches!(a.status, AgentStatus::Running))
         .unwrap_or(false);
 
+    let agent_pending = app
+        .agents
+        .get(app.focused)
+        .map(|a| matches!(a.status, AgentStatus::Pending))
+        .unwrap_or(false);
+
     let text = app.chat_input.text();
 
     if text.is_empty() && !focused {
         // Show placeholder with context-aware hint.
-        let placeholder_text = if agent_running {
+        let placeholder_text = if agent_pending {
+            "Type your first message to start this agent..."
+        } else if agent_running {
             "Type a message... (will queue until agent finishes)"
         } else if app.kbd_enhanced {
             "Type a message... (Enter to send, Shift+Enter for newline)"
@@ -2257,11 +2290,15 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 Style::default().fg(theme.status_no_agent),
             )),
             Some(agent) => {
-                let (activity_label, activity_color) = match &agent.activity {
-                    AgentActivity::Idle => ("Idle", theme.activity_idle),
-                    AgentActivity::Thinking => ("Thinking", theme.activity_thinking),
-                    AgentActivity::Tool(_) => ("", theme.activity_tool),
-                    AgentActivity::Done => ("Done", theme.activity_done),
+                let (activity_label, activity_color) = if matches!(agent.status, AgentStatus::Pending) {
+                    ("Pending", theme.activity_idle)
+                } else {
+                    match &agent.activity {
+                        AgentActivity::Idle => ("Idle", theme.activity_idle),
+                        AgentActivity::Thinking => ("Thinking", theme.activity_thinking),
+                        AgentActivity::Tool(_) => ("", theme.activity_tool),
+                        AgentActivity::Done => ("Done", theme.activity_done),
+                    }
                 };
 
                 let activity_span = if let AgentActivity::Tool(name) = &agent.activity {
@@ -3422,6 +3459,7 @@ fn render_graph(app: &App, frame: &mut Frame, area: Rect) {
             let num = idx + 1;
 
             let (status_icon, icon_color) = match (&agent.status, &agent.activity) {
+                (&AgentStatus::Pending, _) => ("\u{25CB}", theme.tab_badge_idle), // ○
                 (AgentStatus::Exited(Some(0)), _) => (CHECK_MARK, theme.tab_badge_success),
                 (AgentStatus::Exited(_), _) => (CROSS_MARK, theme.tab_badge_error),
                 (AgentStatus::Running, AgentActivity::Idle) => (CIRCLE, theme.tab_badge_idle),
@@ -3609,6 +3647,7 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
             let num = idx + 1;
 
             let (status_icon, icon_color) = match (&agent.status, &agent.activity) {
+                (&AgentStatus::Pending, _) => ("\u{25CB}", theme.tab_badge_idle), // ○
                 (AgentStatus::Exited(Some(0)), _) => {
                     done_count += 1;
                     (CHECK_MARK, theme.tab_badge_success)

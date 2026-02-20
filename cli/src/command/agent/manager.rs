@@ -82,6 +82,10 @@ impl AgentManager {
 
     /// Spawn a new Claude Code instance. Returns the assigned `agent_id`.
     ///
+    /// If `preallocated_id` is `Some`, that ID is reused (for pending agents
+    /// that already reserved an ID via [`allocate_id`]). Otherwise a new ID
+    /// is allocated from the monotonic counter.
+    ///
     /// The process is started with `--output-format stream-json --print --verbose`
     /// and its stdout/stderr are merged and parsed in a background tokio task.
     /// Events are sent through the channel as [`AgentEvent::Output`] and
@@ -92,9 +96,13 @@ impl AgentManager {
         workspace: &Path,
         claude_options: &ClaudeOptions,
         session_id: Option<&str>,
+        preallocated_id: Option<usize>,
     ) -> Result<usize> {
-        let agent_id = self.next_id;
-        self.next_id += 1;
+        let agent_id = preallocated_id.unwrap_or_else(|| {
+            let id = self.next_id;
+            self.next_id += 1;
+            id
+        });
 
         info!(
             agent_id,

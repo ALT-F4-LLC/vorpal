@@ -854,6 +854,8 @@ pub enum DisplayLine {
 /// Lifecycle status of an agent process.
 #[derive(Debug, Clone)]
 pub enum AgentStatus {
+    /// Agent window created, process not yet spawned.
+    Pending,
     Running,
     Exited(Option<i32>),
 }
@@ -1121,6 +1123,51 @@ impl AgentState {
         }
     }
 
+    /// Create a new agent state in the [`AgentStatus::Pending`] state.
+    ///
+    /// The agent window is created but the Claude process has not been
+    /// spawned yet. No prompt is set and the running timer is not started.
+    pub fn new_pending(
+        id: usize,
+        name: String,
+        workspace: PathBuf,
+        claude_options: ClaudeOptions,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            workspace,
+            prompt: String::new(),
+            status: AgentStatus::Pending,
+            output: VecDeque::with_capacity(MAX_OUTPUT_LINES),
+            scroll_offset: 0,
+            has_new_output: false,
+            activity: AgentActivity::Idle,
+            turn_count: 0,
+            tool_count: 0,
+            output_generation: 0,
+            cached_lines: None,
+            cached_row_count: 0,
+            cache_generation: 0,
+            cache_result_display: None,
+            session_id: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_cost_usd: 0.0,
+            turn_input_snapshot: 0,
+            turn_output_snapshot: 0,
+            turn_cost_snapshot: 0.0,
+            claude_options,
+            accumulated_active: Duration::ZERO,
+            running_since: None,
+            section_overrides: HashMap::new(),
+            section_overrides_generation: 0,
+            cache_section_overrides_generation: 0,
+            message_queue: VecDeque::new(),
+            interrupted: false,
+        }
+    }
+
     /// Create an agent state from a loaded session (no running process).
     ///
     /// The agent starts in [`AgentStatus::Exited`] with pre-populated output
@@ -1192,6 +1239,33 @@ impl AgentState {
     /// Start a new running segment. Call this when the agent is resumed.
     pub fn resume_timer(&mut self) {
         self.running_since = Some(Instant::now());
+    }
+
+    /// Transition this agent to [`AgentStatus::Running`] after a successful spawn.
+    ///
+    /// Handles the common state updates shared by both the first-message
+    /// (pending → running) and resume (exited → running) flows:
+    ///
+    /// - Pushes the user prompt into output
+    /// - Calls [`start_new_turn`] when resuming an existing session
+    /// - Sets `id`, `status`, `prompt`, and clears stale cache/scroll state
+    /// - Starts the running timer
+    pub fn activate_after_spawn(&mut self, new_id: usize, prompt: String, is_resume: bool) {
+        self.push_line(DisplayLine::UserPrompt {
+            content: prompt.clone(),
+        });
+        if is_resume {
+            self.start_new_turn();
+        }
+        self.id = new_id;
+        self.status = AgentStatus::Running;
+        self.activity = AgentActivity::Idle;
+        self.interrupted = false;
+        self.prompt = prompt;
+        self.scroll_offset = 0;
+        self.has_new_output = false;
+        self.cached_lines = None;
+        self.resume_timer();
     }
 
     /// Append a line to the output buffer, trimming from the front when over capacity.
@@ -1657,6 +1731,14 @@ impl App {
     /// Look up the Vec index for an agent id.
     pub fn agent_vec_index(&self, agent_id: usize) -> Option<usize> {
         self.agent_index.get(&agent_id).copied()
+    }
+
+    /// Clear inline chat input state after a successful submission.
+    pub fn finish_chat_submit(&mut self) {
+        self.chat_input.clear();
+        self.chat_history_index = None;
+        self.chat_history_stash.clear();
+        self.input_mode = InputMode::Normal;
     }
 
     /// Set a transient status message. It will auto-expire after
@@ -3583,5 +3665,116 @@ mod tests {
             replaced > original,
             "resume_timer should replace running_since with a more recent Instant"
         );
+    }
+
+    // -- Pending agent lifecycle ----------------------------------------------
+
+    #[test]
+    fn test_new_pending_creates_correct_initial_state() {
+        let agent = AgentState::new_pending(
+            42,
+            "test".to_string(),
+            PathBuf::from("/tmp"),
+            ClaudeOptions::default(),
+        );
+        assert!(matches!(agent.status, AgentStatus::Pending));
+        assert!(agent.prompt.is_empty());
+        assert!(agent.running_since.is_none());
+        assert!(matches!(agent.activity, AgentActivity::Idle));
+        assert_eq!(agent.id, 42);
+        assert!(agent.session_id.is_none());
+    }
+
+    #[test]
+    fn test_settings_work_on_pending_agents() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        app.add_agent(AgentState::new_pending(
+            0,
+            String::new(),
+            PathBuf::from("/tmp/ws"),
+            ClaudeOptions::default(),
+        ));
+
+        // enter_settings_mode should not panic and should set InputMode::Settings.
+        app.enter_settings_mode();
+        assert_eq!(app.input_mode, InputMode::Settings);
+
+        // Settings fields should be populated from the pending agent's claude_options
+        // (all default/empty for a default ClaudeOptions).
+        assert_eq!(app.model.text(), "");
+        assert_eq!(app.permission_mode.text(), "");
+
+        // Modify a settings field.
+        app.model.set_text("opus");
+
+        // save_settings should update the pending agent's claude_options.
+        app.save_settings();
+        assert_eq!(
+            app.agents[0].claude_options.model,
+            Some("opus".to_string())
+        );
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_pending_agent_unique_naming() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        app.add_agent(AgentState::new_pending(
+            0,
+            String::new(),
+            PathBuf::from("/tmp/ws"),
+            ClaudeOptions::default(),
+        ));
+        app.add_agent(AgentState::new_pending(
+            1,
+            String::new(),
+            PathBuf::from("/tmp/ws"),
+            ClaudeOptions::default(),
+        ));
+        // add_agent derives names from workspace basename; duplicates get a suffix.
+        assert_ne!(
+            app.agents[0].name, app.agents[1].name,
+            "two pending agents with the same workspace should get unique names"
+        );
+    }
+
+    #[test]
+    fn test_close_pending_agent() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        app.add_agent(AgentState::new_pending(
+            0,
+            String::new(),
+            PathBuf::from("/tmp/ws"),
+            ClaudeOptions::default(),
+        ));
+        assert_eq!(app.agents.len(), 1);
+
+        app.remove_agent(0);
+        assert_eq!(app.agents.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_pending_agents() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        for i in 0..3 {
+            app.add_agent(AgentState::new_pending(
+                i,
+                String::new(),
+                PathBuf::from(format!("/tmp/agent-{i}")),
+                ClaudeOptions::default(),
+            ));
+        }
+        assert_eq!(app.agents.len(), 3);
+
+        // All should be Pending.
+        for agent in &app.agents {
+            assert!(matches!(agent.status, AgentStatus::Pending));
+        }
+
+        // Focus each in turn — no panics.
+        for i in 0..3 {
+            app.focus_agent(i);
+            assert_eq!(app.focused, i);
+        }
     }
 }
