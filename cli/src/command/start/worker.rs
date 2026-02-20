@@ -13,8 +13,7 @@ use crate::command::{
 use anyhow::Result;
 use sha256::digest;
 use std::{
-    collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path,
-    process::Stdio,
+    collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio,
 };
 use tokio::{
     fs::{create_dir_all, read, remove_dir_all, remove_file, set_permissions, write},
@@ -334,9 +333,13 @@ async fn pull_artifact(
                         Status::internal(format!("failed to write artifact archive: {err}"))
                     })?;
 
-                set_timestamps(&artifact_archive_path).await.map_err(|err| {
-                    Status::internal(format!("failed to set artifact archive timestamps: {err}"))
-                })?;
+                set_timestamps(&artifact_archive_path)
+                    .await
+                    .map_err(|err| {
+                        Status::internal(format!(
+                            "failed to set artifact archive timestamps: {err}"
+                        ))
+                    })?;
             }
         }
     }
@@ -347,9 +350,9 @@ async fn pull_artifact(
 
     send_message(format!("unpack artifact: {artifact_digest}"), tx).await?;
 
-    create_dir_all(&artifact_output_path).await.map_err(|err| {
-        Status::internal(format!("failed to create artifact output path: {err}"))
-    })?;
+    create_dir_all(&artifact_output_path)
+        .await
+        .map_err(|err| Status::internal(format!("failed to create artifact output path: {err}")))?;
 
     unpack_zstd(&artifact_output_path, &artifact_archive_path)
         .await
