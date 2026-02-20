@@ -151,6 +151,13 @@ pub struct Theme {
     pub command_selected_fg: Color,
     pub command_desc_fg: Color,
     pub command_error_fg: Color,
+
+    // -- Inline chat input ----------------------------------------------------
+    pub chat_input_bg: Color,
+    pub chat_input_fg: Color,
+    pub chat_input_border: Color,
+    pub chat_input_placeholder: Color,
+    pub chat_input_focused_border: Color,
 }
 
 impl Theme {
@@ -279,6 +286,12 @@ impl Theme {
             command_selected_fg: Color::White,
             command_desc_fg: Color::Gray,
             command_error_fg: Color::Red,
+
+            chat_input_bg: Color::Reset,
+            chat_input_fg: Color::White,
+            chat_input_border: Color::DarkGray,
+            chat_input_placeholder: Color::DarkGray,
+            chat_input_focused_border: Color::Cyan,
         }
     }
 
@@ -407,6 +420,12 @@ impl Theme {
             command_selected_fg: Color::Black,
             command_desc_fg: Color::DarkGray,
             command_error_fg: Color::Red,
+
+            chat_input_bg: Color::Reset,
+            chat_input_fg: Color::Black,
+            chat_input_border: Color::Gray,
+            chat_input_placeholder: Color::Gray,
+            chat_input_focused_border: Color::Rgb(0, 140, 140),
         }
     }
 

@@ -4841,6 +4841,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tui-markdown",
+ "unicode-width",
  "url",
  "uuid",
  "vorpal-sdk",

@@ -21,6 +21,9 @@ const TOAST_TTL: Duration = Duration::from_secs(5);
 /// Maximum number of output lines retained per agent.
 pub const MAX_OUTPUT_LINES: usize = 10_000;
 
+/// Maximum number of messages that can be queued for a running agent.
+pub const MAX_MESSAGE_QUEUE: usize = 20;
+
 /// Valid Claude Code permission modes for the selector.
 pub const PERMISSION_MODES: &[&str] = &["default", "plan", "acceptEdits", "bypassPermissions"];
 
@@ -54,8 +57,8 @@ pub const COMMANDS: &[PaletteCommand] = &[
         description: "Create a new agent",
     },
     PaletteCommand {
-        name: "respond",
-        description: "Respond to an exited agent",
+        name: "edit",
+        description: "Edit agent options and prompt (full form)",
     },
     PaletteCommand {
         name: "search",
@@ -100,6 +103,14 @@ pub const COMMANDS: &[PaletteCommand] = &[
     PaletteCommand {
         name: "theme",
         description: "Cycle color theme",
+    },
+    PaletteCommand {
+        name: "settings",
+        description: "Edit agent options (model, permissions, effort...)",
+    },
+    PaletteCommand {
+        name: "clear-queue",
+        description: "Clear queued messages for focused agent",
     },
 ];
 
@@ -235,6 +246,78 @@ impl InputBuffer {
     /// Move the cursor to the end of the buffer.
     pub fn move_end(&mut self) {
         self.cursor = self.text.len();
+    }
+
+    /// Move the cursor up one line in multiline text.
+    ///
+    /// Finds the current line and character column, then moves the cursor to
+    /// the same character column on the previous line (clamped to that line's
+    /// length). Returns `true` if the cursor actually moved, `false` if
+    /// already on the first line (so callers can fall through to history
+    /// cycling).
+    pub fn move_up(&mut self) -> bool {
+        let before = &self.text[..self.cursor];
+        // Find the start of the current line.
+        let cur_line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        if cur_line_start == 0 {
+            return false; // already on the first line
+        }
+        // Character column (not byte offset) within the current line.
+        let col = self.text[cur_line_start..self.cursor].chars().count();
+        // Find the start of the previous line.
+        let prev_line_start = self.text[..cur_line_start - 1]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let prev_line = &self.text[prev_line_start..cur_line_start - 1];
+        let prev_char_count = prev_line.chars().count();
+        // Walk `col` characters (clamped) into the previous line to get a byte offset.
+        let target_col = col.min(prev_char_count);
+        self.cursor = prev_line_start
+            + prev_line
+                .char_indices()
+                .nth(target_col)
+                .map(|(i, _)| i)
+                .unwrap_or(prev_line.len());
+        true
+    }
+
+    /// Move the cursor down one line in multiline text.
+    ///
+    /// Finds the current line and character column, then moves the cursor to
+    /// the same character column on the next line (clamped to that line's
+    /// length). Returns `true` if the cursor actually moved, `false` if
+    /// already on the last line (so callers can fall through to history
+    /// cycling).
+    pub fn move_down(&mut self) -> bool {
+        let before = &self.text[..self.cursor];
+        let cur_line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        // Character column (not byte offset) within the current line.
+        let col = self.text[cur_line_start..self.cursor].chars().count();
+        // Find the end of the current line (next \n or end of text).
+        let cur_line_end = self.text[cur_line_start..]
+            .find('\n')
+            .map(|i| cur_line_start + i)
+            .unwrap_or(self.text.len());
+        if cur_line_end >= self.text.len() {
+            return false; // already on the last line
+        }
+        let next_line_start = cur_line_end + 1;
+        let next_line_end = self.text[next_line_start..]
+            .find('\n')
+            .map(|i| next_line_start + i)
+            .unwrap_or(self.text.len());
+        let next_line = &self.text[next_line_start..next_line_end];
+        let next_char_count = next_line.chars().count();
+        // Walk `col` characters (clamped) into the next line to get a byte offset.
+        let target_col = col.min(next_char_count);
+        self.cursor = next_line_start
+            + next_line
+                .char_indices()
+                .nth(target_col)
+                .map(|(i, _)| i)
+                .unwrap_or(next_line.len());
+        true
     }
 }
 
@@ -818,12 +901,14 @@ pub enum SplitPane {
     Right,
 }
 
-/// Whether the TUI is in normal navigation mode, prompt input mode, search mode, command mode,
-/// history search mode, template picker, or save-template dialog.
+/// Whether the TUI is in normal navigation mode, inline chat mode, prompt input mode, settings
+/// mode, search mode, command mode, history search mode, template picker, or save-template dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    Chat,
     Input,
+    Settings,
     Search,
     Command,
     HistorySearch,
@@ -949,6 +1034,9 @@ pub struct AgentState {
     pub section_overrides_generation: u64,
     /// The section overrides generation when the cache was last computed.
     pub cache_section_overrides_generation: u64,
+    /// Queue of messages waiting to be submitted when the agent finishes running.
+    /// Capped at [`MAX_MESSAGE_QUEUE`] entries.
+    pub message_queue: VecDeque<String>,
 }
 
 impl AgentState {
@@ -990,6 +1078,7 @@ impl AgentState {
             section_overrides: HashMap::new(),
             section_overrides_generation: 0,
             cache_section_overrides_generation: 0,
+            message_queue: VecDeque::new(),
         }
     }
 
@@ -1240,6 +1329,12 @@ pub struct App {
     /// Saved prompt text before the user started browsing history, so it can
     /// be restored when they press Down past the most recent entry.
     pub history_stash: String,
+    /// History index used by the inline chat mode (separate from `history_index`
+    /// so the two modes don't contaminate each other's browsing position).
+    pub chat_history_index: Option<usize>,
+    /// Saved chat input text before the user started browsing history in chat
+    /// mode. Restored when they press Down past the most recent entry.
+    pub chat_history_stash: String,
     /// Search query for Ctrl+R history search.
     pub history_search_query: InputBuffer,
     /// Filtered history results for Ctrl+R search (newest first).
@@ -1266,6 +1361,12 @@ pub struct App {
     /// Selected agent row in the dashboard (for Enter-to-focus navigation).
     pub dashboard_selected: usize,
 
+    // -- Terminal capabilities ---------------------------------------------------
+    /// Whether the Kitty keyboard enhancement protocol is active. When `true`,
+    /// modifier keys on Enter/Backspace are reported (e.g. Shift+Enter).
+    /// Used by the UI to show the correct newline hint in the chat input.
+    pub kbd_enhanced: bool,
+
     // -- Mouse state -----------------------------------------------------------
     /// Whether mouse capture is enabled. When true, crossterm captures mouse
     /// events (clicks, scroll). Defaults to `true`.
@@ -1278,6 +1379,10 @@ pub struct App {
     /// Cached content area [`Rect`] from the last render. Used by mouse scroll
     /// handling to limit scroll events to the output viewport.
     pub content_rect: Option<Rect>,
+    /// Cached inline chat input area [`Rect`] from the last render.
+    pub chat_input_rect: Rect,
+    /// Inline chat text buffer for the persistent input area.
+    pub chat_input: InputBuffer,
     /// Cached sidebar agent entry regions from the last render. Each entry
     /// maps a rendered [`Rect`] to the corresponding agent Vec index so
     /// mouse clicks can focus the correct agent from the sidebar.
@@ -1339,6 +1444,8 @@ impl App {
             history,
             history_index: None,
             history_stash: String::new(),
+            chat_history_index: None,
+            chat_history_stash: String::new(),
             history_search_query: InputBuffer::new(),
             history_search_results: Vec::new(),
             history_search_selected: 0,
@@ -1348,9 +1455,12 @@ impl App {
             show_graph: false,
             show_dashboard: false,
             dashboard_selected: 0,
+            kbd_enhanced: false,
             mouse_enabled: true,
             tab_rects: Vec::new(),
             content_rect: None,
+            chat_input_rect: Rect::default(),
+            chat_input: InputBuffer::new(),
             sidebar_rects: Vec::new(),
             input_field_rects: Vec::new(),
         }
@@ -1515,6 +1625,99 @@ impl App {
         self.quick_launch = true;
         self.history_index = None;
         self.history_stash.clear();
+    }
+
+    // -- Settings mode ---------------------------------------------------------
+
+    /// Enter settings mode for the focused agent, pre-populating option fields
+    /// from the agent's current `claude_options`.
+    pub fn enter_settings_mode(&mut self) {
+        if self.agents.is_empty() {
+            self.set_status_message("No agent focused");
+            return;
+        }
+        let opts = self.agents[self.focused].claude_options.clone();
+        self.permission_mode
+            .set_text(opts.permission_mode.unwrap_or_default());
+        self.model.set_text(opts.model.unwrap_or_default());
+        self.effort.set_text(opts.effort.unwrap_or_default());
+        self.max_budget.set_text(
+            opts.max_budget_usd
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+        );
+        self.allowed_tools.set_text(opts.allowed_tools.join(", "));
+        self.add_dir.set_text(opts.add_dirs.join(", "));
+        self.input_field = InputField::PermissionMode;
+        self.input_mode = InputMode::Settings;
+    }
+
+    /// Apply the current option field buffers back to the focused agent's
+    /// `claude_options` and exit settings mode.
+    ///
+    /// All fields are validated before any are written, so a parse error in
+    /// one field (e.g. budget) does not partially update the agent.
+    pub fn save_settings(&mut self) {
+        if let Some(agent) = self.agents.get_mut(self.focused) {
+            // -- Validate all fields upfront ------------------------------------
+            let perm = self.permission_mode.text().to_string();
+            let perm_val = if perm.is_empty() { None } else { Some(perm) };
+
+            let model = self.model.text().to_string();
+            let model_val = if model.is_empty() { None } else { Some(model) };
+
+            let effort = self.effort.text().to_string();
+            let effort_val = if effort.is_empty() { None } else { Some(effort) };
+
+            let budget = self.max_budget.text().trim().to_string();
+            let budget_val = if budget.is_empty() {
+                None
+            } else {
+                match budget.parse::<f64>() {
+                    Ok(v) => Some(v),
+                    Err(_) => {
+                        self.set_status_message(format!(
+                            "Invalid budget \"{budget}\" — fix the value and try again"
+                        ));
+                        self.input_field = InputField::MaxBudgetUsd;
+                        return;
+                    }
+                }
+            };
+
+            let tools = self.allowed_tools.text().to_string();
+            let tools_val: Vec<String> = if tools.is_empty() {
+                Vec::new()
+            } else {
+                tools.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            };
+
+            let dirs = self.add_dir.text().to_string();
+            let dirs_val: Vec<String> = if dirs.is_empty() {
+                Vec::new()
+            } else {
+                dirs.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            };
+
+            // -- Commit atomically ---------------------------------------------
+            agent.claude_options.permission_mode = perm_val;
+            agent.claude_options.model = model_val;
+            agent.claude_options.effort = effort_val;
+            agent.claude_options.max_budget_usd = budget_val;
+            agent.claude_options.allowed_tools = tools_val;
+            agent.claude_options.add_dirs = dirs_val;
+
+            self.set_status_message("Settings saved");
+        } else {
+            self.set_status_message("No agent focused — settings not saved");
+        }
+        self.input_mode = InputMode::Normal;
+        self.permission_mode.clear();
+        self.model.clear();
+        self.effort.clear();
+        self.max_budget.clear();
+        self.allowed_tools.clear();
+        self.add_dir.clear();
     }
 
     // -- Template methods ------------------------------------------------------
@@ -1920,6 +2123,57 @@ impl App {
         }
     }
 
+    /// Navigate to the previous (older) history entry in the inline chat.
+    ///
+    /// Works like [`history_prev`] but writes only the prompt text to
+    /// `chat_input` instead of populating the full input form.
+    pub fn history_prev_chat(&mut self) {
+        let entries = self.history.entries();
+        if entries.is_empty() {
+            return;
+        }
+        match self.chat_history_index {
+            None => {
+                self.chat_history_stash = self.chat_input.text().to_string();
+                self.chat_history_index = Some(0);
+                if let Some(entry) = entries.get(entries.len() - 1) {
+                    self.chat_input.set_text(&entry.prompt);
+                }
+            }
+            Some(idx) => {
+                let new_idx = idx + 1;
+                if new_idx < entries.len() {
+                    self.chat_history_index = Some(new_idx);
+                    if let Some(entry) = entries.get(entries.len() - 1 - new_idx) {
+                        self.chat_input.set_text(&entry.prompt);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Navigate to the next (newer) history entry in the inline chat.
+    ///
+    /// When the user presses Down past the most recent entry, the stashed
+    /// original text is restored into `chat_input`.
+    pub fn history_next_chat(&mut self) {
+        let entries = self.history.entries();
+        match self.chat_history_index {
+            None => {}
+            Some(0) => {
+                self.chat_history_index = None;
+                self.chat_input.set_text(&self.chat_history_stash);
+            }
+            Some(idx) => {
+                let new_idx = idx - 1;
+                self.chat_history_index = Some(new_idx);
+                if let Some(entry) = entries.get(entries.len() - 1 - new_idx) {
+                    self.chat_input.set_text(&entry.prompt);
+                }
+            }
+        }
+    }
+
     /// Apply a history entry at the given absolute index (into entries vec)
     /// to the input form fields.
     fn apply_history_entry(&mut self, entry_idx: usize) {
@@ -2182,6 +2436,18 @@ impl App {
             }
         }
         Some(removed)
+    }
+
+    /// Clear the message queue for the focused agent.
+    /// Returns the number of messages that were cleared.
+    pub fn clear_focused_queue(&mut self) -> usize {
+        if let Some(agent) = self.agents.get_mut(self.focused) {
+            let count = agent.message_queue.len();
+            agent.message_queue.clear();
+            count
+        } else {
+            0
+        }
     }
 }
 

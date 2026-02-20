@@ -13,9 +13,12 @@ use super::state::{
 use super::ui;
 use anyhow::Result;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind},
+    event::{
+        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
-    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{self, supports_keyboard_enhancement, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures_lite::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -31,22 +34,48 @@ use tracing::{debug, info, warn};
 
 /// Initialize the terminal for TUI rendering.
 ///
-/// Enables raw mode, switches to the alternate screen, and enables mouse
-/// capture so click and scroll events are delivered to the event loop.
-fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
+/// Enables raw mode, switches to the alternate screen, enables mouse
+/// capture, and (when the terminal supports it) enables the Kitty keyboard
+/// protocol so modifier keys on Enter/Backspace/etc. are reported.
+/// Returns the terminal and a flag indicating whether keyboard enhancement
+/// was enabled (needed for correct teardown).
+fn setup_terminal() -> Result<(Terminal<CrosstermBackend<Stdout>>, bool)> {
     terminal::enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+
+    // Enable the Kitty keyboard protocol when the terminal supports it.
+    // This lets crossterm report Shift/Ctrl/Alt modifiers on keys like
+    // Enter that are otherwise indistinguishable from their unmodified
+    // variants.
+    let kbd_enhanced = supports_keyboard_enhancement().unwrap_or(false);
+    if kbd_enhanced {
+        execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            )
+        )?;
+    }
+
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
-    Ok(terminal)
+    Ok((terminal, kbd_enhanced))
 }
 
 /// Restore the terminal to its original state.
 ///
-/// Disables mouse capture, disables raw mode, leaves the alternate screen,
-/// and shows the cursor.
-fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
+/// Pops keyboard enhancement flags (if they were pushed), disables mouse
+/// capture, disables raw mode, leaves the alternate screen, and shows the
+/// cursor.
+fn restore_terminal(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    kbd_enhanced: bool,
+) -> Result<()> {
+    if kbd_enhanced {
+        execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags)?;
+    }
     terminal::disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -120,8 +149,8 @@ pub async fn run(
     // Install panic hook guard — restores the original hook on drop (RAII).
     let _panic_guard = PanicGuard::install();
 
-    let mut terminal = setup_terminal()?;
-    debug!("terminal setup complete");
+    let (mut terminal, kbd_enhanced) = setup_terminal()?;
+    debug!(kbd_enhanced, "terminal setup complete");
 
     // Set up the event channel and agent manager.
     const EVENT_CHANNEL_CAPACITY: usize = 10_000;
@@ -131,6 +160,7 @@ pub async fn run(
         std::env::current_dir().unwrap_or_default(),
         claude_options.clone(),
     );
+    app.kbd_enhanced = kbd_enhanced;
 
     // Spawn initial agents from prompts/workspaces pairs.
     for (prompt, workspace) in prompts.iter().zip(workspaces.iter()) {
@@ -162,7 +192,7 @@ pub async fn run(
     // Cleanup: kill all agents and restore terminal state.
     info!("shutting down agent TUI");
     manager.kill_all().await;
-    restore_terminal(&mut terminal)?;
+    restore_terminal(&mut terminal, kbd_enhanced)?;
     debug!("terminal restored");
 
     // _panic_guard drops here, restoring the original panic hook.
@@ -216,7 +246,7 @@ async fn event_loop(
                 needs_draw = true;
             }
             Some(event) = event_rx.recv() => {
-                handle_app_event(app, manager, event);
+                handle_app_event(app, manager, event).await;
                 needs_draw = true;
             }
             Some(result) = reader.next() => {
@@ -261,7 +291,7 @@ async fn event_loop(
 // ---------------------------------------------------------------------------
 
 /// Handle an application event from the agent event channel.
-fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent) {
+async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent) {
     match event {
         AgentEvent::Output { agent_id, mut line } => {
             // Fix the placeholder "agent" sender on AgentMessage lines by
@@ -366,6 +396,80 @@ fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: AgentEvent
                     };
                     app.push_toast(msg, kind);
                     app.unread_agents.insert(agent_id);
+                }
+            }
+
+            // Queue drain: auto-submit next queued message for this agent,
+            // but only if the agent exited successfully (exit code 0).
+            // Failed agents keep their queue intact so users can inspect
+            // the failure and decide whether to retry or clear the queue.
+            //
+            // We spawn directly via the manager rather than routing through
+            // the input form (enter_input_mode_with / submit_and_spawn) to
+            // avoid a transient InputMode::Input state that could leave the
+            // UI in a broken mode if the spawn fails.
+            if exit_code == Some(0) {
+                if let Some(vec_idx) = app.agent_vec_index(agent_id) {
+                    let should_drain = app
+                        .agents
+                        .get(vec_idx)
+                        .is_some_and(|a| !a.message_queue.is_empty() && a.session_id.is_some());
+                    if should_drain {
+                        let agent = &mut app.agents[vec_idx];
+                        let queued_msg = agent.message_queue.pop_front().unwrap();
+                        let opts = agent.claude_options.clone();
+                        let workspace = agent.workspace.clone();
+                        let session_id = agent.session_id.clone();
+                        let remaining = agent.message_queue.len();
+
+                        match manager
+                            .spawn(&queued_msg, &workspace, &opts, session_id.as_deref())
+                            .await
+                        {
+                            Ok(new_agent_id) => {
+                                app.save_to_history(&queued_msg, &workspace, &opts);
+                                if let Some(agent) = app.agent_by_id_mut(agent_id) {
+                                    agent.push_line(DisplayLine::TurnStart);
+                                    agent.id = new_agent_id;
+                                    agent.status = AgentStatus::Running;
+                                    agent.activity = AgentActivity::Idle;
+                                    agent.prompt = queued_msg;
+                                    agent.scroll_offset = 0;
+                                    agent.has_new_output = false;
+                                    agent.cached_lines = None;
+                                    agent.resume_timer();
+                                    app.rebuild_agent_index();
+                                } else {
+                                    warn!(agent_id, new_agent_id, "queue drain: agent disappeared after spawn");
+                                }
+                                if remaining > 0 {
+                                    app.set_status_message(format!(
+                                        "Auto-submitted queued message ({remaining} remaining)"
+                                    ));
+                                } else {
+                                    app.set_status_message("Auto-submitted queued message");
+                                }
+                            }
+                            Err(e) => {
+                                // Re-queue the message so the user doesn't lose it.
+                                if let Some(agent) = app.agent_by_id_mut(agent_id) {
+                                    agent.message_queue.push_front(queued_msg);
+                                }
+                                app.set_status_message(format!("Queue drain failed: {e}"));
+                            }
+                        }
+                    }
+                }
+            } else if let Some(vec_idx) = app.agent_vec_index(agent_id) {
+                let queue_len = app
+                    .agents
+                    .get(vec_idx)
+                    .map(|a| a.message_queue.len())
+                    .unwrap_or(0);
+                if queue_len > 0 {
+                    app.set_status_message(format!(
+                        "Agent failed — {queue_len} queued message(s) preserved (use :clear-queue to discard)"
+                    ));
                 }
             }
         }

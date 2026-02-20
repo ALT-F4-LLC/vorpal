@@ -13,6 +13,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // ---------------------------------------------------------------------------
 // Unicode constants
@@ -33,7 +34,7 @@ const CONTINUATION_INDENT: &str = "  ";
 /// Minimum terminal width required for the TUI.
 const MIN_WIDTH: u16 = 40;
 /// Minimum terminal height required for the TUI.
-const MIN_HEIGHT: u16 = 8;
+const MIN_HEIGHT: u16 = 12;
 
 // ---------------------------------------------------------------------------
 // Main render entry point
@@ -41,8 +42,9 @@ const MIN_HEIGHT: u16 = 8;
 
 /// Render the entire TUI from application state.
 ///
-/// Splits the terminal into three vertical sections (tab bar, content area,
-/// status bar) and draws each one. If the help overlay is active it is drawn
+/// Splits the terminal into four vertical sections (tab bar, content area,
+/// inline input area, status bar) and draws each one. The inline input area
+/// is hidden when no agents exist. If the help overlay is active it is drawn
 /// on top of the full terminal area.
 pub fn render(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
@@ -79,15 +81,30 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     let sidebar_area = h_chunks[0];
     let main_area = h_chunks[1];
 
+    // Compute inline input area height dynamically from the chat text content.
+    // Hidden on the welcome screen; otherwise 1 row for the top border plus
+    // enough content rows to fit the wrapped text, clamped to 3..=8 total.
+    let input_height: u16 = if app.agents.is_empty() {
+        0
+    } else {
+        let content_lines = count_wrapped_lines(app.chat_input.text(), main_area.width as usize);
+        // border (1) + content rows (at least 2 so the input doesn't feel cramped)
+        let desired = 1 + content_lines.max(2) as u16;
+        desired.clamp(3, 8)
+    };
+
     let chunks = Layout::vertical([
-        Constraint::Length(3), // tab bar
-        Constraint::Fill(1),   // content
-        Constraint::Length(2), // status bar
+        Constraint::Length(3),            // tab bar
+        Constraint::Fill(1),             // content
+        Constraint::Length(input_height), // inline input area
+        Constraint::Length(2),           // status bar
     ])
     .split(main_area);
 
     // Store the content area rect for mouse scroll hit-testing.
     app.content_rect = Some(chunks[1]);
+    // Store the inline input area rect.
+    app.chat_input_rect = chunks[2];
 
     render_tabs(app, frame, chunks[0]);
 
@@ -107,7 +124,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         render_content(app, frame, chunks[1]);
     }
 
-    render_status(app, frame, chunks[2]);
+    render_inline_input(app, frame, chunks[2]);
+    render_status(app, frame, chunks[3]);
 
     if app.sidebar_visible && sidebar_width > 0 {
         render_sidebar(app, frame, sidebar_area);
@@ -135,6 +153,10 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     if app.input_mode == InputMode::Input {
         render_input(app, frame, area);
+    }
+
+    if app.input_mode == InputMode::Settings {
+        render_settings(app, frame, area);
     }
 
     if app.input_mode == InputMode::SaveTemplate {
@@ -1801,6 +1823,228 @@ fn format_elapsed(d: std::time::Duration) -> String {
     }
 }
 
+/// Compute the display-column position after each character when wrapping at
+/// `width` columns.  This is the single source of truth for character-level
+/// wrapping — [`count_wrapped_lines`], [`char_wrap`], and the cursor position
+/// calculation in [`render_inline_input`] all delegate to this function so
+/// they can never drift out of sync.
+///
+/// Calls `callback(ch, col_before, row)` for every character in `text`.
+/// `col_before` is the column the character starts at (after any wrap),
+/// and `row` is the zero-based visual row.
+fn walk_wrapped<F: FnMut(char, usize, usize)>(text: &str, width: usize, mut callback: F) {
+    let mut col = 0usize;
+    let mut row = 0usize;
+    for ch in text.chars() {
+        if ch == '\n' {
+            callback(ch, col, row);
+            col = 0;
+            row += 1;
+        } else {
+            let w = ch.width().unwrap_or(0);
+            if width > 0 && col + w > width {
+                col = 0;
+                row += 1;
+            }
+            callback(ch, col, row);
+            col += w;
+        }
+    }
+}
+
+/// Count how many visual lines `text` would occupy when wrapped at `width`
+/// display columns.  Returns at least 1 (an empty string still occupies one
+/// line).
+fn count_wrapped_lines(text: &str, width: usize) -> usize {
+    let mut max_row = 0usize;
+    walk_wrapped(text, width, |_, _, row| {
+        max_row = row;
+    });
+    max_row + 1
+}
+
+/// Wrap `text` at exactly `width` display columns, inserting newlines so that
+/// no visual line exceeds `width` columns.  Explicit `\n` in the input starts
+/// a new line as usual.  Uses `UnicodeWidthChar` so that CJK characters and
+/// emoji (display width 2) are handled correctly.
+fn char_wrap(text: &str, width: usize) -> String {
+    if width == 0 {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + text.len() / width);
+    let mut prev_row = 0usize;
+    walk_wrapped(text, width, |ch, _, row| {
+        if row > prev_row && ch != '\n' {
+            out.push('\n');
+        }
+        prev_row = row;
+        out.push(ch);
+    });
+    out
+}
+
+/// Compute the `(col, row)` cursor position after walking through `byte_len`
+/// bytes of `text` with character-level wrapping at `width` columns.
+fn cursor_pos_wrapped(text: &str, byte_len: usize, width: usize) -> (usize, usize) {
+    let mut cx = 0usize;
+    let mut cy = 0usize;
+    let mut bytes_seen = 0usize;
+    walk_wrapped(text, width, |ch, col, row| {
+        if bytes_seen < byte_len {
+            cx = col + ch.width().unwrap_or(0);
+            cy = row;
+            // For newlines, the cursor sits at column 0 on the next row.
+            // If this newline is the last character before `byte_len`,
+            // there won't be a subsequent iteration where `row` advances,
+            // so we set `cy = row + 1` explicitly.
+            if ch == '\n' {
+                cx = 0;
+                cy = row + 1;
+            }
+            bytes_seen += ch.len_utf8();
+        }
+    });
+    (cx, cy)
+}
+
+/// Render the persistent inline chat input area.
+///
+/// When the area has zero height (e.g. on the welcome screen) this is a no-op.
+/// Otherwise it draws:
+/// - A top border separating it from the chat output above
+/// - Placeholder text when the buffer is empty
+/// - The chat input text with word wrapping when non-empty
+/// - A blinking-style cursor when focused (`InputMode::Chat`)
+/// - The focused agent name as a context indicator on the border
+fn render_inline_input(app: &App, frame: &mut Frame, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    let theme = &app.theme;
+    let focused = app.input_mode == InputMode::Chat;
+
+    let border_color = if focused {
+        theme.chat_input_focused_border
+    } else {
+        theme.chat_input_border
+    };
+
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(border_color));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Check if the focused agent is running — if so, show a disabled state.
+    let agent_running = app
+        .agents
+        .get(app.focused)
+        .map(|a| matches!(a.status, AgentStatus::Running))
+        .unwrap_or(false);
+
+    let text = app.chat_input.text();
+
+    if text.is_empty() && !focused {
+        // Show placeholder with context-aware hint.
+        let placeholder_text = if agent_running {
+            "Type a message... (will queue until agent finishes)"
+        } else if app.kbd_enhanced {
+            "Type a message... (Enter to send, Shift+Enter for newline)"
+        } else {
+            "Type a message... (Enter to send, Alt+Enter for newline)"
+        };
+        let placeholder = Paragraph::new(placeholder_text)
+            .style(Style::default().fg(theme.chat_input_placeholder));
+        frame.render_widget(placeholder, inner);
+    } else if text.is_empty() && focused {
+        // Focused but empty — show placeholder and cursor at start
+        let placeholder = Paragraph::new("Type a message...")
+            .style(Style::default().fg(theme.chat_input_placeholder));
+        frame.render_widget(placeholder, inner);
+        if inner.width > 0 && inner.height > 0 {
+            frame.set_cursor_position((inner.x, inner.y));
+        }
+    } else {
+        // Render the input text with character-level wrapping.
+        //
+        // We manually wrap the text into lines so that the cursor position
+        // calculation matches exactly what is rendered. Ratatui's
+        // `Wrap { trim: false }` breaks at word boundaries, which would
+        // cause the cursor to drift on wrapped lines.
+        let line_width = inner.width as usize;
+        let wrapped = char_wrap(text, line_width);
+
+        // Compute a vertical scroll offset so the cursor row is always
+        // visible. When the wrapped text exceeds the available height we
+        // scroll just enough to keep the cursor's row within the viewport.
+        let visible_rows = inner.height as usize;
+        let byte_pos = app.chat_input.cursor_pos().min(text.len());
+        let (cx, cy) = cursor_pos_wrapped(text, byte_pos, line_width);
+        let scroll_offset = if cy >= visible_rows {
+            (cy - visible_rows + 1) as u16
+        } else {
+            0
+        };
+
+        let paragraph = Paragraph::new(wrapped.as_str())
+            .style(
+                Style::default()
+                    .fg(theme.chat_input_fg)
+                    .bg(theme.chat_input_bg),
+            )
+            .scroll((scroll_offset, 0));
+        frame.render_widget(paragraph, inner);
+
+        // Render cursor when focused
+        if focused && inner.width > 0 && inner.height > 0 {
+            let cursor_x = inner.x + cx as u16;
+            let cursor_y = inner.y + (cy as u16).saturating_sub(scroll_offset);
+            if cursor_y < inner.y + inner.height {
+                frame.set_cursor_position((cursor_x, cursor_y));
+            }
+        }
+    }
+
+    // Context indicator: show focused agent name on the right side of the border,
+    // with queue count when messages are queued.
+    if let Some(agent) = app.agents.get(app.focused) {
+        let queue_len = agent.message_queue.len();
+        if queue_len > 0 {
+            let label = format!(" {} [{queue_len} queued] ", agent.name);
+            let label_width = label.width() as u16;
+            if area.width > label_width + 2 {
+                let x = area.x + area.width - label_width - 1;
+                // Render agent name in border color, queue count in highlight color
+                let spans = vec![
+                    Span::styled(
+                        format!(" {} ", agent.name),
+                        Style::default().fg(border_color),
+                    ),
+                    Span::styled(
+                        format!("[{queue_len} queued] "),
+                        Style::default()
+                            .fg(theme.status_message)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ];
+                frame.render_widget(
+                    Line::from(spans),
+                    Rect::new(x, area.y, label_width, 1),
+                );
+            }
+        } else {
+            let label = format!(" {} ", agent.name);
+            let label_width = label.width() as u16;
+            if area.width > label_width + 2 {
+                let x = area.x + area.width - label_width - 1;
+                let span = Span::styled(label, Style::default().fg(border_color));
+                frame.render_widget(span, Rect::new(x, area.y, label_width, 1));
+            }
+        }
+    }
+}
+
 /// Render the two-line status bar at the bottom.
 fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
@@ -1926,7 +2170,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 fn build_hint_bar(_width: u16) -> Line<'static> {
     const HINTS: &[(&str, &str)] = &[
         ("n", "new"),
-        ("r", "respond"),
+        ("i", "chat"),
         (":", "command"),
         ("/", "search"),
         ("Tab", "switch"),
@@ -1963,6 +2207,114 @@ fn field_label_style(active: bool, theme: &Theme) -> Style {
     } else {
         Style::default().fg(theme.field_label_inactive)
     }
+}
+
+/// Render a centered settings overlay for editing the focused agent's Claude
+/// options (permission mode, model, effort, max budget, allowed tools, add-dir).
+fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+
+    // Build field lines using the same helpers as render_input.
+    let perm_lines = build_selector(
+        PERMISSION_MODES,
+        app.permission_mode.text(),
+        app.input_field == InputField::PermissionMode,
+        theme,
+    );
+    let model_lines = build_selector(
+        MODELS,
+        app.model.text(),
+        app.input_field == InputField::Model,
+        theme,
+    );
+    let effort_lines = build_selector(
+        EFFORT_LEVELS,
+        app.effort.text(),
+        app.input_field == InputField::Effort,
+        theme,
+    );
+    let budget_lines = build_optional_field_lines(
+        app.max_budget.text(),
+        app.max_budget.cursor_pos(),
+        app.input_field == InputField::MaxBudgetUsd,
+        theme,
+    );
+    let tools_lines = build_optional_field_lines(
+        app.allowed_tools.text(),
+        app.allowed_tools.cursor_pos(),
+        app.input_field == InputField::AllowedTools,
+        theme,
+    );
+    let dir_lines = build_optional_field_lines(
+        app.add_dir.text(),
+        app.add_dir.cursor_pos(),
+        app.input_field == InputField::AddDir,
+        theme,
+    );
+
+    let mut text = Vec::new();
+    text.push(Line::from(Span::styled(
+        "Permission Mode:",
+        field_label_style(app.input_field == InputField::PermissionMode, theme),
+    )));
+    text.extend(perm_lines);
+    text.push(Line::from(Span::styled(
+        "Model:",
+        field_label_style(app.input_field == InputField::Model, theme),
+    )));
+    text.extend(model_lines);
+    text.push(Line::from(Span::styled(
+        "Effort:",
+        field_label_style(app.input_field == InputField::Effort, theme),
+    )));
+    text.extend(effort_lines);
+    text.push(Line::from(Span::styled(
+        "Max Budget USD:",
+        field_label_style(app.input_field == InputField::MaxBudgetUsd, theme),
+    )));
+    text.extend(budget_lines);
+    text.push(Line::from(Span::styled(
+        "Allowed Tools (comma-separated):",
+        field_label_style(app.input_field == InputField::AllowedTools, theme),
+    )));
+    text.extend(tools_lines);
+    text.push(Line::from(Span::styled(
+        "Add Dir (comma-separated):",
+        field_label_style(app.input_field == InputField::AddDir, theme),
+    )));
+    text.extend(dir_lines);
+
+    text.push(Line::from(""));
+    text.push(
+        Line::from(Span::styled(
+            "Enter: save  |  Tab: next  |  Shift+Tab: prev  |  Esc: cancel",
+            Style::default().fg(theme.help_footer),
+        ))
+        .alignment(Alignment::Center),
+    );
+
+    // 6 fields * 2 rows (label + value) + blank + footer = 14 content rows
+    let content_rows = text.len();
+    let popup_height = (content_rows + 2).min(area.height as usize) as u16;
+
+    let popup = centered_rect_fixed_height(60, popup_height, area);
+    frame.render_widget(Clear, popup);
+
+    let title = if let Some(agent) = app.agents.get(app.focused) {
+        format!(" Settings: {} ", agent.name)
+    } else {
+        " Agent Settings ".to_string()
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.input_border));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
 }
 
 /// Render a centered input overlay for entering a new agent prompt, workspace,
@@ -2269,11 +2621,8 @@ fn render_input(app: &mut App, frame: &mut Frame, area: Rect) {
         let label = app
             .agent_vec_index(target_id)
             .map(|idx| format!("{}", idx + 1))
-            .unwrap_or_else(|| {
-                tracing::debug!(target_id, "respond target has no Vec index");
-                "?".to_string()
-            });
-        format!(" Respond to Agent {} ", label)
+            .unwrap_or_else(|| "?".to_string());
+        format!(" Edit Agent {} ", label)
     } else if app.quick_launch {
         " New Agent (quick) ".to_string()
     } else {
@@ -3069,7 +3418,7 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
             "Agent Management",
             vec![
                 ("n", "New agent (quick launch)"),
-                ("r", "Respond to exited agent"),
+                ("i / Enter", "Inline chat (queues if running)"),
                 ("x", "Kill focused agent"),
                 ("q", "Close focused tab"),
                 ("Ctrl+C", "Quit all agents"),

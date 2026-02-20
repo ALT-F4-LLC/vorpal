@@ -49,6 +49,7 @@ tonic = { version = "0.14.3", features = ["tls-ring"] }
 tonic-health = { version = "0.14.3" }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.22" }
+unicode-width = { version = "0.2.2" }
 url = { version = "2.5.8" }
 uuid = { version = "1.20.0", features = ["v7"] }
 vorpal-sdk = { path = "../sdk/rust" }

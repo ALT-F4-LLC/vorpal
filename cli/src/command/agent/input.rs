@@ -104,18 +104,14 @@ fn action_quit_tab(app: &mut App) {
     }
 }
 
-/// Enter respond mode for the focused exited agent (shared by `s` key and `:respond` command).
-fn action_respond(app: &mut App) {
+/// Open the settings form pre-populated with the focused agent's Claude
+/// options (`:edit` command). Only exposes settings fields — the prompt and
+/// workspace cannot be changed from here.
+fn action_edit(app: &mut App) {
     if let Some(agent) = app.focused_agent() {
         match (&agent.status, &agent.session_id) {
             (AgentStatus::Exited(_), Some(_)) => {
-                let agent_opts = agent.claude_options.clone();
-                let agent_workspace = agent.workspace.clone();
-                app.respond_target = Some(agent.id);
-                app.enter_input_mode_with(Some(InputOverrides {
-                    claude_options: agent_opts,
-                    workspace: agent_workspace,
-                }));
+                app.enter_settings_mode();
             }
             (AgentStatus::Running, _) => {
                 app.set_status_message("Agent is still running");
@@ -125,7 +121,7 @@ fn action_respond(app: &mut App) {
             }
         }
     } else {
-        app.set_status_message("No agent to respond to");
+        app.set_status_message("No agent to edit");
     }
 }
 
@@ -182,6 +178,18 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
     // In save-template mode, delegate all keys to the save-template handler.
     if app.input_mode == InputMode::SaveTemplate {
         handle_save_template_mode(app, key);
+        return;
+    }
+
+    // In inline chat mode, delegate all keys to the chat handler.
+    if app.input_mode == InputMode::Chat {
+        handle_chat_mode(app, manager, key).await;
+        return;
+    }
+
+    // In settings mode, delegate to the settings handler.
+    if app.input_mode == InputMode::Settings {
+        handle_settings_mode(app, key);
         return;
     }
 
@@ -544,11 +552,6 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             app.show_help = !app.show_help;
         }
 
-        // Respond to an exited agent (resume with session ID): r.
-        KeyCode::Char('r') => {
-            action_respond(app);
-        }
-
         // Enter search mode: /.
         KeyCode::Char('/') => {
             action_search(app);
@@ -559,34 +562,43 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             app.enter_command_mode();
         }
 
-        // Enter: sidebar agent focus or tool result section toggle.
-        //
-        // When the sidebar is visible and the sidebar selection differs
-        // from the focused agent, Enter focuses the sidebar-selected
-        // agent. Otherwise, falls through to the section toggle behavior.
+        // Activate inline chat input: i (when agents exist and not running).
+        KeyCode::Char('i') if !app.agents.is_empty() => {
+            app.input_mode = InputMode::Chat;
+        }
+
         KeyCode::Enter => {
-            if app.sidebar_visible && app.sidebar_selected != app.focused {
-                app.focus_agent(app.sidebar_selected);
-            } else if let Some(section_idx) = find_section_at_viewport_top(app) {
-                let global = app.result_display;
-                if let Some(agent) = app.focused_agent_mut() {
-                    agent.toggle_section(section_idx, global);
-                    let mode = agent
-                        .section_overrides
-                        .get(&section_idx)
-                        .copied()
-                        .unwrap_or(global);
-                    app.set_status_message(format!(
-                        "Section {}: {}",
-                        section_idx + 1,
-                        mode.label()
-                    ));
-                }
-            }
+            action_enter(app);
         }
 
         // All other keys: no-op.
         _ => {}
+    }
+}
+
+/// Handle the Enter key in Normal mode.
+///
+/// Priority:
+/// 1. Sidebar selection focus (when sidebar visible and selection differs)
+/// 2. Tool section toggle (when a section header is at viewport top)
+fn action_enter(app: &mut App) {
+    if app.sidebar_visible && app.sidebar_selected != app.focused {
+        app.focus_agent(app.sidebar_selected);
+    } else if let Some(section_idx) = find_section_at_viewport_top(app) {
+        let global = app.result_display;
+        if let Some(agent) = app.focused_agent_mut() {
+            agent.toggle_section(section_idx, global);
+            let mode = agent
+                .section_overrides
+                .get(&section_idx)
+                .copied()
+                .unwrap_or(global);
+            app.set_status_message(format!(
+                "Section {}: {}",
+                section_idx + 1,
+                mode.label()
+            ));
+        }
     }
 }
 
@@ -845,7 +857,7 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
 /// Extracts the respond-target before calling `submit_input()` so the
 /// borrow of `app` is released before spawning. Shared by both the
 /// `Ctrl+S` and quick-launch `Enter` key paths.
-async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) {
+pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) {
     let respond_target = app.respond_target;
     let Some((prompt, workspace, claude_options)) = app.submit_input() else {
         app.set_status_message("Prompt cannot be empty");
@@ -923,6 +935,207 @@ async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) {
             Err(e) => {
                 app.set_status_message(format!("Spawn failed: {e}"));
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Settings mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while in settings mode.
+///
+/// Tab/BackTab cycles through the 6 option fields. Enter saves and exits.
+/// Esc cancels without saving. Text editing keys modify the active field.
+fn handle_settings_mode(app: &mut App, key: KeyEvent) {
+    use InputField::*;
+    let settings_fields = [PermissionMode, Model, Effort, MaxBudgetUsd, AllowedTools, AddDir];
+
+    match key.code {
+        KeyCode::Esc => {
+            app.input_mode = InputMode::Normal;
+            app.permission_mode.clear();
+            app.model.clear();
+            app.effort.clear();
+            app.max_budget.clear();
+            app.allowed_tools.clear();
+            app.add_dir.clear();
+        }
+        KeyCode::Enter => {
+            app.save_settings();
+        }
+        KeyCode::Tab => {
+            if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
+                app.input_field = settings_fields[(pos + 1) % settings_fields.len()];
+            }
+        }
+        KeyCode::BackTab => {
+            if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
+                let prev = if pos == 0 { settings_fields.len() - 1 } else { pos - 1 };
+                app.input_field = settings_fields[prev];
+            }
+        }
+        _ => {
+            let buf = match app.input_field {
+                PermissionMode => &mut app.permission_mode,
+                Model => &mut app.model,
+                Effort => &mut app.effort,
+                MaxBudgetUsd => &mut app.max_budget,
+                AllowedTools => &mut app.allowed_tools,
+                AddDir => &mut app.add_dir,
+                _ => return,
+            };
+            match key.code {
+                KeyCode::Char(c) => buf.insert_char(c),
+                KeyCode::Backspace => buf.delete_char(),
+                KeyCode::Delete => buf.delete_char_forward(),
+                KeyCode::Left => buf.move_left(),
+                KeyCode::Right => buf.move_right(),
+                KeyCode::Home => buf.move_home(),
+                KeyCode::End => buf.move_end(),
+                _ => {}
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Inline chat mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while in inline chat mode.
+///
+/// Supports text entry, cursor movement, Shift+Enter for newlines, and Enter
+/// to submit. Escape exits chat mode (preserving any text). Up/Down cycle
+/// through prompt history when the buffer is empty.
+async fn handle_chat_mode(app: &mut App, manager: &mut AgentManager, key: KeyEvent) {
+    match key.code {
+        // Exit chat mode, preserving text in the buffer.
+        KeyCode::Esc => {
+            app.input_mode = InputMode::Normal;
+            app.chat_history_index = None;
+        }
+
+        // Enter: submit. Shift+Enter or Alt+Enter inserts a newline.
+        // Shift+Enter requires the Kitty keyboard protocol (enabled in
+        // setup_terminal when supported); Alt+Enter works everywhere as
+        // a fallback.
+        KeyCode::Enter => {
+            if key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+                app.chat_input.insert_char('\n');
+            } else {
+                submit_chat_message(app, manager).await;
+            }
+        }
+
+        // Standard text-editing keys.
+        KeyCode::Backspace => app.chat_input.delete_char(),
+        KeyCode::Delete => app.chat_input.delete_char_forward(),
+        KeyCode::Left => app.chat_input.move_left(),
+        KeyCode::Right => app.chat_input.move_right(),
+        KeyCode::Home => app.chat_input.move_home(),
+        KeyCode::End => app.chat_input.move_end(),
+
+        // Up/Down: move cursor between lines in multiline text, or cycle
+        // history when on the first/last line (or buffer is empty).
+        KeyCode::Up => {
+            if !app.chat_input.move_up() {
+                app.history_prev_chat();
+            }
+        }
+        KeyCode::Down => {
+            if !app.chat_input.move_down() {
+                app.history_next_chat();
+            }
+        }
+
+        // Character input (with Ctrl modifiers for shortcuts).
+        KeyCode::Char(c) => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                // Ctrl+C: exit chat mode without submitting.
+                if c == 'c' {
+                    app.input_mode = InputMode::Normal;
+                }
+                // Other Ctrl combinations are no-ops in chat mode.
+            } else {
+                app.chat_input.insert_char(c);
+            }
+        }
+
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Inline chat submission
+// ---------------------------------------------------------------------------
+
+/// Submit the inline chat message and spawn or resume an agent.
+///
+/// Extracts the text from `chat_input`, validates it, then uses the
+/// existing respond or new-agent flow by populating the standard input
+/// fields and calling [`submit_and_spawn`].
+async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
+    let text = app.chat_input.text().trim().to_string();
+    if text.is_empty() {
+        return;
+    }
+
+    if app.agents.is_empty() {
+        app.set_status_message("No agents. Press 'n' to create one.");
+        return;
+    }
+
+    let agent = match app.agents.get(app.focused) {
+        Some(a) => a,
+        None => {
+            app.set_status_message("No agent focused");
+            return;
+        }
+    };
+    match &agent.status {
+        AgentStatus::Running => {
+            let agent_mut = app.agents.get_mut(app.focused).unwrap();
+            if agent_mut.message_queue.len() >= super::state::MAX_MESSAGE_QUEUE {
+                app.set_status_message(format!(
+                    "Queue full ({} messages) — wait for agent to finish",
+                    super::state::MAX_MESSAGE_QUEUE
+                ));
+                return;
+            }
+            agent_mut.message_queue.push_back(text);
+            let queue_len = agent_mut.message_queue.len();
+            app.chat_input.clear();
+            app.chat_history_index = None;
+            app.chat_history_stash.clear();
+            app.input_mode = InputMode::Normal;
+            app.set_status_message(format!("Message queued ({queue_len} pending)"));
+            return;
+        }
+        AgentStatus::Exited(_) => {
+            if agent.session_id.is_none() {
+                app.set_status_message("No session ID — agent must complete first.");
+                return;
+            }
+            // Set up the respond flow: populate the standard input form
+            // from the focused agent's options and inject the chat text as
+            // the prompt, then trigger submit_and_spawn().
+            let agent_opts = agent.claude_options.clone();
+            let agent_workspace = agent.workspace.clone();
+            app.respond_target = Some(agent.id);
+            app.enter_input_mode_with(Some(InputOverrides {
+                claude_options: agent_opts,
+                workspace: agent_workspace,
+            }));
+            // Overwrite the prompt field with our chat text.
+            app.input.set_text(&text);
+            // Clear the inline chat buffer and reset history state.
+            app.chat_input.clear();
+            app.chat_history_index = None;
+            app.chat_history_stash.clear();
+            // submit_and_spawn will call exit_input_mode() internally
+            // (via submit_input()), restoring InputMode::Normal.
+            submit_and_spawn(app, manager).await;
         }
     }
 }
@@ -1296,7 +1509,7 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
     match name {
         "kill" => action_kill(app, manager).await,
         "new" => app.enter_input_mode(),
-        "respond" => action_respond(app),
+        "edit" => action_edit(app),
         "search" => action_search(app),
         "dashboard" => {
             app.show_dashboard = !app.show_dashboard;
@@ -1401,6 +1614,15 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
             app.cycle_theme();
             app.set_status_message(format!("Theme: {}", app.theme.name));
         }
+        "settings" => app.enter_settings_mode(),
+        "clear-queue" => {
+            let cleared = app.clear_focused_queue();
+            if cleared > 0 {
+                app.set_status_message(format!("Cleared {cleared} queued message(s)"));
+            } else {
+                app.set_status_message("No messages in queue");
+            }
+        }
         _ => app.set_status_message(format!("Unknown command: {name}")),
     }
 }
@@ -1464,6 +1686,18 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
                         return true;
                     }
                 }
+            }
+
+            // Click on the inline chat input area activates chat mode.
+            // Only when in Normal mode so clicks don't punch through
+            // modal overlays (Input, Settings, Help, etc.).
+            if app.input_mode == InputMode::Normal
+                && app.chat_input_rect.height > 0
+                && rect_contains(app.chat_input_rect, col, row)
+                && !app.agents.is_empty()
+            {
+                app.input_mode = InputMode::Chat;
+                return true;
             }
 
             // Check tab click regions.
