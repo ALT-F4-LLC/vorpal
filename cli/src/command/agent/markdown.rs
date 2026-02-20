@@ -149,7 +149,8 @@ impl<'t> MarkdownRenderer<'t> {
                 }
 
                 Event::Start(Tag::Heading { .. }) => {
-                    let heading_style = self.current_style()
+                    let heading_style = self
+                        .current_style()
                         .fg(self.theme.heading_fg)
                         .add_modifier(Modifier::BOLD);
                     self.style_stack.push(heading_style);
@@ -188,19 +189,15 @@ impl<'t> MarkdownRenderer<'t> {
                 Event::Start(Tag::Item) => {
                     let indent = "  ".repeat(self.list_stack.len().saturating_sub(1));
                     let marker_style = Style::default().fg(self.theme.list_marker_fg);
-                    let marker = if let Some(Some(_start)) =
-                        self.list_stack.last()
-                    {
-                        let counter =
-                            self.list_counters.last_mut().expect("counter exists");
+                    let marker = if let Some(Some(_start)) = self.list_stack.last() {
+                        let counter = self.list_counters.last_mut().expect("counter exists");
                         let m = format!("{}{}. ", indent, counter);
                         *counter += 1;
                         m
                     } else {
                         format!("{}- ", indent)
                     };
-                    self.current_spans
-                        .push(Span::styled(marker, marker_style));
+                    self.current_spans.push(Span::styled(marker, marker_style));
                 }
                 Event::End(TagEnd::Item) => {
                     self.flush_line();
@@ -270,7 +267,8 @@ impl<'t> MarkdownRenderer<'t> {
                 }
 
                 Event::Start(Tag::Link { .. }) => {
-                    let link_style = self.current_style()
+                    let link_style = self
+                        .current_style()
                         .fg(self.theme.link_fg)
                         .add_modifier(Modifier::UNDERLINED);
                     self.style_stack.push(link_style);
@@ -342,8 +340,7 @@ impl<'t> MarkdownRenderer<'t> {
         let mut spans = std::mem::take(&mut self.current_spans);
 
         if self.blockquote_depth > 0 {
-            let prefix_style = Style::default()
-                .fg(self.theme.blockquote_border);
+            let prefix_style = Style::default().fg(self.theme.blockquote_border);
             let prefix = "\u{2502} ".repeat(self.blockquote_depth);
             spans.insert(0, Span::styled(prefix, prefix_style));
         }
@@ -382,8 +379,8 @@ impl<'t> MarkdownRenderer<'t> {
                 .push(Line::from(Span::styled(top_border, border_style)));
         } else {
             let lang_label = format!(" {} ", lang);
-            let remaining = (CODE_BORDER_WIDTH - CODE_LABEL_PREFIX_WIDTH)
-                .saturating_sub(lang_label.len());
+            let remaining =
+                (CODE_BORDER_WIDTH - CODE_LABEL_PREFIX_WIDTH).saturating_sub(lang_label.len());
             let top_line = vec![
                 Span::styled(
                     format!("  {}", "\u{2500}".repeat(CODE_LABEL_PREFIX_WIDTH)),
@@ -402,10 +399,8 @@ impl<'t> MarkdownRenderer<'t> {
                 .highlight_line(code_line, ss)
                 .unwrap_or_default();
 
-            let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                "    ".to_string(),
-                Style::default().bg(bg),
-            )];
+            let mut spans: Vec<Span<'static>> =
+                vec![Span::styled("    ".to_string(), Style::default().bg(bg))];
             for (style, text) in regions {
                 spans.push(Span::styled(
                     text.to_string(),
@@ -454,31 +449,30 @@ impl<'t> MarkdownRenderer<'t> {
         }
 
         // Helper to build a horizontal border line.
-        let build_border =
-            |left: &str, mid: &str, right: &str, fill: &str| -> Line<'static> {
-                let mut s = String::from("  ");
-                s.push_str(left);
-                for (i, &w) in col_widths.iter().enumerate() {
-                    s.push_str(&fill.repeat(w + 2));
-                    if i < col_count - 1 {
-                        s.push_str(mid);
-                    }
+        let build_border = |left: &str, mid: &str, right: &str, fill: &str| -> Line<'static> {
+            let mut s = String::from("  ");
+            s.push_str(left);
+            for (i, &w) in col_widths.iter().enumerate() {
+                s.push_str(&fill.repeat(w + 2));
+                if i < col_count - 1 {
+                    s.push_str(mid);
                 }
-                s.push_str(right);
-                Line::from(Span::styled(s, border_style))
-            };
+            }
+            s.push_str(right);
+            Line::from(Span::styled(s, border_style))
+        };
 
         // Helper to build a data row with column alignment and styled cell spans.
         let alignments = &self.table_alignments;
         let build_row = |row: &[TableCell], extra_style: Style| -> Line<'static> {
-            let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                "  \u{2502}",
-                border_style,
-            )];
+            let mut spans: Vec<Span<'static>> = vec![Span::styled("  \u{2502}", border_style)];
             for (i, w) in col_widths.iter().enumerate() {
                 let cell = row.get(i);
                 let cell_width = cell.map_or(0, |c| c.display_width);
-                let alignment = alignments.get(i).copied().unwrap_or(pulldown_cmark::Alignment::None);
+                let alignment = alignments
+                    .get(i)
+                    .copied()
+                    .unwrap_or(pulldown_cmark::Alignment::None);
 
                 let total_pad = w.saturating_sub(cell_width);
                 let (left_pad, right_pad) = match alignment {
@@ -542,10 +536,7 @@ impl<'t> MarkdownRenderer<'t> {
 
     /// Return the currently active style from the top of the stack.
     fn current_style(&self) -> Style {
-        self.style_stack
-            .last()
-            .copied()
-            .unwrap_or_default()
+        self.style_stack.last().copied().unwrap_or_default()
     }
 
     /// Push a new style with the given modifier added to the current style.

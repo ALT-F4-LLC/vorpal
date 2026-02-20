@@ -5,8 +5,8 @@
 
 use super::state::{
     self, AgentActivity, AgentState, AgentStatus, App, DiffLine, DisplayLine, InputField,
-    InputMode,
-    ResultDisplay, SplitPane, ToastKind, COMMANDS, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    InputMode, ResultDisplay, SplitPane, ToastKind, COMMANDS, EFFORT_LEVELS, MODELS,
+    PERMISSION_MODES,
 };
 use super::theme::Theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -860,16 +860,13 @@ fn render_jump_to_bottom(
     // Clear the area under the indicator so it floats above content.
     frame.render_widget(Clear, indicator_rect);
 
-    let indicator = Paragraph::new(Line::from(vec![Span::styled(
-        label_text,
-        arrow_style,
-    )]))
-    .alignment(Alignment::Center)
-    .style(
-        Style::default()
-            .bg(theme.jump_to_bottom_bg)
-            .fg(theme.jump_to_bottom_fg),
-    );
+    let indicator = Paragraph::new(Line::from(vec![Span::styled(label_text, arrow_style)]))
+        .alignment(Alignment::Center)
+        .style(
+            Style::default()
+                .bg(theme.jump_to_bottom_bg)
+                .fg(theme.jump_to_bottom_fg),
+        );
 
     frame.render_widget(indicator, indicator_rect);
 }
@@ -1448,7 +1445,10 @@ fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, 
                 format!("{total_bytes} bytes")
             };
             out.push(Line::from(vec![
-                Span::styled("  │ ".to_string(), Style::default().fg(theme.tool_block_border)),
+                Span::styled(
+                    "  │ ".to_string(),
+                    Style::default().fg(theme.tool_block_border),
+                ),
                 Span::styled(
                     format!("{size} (press 'r' to cycle view)"),
                     Style::default().fg(theme.tool_result_hidden),
@@ -1469,7 +1469,10 @@ fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, 
             }
             if *hidden_count > 0 {
                 out.push(Line::from(vec![
-                    Span::styled("  │ ".to_string(), Style::default().fg(theme.tool_block_border)),
+                    Span::styled(
+                        "  │ ".to_string(),
+                        Style::default().fg(theme.tool_block_border),
+                    ),
                     Span::styled(
                         format!("... {hidden_count} more lines hidden (press 'r' to cycle view)"),
                         Style::default().fg(theme.tool_result_hidden),
@@ -1650,7 +1653,6 @@ fn render_tool_result(
     mode: ResultDisplay,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
-
     let compact = mode == ResultDisplay::Compact;
     let display_content = if compact && content.len() > COMPACT_RESULT_MAX {
         let boundary = content
@@ -1668,10 +1670,7 @@ fn render_tool_result(
     } else {
         theme.tool_block_border
     };
-    let prefix = Span::styled(
-        "  │ ".to_string(),
-        Style::default().fg(border_color),
-    );
+    let prefix = Span::styled("  │ ".to_string(), Style::default().fg(border_color));
 
     let mut spans = vec![prefix];
     if is_error {
@@ -1874,12 +1873,19 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
             let prefix = rule_char.repeat(4);
             let suffix_len = 60usize.saturating_sub(4 + label.len());
             let suffix = rule_char.repeat(suffix_len);
-            let dim_rule = Style::default().fg(theme.turn_separator).add_modifier(Modifier::DIM);
+            let dim_rule = Style::default()
+                .fg(theme.turn_separator)
+                .add_modifier(Modifier::DIM);
             vec![
                 Line::from(""),
                 Line::from(vec![
                     Span::styled(prefix, dim_rule),
-                    Span::styled(label, Style::default().fg(theme.turn_separator_label).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        label,
+                        Style::default()
+                            .fg(theme.turn_separator_label)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(suffix, dim_rule),
                 ]),
                 Line::from(""),
@@ -1899,7 +1905,10 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
                 .add_modifier(Modifier::BOLD);
 
             if content.is_empty() {
-                return vec![Line::from(Span::styled(USER_MARKER.to_string(), marker_style))];
+                return vec![Line::from(Span::styled(
+                    USER_MARKER.to_string(),
+                    marker_style,
+                ))];
             }
 
             let indent = " ".repeat(USER_MARKER.len());
@@ -2321,11 +2330,9 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 
                 // Use ratatui Layout to split row into left (fill) and right (length)
                 let right_width = right_line.width() as u16;
-                let row_chunks = Layout::horizontal([
-                    Constraint::Fill(1),
-                    Constraint::Length(right_width),
-                ])
-                .split(rows[0]);
+                let row_chunks =
+                    Layout::horizontal([Constraint::Fill(1), Constraint::Length(right_width)])
+                        .split(rows[0]);
 
                 let left_para = Paragraph::new(left_line).style(
                     Style::default()
@@ -4417,7 +4424,9 @@ mod tests {
     #[test]
     fn strip_empty_removes_empty_text_after_turn_start() {
         let lines = vec![
-            DisplayLine::TurnStart { turn_number: Some(1) },
+            DisplayLine::TurnStart {
+                turn_number: Some(1),
+            },
             DisplayLine::Text("".into()),
             DisplayLine::Text("".into()),
             DisplayLine::Text("hello".into()),
@@ -4632,7 +4641,9 @@ mod tests {
         let lines = vec![
             DisplayLine::System("sys".into()),
             DisplayLine::Error("err".into()),
-            DisplayLine::TurnStart { turn_number: Some(1) },
+            DisplayLine::TurnStart {
+                turn_number: Some(1),
+            },
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
         let blocks = collapse_results(
@@ -4820,7 +4831,9 @@ mod tests {
     #[test]
     fn full_pipeline_strips_empty_after_turn_start() {
         let lines = vec![
-            DisplayLine::TurnStart { turn_number: Some(1) },
+            DisplayLine::TurnStart {
+                turn_number: Some(1),
+            },
             DisplayLine::Text("".into()),
             DisplayLine::Text("content".into()),
         ];

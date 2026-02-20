@@ -70,11 +70,7 @@ fn scroll_by(app: &mut App, delta: isize) {
 /// Cycle an [`InputBuffer`] through a fixed set of `options` using Left/Right keys.
 ///
 /// Returns `true` if the key was handled (Left or Right), `false` otherwise.
-fn cycle_selector(
-    options: &[&str],
-    buf: &mut super::state::InputBuffer,
-    code: KeyCode,
-) -> bool {
+fn cycle_selector(options: &[&str], buf: &mut super::state::InputBuffer, code: KeyCode) -> bool {
     let current_idx = options.iter().position(|m| *m == buf.text());
     match code {
         KeyCode::Left => {
@@ -102,7 +98,9 @@ fn cycle_selector(
 /// Returns `true` if the field is a selector and the key was handled.
 fn try_cycle_current_field(app: &mut App, code: KeyCode) -> bool {
     match app.input_field {
-        InputField::PermissionMode => cycle_selector(PERMISSION_MODES, &mut app.permission_mode, code),
+        InputField::PermissionMode => {
+            cycle_selector(PERMISSION_MODES, &mut app.permission_mode, code)
+        }
         InputField::Model => cycle_selector(MODELS, &mut app.model, code),
         InputField::Effort => cycle_selector(EFFORT_LEVELS, &mut app.effort, code),
         _ => false,
@@ -953,7 +951,9 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
                 app.save_to_history(&prompt, &workspace, &claude_options);
 
                 if let Some(agent) = app.agent_by_id_mut(target_id) {
-                    agent.push_line(DisplayLine::UserPrompt { content: prompt.clone() });
+                    agent.push_line(DisplayLine::UserPrompt {
+                        content: prompt.clone(),
+                    });
                     agent.start_new_turn();
                     agent.id = agent_id;
                     agent.status = AgentStatus::Running;
@@ -997,7 +997,9 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
                 ));
                 // Push the user's initial prompt into the output buffer.
                 if let Some(agent) = app.agents.last_mut() {
-                    agent.push_line(DisplayLine::UserPrompt { content: prompt.clone() });
+                    agent.push_line(DisplayLine::UserPrompt {
+                        content: prompt.clone(),
+                    });
                 }
                 let new_index = app.agents.len() - 1;
                 app.focus_agent(new_index);
@@ -1202,7 +1204,9 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
                 ));
                 return;
             }
-            agent_mut.push_line(DisplayLine::UserPrompt { content: text.clone() });
+            agent_mut.push_line(DisplayLine::UserPrompt {
+                content: text.clone(),
+            });
             agent_mut.message_queue.push_back(text);
             let queue_len = agent_mut.message_queue.len();
             app.chat_input.clear();
