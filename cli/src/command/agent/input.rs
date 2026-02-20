@@ -593,11 +593,7 @@ fn action_enter(app: &mut App) {
                 .get(&section_idx)
                 .copied()
                 .unwrap_or(global);
-            app.set_status_message(format!(
-                "Section {}: {}",
-                section_idx + 1,
-                mode.label()
-            ));
+            app.set_status_message(format!("Section {}: {}", section_idx + 1, mode.label()));
         }
     }
 }
@@ -949,7 +945,14 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
 /// Esc cancels without saving. Text editing keys modify the active field.
 fn handle_settings_mode(app: &mut App, key: KeyEvent) {
     use InputField::*;
-    let settings_fields = [PermissionMode, Model, Effort, MaxBudgetUsd, AllowedTools, AddDir];
+    let settings_fields = [
+        PermissionMode,
+        Model,
+        Effort,
+        MaxBudgetUsd,
+        AllowedTools,
+        AddDir,
+    ];
 
     match key.code {
         KeyCode::Esc => {
@@ -971,7 +974,11 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
         }
         KeyCode::BackTab => {
             if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
-                let prev = if pos == 0 { settings_fields.len() - 1 } else { pos - 1 };
+                let prev = if pos == 0 {
+                    settings_fields.len() - 1
+                } else {
+                    pos - 1
+                };
                 app.input_field = settings_fields[prev];
             }
         }
@@ -1021,7 +1028,10 @@ async fn handle_chat_mode(app: &mut App, manager: &mut AgentManager, key: KeyEve
         // setup_terminal when supported); Alt+Enter works everywhere as
         // a fallback.
         KeyCode::Enter => {
-            if key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+            if key
+                .modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+            {
                 app.chat_input.insert_char('\n');
             } else {
                 submit_chat_message(app, manager).await;

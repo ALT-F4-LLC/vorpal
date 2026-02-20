@@ -440,7 +440,10 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
                                     agent.resume_timer();
                                     app.rebuild_agent_index();
                                 } else {
-                                    warn!(agent_id, new_agent_id, "queue drain: agent disappeared after spawn");
+                                    warn!(
+                                        agent_id,
+                                        new_agent_id, "queue drain: agent disappeared after spawn"
+                                    );
                                 }
                                 if remaining > 0 {
                                     app.set_status_message(format!(

@@ -95,9 +95,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     let chunks = Layout::vertical([
         Constraint::Length(3),            // tab bar
-        Constraint::Fill(1),             // content
+        Constraint::Fill(1),              // content
         Constraint::Length(input_height), // inline input area
-        Constraint::Length(2),           // status bar
+        Constraint::Length(2),            // status bar
     ])
     .split(main_area);
 
@@ -2028,10 +2028,7 @@ fn render_inline_input(app: &App, frame: &mut Frame, area: Rect) {
                             .add_modifier(Modifier::BOLD),
                     ),
                 ];
-                frame.render_widget(
-                    Line::from(spans),
-                    Rect::new(x, area.y, label_width, 1),
-                );
+                frame.render_widget(Line::from(spans), Rect::new(x, area.y, label_width, 1));
             }
         } else {
             let label = format!(" {} ", agent.name);

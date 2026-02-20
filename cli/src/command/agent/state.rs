@@ -1667,7 +1667,11 @@ impl App {
             let model_val = if model.is_empty() { None } else { Some(model) };
 
             let effort = self.effort.text().to_string();
-            let effort_val = if effort.is_empty() { None } else { Some(effort) };
+            let effort_val = if effort.is_empty() {
+                None
+            } else {
+                Some(effort)
+            };
 
             let budget = self.max_budget.text().trim().to_string();
             let budget_val = if budget.is_empty() {
@@ -1689,14 +1693,21 @@ impl App {
             let tools_val: Vec<String> = if tools.is_empty() {
                 Vec::new()
             } else {
-                tools.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                tools
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
             };
 
             let dirs = self.add_dir.text().to_string();
             let dirs_val: Vec<String> = if dirs.is_empty() {
                 Vec::new()
             } else {
-                dirs.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                dirs.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
             };
 
             // -- Commit atomically ---------------------------------------------
