@@ -401,7 +401,7 @@ impl Parser {
                 if let Some(usage) = message.usage {
                     self.last_input_tokens = Some(usage.input_tokens);
                 }
-                vec![DisplayLine::TurnStart]
+                vec![DisplayLine::TurnStart { turn_number: None }]
             }
             ApiEvent::MessageStop => Vec::new(),
 
@@ -1099,7 +1099,7 @@ mod tests {
             r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1}}}}"#,
         );
         assert_eq!(lines.len(), 1);
-        assert!(matches!(&lines[0], DisplayLine::TurnStart));
+        assert!(matches!(&lines[0], DisplayLine::TurnStart { .. }));
     }
 
     #[test]
@@ -1129,7 +1129,7 @@ mod tests {
         let start_lines = p
             .parse_line(r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#);
         assert_eq!(start_lines.len(), 1);
-        assert!(matches!(&start_lines[0], DisplayLine::TurnStart));
+        assert!(matches!(&start_lines[0], DisplayLine::TurnStart { .. }));
 
         // text block
         p.parse_line(

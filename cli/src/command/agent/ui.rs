@@ -1046,6 +1046,11 @@ enum CollapsedBlock<'a> {
         file_path: &'a str,
         effective_mode: ResultDisplay,
     },
+    /// A run of consecutive thinking lines, collapsed into a summary.
+    ThinkingRun {
+        /// Number of lines in the collapsed thinking block.
+        line_count: usize,
+    },
     /// Any other single [`DisplayLine`] (Thinking, System, etc.).
     Single(&'a DisplayLine),
 }
@@ -1223,6 +1228,21 @@ fn collapse_results<'a>(
                 .collect::<Vec<_>>()
                 .join("\n");
             blocks.push(CollapsedBlock::TextRun(markdown));
+        } else if matches!(lines[i], DisplayLine::Thinking(_)) {
+            let run_start = i;
+            while i < lines.len() && matches!(lines[i], DisplayLine::Thinking(_)) {
+                i += 1;
+            }
+            let full_text: String = lines[run_start..i]
+                .iter()
+                .filter_map(|dl| match dl {
+                    DisplayLine::Thinking(s) => Some(s.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let line_count = full_text.lines().count().max(1);
+            blocks.push(CollapsedBlock::ThinkingRun { line_count });
         } else {
             blocks.push(CollapsedBlock::Single(lines[i]));
             i += 1;
@@ -1264,6 +1284,15 @@ fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme) -> Vec<Line
             CollapsedBlock::TextRun(markdown) => {
                 render_text_run(markdown, &mut out, theme);
             }
+            CollapsedBlock::ThinkingRun { line_count, .. } => {
+                let summary = format!("{BLOCK_MARKER} Thinking... ({line_count} lines)");
+                out.push(Line::from(Span::styled(
+                    summary,
+                    Style::default()
+                        .fg(theme.thinking_collapsed_fg)
+                        .add_modifier(Modifier::DIM | Modifier::ITALIC),
+                )));
+            }
             CollapsedBlock::Single(dl) => {
                 out.extend(display_line_to_lines(dl, theme));
             }
@@ -1282,40 +1311,42 @@ fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, 
             } else {
                 format!("{total_bytes} bytes")
             };
-            out.push(Line::from(Span::styled(
-                format!("  {RESULT_CONNECTOR}  {size} (press 'r' to cycle view)"),
-                Style::default().fg(theme.tool_result_hidden),
-            )));
+            out.push(Line::from(vec![
+                Span::styled("  │ ".to_string(), Style::default().fg(theme.tool_block_border)),
+                Span::styled(
+                    format!("{size} (press 'r' to cycle view)"),
+                    Style::default().fg(theme.tool_result_hidden),
+                ),
+            ]));
         }
         ToolResultRun::Compact {
             visible,
             hidden_count,
         } => {
-            for (idx, trl) in visible.iter().enumerate() {
+            for trl in visible.iter() {
                 out.extend(render_tool_result(
                     trl.text,
                     trl.is_error,
                     ResultDisplay::Compact,
-                    idx == 0,
                     theme,
                 ));
             }
             if *hidden_count > 0 {
-                out.push(Line::from(Span::styled(
-                    format!(
-                        "  {RESULT_CONNECTOR}  ... {hidden_count} more lines hidden (press 'r' to cycle view)"
+                out.push(Line::from(vec![
+                    Span::styled("  │ ".to_string(), Style::default().fg(theme.tool_block_border)),
+                    Span::styled(
+                        format!("... {hidden_count} more lines hidden (press 'r' to cycle view)"),
+                        Style::default().fg(theme.tool_result_hidden),
                     ),
-                    Style::default().fg(theme.tool_result_hidden),
-                )));
+                ]));
             }
         }
         ToolResultRun::Full { lines } => {
-            for (idx, trl) in lines.iter().enumerate() {
+            for trl in lines.iter() {
                 out.extend(render_tool_result(
                     trl.text,
                     trl.is_error,
                     ResultDisplay::Full,
-                    idx == 0,
                     theme,
                 ));
             }
@@ -1339,14 +1370,14 @@ fn render_diff_block<'a>(
         return;
     }
 
-    let diff_indent = "     ";
+    let border_prefix = Span::styled(
+        "  │ ".to_string(),
+        Style::default().fg(theme.tool_block_border),
+    );
 
     // Header line showing the file path.
     out.push(Line::from(vec![
-        Span::styled(
-            format!("  {RESULT_CONNECTOR}  "),
-            Style::default().fg(theme.tool_result_connector),
-        ),
+        border_prefix.clone(),
         Span::styled(
             format!("diff {file_path}"),
             Style::default()
@@ -1355,34 +1386,54 @@ fn render_diff_block<'a>(
         ),
     ]));
 
+    // NOTE: Line numbers are relative to the diff block (starting at 1), not
+    // absolute file positions. The `DiffLine` type doesn't carry hunk offset
+    // info, so we can't map back to the original file line numbers.
+    let mut old_line: usize = 1;
+    let mut new_line: usize = 1;
+
     for op in diff_ops {
         match op {
             DiffLine::Equal(line) => {
+                let gutter = format!("{:>4} {:>4} ", old_line, new_line);
                 out.push(Line::from(vec![
-                    Span::raw(diff_indent.to_string()),
+                    border_prefix.clone(),
+                    Span::styled(gutter, Style::default().fg(theme.diff_gutter_fg)),
                     Span::styled(
                         format!("  {line}"),
                         Style::default().fg(theme.diff_context_fg),
                     ),
                 ]));
+                old_line += 1;
+                new_line += 1;
             }
             DiffLine::Delete(line) => {
+                let gutter = format!("{:>4}      ", old_line);
                 out.push(Line::from(vec![
-                    Span::raw(diff_indent.to_string()),
+                    border_prefix.clone(),
+                    Span::styled(gutter, Style::default().fg(theme.diff_gutter_fg)),
                     Span::styled(
                         format!("- {line}"),
-                        Style::default().fg(theme.diff_deletion_fg),
+                        Style::default()
+                            .fg(theme.diff_deletion_fg)
+                            .bg(theme.diff_deletion_bg),
                     ),
                 ]));
+                old_line += 1;
             }
             DiffLine::Insert(line) => {
+                let gutter = format!("     {:>4} ", new_line);
                 out.push(Line::from(vec![
-                    Span::raw(diff_indent.to_string()),
+                    border_prefix.clone(),
+                    Span::styled(gutter, Style::default().fg(theme.diff_gutter_fg)),
                     Span::styled(
                         format!("+ {line}"),
-                        Style::default().fg(theme.diff_addition_fg),
+                        Style::default()
+                            .fg(theme.diff_addition_fg)
+                            .bg(theme.diff_addition_bg),
                     ),
                 ]));
+                new_line += 1;
             }
         }
     }
@@ -1397,7 +1448,7 @@ fn render_diff_block<'a>(
         .filter(|op| matches!(op, DiffLine::Delete(_)))
         .count();
     out.push(Line::from(vec![
-        Span::raw(diff_indent.to_string()),
+        border_prefix,
         Span::styled(
             format!("+{additions}"),
             Style::default().fg(theme.diff_addition_fg),
@@ -1411,41 +1462,15 @@ fn render_diff_block<'a>(
 
 /// Render a markdown text run into output lines with block marker prefixes.
 fn render_text_run<'a>(markdown: &str, out: &mut Vec<Line<'a>>, theme: &Theme) {
-    let preprocessed = preprocess_markdown_tables(markdown);
-    let rendered = tui_markdown::from_str(&preprocessed);
+    let rendered = super::markdown::render_markdown(markdown, theme);
     // Prefix only the very first non-empty line with a ⏺ marker.
     // All subsequent lines (including those after blank lines) use
     // continuation indentation. This matches Claude Code's own
     // rendering style where each assistant text block gets a single
     // leading marker.
-    //
-    // Horizontal rules (`---`) are detected and rendered as Unicode
-    // box-drawing separators instead of literal `---` text.
     let mut need_marker = true;
-    for line in rendered.lines {
-        // Detect horizontal rules: a single span whose trimmed
-        // content is exactly `---` (what tui_markdown emits for
-        // thematic breaks).
-        let is_hr = line.spans.len() == 1 && line.spans[0].content.trim() == "---";
-
-        if is_hr {
-            let prefix = if need_marker {
-                need_marker = false;
-                Span::styled(
-                    format!("{BLOCK_MARKER} "),
-                    Style::default().fg(theme.block_marker),
-                )
-            } else {
-                Span::raw(CONTINUATION_INDENT)
-            };
-            out.push(Line::from(vec![
-                prefix,
-                Span::styled(
-                    "──────────────────────────────",
-                    Style::default().fg(theme.text_hr),
-                ),
-            ]));
-        } else if line.width() == 0 {
+    for line in rendered {
+        if line.width() == 0 {
             out.push(Line::from(""));
         } else if need_marker {
             need_marker = false;
@@ -1453,19 +1478,11 @@ fn render_text_run<'a>(markdown: &str, out: &mut Vec<Line<'a>>, theme: &Theme) {
                 format!("{BLOCK_MARKER} "),
                 Style::default().fg(theme.block_marker),
             )];
-            spans.extend(
-                line.spans
-                    .into_iter()
-                    .map(|s| Span::styled(s.content.into_owned(), s.style)),
-            );
+            spans.extend(line.spans);
             out.push(Line::from(spans));
         } else {
             let mut spans: Vec<Span<'static>> = vec![Span::raw(CONTINUATION_INDENT)];
-            spans.extend(
-                line.spans
-                    .into_iter()
-                    .map(|s| Span::styled(s.content.into_owned(), s.style)),
-            );
+            spans.extend(line.spans);
             out.push(Line::from(spans));
         }
     }
@@ -1491,18 +1508,12 @@ fn lines_to_static(lines: Vec<Line<'_>>) -> Vec<Line<'static>> {
 ///
 /// The caller is responsible for splitting multiline `DisplayLine::ToolResult`
 /// content on `\n` and passing individual lines here.
-///
-/// When `first_in_run` is true the line is prefixed with `  ⎿  ` (the result
-/// connector). Continuation lines use matching whitespace indentation instead.
 fn render_tool_result(
     content: &str,
     is_error: bool,
     mode: ResultDisplay,
-    first_in_run: bool,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
-    /// Indentation that matches the width of `  ⎿  `.
-    const CONTINUATION_INDENT: &str = "     ";
 
     let compact = mode == ResultDisplay::Compact;
     let display_content = if compact && content.len() > COMPACT_RESULT_MAX {
@@ -1516,14 +1527,15 @@ fn render_tool_result(
         content.to_string()
     };
 
-    let prefix = if first_in_run {
-        Span::styled(
-            format!("  {RESULT_CONNECTOR}  "),
-            Style::default().fg(theme.tool_result_connector),
-        )
+    let border_color = if is_error {
+        theme.tool_block_error_border
     } else {
-        Span::raw(CONTINUATION_INDENT)
+        theme.tool_block_border
     };
+    let prefix = Span::styled(
+        "  │ ".to_string(),
+        Style::default().fg(border_color),
+    );
 
     let mut spans = vec![prefix];
     if is_error {
@@ -1553,7 +1565,7 @@ fn strip_leading_empty_after_turn_start<'a>(lines: &[&'a DisplayLine]) -> Vec<&'
 
     for dl in lines {
         match dl {
-            DisplayLine::TurnStart => {
+            DisplayLine::TurnStart { .. } => {
                 after_turn_start = true;
                 out.push(*dl);
             }
@@ -1565,47 +1577,6 @@ fn strip_leading_empty_after_turn_start<'a>(lines: &[&'a DisplayLine]) -> Vec<&'
                 out.push(*dl);
             }
         }
-    }
-
-    out
-}
-
-/// Wrap markdown table blocks in fenced code blocks so `tui_markdown` renders
-/// them as preformatted text instead of dropping/concatenating the cells.
-///
-/// Consecutive lines starting with `|` are treated as a table block. Each block
-/// is wrapped with triple-backtick fences so the pipe-aligned rows survive
-/// rendering intact.
-fn preprocess_markdown_tables(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut in_table = false;
-
-    for line in input.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('|') {
-            if !in_table {
-                out.push_str("```\n");
-                in_table = true;
-            }
-            out.push_str(line);
-            out.push('\n');
-        } else {
-            if in_table {
-                out.push_str("```\n");
-                in_table = false;
-            }
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
-
-    if in_table {
-        out.push_str("```\n");
-    }
-
-    // Remove trailing newline added by our loop if the input didn't end with one.
-    if !input.ends_with('\n') && out.ends_with('\n') {
-        out.pop();
     }
 
     out
@@ -1666,7 +1637,7 @@ fn display_line_to_lines_with_indicator<'a>(
 ///
 /// Handles all variants except [`DisplayLine::Text`] and
 /// [`DisplayLine::ToolResult`], which are rendered inline (via
-/// `tui_markdown`) and by [`render_tool_result`] respectively with
+/// `markdown::render_markdown`) and by [`render_tool_result`] respectively with
 /// run-position awareness.
 fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>> {
     match dl {
@@ -1744,7 +1715,40 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
                 .add_modifier(Modifier::BOLD),
         ))],
 
-        DisplayLine::TurnStart => vec![Line::from("")],
+        DisplayLine::TurnSummary {
+            input_tokens,
+            output_tokens,
+            cost_usd,
+        } => {
+            let input_str = format_token_count(*input_tokens);
+            let output_str = format_token_count(*output_tokens);
+            let summary = format!("{input_str} in / {output_str} out | ${cost_usd:.2}");
+            vec![Line::from(Span::styled(
+                summary,
+                Style::default()
+                    .fg(theme.turn_separator_meta)
+                    .add_modifier(Modifier::DIM),
+            ))]
+        }
+
+        DisplayLine::TurnStart { turn_number } => {
+            let n = turn_number.unwrap_or(0);
+            let label = format!(" Turn {} ", n);
+            let rule_char = "─";
+            let prefix = rule_char.repeat(4);
+            let suffix_len = 60usize.saturating_sub(4 + label.len());
+            let suffix = rule_char.repeat(suffix_len);
+            let dim_rule = Style::default().fg(theme.turn_separator).add_modifier(Modifier::DIM);
+            vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(prefix, dim_rule),
+                    Span::styled(label, Style::default().fg(theme.turn_separator_label).add_modifier(Modifier::BOLD)),
+                    Span::styled(suffix, dim_rule),
+                ]),
+                Line::from(""),
+            ]
+        }
 
         // DiffResult is handled by render_diff_block() via CollapsedBlock::DiffBlock.
         DisplayLine::DiffResult { .. } => Vec::new(),
@@ -2107,10 +2111,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 let (activity_label, activity_color) = match &agent.activity {
                     AgentActivity::Idle => ("Idle", theme.activity_idle),
                     AgentActivity::Thinking => ("Thinking", theme.activity_thinking),
-                    AgentActivity::Tool(_) => {
-                        // Handled specially below for the formatted span.
-                        ("", theme.activity_tool)
-                    }
+                    AgentActivity::Tool(_) => ("", theme.activity_tool),
                     AgentActivity::Done => ("Done", theme.activity_done),
                 };
 
@@ -2130,54 +2131,95 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     )
                 };
 
-                let sep = Span::styled(" | ", Style::default().fg(theme.status_separator));
+                let sep = Span::styled(" │ ", Style::default().fg(theme.status_separator));
 
                 let elapsed = agent.active_elapsed();
                 let elapsed_str = format_elapsed(elapsed);
 
-                let scroll_info = if agent.scroll_offset == 0 {
-                    "bottom".to_string()
-                } else {
-                    format!("-{}", agent.scroll_offset)
-                };
-
-                let mut spans = vec![
+                // Left side: activity + elapsed + turns + tools
+                let mut left_spans = vec![
                     Span::raw(" "),
                     activity_span,
                     sep.clone(),
-                    Span::raw(format!("⏱ {elapsed_str}")),
+                    Span::raw(elapsed_str.to_string()),
                     sep.clone(),
-                    Span::raw(format!("↻ Turns: {}", agent.turn_count)),
+                    Span::raw(format!("T:{}", agent.turn_count)),
                     sep.clone(),
-                    Span::raw(format!("⚒ Tools: {}", agent.tool_count)),
+                    Span::raw(format!("⚒:{}", agent.tool_count)),
                 ];
 
-                if agent.input_tokens != 0
-                    || agent.output_tokens != 0
-                    || agent.total_cost_usd != 0.0
-                {
-                    let input = format_token_count(agent.input_tokens);
-                    let output = format_token_count(agent.output_tokens);
-                    spans.push(sep.clone());
-                    spans.push(Span::raw(format!("⊘ Tokens: {input}in / {output}out")));
-                    spans.push(sep.clone());
-                    spans.push(Span::raw(format!("◇ Cost: ${:.2}", agent.total_cost_usd)));
+                // Scroll indicator only when scrolled up
+                if agent.scroll_offset > 0 {
+                    left_spans.push(sep.clone());
+                    left_spans.push(Span::raw(format!("↑{}", agent.scroll_offset)));
                 }
 
-                spans.push(sep.clone());
-                spans.push(Span::raw(format!("⇕ Scroll: {scroll_info}")));
-
+                // New output indicator (prominent)
                 if agent.has_new_output {
-                    spans.push(sep);
-                    spans.push(Span::styled(
-                        "\u{2193} new output",
+                    left_spans.push(Span::raw(" "));
+                    left_spans.push(Span::styled(
+                        "● new",
                         Style::default()
                             .fg(theme.new_output)
                             .add_modifier(Modifier::BOLD),
                     ));
                 }
 
-                Line::from(spans)
+                // Right side: tokens + cost (only if we have data)
+                let mut right_spans: Vec<Span> = Vec::new();
+                if agent.input_tokens != 0
+                    || agent.output_tokens != 0
+                    || agent.total_cost_usd != 0.0
+                {
+                    let input = format_token_count(agent.input_tokens);
+                    let output = format_token_count(agent.output_tokens);
+                    right_spans.push(Span::raw(format!(
+                        "{input}↑ {output}↓ ${:.2} ",
+                        agent.total_cost_usd
+                    )));
+                }
+
+                // Build the full line with left fill + right
+                let left_line = Line::from(left_spans);
+                let right_line = Line::from(right_spans);
+
+                // Use ratatui Layout to split row into left (fill) and right (length)
+                let right_width = right_line.width() as u16;
+                let row_chunks = Layout::horizontal([
+                    Constraint::Fill(1),
+                    Constraint::Length(right_width),
+                ])
+                .split(rows[0]);
+
+                let left_para = Paragraph::new(left_line).style(
+                    Style::default()
+                        .bg(theme.status_bar_bg)
+                        .fg(theme.status_bar_fg),
+                );
+                let right_para = Paragraph::new(right_line)
+                    .alignment(Alignment::Right)
+                    .style(
+                        Style::default()
+                            .bg(theme.status_bar_bg)
+                            .fg(theme.status_bar_fg),
+                    );
+                frame.render_widget(left_para, row_chunks[0]);
+                frame.render_widget(right_para, row_chunks[1]);
+
+                // The agent branch renders the status bar as a two-part
+                // (left + right) layout that requires direct `frame.render_widget`
+                // calls, so we render the hint bar here and return early to skip
+                // the single-`Paragraph` fallback path below.
+                let hints = build_hint_bar(area.width);
+                let hints_paragraph = Paragraph::new(hints)
+                    .style(Style::default().bg(theme.hint_bar_bg).fg(theme.hint_bar_fg));
+                frame.render_widget(hints_paragraph, rows[1]);
+
+                // Return early: the agent branch uses a two-part (left + right)
+                // layout rendered directly via `frame.render_widget`, which is
+                // incompatible with the single-`Paragraph` fallback below. Any
+                // shared post-render logic must be duplicated above this point.
+                return;
             }
         }
     };
@@ -4239,7 +4281,7 @@ mod tests {
     #[test]
     fn strip_empty_removes_empty_text_after_turn_start() {
         let lines = vec![
-            DisplayLine::TurnStart,
+            DisplayLine::TurnStart { turn_number: Some(1) },
             DisplayLine::Text("".into()),
             DisplayLine::Text("".into()),
             DisplayLine::Text("hello".into()),
@@ -4248,7 +4290,7 @@ mod tests {
         let result = strip_leading_empty_after_turn_start(&refs);
         // TurnStart + "hello" (two empty lines removed)
         assert_eq!(result.len(), 2);
-        assert!(matches!(result[0], DisplayLine::TurnStart));
+        assert!(matches!(result[0], DisplayLine::TurnStart { .. }));
         assert!(matches!(result[1], DisplayLine::Text(ref s) if s == "hello"));
     }
 
@@ -4454,7 +4496,7 @@ mod tests {
         let lines = vec![
             DisplayLine::System("sys".into()),
             DisplayLine::Error("err".into()),
-            DisplayLine::TurnStart,
+            DisplayLine::TurnStart { turn_number: Some(1) },
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
         let blocks = collapse_results(
@@ -4542,7 +4584,7 @@ mod tests {
         assert_eq!(output.len(), 2);
         // First line should have the connector prefix.
         let first_text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(first_text.contains(RESULT_CONNECTOR));
+        assert!(first_text.contains('│'));
         assert!(first_text.contains("first"));
     }
 
@@ -4642,7 +4684,7 @@ mod tests {
     #[test]
     fn full_pipeline_strips_empty_after_turn_start() {
         let lines = vec![
-            DisplayLine::TurnStart,
+            DisplayLine::TurnStart { turn_number: Some(1) },
             DisplayLine::Text("".into()),
             DisplayLine::Text("content".into()),
         ];

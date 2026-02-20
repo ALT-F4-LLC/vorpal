@@ -906,7 +906,7 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
 
                 if let Some(agent) = app.agent_by_id_mut(target_id) {
                     agent.push_line(DisplayLine::UserPrompt { content: prompt.clone() });
-                    agent.push_line(DisplayLine::TurnStart);
+                    agent.start_new_turn();
                     agent.id = agent_id;
                     agent.status = AgentStatus::Running;
                     agent.activity = AgentActivity::Idle;
@@ -1823,7 +1823,8 @@ fn display_line_to_text(line: &DisplayLine) -> String {
                 .collect::<Vec<_>>()
                 .join("\n")
         }
-        DisplayLine::TurnStart => String::new(),
+        DisplayLine::TurnStart { .. } => String::new(),
+        DisplayLine::TurnSummary { .. } => String::new(),
         DisplayLine::DiffResult {
             diff_ops,
             file_path,

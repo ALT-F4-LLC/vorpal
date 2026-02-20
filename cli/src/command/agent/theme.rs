@@ -49,10 +49,25 @@ pub struct Theme {
     pub system_text: Color,
     pub stderr_text: Color,
     pub error_text: Color,
-    pub tool_result_connector: Color,
     pub tool_result_text: Color,
     pub tool_result_error: Color,
     pub tool_result_hidden: Color,
+
+    // -- Markdown rendering ---------------------------------------------------
+    pub syntect_theme: &'static str,
+    pub code_block_bg: Color,
+    pub code_block_border: Color,
+    pub code_block_lang_label: Color,
+    pub table_border: Color,
+    pub table_header_fg: Color,
+    pub table_header_bg: Color,
+    pub inline_code_bg: Color,
+    pub inline_code_fg: Color,
+    pub blockquote_border: Color,
+    pub blockquote_fg: Color,
+    pub heading_fg: Color,
+    pub link_fg: Color,
+    pub list_marker_fg: Color,
 
     // -- Status bar ----------------------------------------------------------
     pub status_bar_bg: Color,
@@ -144,6 +159,11 @@ pub struct Theme {
     pub diff_header_fg: Color,
     pub diff_context_fg: Color,
 
+    // -- Enhanced diff view --------------------------------------------------
+    pub diff_addition_bg: Color,
+    pub diff_deletion_bg: Color,
+    pub diff_gutter_fg: Color,
+
     // -- Command palette -----------------------------------------------------
     pub command_bar_fg: Color,
     pub command_match_fg: Color,
@@ -162,6 +182,18 @@ pub struct Theme {
     pub chat_input_border: Color,
     pub chat_input_placeholder: Color,
     pub chat_input_focused_border: Color,
+
+    // -- Turn separators -----------------------------------------------------
+    pub turn_separator: Color,
+    pub turn_separator_label: Color,
+    pub turn_separator_meta: Color,
+
+    // -- Tool block containers -----------------------------------------------
+    pub tool_block_border: Color,
+    pub tool_block_error_border: Color,
+
+    // -- Thinking blocks -----------------------------------------------------
+    pub thinking_collapsed_fg: Color,
 }
 
 impl Theme {
@@ -199,10 +231,24 @@ impl Theme {
             system_text: Color::DarkGray,
             stderr_text: Color::DarkGray,
             error_text: Color::Red,
-            tool_result_connector: Color::DarkGray,
             tool_result_text: Color::Gray,
             tool_result_error: Color::Red,
             tool_result_hidden: Color::Gray,
+
+            syntect_theme: "base16-ocean.dark",
+            code_block_bg: Color::Rgb(30, 30, 30),
+            code_block_border: Color::DarkGray,
+            code_block_lang_label: Color::DarkGray,
+            table_border: Color::DarkGray,
+            table_header_fg: Color::White,
+            table_header_bg: Color::Rgb(40, 40, 40),
+            inline_code_bg: Color::Rgb(50, 50, 50),
+            inline_code_fg: Color::Rgb(230, 150, 100),
+            blockquote_border: Color::DarkGray,
+            blockquote_fg: Color::Gray,
+            heading_fg: Color::White,
+            link_fg: Color::Cyan,
+            list_marker_fg: Color::DarkGray,
 
             status_bar_bg: Color::DarkGray,
             status_bar_fg: Color::White,
@@ -284,6 +330,10 @@ impl Theme {
             diff_header_fg: Color::Cyan,
             diff_context_fg: Color::DarkGray,
 
+            diff_addition_bg: Color::Rgb(0, 40, 0),
+            diff_deletion_bg: Color::Rgb(40, 0, 0),
+            diff_gutter_fg: Color::DarkGray,
+
             command_bar_fg: Color::Cyan,
             command_match_fg: Color::Yellow,
             command_selected_bg: Color::DarkGray,
@@ -299,6 +349,15 @@ impl Theme {
             chat_input_border: Color::DarkGray,
             chat_input_placeholder: Color::DarkGray,
             chat_input_focused_border: Color::Cyan,
+
+            turn_separator: Color::DarkGray,
+            turn_separator_label: Color::Gray,
+            turn_separator_meta: Color::DarkGray,
+
+            tool_block_border: Color::DarkGray,
+            tool_block_error_border: Color::Red,
+
+            thinking_collapsed_fg: Color::DarkGray,
         }
     }
 
@@ -336,10 +395,24 @@ impl Theme {
             system_text: Color::Gray,
             stderr_text: Color::Gray,
             error_text: Color::Red,
-            tool_result_connector: Color::Gray,
             tool_result_text: Color::DarkGray,
             tool_result_error: Color::Red,
             tool_result_hidden: Color::DarkGray,
+
+            syntect_theme: "InspiredGitHub",
+            code_block_bg: Color::Rgb(245, 245, 245),
+            code_block_border: Color::Gray,
+            code_block_lang_label: Color::Gray,
+            table_border: Color::Gray,
+            table_header_fg: Color::Black,
+            table_header_bg: Color::Rgb(235, 235, 235),
+            inline_code_bg: Color::Rgb(235, 235, 235),
+            inline_code_fg: Color::Rgb(180, 80, 50),
+            blockquote_border: Color::Gray,
+            blockquote_fg: Color::DarkGray,
+            heading_fg: Color::Black,
+            link_fg: Color::Blue,
+            list_marker_fg: Color::Gray,
 
             status_bar_bg: Color::Rgb(220, 220, 220),
             status_bar_fg: Color::Black,
@@ -421,6 +494,10 @@ impl Theme {
             diff_header_fg: Color::Rgb(0, 140, 140),
             diff_context_fg: Color::Gray,
 
+            diff_addition_bg: Color::Rgb(220, 255, 220),
+            diff_deletion_bg: Color::Rgb(255, 220, 220),
+            diff_gutter_fg: Color::Gray,
+
             command_bar_fg: Color::Rgb(0, 140, 140),
             command_match_fg: Color::Rgb(180, 130, 0),
             command_selected_bg: Color::Rgb(220, 220, 220),
@@ -436,6 +513,15 @@ impl Theme {
             chat_input_border: Color::Gray,
             chat_input_placeholder: Color::Gray,
             chat_input_focused_border: Color::Rgb(0, 140, 140),
+
+            turn_separator: Color::Gray,
+            turn_separator_label: Color::DarkGray,
+            turn_separator_meta: Color::Gray,
+
+            tool_block_border: Color::Gray,
+            tool_block_error_border: Color::Red,
+
+            thinking_collapsed_fg: Color::Gray,
         }
     }
 

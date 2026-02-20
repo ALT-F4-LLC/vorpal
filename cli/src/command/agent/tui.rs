@@ -319,24 +319,29 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
             };
 
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
-                match &line {
-                    DisplayLine::TurnStart => {
-                        agent.activity = AgentActivity::Thinking;
-                        agent.turn_count += 1;
+                // The parser emits a bare `TurnStart { turn_number: None }`.
+                // We intercept it here and delegate to `start_new_turn()`,
+                // which inserts a properly numbered `TurnStart` (and a
+                // `TurnSummary` for the previous turn). The parser-emitted
+                // line is intentionally *not* pushed to avoid duplicates.
+                if matches!(&line, DisplayLine::TurnStart { .. }) {
+                    agent.start_new_turn();
+                } else {
+                    match &line {
+                        DisplayLine::ToolUse { tool, .. } => {
+                            agent.activity = AgentActivity::Tool(tool.clone());
+                            agent.tool_count += 1;
+                        }
+                        DisplayLine::Text(_) => {
+                            agent.activity = AgentActivity::Thinking;
+                        }
+                        DisplayLine::Result(_) => {
+                            agent.activity = AgentActivity::Done;
+                        }
+                        _ => {}
                     }
-                    DisplayLine::ToolUse { tool, .. } => {
-                        agent.activity = AgentActivity::Tool(tool.clone());
-                        agent.tool_count += 1;
-                    }
-                    DisplayLine::Text(_) => {
-                        agent.activity = AgentActivity::Thinking;
-                    }
-                    DisplayLine::Result(_) => {
-                        agent.activity = AgentActivity::Done;
-                    }
-                    _ => {}
+                    agent.push_line(line);
                 }
-                agent.push_line(line);
             }
 
             // Deliver a copy of the message to the recipient agent's output
@@ -429,10 +434,11 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
                             Ok(new_agent_id) => {
                                 app.save_to_history(&queued_msg, &workspace, &opts);
                                 if let Some(agent) = app.agent_by_id_mut(agent_id) {
-                                    agent.push_line(DisplayLine::TurnStart);
+                                    // `start_new_turn()` sets activity to Thinking,
+                                    // so no separate Idle assignment is needed here.
+                                    agent.start_new_turn();
                                     agent.id = new_agent_id;
                                     agent.status = AgentStatus::Running;
-                                    agent.activity = AgentActivity::Idle;
                                     agent.prompt = queued_msg;
                                     agent.scroll_offset = 0;
                                     agent.has_new_output = false;

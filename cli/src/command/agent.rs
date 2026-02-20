@@ -6,6 +6,7 @@
 mod export;
 mod input;
 mod manager;
+mod markdown;
 mod parser;
 mod state;
 pub(crate) mod theme;

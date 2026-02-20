@@ -29,6 +29,7 @@ oauth2 = { version = "5.0.0", features = ["reqwest"] }
 path-clean = { version = "1.0.1" }
 petgraph = { version = "0.8.3" }
 port-selector = { version = "0.1.6" }
+pulldown-cmark = { version = "0.13", default-features = false }
 ratatui = { version = "0.30", features = ["crossterm"] }
 rcgen = { version = "0.14.7", features = ["aws_lc_rs", "x509-parser"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
@@ -38,13 +39,13 @@ sanitize-filename = { version = "0.6.0" }
 serde = { version = "1.0.228", features = ["serde_derive"] }
 serde_json = { version = "1.0.149" }
 sha256 = { version = "1.6.0" }
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
 thiserror = { version = "2.0.18" }
 tokio = { version = "1.49.0", features = ["net", "process", "rt-multi-thread", "signal"] }
 tokio-stream = { version = "0.1.18", features = ["io-util", "net"] }
 tokio-tar = { version = "0.3.1" }
 tokio-util = { version = "0.7.18", features = ["compat"] }
 toml = { version = "0.9.11" }
-tui-markdown = { version = "0.3" }
 tonic = { version = "0.14.3", features = ["tls-ring"] }
 tonic-health = { version = "0.14.3" }
 tracing = { version = "0.1.44" }

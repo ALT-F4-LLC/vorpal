@@ -226,7 +226,25 @@ pub fn export_session(agent: &AgentState) -> Result<PathBuf, String> {
                     }
                     writeln!(md, "> **{sender}** -> **{recipient}**: {content}").unwrap();
                 }
-                DisplayLine::TurnStart => {
+                DisplayLine::TurnSummary {
+                    input_tokens,
+                    output_tokens,
+                    cost_usd,
+                } => {
+                    if in_tool_result {
+                        writeln!(md, "````").unwrap();
+                        writeln!(md).unwrap();
+                        in_tool_result = false;
+                    }
+                    writeln!(md).unwrap();
+                    writeln!(
+                        md,
+                        "*{} in / {} out | ${:.2}*",
+                        input_tokens, output_tokens, cost_usd
+                    )
+                    .unwrap();
+                }
+                DisplayLine::TurnStart { .. } => {
                     if in_tool_result {
                         writeln!(md, "````").unwrap();
                         writeln!(md).unwrap();

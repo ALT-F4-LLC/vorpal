@@ -813,7 +813,16 @@ pub enum DisplayLine {
     /// Error messages (malformed stdout protocol lines).
     Error(String),
     /// Marks the start of a new assistant turn (visual separator).
-    TurnStart,
+    ///
+    /// `turn_number` is `None` when first emitted by the parser (before the
+    /// TUI assigns the real count via [`AgentState::start_new_turn`]).
+    TurnStart { turn_number: Option<usize> },
+    /// Per-turn token and cost summary (inserted at the end of each completed turn).
+    TurnSummary {
+        input_tokens: u64,
+        output_tokens: u64,
+        cost_usd: f64,
+    },
     /// An inter-agent message (sent or received between collaborating agents).
     AgentMessage {
         /// The agent that sent the message.
@@ -1024,6 +1033,12 @@ pub struct AgentState {
     pub output_tokens: u64,
     /// Cumulative cost in USD across all invocations.
     pub total_cost_usd: f64,
+    /// Snapshot of cumulative input_tokens at the start of the current turn.
+    pub turn_input_snapshot: u64,
+    /// Snapshot of cumulative output_tokens at the start of the current turn.
+    pub turn_output_snapshot: u64,
+    /// Snapshot of cumulative cost at the start of the current turn.
+    pub turn_cost_snapshot: f64,
     /// Per-section display mode overrides for individual tool result blocks.
     ///
     /// Keys are the sequential index of the ToolUse line in the output
@@ -1077,6 +1092,9 @@ impl AgentState {
             input_tokens: 0,
             output_tokens: 0,
             total_cost_usd: 0.0,
+            turn_input_snapshot: 0,
+            turn_output_snapshot: 0,
+            turn_cost_snapshot: 0.0,
             claude_options,
             accumulated_active: Duration::ZERO,
             running_since: Some(Instant::now()),
@@ -1140,6 +1158,41 @@ impl AgentState {
         if self.scroll_offset > 0 {
             self.has_new_output = true;
         }
+    }
+
+    /// Begin a new assistant turn.
+    ///
+    /// Encapsulates the full turn-transition sequence so every call site
+    /// (parser-driven events, inline chat responses, queue-drain respawns)
+    /// behaves identically:
+    ///
+    /// 1. Insert a [`DisplayLine::TurnSummary`] for the previous turn (if
+    ///    `turn_count > 0` and there is a token delta).
+    /// 2. Snapshot the cumulative token/cost values.
+    /// 3. Increment `turn_count`.
+    /// 4. Push a [`DisplayLine::TurnStart`] with the new turn number.
+    /// 5. Set `activity` to [`AgentActivity::Thinking`].
+    pub fn start_new_turn(&mut self) {
+        if self.turn_count > 0 {
+            let delta_in = self.input_tokens.saturating_sub(self.turn_input_snapshot);
+            let delta_out = self.output_tokens.saturating_sub(self.turn_output_snapshot);
+            let delta_cost = (self.total_cost_usd - self.turn_cost_snapshot).max(0.0);
+            if delta_in > 0 || delta_out > 0 {
+                self.push_line(DisplayLine::TurnSummary {
+                    input_tokens: delta_in,
+                    output_tokens: delta_out,
+                    cost_usd: delta_cost,
+                });
+            }
+        }
+        self.turn_input_snapshot = self.input_tokens;
+        self.turn_output_snapshot = self.output_tokens;
+        self.turn_cost_snapshot = self.total_cost_usd;
+        self.turn_count += 1;
+        self.push_line(DisplayLine::TurnStart {
+            turn_number: Some(self.turn_count),
+        });
+        self.activity = AgentActivity::Thinking;
     }
 
     /// Toggle the display mode override for a specific tool section.
