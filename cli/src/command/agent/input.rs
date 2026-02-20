@@ -1120,7 +1120,6 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
             app.chat_history_stash.clear();
             app.input_mode = InputMode::Normal;
             app.set_status_message(format!("Message queued ({queue_len} pending)"));
-            return;
         }
         AgentStatus::Exited(_) => {
             if agent.session_id.is_none() {

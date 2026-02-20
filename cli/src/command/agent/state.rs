@@ -2147,7 +2147,7 @@ impl App {
             None => {
                 self.chat_history_stash = self.chat_input.text().to_string();
                 self.chat_history_index = Some(0);
-                if let Some(entry) = entries.get(entries.len() - 1) {
+                if let Some(entry) = entries.last() {
                     self.chat_input.set_text(&entry.prompt);
                 }
             }
