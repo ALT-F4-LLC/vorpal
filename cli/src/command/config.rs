@@ -17,7 +17,10 @@ use tokio::{
 use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tonic::transport::Channel;
 use tracing::{info, warn};
-use vorpal_sdk::api::{artifact::Artifact, context::context_service_client::ContextServiceClient};
+use vorpal_sdk::{
+    api::{artifact::Artifact, context::context_service_client::ContextServiceClient},
+    artifact::system::get_system_default_str,
+};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct VorpalConfigSourceGo {
@@ -56,6 +59,10 @@ pub struct VorpalConfig {
     pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker: Option<String>,
 
     // Build config fields
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,7 +72,14 @@ pub struct VorpalConfig {
 }
 
 impl VorpalConfig {
-    const SETTINGS_FIELD_NAMES: &[&str] = &["registry", "namespace", "language", "name"];
+    const SETTINGS_FIELD_NAMES: &[&str] = &[
+        "registry",
+        "namespace",
+        "language",
+        "name",
+        "system",
+        "worker",
+    ];
 
     /// Returns the built-in defaults for settings fields.
     pub fn defaults() -> Self {
@@ -74,6 +88,8 @@ impl VorpalConfig {
             namespace: Some("library".to_string()),
             language: Some("rust".to_string()),
             name: Some("vorpal".to_string()),
+            system: Some(get_system_default_str()),
+            worker: Some("unix:///var/lib/vorpal/vorpal.sock".to_string()),
             environments: None,
             source: None,
         }
@@ -91,6 +107,8 @@ impl VorpalConfig {
             "namespace" => self.namespace = Some(value),
             "language" => self.language = Some(value),
             "name" => self.name = Some(value),
+            "system" => self.system = Some(value),
+            "worker" => self.worker = Some(value),
             _ => {
                 return Err(format!(
                     "unknown setting key '{}'. Valid keys: {}",
@@ -140,6 +158,8 @@ pub struct ResolvedSettings {
     pub namespace: ResolvedValue,
     pub language: ResolvedValue,
     pub name: ResolvedValue,
+    pub system: ResolvedValue,
+    pub worker: ResolvedValue,
 }
 
 impl ResolvedSettings {
@@ -180,6 +200,8 @@ impl ResolvedSettings {
             namespace: pick(&defaults.namespace, &user.namespace, &project.namespace),
             language: pick(&defaults.language, &user.language, &project.language),
             name: pick(&defaults.name, &user.name, &project.name),
+            system: pick(&defaults.system, &user.system, &project.system),
+            worker: pick(&defaults.worker, &user.worker, &project.worker),
         }
     }
 
@@ -190,6 +212,8 @@ impl ResolvedSettings {
             "namespace" => Some(&self.namespace),
             "language" => Some(&self.language),
             "name" => Some(&self.name),
+            "system" => Some(&self.system),
+            "worker" => Some(&self.worker),
             _ => None,
         }
     }

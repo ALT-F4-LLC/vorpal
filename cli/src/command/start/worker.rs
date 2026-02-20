@@ -12,7 +12,10 @@ use crate::command::{
 };
 use anyhow::Result;
 use sha256::digest;
-use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio};
+use std::{
+    collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path,
+    process::Stdio,
+};
 use tokio::{
     fs::{create_dir_all, read, remove_dir_all, remove_file, set_permissions, write},
     io::{AsyncBufReadExt, BufReader},
@@ -249,6 +252,116 @@ async fn pull_source(
                 "failed to sanitize output files: {err:?}"
             )));
         }
+    }
+
+    Ok(())
+}
+
+async fn pull_artifact(
+    archive_auth_header: &Option<MetadataValue<Ascii>>,
+    artifact_namespace: &str,
+    artifact_digest: &str,
+    registry: &str,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
+) -> Result<(), Status> {
+    let artifact_output_path = get_artifact_output_path(artifact_digest, artifact_namespace);
+
+    if artifact_output_path.exists() {
+        return Ok(());
+    }
+
+    let artifact_archive_path = get_artifact_archive_path(artifact_digest, artifact_namespace);
+
+    if !artifact_archive_path.exists() {
+        send_message(format!("pull artifact: {artifact_digest}"), tx).await?;
+
+        let client_archive_channel = build_channel(registry)
+            .await
+            .map_err(|e| Status::internal(format!("failed to connect to registry: {e}")))?;
+
+        let mut client_archive = ArchiveServiceClient::with_interceptor(
+            client_archive_channel,
+            apply_auth_to_request(archive_auth_header),
+        );
+
+        let request = ArchivePullRequest {
+            digest: artifact_digest.to_string(),
+            namespace: artifact_namespace.to_string(),
+        };
+
+        match client_archive.pull(request).await {
+            Err(status) => {
+                if status.code() != NotFound {
+                    return Err(Status::internal(format!(
+                        "failed to pull artifact archive: {status:?}"
+                    )));
+                }
+
+                return Err(Status::not_found("artifact archive not found in registry"));
+            }
+
+            Ok(response) => {
+                let mut response = response.into_inner();
+                let mut response_data = Vec::new();
+
+                while let Ok(message) = response.message().await {
+                    if message.is_none() {
+                        break;
+                    }
+
+                    if let Some(res) = message {
+                        if !res.data.is_empty() {
+                            response_data.extend(res.data);
+                        }
+                    }
+                }
+
+                if response_data.is_empty() {
+                    return Err(Status::not_found("artifact archive empty in registry"));
+                }
+
+                let archive_parent = artifact_archive_path
+                    .parent()
+                    .ok_or_else(|| Status::internal("failed to get artifact archive parent"))?;
+
+                create_dir_all(archive_parent).await.map_err(|err| {
+                    Status::internal(format!("failed to create artifact archive parent: {err}"))
+                })?;
+
+                write(&artifact_archive_path, &response_data)
+                    .await
+                    .map_err(|err| {
+                        Status::internal(format!("failed to write artifact archive: {err}"))
+                    })?;
+
+                set_timestamps(&artifact_archive_path).await.map_err(|err| {
+                    Status::internal(format!("failed to set artifact archive timestamps: {err}"))
+                })?;
+            }
+        }
+    }
+
+    if !artifact_archive_path.exists() {
+        return Err(Status::not_found("artifact archive not found"));
+    }
+
+    send_message(format!("unpack artifact: {artifact_digest}"), tx).await?;
+
+    create_dir_all(&artifact_output_path).await.map_err(|err| {
+        Status::internal(format!("failed to create artifact output path: {err}"))
+    })?;
+
+    unpack_zstd(&artifact_output_path, &artifact_archive_path)
+        .await
+        .map_err(|err| Status::internal(format!("failed to unpack artifact archive: {err:?}")))?;
+
+    let artifact_files = get_file_paths(&artifact_output_path, vec![], vec![])
+        .map_err(|err| Status::internal(format!("failed to get artifact files: {err}")))?;
+
+    for path in artifact_files.iter() {
+        set_timestamps(path).await.map_err(|err| {
+            Status::internal(format!("failed to set artifact file timestamps: {err:?}"))
+        })?;
     }
 
     Ok(())
@@ -647,6 +760,28 @@ async fn build_artifact(
             .ok_or_else(|| Status::invalid_argument("source 'digest' is missing"))?;
 
         info!("worker |> pull source: {}", source_digest);
+    }
+
+    // Pull dependency artifacts
+
+    let mut dependency_digests = HashSet::new();
+    for step in artifact.steps.iter() {
+        for dep_digest in step.artifacts.iter() {
+            dependency_digests.insert(dep_digest.clone());
+        }
+    }
+
+    for dep_digest in dependency_digests.iter() {
+        pull_artifact(
+            &archive_auth_header,
+            artifact_namespace,
+            dep_digest,
+            &registry,
+            &tx,
+        )
+        .await?;
+
+        info!("worker |> pull artifact: {}", dep_digest);
     }
 
     // Run steps

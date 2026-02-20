@@ -346,15 +346,16 @@ pub async fn run() -> Result<()> {
             let default_addr = get_default_address();
             let default_ns = get_default_namespace();
 
-            // Agent and worker are local services — they should NOT inherit the
-            // `registry` setting. Only override them when the user passes an
-            // explicit --agent / --worker flag.
+            // Agent is a local service — it should NOT inherit the `registry`
+            // setting. Only override it when the user passes an explicit --agent flag.
             let effective_agent = agent.to_string();
             let effective_registry =
                 apply_default(registry, &default_addr, &resolved.registry.value);
-            let effective_worker = worker.to_string();
+            let effective_worker = apply_default(worker, &default_addr, &resolved.worker.value);
             let effective_namespace =
                 apply_default(namespace, &default_ns, &resolved.namespace.value);
+            let default_system = get_system_default_str();
+            let effective_system = apply_default(system, &default_system, &resolved.system.value);
 
             if name.is_empty() {
                 error!("no name specified");
@@ -438,7 +439,7 @@ pub async fn run() -> Result<()> {
                 namespace: effective_namespace.clone(),
                 path: *path,
                 rebuild: *rebuild,
-                system: system.clone(),
+                system: effective_system.clone(),
                 unlock: *unlock,
                 variable: variable.clone(),
             };

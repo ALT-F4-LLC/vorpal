@@ -7,6 +7,7 @@ use tokio::{
     fs::{copy, create_dir_all, remove_file, File, OpenOptions},
     io::{AsyncWriteExt, BufReader},
 };
+use tokio_stream::StreamExt;
 use tokio_tar::{Archive, Builder};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -70,7 +71,32 @@ pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(),
 
     let mut archive = Archive::new(zstd_decoder);
 
-    archive.unpack(target_dir).await.expect("Failed to unpack");
+    // Iterate entries manually instead of using archive.unpack() because
+    // tokio-tar does not handle overwriting existing symlinks — it fails
+    // with "File exists" (os error 17). For symlink/hardlink entries, we
+    // remove the destination path before unpacking.
+    let mut entries = archive.entries().expect("Failed to read archive entries");
+
+    while let Some(entry) = entries.next().await {
+        let mut entry = entry.expect("Failed to read archive entry");
+        let entry_type = entry.header().entry_type();
+
+        if entry_type.is_symlink() || entry_type.is_hard_link() {
+            if let Ok(path) = entry.path() {
+                let dest = target_dir.join(path);
+                if dest.symlink_metadata().is_ok() {
+                    tokio::fs::remove_file(&dest)
+                        .await
+                        .expect("Failed to remove existing symlink");
+                }
+            }
+        }
+
+        entry
+            .unpack_in(target_dir)
+            .await
+            .expect("Failed to unpack entry");
+    }
 
     Ok(())
 }
