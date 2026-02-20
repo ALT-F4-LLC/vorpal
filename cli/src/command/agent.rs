@@ -8,6 +8,7 @@ mod input;
 mod manager;
 mod markdown;
 mod parser;
+pub(crate) mod session;
 mod state;
 pub(crate) mod theme;
 mod tui;

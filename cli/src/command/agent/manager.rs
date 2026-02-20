@@ -70,6 +70,16 @@ impl AgentManager {
         }
     }
 
+    /// Allocate the next agent ID without spawning a process.
+    ///
+    /// Used when creating agent tabs for loaded sessions that don't have
+    /// a running Claude Code process.
+    pub fn allocate_id(&mut self) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
     /// Spawn a new Claude Code instance. Returns the assigned `agent_id`.
     ///
     /// The process is started with `--output-format stream-json --print --verbose`

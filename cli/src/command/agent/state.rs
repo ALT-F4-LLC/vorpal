@@ -116,6 +116,10 @@ pub const COMMANDS: &[PaletteCommand] = &[
         name: "clear-queue",
         description: "Clear queued messages for focused agent",
     },
+    PaletteCommand {
+        name: "sessions",
+        description: "Browse previous Claude Code sessions",
+    },
 ];
 
 /// Return the commands whose names fuzzy-match the given query.
@@ -932,6 +936,7 @@ pub enum InputMode {
     HistorySearch,
     TemplatePicker,
     SaveTemplate,
+    SessionPicker,
 }
 
 /// Which field is active in the new-agent input overlay.
@@ -1108,6 +1113,53 @@ impl AgentState {
             claude_options,
             accumulated_active: Duration::ZERO,
             running_since: Some(Instant::now()),
+            section_overrides: HashMap::new(),
+            section_overrides_generation: 0,
+            cache_section_overrides_generation: 0,
+            message_queue: VecDeque::new(),
+            interrupted: false,
+        }
+    }
+
+    /// Create an agent state from a loaded session (no running process).
+    ///
+    /// The agent starts in [`AgentStatus::Exited`] with pre-populated output
+    /// from the session's conversation history.
+    pub fn from_session(
+        id: usize,
+        name: String,
+        workspace: PathBuf,
+        display_lines: Vec<DisplayLine>,
+        session_id: String,
+        claude_options: ClaudeOptions,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            workspace,
+            prompt: String::new(),
+            status: AgentStatus::Exited(Some(0)),
+            output: display_lines.into_iter().collect(),
+            scroll_offset: 0,
+            has_new_output: false,
+            activity: AgentActivity::Done,
+            turn_count: 0,
+            tool_count: 0,
+            output_generation: 0,
+            cached_lines: None,
+            cached_row_count: 0,
+            cache_generation: 0,
+            cache_result_display: None,
+            session_id: Some(session_id),
+            claude_options,
+            accumulated_active: Duration::ZERO,
+            running_since: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_cost_usd: 0.0,
+            turn_input_snapshot: 0,
+            turn_output_snapshot: 0,
+            turn_cost_snapshot: 0.0,
             section_overrides: HashMap::new(),
             section_overrides_generation: 0,
             cache_section_overrides_generation: 0,
@@ -1428,6 +1480,14 @@ pub struct App {
     /// Which pane currently has focus: `Left` or `Right`.
     pub split_focused_pane: SplitPane,
 
+    // -- Session picker state --------------------------------------------------
+    /// Cached list of discovered sessions for the session picker.
+    pub session_list: Vec<super::session::SessionInfo>,
+    /// Index of the currently selected session in the picker.
+    pub session_selected: usize,
+    /// Input buffer for filtering sessions in the session picker.
+    pub session_filter: InputBuffer,
+
     // -- Graph state -----------------------------------------------------------
     /// Whether the dependency graph overlay is visible.
     pub show_graph: bool,
@@ -1485,7 +1545,7 @@ impl App {
             should_quit: false,
             show_help: false,
             confirm_close: false,
-            result_display: ResultDisplay::Hidden,
+            result_display: ResultDisplay::Diff,
             status_message: None,
             pending_g: None,
             input_mode: InputMode::Normal,
@@ -1535,6 +1595,9 @@ impl App {
             split_enabled: false,
             split_right_index: None,
             split_focused_pane: SplitPane::Left,
+            session_list: Vec::new(),
+            session_selected: 0,
+            session_filter: InputBuffer::new(),
             show_graph: false,
             show_dashboard: false,
             dashboard_selected: 0,
@@ -1992,6 +2055,63 @@ impl App {
         self.template_name_input.clear();
         self.input_mode = InputMode::Input;
         self.set_status_message(format!("Template '{name}' saved"));
+    }
+
+    // -- Session picker methods ------------------------------------------------
+
+    /// Enter session picker mode. Discovers sessions for the current workspace
+    /// and populates the picker state.
+    pub fn enter_session_picker(&mut self) {
+        self.session_list = super::session::discover_sessions(&self.default_workspace);
+        self.session_selected = 0;
+        self.session_filter.clear();
+        self.input_mode = InputMode::SessionPicker;
+    }
+
+    /// Exit session picker mode without selecting, returning to normal mode.
+    pub fn exit_session_picker(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.session_list.clear();
+        self.session_selected = 0;
+        self.session_filter.clear();
+    }
+
+    /// Select the currently highlighted session and load its conversation.
+    ///
+    /// Returns `Some((session_id, display_lines, slug))` on success, or `None`
+    /// if the selection index is out of range or the session list is empty.
+    pub fn select_session(&mut self) -> Option<(String, Vec<DisplayLine>, Option<String>)> {
+        let filtered = self.filtered_sessions();
+        let info = filtered.get(self.session_selected)?;
+        let session_id = info.session_id.clone();
+        let file_path = info.file_path.clone();
+        let slug = info.slug.clone();
+        drop(filtered);
+
+        let display_lines = super::session::load_session_conversation(&file_path);
+        self.exit_session_picker();
+        Some((session_id, display_lines, slug))
+    }
+
+    /// Return the session list filtered by the current session_filter text.
+    pub fn filtered_sessions(&self) -> Vec<&super::session::SessionInfo> {
+        let query = self.session_filter.text().to_lowercase();
+        if query.is_empty() {
+            self.session_list.iter().collect()
+        } else {
+            self.session_list
+                .iter()
+                .filter(|s| {
+                    s.slug
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&query)
+                        || s.session_id.to_lowercase().contains(&query)
+                        || s.last_message_preview.to_lowercase().contains(&query)
+                })
+                .collect()
+        }
     }
 
     /// Submit the current input buffers.

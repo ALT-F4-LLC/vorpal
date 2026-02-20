@@ -155,6 +155,10 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         render_template_picker(app, frame, area);
     }
 
+    if app.input_mode == InputMode::SessionPicker {
+        render_session_picker(app, frame, area);
+    }
+
     if app.input_mode == InputMode::Input {
         render_input(app, frame, area);
     }
@@ -3099,6 +3103,107 @@ fn render_template_picker(app: &App, frame: &mut Frame, area: Rect) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.input_border))
                 .title(" Select Template ")
+                .title_style(
+                    Style::default()
+                        .fg(theme.input_title)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .style(Style::default().bg(theme.input_bg).fg(theme.input_fg));
+
+    frame.render_widget(picker, popup);
+}
+
+// ---------------------------------------------------------------------------
+// Session picker overlay
+// ---------------------------------------------------------------------------
+
+/// Render the session picker overlay showing discovered Claude Code sessions.
+fn render_session_picker(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
+    let filtered = app.filtered_sessions();
+    let total = filtered.len();
+
+    let content_rows = total.max(1) + 3; // items + blank + footer + filter
+    let popup_height = (content_rows + 2).min(area.height as usize).min(20) as u16;
+
+    let popup = centered_rect_fixed_height(60, popup_height, area);
+    frame.render_widget(Clear, popup);
+
+    let mut text = Vec::new();
+
+    // Filter indicator.
+    let filter_text = app.session_filter.text();
+    if !filter_text.is_empty() {
+        text.push(Line::from(Span::styled(
+            format!("  Filter: {filter_text}"),
+            Style::default()
+                .fg(theme.help_footer)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
+    if total == 0 {
+        text.push(Line::from(Span::styled(
+            if filter_text.is_empty() {
+                "  No sessions found for this workspace"
+            } else {
+                "  No matching sessions"
+            },
+            Style::default().fg(theme.help_footer),
+        )));
+    } else {
+        for (i, session) in filtered.iter().enumerate() {
+            let is_selected = app.session_selected == i;
+            let slug_display = session
+                .slug
+                .as_deref()
+                .unwrap_or(&session.session_id[..8.min(session.session_id.len())]);
+            let role_indicator = match session.last_message_role.as_str() {
+                "user" => ">",
+                "assistant" => "<",
+                _ => " ",
+            };
+            let preview = if session.last_message_preview.len() > 50 {
+                let mut end = 47;
+                while !session.last_message_preview.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &session.last_message_preview[..end])
+            } else {
+                session.last_message_preview.clone()
+            };
+            let label = format!("  {role_indicator} {slug_display}  {preview}");
+
+            let style = if is_selected {
+                Style::default()
+                    .fg(theme.input_fg)
+                    .bg(theme.selector_active)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.input_fg)
+            };
+
+            text.push(Line::from(Span::styled(label, style)));
+        }
+    }
+
+    // Footer.
+    text.push(Line::from(""));
+    text.push(
+        Line::from(Span::styled(
+            "Up/Down: navigate  |  Enter: open  |  Type to filter  |  Esc: cancel",
+            Style::default().fg(theme.help_footer),
+        ))
+        .alignment(Alignment::Center),
+    );
+
+    let picker = Paragraph::new(text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.input_border))
+                .title(" Previous Sessions ")
                 .title_style(
                     Style::default()
                         .fg(theme.input_title)

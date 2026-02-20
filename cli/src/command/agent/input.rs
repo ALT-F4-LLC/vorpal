@@ -7,8 +7,8 @@
 
 use super::manager::AgentManager;
 use super::state::{
-    AgentActivity, AgentStatus, App, DiffLine, DisplayLine, InputField, InputMode, InputOverrides,
-    SplitPane, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    AgentActivity, AgentState, AgentStatus, App, DiffLine, DisplayLine, InputField, InputMode,
+    InputOverrides, SplitPane, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::ui::{BLOCK_MARKER, RESULT_CONNECTOR, SESSION_MARKER};
 use crossterm::{
@@ -249,6 +249,12 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
     // In template picker mode, delegate all keys to the template handler.
     if app.input_mode == InputMode::TemplatePicker {
         handle_template_mode(app, key);
+        return;
+    }
+
+    // In session picker mode, delegate all keys to the session picker handler.
+    if app.input_mode == InputMode::SessionPicker {
+        handle_session_picker_mode(app, manager, key).await;
         return;
     }
 
@@ -652,6 +658,11 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         // Enter command mode: :.
         KeyCode::Char(':') => {
             app.enter_command_mode();
+        }
+
+        // Open session picker: o.
+        KeyCode::Char('o') => {
+            app.enter_session_picker();
         }
 
         // Activate inline chat input: i (when agents exist and not running).
@@ -1351,6 +1362,90 @@ fn handle_template_mode(app: &mut App, key: KeyEvent) {
 }
 
 // ---------------------------------------------------------------------------
+// Session picker mode handler
+// ---------------------------------------------------------------------------
+
+/// Handle keyboard input while the session picker overlay is active.
+///
+/// Mirrors the template picker pattern: Escape to close, Enter to select,
+/// Up/Down for navigation, character keys to filter.
+async fn handle_session_picker_mode(app: &mut App, manager: &mut AgentManager, key: KeyEvent) {
+    let total = app.filtered_sessions().len();
+
+    match key.code {
+        // Exit session picker: Escape.
+        KeyCode::Esc => {
+            app.exit_session_picker();
+        }
+
+        // Select the current session: Enter.
+        KeyCode::Enter => {
+            if total == 0 {
+                app.set_status_message("No sessions available");
+                app.exit_session_picker();
+                return;
+            }
+            if let Some((session_id, display_lines, slug)) = app.select_session() {
+                let agent_id = manager.allocate_id();
+                let name_str = slug.as_deref().unwrap_or(&session_id).to_string();
+                let agent = AgentState::from_session(
+                    agent_id,
+                    name_str.clone(),
+                    app.default_workspace.clone(),
+                    display_lines,
+                    session_id,
+                    app.default_claude_options.clone(),
+                );
+                app.add_agent(agent);
+                // Focus the newly added agent.
+                app.focused = app.agents.len() - 1;
+                app.set_status_message(format!("Loaded session: {name_str}"));
+            }
+        }
+
+        // Navigate up (arrow keys only — j/k reserved for filter typing).
+        KeyCode::Up => {
+            if total > 0 {
+                app.session_selected = if app.session_selected == 0 {
+                    total - 1
+                } else {
+                    app.session_selected - 1
+                };
+            }
+        }
+
+        // Navigate down (arrow keys only — j/k reserved for filter typing).
+        KeyCode::Down => {
+            if total > 0 {
+                app.session_selected = (app.session_selected + 1) % total;
+            }
+        }
+
+        // Backspace: remove last char from filter.
+        KeyCode::Backspace => {
+            app.session_filter.delete_char();
+            // Clamp selection after filter changes.
+            let new_total = app.filtered_sessions().len();
+            if app.session_selected >= new_total && new_total > 0 {
+                app.session_selected = new_total - 1;
+            }
+        }
+
+        // Character input: append to filter.
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.session_filter.insert_char(c);
+            // Clamp selection after filter changes.
+            let new_total = app.filtered_sessions().len();
+            if app.session_selected >= new_total && new_total > 0 {
+                app.session_selected = new_total - 1;
+            }
+        }
+
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Save-template mode handler
 // ---------------------------------------------------------------------------
 
@@ -1726,6 +1821,9 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
             } else {
                 app.set_status_message("No messages in queue");
             }
+        }
+        "sessions" => {
+            app.enter_session_picker();
         }
         _ => app.set_status_message(format!("Unknown command: {name}")),
     }
