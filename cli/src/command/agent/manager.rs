@@ -54,6 +54,8 @@ pub struct AgentManager {
     kill_senders: HashMap<usize, oneshot::Sender<()>>,
     /// Tokio task handles for the reader/waiter tasks, keyed by agent ID.
     handles: HashMap<usize, JoinHandle<()>>,
+    /// Child process PIDs keyed by agent ID, used for sending signals (e.g. SIGINT).
+    child_pids: HashMap<usize, u32>,
 }
 
 impl AgentManager {
@@ -64,6 +66,7 @@ impl AgentManager {
             next_id: 0,
             kill_senders: HashMap::new(),
             handles: HashMap::new(),
+            child_pids: HashMap::new(),
         }
     }
 
@@ -145,6 +148,11 @@ impl AgentManager {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| anyhow!("failed to spawn claude process: {e}. Is 'claude' (Claude Code CLI) installed and on PATH?"))?;
+
+        // Store the child PID so we can send signals (e.g. SIGINT for interrupt).
+        if let Some(pid) = child.id() {
+            self.child_pids.insert(agent_id, pid);
+        }
 
         let stdout = child
             .stdout
@@ -297,6 +305,50 @@ impl AgentManager {
         Ok(())
     }
 
+    /// Interrupt a specific agent by sending SIGINT to the child process.
+    ///
+    /// Unlike [`kill`], which terminates the process immediately via the
+    /// background task, this sends a SIGINT signal directly to the child
+    /// process. Claude Code handles SIGINT gracefully — it stops the current
+    /// generation and exits, preserving the session for later `--resume`.
+    ///
+    /// The agent is marked as interrupted so the TUI can distinguish an
+    /// interrupt from a normal failure when the exit event arrives.
+    pub async fn interrupt(&mut self, agent_id: usize) -> Result<()> {
+        info!(agent_id, "sending SIGINT to agent");
+
+        let pid = self
+            .child_pids
+            .get(&agent_id)
+            .ok_or_else(|| anyhow!("no child process for agent {agent_id}"))?;
+
+        // Use the POSIX kill command to send SIGINT to the child process.
+        let status = Command::new("kill")
+            .args(["-s", "INT", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .map_err(|e| anyhow!("failed to run kill command: {e}"))?;
+
+        if !status.success() {
+            warn!(agent_id, pid, "kill -INT command failed");
+            return Err(anyhow!("failed to send SIGINT to agent {agent_id}"));
+        }
+
+        Ok(())
+    }
+
+    /// Eagerly remove the stored child PID for an agent.
+    ///
+    /// Called as the very first step when an exit event is received, before
+    /// any other handler logic runs. This prevents [`interrupt`] from sending
+    /// SIGINT to a recycled PID if the OS reuses the PID between the exit
+    /// event and the full [`notify_exited`] cleanup.
+    pub fn remove_child_pid(&mut self, agent_id: usize) {
+        self.child_pids.remove(&agent_id);
+    }
+
     /// Clean up internal state for an agent that has exited.
     ///
     /// Should be called when an [`AgentEvent::Exited`] event is received so
@@ -305,6 +357,7 @@ impl AgentManager {
     pub fn notify_exited(&mut self, agent_id: usize) {
         self.kill_senders.remove(&agent_id);
         self.handles.remove(&agent_id);
+        self.child_pids.remove(&agent_id);
     }
 
     /// Kill all agents and wait for all background tasks to complete.

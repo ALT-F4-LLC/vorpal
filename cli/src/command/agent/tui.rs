@@ -369,11 +369,21 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
         } => {
             info!(agent_id, ?exit_code, "agent exited");
 
+            // Eagerly remove the child PID so that `interrupt()` can never
+            // send SIGINT to a recycled PID. This must happen before any
+            // other logic in the exit handler.
+            manager.remove_child_pid(agent_id);
+
             // Determine the Vec index and whether this agent is unfocused
             // before mutating state so we can generate a toast.
             let vec_index = app.agent_vec_index(agent_id);
             let is_unfocused = vec_index.is_some_and(|idx| idx != app.focused);
 
+            // Read the interrupted flag before mutating — it was already set
+            // by `action_interrupt` when the user pressed Esc / ran :interrupt.
+            let was_interrupted = vec_index
+                .and_then(|idx| app.agents.get(idx))
+                .is_some_and(|a| a.interrupted);
             if let Some(agent) = app.agent_by_id_mut(agent_id) {
                 agent.status = AgentStatus::Exited(exit_code);
                 agent.activity = AgentActivity::Done;
@@ -385,19 +395,23 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
             if is_unfocused {
                 if let Some(idx) = vec_index {
                     let agent_num = idx + 1;
-                    let (msg, kind) = match exit_code {
-                        Some(0) => (
-                            format!("Agent {agent_num} completed successfully"),
-                            ToastKind::Success,
-                        ),
-                        Some(code) => (
-                            format!("Agent {agent_num} failed (exit code {code})"),
-                            ToastKind::Error,
-                        ),
-                        None => (
-                            format!("Agent {agent_num} exited (unknown status)"),
-                            ToastKind::Error,
-                        ),
+                    let (msg, kind) = if was_interrupted {
+                        (format!("Agent {agent_num} interrupted"), ToastKind::Success)
+                    } else {
+                        match exit_code {
+                            Some(0) => (
+                                format!("Agent {agent_num} completed successfully"),
+                                ToastKind::Success,
+                            ),
+                            Some(code) => (
+                                format!("Agent {agent_num} failed (exit code {code})"),
+                                ToastKind::Error,
+                            ),
+                            None => (
+                                format!("Agent {agent_num} exited (unknown status)"),
+                                ToastKind::Error,
+                            ),
+                        }
                     };
                     app.push_toast(msg, kind);
                     app.unread_agents.insert(agent_id);
@@ -439,6 +453,7 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
                                     agent.start_new_turn();
                                     agent.id = new_agent_id;
                                     agent.status = AgentStatus::Running;
+                                    agent.interrupted = false;
                                     agent.prompt = queued_msg;
                                     agent.scroll_offset = 0;
                                     agent.has_new_output = false;
@@ -470,14 +485,16 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
                     }
                 }
             } else if let Some(vec_idx) = app.agent_vec_index(agent_id) {
-                let queue_len = app
-                    .agents
-                    .get(vec_idx)
-                    .map(|a| a.message_queue.len())
-                    .unwrap_or(0);
-                if queue_len > 0 {
+                let agent_ref = app.agents.get(vec_idx);
+                let queue_len = agent_ref.map(|a| a.message_queue.len()).unwrap_or(0);
+                let is_interrupted = agent_ref.is_some_and(|a| a.interrupted);
+                if queue_len > 0 && !is_interrupted {
                     app.set_status_message(format!(
                         "Agent failed — {queue_len} queued message(s) preserved (use :clear-queue to discard)"
+                    ));
+                } else if queue_len > 0 && is_interrupted {
+                    app.set_status_message(format!(
+                        "Agent interrupted — {queue_len} queued message(s) preserved"
                     ));
                 }
             }

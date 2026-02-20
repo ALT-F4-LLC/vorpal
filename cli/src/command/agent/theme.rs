@@ -194,6 +194,13 @@ pub struct Theme {
 
     // -- Thinking blocks -----------------------------------------------------
     pub thinking_collapsed_fg: Color,
+
+    // -- Streaming cursor indicator -------------------------------------------
+    pub streaming_cursor: Color,
+
+    // -- Jump-to-bottom indicator ---------------------------------------------
+    pub jump_to_bottom_bg: Color,
+    pub jump_to_bottom_fg: Color,
 }
 
 impl Theme {
@@ -358,6 +365,11 @@ impl Theme {
             tool_block_error_border: Color::Red,
 
             thinking_collapsed_fg: Color::DarkGray,
+
+            streaming_cursor: Color::Cyan,
+
+            jump_to_bottom_bg: Color::Yellow,
+            jump_to_bottom_fg: Color::Black,
         }
     }
 
@@ -522,6 +534,11 @@ impl Theme {
             tool_block_error_border: Color::Red,
 
             thinking_collapsed_fg: Color::Gray,
+
+            streaming_cursor: Color::Rgb(0, 140, 140),
+
+            jump_to_bottom_bg: Color::Rgb(180, 130, 0),
+            jump_to_bottom_fg: Color::White,
         }
     }
 

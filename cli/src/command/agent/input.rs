@@ -44,6 +44,9 @@ pub(super) fn viewport_height() -> usize {
 /// while a positive `delta` scrolls toward older output (increases
 /// `scroll_offset`). Clamps the offset to the valid range.
 ///
+/// Uses `cached_row_count` (the number of wrapped rows after text wrapping)
+/// for the scroll limit so that long-wrapping lines are properly scrollable.
+///
 /// In split-pane mode, scrolls the agent in the focused pane rather than
 /// always scrolling the primary focused agent.
 fn scroll_by(app: &mut App, delta: isize) {
@@ -54,7 +57,7 @@ fn scroll_by(app: &mut App, delta: isize) {
                 agent.has_new_output = false;
             }
         } else {
-            let max_offset = agent.output.len().saturating_sub(viewport_height());
+            let max_offset = agent.cached_row_count.saturating_sub(viewport_height());
             agent.scroll_offset = (agent.scroll_offset + delta as usize).min(max_offset);
         }
     }
@@ -109,6 +112,36 @@ fn try_cycle_current_field(app: &mut App, code: KeyCode) -> bool {
 // ---------------------------------------------------------------------------
 // Shared actions (used by both keybindings and command palette)
 // ---------------------------------------------------------------------------
+
+/// Interrupt the focused agent's active generation (shared by `Esc` key and `:interrupt` command).
+///
+/// Sends SIGINT to the child process, which stops generation but preserves
+/// the session for follow-up messages. The agent's `interrupted` flag is set
+/// so the TUI can distinguish this from a normal exit.
+async fn action_interrupt(app: &mut App, manager: &mut AgentManager) {
+    if let Some(agent) = app.focused_agent() {
+        if agent.interrupted {
+            return; // already interrupted, SIGINT already sent
+        }
+        let agent_id = agent.id;
+        match manager.interrupt(agent_id).await {
+            Ok(()) => {
+                if let Some(agent) = app.agent_by_id_mut(agent_id) {
+                    agent.interrupted = true;
+                    agent.push_line(DisplayLine::System(
+                        "Generation interrupted by user".to_string(),
+                    ));
+                }
+                app.set_status_message(format!("Interrupted agent {}", agent_id + 1));
+            }
+            Err(e) => {
+                app.set_status_message(format!("Interrupt failed: {e}"));
+            }
+        }
+    } else {
+        app.set_status_message("No agent to interrupt");
+    }
+}
 
 /// Kill the focused agent (shared by `x` key and `:kill` command).
 async fn action_kill(app: &mut App, manager: &mut AgentManager) {
@@ -300,6 +333,21 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         }
     }
 
+    // Interrupt active generation with Escape when the focused agent is
+    // actively thinking or running a tool. This sends SIGINT to the child
+    // process, preserving the session for follow-up messages.
+    if key.code == KeyCode::Esc {
+        if let Some(agent) = app.focused_agent() {
+            if matches!(
+                agent.activity,
+                AgentActivity::Thinking | AgentActivity::Tool(_)
+            ) {
+                action_interrupt(app, manager).await;
+                return;
+            }
+        }
+    }
+
     // Clear search highlights with Escape when not in any overlay.
     if key.code == KeyCode::Esc && !app.search_matches.is_empty() {
         app.search_matches.clear();
@@ -417,7 +465,7 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
                 // Second `g` within timeout — complete the chord.
                 app.pending_g = None;
                 if let Some(agent) = app.active_agent_mut() {
-                    let max_offset = agent.output.len().saturating_sub(viewport_height());
+                    let max_offset = agent.cached_row_count.saturating_sub(viewport_height());
                     agent.scroll_offset = max_offset;
                 }
             } else {
@@ -910,6 +958,7 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
                     agent.id = agent_id;
                     agent.status = AgentStatus::Running;
                     agent.activity = AgentActivity::Idle;
+                    agent.interrupted = false;
                     agent.prompt = prompt.clone();
                     agent.scroll_offset = 0;
                     agent.has_new_output = false;
@@ -1090,11 +1139,23 @@ async fn handle_chat_mode(app: &mut App, manager: &mut AgentManager, key: KeyEve
         // Character input (with Ctrl modifiers for shortcuts).
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
-                // Ctrl+C: exit chat mode without submitting.
-                if c == 'c' {
-                    app.input_mode = InputMode::Normal;
+                match c {
+                    // Ctrl+C: exit chat mode without submitting.
+                    'c' => {
+                        app.input_mode = InputMode::Normal;
+                    }
+                    // Ctrl+R: open history search from inline chat.
+                    'r' => {
+                        app.history_search_from_chat = true;
+                        app.enter_history_search();
+                    }
+                    // Ctrl+P: open template picker from inline chat.
+                    'p' => {
+                        app.template_picker_from_chat = true;
+                        app.enter_template_picker(false);
+                    }
+                    _ => {}
                 }
-                // Other Ctrl combinations are no-ops in chat mode.
             } else {
                 app.chat_input.insert_char(c);
             }
@@ -1545,6 +1606,7 @@ async fn handle_command_mode(app: &mut App, manager: &mut AgentManager, key: Key
 /// Execute a named command from the palette.
 async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) {
     match name {
+        "interrupt" => action_interrupt(app, manager).await,
         "kill" => action_kill(app, manager).await,
         "new" => app.enter_input_mode(),
         "edit" => action_edit(app),
@@ -1723,6 +1785,18 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
                         app.sidebar_selected = agent_index;
                         return true;
                     }
+                }
+            }
+
+            // Click on the jump-to-bottom indicator scrolls to bottom.
+            if let Some(rect) = app.jump_to_bottom_rect {
+                if rect_contains(rect, col, row) {
+                    if let Some(agent) = app.active_agent_mut() {
+                        agent.scroll_offset = 0;
+                        agent.has_new_output = false;
+                    }
+                    app.jump_to_bottom_rect = None;
+                    return true;
                 }
             }
 

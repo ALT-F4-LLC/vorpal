@@ -4,12 +4,13 @@
 //! area with scrollable output, status bar, and help overlay.
 
 use super::state::{
-    self, AgentActivity, AgentStatus, App, DiffLine, DisplayLine, InputField, InputMode,
+    self, AgentActivity, AgentState, AgentStatus, App, DiffLine, DisplayLine, InputField,
+    InputMode,
     ResultDisplay, SplitPane, ToastKind, COMMANDS, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::theme::Theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
@@ -105,6 +106,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.content_rect = Some(chunks[1]);
     // Store the inline input area rect.
     app.chat_input_rect = chunks[2];
+    // Reset jump-to-bottom indicator rect; render_content / render_content_pane
+    // will set it when the indicator is visible.
+    app.jump_to_bottom_rect = None;
 
     render_tabs(app, frame, chunks[0]);
 
@@ -707,7 +711,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             // Apply search highlighting if there are active search matches.
             // Otherwise, borrow from the cache to avoid deep-cloning every
             // Span/String each frame.
-            let display_lines =
+            let mut display_lines =
                 if !app.search_matches.is_empty() && !app.search_query.text().is_empty() {
                     apply_search_highlights(
                         cached,
@@ -719,12 +723,24 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
                     borrow_cached_lines(cached)
                 };
 
+            append_streaming_cursor(
+                &mut display_lines,
+                agent,
+                app.tick,
+                app.theme.streaming_cursor,
+            );
+
             let paragraph = Paragraph::new(display_lines)
                 .block(block)
                 .wrap(Wrap { trim: false })
                 .scroll((scroll_y, 0));
 
             frame.render_widget(paragraph, area);
+
+            // Floating jump-to-bottom indicator when scrolled up with new output.
+            let has_new = app.agents[focused].has_new_output;
+            let scroll_off = app.agents[focused].scroll_offset;
+            maybe_render_jump_to_bottom(app, frame, inner, has_new, scroll_off, true);
         }
     }
 }
@@ -748,6 +764,114 @@ fn borrow_cached_lines<'a>(cached: &'a [Line<'static>]) -> Vec<Line<'a>> {
             )
         })
         .collect()
+}
+
+/// Append a blinking cursor indicator when the agent is actively generating
+/// and the viewport is pinned to the bottom.
+fn append_streaming_cursor<'a>(
+    lines: &mut Vec<Line<'a>>,
+    agent: &AgentState,
+    tick: usize,
+    color: Color,
+) {
+    let is_streaming = matches!(
+        agent.activity,
+        AgentActivity::Thinking | AgentActivity::Tool(_)
+    );
+    if is_streaming && agent.scroll_offset == 0 {
+        let cursor_char = if tick % 6 < 3 { "█" } else { " " };
+        let cursor_span = Span::styled(cursor_char, Style::default().fg(color));
+        if let Some(last_line) = lines.last_mut() {
+            last_line.spans.push(cursor_span);
+        } else {
+            lines.push(Line::from(cursor_span));
+        }
+    }
+}
+
+/// Conditionally render the jump-to-bottom indicator when scrolled up.
+/// Clears the stored rect when the indicator is not shown.
+fn maybe_render_jump_to_bottom(
+    app: &mut App,
+    frame: &mut Frame,
+    inner: Rect,
+    has_new_output: bool,
+    scroll_offset: usize,
+    is_focused: bool,
+) {
+    if is_focused && scroll_offset > 0 {
+        render_jump_to_bottom(app, frame, inner, has_new_output);
+    } else if is_focused {
+        app.jump_to_bottom_rect = None;
+    }
+}
+
+/// Render a floating "jump to bottom" indicator at the bottom-center of the
+/// content area. Shown when the user is scrolled up, prompting them to press
+/// G or click the indicator to jump to the latest output. When new output has
+/// arrived the arrow pulses to draw attention; otherwise a static style is used.
+fn render_jump_to_bottom(
+    app: &mut App,
+    frame: &mut Frame,
+    content_area: Rect,
+    has_new_output: bool,
+) {
+    let theme = &app.theme;
+
+    let arrow_style = if has_new_output {
+        // Pulsing arrow: alternate bold/dim to draw attention to new output.
+        if app.tick % 4 < 2 {
+            Style::default()
+                .fg(theme.jump_to_bottom_fg)
+                .bg(theme.jump_to_bottom_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(theme.jump_to_bottom_fg)
+                .bg(theme.jump_to_bottom_bg)
+                .add_modifier(Modifier::DIM)
+        }
+    } else {
+        // Static style when simply scrolled up without new output.
+        Style::default()
+            .fg(theme.jump_to_bottom_fg)
+            .bg(theme.jump_to_bottom_bg)
+    };
+
+    let label_text = if has_new_output {
+        " ↓ New output — press G to jump to bottom "
+    } else {
+        " ↓ Press G to jump to bottom "
+    };
+    let label_width = label_text.width() as u16;
+
+    // The indicator is 1 row tall and centered horizontally, positioned at
+    // the bottom of the content area (2 rows up so it doesn't overlap the
+    // very last visible line).
+    let indicator_width = (label_width + 2).min(content_area.width);
+    let indicator_x = content_area.x + content_area.width.saturating_sub(indicator_width) / 2;
+    let indicator_y = content_area.y + content_area.height.saturating_sub(2);
+
+    let indicator_rect = Rect::new(indicator_x, indicator_y, indicator_width, 1);
+
+    // Store the rect for mouse click hit-testing.
+    app.jump_to_bottom_rect = Some(indicator_rect);
+
+    // Clear the area under the indicator so it floats above content.
+    frame.render_widget(Clear, indicator_rect);
+
+    let indicator = Paragraph::new(Line::from(vec![Span::styled(
+        label_text,
+        arrow_style,
+    )]))
+    .alignment(Alignment::Center)
+    .style(
+        Style::default()
+            .bg(theme.jump_to_bottom_bg)
+            .fg(theme.jump_to_bottom_fg),
+    );
+
+    frame.render_widget(indicator, indicator_rect);
 }
 
 /// Ensure the agent's cached lines are up to date. Rebuilds if stale.
@@ -857,7 +981,14 @@ fn render_content_pane(
     let clamped_offset = agent.scroll_offset.min(max_scroll);
     let scroll_y = max_scroll.saturating_sub(clamped_offset) as u16;
 
-    let display_lines = borrow_cached_lines(cached);
+    let mut display_lines = borrow_cached_lines(cached);
+
+    append_streaming_cursor(
+        &mut display_lines,
+        agent,
+        app.tick,
+        app.theme.streaming_cursor,
+    );
 
     let paragraph = Paragraph::new(display_lines)
         .block(block)
@@ -865,6 +996,11 @@ fn render_content_pane(
         .scroll((scroll_y, 0));
 
     frame.render_widget(paragraph, area);
+
+    // Floating jump-to-bottom indicator when scrolled up with new output.
+    let has_new = app.agents[agent_idx].has_new_output;
+    let scroll_off = app.agents[agent_idx].scroll_offset;
+    maybe_render_jump_to_bottom(app, frame, inner, has_new, scroll_off, is_focused);
 }
 
 /// Render a centered welcome screen when no agents exist.

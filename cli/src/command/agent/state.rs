@@ -109,6 +109,10 @@ pub const COMMANDS: &[PaletteCommand] = &[
         description: "Edit agent options (model, permissions, effort...)",
     },
     PaletteCommand {
+        name: "interrupt",
+        description: "Interrupt active generation (send SIGINT)",
+    },
+    PaletteCommand {
         name: "clear-queue",
         description: "Clear queued messages for focused agent",
     },
@@ -1057,6 +1061,12 @@ pub struct AgentState {
     /// Queue of messages waiting to be submitted when the agent finishes running.
     /// Capped at [`MAX_MESSAGE_QUEUE`] entries.
     pub message_queue: VecDeque<String>,
+    /// Whether this agent's last generation was interrupted by the user (Esc).
+    ///
+    /// Set to `true` when the user sends SIGINT via the interrupt action.
+    /// Cleared when the agent is resumed with a new message. Used by the
+    /// TUI to distinguish interrupted exits from normal completions/failures.
+    pub interrupted: bool,
 }
 
 impl AgentState {
@@ -1102,6 +1112,7 @@ impl AgentState {
             section_overrides_generation: 0,
             cache_section_overrides_generation: 0,
             message_queue: VecDeque::new(),
+            interrupted: false,
         }
     }
 
@@ -1341,6 +1352,10 @@ pub struct App {
     /// (via Ctrl+P). When true, cancelling the picker returns to input mode
     /// instead of normal mode.
     pub template_picker_from_input: bool,
+    /// Whether the template picker was opened from inline chat mode (Ctrl+P
+    /// in Chat mode). When true, selecting a template populates only the
+    /// chat input buffer (not the full form) and cancelling returns to Chat.
+    pub template_picker_from_chat: bool,
 
     // -- Search state --------------------------------------------------------
     /// Search query input buffer (used in [`InputMode::Search`]).
@@ -1399,6 +1414,10 @@ pub struct App {
     pub history_search_results: Vec<usize>,
     /// Selected index within `history_search_results`.
     pub history_search_selected: usize,
+    /// Whether history search was opened from inline chat mode (Ctrl+R in
+    /// Chat mode). When true, selecting an entry populates only the chat
+    /// input buffer and cancelling returns to Chat instead of Input.
+    pub history_search_from_chat: bool,
 
     // -- Split-pane state -------------------------------------------------------
     /// Whether split-pane mode is active (two agents side by side).
@@ -1449,6 +1468,10 @@ pub struct App {
     /// Maps each rendered field's [`Rect`] to its [`InputField`] variant so
     /// mouse clicks can focus the correct field.
     pub input_field_rects: Vec<(Rect, InputField)>,
+    /// Cached jump-to-bottom indicator [`Rect`] from the last render.
+    /// Set when the indicator is visible so mouse clicks can trigger
+    /// scroll-to-bottom.
+    pub jump_to_bottom_rect: Option<Rect>,
 }
 
 impl App {
@@ -1489,6 +1512,7 @@ impl App {
             template_selected: 0,
             template_name_input: InputBuffer::new(),
             template_picker_from_input: false,
+            template_picker_from_chat: false,
             search_query: InputBuffer::new(),
             search_matches: Vec::new(),
             search_match_index: 0,
@@ -1507,6 +1531,7 @@ impl App {
             history_search_query: InputBuffer::new(),
             history_search_results: Vec::new(),
             history_search_selected: 0,
+            history_search_from_chat: false,
             split_enabled: false,
             split_right_index: None,
             split_focused_pane: SplitPane::Left,
@@ -1521,6 +1546,7 @@ impl App {
             chat_input: InputBuffer::new(),
             sidebar_rects: Vec::new(),
             input_field_rects: Vec::new(),
+            jump_to_bottom_rect: None,
         }
     }
 
@@ -1806,10 +1832,13 @@ impl App {
 
     /// Exit template picker mode.
     ///
-    /// Returns to input mode if the picker was opened from the input form,
-    /// otherwise returns to normal mode.
+    /// Returns to the originating mode: [`InputMode::Chat`] if opened from
+    /// inline chat, [`InputMode::Input`] if opened from the input form,
+    /// or [`InputMode::Normal`] otherwise.
     pub fn exit_template_picker(&mut self) {
-        if self.template_picker_from_input {
+        if self.template_picker_from_chat {
+            self.input_mode = InputMode::Chat;
+        } else if self.template_picker_from_input {
             self.input_mode = InputMode::Input;
         } else {
             self.input_mode = InputMode::Normal;
@@ -1817,22 +1846,30 @@ impl App {
         self.template_list.clear();
         self.template_selected = 0;
         self.template_picker_from_input = false;
+        self.template_picker_from_chat = false;
     }
 
-    /// Select the current template and enter input mode with its values
-    /// pre-filled. Index 0 is "Blank" (opens the default form). Indices
-    /// 1..N correspond to `template_list[i - 1]`.
+    /// Select the current template and enter the appropriate mode with its
+    /// values pre-filled. Index 0 is "Blank" (opens the default form or
+    /// returns to the originating mode). Indices 1..N correspond to
+    /// `template_list[i - 1]`.
     ///
-    /// When the picker was opened from within the input form, "Blank"
-    /// returns to the existing form without resetting fields.
+    /// When opened from inline chat mode, only the template's prompt text
+    /// is applied to the `chat_input` buffer (workspace/options are
+    /// irrelevant for inline chat). When opened from the input form,
+    /// "Blank" returns to the existing form without resetting fields.
     pub fn select_template(&mut self) {
         let from_input = self.template_picker_from_input;
+        let from_chat = self.template_picker_from_chat;
         self.template_picker_from_input = false;
+        self.template_picker_from_chat = false;
 
         if self.template_selected == 0 {
             // "Blank" option.
             self.template_list.clear();
-            if from_input {
+            if from_chat {
+                self.input_mode = InputMode::Chat;
+            } else if from_input {
                 // Return to the existing input form without resetting.
                 self.input_mode = InputMode::Input;
             } else {
@@ -1843,7 +1880,15 @@ impl App {
         let idx = self.template_selected - 1;
         if let Some(template) = self.template_list.get(idx).cloned() {
             self.template_list.clear();
-            self.apply_template(&template);
+            if from_chat {
+                // Only apply the prompt text to the inline chat buffer.
+                self.chat_input.set_text(&template.prompt);
+                self.input_mode = InputMode::Chat;
+            } else {
+                self.apply_template(&template);
+            }
+        } else if from_chat {
+            self.input_mode = InputMode::Chat;
         } else if from_input {
             self.input_mode = InputMode::Input;
         } else {
@@ -2272,12 +2317,20 @@ impl App {
         self.history_search_selected = 0;
     }
 
-    /// Exit history search mode, returning to input mode.
+    /// Exit history search mode, returning to the originating mode.
+    ///
+    /// Returns to [`InputMode::Chat`] if the search was opened from inline
+    /// chat mode, otherwise returns to [`InputMode::Input`].
     pub fn exit_history_search(&mut self) {
-        self.input_mode = InputMode::Input;
+        if self.history_search_from_chat {
+            self.input_mode = InputMode::Chat;
+        } else {
+            self.input_mode = InputMode::Input;
+        }
         self.history_search_query.clear();
         self.history_search_results.clear();
         self.history_search_selected = 0;
+        self.history_search_from_chat = false;
     }
 
     /// Recompute the history search results from the current query.
@@ -2299,14 +2352,26 @@ impl App {
         self.history_search_selected = 0;
     }
 
-    /// Select a history entry from the search results and populate the form.
+    /// Select a history entry from the search results and populate the
+    /// appropriate input buffer.
+    ///
+    /// When opened from inline chat mode, only the prompt text is applied to
+    /// the `chat_input` buffer (workspace/options are irrelevant for chat).
+    /// When opened from the input form, all fields are populated as before.
     pub fn select_history_search_entry(&mut self) {
         if let Some(&entry_idx) = self
             .history_search_results
             .get(self.history_search_selected)
         {
-            self.apply_history_entry(entry_idx);
-            self.history_index = None; // Reset browsing state.
+            if self.history_search_from_chat {
+                // Only apply the prompt text to the inline chat buffer.
+                if let Some(entry) = self.history.entries().get(entry_idx) {
+                    self.chat_input.set_text(&entry.prompt);
+                }
+            } else {
+                self.apply_history_entry(entry_idx);
+                self.history_index = None; // Reset browsing state.
+            }
         }
         self.exit_history_search();
     }
