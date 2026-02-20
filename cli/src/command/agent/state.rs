@@ -823,6 +823,11 @@ pub enum DisplayLine {
         /// The message content (may be a summary or full text).
         content: String,
     },
+    /// A user prompt displayed in the chat stream.
+    UserPrompt {
+        /// The user's message text (may contain multiple lines).
+        content: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

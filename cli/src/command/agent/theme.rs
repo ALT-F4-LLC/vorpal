@@ -152,6 +152,10 @@ pub struct Theme {
     pub command_desc_fg: Color,
     pub command_error_fg: Color,
 
+    // -- User prompt ---------------------------------------------------------
+    pub user_prompt_marker: Color,
+    pub user_prompt_fg: Color,
+
     // -- Inline chat input ----------------------------------------------------
     pub chat_input_bg: Color,
     pub chat_input_fg: Color,
@@ -287,6 +291,9 @@ impl Theme {
             command_desc_fg: Color::Gray,
             command_error_fg: Color::Red,
 
+            user_prompt_marker: Color::Cyan,
+            user_prompt_fg: Color::White,
+
             chat_input_bg: Color::Reset,
             chat_input_fg: Color::White,
             chat_input_border: Color::DarkGray,
@@ -420,6 +427,9 @@ impl Theme {
             command_selected_fg: Color::Black,
             command_desc_fg: Color::DarkGray,
             command_error_fg: Color::Red,
+
+            user_prompt_marker: Color::Rgb(0, 140, 140),
+            user_prompt_fg: Color::Black,
 
             chat_input_bg: Color::Reset,
             chat_input_fg: Color::Black,

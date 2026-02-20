@@ -1749,6 +1749,43 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
         // DiffResult is handled by render_diff_block() via CollapsedBlock::DiffBlock.
         DisplayLine::DiffResult { .. } => Vec::new(),
 
+        DisplayLine::UserPrompt { content } => {
+            // User prompt marker: bold colored '>' prefix with regular-weight text.
+            // Multiline prompts get continuation lines indented to align with the
+            // first line's text (past the "> " prefix).
+            const USER_MARKER: &str = "> ";
+            let marker_style = Style::default()
+                .fg(theme.user_prompt_marker)
+                .add_modifier(Modifier::BOLD);
+
+            if content.is_empty() {
+                return vec![Line::from(Span::styled(USER_MARKER.to_string(), marker_style))];
+            }
+
+            let indent = " ".repeat(USER_MARKER.len());
+            let mut result_lines = Vec::new();
+            for (idx, text_line) in content.lines().enumerate() {
+                if idx == 0 {
+                    result_lines.push(Line::from(vec![
+                        Span::styled(USER_MARKER.to_string(), marker_style),
+                        Span::styled(
+                            text_line.to_string(),
+                            Style::default().fg(theme.user_prompt_fg),
+                        ),
+                    ]));
+                } else {
+                    result_lines.push(Line::from(vec![
+                        Span::styled(indent.clone(), Style::default()),
+                        Span::styled(
+                            text_line.to_string(),
+                            Style::default().fg(theme.user_prompt_fg),
+                        ),
+                    ]));
+                }
+            }
+            result_lines
+        }
+
         DisplayLine::AgentMessage {
             sender,
             recipient,

@@ -61,6 +61,52 @@ fn scroll_by(app: &mut App, delta: isize) {
 }
 
 // ---------------------------------------------------------------------------
+// Selector cycling helpers
+// ---------------------------------------------------------------------------
+
+/// Cycle an [`InputBuffer`] through a fixed set of `options` using Left/Right keys.
+///
+/// Returns `true` if the key was handled (Left or Right), `false` otherwise.
+fn cycle_selector(
+    options: &[&str],
+    buf: &mut super::state::InputBuffer,
+    code: KeyCode,
+) -> bool {
+    let current_idx = options.iter().position(|m| *m == buf.text());
+    match code {
+        KeyCode::Left => {
+            let new_idx = match current_idx {
+                Some(0) | None => options.len() - 1,
+                Some(i) => i - 1,
+            };
+            buf.set_text(options[new_idx]);
+            true
+        }
+        KeyCode::Right => {
+            let new_idx = match current_idx {
+                Some(i) if i + 1 < options.len() => i + 1,
+                _ => 0,
+            };
+            buf.set_text(options[new_idx]);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Try cycling the current input field through its predefined options.
+///
+/// Returns `true` if the field is a selector and the key was handled.
+fn try_cycle_current_field(app: &mut App, code: KeyCode) -> bool {
+    match app.input_field {
+        InputField::PermissionMode => cycle_selector(PERMISSION_MODES, &mut app.permission_mode, code),
+        InputField::Model => cycle_selector(MODELS, &mut app.model, code),
+        InputField::Effort => cycle_selector(EFFORT_LEVELS, &mut app.effort, code),
+        _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shared actions (used by both keybindings and command palette)
 // ---------------------------------------------------------------------------
 
@@ -770,32 +816,7 @@ async fn handle_input_mode(app: &mut App, manager: &mut AgentManager, key: KeyEv
         code => {
             // Selector fields (PermissionMode, Model, Effort) use Left/Right
             // to cycle through predefined options instead of free-text editing.
-            let selector: Option<(&[&str], &mut super::state::InputBuffer)> = match app.input_field
-            {
-                InputField::PermissionMode => Some((PERMISSION_MODES, &mut app.permission_mode)),
-                InputField::Model => Some((MODELS, &mut app.model)),
-                InputField::Effort => Some((EFFORT_LEVELS, &mut app.effort)),
-                _ => None,
-            };
-            if let Some((options, buf)) = selector {
-                let current_idx = options.iter().position(|m| *m == buf.text());
-                match code {
-                    KeyCode::Left => {
-                        let new_idx = match current_idx {
-                            Some(0) | None => options.len() - 1,
-                            Some(i) => i - 1,
-                        };
-                        buf.set_text(options[new_idx]);
-                    }
-                    KeyCode::Right => {
-                        let new_idx = match current_idx {
-                            Some(i) if i + 1 < options.len() => i + 1,
-                            _ => 0,
-                        };
-                        buf.set_text(options[new_idx]);
-                    }
-                    _ => {}
-                }
+            if try_cycle_current_field(app, code) {
                 return;
             }
 
@@ -884,6 +905,7 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
                 app.save_to_history(&prompt, &workspace, &claude_options);
 
                 if let Some(agent) = app.agent_by_id_mut(target_id) {
+                    agent.push_line(DisplayLine::UserPrompt { content: prompt.clone() });
                     agent.push_line(DisplayLine::TurnStart);
                     agent.id = agent_id;
                     agent.status = AgentStatus::Running;
@@ -924,6 +946,10 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
                     prompt.clone(),
                     claude_options.clone(),
                 ));
+                // Push the user's initial prompt into the output buffer.
+                if let Some(agent) = app.agents.last_mut() {
+                    agent.push_line(DisplayLine::UserPrompt { content: prompt.clone() });
+                }
                 let new_index = app.agents.len() - 1;
                 app.focus_agent(new_index);
                 app.set_status_message(format!("Spawned agent {}", agent_id + 1));
@@ -983,10 +1009,12 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
             }
         }
         _ => {
+            // Selector fields cycle through predefined options with Left/Right.
+            if try_cycle_current_field(app, key.code) {
+                return;
+            }
+
             let buf = match app.input_field {
-                PermissionMode => &mut app.permission_mode,
-                Model => &mut app.model,
-                Effort => &mut app.effort,
                 MaxBudgetUsd => &mut app.max_budget,
                 AllowedTools => &mut app.allowed_tools,
                 AddDir => &mut app.add_dir,
@@ -1113,6 +1141,7 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
                 ));
                 return;
             }
+            agent_mut.push_line(DisplayLine::UserPrompt { content: text.clone() });
             agent_mut.message_queue.push_back(text);
             let queue_len = agent_mut.message_queue.len();
             app.chat_input.clear();
@@ -1814,6 +1843,7 @@ fn display_line_to_text(line: &DisplayLine) -> String {
             recipient,
             content,
         } => format!("[{sender} -> {recipient}] {content}"),
+        DisplayLine::UserPrompt { content } => format!("> {content}"),
     }
 }
 

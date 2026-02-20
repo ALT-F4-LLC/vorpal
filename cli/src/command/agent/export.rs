@@ -236,6 +236,26 @@ pub fn export_session(agent: &AgentState) -> Result<PathBuf, String> {
                     writeln!(md, "---").unwrap();
                     writeln!(md).unwrap();
                 }
+                DisplayLine::UserPrompt { content } => {
+                    if in_tool_result {
+                        writeln!(md, "````").unwrap();
+                        writeln!(md).unwrap();
+                        in_tool_result = false;
+                    }
+                    writeln!(md).unwrap();
+                    for (idx, line) in content.lines().enumerate() {
+                        if idx == 0 {
+                            writeln!(md, "> **You:** {line}").unwrap();
+                        } else {
+                            writeln!(md, "> {line}").unwrap();
+                        }
+                    }
+                    // Handle empty content.
+                    if content.is_empty() {
+                        writeln!(md, "> **You:**").unwrap();
+                    }
+                    writeln!(md).unwrap();
+                }
             }
         }
 
