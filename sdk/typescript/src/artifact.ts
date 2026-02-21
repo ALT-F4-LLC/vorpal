@@ -31,26 +31,47 @@ export class ArtifactSourceBuilder {
   private _name: string;
   private _path: string;
 
+  /**
+   * @param name - Source name (used as a key in the artifact's source map)
+   * @param path - Filesystem path to the source directory or file
+   */
   constructor(name: string, path: string) {
     this._name = name;
     this._path = path;
   }
 
+  /**
+   * Sets a pre-computed digest for this source.
+   * When set, the agent skips re-hashing the source contents.
+   */
   withDigest(digest: string): this {
     this._digest = digest;
     return this;
   }
 
+  /**
+   * Sets glob patterns to exclude from the source.
+   * Patterns are matched relative to the source path.
+   *
+   * @param excludes - Array of glob patterns (e.g., `["node_modules", "*.log"]`)
+   */
   withExcludes(excludes: string[]): this {
     this._excludes = excludes;
     return this;
   }
 
+  /**
+   * Sets glob patterns to include in the source.
+   * Only matching files will be included. Patterns are matched relative to the source path.
+   *
+   * @param includes - Array of glob patterns (e.g., `["src/**", "package.json"]`)
+   */
   withIncludes(includes: string[]): this {
     this._includes = includes;
     return this;
   }
 
+  /** Builds the {@link ArtifactSource} message. */
   build(): ArtifactSourceMsg {
     return {
       digest: this._digest,
@@ -78,25 +99,50 @@ export class ArtifactStepBuilder {
   private _secrets: ArtifactStepSecret[] = [];
   private _script: string | undefined = undefined;
 
+  /**
+   * @param entrypoint - The executable entrypoint (e.g., `"bash"`, `"bwrap"`, `"docker"`)
+   */
   constructor(entrypoint: string) {
     this._entrypoint = entrypoint;
   }
 
+  /**
+   * Sets command-line arguments passed to the entrypoint.
+   *
+   * @param args - Array of argument strings
+   */
   withArguments(args: string[]): this {
     this._arguments = args;
     return this;
   }
 
+  /**
+   * Sets artifact digests whose outputs are available during this step.
+   * Each artifact's `$VORPAL_ARTIFACT_{digest}` directory will be mounted.
+   *
+   * @param artifacts - Array of artifact digest strings
+   */
   withArtifacts(artifacts: string[]): this {
     this._artifacts = artifacts;
     return this;
   }
 
+  /**
+   * Sets environment variables for the step execution.
+   * Format: `"KEY=VALUE"`.
+   *
+   * @param environments - Array of environment variable strings
+   */
   withEnvironments(environments: string[]): this {
     this._environments = environments;
     return this;
   }
 
+  /**
+   * Adds secrets available during the step. Secrets are deduplicated by name.
+   *
+   * @param secrets - Array of {@link ArtifactStepSecret} objects
+   */
   withSecrets(secrets: ArtifactStepSecret[]): this {
     for (const secret of secrets) {
       if (!this._secrets.some((s) => s.name === secret.name)) {
@@ -106,11 +152,17 @@ export class ArtifactStepBuilder {
     return this;
   }
 
+  /**
+   * Sets the shell script to execute in this step.
+   * A bash shebang and `set -euo pipefail` are **not** prepended automatically;
+   * use the {@link bash} or {@link shell} helpers for that behavior.
+   */
   withScript(script: string): this {
     this._script = script;
     return this;
   }
 
+  /** Builds the {@link ArtifactStep} message. */
   build(): ArtifactStepMsg {
     return {
       entrypoint: this._entrypoint,
@@ -138,6 +190,11 @@ export class ArtifactBuilder {
   private _steps: ArtifactStepMsg[];
   private _systems: ArtifactSystem[];
 
+  /**
+   * @param name - Artifact name (must be unique within a namespace)
+   * @param steps - Build steps that produce the artifact output
+   * @param systems - Target systems this artifact supports (e.g., `[ArtifactSystem.AARCH64_DARWIN]`)
+   */
   constructor(
     name: string,
     steps: ArtifactStepMsg[],
@@ -148,6 +205,12 @@ export class ArtifactBuilder {
     this._systems = systems;
   }
 
+  /**
+   * Adds human-readable aliases for this artifact (e.g., `"my-tool:latest"`).
+   * Duplicates are ignored.
+   *
+   * @param aliases - Array of alias strings in `[namespace/]name[:tag]` format
+   */
   withAliases(aliases: string[]): this {
     for (const alias of aliases) {
       if (!this._aliases.includes(alias)) {
@@ -157,6 +220,11 @@ export class ArtifactBuilder {
     return this;
   }
 
+  /**
+   * Adds source definitions for this artifact. Sources are deduplicated by name.
+   *
+   * @param sources - Array of {@link ArtifactSource} messages
+   */
   withSources(sources: ArtifactSourceMsg[]): this {
     for (const source of sources) {
       if (!this._sources.some((s) => s.name === source.name)) {
@@ -166,6 +234,12 @@ export class ArtifactBuilder {
     return this;
   }
 
+  /**
+   * Builds the artifact, computes its SHA-256 digest, and registers it
+   * with the agent service via the provided {@link ConfigContext}.
+   *
+   * @returns The hex-encoded SHA-256 digest of the artifact
+   */
   async build(context: ConfigContext): Promise<string> {
     const artifact: ArtifactMsg = {
       target: context.getSystem(),
@@ -197,17 +271,32 @@ export class JobBuilder {
   private _script: string;
   private _systems: ArtifactSystem[];
 
+  /**
+   * @param name - Job artifact name
+   * @param script - Shell script to execute
+   * @param systems - Target systems this job supports
+   */
   constructor(name: string, script: string, systems: ArtifactSystem[]) {
     this._name = name;
     this._script = script;
     this._systems = systems;
   }
 
+  /**
+   * Sets artifact digests whose outputs are available during the job's build step.
+   *
+   * @param artifacts - Array of artifact digest strings
+   */
   withArtifacts(artifacts: string[]): this {
     this._artifacts = artifacts;
     return this;
   }
 
+  /**
+   * Adds secrets available during the job's build step. Duplicates (by name) are ignored.
+   *
+   * @param secrets - Array of `[name, value]` tuples
+   */
   withSecrets(secrets: Array<[string, string]>): this {
     for (const [name, value] of secrets) {
       if (!this._secrets.some((s) => s.name === name)) {
@@ -217,6 +306,11 @@ export class JobBuilder {
     return this;
   }
 
+  /**
+   * Builds the job artifact and registers it with the agent service.
+   *
+   * @returns The hex-encoded SHA-256 digest of the artifact
+   */
   async build(context: ConfigContext): Promise<string> {
     // Sort for deterministic output
     this._secrets.sort((a, b) => a.name.localeCompare(b.name));
@@ -254,6 +348,11 @@ export class ProcessBuilder {
   private _secrets: ArtifactStepSecret[] = [];
   private _systems: ArtifactSystem[];
 
+  /**
+   * @param name - Process artifact name (used for start/stop/logs scripts)
+   * @param entrypoint - Path to the executable to run as a background process
+   * @param systems - Target systems this process supports
+   */
   constructor(
     name: string,
     entrypoint: string,
@@ -264,11 +363,22 @@ export class ProcessBuilder {
     this._systems = systems;
   }
 
+  /**
+   * Sets command-line arguments passed to the process entrypoint.
+   *
+   * @param args - Array of argument strings
+   */
   withArguments(args: string[]): this {
     this._arguments = args;
     return this;
   }
 
+  /**
+   * Adds artifact dependencies whose bin directories are added to PATH.
+   * Duplicates are ignored.
+   *
+   * @param artifacts - Array of artifact digest strings
+   */
   withArtifacts(artifacts: string[]): this {
     for (const artifact of artifacts) {
       if (!this._artifacts.includes(artifact)) {
@@ -278,6 +388,11 @@ export class ProcessBuilder {
     return this;
   }
 
+  /**
+   * Adds secrets available during the process build step. Duplicates (by name) are ignored.
+   *
+   * @param secrets - Array of `[name, value]` tuples
+   */
   withSecrets(secrets: Array<[string, string]>): this {
     for (const [name, value] of secrets) {
       if (!this._secrets.some((s) => s.name === name)) {
@@ -287,6 +402,11 @@ export class ProcessBuilder {
     return this;
   }
 
+  /**
+   * Builds the process artifact, which includes start/stop/logs helper scripts.
+   *
+   * @returns The hex-encoded SHA-256 digest of the artifact
+   */
   async build(context: ConfigContext): Promise<string> {
     // Sort for deterministic output
     this._secrets.sort((a, b) => a.name.localeCompare(b.name));
@@ -382,21 +502,42 @@ export class ProjectEnvironmentBuilder {
   private _secrets: ArtifactStepSecret[] = [];
   private _systems: ArtifactSystem[];
 
+  /**
+   * @param name - Environment name (shown in shell prompt as `(name)`)
+   * @param systems - Target systems this environment supports
+   */
   constructor(name: string, systems: ArtifactSystem[]) {
     this._name = name;
     this._systems = systems;
   }
 
+  /**
+   * Sets artifact dependencies whose bin directories are added to PATH.
+   *
+   * @param artifacts - Array of artifact digest strings
+   */
   withArtifacts(artifacts: string[]): this {
     this._artifacts = artifacts;
     return this;
   }
 
+  /**
+   * Sets environment variables exported when the environment is activated.
+   * Format: `"KEY=VALUE"`. PATH entries are handled specially and merged
+   * with artifact bin paths.
+   *
+   * @param environments - Array of environment variable strings
+   */
   withEnvironments(environments: string[]): this {
     this._environments = environments;
     return this;
   }
 
+  /**
+   * Adds secrets available during the environment build step. Duplicates (by name) are ignored.
+   *
+   * @param secrets - Array of `[name, value]` tuples
+   */
   withSecrets(secrets: Array<[string, string]>): this {
     for (const [name, value] of secrets) {
       if (!this._secrets.some((s) => s.name === name)) {
@@ -406,6 +547,12 @@ export class ProjectEnvironmentBuilder {
     return this;
   }
 
+  /**
+   * Builds the project environment artifact, which includes activate/deactivate
+   * scripts for shell integration.
+   *
+   * @returns The hex-encoded SHA-256 digest of the artifact
+   */
   async build(context: ConfigContext): Promise<string> {
     // Sort for deterministic output
     this._secrets.sort((a, b) => a.name.localeCompare(b.name));
@@ -523,21 +670,43 @@ export class UserEnvironmentBuilder {
   private _symlinks: Array<[string, string]> = [];
   private _systems: ArtifactSystem[];
 
+  /**
+   * @param name - User environment name
+   * @param systems - Target systems this environment supports
+   */
   constructor(name: string, systems: ArtifactSystem[]) {
     this._name = name;
     this._systems = systems;
   }
 
+  /**
+   * Sets artifact dependencies whose bin directories are added to PATH.
+   *
+   * @param artifacts - Array of artifact digest strings
+   */
   withArtifacts(artifacts: string[]): this {
     this._artifacts = artifacts;
     return this;
   }
 
+  /**
+   * Sets environment variables exported when the user environment is activated.
+   * Format: `"KEY=VALUE"`. PATH entries are handled specially and merged
+   * with artifact bin paths.
+   *
+   * @param environments - Array of environment variable strings
+   */
   withEnvironments(environments: string[]): this {
     this._environments = environments;
     return this;
   }
 
+  /**
+   * Adds symlinks created when the user environment is activated.
+   * Symlinks are sorted by source path before building for deterministic output.
+   *
+   * @param symlinks - Array of `[source, target]` path tuples
+   */
   withSymlinks(symlinks: Array<[string, string]>): this {
     for (const [source, target] of symlinks) {
       this._symlinks.push([source, target]);
@@ -545,6 +714,12 @@ export class UserEnvironmentBuilder {
     return this;
   }
 
+  /**
+   * Builds the user environment artifact, which includes activate/deactivate
+   * scripts and symlink management.
+   *
+   * @returns The hex-encoded SHA-256 digest of the artifact
+   */
   async build(context: ConfigContext): Promise<string> {
     // Sort for deterministic output -- sorted by source path (index 0)
     this._symlinks.sort((a, b) => a[0].localeCompare(b[0]));
@@ -655,15 +830,28 @@ export class Argument {
   private _name: string;
   private _require: boolean = false;
 
+  /**
+   * @param name - The variable name to look up in the context
+   */
   constructor(name: string) {
     this._name = name;
   }
 
+  /**
+   * Marks this argument as required. If the variable is not set in the
+   * context when {@link Argument.build} is called, an error is thrown.
+   */
   withRequire(): this {
     this._require = true;
     return this;
   }
 
+  /**
+   * Resolves the argument value from the {@link ConfigContext}.
+   *
+   * @returns The variable value, or `undefined` if not set and not required
+   * @throws If the variable is required but not set
+   */
   build(context: ConfigContext): string | undefined {
     const variable = context.getVariable(this._name);
 

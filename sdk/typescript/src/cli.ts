@@ -8,15 +8,31 @@
  *         [--artifact-unlock] [--artifact-variable KEY=VALUE...]
  */
 
+/**
+ * Parsed result of the `start` CLI subcommand.
+ *
+ * These arguments are supplied automatically by the Vorpal CLI when
+ * invoking a compiled TypeScript config binary. You typically do not
+ * construct this manually -- use {@link ConfigContext.create} instead.
+ */
 export interface StartCommand {
+  /** URL of the Vorpal agent gRPC service */
   agent: string;
+  /** Name of the top-level artifact being built */
   artifact: string;
+  /** Filesystem path to the artifact context directory */
   artifactContext: string;
+  /** Namespace for artifact registration and lookup */
   artifactNamespace: string;
+  /** Target system string (e.g., `"aarch64-darwin"`) */
   artifactSystem: string;
+  /** Whether to unlock (rebuild) already-cached artifacts */
   artifactUnlock: boolean;
+  /** Build variables in `KEY=VALUE` format */
   artifactVariable: string[];
+  /** Port for the context gRPC service */
   port: number;
+  /** URL of the Vorpal registry gRPC service */
   registry: string;
 }
 

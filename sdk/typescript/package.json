@@ -48,7 +48,8 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.11.0",
-    "@grpc/grpc-js": "1.14.3"
+    "@grpc/grpc-js": "1.14.3",
+    "smol-toml": "^1.6.0"
   },
   "devDependencies": {
     "@types/bun": "1.2.4",

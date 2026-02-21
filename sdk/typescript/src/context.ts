@@ -75,6 +75,10 @@ export function serializeArtifactStepSecret(secret: ArtifactStepSecret): object 
   };
 }
 
+/**
+ * Serializes an {@link ArtifactSource} to a plain object matching Rust's serde output.
+ * Field order and inclusion rules match the cross-SDK parity requirements.
+ */
 export function serializeArtifactSource(source: ArtifactSourceMsg): object {
   return {
     digest: source.digest ?? null,
@@ -85,6 +89,10 @@ export function serializeArtifactSource(source: ArtifactSourceMsg): object {
   };
 }
 
+/**
+ * Serializes an {@link ArtifactStep} to a plain object matching Rust's serde output.
+ * Field order and inclusion rules match the cross-SDK parity requirements.
+ */
 export function serializeArtifactStep(step: ArtifactStepMsg): object {
   return {
     entrypoint: step.entrypoint ?? null,
@@ -96,6 +104,10 @@ export function serializeArtifactStep(step: ArtifactStepMsg): object {
   };
 }
 
+/**
+ * Serializes an {@link Artifact} to a plain object matching Rust's serde output.
+ * Field order and inclusion rules match the cross-SDK parity requirements.
+ */
 export function serializeArtifact(artifact: ArtifactMsg): object {
   return {
     target: artifact.target,
@@ -117,6 +129,11 @@ export function artifactToJsonBytes(artifact: ArtifactMsg): Buffer {
   return Buffer.from(json, "utf-8");
 }
 
+/**
+ * Computes the SHA-256 digest of an artifact using the cross-SDK-compatible
+ * JSON serialization. The returned hex string is identical to what the
+ * Rust and Go SDKs produce for the same artifact definition.
+ */
 export function computeArtifactDigest(artifact: ArtifactMsg): string {
   const jsonBytes = artifactToJsonBytes(artifact);
   return createHash("sha256").update(jsonBytes).digest("hex");
@@ -129,9 +146,27 @@ export function computeArtifactDigest(artifact: ArtifactMsg): string {
 const DEFAULT_NAMESPACE = "library";
 const DEFAULT_TAG = "latest";
 
+/**
+ * Parsed representation of an artifact alias string.
+ *
+ * Alias format: `[namespace/]name[:tag]`
+ *
+ * Defaults:
+ * - `namespace` defaults to `"library"`
+ * - `tag` defaults to `"latest"`
+ *
+ * @example
+ * ```typescript
+ * const alias = parseArtifactAlias("my-tool:v1.0");
+ * // { name: "my-tool", namespace: "library", tag: "v1.0" }
+ * ```
+ */
 export interface ArtifactAlias {
+  /** Artifact name (required) */
   name: string;
+  /** Namespace, defaults to `"library"` */
   namespace: string;
+  /** Version tag, defaults to `"latest"` */
   tag: string;
 }
 
@@ -174,6 +209,20 @@ function isValidComponent(s: string): boolean {
   return true;
 }
 
+/**
+ * Parses an artifact alias string into its component parts.
+ *
+ * Format: `[namespace/]name[:tag]`
+ *
+ * - If no namespace is provided, defaults to `"library"`.
+ * - If no tag is provided, defaults to `"latest"`.
+ * - Valid characters: alphanumeric, hyphens, dots, underscores, plus signs.
+ * - Maximum length: 255 characters.
+ *
+ * @param alias - The alias string to parse
+ * @returns Parsed {@link ArtifactAlias} with defaults applied
+ * @throws If the alias is empty, too long, or contains invalid characters
+ */
 export function parseArtifactAlias(alias: string): ArtifactAlias {
   if (alias.length === 0) {
     throw new Error("alias cannot be empty");
@@ -307,9 +356,37 @@ export class ConfigContext {
    * gRPC services. Matches Rust get_context() and Go GetContext().
    */
   static create(argv?: string[]): ConfigContext {
-    const args = parseCliArgs(argv);
+    let args: ReturnType<typeof parseCliArgs>;
+    try {
+      args = parseCliArgs(argv);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to parse CLI arguments: ${msg}\n\n` +
+        `  This usually means the compiled TypeScript config was invoked\n` +
+        `  with incorrect or missing arguments. The Vorpal CLI should\n` +
+        `  supply these automatically during 'vorpal build'.\n\n` +
+        `  If you are running the config binary manually, the required\n` +
+        `  arguments are:\n` +
+        `    start --agent <URL> --artifact <NAME> --artifact-context <PATH>\n` +
+        `          --artifact-namespace <NS> --artifact-system <SYSTEM>\n` +
+        `          --port <PORT> --registry <URL>\n`,
+      );
+    }
 
-    const artifactSystem = getSystem(args.artifactSystem);
+    let artifactSystem: ArtifactSystem;
+    try {
+      artifactSystem = getSystem(args.artifactSystem);
+    } catch (_err) {
+      throw new Error(
+        `Unsupported artifact system: '${args.artifactSystem}'\n\n` +
+        `  Supported systems are:\n` +
+        `    - aarch64-darwin  (Apple Silicon macOS)\n` +
+        `    - aarch64-linux   (ARM64 Linux)\n` +
+        `    - x86_64-darwin   (Intel macOS)\n` +
+        `    - x86_64-linux    (Intel/AMD Linux)\n`,
+      );
+    }
 
     // Parse variables
     const variables = new Map<string, string>();
@@ -323,10 +400,32 @@ export class ConfigContext {
     }
 
     // Create gRPC clients (TLS based on URI scheme, matching Rust SDK)
-    const agentCredentials = getClientCredentials(args.agent);
-    const registryCredentials = getClientCredentials(args.registry);
-    const clientAgent = new AgentServiceClient(args.agent, agentCredentials);
-    const clientArtifact = new ArtifactServiceClient(args.registry, registryCredentials);
+    let clientAgent: AgentServiceClient;
+    let clientArtifact: ArtifactServiceClient;
+    try {
+      const agentCredentials = getClientCredentials(args.agent);
+      clientAgent = new AgentServiceClient(args.agent, agentCredentials);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to connect to agent service at '${args.agent}': ${msg}\n\n` +
+        `  Make sure the Vorpal agent is running. You can start it with:\n` +
+        `    vorpal system services start\n\n` +
+        `  If using a custom agent address, verify the --agent URL is correct.\n`,
+      );
+    }
+    try {
+      const registryCredentials = getClientCredentials(args.registry);
+      clientArtifact = new ArtifactServiceClient(args.registry, registryCredentials);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to connect to registry service at '${args.registry}': ${msg}\n\n` +
+        `  Make sure the Vorpal registry is running. You can start it with:\n` +
+        `    vorpal system services start\n\n` +
+        `  If using a custom registry address, verify the --registry URL is correct.\n`,
+      );
+    }
 
     return new ConfigContext(
       args.artifact,
@@ -415,9 +514,35 @@ export class ConfigContext {
       stream.on("end", () => resolve());
       stream.on("error", (err: grpc.ServiceError) => {
         if (err.code === grpc.status.NOT_FOUND) {
-          reject(new Error(`artifact '${artifact.name}' not found in agent service`));
+          reject(new Error(
+            `Artifact '${artifact.name}' not found in agent service.\n\n` +
+            `  The agent does not have this artifact registered.\n` +
+            `  This can happen if the agent was restarted or the artifact\n` +
+            `  has not been built yet.\n`,
+          ));
+        } else if (err.code === grpc.status.UNAVAILABLE) {
+          reject(new Error(
+            `Agent service is unavailable (connection refused or dropped).\n\n` +
+            `  Could not reach the agent at the configured address.\n\n` +
+            `  To fix this:\n` +
+            `    1. Make sure the Vorpal agent is running:\n` +
+            `         vorpal system services start\n` +
+            `    2. Check that the agent address is correct in your config.\n`,
+          ));
+        } else if (err.code === grpc.status.DEADLINE_EXCEEDED) {
+          reject(new Error(
+            `Agent service request timed out for artifact '${artifact.name}'.\n\n` +
+            `  The agent took too long to respond. This may indicate:\n` +
+            `    - The agent is overloaded or under heavy build load\n` +
+            `    - Network connectivity issues between client and agent\n\n` +
+            `  Try again, or check agent logs for more details.\n`,
+          ));
         } else {
-          reject(new Error(`gRPC error (code=${err.code}): ${err.message}`));
+          reject(new Error(
+            `gRPC error from agent service (code=${err.code}): ${err.message}\n\n` +
+            `  An unexpected error occurred while communicating with the agent.\n` +
+            `  Check the agent logs for more details.\n`,
+          ));
         }
       });
     });
@@ -452,7 +577,29 @@ export class ConfigContext {
     const artifact = await new Promise<ArtifactMsg>((resolve, reject) => {
       this._clientArtifact.getArtifact(request, (err, response) => {
         if (err) {
-          reject(new Error(`artifact service error: ${err.message}`));
+          const svcErr = err as grpc.ServiceError;
+          if (svcErr.code === grpc.status.NOT_FOUND) {
+            reject(new Error(
+              `Artifact not found in registry (digest: ${digest}).\n\n` +
+              `  The registry does not have an artifact with this digest.\n` +
+              `  This can happen if the artifact was never pushed or has been pruned.\n`,
+            ));
+          } else if (svcErr.code === grpc.status.UNAVAILABLE) {
+            reject(new Error(
+              `Registry service is unavailable.\n\n` +
+              `  Could not reach the registry at '${this._registry}'.\n\n` +
+              `  To fix this:\n` +
+              `    1. Make sure the Vorpal registry is running:\n` +
+              `         vorpal system services start\n` +
+              `    2. Check that the registry address is correct.\n`,
+            ));
+          } else {
+            reject(new Error(
+              `Registry service error (code=${svcErr.code}): ${err.message}\n\n` +
+              `  An unexpected error occurred while fetching artifact '${digest}'.\n` +
+              `  Check the registry logs for more details.\n`,
+            ));
+          }
         } else {
           resolve(response);
         }
@@ -487,7 +634,30 @@ export class ConfigContext {
     const response = await new Promise<{ digest: string }>((resolve, reject) => {
       this._clientArtifact.getArtifactAlias(request, (err, resp) => {
         if (err) {
-          reject(new Error(`error fetching artifact alias: ${err.message}`));
+          const svcErr = err as grpc.ServiceError;
+          if (svcErr.code === grpc.status.NOT_FOUND) {
+            reject(new Error(
+              `Artifact alias '${alias}' not found in registry.\n\n` +
+              `  No artifact matches namespace='${parsed.namespace}', ` +
+              `name='${parsed.name}', tag='${parsed.tag}'.\n\n` +
+              `  Make sure the artifact has been built and published,\n` +
+              `  and that the alias is spelled correctly.\n`,
+            ));
+          } else if (svcErr.code === grpc.status.UNAVAILABLE) {
+            reject(new Error(
+              `Registry service is unavailable.\n\n` +
+              `  Could not reach the registry at '${this._registry}'.\n\n` +
+              `  To fix this:\n` +
+              `    1. Make sure the Vorpal registry is running:\n` +
+              `         vorpal system services start\n` +
+              `    2. Check that the registry address is correct.\n`,
+            ));
+          } else {
+            reject(new Error(
+              `Registry error fetching alias '${alias}' (code=${svcErr.code}): ${err.message}\n\n` +
+              `  Check the registry logs for more details.\n`,
+            ));
+          }
         } else {
           resolve(resp);
         }
@@ -505,30 +675,54 @@ export class ConfigContext {
     return artifactDigest;
   }
 
+  /**
+   * Returns a shallow copy of the artifact store (digest -> Artifact).
+   * Useful for inspecting all artifacts registered during this config run.
+   */
   getArtifactStore(): Map<string, ArtifactMsg> {
     return new Map(this._store.artifact);
   }
 
+  /**
+   * Looks up a previously registered artifact by its digest.
+   *
+   * @param digest - The hex-encoded SHA-256 digest
+   * @returns The artifact, or `undefined` if not found
+   */
   getArtifact(digest: string): ArtifactMsg | undefined {
     return this._store.artifact.get(digest);
   }
 
+  /** Returns the filesystem path to the artifact context directory. */
   getArtifactContextPath(): string {
     return this._artifactContext;
   }
 
+  /** Returns the name of the top-level artifact being built. */
   getArtifactName(): string {
     return this._artifact;
   }
 
+  /** Returns the namespace used for artifact registration and lookup. */
   getArtifactNamespace(): string {
     return this._artifactNamespace;
   }
 
+  /**
+   * Returns the target {@link ArtifactSystem} for this build
+   * (e.g., `ArtifactSystem.AARCH64_DARWIN`).
+   */
   getSystem(): ArtifactSystem {
     return this._artifactSystem;
   }
 
+  /**
+   * Looks up a build variable by name. Variables are passed via
+   * `--artifact-variable KEY=VALUE` on the CLI.
+   *
+   * @param name - Variable name
+   * @returns The variable value, or `undefined` if not set
+   */
   getVariable(name: string): string | undefined {
     return this._store.variable.get(name);
   }
@@ -586,7 +780,14 @@ export class ConfigContext {
     await new Promise<void>((resolve, reject) => {
       server.bindAsync(addr, grpc.ServerCredentials.createInsecure(), (err) => {
         if (err) {
-          reject(new Error(`failed to bind: ${err.message}`));
+          reject(new Error(
+            `Failed to bind context service to ${addr}: ${err.message}\n\n` +
+            `  The TypeScript config's gRPC context server could not start.\n` +
+            `  This usually means the port is already in use by another process.\n\n` +
+            `  To fix this:\n` +
+            `    1. Check if another Vorpal config process is still running\n` +
+            `    2. Try running 'vorpal build' again (a new port will be selected)\n`,
+          ));
           return;
         }
         resolve();
@@ -600,7 +801,8 @@ export class ConfigContext {
       const shutdown = () => {
         server.tryShutdown((err) => {
           if (err) {
-            console.error(`shutdown error: ${err.message}`);
+            console.error(`Warning: context service shutdown error: ${err.message}`);
+            console.error(`  Forcing shutdown. This is usually harmless.`);
             server.forceShutdown();
           }
           resolve();

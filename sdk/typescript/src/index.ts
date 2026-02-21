@@ -21,6 +21,7 @@ export {
 export { bash, bwrap, shell, docker } from "./artifact/step.js";
 
 // Language builders
+export { RustBuilder } from "./artifact/language/rust.js";
 export { TypeScriptBuilder } from "./artifact/language/typescript.js";
 
 // System utilities

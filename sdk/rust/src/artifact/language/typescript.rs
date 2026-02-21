@@ -9,6 +9,7 @@ use indoc::formatdoc;
 
 pub struct TypeScript<'a> {
     artifacts: Vec<String>,
+    bun_version: Option<String>,
     entrypoint: Option<&'a str>,
     environments: Vec<&'a str>,
     includes: Vec<&'a str>,
@@ -21,6 +22,7 @@ impl<'a> TypeScript<'a> {
     pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],
+            bun_version: None,
             entrypoint: None,
             environments: vec![],
             includes: vec![],
@@ -32,6 +34,11 @@ impl<'a> TypeScript<'a> {
 
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts = artifacts;
+        self
+    }
+
+    pub fn with_bun_version(mut self, version: &str) -> Self {
+        self.bun_version = Some(version.to_string());
         self
     }
 
@@ -83,10 +90,18 @@ impl<'a> TypeScript<'a> {
             None => format!("src/{}.ts", self.name),
         };
 
-        let bun = Bun::new().build(context).await?;
+        let mut bun = Bun::new();
+        if let Some(version) = &self.bun_version {
+            bun = bun.with_version(version);
+        }
+        let bun = bun.build(context).await?;
         let bun_bin = format!("{}/bin", get_env_key(&bun));
 
+        // NOTE: Pre-flight validation (package.json, bun.lockb, entrypoint, @vorpal/sdk)
+        // is performed by the CLI in cli/src/command/build.rs before this build step runs.
         let step_script = formatdoc! {r#"
+            set -euo pipefail
+
             pushd {source_dir}
 
             mkdir -p $VORPAL_OUTPUT/bin

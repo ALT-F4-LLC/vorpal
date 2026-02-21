@@ -38,6 +38,18 @@ pub struct VorpalConfigSourceRust {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct VorpalConfigSourceTypeScript {
+    /// Override the Bun version used for TypeScript builds.
+    ///
+    /// When `None`, the default version pinned by the SDK is used
+    /// (see `vorpal_sdk::artifact::bun::DEFAULT_BUN_VERSION`).
+    ///
+    /// Example in `Vorpal.toml`:
+    /// ```toml
+    /// [source.typescript]
+    /// bun_version = "1.2.1"
+    /// ```
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bun_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
 }
