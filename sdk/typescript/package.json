@@ -8,6 +8,18 @@
     "url": "https://github.com/ALT-F4-LLC/vorpal",
     "directory": "sdk/typescript"
   },
+  "homepage": "https://github.com/ALT-F4-LLC/vorpal/tree/main/sdk/typescript",
+  "bugs": {
+    "url": "https://github.com/ALT-F4-LLC/vorpal/issues"
+  },
+  "keywords": [
+    "vorpal",
+    "sdk",
+    "build-system",
+    "artifacts",
+    "grpc",
+    "protobuf"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,9 +29,20 @@
       "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "dist/**/*.js.map"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "generate:proto": "protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/api --ts_proto_opt=outputServices=grpc-js --ts_proto_opt=esModuleInterop=true --ts_proto_opt=snakeToCamel=false --ts_proto_opt=forceLong=number --ts_proto_opt=useOptionals=messages --ts_proto_opt=oneof=unions --ts_proto_opt=env=node --ts_proto_opt=importSuffix=.js -I ../rust/api ../rust/api/agent/agent.proto ../rust/api/archive/archive.proto ../rust/api/artifact/artifact.proto ../rust/api/context/context.proto ../rust/api/worker/worker.proto",
+    "clean": "rm -rf dist",
     "build": "tsc",
+    "prepublishOnly": "npm run clean && npm run build",
     "test": "bun test",
     "validate:proto": "npx tsx scripts/validate-serialization.ts"
   },

@@ -20,6 +20,9 @@ export {
 // Step functions
 export { bash, bwrap, shell, docker } from "./artifact/step.js";
 
+// Language builders
+export { TypeScriptBuilder } from "./artifact/language/typescript.js";
+
 // System utilities
 export {
   getSystem,

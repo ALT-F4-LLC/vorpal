@@ -4,7 +4,7 @@ Build and ship software with one language-agnostic workflow.
 
 ## Why?
 - Declarative: describe steps once, use them anywhere.
-- Cross-language: Rust and Go SDKs today; more to come.
+- Cross-language: Rust, Go, and TypeScript SDKs.
 - Reproducible: hermetic steps and pinned toolchains.
 - Scalable: the same artifacts power your end-to-end flow.
 
@@ -43,7 +43,8 @@ flowchart LR
   - Common tasks: `make check`, `make test`, `make format`, `make lint`, `make dist`
 
 ## Using the SDK
-The examples below build a simple Rust binary artifact for multiple systems and run the context.
+The examples below build a simple artifact for multiple systems and run the context.
+Vorpal provides SDKs in **Rust**, **Go**, and **TypeScript** ([`@vorpal/sdk`](https://www.npmjs.com/package/@vorpal/sdk)).
 
 ### Rust
 ```rust
@@ -91,6 +92,45 @@ func main() {
 }
 ```
 
+### TypeScript
+```typescript
+import {
+  ConfigContext,
+  ArtifactSystem,
+  JobBuilder,
+} from "@vorpal/sdk";
+
+const SYSTEMS = [
+  ArtifactSystem.AARCH64_DARWIN,
+  ArtifactSystem.AARCH64_LINUX,
+  ArtifactSystem.X8664_DARWIN,
+  ArtifactSystem.X8664_LINUX,
+];
+
+async function main() {
+  const context = ConfigContext.create();
+
+  await new JobBuilder(
+    "example",
+    'echo "Hello, World!"',
+    SYSTEMS,
+  ).build(context);
+
+  await context.run();
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
+```
+
+`Vorpal.toml` for TypeScript:
+```toml
+language = "typescript"
+name = "example"
+
+[source]
+includes = ["src", "package.json", "tsconfig.json", "bun.lockb"]
+```
+
 ## Quickstart
 These steps assume you installed Vorpal via the installer and have `vorpal` on your PATH.
 
@@ -103,7 +143,7 @@ These steps assume you installed Vorpal via the installer and have `vorpal` on y
 - If you used the installer, services are already running.
 - Otherwise: `vorpal system services start`  # defaults to https://localhost:23151
 
-3) Create a new project (pick Go or Rust)
+3) Create a new project (pick Go, Rust, or TypeScript)
 
 - `mkdir hello-vorpal && cd hello-vorpal`
 - `vorpal artifact init`  # scaffolds Vorpal.toml and a sample
@@ -212,6 +252,39 @@ func main() {
 
   ctx.Run()
 }
+```
+
+**TypeScript**
+```typescript
+import {
+  ConfigContext,
+  ArtifactSystem,
+  ProjectEnvironmentBuilder,
+  UserEnvironmentBuilder,
+} from "@vorpal/sdk";
+
+const SYSTEMS = [
+  ArtifactSystem.AARCH64_DARWIN,
+  ArtifactSystem.AARCH64_LINUX,
+  ArtifactSystem.X8664_DARWIN,
+  ArtifactSystem.X8664_LINUX,
+];
+
+async function main() {
+  const context = ConfigContext.create();
+
+  await new ProjectEnvironmentBuilder("my-project", SYSTEMS)
+    .withEnvironments(["FOO=bar"])
+    .build(context);
+
+  await new UserEnvironmentBuilder("my-home", SYSTEMS)
+    .withSymlinks([["/path/to/local/bin/app", "$HOME/.vorpal/bin/app"]])
+    .build(context);
+
+  await context.run();
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
 ```
 
 ### Activate
