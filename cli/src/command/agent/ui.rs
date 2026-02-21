@@ -2103,8 +2103,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                                 .add_modifier(Modifier::BOLD),
                         ));
                     } else {
-                        let line_pos =
-                            agent.output.len().saturating_sub(agent.scroll_offset);
+                        let line_pos = agent.output.len().saturating_sub(agent.scroll_offset);
                         left_spans.push(Span::styled(
                             format!("[line {}]", line_pos),
                             Style::default().fg(theme.status_bar_fg),
@@ -2124,13 +2123,9 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     let output = format_token_count(agent.output_tokens);
                     if w >= 80 {
                         let cost = format_cost(agent.total_cost_usd);
-                        right_spans.push(Span::raw(format!(
-                            "{input} in  {output} out  {cost} ",
-                        )));
+                        right_spans.push(Span::raw(format!("{input} in  {output} out  {cost} ",)));
                     } else {
-                        right_spans.push(Span::raw(format!(
-                            "{input} in  {output} out ",
-                        )));
+                        right_spans.push(Span::raw(format!("{input} in  {output} out ",)));
                     }
                 }
 
