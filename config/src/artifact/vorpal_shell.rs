@@ -8,6 +8,8 @@ use vorpal_sdk::artifact::{
     gopls::Gopls,
     grpcurl::Grpcurl,
     language::go::{get_goarch, get_goos},
+    nodejs::NodeJS,
+    pnpm::Pnpm,
     protoc::Protoc,
     protoc_gen_go::ProtocGenGo,
     protoc_gen_go_grpc::ProtocGenGoGrpc,
@@ -30,6 +32,8 @@ impl VorpalShell {
         let goimports = Goimports::new().build(context).await?;
         let gopls = Gopls::new().build(context).await?;
         let grpcurl = Grpcurl::new().build(context).await?;
+        let nodejs = NodeJS::new().build(context).await?;
+        let pnpm = Pnpm::new().build(context).await?;
         let protoc = Protoc::new().build(context).await?;
         let protoc_gen_go = ProtocGenGo::new().build(context).await?;
         let protoc_gen_go_grpc = ProtocGenGoGrpc::new().build(context).await?;
@@ -43,6 +47,8 @@ impl VorpalShell {
                 goimports,
                 gopls,
                 grpcurl,
+                nodejs,
+                pnpm,
                 protoc,
                 protoc_gen_go,
                 protoc_gen_go_grpc,

@@ -1217,6 +1217,14 @@ digest = "35764d85e27eac8e8c9eebfe6c5a593224ef63fdd1f2ea0916bf8b4d2335acc0"
 platform = "aarch64-linux"
 
 [[sources]]
+name = "nodejs"
+path = "https://nodejs.org/dist/v22.14.0/node-v22.14.0-darwin-arm64.tar.gz"
+includes = []
+excludes = []
+digest = "5a5c3381f5c2b1f01f14974f019e58c4e75966968258e2deab6110abeacd1d49"
+platform = "aarch64-darwin"
+
+[[sources]]
 name = "openapi-generator-cli"
 path = "https://repo1.maven.org/maven2/org/openapitools/openapi-generator-cli/7.18.0/openapi-generator-cli-7.18.0.jar"
 includes = []
@@ -1327,6 +1335,14 @@ includes = []
 excludes = []
 digest = "43a6f8cf15fcedeb66e95c4957ec8bc43db40515de89483e507c01c255fce853"
 platform = "aarch64-linux"
+
+[[sources]]
+name = "pnpm"
+path = "https://github.com/pnpm/pnpm/releases/download/v10.5.2/pnpm-macos-arm64"
+includes = []
+excludes = []
+digest = "1252fd991d2eee033c88746f6e3cd75295b527ff48de12c8cb50e4a6c2d97a01"
+platform = "aarch64-darwin"
 
 [[sources]]
 name = "protoc"
