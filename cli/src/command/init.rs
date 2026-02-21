@@ -5,7 +5,7 @@ use tokio::fs::{create_dir_all, write};
 use tracing::{info, warn};
 
 pub async fn run(name: &str, path: &Path) -> Result<()> {
-    let options: Vec<&str> = vec!["Go", "Rust"];
+    let options: Vec<&str> = vec!["Go", "Rust", "TypeScript"];
 
     let answer: Result<&str, InquireError> =
         Select::new("Which language would you like to use?", options).prompt();
@@ -34,6 +34,29 @@ pub async fn run(name: &str, path: &Path) -> Result<()> {
                 template.insert("Cargo.lock", include_str!("template/rust/Cargo.lock"));
                 template.insert("Cargo.toml", include_str!("template/rust/Cargo.toml"));
                 template.insert("Vorpal.toml", include_str!("template/rust/Vorpal.toml"));
+            }
+
+            "TypeScript" => {
+                template.insert(
+                    "src/vorpal.ts",
+                    include_str!("template/typescript/src/vorpal.ts"),
+                );
+                template.insert(
+                    "src/main.ts",
+                    include_str!("template/typescript/src/main.ts"),
+                );
+                template.insert(
+                    "package.json",
+                    include_str!("template/typescript/package.json"),
+                );
+                template.insert(
+                    "tsconfig.json",
+                    include_str!("template/typescript/tsconfig.json"),
+                );
+                template.insert(
+                    "Vorpal.toml",
+                    include_str!("template/typescript/Vorpal.toml"),
+                );
             }
 
             _ => bail!("invalid 'language' choice"),

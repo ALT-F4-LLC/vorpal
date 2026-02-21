@@ -29,7 +29,7 @@ use vorpal_sdk::{
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
-        language::{go::Go, rust::Rust},
+        language::{go::Go, rust::Rust, typescript::TypeScript},
         protoc::Protoc,
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
@@ -460,6 +460,35 @@ pub async fn run(
             if !config.environments.is_empty() {
                 builder = builder
                     .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
+            }
+
+            builder.build(&mut config_context).await?
+        }
+
+        "typescript" => {
+            let source_path = format!("src/{}.ts", config.name);
+
+            let mut includes = vec![&source_path, "package.json", "tsconfig.json", "bun.lockb"];
+
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+            }
+
+            let mut builder =
+                TypeScript::new(&config.name, vec![config_system]).with_includes(includes);
+
+            if !config.environments.is_empty() {
+                builder = builder
+                    .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
+            }
+
+            if let Some(entrypoint) = config
+                .source
+                .as_ref()
+                .and_then(|s| s.typescript.as_ref())
+                .and_then(|t| t.entrypoint.as_ref())
+            {
+                builder = builder.with_entrypoint(entrypoint);
             }
 
             builder.build(&mut config_context).await?

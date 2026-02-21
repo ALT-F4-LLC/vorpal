@@ -1,5 +1,8 @@
 use crate::command::{
-    config::{VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourceRust},
+    config::{
+        VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourceRust,
+        VorpalConfigSourceTypeScript,
+    },
     store::paths::get_key_credentials_path,
 };
 use anyhow::{anyhow, Result};
@@ -374,6 +377,7 @@ pub async fn run() -> Result<()> {
             let mut config_source_rust_bin = None;
             let mut config_source_rust_packages = None;
             let mut config_source_script = None;
+            let mut config_source_typescript_entrypoint = None;
 
             if let Some(environments) = &project_config.environments {
                 if !environments.is_empty() {
@@ -413,6 +417,14 @@ pub async fn run() -> Result<()> {
                 if let Some(script) = &config_source.script {
                     if !script.is_empty() {
                         config_source_script = Some(script.clone());
+                    }
+                }
+
+                if let Some(config_source_typescript) = &config_source.typescript {
+                    if let Some(entrypoint) = &config_source_typescript.entrypoint {
+                        if !entrypoint.is_empty() {
+                            config_source_typescript_entrypoint = Some(entrypoint.clone());
+                        }
                     }
                 }
             };
@@ -459,6 +471,9 @@ pub async fn run() -> Result<()> {
                         packages: config_source_rust_packages,
                     }),
                     script: config_source_script,
+                    typescript: Some(VorpalConfigSourceTypeScript {
+                        entrypoint: config_source_typescript_entrypoint,
+                    }),
                 }),
             };
 
