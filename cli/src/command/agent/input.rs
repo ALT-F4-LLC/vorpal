@@ -998,11 +998,12 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
 
 /// Handle keyboard input while in settings mode.
 ///
-/// Tab/BackTab cycles through the 6 option fields. Enter saves and exits.
+/// Tab/BackTab cycles through the 7 option fields. Enter saves and exits.
 /// Esc cancels without saving. Text editing keys modify the active field.
 fn handle_settings_mode(app: &mut App, key: KeyEvent) {
     use InputField::*;
     let settings_fields = [
+        Workspace,
         PermissionMode,
         Model,
         Effort,
@@ -1014,6 +1015,7 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.input_mode = InputMode::Normal;
+            app.workspace.clear();
             app.permission_mode.clear();
             app.model.clear();
             app.effort.clear();
@@ -1046,6 +1048,7 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
             }
 
             let buf = match app.input_field {
+                Workspace => &mut app.workspace,
                 MaxBudgetUsd => &mut app.max_budget,
                 AllowedTools => &mut app.allowed_tools,
                 AddDir => &mut app.add_dir,

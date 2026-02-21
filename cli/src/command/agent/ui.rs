@@ -2632,6 +2632,12 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
 
     // Build field lines using the same helpers as render_input.
+    let workspace_lines = build_input_field_lines(
+        app.workspace.text(),
+        app.workspace.cursor_pos(),
+        app.input_field == InputField::Workspace,
+        theme,
+    );
     let perm_lines = build_selector(
         PERMISSION_MODES,
         app.permission_mode.text(),
@@ -2670,6 +2676,11 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
     );
 
     let mut text = Vec::new();
+    text.push(Line::from(Span::styled(
+        " Workspace",
+        field_label_style(app.input_field == InputField::Workspace, theme),
+    )));
+    text.extend(workspace_lines);
     text.push(Line::from(Span::styled(
         "Permission Mode:",
         field_label_style(app.input_field == InputField::PermissionMode, theme),
@@ -2710,7 +2721,7 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
         .alignment(Alignment::Center),
     );
 
-    // 6 fields * 2 rows (label + value) + blank + footer = 14 content rows
+    // 7 fields * 2 rows (label + value) + blank + footer = 16 content rows
     let content_rows = text.len();
     let popup_height = (content_rows + 2).min(area.height as usize) as u16;
 

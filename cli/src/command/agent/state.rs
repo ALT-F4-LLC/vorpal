@@ -5,6 +5,7 @@
 
 use super::manager::ClaudeOptions;
 use super::theme::Theme;
+use path_clean::PathClean;
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -1954,6 +1955,8 @@ impl App {
             self.set_status_message("No agent focused");
             return;
         }
+        self.workspace
+            .set_text(self.agents[self.focused].workspace.display().to_string());
         let opts = self.agents[self.focused].claude_options.clone();
         self.permission_mode
             .set_text(opts.permission_mode.unwrap_or_default());
@@ -1966,7 +1969,7 @@ impl App {
         );
         self.allowed_tools.set_text(opts.allowed_tools.join(", "));
         self.add_dir.set_text(opts.add_dirs.join(", "));
-        self.input_field = InputField::PermissionMode;
+        self.input_field = InputField::Workspace;
         self.input_mode = InputMode::Settings;
     }
 
@@ -1976,7 +1979,26 @@ impl App {
     /// All fields are validated before any are written, so a parse error in
     /// one field (e.g. budget) does not partially update the agent.
     pub fn save_settings(&mut self) {
-        if let Some(agent) = self.agents.get_mut(self.focused) {
+        if self.focused >= self.agents.len() {
+            self.set_status_message("No agent focused — settings not saved");
+        } else {
+            // -- Validate workspace --------------------------------------------
+            let workspace_raw = self.workspace.text().trim().to_string();
+            if workspace_raw.is_empty() {
+                self.set_status_message("Workspace cannot be empty");
+                self.input_field = InputField::Workspace;
+                return;
+            }
+            let workspace_path = PathBuf::from(&workspace_raw);
+            let resolved_workspace = if workspace_path.is_absolute() {
+                workspace_path.clean()
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .join(&workspace_path)
+                    .clean()
+            };
+
             // -- Validate all fields upfront ------------------------------------
             let perm = self.permission_mode.text().to_string();
             let perm_val = if perm.is_empty() { None } else { Some(perm) };
@@ -2028,7 +2050,38 @@ impl App {
                     .collect()
             };
 
+            // -- Re-derive agent name from new workspace basename --------------
+            let agent_id = self.agents[self.focused].id;
+            let base = resolved_workspace
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| format!("agent-{}", agent_id + 1));
+
+            let new_name = if self
+                .agents
+                .iter()
+                .any(|a| a.id != agent_id && a.name == base)
+            {
+                let mut n = 2;
+                loop {
+                    let candidate = format!("{base}-{n}");
+                    if !self
+                        .agents
+                        .iter()
+                        .any(|a| a.id != agent_id && a.name == candidate)
+                    {
+                        break candidate;
+                    }
+                    n += 1;
+                }
+            } else {
+                base
+            };
+
             // -- Commit atomically ---------------------------------------------
+            let agent = &mut self.agents[self.focused];
+            agent.workspace = resolved_workspace;
+            agent.name = new_name;
             agent.claude_options.permission_mode = perm_val;
             agent.claude_options.model = model_val;
             agent.claude_options.effort = effort_val;
@@ -2037,10 +2090,9 @@ impl App {
             agent.claude_options.add_dirs = dirs_val;
 
             self.set_status_message("Settings saved");
-        } else {
-            self.set_status_message("No agent focused — settings not saved");
         }
         self.input_mode = InputMode::Normal;
+        self.workspace.clear();
         self.permission_mode.clear();
         self.model.clear();
         self.effort.clear();
