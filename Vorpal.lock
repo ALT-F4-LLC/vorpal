@@ -145,6 +145,14 @@ digest = "ca2abfdadc1c5df2c87cf8fbcf56ef0d7b38ac29277ace74d4ff257c516d3894"
 platform = "aarch64-linux"
 
 [[sources]]
+name = "bun"
+path = "https://github.com/oven-sh/bun/releases/download/bun-v1.2.0/bun-darwin-aarch64.zip"
+includes = []
+excludes = []
+digest = "fdc1a8b277852ec83e87eed993d361f77117fcbab25ae98151a6e20cf94165aa"
+platform = "aarch64-darwin"
+
+[[sources]]
 name = "cargo"
 path = "https://static.rust-lang.org/dist/cargo-1.89.0-x86_64-unknown-linux-gnu.tar.gz"
 includes = []

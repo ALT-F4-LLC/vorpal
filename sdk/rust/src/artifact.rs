@@ -2,6 +2,7 @@ use crate::{api, context};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+pub mod bun;
 pub mod cargo;
 pub mod clippy;
 pub mod crane;

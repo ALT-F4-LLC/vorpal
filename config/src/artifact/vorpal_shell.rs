@@ -1,6 +1,7 @@
 use crate::artifact::SYSTEMS;
 use anyhow::Result;
 use vorpal_sdk::artifact::{
+    bun::Bun,
     crane::Crane,
     go::Go,
     goimports::Goimports,
@@ -23,6 +24,7 @@ impl VorpalShell {
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let bun = Bun::new().build(context).await?;
         let crane = Crane::new().build(context).await?;
         let go = Go::new().build(context).await?;
         let goimports = Goimports::new().build(context).await?;
@@ -35,6 +37,7 @@ impl VorpalShell {
 
         artifact::ProjectEnvironment::new("vorpal-shell", SYSTEMS.to_vec())
             .with_artifacts(vec![
+                bun,
                 crane,
                 go,
                 goimports,
