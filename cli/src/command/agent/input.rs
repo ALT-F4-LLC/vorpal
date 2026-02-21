@@ -186,18 +186,12 @@ fn action_quit_tab(app: &mut App) {
 /// workspace cannot be changed from here.
 fn action_edit(app: &mut App) {
     if let Some(agent) = app.focused_agent() {
-        match (&agent.status, &agent.session_id) {
-            (AgentStatus::Exited(_), Some(_)) => {
-                app.enter_settings_mode();
-            }
-            (AgentStatus::Running, _) => {
+        match &agent.status {
+            AgentStatus::Running => {
                 app.set_status_message("Agent is still running");
             }
-            (AgentStatus::Pending, _) => {
-                app.set_status_message("Agent is pending — submit a prompt first");
-            }
-            (_, None) => {
-                app.set_status_message("No session ID -- agent must complete first");
+            AgentStatus::Pending | AgentStatus::Exited(_) => {
+                app.enter_settings_mode();
             }
         }
     } else {
@@ -2061,5 +2055,63 @@ async fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
         Ok(())
     } else {
         anyhow::bail!("clipboard command exited with {status}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::state::{AgentState, AgentStatus, App, InputMode};
+    use super::super::manager::ClaudeOptions;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_edit_works_on_pending_agents() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        app.add_agent(AgentState::new_pending(
+            0,
+            String::new(),
+            PathBuf::from("/tmp/ws"),
+            ClaudeOptions::default(),
+        ));
+
+        // Pending agent should be editable via action_edit.
+        action_edit(&mut app);
+        assert_eq!(app.input_mode, InputMode::Settings);
+    }
+
+    #[test]
+    fn test_edit_works_on_exited_agents_without_session_id() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        let mut agent = AgentState::new_pending(
+            0,
+            String::new(),
+            PathBuf::from("/tmp/ws"),
+            ClaudeOptions::default(),
+        );
+        agent.status = AgentStatus::Exited(Some(0));
+        // session_id is None — should still allow editing.
+        assert!(agent.session_id.is_none());
+        app.add_agent(agent);
+
+        action_edit(&mut app);
+        assert_eq!(app.input_mode, InputMode::Settings);
+    }
+
+    #[test]
+    fn test_edit_blocked_on_running_agents() {
+        let mut app = App::new(PathBuf::from("/tmp/default"), ClaudeOptions::default());
+        let mut agent = AgentState::new_pending(
+            0,
+            String::new(),
+            PathBuf::from("/tmp/ws"),
+            ClaudeOptions::default(),
+        );
+        agent.status = AgentStatus::Running;
+        app.add_agent(agent);
+
+        action_edit(&mut app);
+        // Should remain in Normal mode, not enter Settings.
+        assert_eq!(app.input_mode, InputMode::Normal);
     }
 }
