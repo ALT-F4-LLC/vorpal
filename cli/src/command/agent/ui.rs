@@ -1429,7 +1429,7 @@ fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, 
                     Style::default().fg(theme.tool_block_border),
                 ),
                 Span::styled(
-                    format!("{size} (press 's' to cycle view)"),
+                    format!("{size} (press 'r' to cycle view)"),
                     Style::default().fg(theme.tool_result_hidden),
                 ),
             ]));
@@ -1453,7 +1453,7 @@ fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, 
                         Style::default().fg(theme.tool_block_border),
                     ),
                     Span::styled(
-                        format!("... {hidden_count} more lines hidden (press 's' to cycle view)"),
+                        format!("... {hidden_count} more lines hidden (press 'r' to cycle view)"),
                         Style::default().fg(theme.tool_result_hidden),
                     ),
                 ]));
@@ -1585,7 +1585,7 @@ fn render_text_run<'a>(markdown: &str, out: &mut Vec<Line<'a>>, theme: &Theme) {
     // after each paragraph, but inter-block spacing is handled by the
     // spacing pass in `render_to_spans`, so trailing blanks would cause
     // double-spacing.
-    while rendered.last().map_or(false, |l| l.width() == 0) {
+    while rendered.last().is_some_and(|l| l.width() == 0) {
         rendered.pop();
     }
     // Prefix only the very first non-empty line with a marker.
@@ -2620,14 +2620,24 @@ fn field_label_style(active: bool, theme: &Theme) -> Style {
 
 /// Render a centered settings overlay for editing the focused agent's Claude
 /// options (permission mode, model, effort, max budget, allowed tools, add-dir).
+///
+/// Layout: Core Configuration (Model, Permission Mode, Effort) with three-line
+/// selector fields (UPPERCASE label, description, selector), then an Advanced
+/// section divider, then text fields (Workspace, Budget, Tools, Dirs) with
+/// inline validation errors.
 fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
 
+    // Description style: dim gray, always visible.
+    let desc_style = Style::default()
+        .fg(theme.option_unset)
+        .add_modifier(Modifier::DIM);
+
     // Build field lines using the same helpers as render_input.
-    let workspace_lines = build_input_field_lines(
-        app.workspace.text(),
-        app.workspace.cursor_pos(),
-        app.input_field == InputField::Workspace,
+    let model_lines = build_selector(
+        MODELS,
+        app.model.text(),
+        app.input_field == InputField::Model,
         theme,
     );
     let perm_lines = build_selector(
@@ -2636,16 +2646,16 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
         app.input_field == InputField::PermissionMode,
         theme,
     );
-    let model_lines = build_selector(
-        MODELS,
-        app.model.text(),
-        app.input_field == InputField::Model,
-        theme,
-    );
     let effort_lines = build_selector(
         EFFORT_LEVELS,
         app.effort.text(),
         app.input_field == InputField::Effort,
+        theme,
+    );
+    let workspace_lines = build_input_field_lines(
+        app.workspace.text(),
+        app.workspace.cursor_pos(),
+        app.input_field == InputField::Workspace,
         theme,
     );
     let budget_lines = build_optional_field_lines(
@@ -2667,57 +2677,148 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
         theme,
     );
 
+    // Helper: check if settings_error targets a specific field.
+    let error_for = |field: InputField| -> Option<&str> {
+        app.settings_error
+            .as_ref()
+            .filter(|(f, _)| *f == field)
+            .map(|(_, msg)| msg.as_str())
+    };
+
     let mut text = Vec::new();
+
+    // ── Add Dir ──
     text.push(Line::from(Span::styled(
-        " Workspace",
-        field_label_style(app.input_field == InputField::Workspace, theme),
-    )));
-    text.extend(workspace_lines);
-    text.push(Line::from(Span::styled(
-        "Permission Mode:",
-        field_label_style(app.input_field == InputField::PermissionMode, theme),
-    )));
-    text.extend(perm_lines);
-    text.push(Line::from(Span::styled(
-        "Model:",
-        field_label_style(app.input_field == InputField::Model, theme),
-    )));
-    text.extend(model_lines);
-    text.push(Line::from(Span::styled(
-        "Effort:",
-        field_label_style(app.input_field == InputField::Effort, theme),
-    )));
-    text.extend(effort_lines);
-    text.push(Line::from(Span::styled(
-        "Max Budget USD:",
-        field_label_style(app.input_field == InputField::MaxBudgetUsd, theme),
-    )));
-    text.extend(budget_lines);
-    text.push(Line::from(Span::styled(
-        "Allowed Tools (comma-separated):",
-        field_label_style(app.input_field == InputField::AllowedTools, theme),
-    )));
-    text.extend(tools_lines);
-    text.push(Line::from(Span::styled(
-        "Add Dir (comma-separated):",
+        "ADD DIR",
         field_label_style(app.input_field == InputField::AddDir, theme),
     )));
+    text.push(Line::from(Span::styled(
+        "Comma-separated additional directories to include",
+        desc_style,
+    )));
     text.extend(dir_lines);
+    if let Some(msg) = error_for(InputField::AddDir) {
+        text.push(Line::from(Span::styled(
+            format!("^ {msg}"),
+            Style::default().fg(theme.error_text),
+        )));
+    }
 
+    text.push(Line::from("")); // blank separator
+
+    // ── Allowed Tools ──
+    text.push(Line::from(Span::styled(
+        "ALLOWED TOOLS",
+        field_label_style(app.input_field == InputField::AllowedTools, theme),
+    )));
+    text.push(Line::from(Span::styled(
+        "Comma-separated list of permitted tools",
+        desc_style,
+    )));
+    text.extend(tools_lines);
+    if let Some(msg) = error_for(InputField::AllowedTools) {
+        text.push(Line::from(Span::styled(
+            format!("^ {msg}"),
+            Style::default().fg(theme.error_text),
+        )));
+    }
+
+    text.push(Line::from("")); // blank separator
+
+    // ── Effort ──
+    text.push(Line::from(Span::styled(
+        "EFFORT",
+        field_label_style(app.input_field == InputField::Effort, theme),
+    )));
+    text.push(Line::from(Span::styled(
+        "Reasoning effort level (affects speed and token usage)",
+        desc_style,
+    )));
+    text.extend(effort_lines);
+
+    text.push(Line::from("")); // blank separator
+
+    // ── Max Budget USD ──
+    text.push(Line::from(Span::styled(
+        "MAX BUDGET USD",
+        field_label_style(app.input_field == InputField::MaxBudgetUsd, theme),
+    )));
+    text.push(Line::from(Span::styled(
+        "Maximum spending limit per session in USD",
+        desc_style,
+    )));
+    text.extend(budget_lines);
+    if let Some(msg) = error_for(InputField::MaxBudgetUsd) {
+        text.push(Line::from(Span::styled(
+            format!("^ {msg}"),
+            Style::default().fg(theme.error_text),
+        )));
+    }
+
+    text.push(Line::from("")); // blank separator
+
+    // ── Model ──
+    text.push(Line::from(Span::styled(
+        "MODEL",
+        field_label_style(app.input_field == InputField::Model, theme),
+    )));
+    text.push(Line::from(Span::styled(
+        "Which Claude model to use for this agent",
+        desc_style,
+    )));
+    text.extend(model_lines);
+
+    text.push(Line::from("")); // blank separator
+
+    // ── Permission Mode ──
+    text.push(Line::from(Span::styled(
+        "PERMISSION MODE",
+        field_label_style(app.input_field == InputField::PermissionMode, theme),
+    )));
+    text.push(Line::from(Span::styled(
+        "How Claude handles file edits and tool permissions",
+        desc_style,
+    )));
+    text.extend(perm_lines);
+
+    text.push(Line::from("")); // blank separator
+
+    // ── Workspace ──
+    text.push(Line::from(Span::styled(
+        "WORKSPACE",
+        field_label_style(app.input_field == InputField::Workspace, theme),
+    )));
+    text.push(Line::from(Span::styled(
+        "Root directory for this agent's file operations",
+        desc_style,
+    )));
+    text.extend(workspace_lines);
+    if let Some(msg) = error_for(InputField::Workspace) {
+        text.push(Line::from(Span::styled(
+            format!("^ {msg}"),
+            Style::default().fg(theme.error_text),
+        )));
+    }
+
+    // ── Footer ──
     text.push(Line::from(""));
     text.push(
         Line::from(Span::styled(
-            "Enter: save  |  Tab: next  |  Shift+Tab: prev  |  Esc: cancel",
+            "Enter: save  |  Tab: next  |  Shift+Tab: prev  |  Ctrl+X: clear  |  Esc: cancel",
             Style::default().fg(theme.help_footer),
         ))
         .alignment(Alignment::Center),
     );
 
-    // 7 fields * 2 rows (label + value) + blank + footer = 16 content rows
+    // Compute popup height dynamically from content.
     let content_rows = text.len();
     let popup_height = (content_rows + 2).min(area.height as usize) as u16;
 
-    let popup = centered_rect_fixed_height(60, popup_height, area);
+    // Clamp popup to 80 columns (or area.width - 4 on narrow terminals).
+    let popup_width = 80u16.min(area.width.saturating_sub(4));
+    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let y = area.y + area.height.saturating_sub(popup_height) / 2;
+    let popup = Rect::new(x, y, popup_width, popup_height);
     frame.render_widget(Clear, popup);
 
     let title = if let Some(agent) = app.agents.get(app.focused) {
@@ -4016,7 +4117,7 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
                 ("d", "Toggle aggregate dashboard"),
                 ("|", "Toggle split-pane view"),
                 ("`", "Switch split-pane focus"),
-                ("s", "Cycle tool result display"),
+                ("r", "Cycle tool result display"),
                 ("t", "Cycle color theme"),
             ],
         ),

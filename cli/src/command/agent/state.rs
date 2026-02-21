@@ -1544,6 +1544,10 @@ pub struct App {
     pub allowed_tools: InputBuffer,
     /// Add-dir input buffer (comma-separated).
     pub add_dir: InputBuffer,
+    /// Structured validation error for the settings form.
+    /// Stores which field failed validation and the error message so the
+    /// renderer can display the error inline next to the offending field.
+    pub settings_error: Option<(InputField, String)>,
     /// When `Some(id)`, the input overlay is a "respond" to the agent with the
     /// given `id` rather than a new-agent prompt. The target agent's session ID
     /// will be passed to `AgentManager::spawn()` so Claude resumes the conversation.
@@ -1730,6 +1734,7 @@ impl App {
             max_budget: InputBuffer::new(),
             allowed_tools: InputBuffer::new(),
             add_dir: InputBuffer::new(),
+            settings_error: None,
             respond_target: None,
             tick: 0,
             default_workspace,
@@ -1975,7 +1980,7 @@ impl App {
         );
         self.allowed_tools.set_text(opts.allowed_tools.join(", "));
         self.add_dir.set_text(opts.add_dirs.join(", "));
-        self.input_field = InputField::Workspace;
+        self.input_field = InputField::AddDir;
         self.input_mode = InputMode::Settings;
     }
 
@@ -1991,7 +1996,8 @@ impl App {
             // -- Validate workspace --------------------------------------------
             let workspace_raw = self.workspace.text().trim().to_string();
             if workspace_raw.is_empty() {
-                self.set_status_message("Workspace cannot be empty");
+                self.settings_error =
+                    Some((InputField::Workspace, "Workspace cannot be empty".into()));
                 self.input_field = InputField::Workspace;
                 return;
             }
@@ -2026,9 +2032,8 @@ impl App {
                 match budget.parse::<f64>() {
                     Ok(v) => Some(v),
                     Err(_) => {
-                        self.set_status_message(format!(
-                            "Invalid budget \"{budget}\" — fix the value and try again"
-                        ));
+                        self.settings_error =
+                            Some((InputField::MaxBudgetUsd, "Not a valid number".into()));
                         self.input_field = InputField::MaxBudgetUsd;
                         return;
                     }
@@ -2095,6 +2100,7 @@ impl App {
             agent.claude_options.allowed_tools = tools_val;
             agent.claude_options.add_dirs = dirs_val;
 
+            self.settings_error = None;
             self.set_status_message("Settings saved");
         }
         self.input_mode = InputMode::Normal;

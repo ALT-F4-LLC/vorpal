@@ -451,10 +451,15 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             action_kill(app, manager).await;
         }
 
+        // Open the settings pop-up for the focused agent.
+        KeyCode::Char('s') => {
+            action_edit(app);
+        }
+
         // Cycle tool result display mode: compact → hidden → full.
         // Also clears all per-section overrides so every section resets
         // to the new global mode.
-        KeyCode::Char('s') => {
+        KeyCode::Char('r') => {
             app.result_display = app.result_display.next();
             // Clear per-section overrides so all sections follow the new global mode.
             for agent in &mut app.agents {
@@ -1003,18 +1008,19 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
 fn handle_settings_mode(app: &mut App, key: KeyEvent) {
     use InputField::*;
     let settings_fields = [
-        Workspace,
-        PermissionMode,
-        Model,
+        AddDir,
+        AllowedTools,
         Effort,
         MaxBudgetUsd,
-        AllowedTools,
-        AddDir,
+        Model,
+        PermissionMode,
+        Workspace,
     ];
 
     match key.code {
         KeyCode::Esc => {
             app.input_mode = InputMode::Normal;
+            app.settings_error = None;
             app.workspace.clear();
             app.permission_mode.clear();
             app.model.clear();
@@ -1026,12 +1032,12 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             app.save_settings();
         }
-        KeyCode::Tab => {
+        KeyCode::Tab | KeyCode::Down => {
             if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
                 app.input_field = settings_fields[(pos + 1) % settings_fields.len()];
             }
         }
-        KeyCode::BackTab => {
+        KeyCode::BackTab | KeyCode::Up => {
             if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
                 let prev = if pos == 0 {
                     settings_fields.len() - 1
@@ -1054,6 +1060,18 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
                 AddDir => &mut app.add_dir,
                 _ => return,
             };
+
+            // Ctrl+X: clear the current text field.
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('x') {
+                buf.clear();
+                if let Some((err_field, _)) = &app.settings_error {
+                    if *err_field == app.input_field {
+                        app.settings_error = None;
+                    }
+                }
+                return;
+            }
+
             match key.code {
                 KeyCode::Char(c) => buf.insert_char(c),
                 KeyCode::Backspace => buf.delete_char(),
@@ -1063,6 +1081,13 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
                 KeyCode::Home => buf.move_home(),
                 KeyCode::End => buf.move_end(),
                 _ => {}
+            }
+
+            // Clear inline error when the user edits the field that has the error.
+            if let Some((err_field, _)) = &app.settings_error {
+                if *err_field == app.input_field {
+                    app.settings_error = None;
+                }
             }
         }
     }
