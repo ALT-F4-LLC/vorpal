@@ -3298,13 +3298,15 @@ fn render_graph(app: &App, frame: &mut Frame, area: Rect) {
 /// row is highlighted and pressing Enter focuses that agent.
 fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
-    let popup = centered_rect(85, 80, area);
+    let popup = centered_rect(90, 80, area);
 
     // Clear the area behind the popup.
     frame.render_widget(Clear, popup);
 
-    // Show the PROMPT column only when the terminal is wide enough.
-    let show_prompt = area.width >= 100;
+    // Show the PROMPT column only when the popup is wide enough.
+    // Column width breakdown: #:4 + icon:3 + WORKSPACE:17 + ACTIVITY:13 + TURNS:7 + TOOLS:7 + ELAPSED:9 + borders:4 = 64
+    let prompt_width = (popup.width as usize).saturating_sub(64).clamp(10, 40);
+    let show_prompt = popup.width >= 74;
 
     let heading_style = Style::default()
         .fg(theme.help_heading)
@@ -3327,9 +3329,10 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
         )));
     } else {
         // Table header.
+        let pw = prompt_width;
         let header_text = if show_prompt {
             format!(
-                " {:<3} {:<2} {:<16} {:<20} {:<12} {:>6} {:>6} {:>8} ",
+                " {:<3} {:<2} {:<16} {:<pw$} {:<12} {:>6} {:>6} {:>8} ",
                 "#", "", "WORKSPACE", "PROMPT", "ACTIVITY", "TURNS", "TOOLS", "ELAPSED"
             )
         } else {
@@ -3402,9 +3405,9 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
             let row_text = format!(" {:<3} ", num,);
             let rest_text = if show_prompt {
                 let prompt_preview = agent.prompt.lines().next().unwrap_or("");
-                let display_prompt = truncate_chars(prompt_preview, 18, "\u{2026}");
+                let display_prompt = truncate_chars(prompt_preview, prompt_width.saturating_sub(2), "\u{2026}");
                 format!(
-                    " {:<16} {:<20} {:<12} {:>6} {:>6} {:>8} ",
+                    " {:<16} {:<pw$} {:<12} {:>6} {:>6} {:>8} ",
                     display_label,
                     display_prompt,
                     activity_label,
@@ -3446,7 +3449,7 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
         // Aggregate totals row.
         let totals_text = if show_prompt {
             format!(
-                " {:<3} {:<2} {:<16} {:<20} {:<12} {:>6} {:>6} {:>8} ",
+                " {:<3} {:<2} {:<16} {:<pw$} {:<12} {:>6} {:>6} {:>8} ",
                 "\u{03A3}", // Sigma
                 "",
                 format!("{}R {}D {}E", running_count, done_count, error_count),
