@@ -2761,88 +2761,94 @@ fn render_settings(app: &mut App, frame: &mut Frame, area: Rect) {
     // Helper to build a compact (or stacked) field line.
     // Inner width available for content (popup minus left/right border).
     let inner_width = popup_width.saturating_sub(2) as usize;
-    let build_compact_line =
-        |label: &str, buffer: &str, cursor: usize, active: bool, optional: bool, stacked: bool| -> Vec<Line<'static>> {
-            // Max chars available for the value portion.
-            let max_val = if stacked {
-                inner_width
-            } else {
-                inner_width.saturating_sub(LABEL_COL_WIDTH)
-            };
+    let build_compact_line = |label: &str,
+                              buffer: &str,
+                              cursor: usize,
+                              active: bool,
+                              optional: bool,
+                              stacked: bool|
+     -> Vec<Line<'static>> {
+        // Max chars available for the value portion.
+        let max_val = if stacked {
+            inner_width
+        } else {
+            inner_width.saturating_sub(LABEL_COL_WIDTH)
+        };
 
-            // Truncate long values from the left, showing "…{tail}".
-            let truncated: std::borrow::Cow<'_, str> = if !active && buffer.len() > max_val && max_val > 1 {
+        // Truncate long values from the left, showing "…{tail}".
+        let truncated: std::borrow::Cow<'_, str> =
+            if !active && buffer.len() > max_val && max_val > 1 {
                 let tail_start = buffer.len() - (max_val - 1);
                 std::borrow::Cow::Owned(format!("…{}", &buffer[tail_start..]))
             } else {
                 std::borrow::Cow::Borrowed(buffer)
             };
 
-            let value_spans = if optional && buffer.is_empty() && !active {
-                vec![Span::styled(
-                    "(unset)".to_string(),
-                    Style::default()
-                        .fg(theme.option_unset)
-                        .add_modifier(Modifier::DIM),
-                )]
-            } else if active {
-                // When editing, show a scrolling window around the cursor.
-                let buf = truncated.as_ref();
-                let cur = cursor.min(buf.len());
-                // If the full text fits, show it all; otherwise scroll to keep cursor visible.
-                let (display, display_cur) = if buf.len() <= max_val {
-                    (buf.to_string(), cur)
+        let value_spans = if optional && buffer.is_empty() && !active {
+            vec![Span::styled(
+                "(unset)".to_string(),
+                Style::default()
+                    .fg(theme.option_unset)
+                    .add_modifier(Modifier::DIM),
+            )]
+        } else if active {
+            // When editing, show a scrolling window around the cursor.
+            let buf = truncated.as_ref();
+            let cur = cursor.min(buf.len());
+            // If the full text fits, show it all; otherwise scroll to keep cursor visible.
+            let (display, display_cur) = if buf.len() <= max_val {
+                (buf.to_string(), cur)
+            } else {
+                // Center a window of max_val chars around the cursor.
+                let half = max_val / 2;
+                let start = if cur <= half {
+                    0
+                } else if cur + half >= buf.len() {
+                    buf.len().saturating_sub(max_val)
                 } else {
-                    // Center a window of max_val chars around the cursor.
-                    let half = max_val / 2;
-                    let start = if cur <= half {
-                        0
-                    } else if cur + half >= buf.len() {
-                        buf.len().saturating_sub(max_val)
-                    } else {
-                        cur - half
-                    };
-                    let end = (start + max_val).min(buf.len());
-                    (buf[start..end].to_string(), cur - start)
+                    cur - half
                 };
-                let before = &display[..display_cur.min(display.len())];
-                let after = &display[display_cur.min(display.len())..];
-                let clen = after.chars().next().map_or(0, |c| c.len_utf8());
-                vec![
-                    Span::raw(before.to_string()),
-                    Span::styled(
-                        if after.is_empty() {
-                            " ".to_string()
-                        } else {
-                            after[..clen].to_string()
-                        },
-                        Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
-                    ),
-                    Span::raw(after.get(clen..).unwrap_or("").to_string()),
-                ]
-            } else {
-                vec![Span::raw(truncated.into_owned())]
+                let end = (start + max_val).min(buf.len());
+                (buf[start..end].to_string(), cur - start)
             };
-
-            if stacked {
-                // Stacked: label on its own line, value on the next.
-                let label_line = Line::from(Span::styled(
-                    label.to_string(),
-                    field_label_style(active, theme),
-                ));
-                let value_line = Line::from(value_spans);
-                vec![label_line, value_line]
-            } else {
-                // Two-column: fixed-width label + value on one line.
-                let label_span = Span::styled(
-                    format!("{:<width$}", label, width = LABEL_COL_WIDTH),
-                    field_label_style(active, theme),
-                );
-                let mut spans = vec![label_span];
-                spans.extend(value_spans);
-                vec![Line::from(spans)]
-            }
+            let before = &display[..display_cur.min(display.len())];
+            let after = &display[display_cur.min(display.len())..];
+            let clen = after.chars().next().map_or(0, |c| c.len_utf8());
+            vec![
+                Span::raw(before.to_string()),
+                Span::styled(
+                    if after.is_empty() {
+                        " ".to_string()
+                    } else {
+                        after[..clen].to_string()
+                    },
+                    Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
+                ),
+                Span::raw(after.get(clen..).unwrap_or("").to_string()),
+            ]
+        } else {
+            vec![Span::raw(truncated.into_owned())]
         };
+
+        if stacked {
+            // Stacked: label on its own line, value on the next.
+            let label_line = Line::from(Span::styled(
+                label.to_string(),
+                field_label_style(active, theme),
+            ));
+            let value_line = Line::from(value_spans);
+            vec![label_line, value_line]
+        } else {
+            // Two-column: fixed-width label + value on one line.
+            let label_span = Span::styled(
+                format!("{:<width$}", label, width = LABEL_COL_WIDTH),
+                field_label_style(active, theme),
+            );
+            let mut spans = vec![label_span];
+            spans.extend(value_spans);
+            vec![Line::from(spans)]
+        }
+    };
 
     // ── Workspace ──
     if app.input_field == InputField::Workspace {
@@ -2858,7 +2864,11 @@ fn render_settings(app: &mut App, frame: &mut Frame, area: Rect) {
     ));
     if let Some(msg) = error_for(InputField::Workspace) {
         text.push(Line::from(Span::styled(
-            format!("{:width$}^ {msg}", "", width = if narrow { 0 } else { LABEL_COL_WIDTH }),
+            format!(
+                "{:width$}^ {msg}",
+                "",
+                width = if narrow { 0 } else { LABEL_COL_WIDTH }
+            ),
             Style::default().fg(theme.error_text),
         )));
     }
@@ -2880,7 +2890,11 @@ fn render_settings(app: &mut App, frame: &mut Frame, area: Rect) {
     ));
     if let Some(msg) = error_for(InputField::MaxBudgetUsd) {
         text.push(Line::from(Span::styled(
-            format!("{:width$}^ {msg}", "", width = if narrow { 0 } else { LABEL_COL_WIDTH }),
+            format!(
+                "{:width$}^ {msg}",
+                "",
+                width = if narrow { 0 } else { LABEL_COL_WIDTH }
+            ),
             Style::default().fg(theme.error_text),
         )));
     }
@@ -2902,7 +2916,11 @@ fn render_settings(app: &mut App, frame: &mut Frame, area: Rect) {
     ));
     if let Some(msg) = error_for(InputField::AllowedTools) {
         text.push(Line::from(Span::styled(
-            format!("{:width$}^ {msg}", "", width = if narrow { 0 } else { LABEL_COL_WIDTH }),
+            format!(
+                "{:width$}^ {msg}",
+                "",
+                width = if narrow { 0 } else { LABEL_COL_WIDTH }
+            ),
             Style::default().fg(theme.error_text),
         )));
     }
@@ -2924,7 +2942,11 @@ fn render_settings(app: &mut App, frame: &mut Frame, area: Rect) {
     ));
     if let Some(msg) = error_for(InputField::AddDir) {
         text.push(Line::from(Span::styled(
-            format!("{:width$}^ {msg}", "", width = if narrow { 0 } else { LABEL_COL_WIDTH }),
+            format!(
+                "{:width$}^ {msg}",
+                "",
+                width = if narrow { 0 } else { LABEL_COL_WIDTH }
+            ),
             Style::default().fg(theme.error_text),
         )));
     }

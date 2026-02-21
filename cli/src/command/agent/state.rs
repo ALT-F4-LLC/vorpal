@@ -2120,10 +2120,7 @@ impl App {
 
             self.settings_error = None;
             if new_name != old_name {
-                self.set_status_message(format!(
-                    "Settings saved — agent renamed to {}",
-                    new_name
-                ));
+                self.set_status_message(format!("Settings saved — agent renamed to {}", new_name));
             } else {
                 self.set_status_message("Settings saved");
             }
