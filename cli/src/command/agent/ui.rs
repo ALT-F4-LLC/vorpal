@@ -25,11 +25,11 @@ const ARROW_RIGHT: &str = "▶";
 const CHECK_MARK: &str = "✔";
 const CROSS_MARK: &str = "✘";
 const CIRCLE: &str = "●";
-pub(super) const BLOCK_MARKER: &str = "⏺";
+pub(super) const BLOCK_MARKER: &str = "*";
 pub(super) const RESULT_CONNECTOR: &str = "⎿";
 pub(super) const SESSION_MARKER: &str = "✻";
 
-/// Indentation that matches the width of `⏺ ` (marker + space).
+/// Indentation that matches the width of `* ` (marker + space).
 const CONTINUATION_INDENT: &str = "  ";
 
 /// Minimum terminal width required for the TUI.
@@ -65,14 +65,17 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     // Compute inline input area height dynamically from the chat text content.
     // Hidden on the welcome screen; otherwise 1 row for the top border plus
-    // enough content rows to fit the wrapped text, clamped to 3..=8 total.
+    // enough content rows to fit the wrapped text, clamped to 3..=10 total
+    // (with a 40% terminal height cap).
     let input_height: u16 = if app.agents.is_empty() {
         0
     } else {
         let content_lines = count_wrapped_lines(app.chat_input.text(), area.width as usize);
         // border (1) + content rows (at least 2 so the input doesn't feel cramped)
         let desired = 1 + content_lines.max(2) as u16;
-        desired.clamp(3, 8)
+        // Hard cap at 10 rows, but also respect a 40% terminal height limit.
+        let max_from_percent = (area.height * 40 / 100).max(3);
+        desired.clamp(3, 10.min(max_from_percent))
     };
 
     let chunks = Layout::vertical([
@@ -524,6 +527,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             let agent = &app.agents[focused];
             let cached = agent.cached_lines.as_ref().unwrap();
             let total_rows = agent.cached_row_count;
+            let evicted = agent.evicted_line_count;
 
             let max_scroll = total_rows.saturating_sub(height);
 
@@ -547,11 +551,26 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
                     borrow_cached_lines(cached)
                 };
 
+            maybe_prepend_truncation_notice(
+                &mut display_lines,
+                evicted,
+                clamped_offset,
+                max_scroll,
+                &app.theme,
+            );
+
             append_streaming_cursor(
                 &mut display_lines,
                 agent,
                 app.tick,
                 app.theme.streaming_cursor,
+            );
+
+            append_thinking_indicator(
+                &mut display_lines,
+                agent,
+                app.tick,
+                &app.theme,
             );
 
             let paragraph = Paragraph::new(display_lines)
@@ -590,6 +609,34 @@ fn borrow_cached_lines<'a>(cached: &'a [Line<'static>]) -> Vec<Line<'a>> {
         .collect()
 }
 
+/// Prepend a dim truncation notice when lines have been evicted and the
+/// viewport includes the very top of the buffer.
+///
+/// The notice appears only when `evicted > 0` and the user has scrolled to
+/// the maximum offset (`clamped_offset == max_scroll`), meaning the first
+/// line of the ring buffer is visible.
+fn maybe_prepend_truncation_notice<'a>(
+    lines: &mut Vec<Line<'a>>,
+    evicted: usize,
+    clamped_offset: usize,
+    max_scroll: usize,
+    theme: &Theme,
+) {
+    if evicted == 0 {
+        return;
+    }
+    // The viewport includes the first buffer line when the user has scrolled
+    // all the way to the top (clamped_offset == max_scroll).
+    if clamped_offset != max_scroll {
+        return;
+    }
+    let notice = format!("(earlier output truncated -- {} lines removed)", evicted);
+    let style = Style::default()
+        .fg(theme.system_text)
+        .add_modifier(Modifier::ITALIC | Modifier::DIM);
+    lines.insert(0, Line::from(Span::styled(notice, style)));
+}
+
 /// Append a blinking cursor indicator when the agent is actively generating
 /// and the viewport is pinned to the bottom.
 fn append_streaming_cursor<'a>(
@@ -611,6 +658,44 @@ fn append_streaming_cursor<'a>(
             lines.push(Line::from(cursor_span));
         }
     }
+}
+
+/// Append a synthetic thinking indicator with a braille spinner when the agent
+/// is in the `Thinking` state but no thinking content has arrived yet (the
+/// brief pause before the first thinking token).
+///
+/// The indicator line uses the tilde marker (`~ `) followed by an animated
+/// spinner frame, styled with `thinking_color` in dim+italic to match the
+/// thinking block style.
+fn append_thinking_indicator<'a>(
+    lines: &mut Vec<Line<'a>>,
+    agent: &AgentState,
+    tick: usize,
+    theme: &Theme,
+) {
+    if !matches!(agent.activity, AgentActivity::Thinking) {
+        return;
+    }
+    // Only show when no thinking content has arrived yet — i.e. the last
+    // output line is NOT a Thinking variant.
+    let has_thinking = agent
+        .output
+        .back()
+        .is_some_and(|dl| matches!(dl, DisplayLine::Thinking(_)));
+    if has_thinking {
+        return;
+    }
+    let frame_idx = tick % SPINNER_FRAMES.len();
+    let spinner = SPINNER_FRAMES[frame_idx];
+    lines.push(Line::from(vec![
+        Span::styled("~ ", Style::default().fg(theme.thinking_color)),
+        Span::styled(
+            spinner.to_string(),
+            Style::default()
+                .fg(theme.thinking_color)
+                .add_modifier(Modifier::DIM | Modifier::ITALIC),
+        ),
+    ]));
 }
 
 /// Conditionally render the jump-to-bottom indicator when scrolled up.
@@ -710,6 +795,7 @@ fn ensure_agent_cache(app: &mut App, agent_idx: usize, inner_width: u16) {
             app.result_display,
             &agent.section_overrides,
             &app.theme,
+            inner_width,
         );
         let row_count = wrapped_row_count(&collapsed, inner_width);
         let owned = lines_to_static(collapsed);
@@ -802,6 +888,7 @@ fn render_content_pane(
     let agent = &app.agents[agent_idx];
     let cached = agent.cached_lines.as_ref().unwrap();
     let total_rows = agent.cached_row_count;
+    let evicted = agent.evicted_line_count;
 
     let max_scroll = total_rows.saturating_sub(height);
     let clamped_offset = agent.scroll_offset.min(max_scroll);
@@ -809,11 +896,26 @@ fn render_content_pane(
 
     let mut display_lines = borrow_cached_lines(cached);
 
+    maybe_prepend_truncation_notice(
+        &mut display_lines,
+        evicted,
+        clamped_offset,
+        max_scroll,
+        &app.theme,
+    );
+
     append_streaming_cursor(
         &mut display_lines,
         agent,
         app.tick,
         app.theme.streaming_cursor,
+    );
+
+    append_thinking_indicator(
+        &mut display_lines,
+        agent,
+        app.tick,
+        &app.theme,
     );
 
     let paragraph = Paragraph::new(display_lines)
@@ -873,7 +975,7 @@ const COMPACT_RESULT_RUN_MAX: usize = 3;
 /// display modes that override the global `mode`.
 ///
 /// Internally this is a three-stage pipeline:
-/// 1. [`strip_leading_empty_after_turn_start`] — remove visual noise
+/// 1. [`strip_empty_text_lines`] — remove parser-emitted blank lines
 /// 2. [`collapse_results`] — group lines into [`CollapsedBlock`]s
 /// 3. [`render_to_spans`] — convert blocks into styled ratatui [`Line`]s
 fn collapse_tool_results<'a>(
@@ -881,10 +983,11 @@ fn collapse_tool_results<'a>(
     mode: ResultDisplay,
     section_overrides: &std::collections::HashMap<usize, ResultDisplay>,
     theme: &Theme,
+    content_width: u16,
 ) -> Vec<Line<'a>> {
-    let stripped = strip_leading_empty_after_turn_start(lines);
+    let stripped = strip_empty_text_lines(lines);
     let blocks = collapse_results(&stripped, mode, section_overrides);
-    render_to_spans(&blocks, theme)
+    render_to_spans(&blocks, theme, content_width)
 }
 
 // ---------------------------------------------------------------------------
@@ -1122,11 +1225,139 @@ fn collapse_results<'a>(
 // Pipeline stage 3: render collapsed blocks to ratatui spans
 // ---------------------------------------------------------------------------
 
+/// Semantic category of a [`CollapsedBlock`], used by the spacing logic in
+/// [`render_to_spans`] to decide whether to insert blank lines between
+/// adjacent blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockCategory {
+    TurnStart,
+    UserPrompt,
+    AssistantText,
+    ToolCall,
+    ToolResult,
+    DiffBlock,
+    Thinking,
+    TurnSummary,
+    System,
+    Error,
+    /// Catch-all for block types that don't need special spacing rules
+    /// (e.g. Result, Stderr, AgentMessage, DiffResult).
+    Other,
+}
+
+/// Classify a [`CollapsedBlock`] into a [`BlockCategory`] for spacing decisions.
+fn categorize_block(block: &CollapsedBlock<'_>) -> BlockCategory {
+    match block {
+        CollapsedBlock::TextRun(_) => BlockCategory::AssistantText,
+        CollapsedBlock::ToolUseHeader { .. } => BlockCategory::ToolCall,
+        CollapsedBlock::ToolResultRun(_) => BlockCategory::ToolResult,
+        CollapsedBlock::DiffBlock { .. } => BlockCategory::DiffBlock,
+        CollapsedBlock::ThinkingRun { .. } => BlockCategory::Thinking,
+        CollapsedBlock::Single(dl) => match dl {
+            DisplayLine::TurnStart { .. } => BlockCategory::TurnStart,
+            DisplayLine::UserPrompt { .. } => BlockCategory::UserPrompt,
+            DisplayLine::TurnSummary { .. } => BlockCategory::TurnSummary,
+            DisplayLine::System(_) => BlockCategory::System,
+            DisplayLine::Error(_) => BlockCategory::Error,
+            _ => BlockCategory::Other,
+        },
+    }
+}
+
+/// Determine whether a blank line should be inserted before `current` given
+/// that `prev` was the most recently emitted block.
+///
+/// Implements the spacing rules from the design spec Section 3:
+///
+/// 1. After TurnStart → one blank line (handled by TurnStart's own renderer).
+/// 2. Before/after UserPrompt → one blank line above and below.
+/// 3. Between consecutive assistant text blocks → no blank line.
+/// 4. Before a tool call → one blank line if preceded by assistant text.
+/// 5. After a tool result run → one blank line before the next element.
+/// 6. Before TurnSummary → one blank line.
+/// 7. Thinking blocks → one blank line above and below.
+/// 8. System messages → no blank lines.
+/// 9. Errors → one blank line above, no blank line below.
+fn needs_blank_line_before(prev: BlockCategory, current: BlockCategory) -> bool {
+    // Rule 1: TurnStart already embeds its own blank lines (before and after),
+    // so nothing following it needs an additional blank, and TurnStart itself
+    // should not get a blank before it from this logic.
+    if current == BlockCategory::TurnStart {
+        return false;
+    }
+    if prev == BlockCategory::TurnStart {
+        // TurnStart already emits a trailing blank line; no extra needed.
+        return false;
+    }
+
+    // Rule 8: System messages — no blank lines around them.
+    if current == BlockCategory::System || prev == BlockCategory::System {
+        return false;
+    }
+
+    // Rule 2: Before a user prompt → one blank line above.
+    if current == BlockCategory::UserPrompt {
+        return true;
+    }
+    // Rule 2: After a user prompt → one blank line below.
+    if prev == BlockCategory::UserPrompt {
+        return true;
+    }
+
+    // Rule 3: Between consecutive assistant text blocks → no blank line.
+    if prev == BlockCategory::AssistantText && current == BlockCategory::AssistantText {
+        return false;
+    }
+
+    // Rule 4: Before a tool call → one blank line if preceded by assistant text.
+    if current == BlockCategory::ToolCall && prev == BlockCategory::AssistantText {
+        return true;
+    }
+
+    // Rule 5: After a tool result run → one blank line before the next element.
+    // Also applies after DiffBlock (which is part of the tool result area).
+    if prev == BlockCategory::ToolResult || prev == BlockCategory::DiffBlock {
+        return true;
+    }
+
+    // Rule 6: Before turn summary → one blank line.
+    if current == BlockCategory::TurnSummary {
+        return true;
+    }
+
+    // Rule 7: Thinking blocks → one blank line above and below.
+    if current == BlockCategory::Thinking || prev == BlockCategory::Thinking {
+        return true;
+    }
+
+    // Rule 9: Errors → one blank line above, no blank line below.
+    if current == BlockCategory::Error {
+        return true;
+    }
+    // (After an error, no blank line — so we do not add a rule for prev == Error.)
+
+    false
+}
+
 /// Convert a sequence of [`CollapsedBlock`]s into styled ratatui [`Line`]s.
-fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme) -> Vec<Line<'a>> {
+///
+/// Applies inter-element spacing rules (design spec Section 3) by inserting
+/// blank lines between blocks based on their semantic categories. A final
+/// dedup pass ensures no consecutive blank lines appear in the output.
+fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme, content_width: u16) -> Vec<Line<'a>> {
     let mut out: Vec<Line<'a>> = Vec::new();
+    let mut prev_category: Option<BlockCategory> = None;
 
     for block in blocks {
+        let current_category = categorize_block(block);
+
+        // Insert inter-element blank line if the spacing rules require it.
+        if let Some(prev) = prev_category {
+            if needs_blank_line_before(prev, current_category) {
+                out.push(Line::from(""));
+            }
+        }
+
         match block {
             CollapsedBlock::ToolResultRun(run) => {
                 render_tool_result_run(run, &mut out, theme);
@@ -1138,6 +1369,7 @@ fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme) -> Vec<Line
                     dl,
                     *effective_mode,
                     theme,
+                    content_width,
                 ));
             }
             CollapsedBlock::DiffBlock {
@@ -1151,7 +1383,7 @@ fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme) -> Vec<Line
                 render_text_run(markdown, &mut out, theme);
             }
             CollapsedBlock::ThinkingRun { line_count, .. } => {
-                let summary = format!("{BLOCK_MARKER} Thinking... ({line_count} lines)");
+                let summary = format!("~ Thinking... ({line_count} lines)");
                 out.push(Line::from(Span::styled(
                     summary,
                     Style::default()
@@ -1160,11 +1392,31 @@ fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme) -> Vec<Line
                 )));
             }
             CollapsedBlock::Single(dl) => {
-                out.extend(display_line_to_lines(dl, theme));
+                out.extend(display_line_to_lines(dl, theme, content_width));
             }
         }
+
+        prev_category = Some(current_category);
     }
 
+    // Final dedup: collapse consecutive blank lines into at most one.
+    dedup_blank_lines(out)
+}
+
+/// Remove consecutive blank lines, keeping at most one blank line between
+/// non-blank content. Also trims leading blank lines from the output.
+fn dedup_blank_lines(lines: Vec<Line<'_>>) -> Vec<Line<'_>> {
+    let mut out = Vec::with_capacity(lines.len());
+    let mut prev_blank = true; // treat start-of-output as "after a blank" to trim leading blanks
+    for line in lines {
+        let is_blank = line.spans.is_empty()
+            || (line.spans.len() == 1 && line.spans[0].content.as_ref().is_empty());
+        if is_blank && prev_blank {
+            continue; // skip consecutive blank lines
+        }
+        prev_blank = is_blank;
+        out.push(line);
+    }
     out
 }
 
@@ -1334,8 +1586,15 @@ fn render_diff_block<'a>(
 
 /// Render a markdown text run into output lines with block marker prefixes.
 fn render_text_run<'a>(markdown: &str, out: &mut Vec<Line<'a>>, theme: &Theme) {
-    let rendered = super::markdown::render_markdown(markdown, theme);
-    // Prefix only the very first non-empty line with a ⏺ marker.
+    let mut rendered = super::markdown::render_markdown(markdown, theme);
+    // Strip trailing blank lines — the markdown renderer adds a blank line
+    // after each paragraph, but inter-block spacing is handled by the
+    // spacing pass in `render_to_spans`, so trailing blanks would cause
+    // double-spacing.
+    while rendered.last().map_or(false, |l| l.width() == 0) {
+        rendered.pop();
+    }
+    // Prefix only the very first non-empty line with a marker.
     // All subsequent lines (including those after blank lines) use
     // continuation indentation. This matches Claude Code's own
     // rendering style where each assistant text block gets a single
@@ -1346,8 +1605,9 @@ fn render_text_run<'a>(markdown: &str, out: &mut Vec<Line<'a>>, theme: &Theme) {
             out.push(Line::from(""));
         } else if need_marker {
             need_marker = false;
+            let marker = theme.marker_char;
             let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                format!("{BLOCK_MARKER} "),
+                format!("{marker} "),
                 Style::default().fg(theme.block_marker),
             )];
             spans.extend(line.spans);
@@ -1421,47 +1681,33 @@ fn render_tool_result(
     vec![Line::from(spans)]
 }
 
-/// Remove empty `Text("")` lines that immediately follow a `TurnStart`.
+/// Remove empty `Text("")` lines from the input sequence.
 ///
-/// Claude's first text delta often begins with `"\n\n"`, producing empty text
-/// lines. These render as blank marker lines between the turn separator and
-/// the first real content, creating unwanted whitespace — especially visible
-/// at the very start of a session.
-fn strip_leading_empty_after_turn_start<'a>(lines: &[&'a DisplayLine]) -> Vec<&'a DisplayLine> {
-    let mut out = Vec::with_capacity(lines.len());
-    let mut after_turn_start = false;
-
-    for dl in lines {
-        match dl {
-            DisplayLine::TurnStart { .. } => {
-                after_turn_start = true;
-                out.push(*dl);
-            }
-            DisplayLine::Text(s) if after_turn_start && s.is_empty() => {
-                // Skip empty text lines right after a TurnStart.
-            }
-            _ => {
-                after_turn_start = false;
-                out.push(*dl);
-            }
-        }
-    }
-
-    out
+/// Parser-emitted empty text lines (e.g. from Claude's `"\n\n"` deltas) are
+/// stripped entirely — the `render_to_spans` spacing pass is responsible for
+/// all inter-element blank lines, so parser blanks would create unwanted
+/// double-spacing.
+fn strip_empty_text_lines<'a>(lines: &[&'a DisplayLine]) -> Vec<&'a DisplayLine> {
+    lines
+        .iter()
+        .filter(|dl| !matches!(dl, DisplayLine::Text(s) if s.is_empty()))
+        .copied()
+        .collect()
 }
 
 /// Collapse indicator characters.
-const CHEVRON_EXPANDED: &str = "\u{25BC}"; // ▼
-const CHEVRON_COLLAPSED: &str = "\u{25B6}"; // ▶
+const CHEVRON_EXPANDED: &str = "v";
+const CHEVRON_COLLAPSED: &str = ">";
 
 /// Render a ToolUse header line with a collapse/expand indicator.
 ///
-/// Shows a chevron (▼ for full/expanded, ▶ for compact/hidden/collapsed) after
+/// Shows a chevron (v for full/expanded, > for compact/hidden/collapsed) after
 /// the tool name to indicate the display state of the following result section.
 fn display_line_to_lines_with_indicator<'a>(
     dl: &'a DisplayLine,
     effective_mode: ResultDisplay,
     theme: &Theme,
+    content_width: u16,
 ) -> Vec<Line<'a>> {
     if let DisplayLine::ToolUse {
         tool,
@@ -1469,13 +1715,14 @@ fn display_line_to_lines_with_indicator<'a>(
     } = dl
     {
         let color = theme.tool_color(tool);
+        let marker = theme.marker_char;
         let chevron = match effective_mode {
             ResultDisplay::Full | ResultDisplay::Diff => CHEVRON_EXPANDED,
             ResultDisplay::Compact | ResultDisplay::Hidden => CHEVRON_COLLAPSED,
         };
         let mut spans = vec![
             Span::styled(
-                format!("{BLOCK_MARKER} "),
+                format!("{marker} "),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -1497,7 +1744,7 @@ fn display_line_to_lines_with_indicator<'a>(
         ));
         vec![Line::from(spans)]
     } else {
-        display_line_to_lines(dl, theme)
+        display_line_to_lines(dl, theme, content_width)
     }
 }
 
@@ -1507,7 +1754,7 @@ fn display_line_to_lines_with_indicator<'a>(
 /// [`DisplayLine::ToolResult`], which are rendered inline (via
 /// `markdown::render_markdown`) and by [`render_tool_result`] respectively with
 /// run-position awareness.
-fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>> {
+fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme, content_width: u16) -> Vec<Line<'a>> {
     match dl {
         // Text is handled by render_text_line() for run tracking.
         DisplayLine::Text(_) => Vec::new(),
@@ -1517,9 +1764,10 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
             input_preview,
         } => {
             let color = theme.tool_color(tool);
+            let marker = theme.marker_char;
             let mut spans = vec![
                 Span::styled(
-                    format!("{BLOCK_MARKER} "),
+                    format!("{marker} "),
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -1541,7 +1789,7 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
 
         DisplayLine::Thinking(s) => vec![Line::from(vec![
             Span::styled(
-                format!("{BLOCK_MARKER} "),
+                "~ ",
                 Style::default().fg(theme.thinking_color),
             ),
             Span::styled(
@@ -1576,12 +1824,20 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
                 .add_modifier(Modifier::DIM),
         ))],
 
-        DisplayLine::Error(s) => vec![Line::from(Span::styled(
-            s.as_str(),
-            Style::default()
-                .fg(theme.error_text)
-                .add_modifier(Modifier::BOLD),
-        ))],
+        DisplayLine::Error(s) => vec![Line::from(vec![
+            Span::styled(
+                "! ",
+                Style::default()
+                    .fg(theme.error_text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                s.as_str(),
+                Style::default()
+                    .fg(theme.error_text)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])],
 
         DisplayLine::TurnSummary {
             input_tokens,
@@ -1605,7 +1861,8 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
             let label = format!(" Turn {} ", n);
             let rule_char = "─";
             let prefix = rule_char.repeat(4);
-            let suffix_len = 60usize.saturating_sub(4 + label.len());
+            let effective_width = (content_width as usize).saturating_sub(2).max(20);
+            let suffix_len = effective_width.saturating_sub(4 + label.len());
             let suffix = rule_char.repeat(suffix_len);
             let dim_rule = Style::default()
                 .fg(theme.turn_separator)
@@ -1629,33 +1886,64 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
         // DiffResult is handled by render_diff_block() via CollapsedBlock::DiffBlock.
         DisplayLine::DiffResult { .. } => Vec::new(),
 
-        DisplayLine::UserPrompt { content } => {
+        DisplayLine::UserPrompt { content, queued } => {
             // User prompt marker: bold colored '>' prefix with regular-weight text.
             // Multiline prompts get continuation lines indented to align with the
             // first line's text (past the "> " prefix).
+            //
+            // When `queued` is true a right-aligned `[queued]` label is appended to
+            // the first line in dim Yellow (status_message color) to visually
+            // distinguish messages that haven't been processed yet.
             const USER_MARKER: &str = "> ";
             let marker_style = Style::default()
                 .fg(theme.user_prompt_marker)
                 .add_modifier(Modifier::BOLD);
 
             if content.is_empty() {
-                return vec![Line::from(Span::styled(
+                let mut spans = vec![Span::styled(
                     USER_MARKER.to_string(),
                     marker_style,
-                ))];
+                )];
+                if *queued {
+                    let used = UnicodeWidthStr::width(USER_MARKER) + 8; // 8 for "[queued]"
+                    let pad = (content_width as usize).saturating_sub(used);
+                    spans.push(Span::raw(" ".repeat(pad)));
+                    spans.push(Span::styled(
+                        "[queued]",
+                        Style::default()
+                            .fg(theme.status_message)
+                            .add_modifier(Modifier::DIM),
+                    ));
+                }
+                return vec![Line::from(spans)];
             }
 
             let indent = " ".repeat(USER_MARKER.len());
             let mut result_lines = Vec::new();
             for (idx, text_line) in content.lines().enumerate() {
                 if idx == 0 {
-                    result_lines.push(Line::from(vec![
+                    let mut spans = vec![
                         Span::styled(USER_MARKER.to_string(), marker_style),
                         Span::styled(
                             text_line.to_string(),
                             Style::default().fg(theme.user_prompt_fg),
                         ),
-                    ]));
+                    ];
+                    if *queued {
+                        // Right-align the [queued] label with padding.
+                        let used = UnicodeWidthStr::width(USER_MARKER)
+                            + UnicodeWidthStr::width(text_line)
+                            + 9; // 8 for "[queued]" + 1 space
+                        let pad = (content_width as usize).saturating_sub(used);
+                        spans.push(Span::raw(" ".repeat(pad.max(1))));
+                        spans.push(Span::styled(
+                            "[queued]",
+                            Style::default()
+                                .fg(theme.status_message)
+                                .add_modifier(Modifier::DIM),
+                        ));
+                    }
+                    result_lines.push(Line::from(spans));
                 } else {
                     result_lines.push(Line::from(vec![
                         Span::styled(indent.clone(), Style::default()),
@@ -1676,10 +1964,10 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
         } => {
             // Envelope marker with blue styling to visually distinguish
             // inter-agent messages from regular tool output.
-            let arrow = format!("@{sender} \u{2192} @{recipient}");
+            let arrow = format!("@{sender} -> @{recipient}");
             vec![Line::from(vec![
                 Span::styled(
-                    "\u{2709} ",
+                    "@ ",
                     Style::default()
                         .fg(theme.result_marker)
                         .add_modifier(Modifier::BOLD),
@@ -1876,31 +2164,31 @@ fn render_inline_input(app: &App, frame: &mut Frame, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Check if the focused agent is running — if so, show a disabled state.
-    let agent_running = app
-        .agents
-        .get(app.focused)
-        .map(|a| matches!(a.status, AgentStatus::Running))
-        .unwrap_or(false);
+    // Retrieve the focused agent's status and queue length for placeholder logic.
+    let focused_agent = app.agents.get(app.focused);
+    let agent_status = focused_agent.map(|a| &a.status);
+    let queue_len = focused_agent.map(|a| a.message_queue.len()).unwrap_or(0);
 
-    let agent_pending = app
-        .agents
-        .get(app.focused)
-        .map(|a| matches!(a.status, AgentStatus::Pending))
-        .unwrap_or(false);
+    let agent_pending = matches!(agent_status, Some(AgentStatus::Pending));
+    let agent_running = matches!(agent_status, Some(AgentStatus::Running));
 
     let text = app.chat_input.text();
 
     if text.is_empty() && !focused {
-        // Show placeholder with context-aware hint.
+        // Show placeholder with context-aware hint based on agent status.
         let placeholder_text = if agent_pending {
             "Type your first message to start this agent..."
         } else if agent_running {
-            "Type a message... (will queue until agent finishes)"
-        } else if app.kbd_enhanced {
-            "Type a message... (Enter to send, Shift+Enter for newline)"
+            if queue_len >= super::state::MAX_MESSAGE_QUEUE {
+                "Queue full -- wait for agent to finish before sending more messages"
+            } else {
+                "Press i to chat -- messages will queue until agent finishes..."
+            }
+        } else if matches!(agent_status, Some(AgentStatus::Exited(Some(n))) if *n != 0) {
+            "Press i to retry or send a new message..."
         } else {
-            "Type a message... (Enter to send, Alt+Enter for newline)"
+            // Exited(None), Exited(Some(0)), or no agent — success / default.
+            "Press i to send a follow-up message..."
         };
         let placeholder = Paragraph::new(placeholder_text)
             .style(Style::default().fg(theme.chat_input_placeholder));
@@ -1959,22 +2247,33 @@ fn render_inline_input(app: &App, frame: &mut Frame, area: Rect) {
     if let Some(agent) = app.agents.get(app.focused) {
         let queue_len = agent.message_queue.len();
         if queue_len > 0 {
-            let label = format!(" {} [{queue_len} queued] ", agent.name);
+            let is_full = queue_len >= super::state::MAX_MESSAGE_QUEUE;
+            let queue_label = if is_full {
+                format!("[{}/{} FULL] ", queue_len, super::state::MAX_MESSAGE_QUEUE)
+            } else {
+                format!("[{queue_len} queued] ")
+            };
+            let label = format!(" {} {}", agent.name, queue_label);
             let label_width = label.width() as u16;
             if area.width > label_width + 2 {
                 let x = area.x + area.width - label_width - 1;
-                // Render agent name in border color, queue count in highlight color
+                // Render agent name in border color, queue count in
+                // status_message color normally or error_text when full.
+                let queue_style = if is_full {
+                    Style::default()
+                        .fg(theme.error_text)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(theme.status_message)
+                        .add_modifier(Modifier::BOLD)
+                };
                 let spans = vec![
                     Span::styled(
                         format!(" {} ", agent.name),
                         Style::default().fg(border_color),
                     ),
-                    Span::styled(
-                        format!("[{queue_len} queued] "),
-                        Style::default()
-                            .fg(theme.status_message)
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(queue_label, queue_style),
                 ];
                 frame.render_widget(Line::from(spans), Rect::new(x, area.y, label_width, 1));
             }
@@ -2089,7 +2388,14 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 let queue_len = agent.message_queue.len();
                 if queue_len > 0 {
                     left_spans.push(Span::raw("  "));
-                    left_spans.push(Span::raw(format!("{queue_len} queued")));
+                    if queue_len >= super::state::MAX_MESSAGE_QUEUE {
+                        left_spans.push(Span::styled(
+                            format!("{}/{} FULL", queue_len, super::state::MAX_MESSAGE_QUEUE),
+                            Style::default().fg(theme.error_text),
+                        ));
+                    } else {
+                        left_spans.push(Span::raw(format!("{queue_len} queued")));
+                    }
                 }
 
                 // Scroll indicator (unified bracketed format)
@@ -4441,17 +4747,17 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // strip_leading_empty_after_turn_start tests
+    // strip_empty_text_lines tests
     // -----------------------------------------------------------------------
 
     #[test]
-    fn strip_empty_preserves_non_turn_start_lines() {
+    fn strip_empty_preserves_non_empty_text_lines() {
         let lines = vec![
             DisplayLine::Text("hello".into()),
             DisplayLine::Text("world".into()),
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let result = strip_leading_empty_after_turn_start(&refs);
+        let result = strip_empty_text_lines(&refs);
         assert_eq!(result.len(), 2);
     }
 
@@ -4466,7 +4772,7 @@ mod tests {
             DisplayLine::Text("hello".into()),
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let result = strip_leading_empty_after_turn_start(&refs);
+        let result = strip_empty_text_lines(&refs);
         // TurnStart + "hello" (two empty lines removed)
         assert_eq!(result.len(), 2);
         assert!(matches!(result[0], DisplayLine::TurnStart { .. }));
@@ -4474,15 +4780,18 @@ mod tests {
     }
 
     #[test]
-    fn strip_empty_keeps_empty_text_not_after_turn_start() {
+    fn strip_empty_removes_empty_text_between_non_turn_start_lines() {
         let lines = vec![
             DisplayLine::Text("first".into()),
             DisplayLine::Text("".into()),
             DisplayLine::Text("second".into()),
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
-        let result = strip_leading_empty_after_turn_start(&refs);
-        assert_eq!(result.len(), 3);
+        let result = strip_empty_text_lines(&refs);
+        // Empty text lines are now always stripped (spacing is render-time).
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], DisplayLine::Text(ref s) if s == "first"));
+        assert!(matches!(result[1], DisplayLine::Text(ref s) if s == "second"));
     }
 
     // -----------------------------------------------------------------------
@@ -4730,11 +5039,11 @@ mod tests {
         let blocks = vec![CollapsedBlock::ToolResultRun(ToolResultRun::Hidden {
             total_bytes: 42,
         })];
-        let lines = render_to_spans(&blocks, &test_theme());
+        let lines = render_to_spans(&blocks, &test_theme(), 80);
         assert_eq!(lines.len(), 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("42 bytes"));
-        assert!(text.contains("press 'r'"));
+        assert!(text.contains("press 's'"));
     }
 
     #[test]
@@ -4742,7 +5051,7 @@ mod tests {
         let blocks = vec![CollapsedBlock::ToolResultRun(ToolResultRun::Hidden {
             total_bytes: 2048,
         })];
-        let lines = render_to_spans(&blocks, &test_theme());
+        let lines = render_to_spans(&blocks, &test_theme(), 80);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("2.0 KB"));
     }
@@ -4761,7 +5070,7 @@ mod tests {
                 },
             ],
         })];
-        let output = render_to_spans(&blocks, &test_theme());
+        let output = render_to_spans(&blocks, &test_theme(), 80);
         assert_eq!(output.len(), 2);
         // First line should have the connector prefix.
         let first_text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
@@ -4778,7 +5087,7 @@ mod tests {
             }],
             hidden_count: 5,
         })];
-        let output = render_to_spans(&blocks, &test_theme());
+        let output = render_to_spans(&blocks, &test_theme(), 80);
         // 1 visible line + 1 "more lines hidden" line
         assert_eq!(output.len(), 2);
         let last_text: String = output[1].spans.iter().map(|s| s.content.as_ref()).collect();
@@ -4794,14 +5103,14 @@ mod tests {
             }],
             hidden_count: 0,
         })];
-        let output = render_to_spans(&blocks, &test_theme());
+        let output = render_to_spans(&blocks, &test_theme(), 80);
         assert_eq!(output.len(), 1);
     }
 
     #[test]
     fn render_text_run_adds_block_marker() {
         let blocks = vec![CollapsedBlock::TextRun("hello world".into())];
-        let output = render_to_spans(&blocks, &test_theme());
+        let output = render_to_spans(&blocks, &test_theme(), 80);
         assert!(!output.is_empty());
         let first_text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(first_text.contains(BLOCK_MARKER));
@@ -4812,7 +5121,7 @@ mod tests {
     fn render_single_system_line() {
         let dl = DisplayLine::System("system msg".into());
         let blocks = vec![CollapsedBlock::Single(&dl)];
-        let output = render_to_spans(&blocks, &test_theme());
+        let output = render_to_spans(&blocks, &test_theme(), 80);
         assert_eq!(output.len(), 1);
         let text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("system msg"));
@@ -4822,10 +5131,338 @@ mod tests {
     fn render_single_error_line() {
         let dl = DisplayLine::Error("error msg".into());
         let blocks = vec![CollapsedBlock::Single(&dl)];
-        let output = render_to_spans(&blocks, &test_theme());
+        let output = render_to_spans(&blocks, &test_theme(), 80);
         assert_eq!(output.len(), 1);
         let text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("error msg"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Inter-element spacing tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: check whether a Line is a blank line (empty or single empty span).
+    fn is_blank_line(line: &Line<'_>) -> bool {
+        line.spans.is_empty()
+            || (line.spans.len() == 1 && line.spans[0].content.as_ref().is_empty())
+    }
+
+    #[test]
+    fn spacing_blank_line_before_user_prompt() {
+        // Rule 2: one blank line above a user prompt when preceded by text.
+        let prompt_dl = DisplayLine::UserPrompt {
+            content: "hello".into(),
+            queued: false,
+        };
+        let blocks = vec![
+            CollapsedBlock::TextRun("some text".into()),
+            CollapsedBlock::Single(&prompt_dl),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // There should be a blank line between the text and the prompt.
+        let blank_count = output.iter().filter(|l| is_blank_line(l)).count();
+        assert!(blank_count >= 1, "expected at least one blank line before UserPrompt");
+        // Find the prompt line (contains ">").
+        let prompt_idx = output
+            .iter()
+            .position(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains('>'))
+            })
+            .expect("should find user prompt line");
+        assert!(prompt_idx > 0, "prompt should not be the first line");
+        assert!(
+            is_blank_line(&output[prompt_idx - 1]),
+            "line before prompt should be blank"
+        );
+    }
+
+    #[test]
+    fn spacing_blank_line_after_user_prompt() {
+        // Rule 2: one blank line below a user prompt.
+        let prompt_dl = DisplayLine::UserPrompt {
+            content: "hello".into(),
+            queued: false,
+        };
+        let blocks = vec![
+            CollapsedBlock::Single(&prompt_dl),
+            CollapsedBlock::TextRun("response".into()),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // Find the prompt line.
+        let prompt_idx = output
+            .iter()
+            .position(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains('>'))
+            })
+            .expect("should find user prompt line");
+        // The next line after the prompt line(s) should be blank.
+        let after_prompt = prompt_idx + 1;
+        assert!(
+            after_prompt < output.len(),
+            "there should be lines after the prompt"
+        );
+        assert!(
+            is_blank_line(&output[after_prompt]),
+            "line after prompt should be blank"
+        );
+    }
+
+    #[test]
+    fn spacing_no_blank_between_consecutive_text_runs() {
+        // Rule 3: no blank line between consecutive assistant text blocks.
+        let blocks = vec![
+            CollapsedBlock::TextRun("first paragraph".into()),
+            CollapsedBlock::TextRun("second paragraph".into()),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // There should be no blank lines in the output.
+        let blank_count = output.iter().filter(|l| is_blank_line(l)).count();
+        assert_eq!(blank_count, 0, "no blank lines between consecutive text runs");
+    }
+
+    #[test]
+    fn spacing_blank_before_tool_call_after_text() {
+        // Rule 4: one blank line before a tool call if preceded by assistant text.
+        let tool_dl = DisplayLine::ToolUse {
+            tool: "Read".into(),
+            input_preview: "file.rs".into(),
+        };
+        let blocks = vec![
+            CollapsedBlock::TextRun("some text".into()),
+            CollapsedBlock::ToolUseHeader {
+                dl: &tool_dl,
+                effective_mode: ResultDisplay::Full,
+            },
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // Find the tool use line (contains "Read").
+        let tool_idx = output
+            .iter()
+            .position(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains("Read"))
+            })
+            .expect("should find tool use line");
+        assert!(tool_idx > 0, "tool call should not be the first line");
+        assert!(
+            is_blank_line(&output[tool_idx - 1]),
+            "line before tool call should be blank"
+        );
+    }
+
+    #[test]
+    fn spacing_blank_after_tool_result_run() {
+        // Rule 5: one blank line after a tool result run before the next element.
+        let blocks = vec![
+            CollapsedBlock::ToolResultRun(ToolResultRun::Hidden { total_bytes: 10 }),
+            CollapsedBlock::TextRun("next text".into()),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // The first line is the hidden result, then blank, then text.
+        assert!(output.len() >= 3, "should have result + blank + text");
+        assert!(
+            is_blank_line(&output[1]),
+            "second line should be blank (spacing after tool result)"
+        );
+    }
+
+    #[test]
+    fn spacing_blank_before_turn_summary() {
+        // Rule 6: one blank line before turn summary.
+        let summary_dl = DisplayLine::TurnSummary {
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_usd: 0.01,
+        };
+        let blocks = vec![
+            CollapsedBlock::TextRun("content".into()),
+            CollapsedBlock::Single(&summary_dl),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // Find the summary line (contains "in /").
+        let summary_idx = output
+            .iter()
+            .position(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains("in /"))
+            })
+            .expect("should find turn summary line");
+        assert!(summary_idx > 0, "summary should not be the first line");
+        assert!(
+            is_blank_line(&output[summary_idx - 1]),
+            "line before summary should be blank"
+        );
+    }
+
+    #[test]
+    fn spacing_blank_around_thinking() {
+        // Rule 7: one blank line above and below thinking blocks.
+        let blocks = vec![
+            CollapsedBlock::TextRun("before".into()),
+            CollapsedBlock::ThinkingRun { line_count: 5 },
+            CollapsedBlock::TextRun("after".into()),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // Find the thinking line (contains "Thinking").
+        let thinking_idx = output
+            .iter()
+            .position(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains("Thinking"))
+            })
+            .expect("should find thinking line");
+        assert!(thinking_idx > 0, "thinking should not be the first line");
+        assert!(
+            is_blank_line(&output[thinking_idx - 1]),
+            "line before thinking should be blank"
+        );
+        assert!(
+            thinking_idx + 1 < output.len(),
+            "there should be lines after thinking"
+        );
+        assert!(
+            is_blank_line(&output[thinking_idx + 1]),
+            "line after thinking should be blank"
+        );
+    }
+
+    #[test]
+    fn spacing_no_blank_around_system() {
+        // Rule 8: system messages get no blank lines.
+        let system_dl = DisplayLine::System("system msg".into());
+        let blocks = vec![
+            CollapsedBlock::TextRun("before".into()),
+            CollapsedBlock::Single(&system_dl),
+            CollapsedBlock::TextRun("after".into()),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // Find the system line.
+        let system_idx = output
+            .iter()
+            .position(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains("system msg"))
+            })
+            .expect("should find system line");
+        // No blank line immediately before or after.
+        if system_idx > 0 {
+            assert!(
+                !is_blank_line(&output[system_idx - 1]),
+                "no blank line before system message"
+            );
+        }
+        if system_idx + 1 < output.len() {
+            assert!(
+                !is_blank_line(&output[system_idx + 1]),
+                "no blank line after system message"
+            );
+        }
+    }
+
+    #[test]
+    fn spacing_blank_above_error_no_blank_below() {
+        // Rule 9: one blank line above error, no blank line below.
+        let error_dl = DisplayLine::Error("bad thing".into());
+        let blocks = vec![
+            CollapsedBlock::TextRun("before".into()),
+            CollapsedBlock::Single(&error_dl),
+            CollapsedBlock::TextRun("after".into()),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // Find the error line.
+        let error_idx = output
+            .iter()
+            .position(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.as_ref().contains("bad thing"))
+            })
+            .expect("should find error line");
+        assert!(error_idx > 0, "error should not be the first line");
+        assert!(
+            is_blank_line(&output[error_idx - 1]),
+            "line before error should be blank"
+        );
+        // No blank line after error.
+        if error_idx + 1 < output.len() {
+            assert!(
+                !is_blank_line(&output[error_idx + 1]),
+                "no blank line after error"
+            );
+        }
+    }
+
+    #[test]
+    fn spacing_no_double_blank_lines() {
+        // Ensure that no matter the sequence, double blank lines never appear.
+        let turn_dl = DisplayLine::TurnStart {
+            turn_number: Some(1),
+        };
+        let prompt_dl = DisplayLine::UserPrompt {
+            content: "test".into(),
+            queued: false,
+        };
+        let summary_dl = DisplayLine::TurnSummary {
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_usd: 0.01,
+        };
+        let blocks = vec![
+            CollapsedBlock::Single(&turn_dl),
+            CollapsedBlock::Single(&prompt_dl),
+            CollapsedBlock::TextRun("response".into()),
+            CollapsedBlock::ThinkingRun { line_count: 3 },
+            CollapsedBlock::TextRun("more text".into()),
+            CollapsedBlock::Single(&summary_dl),
+        ];
+        let output = render_to_spans(&blocks, &test_theme(), 80);
+        // Check no consecutive blank lines.
+        for i in 1..output.len() {
+            if is_blank_line(&output[i]) && is_blank_line(&output[i - 1]) {
+                panic!(
+                    "double blank lines at indices {} and {} (total {} lines)",
+                    i - 1,
+                    i,
+                    output.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dedup_blank_lines_collapses_consecutive() {
+        let lines = vec![
+            Line::from("content"),
+            Line::from(""),
+            Line::from(""),
+            Line::from(""),
+            Line::from("more"),
+        ];
+        let result = dedup_blank_lines(lines);
+        assert_eq!(result.len(), 3); // content, blank, more
+        assert!(!is_blank_line(&result[0]));
+        assert!(is_blank_line(&result[1]));
+        assert!(!is_blank_line(&result[2]));
+    }
+
+    #[test]
+    fn dedup_blank_lines_trims_leading() {
+        let lines = vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from("content"),
+        ];
+        let result = dedup_blank_lines(lines);
+        assert_eq!(result.len(), 1);
+        assert!(!is_blank_line(&result[0]));
     }
 
     // -----------------------------------------------------------------------
@@ -4837,7 +5474,7 @@ mod tests {
         let lines: Vec<&DisplayLine> = vec![];
         let no_overrides = std::collections::HashMap::new();
         let result =
-            collapse_tool_results(&lines, ResultDisplay::Full, &no_overrides, &test_theme());
+            collapse_tool_results(&lines, ResultDisplay::Full, &no_overrides, &test_theme(), 80);
         assert!(result.is_empty());
     }
 
@@ -4856,7 +5493,7 @@ mod tests {
         let refs: Vec<&DisplayLine> = lines.iter().collect();
         let no_overrides = std::collections::HashMap::new();
         let output =
-            collapse_tool_results(&refs, ResultDisplay::Hidden, &no_overrides, &test_theme());
+            collapse_tool_results(&refs, ResultDisplay::Hidden, &no_overrides, &test_theme(), 80);
         assert_eq!(output.len(), 1);
         let text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("6 bytes"));
@@ -4874,7 +5511,7 @@ mod tests {
         let refs: Vec<&DisplayLine> = lines.iter().collect();
         let no_overrides = std::collections::HashMap::new();
         let output =
-            collapse_tool_results(&refs, ResultDisplay::Full, &no_overrides, &test_theme());
+            collapse_tool_results(&refs, ResultDisplay::Full, &no_overrides, &test_theme(), 80);
         // TurnStart produces 1 empty line, then "content" produces 1 line with marker.
         // The empty Text("") should be stripped.
         let all_text: String = output

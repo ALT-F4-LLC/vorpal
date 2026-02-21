@@ -931,6 +931,7 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
                 if let Some(agent) = app.agent_by_id_mut(target_id) {
                     agent.push_line(DisplayLine::UserPrompt {
                         content: prompt.clone(),
+                        queued: false,
                     });
                     agent.start_new_turn();
                     agent.id = agent_id;
@@ -977,6 +978,7 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
                 if let Some(agent) = app.agents.last_mut() {
                     agent.push_line(DisplayLine::UserPrompt {
                         content: prompt.clone(),
+                        queued: false,
                     });
                 }
                 let new_index = app.agents.len() - 1;
@@ -1134,6 +1136,16 @@ async fn handle_chat_mode(app: &mut App, manager: &mut AgentManager, key: KeyEve
                         app.template_picker_from_chat = true;
                         app.enter_template_picker(false);
                     }
+                    // Readline keybindings.
+                    'a' => app.chat_input.move_to_line_start(),
+                    'e' => app.chat_input.move_to_line_end(),
+                    'k' => app.kill_buffer = app.chat_input.kill_to_line_end(),
+                    'u' => app.kill_buffer = app.chat_input.kill_to_line_start(),
+                    'y' => {
+                        let buf = app.kill_buffer.clone();
+                        app.chat_input.yank(&buf);
+                    }
+                    'w' => app.kill_buffer = app.chat_input.delete_word_backward(),
                     _ => {}
                 }
             } else {
@@ -1184,6 +1196,7 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
             }
             agent_mut.push_line(DisplayLine::UserPrompt {
                 content: text.clone(),
+                queued: true,
             });
             agent_mut.message_queue.push_back(text);
             let queue_len = agent_mut.message_queue.len();
@@ -1967,7 +1980,7 @@ fn display_line_to_text(line: &DisplayLine) -> String {
         | DisplayLine::System(s)
         | DisplayLine::Stderr(s)
         | DisplayLine::Error(s) => s.clone(),
-        DisplayLine::Thinking(s) => format!("{BLOCK_MARKER} {s}"),
+        DisplayLine::Thinking(s) => format!("~ {s}"),
         DisplayLine::Result(s) => format!("{SESSION_MARKER} {s}"),
         DisplayLine::ToolUse {
             tool,
@@ -2013,7 +2026,7 @@ fn display_line_to_text(line: &DisplayLine) -> String {
             recipient,
             content,
         } => format!("[{sender} -> {recipient}] {content}"),
-        DisplayLine::UserPrompt { content } => format!("> {content}"),
+        DisplayLine::UserPrompt { content, .. } => format!("> {content}"),
     }
 }
 

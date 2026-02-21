@@ -16,6 +16,11 @@ pub struct Theme {
     /// Display name shown in the status bar when cycling themes.
     pub name: &'static str,
 
+    /// The character used as a block marker prefix for assistant text and tool
+    /// use lines. Defaults to `"*"` (ASCII asterisk). Users who prefer the
+    /// original Unicode marker can override this at the theme level.
+    pub marker_char: &'static str,
+
     // -- Tool category colors ------------------------------------------------
     pub tool_read: Color,
     pub tool_write: Color,
@@ -192,6 +197,7 @@ impl Theme {
     pub fn dark() -> Self {
         Self {
             name: "dark",
+            marker_char: "*",
 
             tool_read: Color::Green,
             tool_write: Color::Yellow,
@@ -330,7 +336,7 @@ impl Theme {
             turn_separator_label: Color::Gray,
             turn_separator_meta: Color::DarkGray,
 
-            tool_block_border: Color::DarkGray,
+            tool_block_border: Color::Rgb(60, 60, 60),
             tool_block_error_border: Color::Red,
 
             thinking_collapsed_fg: Color::DarkGray,
@@ -346,6 +352,7 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             name: "light",
+            marker_char: "*",
 
             tool_read: Color::Green,
             tool_write: Color::Rgb(180, 130, 0),
@@ -493,6 +500,178 @@ impl Theme {
 
             jump_to_bottom_bg: Color::Rgb(180, 130, 0),
             jump_to_bottom_fg: Color::White,
+        }
+    }
+
+    /// A monochrome theme for use when the `NO_COLOR` environment variable is
+    /// set. All semantic colors are replaced with `Color::Reset` (terminal
+    /// default), while bold/italic modifiers are preserved so that message
+    /// types remain distinguishable via markers and text weight alone.
+    pub fn monochrome() -> Self {
+        let r = Color::Reset;
+        Self {
+            name: "monochrome",
+            marker_char: "*",
+
+            tool_read: r,
+            tool_write: r,
+            tool_bash: r,
+            tool_web: r,
+            tool_default: r,
+
+            tab_no_agents: r,
+            tab_border: r,
+            tab_badge_success: r,
+            tab_badge_error: r,
+            tab_badge_idle: r,
+            tab_badge_spinner: r,
+            tab_highlight: r,
+            tab_text: r,
+            tab_overflow: r,
+
+            terminal_too_small: r,
+
+            content_empty: r,
+            block_marker: r,
+            text_hr: r,
+            tool_input_preview: r,
+            thinking_color: r,
+            result_marker: r,
+            result_text: r,
+            system_text: r,
+            stderr_text: r,
+            error_text: r,
+            tool_result_text: r,
+            tool_result_error: r,
+            tool_result_hidden: r,
+
+            syntect_theme: "base16-ocean.dark",
+            code_block_bg: r,
+            code_block_border: r,
+            code_block_lang_label: r,
+            table_border: r,
+            table_header_fg: r,
+            table_header_bg: r,
+            inline_code_bg: r,
+            inline_code_fg: r,
+            blockquote_border: r,
+            blockquote_fg: r,
+            heading_fg: r,
+            link_fg: r,
+            list_marker_fg: r,
+
+            status_bar_bg: r,
+            status_bar_fg: r,
+            status_message: r,
+            status_no_agent: r,
+            activity_idle: r,
+            activity_thinking: r,
+            activity_tool: r,
+            activity_done: r,
+            new_output: r,
+            hint_bar_bg: r,
+            hint_bar_fg: r,
+
+            field_label_active: r,
+            field_label_inactive: r,
+            input_border: r,
+            input_title: r,
+            input_bg: r,
+            input_fg: r,
+            cursor_bg: r,
+            cursor_fg: r,
+            selector_separator: r,
+            selector_active: r,
+            selector_inactive: r,
+            selector_option_dim: r,
+            option_unset: r,
+            options_header: r,
+
+            help_border: r,
+            help_title: r,
+            help_heading: r,
+            help_key: r,
+            help_footer: r,
+            help_bg: r,
+            help_fg: r,
+
+            confirm_border: r,
+            confirm_title: r,
+            confirm_text: r,
+            confirm_yes: r,
+            confirm_no: r,
+            confirm_bg: r,
+            confirm_fg: r,
+
+            toast_bg: r,
+            toast_fg: r,
+            toast_border: r,
+            toast_success: r,
+            toast_error: r,
+
+            tab_unread: r,
+
+            search_highlight_bg: r,
+            search_highlight_fg: r,
+            search_current_bg: r,
+            search_current_fg: r,
+            search_bar_fg: r,
+
+            dashboard_selected_bg: r,
+            dashboard_selected_fg: r,
+            dashboard_dim: r,
+
+            diff_addition_fg: r,
+            diff_deletion_fg: r,
+            diff_header_fg: r,
+            diff_context_fg: r,
+
+            diff_addition_bg: r,
+            diff_deletion_bg: r,
+            diff_gutter_fg: r,
+
+            command_bar_fg: r,
+            command_match_fg: r,
+            command_selected_bg: r,
+            command_selected_fg: r,
+            command_desc_fg: r,
+            command_error_fg: r,
+
+            user_prompt_marker: r,
+            user_prompt_fg: r,
+
+            chat_input_bg: r,
+            chat_input_fg: r,
+            chat_input_border: r,
+            chat_input_placeholder: r,
+            chat_input_focused_border: r,
+
+            turn_separator: r,
+            turn_separator_label: r,
+            turn_separator_meta: r,
+
+            tool_block_border: r,
+            tool_block_error_border: r,
+
+            thinking_collapsed_fg: r,
+
+            streaming_cursor: r,
+
+            jump_to_bottom_bg: r,
+            jump_to_bottom_fg: r,
+        }
+    }
+
+    /// Returns the appropriate default theme based on the environment.
+    ///
+    /// When the `NO_COLOR` environment variable is set (to any value,
+    /// including empty), returns [`Theme::monochrome`]. Otherwise returns
+    /// [`Theme::dark`].
+    pub fn default_theme() -> Self {
+        if std::env::var_os("NO_COLOR").is_some() {
+            Self::monochrome()
+        } else {
+            Self::dark()
         }
     }
 

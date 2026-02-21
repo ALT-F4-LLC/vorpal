@@ -436,6 +436,21 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
                     if should_drain {
                         let agent = &mut app.agents[vec_idx];
                         let queued_msg = agent.message_queue.pop_front().unwrap();
+                        // Clear the [queued] label on the earliest queued
+                        // UserPrompt so the visual indicator disappears when
+                        // the message is processed.
+                        for dl in agent.output.iter_mut() {
+                            if let DisplayLine::UserPrompt {
+                                ref mut queued, ..
+                            } = dl
+                            {
+                                if *queued {
+                                    *queued = false;
+                                    break;
+                                }
+                            }
+                        }
+                        agent.cached_lines = None;
                         let opts = agent.claude_options.clone();
                         let workspace = agent.workspace.clone();
                         let session_id = agent.session_id.clone();

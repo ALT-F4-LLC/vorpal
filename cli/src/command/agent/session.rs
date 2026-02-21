@@ -247,6 +247,7 @@ pub fn load_session_conversation(file_path: &Path) -> Vec<DisplayLine> {
                                     if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                                         lines.push(DisplayLine::UserPrompt {
                                             content: text.to_string(),
+                                            queued: false,
                                         });
                                     }
                                 }
@@ -294,6 +295,7 @@ pub fn load_session_conversation(file_path: &Path) -> Vec<DisplayLine> {
                         // String content: direct user prompt.
                         lines.push(DisplayLine::UserPrompt {
                             content: text.to_string(),
+                            queued: false,
                         });
                     }
                 }

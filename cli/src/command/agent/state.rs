@@ -252,6 +252,97 @@ impl InputBuffer {
         self.cursor = self.text.len();
     }
 
+    // ----- Readline-style methods -----
+
+    /// Move the cursor to the beginning of the current line (Ctrl+A).
+    ///
+    /// Finds the previous newline (or position 0) and places the cursor there.
+    pub fn move_to_line_start(&mut self) {
+        let before = &self.text[..self.cursor];
+        self.cursor = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    }
+
+    /// Move the cursor to the end of the current line (Ctrl+E).
+    ///
+    /// Finds the next newline (or text end) and places the cursor there.
+    pub fn move_to_line_end(&mut self) {
+        self.cursor = self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len());
+    }
+
+    /// Kill text from cursor to end of current line (Ctrl+K).
+    ///
+    /// If there is text after the cursor on the current line, that text is
+    /// killed. If the cursor is already at the end of the line (i.e. sitting
+    /// on a newline), the newline itself is deleted — joining the current line
+    /// with the next, matching standard readline/emacs behaviour.
+    ///
+    /// Returns the killed text for storage in the kill buffer.
+    pub fn kill_to_line_end(&mut self) -> String {
+        let line_end = self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len());
+        if self.cursor == line_end && self.cursor < self.text.len() {
+            // Cursor is at a newline — delete the newline to join lines.
+            let killed = self.text[self.cursor..self.cursor + 1].to_string();
+            self.text.replace_range(self.cursor..self.cursor + 1, "");
+            return killed;
+        }
+        let killed: String = self.text[self.cursor..line_end].to_string();
+        self.text.replace_range(self.cursor..line_end, "");
+        killed
+    }
+
+    /// Kill text from cursor to beginning of current line (Ctrl+U).
+    ///
+    /// Returns the killed text for storage in the kill buffer.
+    pub fn kill_to_line_start(&mut self) -> String {
+        let before = &self.text[..self.cursor];
+        let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let killed: String = self.text[line_start..self.cursor].to_string();
+        self.text.replace_range(line_start..self.cursor, "");
+        self.cursor = line_start;
+        killed
+    }
+
+    /// Yank (paste) text at the current cursor position (Ctrl+Y).
+    pub fn yank(&mut self, text: &str) {
+        self.text.insert_str(self.cursor, text);
+        self.cursor += text.len();
+    }
+
+    /// Delete the word before the cursor (Ctrl+W).
+    ///
+    /// Skips any whitespace (including newlines) immediately before the cursor,
+    /// then deletes backward to the previous whitespace boundary. This matches
+    /// standard readline behaviour where Ctrl+W crosses line boundaries.
+    ///
+    /// Returns the killed text for storage in the kill buffer.
+    pub fn delete_word_backward(&mut self) -> String {
+        if self.cursor == 0 {
+            return String::new();
+        }
+        let before = &self.text[..self.cursor];
+        // Skip any trailing whitespace (including newlines).
+        let end = before.len();
+        let trimmed = before.trim_end_matches(|c: char| c.is_whitespace());
+        // If we only trimmed whitespace we still want to delete at least one
+        // word, so only stop at the trimmed boundary when there is non-space
+        // content before the cursor.
+        let search = if trimmed.len() < end { trimmed } else { before };
+        let word_start = search
+            .rfind(|c: char| c.is_whitespace())
+            .map(|i| i + search[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(0))
+            .unwrap_or(0);
+        let killed = self.text[word_start..self.cursor].to_string();
+        self.text.replace_range(word_start..self.cursor, "");
+        self.cursor = word_start;
+        killed
+    }
+
     /// Move the cursor up one line in multiline text.
     ///
     /// Finds the current line and character column, then moves the cursor to
@@ -840,6 +931,9 @@ pub enum DisplayLine {
     UserPrompt {
         /// The user's message text (may contain multiple lines).
         content: String,
+        /// Whether this message is queued (sent while the agent is running)
+        /// and has not yet been processed.
+        queued: bool,
     },
 }
 
@@ -1070,6 +1164,12 @@ pub struct AgentState {
     /// Cleared when the agent is resumed with a new message. Used by the
     /// TUI to distinguish interrupted exits from normal completions/failures.
     pub interrupted: bool,
+    /// Number of lines evicted from the front of the output buffer.
+    ///
+    /// Incremented each time a line is popped from the front due to the
+    /// [`MAX_OUTPUT_LINES`] cap. Used by the UI to show a truncation notice
+    /// when the user scrolls to the very top of the buffer.
+    pub evicted_line_count: usize,
 }
 
 impl AgentState {
@@ -1116,6 +1216,7 @@ impl AgentState {
             cache_section_overrides_generation: 0,
             message_queue: VecDeque::new(),
             interrupted: false,
+            evicted_line_count: 0,
         }
     }
 
@@ -1161,6 +1262,7 @@ impl AgentState {
             cache_section_overrides_generation: 0,
             message_queue: VecDeque::new(),
             interrupted: false,
+            evicted_line_count: 0,
         }
     }
 
@@ -1208,6 +1310,7 @@ impl AgentState {
             cache_section_overrides_generation: 0,
             message_queue: VecDeque::new(),
             interrupted: false,
+            evicted_line_count: 0,
         }
     }
 
@@ -1249,6 +1352,7 @@ impl AgentState {
     pub fn activate_after_spawn(&mut self, new_id: usize, prompt: String, is_resume: bool) {
         self.push_line(DisplayLine::UserPrompt {
             content: prompt.clone(),
+            queued: false,
         });
         if is_resume {
             self.start_new_turn();
@@ -1279,6 +1383,7 @@ impl AgentState {
     pub fn push_line(&mut self, line: DisplayLine) {
         if self.output.len() >= MAX_OUTPUT_LINES {
             self.output.pop_front();
+            self.evicted_line_count += 1;
             // Keep scroll_offset valid after the oldest line is evicted.
             if self.scroll_offset > 0 {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
@@ -1582,6 +1687,8 @@ pub struct App {
     pub chat_input_rect: Rect,
     /// Inline chat text buffer for the persistent input area.
     pub chat_input: InputBuffer,
+    /// Kill buffer for readline-style Ctrl+K/U/Y operations.
+    pub kill_buffer: String,
     /// Cached input field regions from the last render of the input overlay.
     /// Maps each rendered field's [`Rect`] to its [`InputField`] variant so
     /// mouse clicks can focus the correct field.
@@ -1620,7 +1727,7 @@ impl App {
             tick: 0,
             default_workspace,
             default_claude_options,
-            theme: Theme::dark(),
+            theme: Theme::default_theme(),
             theme_index: 0,
             toasts: Vec::new(),
             unread_agents: std::collections::HashSet::new(),
@@ -1663,6 +1770,7 @@ impl App {
             content_rect: None,
             chat_input_rect: Rect::default(),
             chat_input: InputBuffer::new(),
+            kill_buffer: String::new(),
             input_field_rects: Vec::new(),
             jump_to_bottom_rect: None,
         }
@@ -2877,6 +2985,12 @@ mod tests {
             "output buffer should be capped at MAX_OUTPUT_LINES"
         );
 
+        // Evicted count should match the overflow.
+        assert_eq!(
+            agent.evicted_line_count, overflow,
+            "evicted_line_count should equal the number of lines popped"
+        );
+
         // The earliest `overflow` lines should have been dropped.
         // The first remaining line should be "line {overflow}".
         match &agent.output[0] {
@@ -2989,6 +3103,10 @@ mod tests {
         }
 
         assert_eq!(agent.output.len(), MAX_OUTPUT_LINES);
+        assert_eq!(
+            agent.evicted_line_count, overflow,
+            "evicted_line_count should track popped lines after ring buffer wrap"
+        );
 
         // Viewport at the bottom — should see the last 10 lines.
         let visible = agent.visible_lines(10);

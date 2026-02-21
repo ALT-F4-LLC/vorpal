@@ -255,7 +255,7 @@ pub fn export_session(agent: &AgentState) -> Result<PathBuf, String> {
                     writeln!(md, "---").unwrap();
                     writeln!(md).unwrap();
                 }
-                DisplayLine::UserPrompt { content } => {
+                DisplayLine::UserPrompt { content, .. } => {
                     if in_tool_result {
                         writeln!(md, "````").unwrap();
                         writeln!(md).unwrap();
