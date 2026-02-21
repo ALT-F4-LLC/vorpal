@@ -1590,7 +1590,8 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme) -> Vec<Line<'a>
         } => {
             let input_str = format_token_count(*input_tokens);
             let output_str = format_token_count(*output_tokens);
-            let summary = format!("{input_str} in / {output_str} out | ${cost_usd:.2}");
+            let cost_str = format_cost(*cost_usd);
+            let summary = format!("{input_str} in / {output_str} out | {cost_str}");
             vec![Line::from(Span::styled(
                 summary,
                 Style::default()
@@ -1716,6 +1717,26 @@ fn format_token_count(count: u64) -> String {
         format!("{:.1}K", count as f64 / 1_000.0)
     } else {
         count.to_string()
+    }
+}
+
+/// Format a cost in USD as a compact string.
+///
+/// - Under $100: two decimal places (`$0.15`, `$99.99`)
+/// - $100 to $9999: integer only (`$123`, `$9999`)
+/// - $10000+: K suffix (`$10.0K`, `$150K`)
+fn format_cost(cost: f64) -> String {
+    if cost >= 10_000.0 {
+        let k = cost / 1_000.0;
+        if k >= 100.0 {
+            format!("${:.0}K", k)
+        } else {
+            format!("${:.1}K", k)
+        }
+    } else if cost >= 100.0 {
+        format!("${:.0}", cost)
+    } else {
+        format!("${:.2}", cost)
     }
 }
 
@@ -1976,6 +1997,12 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     // Split the 2-line area into two 1-line rows.
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
 
+    // Pre-compute whether the focused agent is actively running (used for hint bar).
+    let agent_active = app
+        .focused_agent()
+        .map(|a| matches!(a.activity, AgentActivity::Thinking | AgentActivity::Tool(_)))
+        .unwrap_or(false);
+
     // Line 1: transient status message (if active) or agent status info.
     let status_line = if let Some(msg) = app.status_message() {
         Line::from(vec![
@@ -1990,7 +2017,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         match app.focused_agent() {
             None => Line::from(Span::styled(
-                " No agent",
+                " No agent — press n to create one",
                 Style::default().fg(theme.status_no_agent),
             )),
             Some(agent) => {
@@ -2022,52 +2049,89 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     )
                 };
 
-                let sep = Span::styled(" │ ", Style::default().fg(theme.status_separator));
-
                 let elapsed = agent.active_elapsed();
                 let elapsed_str = format_elapsed(elapsed);
 
-                // Left side: activity + elapsed + turns + tools
-                let mut left_spans = vec![
-                    Span::raw(" "),
-                    activity_span,
-                    sep.clone(),
-                    Span::raw(elapsed_str.to_string()),
-                    sep.clone(),
-                    Span::raw(format!("T:{}", agent.turn_count)),
-                    sep.clone(),
-                    Span::raw(format!("⚒:{}", agent.tool_count)),
-                ];
+                let turns_label = if agent.turn_count == 1 {
+                    "turn"
+                } else {
+                    "turns"
+                };
+                let tools_label = if agent.tool_count == 1 {
+                    "tool"
+                } else {
+                    "tools"
+                };
 
-                // Scroll indicator only when scrolled up
-                if agent.scroll_offset > 0 {
-                    left_spans.push(sep.clone());
-                    left_spans.push(Span::raw(format!("↑{}", agent.scroll_offset)));
+                // Left side: activity  elapsed    turns  tools
+                // Spacing: 1 leading, 2 after activity, 4 before metrics, 2 within metrics
+                // Width-aware truncation:
+                //   80+ cols: full layout
+                //   60-79:   drop cost from right side
+                //   45-59:   drop turns/tools from left side
+                //   40-44:   drop elapsed time, show activity label only
+                let w = area.width;
+                let mut left_spans = vec![Span::raw(" "), activity_span];
+                if w >= 45 {
+                    // 45+ cols: show elapsed time
+                    left_spans.push(Span::raw("  "));
+                    left_spans.push(Span::raw(elapsed_str.to_string()));
+                }
+                if w >= 60 {
+                    // 60+ cols: show turns and tools
+                    left_spans.push(Span::raw("    "));
+                    left_spans.push(Span::raw(format!("{} {turns_label}", agent.turn_count)));
+                    left_spans.push(Span::raw("  "));
+                    left_spans.push(Span::raw(format!("{} {tools_label}", agent.tool_count)));
                 }
 
-                // New output indicator (prominent)
-                if agent.has_new_output {
-                    left_spans.push(Span::raw(" "));
-                    left_spans.push(Span::styled(
-                        "● new",
-                        Style::default()
-                            .fg(theme.new_output)
-                            .add_modifier(Modifier::BOLD),
-                    ));
+                // Queue indicator (only when non-empty)
+                let queue_len = agent.message_queue.len();
+                if queue_len > 0 {
+                    left_spans.push(Span::raw("  "));
+                    left_spans.push(Span::raw(format!("{queue_len} queued")));
+                }
+
+                // Scroll indicator (unified bracketed format)
+                if agent.scroll_offset > 0 {
+                    left_spans.push(Span::raw("  "));
+                    if agent.has_new_output {
+                        left_spans.push(Span::styled(
+                            "[new output]".to_string(),
+                            Style::default()
+                                .fg(theme.new_output)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    } else {
+                        let line_pos =
+                            agent.output.len().saturating_sub(agent.scroll_offset);
+                        left_spans.push(Span::styled(
+                            format!("[line {}]", line_pos),
+                            Style::default().fg(theme.status_bar_fg),
+                        ));
+                    }
                 }
 
                 // Right side: tokens + cost (only if we have data)
+                // Width-aware: drop cost at <80 cols, drop entire right side at <45 cols
                 let mut right_spans: Vec<Span> = Vec::new();
-                if agent.input_tokens != 0
-                    || agent.output_tokens != 0
-                    || agent.total_cost_usd != 0.0
+                if w >= 45
+                    && (agent.input_tokens != 0
+                        || agent.output_tokens != 0
+                        || agent.total_cost_usd != 0.0)
                 {
                     let input = format_token_count(agent.input_tokens);
                     let output = format_token_count(agent.output_tokens);
-                    right_spans.push(Span::raw(format!(
-                        "{input}↑ {output}↓ ${:.2} ",
-                        agent.total_cost_usd
-                    )));
+                    if w >= 80 {
+                        let cost = format_cost(agent.total_cost_usd);
+                        right_spans.push(Span::raw(format!(
+                            "{input} in  {output} out  {cost} ",
+                        )));
+                    } else {
+                        right_spans.push(Span::raw(format!(
+                            "{input} in  {output} out ",
+                        )));
+                    }
                 }
 
                 // Build the full line with left fill + right
@@ -2099,7 +2163,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 // (left + right) layout that requires direct `frame.render_widget`
                 // calls, so we render the hint bar here and return early to skip
                 // the single-`Paragraph` fallback path below.
-                let hints = build_hint_bar(area.width);
+                let hints = build_hint_bar(app.input_mode, agent_active, area.width);
                 let hints_paragraph = Paragraph::new(hints)
                     .style(Style::default().bg(theme.hint_bar_bg).fg(theme.hint_bar_fg));
                 frame.render_widget(hints_paragraph, rows[1]);
@@ -2121,36 +2185,123 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(status_paragraph, rows[0]);
 
     // Line 2: keybinding hints — priority-ordered, truncated to fit width.
-    let hints = build_hint_bar(area.width);
+    let hints = build_hint_bar(app.input_mode, agent_active, area.width);
 
     let hints_paragraph =
         Paragraph::new(hints).style(Style::default().bg(theme.hint_bar_bg).fg(theme.hint_bar_fg));
     frame.render_widget(hints_paragraph, rows[1]);
 }
 
-/// Build the hint bar line with essential hotkeys.
+/// Build the hint bar line with context-sensitive hotkeys based on the current
+/// `InputMode` and agent state.
 ///
-/// The reduced set of ~7 hints fits comfortably at 80 columns, so no
-/// truncation logic is needed.
-fn build_hint_bar(_width: u16) -> Line<'static> {
-    const HINTS: &[(&str, &str)] = &[
-        ("n", "new"),
-        ("i", "chat"),
-        (":", "command"),
-        ("/", "search"),
-        ("Tab", "switch"),
-        ("q", "close"),
-        ("?", "help"),
-    ];
+/// `agent_active` should be `true` when the focused agent is in `Thinking` or
+/// `Tool` activity, which makes `Esc:interrupt` relevant in Normal mode.
+fn build_hint_bar(mode: InputMode, agent_active: bool, width: u16) -> Line<'static> {
+    let hints: &[(&str, &str)] = match mode {
+        InputMode::Normal if agent_active => &[
+            ("Esc", "interrupt"),
+            ("i", "chat"),
+            ("n", "new"),
+            (":", "command"),
+            ("/", "search"),
+            ("Tab", "next"),
+            ("?", "help"),
+        ],
+        InputMode::Normal => &[
+            ("i", "chat"),
+            ("n", "new"),
+            ("o", "sessions"),
+            (":", "command"),
+            ("Tab", "next"),
+            ("q", "close"),
+            ("?", "help"),
+        ],
+        InputMode::Chat => &[
+            ("Esc", "cancel"),
+            ("Enter", "send"),
+            ("Shift+Enter", "newline"),
+            ("Up/Down", "history"),
+            ("Ctrl+R", "search"),
+        ],
+        InputMode::Input => &[
+            ("Esc", "cancel"),
+            ("Tab", "next field"),
+            ("Ctrl+S", "submit"),
+            ("Ctrl+E", "toggle mode"),
+            ("Ctrl+R", "history"),
+        ],
+        InputMode::Settings => &[
+            ("Esc", "cancel"),
+            ("Tab", "next field"),
+            ("Enter", "save"),
+            ("Left/Right", "cycle option"),
+        ],
+        InputMode::HistorySearch => &[
+            ("Esc", "cancel"),
+            ("Enter", "select"),
+            ("Up/Down", "navigate"),
+        ],
+        InputMode::TemplatePicker => &[
+            ("Esc", "cancel"),
+            ("Enter", "select"),
+            ("Up/Down", "navigate"),
+            ("d", "delete"),
+        ],
+        InputMode::SaveTemplate => &[("Esc", "cancel"), ("Enter", "save")],
+        InputMode::SessionPicker => &[
+            ("Esc", "cancel"),
+            ("Enter", "open"),
+            ("Up/Down", "navigate"),
+        ],
+        InputMode::Search => &[
+            ("Esc", "cancel"),
+            ("Enter", "find next"),
+            ("n/N", "next/prev"),
+            (":", "command"),
+        ],
+        InputMode::Command => &[
+            ("Esc", "cancel"),
+            ("Enter", "execute"),
+            ("Up/Down", "navigate"),
+            ("Tab", "complete"),
+        ],
+    };
+
+    // Truncate hints to fit within available width.
+    // Each hint occupies: key_len + 1 (colon) + desc_len [+ 2 (separator) if not last].
+    // Total includes 1 leading space.
+    // Strategy: preserve first and last hints, remove from second-to-last backwards.
+    let hint_width = |h: &(&str, &str)| -> usize { h.0.len() + 1 + h.1.len() };
+    let available = width as usize;
+
+    let mut visible: Vec<(&str, &str)> = hints.to_vec();
+
+    // Calculate total width: 1 leading space + sum of hint widths + 2 separator per non-last hint
+    let total_width = |v: &[(&str, &str)]| -> usize {
+        if v.is_empty() {
+            return 0;
+        }
+        1 + v.iter().map(hint_width).sum::<usize>() + 2 * v.len().saturating_sub(1)
+    };
+
+    // Remove hints from second-to-last working backwards until it fits
+    while visible.len() > 2 && total_width(&visible) > available {
+        visible.remove(visible.len() - 2);
+    }
+    // If still too wide with only 2 hints, try removing the last one
+    if visible.len() == 2 && total_width(&visible) > available {
+        visible.pop();
+    }
 
     let mut spans = Vec::new();
     spans.push(Span::raw(" "));
-    for (i, (key, desc)) in HINTS.iter().enumerate() {
+    for (i, (key, desc)) in visible.iter().enumerate() {
         spans.push(Span::styled(
             key.to_string(),
             Style::default().add_modifier(Modifier::BOLD),
         ));
-        if i + 1 < HINTS.len() {
+        if i + 1 < visible.len() {
             spans.push(Span::raw(format!(":{desc}  ")));
         } else {
             spans.push(Span::raw(format!(":{desc}")));
@@ -4773,6 +4924,48 @@ mod tests {
             }
             other => panic!("expected Hidden ToolResultRun, got {:?}", other),
         }
+    }
+
+    // -- format_cost ------------------------------------------------------
+
+    #[test]
+    fn format_cost_zero() {
+        assert_eq!(format_cost(0.0), "$0.00");
+    }
+
+    #[test]
+    fn format_cost_small() {
+        assert_eq!(format_cost(0.15), "$0.15");
+    }
+
+    #[test]
+    fn format_cost_under_hundred() {
+        assert_eq!(format_cost(99.99), "$99.99");
+    }
+
+    #[test]
+    fn format_cost_exactly_hundred() {
+        assert_eq!(format_cost(100.0), "$100");
+    }
+
+    #[test]
+    fn format_cost_hundreds() {
+        assert_eq!(format_cost(123.45), "$123");
+    }
+
+    #[test]
+    fn format_cost_thousands() {
+        assert_eq!(format_cost(9999.0), "$9999");
+    }
+
+    #[test]
+    fn format_cost_ten_thousand() {
+        assert_eq!(format_cost(10_000.0), "$10.0K");
+    }
+
+    #[test]
+    fn format_cost_large() {
+        assert_eq!(format_cost(150_000.0), "$150K");
     }
 
     // -- format_token_count -----------------------------------------------
