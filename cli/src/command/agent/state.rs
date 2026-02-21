@@ -89,10 +89,6 @@ pub const COMMANDS: &[PaletteCommand] = &[
         description: "Cycle tool result display",
     },
     PaletteCommand {
-        name: "sidebar",
-        description: "Toggle sidebar panel",
-    },
-    PaletteCommand {
         name: "graph",
         description: "Toggle dependency graph",
     },
@@ -1509,14 +1505,6 @@ pub struct App {
     /// runs once per event.
     pub command_filtered: Vec<&'static PaletteCommand>,
 
-    // -- Sidebar state ---------------------------------------------------------
-    /// Whether the agent sidebar panel is visible.
-    pub sidebar_visible: bool,
-    /// Selected agent index within the sidebar (for keyboard navigation).
-    /// This is independent of `focused` — the sidebar selection can move
-    /// without changing the focused agent until Enter is pressed.
-    pub sidebar_selected: usize,
-
     // -- History state -----------------------------------------------------------
     /// Persistent prompt history for the current workspace.
     pub history: PromptHistory,
@@ -1594,10 +1582,6 @@ pub struct App {
     pub chat_input_rect: Rect,
     /// Inline chat text buffer for the persistent input area.
     pub chat_input: InputBuffer,
-    /// Cached sidebar agent entry regions from the last render. Each entry
-    /// maps a rendered [`Rect`] to the corresponding agent Vec index so
-    /// mouse clicks can focus the correct agent from the sidebar.
-    pub sidebar_rects: Vec<(Rect, usize)>,
     /// Cached input field regions from the last render of the input overlay.
     /// Maps each rendered field's [`Rect`] to its [`InputField`] variant so
     /// mouse clicks can focus the correct field.
@@ -1655,8 +1639,6 @@ impl App {
             command_selected: 0,
             command_error: None,
             command_filtered: COMMANDS.iter().collect(),
-            sidebar_visible: false,
-            sidebar_selected: 0,
             history,
             history_index: None,
             history_stash: String::new(),
@@ -1681,7 +1663,6 @@ impl App {
             content_rect: None,
             chat_input_rect: Rect::default(),
             chat_input: InputBuffer::new(),
-            sidebar_rects: Vec::new(),
             input_field_rects: Vec::new(),
             jump_to_bottom_rect: None,
         }
@@ -2749,17 +2730,11 @@ impl App {
         }
         // Remove the agent's ID from unread tracking.
         self.unread_agents.remove(&removed.id);
-        // Clamp focused and sidebar_selected indices to remain valid.
+        // Clamp focused index to remain valid.
         if self.agents.is_empty() {
             self.focused = 0;
-            self.sidebar_selected = 0;
-        } else {
-            if self.focused >= self.agents.len() {
-                self.focused = self.agents.len() - 1;
-            }
-            if self.sidebar_selected >= self.agents.len() {
-                self.sidebar_selected = self.agents.len() - 1;
-            }
+        } else if self.focused >= self.agents.len() {
+            self.focused = self.agents.len() - 1;
         }
         // Disable split mode if fewer than 2 agents remain.
         if self.agents.len() < 2 {
@@ -3521,32 +3496,6 @@ mod tests {
             ClaudeOptions::default(),
         ));
         assert_eq!(app.split_right_agent_index(), None);
-    }
-
-    // -- sidebar sync --------------------------------------------------------
-
-    #[test]
-    fn remove_agent_clamps_sidebar_selected() {
-        let mut app = App::new(PathBuf::from("/tmp/ws"), ClaudeOptions::default());
-        app.agents.push(AgentState::new(
-            1,
-            "a".to_string(),
-            PathBuf::from("/tmp/ws"),
-            "a".into(),
-            ClaudeOptions::default(),
-        ));
-        app.agents.push(AgentState::new(
-            2,
-            "b".to_string(),
-            PathBuf::from("/tmp/ws"),
-            "b".into(),
-            ClaudeOptions::default(),
-        ));
-        app.rebuild_agent_index();
-        app.sidebar_selected = 1;
-
-        app.remove_agent(1);
-        assert!(app.sidebar_selected < app.agents.len());
     }
 
     // -- AgentState: active-time tracking (pause/resume timer) ----------------

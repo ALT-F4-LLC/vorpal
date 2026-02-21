@@ -133,17 +133,10 @@ pub struct Theme {
     pub search_current_fg: Color,
     pub search_bar_fg: Color,
 
-    // -- Sidebar panel --------------------------------------------------------
-    pub sidebar_bg: Color,
-    pub sidebar_fg: Color,
-    pub sidebar_border: Color,
-    pub sidebar_title: Color,
-    pub sidebar_selected_bg: Color,
-    pub sidebar_selected_fg: Color,
-    pub sidebar_status_running: Color,
-    pub sidebar_status_done: Color,
-    pub sidebar_status_error: Color,
-    pub sidebar_dim: Color,
+    // -- Dashboard overlay ----------------------------------------------------
+    pub dashboard_selected_bg: Color,
+    pub dashboard_selected_fg: Color,
+    pub dashboard_dim: Color,
 
     // -- Diff view -----------------------------------------------------------
     pub diff_addition_fg: Color,
@@ -306,16 +299,9 @@ impl Theme {
             search_current_fg: Color::Black,
             search_bar_fg: Color::Cyan,
 
-            sidebar_bg: Color::Black,
-            sidebar_fg: Color::White,
-            sidebar_border: Color::DarkGray,
-            sidebar_title: Color::Cyan,
-            sidebar_selected_bg: Color::DarkGray,
-            sidebar_selected_fg: Color::White,
-            sidebar_status_running: Color::Cyan,
-            sidebar_status_done: Color::Green,
-            sidebar_status_error: Color::Red,
-            sidebar_dim: Color::DarkGray,
+            dashboard_selected_bg: Color::DarkGray,
+            dashboard_selected_fg: Color::White,
+            dashboard_dim: Color::DarkGray,
 
             diff_addition_fg: Color::Green,
             diff_deletion_fg: Color::Red,
@@ -468,16 +454,9 @@ impl Theme {
             search_current_fg: Color::White,
             search_bar_fg: Color::Rgb(0, 140, 140),
 
-            sidebar_bg: Color::White,
-            sidebar_fg: Color::Black,
-            sidebar_border: Color::Gray,
-            sidebar_title: Color::Rgb(0, 140, 140),
-            sidebar_selected_bg: Color::Rgb(220, 220, 220),
-            sidebar_selected_fg: Color::Black,
-            sidebar_status_running: Color::Rgb(0, 140, 140),
-            sidebar_status_done: Color::Green,
-            sidebar_status_error: Color::Red,
-            sidebar_dim: Color::Gray,
+            dashboard_selected_bg: Color::Rgb(220, 220, 220),
+            dashboard_selected_fg: Color::Black,
+            dashboard_dim: Color::Gray,
 
             diff_addition_fg: Color::Green,
             diff_deletion_fg: Color::Red,

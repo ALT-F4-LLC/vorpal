@@ -377,46 +377,17 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         // Next agent: Tab or l.
         KeyCode::Tab | KeyCode::Char('l') => {
             app.next_agent();
-            // Keep sidebar selection in sync with focused agent.
-            if app.sidebar_visible {
-                app.sidebar_selected = app.focused;
-            }
         }
 
         // Previous agent: Shift+Tab or h.
         KeyCode::BackTab | KeyCode::Char('h') => {
             app.prev_agent();
-            // Keep sidebar selection in sync with focused agent.
-            if app.sidebar_visible {
-                app.sidebar_selected = app.focused;
-            }
         }
 
         // Focus agent by number (1-9).
         KeyCode::Char(c @ '1'..='9') => {
             let index = (c as usize) - ('1' as usize);
             app.focus_agent(index);
-            // Keep sidebar selection in sync with focused agent.
-            if app.sidebar_visible {
-                app.sidebar_selected = app.focused;
-            }
-        }
-
-        // Sidebar navigation: J moves selection down, K moves selection up.
-        // Enter on sidebar selection focuses that agent.
-        KeyCode::Char('J') if app.sidebar_visible => {
-            if !app.agents.is_empty() {
-                app.sidebar_selected = (app.sidebar_selected + 1) % app.agents.len();
-            }
-        }
-        KeyCode::Char('K') if app.sidebar_visible => {
-            if !app.agents.is_empty() {
-                app.sidebar_selected = if app.sidebar_selected == 0 {
-                    app.agents.len() - 1
-                } else {
-                    app.sidebar_selected - 1
-                };
-            }
         }
 
         // Scroll down toward latest (decrease scroll_offset).
@@ -627,15 +598,6 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             app.set_status_message(format!("Focus: {pane_label} pane"));
         }
 
-        // Toggle sidebar panel: b.
-        KeyCode::Char('b') => {
-            app.sidebar_visible = !app.sidebar_visible;
-            // Sync sidebar selection with current focus when opening.
-            if app.sidebar_visible {
-                app.sidebar_selected = app.focused;
-            }
-        }
-
         // Toggle dependency graph overlay: v.
         KeyCode::Char('v') => {
             app.show_graph = !app.show_graph;
@@ -647,8 +609,8 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
             }
         }
 
-        // Toggle aggregate dashboard overlay: D (Shift+d).
-        KeyCode::Char('D') => {
+        // Toggle aggregate dashboard overlay: d.
+        KeyCode::Char('d') => {
             app.show_dashboard = !app.show_dashboard;
             if app.show_dashboard {
                 app.show_graph = false;
@@ -695,13 +657,10 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
 
 /// Handle the Enter key in Normal mode.
 ///
-/// Priority:
-/// 1. Sidebar selection focus (when sidebar visible and selection differs)
-/// 2. Tool section toggle (when a section header is at viewport top)
+/// Toggles a tool section between display modes when a section header is
+/// at the viewport top.
 fn action_enter(app: &mut App) {
-    if app.sidebar_visible && app.sidebar_selected != app.focused {
-        app.focus_agent(app.sidebar_selected);
-    } else if let Some(section_idx) = find_section_at_viewport_top(app) {
+    if let Some(section_idx) = find_section_at_viewport_top(app) {
         let global = app.result_display;
         if let Some(agent) = app.focused_agent_mut() {
             agent.toggle_section(section_idx, global);
@@ -1833,12 +1792,6 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
             }
             app.set_status_message(format!("Tool results: {}", app.result_display.label()));
         }
-        "sidebar" => {
-            app.sidebar_visible = !app.sidebar_visible;
-            if app.sidebar_visible {
-                app.sidebar_selected = app.focused;
-            }
-        }
         "graph" => {
             app.show_graph = !app.show_graph;
             if app.show_graph {
@@ -1934,17 +1887,6 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
                 return true;
             }
 
-            // Check sidebar click regions.
-            if app.sidebar_visible {
-                for &(rect, agent_index) in &app.sidebar_rects {
-                    if rect_contains(rect, col, row) {
-                        app.focus_agent(agent_index);
-                        app.sidebar_selected = agent_index;
-                        return true;
-                    }
-                }
-            }
-
             // Click on the jump-to-bottom indicator scrolls to bottom.
             if let Some(rect) = app.jump_to_bottom_rect {
                 if rect_contains(rect, col, row) {
@@ -1973,9 +1915,6 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
             for &(rect, agent_index) in &app.tab_rects {
                 if rect_contains(rect, col, row) {
                     app.focus_agent(agent_index);
-                    if app.sidebar_visible {
-                        app.sidebar_selected = agent_index;
-                    }
                     return true;
                 }
             }

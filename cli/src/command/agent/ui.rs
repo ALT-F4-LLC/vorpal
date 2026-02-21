@@ -63,32 +63,13 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         return;
     }
 
-    // When the sidebar is visible, split horizontally first: sidebar | main.
-    // The sidebar width is ~30 columns, clamped so it never exceeds 40% of
-    // the terminal width.
-    let sidebar_width: u16 = if app.sidebar_visible {
-        30.min(area.width * 2 / 5)
-    } else {
-        0
-    };
-
-    let h_chunks = if sidebar_width > 0 {
-        Layout::horizontal([Constraint::Length(sidebar_width), Constraint::Fill(1)]).split(area)
-    } else {
-        // No sidebar — the main area gets the full width.
-        Layout::horizontal([Constraint::Length(0), Constraint::Fill(1)]).split(area)
-    };
-
-    let sidebar_area = h_chunks[0];
-    let main_area = h_chunks[1];
-
     // Compute inline input area height dynamically from the chat text content.
     // Hidden on the welcome screen; otherwise 1 row for the top border plus
     // enough content rows to fit the wrapped text, clamped to 3..=8 total.
     let input_height: u16 = if app.agents.is_empty() {
         0
     } else {
-        let content_lines = count_wrapped_lines(app.chat_input.text(), main_area.width as usize);
+        let content_lines = count_wrapped_lines(app.chat_input.text(), area.width as usize);
         // border (1) + content rows (at least 2 so the input doesn't feel cramped)
         let desired = 1 + content_lines.max(2) as u16;
         desired.clamp(3, 8)
@@ -100,7 +81,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Constraint::Length(input_height), // inline input area
         Constraint::Length(2),            // status bar
     ])
-    .split(main_area);
+    .split(area);
 
     // Store the content area rect for mouse scroll hit-testing.
     app.content_rect = Some(chunks[1]);
@@ -130,10 +111,6 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
     render_inline_input(app, frame, chunks[2]);
     render_status(app, frame, chunks[3]);
-
-    if app.sidebar_visible && sidebar_width > 0 {
-        render_sidebar(app, frame, sidebar_area);
-    }
 
     if app.show_help {
         render_help(&app.theme, frame, area);
@@ -227,6 +204,12 @@ fn render_tabs(app: &mut App, frame: &mut Frame, area: Rect) {
         return;
     }
 
+    // Show the activity label on the focused tab only when the tab bar has
+    // enough room. A rough heuristic: at least 25 columns per agent ensures
+    // the extra ~12 chars of activity text won't push tabs off-screen.
+    let show_focused_activity = !app.agents.is_empty()
+        && (area.width as usize / app.agents.len()) >= 25;
+
     let all_titles: Vec<Line<'_>> = app
         .agents
         .iter()
@@ -251,6 +234,23 @@ fn render_tabs(app: &mut App, frame: &mut Frame, area: Rect) {
                 Span::styled(format!(" {badge}"), Style::default().fg(badge_color)),
                 Span::raw(format!(" {num}: {label} ")),
             ];
+            // For the focused tab, append a short activity label when the
+            // agent is actively working (thinking or running a tool).
+            if show_focused_activity && i == app.focused {
+                let activity_text = match &agent.activity {
+                    AgentActivity::Thinking => Some("thinking".to_string()),
+                    AgentActivity::Tool(name) => Some(truncate_chars(name, 10, "\u{2026}")),
+                    _ => None,
+                };
+                if let Some(text) = activity_text {
+                    spans.push(Span::styled(
+                        format!("({text}) "),
+                        Style::default()
+                            .fg(theme.tab_border)
+                            .add_modifier(Modifier::DIM),
+                    ));
+                }
+            }
             // Append unread dot for agents with unread completion events.
             if app.unread_agents.contains(&agent.id) {
                 spans.push(Span::styled(CIRCLE, Style::default().fg(theme.tab_unread)));
@@ -454,202 +454,6 @@ fn visible_tab_window(
     }
 
     (entries, select_index)
-}
-
-// ---------------------------------------------------------------------------
-// Sidebar panel
-// ---------------------------------------------------------------------------
-
-/// Render the agent sidebar panel showing per-agent status information.
-///
-/// Each agent entry displays: status icon, agent number, workspace name,
-/// current activity, and elapsed time. The sidebar-selected agent is
-/// highlighted; the focused agent (whose output is in the main content
-/// area) is marked with an arrow indicator.
-fn render_sidebar(app: &mut App, frame: &mut Frame, area: Rect) {
-    let theme = &app.theme;
-
-    // Clear previous sidebar rects.
-    app.sidebar_rects.clear();
-
-    if app.agents.is_empty() {
-        let empty = Paragraph::new(" No agents")
-            .style(Style::default().fg(theme.sidebar_dim))
-            .block(
-                Block::default()
-                    .borders(Borders::RIGHT)
-                    .border_style(Style::default().fg(theme.sidebar_border))
-                    .title(" Agents ")
-                    .title_style(
-                        Style::default()
-                            .fg(theme.sidebar_title)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-            );
-        frame.render_widget(empty, area);
-        return;
-    }
-
-    // Inner width available for text (area minus right border).
-    let inner_width = area.width.saturating_sub(1) as usize;
-
-    // Display agents in creation order (matching tab bar and 1-9 keybindings)
-    // so the sidebar indices stay consistent with the rest of the UI.
-    let indices: Vec<usize> = (0..app.agents.len()).collect();
-
-    let mut lines: Vec<Line<'_>> = Vec::new();
-    // Track (start_line, agent_index) for click regions.
-    let mut entry_positions: Vec<(usize, usize)> = Vec::new();
-
-    for &idx in &indices {
-        let agent = &app.agents[idx];
-        let is_focused = idx == app.focused;
-        let is_selected = idx == app.sidebar_selected;
-
-        let entry_start = lines.len();
-
-        // Status icon.
-        let (icon, icon_color) = match (&agent.status, &agent.activity) {
-            (&AgentStatus::Pending, _) => ("\u{25CB}", theme.sidebar_dim), // ○
-            (AgentStatus::Exited(Some(0)), _) => (CHECK_MARK, theme.sidebar_status_done),
-            (AgentStatus::Exited(_), _) => (CROSS_MARK, theme.sidebar_status_error),
-            (AgentStatus::Running, AgentActivity::Idle) => (CIRCLE, theme.sidebar_dim),
-            (AgentStatus::Running, AgentActivity::Done) => (CHECK_MARK, theme.sidebar_status_done),
-            (AgentStatus::Running, _) => {
-                let frame_idx = app.tick % SPINNER_FRAMES.len();
-                (SPINNER_FRAMES[frame_idx], theme.sidebar_status_running)
-            }
-        };
-
-        // Focus indicator.
-        let focus_indicator = if is_focused { ARROW_RIGHT } else { " " };
-
-        // Agent name: number + workspace basename.
-        let label = workspace_label(&agent.workspace);
-        let num = idx + 1;
-
-        // Activity label.
-        let activity = match &agent.activity {
-            AgentActivity::Idle => "idle".to_string(),
-            AgentActivity::Thinking => "thinking".to_string(),
-            AgentActivity::Tool(name) => truncate_chars(name, 10, "..."),
-            AgentActivity::Done => "done".to_string(),
-        };
-
-        // Elapsed time.
-        let elapsed = format_elapsed(agent.active_elapsed());
-
-        // First line: focus indicator + icon + number: name.
-        let name_text = format!("{num}: {label}");
-        // Truncate name to fit.
-        let max_name = inner_width.saturating_sub(5); // " > X N: "
-        let display_name = if name_text.len() > max_name {
-            format!("{}\u{2026}", &name_text[..max_name.saturating_sub(1)])
-        } else {
-            name_text
-        };
-
-        let row_style = if is_selected {
-            Style::default()
-                .bg(theme.sidebar_selected_bg)
-                .fg(theme.sidebar_selected_fg)
-        } else {
-            Style::default().fg(theme.sidebar_fg)
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled(format!("{focus_indicator} "), row_style),
-            Span::styled(format!("{icon} "), Style::default().fg(icon_color)),
-            Span::styled(display_name, row_style.add_modifier(Modifier::BOLD)),
-        ]));
-
-        // Second line: activity + elapsed (indented).
-        let detail = format!("    {activity} | {elapsed}");
-        let detail_style = if is_selected {
-            Style::default()
-                .bg(theme.sidebar_selected_bg)
-                .fg(theme.sidebar_dim)
-        } else {
-            Style::default().fg(theme.sidebar_dim)
-        };
-        lines.push(Line::from(Span::styled(detail, detail_style)));
-
-        // Prompt snippet (third line, truncated).
-        let prompt_snippet = agent.prompt.lines().next().unwrap_or("");
-        let max_snippet = inner_width.saturating_sub(5);
-        let snippet = if prompt_snippet.len() > max_snippet {
-            format!(
-                "    \"{}\u{2026}\"",
-                &prompt_snippet[..max_snippet.saturating_sub(2)]
-            )
-        } else if !prompt_snippet.is_empty() {
-            format!("    \"{prompt_snippet}\"")
-        } else {
-            String::new()
-        };
-        if !snippet.is_empty() {
-            let snippet_style = if is_selected {
-                Style::default()
-                    .bg(theme.sidebar_selected_bg)
-                    .fg(theme.sidebar_dim)
-                    .add_modifier(Modifier::ITALIC)
-            } else {
-                Style::default()
-                    .fg(theme.sidebar_dim)
-                    .add_modifier(Modifier::ITALIC)
-            };
-            lines.push(Line::from(Span::styled(snippet, snippet_style)));
-        }
-
-        entry_positions.push((entry_start, idx));
-
-        // Blank separator between agents.
-        lines.push(Line::from(""));
-    }
-
-    // Remove trailing blank line.
-    if lines.last().is_some_and(|l| l.width() == 0) {
-        lines.pop();
-    }
-
-    // Compute sidebar click regions. The block has a top border (title row)
-    // so inner content starts at area.y + 1. Each line is one row.
-    {
-        let inner_y = area.y + 1; // below block title
-        let inner_w = area.width.saturating_sub(1); // minus right border
-        let total_lines = lines.len();
-        for (i, &(start_line, agent_idx)) in entry_positions.iter().enumerate() {
-            let end_line = if i + 1 < entry_positions.len() {
-                // Next entry's start minus the blank separator.
-                entry_positions[i + 1].0.saturating_sub(1)
-            } else {
-                total_lines
-            };
-            let row_start = inner_y + start_line as u16;
-            let row_count = (end_line - start_line) as u16;
-            if row_start + row_count <= area.y + area.height {
-                app.sidebar_rects
-                    .push((Rect::new(area.x, row_start, inner_w, row_count), agent_idx));
-            }
-        }
-    }
-
-    let title = format!(" Agents ({}) ", app.agents.len());
-    let sidebar = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::RIGHT)
-                .border_style(Style::default().fg(theme.sidebar_border))
-                .title(title)
-                .title_style(
-                    Style::default()
-                        .fg(theme.sidebar_title)
-                        .add_modifier(Modifier::BOLD),
-                ),
-        )
-        .style(Style::default().bg(theme.sidebar_bg).fg(theme.sidebar_fg));
-
-    frame.render_widget(sidebar, area);
 }
 
 // ---------------------------------------------------------------------------
@@ -3494,10 +3298,13 @@ fn render_graph(app: &App, frame: &mut Frame, area: Rect) {
 /// row is highlighted and pressing Enter focuses that agent.
 fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
-    let popup = centered_rect(80, 80, area);
+    let popup = centered_rect(85, 80, area);
 
     // Clear the area behind the popup.
     frame.render_widget(Clear, popup);
+
+    // Show the PROMPT column only when the terminal is wide enough.
+    let show_prompt = area.width >= 100;
 
     let heading_style = Style::default()
         .fg(theme.help_heading)
@@ -3506,7 +3313,7 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
         .fg(theme.help_key)
         .add_modifier(Modifier::BOLD);
     let footer_style = Style::default().fg(theme.help_footer);
-    let dim_style = Style::default().fg(theme.sidebar_dim);
+    let dim_style = Style::default().fg(theme.dashboard_dim);
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
@@ -3520,13 +3327,18 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
         )));
     } else {
         // Table header.
-        lines.push(Line::from(vec![Span::styled(
+        let header_text = if show_prompt {
+            format!(
+                " {:<3} {:<2} {:<16} {:<20} {:<12} {:>6} {:>6} {:>8} ",
+                "#", "", "WORKSPACE", "PROMPT", "ACTIVITY", "TURNS", "TOOLS", "ELAPSED"
+            )
+        } else {
             format!(
                 " {:<3} {:<2} {:<16} {:<12} {:>6} {:>6} {:>8} ",
                 "#", "", "WORKSPACE", "ACTIVITY", "TURNS", "TOOLS", "ELAPSED"
-            ),
-            header_style,
-        )]));
+            )
+        };
+        lines.push(Line::from(vec![Span::styled(header_text, header_style)]));
         lines.push(Line::from(Span::styled(
             format!(
                 " {}",
@@ -3588,15 +3400,29 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
             total_tools += agent.tool_count;
 
             let row_text = format!(" {:<3} ", num,);
-            let rest_text = format!(
-                " {:<16} {:<12} {:>6} {:>6} {:>8} ",
-                display_label, activity_label, agent.turn_count, agent.tool_count, elapsed,
-            );
+            let rest_text = if show_prompt {
+                let prompt_preview = agent.prompt.lines().next().unwrap_or("");
+                let display_prompt = truncate_chars(prompt_preview, 18, "\u{2026}");
+                format!(
+                    " {:<16} {:<20} {:<12} {:>6} {:>6} {:>8} ",
+                    display_label,
+                    display_prompt,
+                    activity_label,
+                    agent.turn_count,
+                    agent.tool_count,
+                    elapsed,
+                )
+            } else {
+                format!(
+                    " {:<16} {:<12} {:>6} {:>6} {:>8} ",
+                    display_label, activity_label, agent.turn_count, agent.tool_count, elapsed,
+                )
+            };
 
             let row_style = if is_selected {
                 Style::default()
-                    .bg(theme.sidebar_selected_bg)
-                    .fg(theme.sidebar_selected_fg)
+                    .bg(theme.dashboard_selected_bg)
+                    .fg(theme.dashboard_selected_fg)
             } else {
                 Style::default().fg(theme.help_fg)
             };
@@ -3618,7 +3444,19 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
         )));
 
         // Aggregate totals row.
-        lines.push(Line::from(vec![Span::styled(
+        let totals_text = if show_prompt {
+            format!(
+                " {:<3} {:<2} {:<16} {:<20} {:<12} {:>6} {:>6} {:>8} ",
+                "\u{03A3}", // Sigma
+                "",
+                format!("{}R {}D {}E", running_count, done_count, error_count),
+                "",
+                "",
+                total_turns,
+                total_tools,
+                "",
+            )
+        } else {
             format!(
                 " {:<3} {:<2} {:<16} {:<12} {:>6} {:>6} {:>8} ",
                 "\u{03A3}", // Sigma
@@ -3628,7 +3466,10 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
                 total_turns,
                 total_tools,
                 "",
-            ),
+            )
+        };
+        lines.push(Line::from(vec![Span::styled(
+            totals_text,
             Style::default()
                 .fg(theme.help_heading)
                 .add_modifier(Modifier::BOLD),
@@ -3712,9 +3553,8 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
         (
             "Views & Panels",
             vec![
-                ("b", "Toggle sidebar panel"),
                 ("v", "Toggle dependency graph"),
-                ("D", "Toggle aggregate dashboard"),
+                ("d", "Toggle aggregate dashboard"),
                 ("|", "Toggle split-pane view"),
                 ("`", "Switch split-pane focus"),
                 ("s", "Cycle tool result display"),
@@ -3730,7 +3570,6 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
                 ("y", "Copy output to clipboard"),
                 ("e", "Export session to Markdown"),
                 ("Enter", "Toggle tool result section"),
-                ("J / K", "Navigate sidebar selection"),
                 ("?", "Toggle this help"),
             ],
         ),
