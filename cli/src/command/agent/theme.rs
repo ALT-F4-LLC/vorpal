@@ -33,7 +33,6 @@ pub struct Theme {
     pub tab_highlight: Color,
     pub tab_text: Color,
     pub tab_overflow: Color,
-    pub tab_title: Color,
 
     // -- Terminal too small message -------------------------------------------
     pub terminal_too_small: Color,
@@ -116,13 +115,6 @@ pub struct Theme {
     pub confirm_no: Color,
     pub confirm_bg: Color,
     pub confirm_fg: Color,
-
-    // -- Welcome screen ------------------------------------------------------
-    pub welcome_title: Color,
-    pub welcome_description: Color,
-    pub welcome_key: Color,
-    pub welcome_key_desc: Color,
-    pub welcome_border: Color,
 
     // -- Toast notifications -------------------------------------------------
     pub toast_bg: Color,
@@ -224,7 +216,6 @@ impl Theme {
             tab_highlight: Color::Cyan,
             tab_text: Color::White,
             tab_overflow: Color::DarkGray,
-            tab_title: Color::White,
 
             terminal_too_small: Color::Red,
 
@@ -300,12 +291,6 @@ impl Theme {
             confirm_no: Color::Red,
             confirm_bg: Color::Black,
             confirm_fg: Color::White,
-
-            welcome_title: Color::Cyan,
-            welcome_description: Color::Gray,
-            welcome_key: Color::Yellow,
-            welcome_key_desc: Color::DarkGray,
-            welcome_border: Color::DarkGray,
 
             toast_bg: Color::Black,
             toast_fg: Color::White,
@@ -393,7 +378,6 @@ impl Theme {
             tab_highlight: Color::Rgb(0, 140, 140),
             tab_text: Color::Black,
             tab_overflow: Color::Gray,
-            tab_title: Color::Black,
 
             terminal_too_small: Color::Red,
 
@@ -469,12 +453,6 @@ impl Theme {
             confirm_no: Color::Red,
             confirm_bg: Color::White,
             confirm_fg: Color::Black,
-
-            welcome_title: Color::Rgb(0, 140, 140),
-            welcome_description: Color::DarkGray,
-            welcome_key: Color::Rgb(180, 130, 0),
-            welcome_key_desc: Color::Gray,
-            welcome_border: Color::Gray,
 
             toast_bg: Color::White,
             toast_fg: Color::Black,

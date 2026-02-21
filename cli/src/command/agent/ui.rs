@@ -95,7 +95,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     };
 
     let chunks = Layout::vertical([
-        Constraint::Length(3),            // tab bar
+        Constraint::Length(2),            // tab bar
         Constraint::Fill(1),              // content
         Constraint::Length(input_height), // inline input area
         Constraint::Length(2),            // status bar
@@ -205,13 +205,24 @@ fn render_tabs(app: &mut App, frame: &mut Frame, area: Rect) {
     app.tab_rects.clear();
 
     if app.agents.is_empty() {
-        let hint = Paragraph::new(" [No agents] — press 'n' to start one")
-            .style(Style::default().fg(theme.tab_no_agents))
-            .block(
-                Block::default()
-                    .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(theme.tab_border)),
-            );
+        let dim = Style::default().fg(theme.tab_no_agents);
+        let key = Style::default()
+            .fg(theme.tab_highlight)
+            .add_modifier(Modifier::BOLD);
+        let hint = Paragraph::new(Line::from(vec![
+            Span::styled(" No agents -- press ", dim),
+            Span::styled("n", key),
+            Span::styled(" to create one · ", dim),
+            Span::styled("?", key),
+            Span::styled(" help · ", dim),
+            Span::styled("q", key),
+            Span::styled(" quit", dim),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme.tab_border)),
+        );
         frame.render_widget(hint, area);
         return;
     }
@@ -238,7 +249,7 @@ fn render_tabs(app: &mut App, frame: &mut Frame, area: Rect) {
             };
             let mut spans = vec![
                 Span::styled(format!(" {badge}"), Style::default().fg(badge_color)),
-                Span::raw(format!(" {num}: ⌂ {label} ")),
+                Span::raw(format!(" {num}: {label} ")),
             ];
             // Append unread dot for agents with unread completion events.
             if app.unread_agents.contains(&agent.id) {
@@ -294,30 +305,14 @@ fn render_tabs(app: &mut App, frame: &mut Frame, area: Rect) {
         .highlight_style(
             Style::default()
                 .fg(theme.tab_highlight)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+                .add_modifier(Modifier::BOLD),
         )
         .style(Style::default().fg(theme.tab_text))
-        .divider(Span::raw("|"))
+        .divider(Span::styled("│", Style::default().fg(theme.tab_border)))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(theme.tab_border))
-                .title(
-                    app.focused_agent()
-                        .map(|a| {
-                            format!(
-                                " ◆ Agent {} │ ⌂ {} ",
-                                app.focused + 1,
-                                workspace_label(&a.workspace)
-                            )
-                        })
-                        .unwrap_or_else(|| " Agents ".to_string()),
-                )
-                .title_style(
-                    Style::default()
-                        .fg(theme.tab_title)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                .border_style(Style::default().fg(theme.tab_border)),
         );
 
     frame.render_widget(tabs, area);
@@ -683,7 +678,8 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
 
     match app.focused_agent() {
         None => {
-            render_welcome(theme, frame, area);
+            // Empty content area — quick start hints are in the tab bar.
+            frame.render_widget(block, area);
         }
         Some(_) => {
             let height = inner.height as usize;
@@ -1029,101 +1025,6 @@ fn render_content_pane(
     maybe_render_jump_to_bottom(app, frame, inner, has_new, scroll_off, is_focused);
 }
 
-/// Render a centered welcome screen when no agents exist.
-///
-/// Displays the tool name, a brief description, and the most important
-/// keybindings to help new users get started quickly.
-fn render_welcome(theme: &Theme, frame: &mut Frame, area: Rect) {
-    // Welcome content height: title(1) + blank(1) + border(1) + blank(1) +
-    //   description(2) + blank(1) + keybindings header(1) + blank(1) +
-    //   3 keybindings + blank(1) + border(1) + blank(1) + footer(1) = ~16 rows
-    // Plus 2 for the outer block borders = 18 total.
-    let popup_height: u16 = 18;
-    let popup_width: u16 = 50;
-
-    // Center the popup in the content area.
-    let popup = centered_rect_fixed_height(
-        // Convert fixed width to a percentage of the area, clamped to [30, 80].
-        ((popup_width as u32 * 100 / area.width.max(1) as u32) as u16).clamp(30, 80),
-        popup_height.min(area.height),
-        area,
-    );
-
-    let title_style = Style::default()
-        .fg(theme.welcome_title)
-        .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(theme.welcome_description);
-    let key_style = Style::default()
-        .fg(theme.welcome_key)
-        .add_modifier(Modifier::BOLD);
-    let key_desc_style = Style::default().fg(theme.welcome_key_desc);
-    let border_line_style = Style::default().fg(theme.welcome_border);
-
-    let mut text = vec![
-        // Title block.
-        Line::from(""),
-        Line::from(Span::styled("Vorpal Agent Manager", title_style)).alignment(Alignment::Center),
-        Line::from(""),
-        Line::from(Span::styled(
-            "────────────────────────────",
-            border_line_style,
-        ))
-        .alignment(Alignment::Center),
-        Line::from(""),
-        // Description.
-        Line::from(Span::styled(
-            "Launch and manage multiple Claude Code",
-            desc_style,
-        ))
-        .alignment(Alignment::Center),
-        Line::from(Span::styled(
-            "agents from a single terminal interface.",
-            desc_style,
-        ))
-        .alignment(Alignment::Center),
-        Line::from(""),
-        // Quick-start keybindings header.
-        Line::from(Span::styled("Quick Start", title_style)).alignment(Alignment::Center),
-        Line::from(""),
-    ];
-
-    let bindings: &[(&str, &str)] = &[
-        ("  n  ", "Create a new agent"),
-        ("  ?  ", "Show all keybindings"),
-        ("  q  ", "Quit"),
-    ];
-
-    for (key, desc) in bindings {
-        text.push(
-            Line::from(vec![
-                Span::styled(*key, key_style),
-                Span::styled(*desc, key_desc_style),
-            ])
-            .alignment(Alignment::Center),
-        );
-    }
-
-    text.push(Line::from(""));
-    text.push(
-        Line::from(Span::styled(
-            "Press 'n' to get started",
-            Style::default()
-                .fg(theme.welcome_title)
-                .add_modifier(Modifier::DIM),
-        ))
-        .alignment(Alignment::Center),
-    );
-
-    let welcome = Paragraph::new(text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.welcome_border))
-            .title(" Welcome ")
-            .title_style(title_style),
-    );
-
-    frame.render_widget(welcome, popup);
-}
 
 /// Compute the total number of terminal rows needed to display `lines` in a
 /// viewport of the given `width`, accounting for word-wrapping.
@@ -1479,7 +1380,7 @@ fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, 
                     Style::default().fg(theme.tool_block_border),
                 ),
                 Span::styled(
-                    format!("{size} (press 'r' to cycle view)"),
+                    format!("{size} (press 's' to cycle view)"),
                     Style::default().fg(theme.tool_result_hidden),
                 ),
             ]));
@@ -1503,7 +1404,7 @@ fn render_tool_result_run<'a>(run: &ToolResultRun<'a>, out: &mut Vec<Line<'a>>, 
                         Style::default().fg(theme.tool_block_border),
                     ),
                     Span::styled(
-                        format!("... {hidden_count} more lines hidden (press 'r' to cycle view)"),
+                        format!("... {hidden_count} more lines hidden (press 's' to cycle view)"),
                         Style::default().fg(theme.tool_result_hidden),
                     ),
                 ]));
