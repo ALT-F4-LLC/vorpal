@@ -3658,10 +3658,7 @@ mod tests {
 
         // save_settings should update the pending agent's claude_options.
         app.save_settings();
-        assert_eq!(
-            app.agents[0].claude_options.model,
-            Some("opus".to_string())
-        );
+        assert_eq!(app.agents[0].claude_options.model, Some("opus".to_string()));
         assert_eq!(app.input_mode, InputMode::Normal);
     }
 

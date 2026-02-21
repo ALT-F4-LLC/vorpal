@@ -121,17 +121,16 @@ pub fn parse_session_preview(file_path: &Path) -> Option<SessionInfo> {
         let content = message.get("content");
         let preview = match content {
             Some(serde_json::Value::String(s)) => s.clone(),
-            Some(serde_json::Value::Array(arr)) => {
-                arr.iter()
-                    .find_map(|block| {
-                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                            block.get("text").and_then(|t| t.as_str()).map(String::from)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default()
-            }
+            Some(serde_json::Value::Array(arr)) => arr
+                .iter()
+                .find_map(|block| {
+                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        block.get("text").and_then(|t| t.as_str()).map(String::from)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default(),
             _ => continue,
         };
 
@@ -168,13 +167,21 @@ pub fn parse_session_preview(file_path: &Path) -> Option<SessionInfo> {
         buf.lines().rev().find_map(|line| {
             let val: serde_json::Value = serde_json::from_str(line).ok()?;
             let s = val.get("slug")?.as_str()?;
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         })
     } else {
         head_content.lines().rev().find_map(|line| {
             let val: serde_json::Value = serde_json::from_str(line).ok()?;
             let s = val.get("slug")?.as_str()?;
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         })
     };
 
@@ -237,8 +244,7 @@ pub fn load_session_conversation(file_path: &Path) -> Vec<DisplayLine> {
                                 block.get("type").and_then(|t| t.as_str()).unwrap_or("");
                             match block_type {
                                 "text" => {
-                                    if let Some(text) = block.get("text").and_then(|t| t.as_str())
-                                    {
+                                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                                         lines.push(DisplayLine::UserPrompt {
                                             content: text.to_string(),
                                         });
@@ -284,9 +290,7 @@ pub fn load_session_conversation(file_path: &Path) -> Vec<DisplayLine> {
                         if !has_tool_results {
                             last_edit_input = None;
                         }
-                    } else if let Some(text) =
-                        message.get("content").and_then(|c| c.as_str())
-                    {
+                    } else if let Some(text) = message.get("content").and_then(|c| c.as_str()) {
                         // String content: direct user prompt.
                         lines.push(DisplayLine::UserPrompt {
                             content: text.to_string(),
@@ -335,18 +339,9 @@ pub fn load_session_conversation(file_path: &Path) -> Vec<DisplayLine> {
                                     // Capture Edit tool input for diff generation.
                                     if tool == "Edit" {
                                         last_edit_input = input_val.and_then(|v| {
-                                            let fp = v
-                                                .get("file_path")?
-                                                .as_str()?
-                                                .to_string();
-                                            let old = v
-                                                .get("old_string")?
-                                                .as_str()?
-                                                .to_string();
-                                            let new = v
-                                                .get("new_string")?
-                                                .as_str()?
-                                                .to_string();
+                                            let fp = v.get("file_path")?.as_str()?.to_string();
+                                            let old = v.get("old_string")?.as_str()?.to_string();
+                                            let new = v.get("new_string")?.as_str()?.to_string();
                                             Some((old, new, fp))
                                         });
                                     } else {

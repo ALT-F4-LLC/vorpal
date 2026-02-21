@@ -207,8 +207,8 @@ fn render_tabs(app: &mut App, frame: &mut Frame, area: Rect) {
     // Show the activity label on the focused tab only when the tab bar has
     // enough room. A rough heuristic: at least 25 columns per agent ensures
     // the extra ~12 chars of activity text won't push tabs off-screen.
-    let show_focused_activity = !app.agents.is_empty()
-        && (area.width as usize / app.agents.len()) >= 25;
+    let show_focused_activity =
+        !app.agents.is_empty() && (area.width as usize / app.agents.len()) >= 25;
 
     let all_titles: Vec<Line<'_>> = app
         .agents
@@ -828,7 +828,6 @@ fn render_content_pane(
     let scroll_off = app.agents[agent_idx].scroll_offset;
     maybe_render_jump_to_bottom(app, frame, inner, has_new, scroll_off, is_focused);
 }
-
 
 /// Compute the total number of terminal rows needed to display `lines` in a
 /// viewport of the given `width`, accounting for word-wrapping.
@@ -1995,16 +1994,17 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 Style::default().fg(theme.status_no_agent),
             )),
             Some(agent) => {
-                let (activity_label, activity_color) = if matches!(agent.status, AgentStatus::Pending) {
-                    ("Pending", theme.activity_idle)
-                } else {
-                    match &agent.activity {
-                        AgentActivity::Idle => ("Idle", theme.activity_idle),
-                        AgentActivity::Thinking => ("Thinking", theme.activity_thinking),
-                        AgentActivity::Tool(_) => ("", theme.activity_tool),
-                        AgentActivity::Done => ("Done", theme.activity_done),
-                    }
-                };
+                let (activity_label, activity_color) =
+                    if matches!(agent.status, AgentStatus::Pending) {
+                        ("Pending", theme.activity_idle)
+                    } else {
+                        match &agent.activity {
+                            AgentActivity::Idle => ("Idle", theme.activity_idle),
+                            AgentActivity::Thinking => ("Thinking", theme.activity_thinking),
+                            AgentActivity::Tool(_) => ("", theme.activity_tool),
+                            AgentActivity::Done => ("Done", theme.activity_done),
+                        }
+                    };
 
                 let activity_span = if let AgentActivity::Tool(name) = &agent.activity {
                     Span::styled(
@@ -3405,7 +3405,8 @@ fn render_dashboard(app: &App, frame: &mut Frame, area: Rect) {
             let row_text = format!(" {:<3} ", num,);
             let rest_text = if show_prompt {
                 let prompt_preview = agent.prompt.lines().next().unwrap_or("");
-                let display_prompt = truncate_chars(prompt_preview, prompt_width.saturating_sub(2), "\u{2026}");
+                let display_prompt =
+                    truncate_chars(prompt_preview, prompt_width.saturating_sub(2), "\u{2026}");
                 format!(
                     " {:<16} {:<pw$} {:<12} {:>6} {:>6} {:>8} ",
                     display_label,

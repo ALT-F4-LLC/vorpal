@@ -1205,7 +1205,10 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
             let claude_options = agent.claude_options.clone();
             let pending_id = agent.id;
 
-            match manager.spawn(&text, &workspace, &claude_options, None, Some(pending_id)).await {
+            match manager
+                .spawn(&text, &workspace, &claude_options, None, Some(pending_id))
+                .await
+            {
                 Ok(new_agent_id) => {
                     app.save_to_history(&text, &workspace, &claude_options);
                     let agent_mut = app.agents.get_mut(app.focused).unwrap();
@@ -1220,9 +1223,7 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
                     // and push the error into the output buffer so the user can
                     // see what went wrong after the status message expires.
                     if let Some(agent_mut) = app.agents.get_mut(app.focused) {
-                        agent_mut.push_line(DisplayLine::System(format!(
-                            "Spawn failed: {e}"
-                        )));
+                        agent_mut.push_line(DisplayLine::System(format!("Spawn failed: {e}")));
                         agent_mut.status = AgentStatus::Exited(None);
                     }
                 }
@@ -1241,7 +1242,13 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
             let target_id = agent.id;
 
             match manager
-                .spawn(&text, &workspace, &claude_options, session_id.as_deref(), None)
+                .spawn(
+                    &text,
+                    &workspace,
+                    &claude_options,
+                    session_id.as_deref(),
+                    None,
+                )
                 .await
             {
                 Ok(new_agent_id) => {
@@ -1258,9 +1265,7 @@ async fn submit_chat_message(app: &mut App, manager: &mut AgentManager) {
                 Err(e) => {
                     app.set_status_message(format!("Spawn failed: {e}"));
                     if let Some(agent_mut) = app.agent_by_id_mut(target_id) {
-                        agent_mut.push_line(DisplayLine::System(format!(
-                            "Resume failed: {e}"
-                        )));
+                        agent_mut.push_line(DisplayLine::System(format!("Resume failed: {e}")));
                     }
                 }
             }
