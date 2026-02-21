@@ -336,7 +336,13 @@ impl InputBuffer {
         let search = if trimmed.len() < end { trimmed } else { before };
         let word_start = search
             .rfind(|c: char| c.is_whitespace())
-            .map(|i| i + search[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(0))
+            .map(|i| {
+                i + search[i..]
+                    .chars()
+                    .next()
+                    .map(|c| c.len_utf8())
+                    .unwrap_or(0)
+            })
             .unwrap_or(0);
         let killed = self.text[word_start..self.cursor].to_string();
         self.text.replace_range(word_start..self.cursor, "");

@@ -2076,9 +2076,9 @@ async fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::super::state::{AgentState, AgentStatus, App, InputMode};
     use super::super::manager::ClaudeOptions;
+    use super::super::state::{AgentState, AgentStatus, App, InputMode};
+    use super::*;
     use std::path::PathBuf;
 
     #[test]

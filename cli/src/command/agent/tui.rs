@@ -440,10 +440,7 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
                         // UserPrompt so the visual indicator disappears when
                         // the message is processed.
                         for dl in agent.output.iter_mut() {
-                            if let DisplayLine::UserPrompt {
-                                ref mut queued, ..
-                            } = dl
-                            {
+                            if let DisplayLine::UserPrompt { ref mut queued, .. } = dl {
                                 if *queued {
                                     *queued = false;
                                     break;

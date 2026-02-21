@@ -566,12 +566,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
                 app.theme.streaming_cursor,
             );
 
-            append_thinking_indicator(
-                &mut display_lines,
-                agent,
-                app.tick,
-                &app.theme,
-            );
+            append_thinking_indicator(&mut display_lines, agent, app.tick, &app.theme);
 
             let paragraph = Paragraph::new(display_lines)
                 .block(block)
@@ -911,12 +906,7 @@ fn render_content_pane(
         app.theme.streaming_cursor,
     );
 
-    append_thinking_indicator(
-        &mut display_lines,
-        agent,
-        app.tick,
-        &app.theme,
-    );
+    append_thinking_indicator(&mut display_lines, agent, app.tick, &app.theme);
 
     let paragraph = Paragraph::new(display_lines)
         .block(block)
@@ -1344,7 +1334,11 @@ fn needs_blank_line_before(prev: BlockCategory, current: BlockCategory) -> bool 
 /// Applies inter-element spacing rules (design spec Section 3) by inserting
 /// blank lines between blocks based on their semantic categories. A final
 /// dedup pass ensures no consecutive blank lines appear in the output.
-fn render_to_spans<'a>(blocks: &[CollapsedBlock<'a>], theme: &Theme, content_width: u16) -> Vec<Line<'a>> {
+fn render_to_spans<'a>(
+    blocks: &[CollapsedBlock<'a>],
+    theme: &Theme,
+    content_width: u16,
+) -> Vec<Line<'a>> {
     let mut out: Vec<Line<'a>> = Vec::new();
     let mut prev_category: Option<BlockCategory> = None;
 
@@ -1754,7 +1748,11 @@ fn display_line_to_lines_with_indicator<'a>(
 /// [`DisplayLine::ToolResult`], which are rendered inline (via
 /// `markdown::render_markdown`) and by [`render_tool_result`] respectively with
 /// run-position awareness.
-fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme, content_width: u16) -> Vec<Line<'a>> {
+fn display_line_to_lines<'a>(
+    dl: &'a DisplayLine,
+    theme: &Theme,
+    content_width: u16,
+) -> Vec<Line<'a>> {
     match dl {
         // Text is handled by render_text_line() for run tracking.
         DisplayLine::Text(_) => Vec::new(),
@@ -1788,10 +1786,7 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme, content_width: 
         DisplayLine::ToolResult { .. } => Vec::new(),
 
         DisplayLine::Thinking(s) => vec![Line::from(vec![
-            Span::styled(
-                "~ ",
-                Style::default().fg(theme.thinking_color),
-            ),
+            Span::styled("~ ", Style::default().fg(theme.thinking_color)),
             Span::styled(
                 s.as_str(),
                 Style::default()
@@ -1900,10 +1895,7 @@ fn display_line_to_lines<'a>(dl: &'a DisplayLine, theme: &Theme, content_width: 
                 .add_modifier(Modifier::BOLD);
 
             if content.is_empty() {
-                let mut spans = vec![Span::styled(
-                    USER_MARKER.to_string(),
-                    marker_style,
-                )];
+                let mut spans = vec![Span::styled(USER_MARKER.to_string(), marker_style)];
                 if *queued {
                     let used = UnicodeWidthStr::width(USER_MARKER) + 8; // 8 for "[queued]"
                     let pad = (content_width as usize).saturating_sub(used);
@@ -5172,15 +5164,14 @@ mod tests {
         let output = render_to_spans(&blocks, &test_theme(), 80);
         // There should be a blank line between the text and the prompt.
         let blank_count = output.iter().filter(|l| is_blank_line(l)).count();
-        assert!(blank_count >= 1, "expected at least one blank line before UserPrompt");
+        assert!(
+            blank_count >= 1,
+            "expected at least one blank line before UserPrompt"
+        );
         // Find the prompt line (contains ">").
         let prompt_idx = output
             .iter()
-            .position(|l| {
-                l.spans
-                    .iter()
-                    .any(|s| s.content.as_ref().contains('>'))
-            })
+            .position(|l| l.spans.iter().any(|s| s.content.as_ref().contains('>')))
             .expect("should find user prompt line");
         assert!(prompt_idx > 0, "prompt should not be the first line");
         assert!(
@@ -5204,11 +5195,7 @@ mod tests {
         // Find the prompt line.
         let prompt_idx = output
             .iter()
-            .position(|l| {
-                l.spans
-                    .iter()
-                    .any(|s| s.content.as_ref().contains('>'))
-            })
+            .position(|l| l.spans.iter().any(|s| s.content.as_ref().contains('>')))
             .expect("should find user prompt line");
         // The next line after the prompt line(s) should be blank.
         let after_prompt = prompt_idx + 1;
@@ -5232,7 +5219,10 @@ mod tests {
         let output = render_to_spans(&blocks, &test_theme(), 80);
         // There should be no blank lines in the output.
         let blank_count = output.iter().filter(|l| is_blank_line(l)).count();
-        assert_eq!(blank_count, 0, "no blank lines between consecutive text runs");
+        assert_eq!(
+            blank_count, 0,
+            "no blank lines between consecutive text runs"
+        );
     }
 
     #[test]
@@ -5253,11 +5243,7 @@ mod tests {
         // Find the tool use line (contains "Read").
         let tool_idx = output
             .iter()
-            .position(|l| {
-                l.spans
-                    .iter()
-                    .any(|s| s.content.as_ref().contains("Read"))
-            })
+            .position(|l| l.spans.iter().any(|s| s.content.as_ref().contains("Read")))
             .expect("should find tool use line");
         assert!(tool_idx > 0, "tool call should not be the first line");
         assert!(
@@ -5298,11 +5284,7 @@ mod tests {
         // Find the summary line (contains "in /").
         let summary_idx = output
             .iter()
-            .position(|l| {
-                l.spans
-                    .iter()
-                    .any(|s| s.content.as_ref().contains("in /"))
-            })
+            .position(|l| l.spans.iter().any(|s| s.content.as_ref().contains("in /")))
             .expect("should find turn summary line");
         assert!(summary_idx > 0, "summary should not be the first line");
         assert!(
@@ -5466,11 +5448,7 @@ mod tests {
 
     #[test]
     fn dedup_blank_lines_trims_leading() {
-        let lines = vec![
-            Line::from(""),
-            Line::from(""),
-            Line::from("content"),
-        ];
+        let lines = vec![Line::from(""), Line::from(""), Line::from("content")];
         let result = dedup_blank_lines(lines);
         assert_eq!(result.len(), 1);
         assert!(!is_blank_line(&result[0]));
@@ -5484,8 +5462,13 @@ mod tests {
     fn full_pipeline_empty_input() {
         let lines: Vec<&DisplayLine> = vec![];
         let no_overrides = std::collections::HashMap::new();
-        let result =
-            collapse_tool_results(&lines, ResultDisplay::Full, &no_overrides, &test_theme(), 80);
+        let result = collapse_tool_results(
+            &lines,
+            ResultDisplay::Full,
+            &no_overrides,
+            &test_theme(),
+            80,
+        );
         assert!(result.is_empty());
     }
 
@@ -5503,8 +5486,13 @@ mod tests {
         ];
         let refs: Vec<&DisplayLine> = lines.iter().collect();
         let no_overrides = std::collections::HashMap::new();
-        let output =
-            collapse_tool_results(&refs, ResultDisplay::Hidden, &no_overrides, &test_theme(), 80);
+        let output = collapse_tool_results(
+            &refs,
+            ResultDisplay::Hidden,
+            &no_overrides,
+            &test_theme(),
+            80,
+        );
         assert_eq!(output.len(), 1);
         let text: String = output[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("6 bytes"));
