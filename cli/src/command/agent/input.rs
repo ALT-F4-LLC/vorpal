@@ -188,7 +188,7 @@ fn action_edit(app: &mut App) {
     if let Some(agent) = app.focused_agent() {
         match &agent.status {
             AgentStatus::Running => {
-                app.set_status_message("Agent is still running");
+                app.set_status_message("Stop the agent first (Esc to interrupt, x to kill)");
             }
             AgentStatus::Pending | AgentStatus::Exited(_) => {
                 app.enter_settings_mode();
@@ -1007,15 +1007,18 @@ pub(super) async fn submit_and_spawn(app: &mut App, manager: &mut AgentManager) 
 /// Esc cancels without saving. Text editing keys modify the active field.
 fn handle_settings_mode(app: &mut App, key: KeyEvent) {
     use InputField::*;
+    // Order must match the visual top-to-bottom layout in render_settings.
     let settings_fields = [
-        AddDir,
-        AllowedTools,
-        Effort,
-        MaxBudgetUsd,
         Model,
         PermissionMode,
+        Effort,
         Workspace,
+        MaxBudgetUsd,
+        AllowedTools,
+        AddDir,
     ];
+
+    let is_selector = matches!(app.input_field, PermissionMode | Model | Effort);
 
     match key.code {
         KeyCode::Esc => {
@@ -1032,12 +1035,20 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             app.save_settings();
         }
-        KeyCode::Tab | KeyCode::Down => {
+
+        // Ctrl+S: save alias (same as Enter).
+        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.save_settings();
+        }
+
+        // Tab wraps around to the first field.
+        KeyCode::Tab => {
             if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
                 app.input_field = settings_fields[(pos + 1) % settings_fields.len()];
             }
         }
-        KeyCode::BackTab | KeyCode::Up => {
+        // Shift+Tab wraps around to the last field.
+        KeyCode::BackTab => {
             if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
                 let prev = if pos == 0 {
                     settings_fields.len() - 1
@@ -1047,6 +1058,49 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
                 app.input_field = settings_fields[prev];
             }
         }
+
+        // Down/j: move to next field without wrapping (stops at last).
+        // j only navigates on selector fields; on text fields it falls through
+        // to character insertion below.
+        KeyCode::Down => {
+            if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
+                if pos + 1 < settings_fields.len() {
+                    app.input_field = settings_fields[pos + 1];
+                }
+            }
+        }
+        KeyCode::Char('j') if is_selector => {
+            if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
+                if pos + 1 < settings_fields.len() {
+                    app.input_field = settings_fields[pos + 1];
+                }
+            }
+        }
+
+        // Up/k: move to previous field without wrapping (stops at first).
+        // k only navigates on selector fields; on text fields it falls through
+        // to character insertion below.
+        KeyCode::Up => {
+            if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
+                if pos > 0 {
+                    app.input_field = settings_fields[pos - 1];
+                }
+            }
+        }
+        KeyCode::Char('k') if is_selector => {
+            if let Some(pos) = settings_fields.iter().position(|f| *f == app.input_field) {
+                if pos > 0 {
+                    app.input_field = settings_fields[pos - 1];
+                }
+            }
+        }
+
+        // Space on selector fields: cycle forward (same as Right arrow).
+        // On text fields, falls through to character insertion below.
+        KeyCode::Char(' ') if is_selector => {
+            try_cycle_current_field(app, KeyCode::Right);
+        }
+
         _ => {
             // Selector fields cycle through predefined options with Left/Right.
             if try_cycle_current_field(app, key.code) {
@@ -1061,13 +1115,29 @@ fn handle_settings_mode(app: &mut App, key: KeyEvent) {
                 _ => return,
             };
 
-            // Ctrl+X: clear the current text field.
-            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('x') {
-                buf.clear();
-                if let Some((err_field, _)) = &app.settings_error {
-                    if *err_field == app.input_field {
-                        app.settings_error = None;
+            // Ctrl modifier shortcuts on text fields.
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match key.code {
+                    // Ctrl+X: clear the current text field.
+                    KeyCode::Char('x') => {
+                        buf.clear();
+                        if let Some((err_field, _)) = &app.settings_error {
+                            if *err_field == app.input_field {
+                                app.settings_error = None;
+                            }
+                        }
                     }
+                    // Readline keybindings.
+                    KeyCode::Char('a') => buf.move_to_line_start(),
+                    KeyCode::Char('e') => buf.move_to_line_end(),
+                    KeyCode::Char('k') => app.kill_buffer = buf.kill_to_line_end(),
+                    KeyCode::Char('u') => app.kill_buffer = buf.kill_to_line_start(),
+                    KeyCode::Char('w') => app.kill_buffer = buf.delete_word_backward(),
+                    KeyCode::Char('y') => {
+                        let text = app.kill_buffer.clone();
+                        buf.yank(&text);
+                    }
+                    _ => {}
                 }
                 return;
             }

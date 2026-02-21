@@ -1548,6 +1548,9 @@ pub struct App {
     /// Stores which field failed validation and the error message so the
     /// renderer can display the error inline next to the offending field.
     pub settings_error: Option<(InputField, String)>,
+    /// Scroll offset (in lines) for the settings pop-up content when it
+    /// exceeds the available height.
+    pub settings_scroll: usize,
     /// When `Some(id)`, the input overlay is a "respond" to the agent with the
     /// given `id` rather than a new-agent prompt. The target agent's session ID
     /// will be passed to `AgentManager::spawn()` so Claude resumes the conversation.
@@ -1735,6 +1738,7 @@ impl App {
             allowed_tools: InputBuffer::new(),
             add_dir: InputBuffer::new(),
             settings_error: None,
+            settings_scroll: 0,
             respond_target: None,
             tick: 0,
             default_workspace,
@@ -1980,7 +1984,8 @@ impl App {
         );
         self.allowed_tools.set_text(opts.allowed_tools.join(", "));
         self.add_dir.set_text(opts.add_dirs.join(", "));
-        self.input_field = InputField::AddDir;
+        self.input_field = InputField::Model;
+        self.settings_scroll = 0;
         self.input_mode = InputMode::Settings;
     }
 
@@ -2030,7 +2035,17 @@ impl App {
                 None
             } else {
                 match budget.parse::<f64>() {
-                    Ok(v) => Some(v),
+                    Ok(v) => {
+                        if v < 0.0 {
+                            self.settings_error = Some((
+                                InputField::MaxBudgetUsd,
+                                "Budget must be zero or positive".into(),
+                            ));
+                            self.input_field = InputField::MaxBudgetUsd;
+                            return;
+                        }
+                        Some(v)
+                    }
                     Err(_) => {
                         self.settings_error =
                             Some((InputField::MaxBudgetUsd, "Not a valid number".into()));
@@ -2090,6 +2105,7 @@ impl App {
             };
 
             // -- Commit atomically ---------------------------------------------
+            let old_name = self.agents[self.focused].name.clone();
             let agent = &mut self.agents[self.focused];
             agent.workspace = resolved_workspace;
             agent.name = new_name;
@@ -2100,8 +2116,17 @@ impl App {
             agent.claude_options.allowed_tools = tools_val;
             agent.claude_options.add_dirs = dirs_val;
 
+            let new_name = agent.name.clone();
+
             self.settings_error = None;
-            self.set_status_message("Settings saved");
+            if new_name != old_name {
+                self.set_status_message(format!(
+                    "Settings saved — agent renamed to {}",
+                    new_name
+                ));
+            } else {
+                self.set_status_message("Settings saved");
+            }
         }
         self.input_mode = InputMode::Normal;
         self.workspace.clear();

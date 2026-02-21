@@ -2625,10 +2625,19 @@ fn field_label_style(active: bool, theme: &Theme) -> Style {
 /// selector fields (UPPERCASE label, description, selector), then an Advanced
 /// section divider, then text fields (Workspace, Budget, Tools, Dirs) with
 /// inline validation errors.
-fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
+fn render_settings(app: &mut App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
 
-    // Description style: dim gray, always visible.
+    // ── Width clamping ──
+    // Desired = 60% of terminal, clamped between 50 and 80, never wider than terminal.
+    let desired_width = area.width * 60 / 100;
+    let popup_width = desired_width.max(50).min(80).min(area.width);
+
+    // Narrow mode: hide descriptions and use stacked text field layout.
+    // Based on terminal width, not popup width (popup is always ≤80).
+    let narrow = area.width < 60;
+
+    // Description style: dim gray (only used in wide mode).
     let desc_style = Style::default()
         .fg(theme.option_unset)
         .add_modifier(Modifier::DIM);
@@ -2652,30 +2661,6 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
         app.input_field == InputField::Effort,
         theme,
     );
-    let workspace_lines = build_input_field_lines(
-        app.workspace.text(),
-        app.workspace.cursor_pos(),
-        app.input_field == InputField::Workspace,
-        theme,
-    );
-    let budget_lines = build_optional_field_lines(
-        app.max_budget.text(),
-        app.max_budget.cursor_pos(),
-        app.input_field == InputField::MaxBudgetUsd,
-        theme,
-    );
-    let tools_lines = build_optional_field_lines(
-        app.allowed_tools.text(),
-        app.allowed_tools.cursor_pos(),
-        app.input_field == InputField::AllowedTools,
-        theme,
-    );
-    let dir_lines = build_optional_field_lines(
-        app.add_dir.text(),
-        app.add_dir.cursor_pos(),
-        app.input_field == InputField::AddDir,
-        theme,
-    );
 
     // Helper: check if settings_error targets a specific field.
     let error_for = |field: InputField| -> Option<&str> {
@@ -2685,119 +2670,266 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
             .map(|(_, msg)| msg.as_str())
     };
 
+    // Column 1 width for compact two-column text fields.
+    const LABEL_COL_WIDTH: usize = 18;
+
     let mut text = Vec::new();
 
-    // ── Add Dir ──
+    // Track the starting line index for each field so we can auto-scroll.
+    let mut focused_field_line: Option<usize> = None;
+    let mut focused_field_end: Option<usize> = None;
+
+    // ── Core Configuration: Selector fields (3-line or 2-line format) ──
+
+    // ── Model ──
+    if app.input_field == InputField::Model {
+        focused_field_line = Some(text.len());
+    }
     text.push(Line::from(Span::styled(
-        "ADD DIR",
-        field_label_style(app.input_field == InputField::AddDir, theme),
+        "MODEL",
+        field_label_style(app.input_field == InputField::Model, theme),
     )));
-    text.push(Line::from(Span::styled(
-        "Comma-separated additional directories to include",
-        desc_style,
-    )));
-    text.extend(dir_lines);
-    if let Some(msg) = error_for(InputField::AddDir) {
+    if !narrow {
         text.push(Line::from(Span::styled(
-            format!("^ {msg}"),
-            Style::default().fg(theme.error_text),
+            "Which Claude model to use for this agent",
+            desc_style,
         )));
+    }
+    text.extend(model_lines);
+    if app.input_field == InputField::Model {
+        focused_field_end = Some(text.len());
     }
 
     text.push(Line::from("")); // blank separator
 
-    // ── Allowed Tools ──
+    // ── Permission Mode ──
+    if app.input_field == InputField::PermissionMode {
+        focused_field_line = Some(text.len());
+    }
     text.push(Line::from(Span::styled(
-        "ALLOWED TOOLS",
-        field_label_style(app.input_field == InputField::AllowedTools, theme),
+        "PERMISSION MODE",
+        field_label_style(app.input_field == InputField::PermissionMode, theme),
     )));
-    text.push(Line::from(Span::styled(
-        "Comma-separated list of permitted tools",
-        desc_style,
-    )));
-    text.extend(tools_lines);
-    if let Some(msg) = error_for(InputField::AllowedTools) {
+    if !narrow {
         text.push(Line::from(Span::styled(
-            format!("^ {msg}"),
-            Style::default().fg(theme.error_text),
+            "How Claude handles file edits and tool permissions",
+            desc_style,
         )));
+    }
+    text.extend(perm_lines);
+    if app.input_field == InputField::PermissionMode {
+        focused_field_end = Some(text.len());
     }
 
     text.push(Line::from("")); // blank separator
 
     // ── Effort ──
+    if app.input_field == InputField::Effort {
+        focused_field_line = Some(text.len());
+    }
     text.push(Line::from(Span::styled(
         "EFFORT",
         field_label_style(app.input_field == InputField::Effort, theme),
     )));
-    text.push(Line::from(Span::styled(
-        "Reasoning effort level (affects speed and token usage)",
-        desc_style,
-    )));
-    text.extend(effort_lines);
-
-    text.push(Line::from("")); // blank separator
-
-    // ── Max Budget USD ──
-    text.push(Line::from(Span::styled(
-        "MAX BUDGET USD",
-        field_label_style(app.input_field == InputField::MaxBudgetUsd, theme),
-    )));
-    text.push(Line::from(Span::styled(
-        "Maximum spending limit per session in USD",
-        desc_style,
-    )));
-    text.extend(budget_lines);
-    if let Some(msg) = error_for(InputField::MaxBudgetUsd) {
+    if !narrow {
         text.push(Line::from(Span::styled(
-            format!("^ {msg}"),
-            Style::default().fg(theme.error_text),
+            "Reasoning effort level (affects speed and token usage)",
+            desc_style,
         )));
+    }
+    text.extend(effort_lines);
+    if app.input_field == InputField::Effort {
+        focused_field_end = Some(text.len());
     }
 
     text.push(Line::from("")); // blank separator
 
-    // ── Model ──
+    // ── Advanced section divider ──
     text.push(Line::from(Span::styled(
-        "MODEL",
-        field_label_style(app.input_field == InputField::Model, theme),
+        "-- Advanced -------------------------------------------------------",
+        Style::default()
+            .fg(theme.options_header)
+            .add_modifier(Modifier::DIM),
     )));
-    text.push(Line::from(Span::styled(
-        "Which Claude model to use for this agent",
-        desc_style,
-    )));
-    text.extend(model_lines);
 
-    text.push(Line::from("")); // blank separator
+    text.push(Line::from("")); // blank separator after divider
 
-    // ── Permission Mode ──
-    text.push(Line::from(Span::styled(
-        "PERMISSION MODE",
-        field_label_style(app.input_field == InputField::PermissionMode, theme),
-    )));
-    text.push(Line::from(Span::styled(
-        "How Claude handles file edits and tool permissions",
-        desc_style,
-    )));
-    text.extend(perm_lines);
+    // ── Advanced Configuration: Compact two-column text fields ──
+    // In wide mode: single line with fixed-width label + value.
+    // In narrow mode: stacked layout (label on one line, value on next).
 
-    text.push(Line::from("")); // blank separator
+    // Helper to build a compact (or stacked) field line.
+    // Inner width available for content (popup minus left/right border).
+    let inner_width = popup_width.saturating_sub(2) as usize;
+    let build_compact_line =
+        |label: &str, buffer: &str, cursor: usize, active: bool, optional: bool, stacked: bool| -> Vec<Line<'static>> {
+            // Max chars available for the value portion.
+            let max_val = if stacked {
+                inner_width
+            } else {
+                inner_width.saturating_sub(LABEL_COL_WIDTH)
+            };
+
+            // Truncate long values from the left, showing "…{tail}".
+            let truncated: std::borrow::Cow<'_, str> = if !active && buffer.len() > max_val && max_val > 1 {
+                let tail_start = buffer.len() - (max_val - 1);
+                std::borrow::Cow::Owned(format!("…{}", &buffer[tail_start..]))
+            } else {
+                std::borrow::Cow::Borrowed(buffer)
+            };
+
+            let value_spans = if optional && buffer.is_empty() && !active {
+                vec![Span::styled(
+                    "(unset)".to_string(),
+                    Style::default()
+                        .fg(theme.option_unset)
+                        .add_modifier(Modifier::DIM),
+                )]
+            } else if active {
+                // When editing, show a scrolling window around the cursor.
+                let buf = truncated.as_ref();
+                let cur = cursor.min(buf.len());
+                // If the full text fits, show it all; otherwise scroll to keep cursor visible.
+                let (display, display_cur) = if buf.len() <= max_val {
+                    (buf.to_string(), cur)
+                } else {
+                    // Center a window of max_val chars around the cursor.
+                    let half = max_val / 2;
+                    let start = if cur <= half {
+                        0
+                    } else if cur + half >= buf.len() {
+                        buf.len().saturating_sub(max_val)
+                    } else {
+                        cur - half
+                    };
+                    let end = (start + max_val).min(buf.len());
+                    (buf[start..end].to_string(), cur - start)
+                };
+                let before = &display[..display_cur.min(display.len())];
+                let after = &display[display_cur.min(display.len())..];
+                let clen = after.chars().next().map_or(0, |c| c.len_utf8());
+                vec![
+                    Span::raw(before.to_string()),
+                    Span::styled(
+                        if after.is_empty() {
+                            " ".to_string()
+                        } else {
+                            after[..clen].to_string()
+                        },
+                        Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg),
+                    ),
+                    Span::raw(after.get(clen..).unwrap_or("").to_string()),
+                ]
+            } else {
+                vec![Span::raw(truncated.into_owned())]
+            };
+
+            if stacked {
+                // Stacked: label on its own line, value on the next.
+                let label_line = Line::from(Span::styled(
+                    label.to_string(),
+                    field_label_style(active, theme),
+                ));
+                let value_line = Line::from(value_spans);
+                vec![label_line, value_line]
+            } else {
+                // Two-column: fixed-width label + value on one line.
+                let label_span = Span::styled(
+                    format!("{:<width$}", label, width = LABEL_COL_WIDTH),
+                    field_label_style(active, theme),
+                );
+                let mut spans = vec![label_span];
+                spans.extend(value_spans);
+                vec![Line::from(spans)]
+            }
+        };
 
     // ── Workspace ──
-    text.push(Line::from(Span::styled(
-        "WORKSPACE",
-        field_label_style(app.input_field == InputField::Workspace, theme),
-    )));
-    text.push(Line::from(Span::styled(
-        "Root directory for this agent's file operations",
-        desc_style,
-    )));
-    text.extend(workspace_lines);
+    if app.input_field == InputField::Workspace {
+        focused_field_line = Some(text.len());
+    }
+    text.extend(build_compact_line(
+        "Workspace",
+        app.workspace.text(),
+        app.workspace.cursor_pos(),
+        app.input_field == InputField::Workspace,
+        false,
+        narrow,
+    ));
     if let Some(msg) = error_for(InputField::Workspace) {
         text.push(Line::from(Span::styled(
-            format!("^ {msg}"),
+            format!("{:width$}^ {msg}", "", width = if narrow { 0 } else { LABEL_COL_WIDTH }),
             Style::default().fg(theme.error_text),
         )));
+    }
+    if app.input_field == InputField::Workspace {
+        focused_field_end = Some(text.len());
+    }
+
+    // ── Max Budget USD ──
+    if app.input_field == InputField::MaxBudgetUsd {
+        focused_field_line = Some(text.len());
+    }
+    text.extend(build_compact_line(
+        "Max Budget USD",
+        app.max_budget.text(),
+        app.max_budget.cursor_pos(),
+        app.input_field == InputField::MaxBudgetUsd,
+        true,
+        narrow,
+    ));
+    if let Some(msg) = error_for(InputField::MaxBudgetUsd) {
+        text.push(Line::from(Span::styled(
+            format!("{:width$}^ {msg}", "", width = if narrow { 0 } else { LABEL_COL_WIDTH }),
+            Style::default().fg(theme.error_text),
+        )));
+    }
+    if app.input_field == InputField::MaxBudgetUsd {
+        focused_field_end = Some(text.len());
+    }
+
+    // ── Allowed Tools ──
+    if app.input_field == InputField::AllowedTools {
+        focused_field_line = Some(text.len());
+    }
+    text.extend(build_compact_line(
+        "Allowed Tools",
+        app.allowed_tools.text(),
+        app.allowed_tools.cursor_pos(),
+        app.input_field == InputField::AllowedTools,
+        true,
+        narrow,
+    ));
+    if let Some(msg) = error_for(InputField::AllowedTools) {
+        text.push(Line::from(Span::styled(
+            format!("{:width$}^ {msg}", "", width = if narrow { 0 } else { LABEL_COL_WIDTH }),
+            Style::default().fg(theme.error_text),
+        )));
+    }
+    if app.input_field == InputField::AllowedTools {
+        focused_field_end = Some(text.len());
+    }
+
+    // ── Add Dir ──
+    if app.input_field == InputField::AddDir {
+        focused_field_line = Some(text.len());
+    }
+    text.extend(build_compact_line(
+        "Add Dir",
+        app.add_dir.text(),
+        app.add_dir.cursor_pos(),
+        app.input_field == InputField::AddDir,
+        true,
+        narrow,
+    ));
+    if let Some(msg) = error_for(InputField::AddDir) {
+        text.push(Line::from(Span::styled(
+            format!("{:width$}^ {msg}", "", width = if narrow { 0 } else { LABEL_COL_WIDTH }),
+            Style::default().fg(theme.error_text),
+        )));
+    }
+    if app.input_field == InputField::AddDir {
+        focused_field_end = Some(text.len());
     }
 
     // ── Footer ──
@@ -2810,12 +2942,43 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
         .alignment(Alignment::Center),
     );
 
-    // Compute popup height dynamically from content.
+    // ── Popup dimensions ──
     let content_rows = text.len();
-    let popup_height = (content_rows + 2).min(area.height as usize) as u16;
+    // Cap height at 80% of terminal height.
+    let max_height = (area.height as usize * 80 / 100).max(3);
+    // +2 for top/bottom border.
+    let popup_height = (content_rows + 2).min(max_height).min(area.height as usize) as u16;
+    // Inner height available for content (subtract 2 for borders).
+    let inner_height = popup_height.saturating_sub(2) as usize;
 
-    // Clamp popup to 80 columns (or area.width - 4 on narrow terminals).
-    let popup_width = 80u16.min(area.width.saturating_sub(4));
+    // ── Auto-scroll to keep focused field visible ──
+    if content_rows > inner_height {
+        if let (Some(field_start), Some(field_end)) = (focused_field_line, focused_field_end) {
+            // If the focused field starts before the visible window, scroll up.
+            if field_start < app.settings_scroll {
+                app.settings_scroll = field_start;
+            }
+            // If the focused field ends after the visible window, scroll down.
+            if field_end > app.settings_scroll + inner_height {
+                app.settings_scroll = field_end.saturating_sub(inner_height);
+            }
+        }
+        // Clamp scroll to valid range.
+        let max_scroll = content_rows.saturating_sub(inner_height);
+        if app.settings_scroll > max_scroll {
+            app.settings_scroll = max_scroll;
+        }
+    } else {
+        app.settings_scroll = 0;
+    }
+
+    // Apply scroll offset: take the visible slice of content lines.
+    let visible_text: Vec<Line> = text
+        .into_iter()
+        .skip(app.settings_scroll)
+        .take(inner_height)
+        .collect();
+
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let y = area.y + area.height.saturating_sub(popup_height) / 2;
     let popup = Rect::new(x, y, popup_width, popup_height);
@@ -2834,7 +2997,7 @@ fn render_settings(app: &App, frame: &mut Frame, area: Rect) {
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(visible_text).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, inner);
 }
 
@@ -5147,7 +5310,7 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("42 bytes"));
-        assert!(text.contains("press 's'"));
+        assert!(text.contains("press 'r'"));
     }
 
     #[test]
