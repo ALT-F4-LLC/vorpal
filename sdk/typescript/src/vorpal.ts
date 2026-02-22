@@ -2,6 +2,7 @@ import { ArtifactSystem } from "./api/artifact/artifact.js";
 import {
   getEnvKey,
   JobBuilder,
+  OciImageBuilder,
   ProcessBuilder,
   ProjectEnvironmentBuilder,
   UserEnvironmentBuilder,
@@ -47,6 +48,22 @@ async function buildVorpal(context: ConfigContext): Promise<string> {
     .withBins(["vorpal"])
     .withIncludes(["cli", "sdk/rust"])
     .withPackages(["vorpal-cli", "vorpal-sdk"])
+    .build(context);
+}
+
+async function buildVorpalContainerImage(
+  context: ConfigContext,
+): Promise<string> {
+  const linuxVorpalSlim = await context.fetchArtifactAlias(
+    "linux-vorpal-slim:latest",
+  );
+  const vorpal = await buildVorpal(context);
+
+  const name = "vorpal-container-image";
+
+  return new OciImageBuilder(name, linuxVorpalSlim)
+    .withAliases([`${name}:latest`])
+    .withArtifacts([vorpal])
     .build(context);
 }
 
@@ -142,6 +159,9 @@ async function main(): Promise<void> {
   switch (context.getArtifactName()) {
     case "vorpal":
       await buildVorpal(context);
+      break;
+    case "vorpal-container-image":
+      await buildVorpalContainerImage(context);
       break;
     case "vorpal-job":
       await buildVorpalJob(context);

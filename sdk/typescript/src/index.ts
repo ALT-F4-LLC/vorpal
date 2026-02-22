@@ -11,6 +11,7 @@ export {
   ArtifactStepBuilder,
   Argument,
   JobBuilder,
+  OciImageBuilder,
   ProcessBuilder,
   ProjectEnvironmentBuilder,
   UserEnvironmentBuilder,

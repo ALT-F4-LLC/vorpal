@@ -819,6 +819,214 @@ chmod +x $VORPAL_OUTPUT/bin/vorpal-activate`;
 }
 
 // ---------------------------------------------------------------------------
+// OciImageBuilder
+// ---------------------------------------------------------------------------
+
+/**
+ * Builder for OCI container image artifacts.
+ * Matches Rust sdk/rust/src/artifact/oci_image.rs OciImage impl.
+ *
+ * Produces a container image tarball using crane, rsync, and a rootfs artifact.
+ * Only supports Linux systems (AARCH64_LINUX, X8664_LINUX).
+ */
+export class OciImageBuilder {
+  private _aliases: string[] = [];
+  private _artifacts: string[] = [];
+  private _name: string;
+  private _rootfs: string;
+
+  /**
+   * @param name - OCI image name (must be lowercase, valid chars: a-z, 0-9, / : - . _)
+   * @param rootfs - Artifact digest for the rootfs base layer
+   */
+  constructor(name: string, rootfs: string) {
+    this._name = name;
+    this._rootfs = rootfs;
+  }
+
+  /**
+   * Adds human-readable aliases for this image artifact.
+   *
+   * @param aliases - Array of alias strings
+   */
+  withAliases(aliases: string[]): this {
+    this._aliases = aliases;
+    return this;
+  }
+
+  /**
+   * Sets artifact digests to include as layers in the container image.
+   * Each artifact's bin directory is symlinked into /usr/local/bin.
+   *
+   * @param artifacts - Array of artifact digest strings
+   */
+  withArtifacts(artifacts: string[]): this {
+    this._artifacts = artifacts;
+    return this;
+  }
+
+  /**
+   * Builds the OCI image artifact and registers it with the agent service.
+   *
+   * Fetches crane and rsync as pre-built aliases from the registry,
+   * generates the build script, and creates the artifact.
+   *
+   * @returns The hex-encoded SHA-256 digest of the artifact
+   */
+  async build(context: ConfigContext): Promise<string> {
+    // Validate image name (matches Rust validation)
+    if (this._name !== this._name.toLowerCase()) {
+      throw new Error(
+        `container image name must be lowercase: '${this._name}'`,
+      );
+    }
+
+    for (const c of this._name) {
+      if (
+        !(
+          (c >= "a" && c <= "z") ||
+          (c >= "0" && c <= "9") ||
+          c === "/" ||
+          c === ":" ||
+          c === "-" ||
+          c === "." ||
+          c === "_"
+        )
+      ) {
+        throw new Error(
+          `container image name invalid character '${c}': '${this._name}'. ` +
+            `Allowed: lowercase letters, digits, and / : - . _`,
+        );
+      }
+    }
+
+    const crane = await context.fetchArtifactAlias("crane:0.20.7");
+    const rsync = await context.fetchArtifactAlias("rsync:3.4.1");
+
+    const artifactsList = this._artifacts.join(" ");
+    const namespace = context.getArtifactNamespace();
+
+    const stepScript = `OCI_IMAGE_ARTIFACTS="${artifactsList}"
+OCI_IMAGE_CRANE="${getEnvKey(crane)}"
+OCI_IMAGE_NAME="${this._name}"
+OCI_IMAGE_ROOTFS="${getEnvKey(this._rootfs)}"
+OCI_IMAGE_RSYNC="${getEnvKey(rsync)}"
+OUTPUT_TAR=\${PWD}/rootfs.tar
+ROOTFS_DIR=\${PWD}/rootfs
+STORE_PREFIX=var/lib/vorpal/store/artifact/output/${namespace}
+
+# Detect platform based on build architecture
+case "$(uname -m)" in
+    x86_64)  OCI_PLATFORM="linux/amd64" ;;
+    aarch64) OCI_PLATFORM="linux/arm64" ;;
+    *)       OCI_PLATFORM="linux/$(uname -m)" ;;
+esac
+
+mkdir -pv \${ROOTFS_DIR}
+
+for artifact in \${OCI_IMAGE_ARTIFACTS}; do
+    SOURCE_DIR=/\${STORE_PREFIX}/\${artifact}
+    TARGET_PATH=\${STORE_PREFIX}/\${artifact}
+
+    mkdir -p \${ROOTFS_DIR}/\${TARGET_PATH}
+
+    echo "Copying artifact layer \${artifact}..."
+
+    \${OCI_IMAGE_RSYNC}/bin/rsync -aW \${SOURCE_DIR}/ \${ROOTFS_DIR}/\${TARGET_PATH}
+
+    echo "Copied artifact layer \${artifact}"
+
+    # Symlink bin files to /usr/local/bin
+    if [ -d "\${SOURCE_DIR}/bin" ]; then
+        mkdir -p \${ROOTFS_DIR}/usr/local/bin
+        for bin_file in \${SOURCE_DIR}/bin/*; do
+            if [ -f "\${bin_file}" ]; then
+                bin_name=$(basename "\${bin_file}")
+                ln -sf /\${TARGET_PATH}/bin/\${bin_name} \${ROOTFS_DIR}/usr/local/bin/\${bin_name}
+                echo "Symlinked \${bin_name} to /usr/local/bin"
+            fi
+        done
+    fi
+done
+
+echo "Copying Vorpal operating system files..."
+
+\${OCI_IMAGE_RSYNC}/bin/rsync -aW \${OCI_IMAGE_ROOTFS}/ \${ROOTFS_DIR}
+
+echo "Copied Vorpal operating system files"
+
+echo "Creating output tarball..."
+
+tar -cf \${OUTPUT_TAR} -C \${ROOTFS_DIR} .
+
+echo "Created output tarball"
+
+mkdir -p \${VORPAL_OUTPUT}
+
+echo "Creating OCI image \${OCI_IMAGE_NAME}:latest"
+
+\${OCI_IMAGE_CRANE}/bin/crane append \\
+    --new_layer \${OUTPUT_TAR} \\
+    --new_tag \${OCI_IMAGE_NAME}:latest \\
+    --oci-empty-base \\
+    --output \${VORPAL_OUTPUT}/image.tar \\
+    --platform \${OCI_PLATFORM}
+
+echo "Setting platform metadata in image config..."
+
+# Extract tarball to modify config (crane mutate cannot work with local files)
+WORK_DIR=\${PWD}/image-work
+mkdir -p \${WORK_DIR}
+tar -xf \${VORPAL_OUTPUT}/image.tar -C \${WORK_DIR}
+
+# Get config filename from manifest
+CONFIG_FILE=$(sed -n 's/.*"Config":"\\([^"]*\\)".*/\\1/p' \${WORK_DIR}/manifest.json)
+
+# Detect architecture for config metadata
+case "$(uname -m)" in
+    x86_64)  CONFIG_ARCH="amd64" ;;
+    aarch64) CONFIG_ARCH="arm64" ;;
+    *)       CONFIG_ARCH="$(uname -m)" ;;
+esac
+
+# Modify config to set platform (crane append leaves these empty)
+sed -i "s/\\"architecture\\":\\"\\"/\\"architecture\\":\\"\${CONFIG_ARCH}\\"/" \${WORK_DIR}/\${CONFIG_FILE}
+sed -i "s/\\"os\\":\\"\\"/\\"os\\":\\"linux\\"/" \${WORK_DIR}/\${CONFIG_FILE}
+
+# Compute new hash and rename config file
+NEW_HASH=$(sha256sum \${WORK_DIR}/\${CONFIG_FILE} | awk '{print $1}')
+NEW_CONFIG="sha256:\${NEW_HASH}"
+mv \${WORK_DIR}/\${CONFIG_FILE} \${WORK_DIR}/\${NEW_CONFIG}
+
+# Update manifest with new config reference
+sed -i "s|\${CONFIG_FILE}|\${NEW_CONFIG}|" \${WORK_DIR}/manifest.json
+
+# Repackage tarball
+pushd \${WORK_DIR}
+tar -cf \${VORPAL_OUTPUT}/image.tar manifest.json \${NEW_CONFIG} *.tar.gz
+popd
+
+# Cleanup
+rm -rf \${WORK_DIR}
+
+echo "Created OCI image \${OCI_IMAGE_NAME}:latest"`;
+
+    const stepArtifacts = [crane, rsync, this._rootfs, ...this._artifacts];
+
+    const step = await shell(context, stepArtifacts, [], stepScript, []);
+
+    const systems = [
+      ArtifactSystem.AARCH64_LINUX,
+      ArtifactSystem.X8664_LINUX,
+    ];
+
+    return new ArtifactBuilder(this._name, [step], systems)
+      .withAliases(this._aliases)
+      .build(context);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Argument
 // ---------------------------------------------------------------------------
 
