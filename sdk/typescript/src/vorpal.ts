@@ -1,4 +1,5 @@
 import { ArtifactSystem } from "./api/artifact/artifact.js";
+import { getEnvKey, JobBuilder } from "./artifact.js";
 import { RustBuilder } from "./artifact/language/rust.js";
 import { ConfigContext } from "./context.js";
 
@@ -9,16 +10,32 @@ const SYSTEMS: ArtifactSystem[] = [
   ArtifactSystem.X8664_LINUX,
 ];
 
+async function buildVorpal(context: ConfigContext): Promise<string> {
+  return new RustBuilder("vorpal", SYSTEMS)
+    .withBins(["vorpal"])
+    .withIncludes(["cli", "sdk/rust"])
+    .withPackages(["vorpal-cli", "vorpal-sdk"])
+    .build(context);
+}
+
+async function buildVorpalJob(context: ConfigContext): Promise<string> {
+  const vorpal = await buildVorpal(context);
+  const script = `${getEnvKey(vorpal)}/bin/vorpal --version`;
+
+  return new JobBuilder("vorpal-job", script, SYSTEMS)
+    .withArtifacts([vorpal])
+    .build(context);
+}
+
 async function main(): Promise<void> {
   const context = ConfigContext.create();
 
   switch (context.getArtifactName()) {
     case "vorpal":
-      await new RustBuilder("vorpal", SYSTEMS)
-        .withBins(["vorpal"])
-        .withIncludes(["cli", "sdk/rust"])
-        .withPackages(["vorpal-cli", "vorpal-sdk"])
-        .build(context);
+      await buildVorpal(context);
+      break;
+    case "vorpal-job":
+      await buildVorpalJob(context);
       break;
     default:
       break;
