@@ -71,9 +71,8 @@ impl ProtocGenTsProto {
               {source_dir}/worker/worker.proto"#,
         };
 
-        let steps = vec![
-            step::shell(context, vec![protoc, bun], vec![], step_script, vec![]).await?,
-        ];
+        let steps =
+            vec![step::shell(context, vec![protoc, bun], vec![], step_script, vec![]).await?];
         let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
         Artifact::new(name, steps, systems)

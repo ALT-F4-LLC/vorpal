@@ -563,8 +563,7 @@ pub async fn run(
                 }
             }
 
-            let protoc_gen_ts_proto =
-                ProtocGenTsProto::new().build(&mut config_context).await?;
+            let protoc_gen_ts_proto = ProtocGenTsProto::new().build(&mut config_context).await?;
 
             let mut builder =
                 TypeScript::new(&config.name, vec![config_system]).with_includes(includes);
