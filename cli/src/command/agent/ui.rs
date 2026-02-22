@@ -2353,8 +2353,9 @@ fn build_status_left_spans<'a>(
 /// Return a responsive display label for the agent's model setting.
 ///
 /// Strips the `claude-` prefix for known models at wider widths, abbreviates to
-/// the family name or a single uppercase letter at narrower widths, and hides
-/// entirely below 45 columns. Non-standard model strings fall back to truncation.
+/// the family name at >= 60 columns or a single uppercase letter at narrower
+/// widths, and hides entirely below 45 columns. Non-standard model strings
+/// fall back to truncation.
 /// Returns `None` when the input is `None`.
 fn format_model_label(model: &Option<String>, width: u16) -> Option<String> {
     let value = model.as_deref()?;
@@ -2374,7 +2375,7 @@ fn format_model_label(model: &Option<String>, width: u16) -> Option<String> {
         if value == full {
             return Some(if width >= 100 {
                 stripped.to_string()
-            } else if width >= 80 {
+            } else if width >= 60 {
                 family.to_string()
             } else {
                 initial.to_string()
@@ -2389,7 +2390,7 @@ fn format_model_label(model: &Option<String>, width: u16) -> Option<String> {
         } else {
             value.chars().take(12).collect()
         }
-    } else if width >= 80 {
+    } else if width >= 60 {
         if value.len() <= 8 {
             value.to_string()
         } else {
@@ -2408,7 +2409,7 @@ fn format_model_label(model: &Option<String>, width: u16) -> Option<String> {
 /// Return a responsive display label for the agent's permission mode setting.
 ///
 /// Known modes (`default`, `plan`, `acceptEdits`, `bypassPermissions`) are
-/// shortened at the 80-column tier and reduced to a single lowercase letter at
+/// shortened at the 60-column tier and reduced to a single lowercase letter at
 /// 45 columns. Hidden below 45 columns. Returns `None` when the input is `None`.
 fn format_permission_label(perm: &Option<String>, width: u16) -> Option<String> {
     let value = perm.as_deref()?;
@@ -2417,7 +2418,7 @@ fn format_permission_label(perm: &Option<String>, width: u16) -> Option<String> 
         return None;
     }
 
-    // (full value, >= 100, >= 80, >= 45)
+    // (full value, >= 100, >= 60, >= 45)
     let known: &[(&str, &str, &str, &str)] = &[
         ("default", "default", "default", "d"),
         ("plan", "plan", "plan", "p"),
@@ -2429,7 +2430,7 @@ fn format_permission_label(perm: &Option<String>, width: u16) -> Option<String> 
         if value == full {
             return Some(if width >= 100 {
                 wide.to_string()
-            } else if width >= 80 {
+            } else if width >= 60 {
                 medium.to_string()
             } else {
                 narrow.to_string()
@@ -6363,12 +6364,13 @@ mod tests {
         let model = Some("claude-opus-4-6".to_string());
         assert_eq!(format_model_label(&model, 99), Some("opus".to_string()));
         assert_eq!(format_model_label(&model, 80), Some("opus".to_string()));
+        assert_eq!(format_model_label(&model, 60), Some("opus".to_string()));
     }
 
     #[test]
     fn model_label_opus_initial_at_narrow_width() {
         let model = Some("claude-opus-4-6".to_string());
-        assert_eq!(format_model_label(&model, 79), Some("O".to_string()));
+        assert_eq!(format_model_label(&model, 59), Some("O".to_string()));
         assert_eq!(format_model_label(&model, 45), Some("O".to_string()));
     }
 
@@ -6402,8 +6404,8 @@ mod tests {
         let model = Some("claude-opus-4-6".to_string());
         // Exact boundary at 45: should return initial
         assert_eq!(format_model_label(&model, 45), Some("O".to_string()));
-        // Exact boundary at 80: should return family
-        assert_eq!(format_model_label(&model, 80), Some("opus".to_string()));
+        // Exact boundary at 60: should return family
+        assert_eq!(format_model_label(&model, 60), Some("opus".to_string()));
         // Exact boundary at 100: should return stripped
         assert_eq!(format_model_label(&model, 100), Some("opus-4-6".to_string()));
     }
@@ -6416,9 +6418,9 @@ mod tests {
             format_model_label(&model, 100),
             Some("custom-model".to_string())
         );
-        // >= 80: truncated to 8 chars
+        // >= 60: truncated to 8 chars
         assert_eq!(
-            format_model_label(&model, 80),
+            format_model_label(&model, 60),
             Some("custom-m".to_string())
         );
         // >= 45: first char uppercase
@@ -6447,6 +6449,7 @@ mod tests {
         let perm = Some("default".to_string());
         assert_eq!(format_permission_label(&perm, 100), Some("default".to_string()));
         assert_eq!(format_permission_label(&perm, 80), Some("default".to_string()));
+        assert_eq!(format_permission_label(&perm, 60), Some("default".to_string()));
         assert_eq!(format_permission_label(&perm, 45), Some("d".to_string()));
         assert_eq!(format_permission_label(&perm, 44), None);
     }
@@ -6456,6 +6459,7 @@ mod tests {
         let perm = Some("plan".to_string());
         assert_eq!(format_permission_label(&perm, 100), Some("plan".to_string()));
         assert_eq!(format_permission_label(&perm, 80), Some("plan".to_string()));
+        assert_eq!(format_permission_label(&perm, 60), Some("plan".to_string()));
         assert_eq!(format_permission_label(&perm, 45), Some("p".to_string()));
         assert_eq!(format_permission_label(&perm, 44), None);
     }
@@ -6465,6 +6469,7 @@ mod tests {
         let perm = Some("acceptEdits".to_string());
         assert_eq!(format_permission_label(&perm, 100), Some("acceptEdits".to_string()));
         assert_eq!(format_permission_label(&perm, 80), Some("accept".to_string()));
+        assert_eq!(format_permission_label(&perm, 60), Some("accept".to_string()));
         assert_eq!(format_permission_label(&perm, 45), Some("a".to_string()));
         assert_eq!(format_permission_label(&perm, 44), None);
     }
@@ -6474,6 +6479,7 @@ mod tests {
         let perm = Some("bypassPermissions".to_string());
         assert_eq!(format_permission_label(&perm, 100), Some("bypassPermissions".to_string()));
         assert_eq!(format_permission_label(&perm, 80), Some("bypass".to_string()));
+        assert_eq!(format_permission_label(&perm, 60), Some("bypass".to_string()));
         assert_eq!(format_permission_label(&perm, 45), Some("b".to_string()));
         assert_eq!(format_permission_label(&perm, 44), None);
     }
@@ -6482,7 +6488,7 @@ mod tests {
     fn permission_label_boundary_values() {
         let perm = Some("acceptEdits".to_string());
         assert_eq!(format_permission_label(&perm, 45), Some("a".to_string()));
-        assert_eq!(format_permission_label(&perm, 80), Some("accept".to_string()));
+        assert_eq!(format_permission_label(&perm, 60), Some("accept".to_string()));
         assert_eq!(format_permission_label(&perm, 100), Some("acceptEdits".to_string()));
     }
 
@@ -6597,15 +6603,15 @@ mod tests {
         assert_eq!(text, "opus  accept  hi");
     }
 
-    // 4. All options set at width 60 (45-79 range): initial/short labels
+    // 4. All options set at width 60 (>= 60 range): short labels
     #[test]
-    fn indicator_spans_all_set_width_60_initial_labels() {
+    fn indicator_spans_all_set_width_60_short_labels() {
         let theme = test_theme();
         let options = all_options_set();
         let spans = build_indicator_spans(&options, 60, &theme);
         let text = spans_text(&spans);
-        // Width 60 is < 80, so model and permission use initial form
-        assert_eq!(text, "O  a  hi");
+        // Width 60 uses family/short form (same as >= 80)
+        assert_eq!(text, "opus  accept  hi");
     }
 
     // 5. All options set at width 45: initials/short
