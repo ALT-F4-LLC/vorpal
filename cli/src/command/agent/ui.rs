@@ -2596,9 +2596,12 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     }
                 }
 
-                // Right side: tokens + cost (only if we have data)
+                // Right side: indicator spans + tokens + cost
                 // Width-aware: drop cost at <80 cols, drop entire right side at <45 cols
-                let mut right_spans: Vec<Span> = Vec::new();
+                let indicator_spans =
+                    build_indicator_spans(&agent.claude_options, w, theme);
+
+                let mut token_cost_spans: Vec<Span> = Vec::new();
                 if w >= 45
                     && (agent.input_tokens != 0
                         || agent.output_tokens != 0
@@ -2608,11 +2611,25 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                     let output = format_token_count(agent.output_tokens);
                     if w >= 80 {
                         let cost = format_cost(agent.total_cost_usd);
-                        right_spans.push(Span::raw(format!("{input} in  {output} out  {cost} ",)));
+                        token_cost_spans
+                            .push(Span::raw(format!("{input} in  {output} out  {cost} ",)));
                     } else {
-                        right_spans.push(Span::raw(format!("{input} in  {output} out ",)));
+                        token_cost_spans
+                            .push(Span::raw(format!("{input} in  {output} out ",)));
                     }
                 }
+
+                let mut right_spans: Vec<Span> = Vec::new();
+                let has_indicators = !indicator_spans.is_empty();
+                let has_token_cost = !token_cost_spans.is_empty();
+                right_spans.extend(indicator_spans);
+                if has_indicators && has_token_cost && w >= 80 {
+                    right_spans.push(Span::styled(
+                        " | ",
+                        Style::default().fg(theme.status_bar_fg),
+                    ));
+                }
+                right_spans.extend(token_cost_spans);
 
                 // Build the full line with left fill + right
                 let left_line = Line::from(left_spans);
