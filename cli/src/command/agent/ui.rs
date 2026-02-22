@@ -2446,6 +2446,7 @@ fn format_permission_label(perm: &Option<String>, width: u16) -> Option<String> 
 ///
 /// Full label at >= 100 columns, short form (`hi`/`med`/`lo`) at >= 80 and
 /// >= 45 columns (same abbreviation for both tiers), hidden below 45 columns.
+///
 /// Returns `None` when the input is `None`.
 fn format_effort_label(effort: &Option<String>, width: u16) -> Option<String> {
     let value = effort.as_deref()?;
@@ -2834,7 +2835,7 @@ fn render_settings(app: &mut App, frame: &mut Frame, area: Rect) {
     // ── Width clamping ──
     // Desired = 60% of terminal, clamped between 50 and 80, never wider than terminal.
     let desired_width = area.width * 60 / 100;
-    let popup_width = desired_width.max(50).min(80).min(area.width);
+    let popup_width = desired_width.clamp(50, 80).min(area.width);
 
     // Narrow mode: hide descriptions and use stacked text field layout.
     // Based on terminal width, not popup width (popup is always ≤80).
