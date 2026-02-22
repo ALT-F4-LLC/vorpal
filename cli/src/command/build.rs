@@ -585,7 +585,7 @@ pub async fn run(
             let working_dir_prefix = project_dir
                 .strip_prefix(context_dir)
                 .ok()
-                .filter(|p| p.as_os_str().len() > 0)
+                .filter(|p| !p.as_os_str().is_empty())
                 .map(|p| p.to_string_lossy().to_string());
 
             if let Some(ref wd) = working_dir_prefix {
