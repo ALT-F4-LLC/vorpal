@@ -6338,4 +6338,213 @@ mod tests {
         assert!(text.contains(name_20_chars), "expected full tool name in: {text}");
         assert!(!text.contains("..."), "should NOT contain '...' in: {text}");
     }
+
+    // -----------------------------------------------------------------------
+    // format_model_label tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn model_label_none_returns_none_at_all_widths() {
+        let none: Option<String> = None;
+        for width in [30, 45, 80, 100, 120] {
+            assert_eq!(format_model_label(&none, width), None, "width={width}");
+        }
+    }
+
+    #[test]
+    fn model_label_opus_full_at_wide_width() {
+        let model = Some("claude-opus-4-6".to_string());
+        assert_eq!(format_model_label(&model, 120), Some("opus-4-6".to_string()));
+        assert_eq!(format_model_label(&model, 100), Some("opus-4-6".to_string()));
+    }
+
+    #[test]
+    fn model_label_opus_family_at_medium_width() {
+        let model = Some("claude-opus-4-6".to_string());
+        assert_eq!(format_model_label(&model, 99), Some("opus".to_string()));
+        assert_eq!(format_model_label(&model, 80), Some("opus".to_string()));
+    }
+
+    #[test]
+    fn model_label_opus_initial_at_narrow_width() {
+        let model = Some("claude-opus-4-6".to_string());
+        assert_eq!(format_model_label(&model, 79), Some("O".to_string()));
+        assert_eq!(format_model_label(&model, 45), Some("O".to_string()));
+    }
+
+    #[test]
+    fn model_label_opus_hidden_below_45() {
+        let model = Some("claude-opus-4-6".to_string());
+        assert_eq!(format_model_label(&model, 44), None);
+        assert_eq!(format_model_label(&model, 0), None);
+    }
+
+    #[test]
+    fn model_label_sonnet_tiers() {
+        let model = Some("claude-sonnet-4-5".to_string());
+        assert_eq!(format_model_label(&model, 100), Some("sonnet-4-5".to_string()));
+        assert_eq!(format_model_label(&model, 80), Some("sonnet".to_string()));
+        assert_eq!(format_model_label(&model, 45), Some("S".to_string()));
+        assert_eq!(format_model_label(&model, 44), None);
+    }
+
+    #[test]
+    fn model_label_haiku_tiers() {
+        let model = Some("claude-haiku-4-5".to_string());
+        assert_eq!(format_model_label(&model, 100), Some("haiku-4-5".to_string()));
+        assert_eq!(format_model_label(&model, 80), Some("haiku".to_string()));
+        assert_eq!(format_model_label(&model, 45), Some("H".to_string()));
+        assert_eq!(format_model_label(&model, 44), None);
+    }
+
+    #[test]
+    fn model_label_boundary_values() {
+        let model = Some("claude-opus-4-6".to_string());
+        // Exact boundary at 45: should return initial
+        assert_eq!(format_model_label(&model, 45), Some("O".to_string()));
+        // Exact boundary at 80: should return family
+        assert_eq!(format_model_label(&model, 80), Some("opus".to_string()));
+        // Exact boundary at 100: should return stripped
+        assert_eq!(format_model_label(&model, 100), Some("opus-4-6".to_string()));
+    }
+
+    #[test]
+    fn model_label_nonstandard_truncation() {
+        let model = Some("custom-model-name-very-long".to_string());
+        // >= 100: truncated to 12 chars
+        assert_eq!(
+            format_model_label(&model, 100),
+            Some("custom-model".to_string())
+        );
+        // >= 80: truncated to 8 chars
+        assert_eq!(
+            format_model_label(&model, 80),
+            Some("custom-m".to_string())
+        );
+        // >= 45: first char uppercase
+        assert_eq!(
+            format_model_label(&model, 45),
+            Some("C".to_string())
+        );
+        // < 45: hidden
+        assert_eq!(format_model_label(&model, 44), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // format_permission_label tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn permission_label_none_returns_none_at_all_widths() {
+        let none: Option<String> = None;
+        for width in [30, 45, 80, 100, 120] {
+            assert_eq!(format_permission_label(&none, width), None, "width={width}");
+        }
+    }
+
+    #[test]
+    fn permission_label_default_tiers() {
+        let perm = Some("default".to_string());
+        assert_eq!(format_permission_label(&perm, 100), Some("default".to_string()));
+        assert_eq!(format_permission_label(&perm, 80), Some("default".to_string()));
+        assert_eq!(format_permission_label(&perm, 45), Some("d".to_string()));
+        assert_eq!(format_permission_label(&perm, 44), None);
+    }
+
+    #[test]
+    fn permission_label_plan_tiers() {
+        let perm = Some("plan".to_string());
+        assert_eq!(format_permission_label(&perm, 100), Some("plan".to_string()));
+        assert_eq!(format_permission_label(&perm, 80), Some("plan".to_string()));
+        assert_eq!(format_permission_label(&perm, 45), Some("p".to_string()));
+        assert_eq!(format_permission_label(&perm, 44), None);
+    }
+
+    #[test]
+    fn permission_label_accept_edits_tiers() {
+        let perm = Some("acceptEdits".to_string());
+        assert_eq!(format_permission_label(&perm, 100), Some("acceptEdits".to_string()));
+        assert_eq!(format_permission_label(&perm, 80), Some("accept".to_string()));
+        assert_eq!(format_permission_label(&perm, 45), Some("a".to_string()));
+        assert_eq!(format_permission_label(&perm, 44), None);
+    }
+
+    #[test]
+    fn permission_label_bypass_permissions_tiers() {
+        let perm = Some("bypassPermissions".to_string());
+        assert_eq!(format_permission_label(&perm, 100), Some("bypassPermissions".to_string()));
+        assert_eq!(format_permission_label(&perm, 80), Some("bypass".to_string()));
+        assert_eq!(format_permission_label(&perm, 45), Some("b".to_string()));
+        assert_eq!(format_permission_label(&perm, 44), None);
+    }
+
+    #[test]
+    fn permission_label_boundary_values() {
+        let perm = Some("acceptEdits".to_string());
+        assert_eq!(format_permission_label(&perm, 45), Some("a".to_string()));
+        assert_eq!(format_permission_label(&perm, 80), Some("accept".to_string()));
+        assert_eq!(format_permission_label(&perm, 100), Some("acceptEdits".to_string()));
+    }
+
+    // -----------------------------------------------------------------------
+    // format_effort_label tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn effort_label_none_returns_none_at_all_widths() {
+        let none: Option<String> = None;
+        for width in [30, 45, 80, 100, 120] {
+            assert_eq!(format_effort_label(&none, width), None, "width={width}");
+        }
+    }
+
+    #[test]
+    fn effort_label_high_tiers() {
+        let effort = Some("high".to_string());
+        assert_eq!(format_effort_label(&effort, 100), Some("high".to_string()));
+        assert_eq!(format_effort_label(&effort, 80), Some("hi".to_string()));
+        assert_eq!(format_effort_label(&effort, 45), Some("hi".to_string()));
+        assert_eq!(format_effort_label(&effort, 44), None);
+    }
+
+    #[test]
+    fn effort_label_medium_tiers() {
+        let effort = Some("medium".to_string());
+        assert_eq!(format_effort_label(&effort, 100), Some("medium".to_string()));
+        assert_eq!(format_effort_label(&effort, 80), Some("med".to_string()));
+        assert_eq!(format_effort_label(&effort, 45), Some("med".to_string()));
+        assert_eq!(format_effort_label(&effort, 44), None);
+    }
+
+    #[test]
+    fn effort_label_low_tiers() {
+        let effort = Some("low".to_string());
+        assert_eq!(format_effort_label(&effort, 100), Some("low".to_string()));
+        assert_eq!(format_effort_label(&effort, 80), Some("lo".to_string()));
+        assert_eq!(format_effort_label(&effort, 45), Some("lo".to_string()));
+        assert_eq!(format_effort_label(&effort, 44), None);
+    }
+
+    #[test]
+    fn effort_label_short_form_same_at_80_and_45() {
+        // Verify >= 80 and >= 45 return the SAME short form.
+        for (value, expected_short) in [("high", "hi"), ("medium", "med"), ("low", "lo")] {
+            let effort = Some(value.to_string());
+            let at_80 = format_effort_label(&effort, 80);
+            let at_45 = format_effort_label(&effort, 45);
+            assert_eq!(
+                at_80, at_45,
+                "effort '{value}' should return same short form at width 80 and 45"
+            );
+            assert_eq!(at_80, Some(expected_short.to_string()));
+        }
+    }
+
+    #[test]
+    fn effort_label_boundary_values() {
+        let effort = Some("high".to_string());
+        assert_eq!(format_effort_label(&effort, 45), Some("hi".to_string()));
+        assert_eq!(format_effort_label(&effort, 80), Some("hi".to_string()));
+        assert_eq!(format_effort_label(&effort, 100), Some("high".to_string()));
+    }
 }
