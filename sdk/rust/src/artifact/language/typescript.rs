@@ -14,6 +14,7 @@ pub struct TypeScript<'a> {
     environments: Vec<&'a str>,
     includes: Vec<&'a str>,
     name: &'a str,
+    proto_artifact: Option<String>,
     secrets: Vec<api::artifact::ArtifactStepSecret>,
     systems: Vec<ArtifactSystem>,
     working_dir: Option<String>,
@@ -28,6 +29,7 @@ impl<'a> TypeScript<'a> {
             environments: vec![],
             includes: vec![],
             name,
+            proto_artifact: None,
             secrets: vec![],
             systems,
             working_dir: None,
@@ -56,6 +58,11 @@ impl<'a> TypeScript<'a> {
 
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
         self.includes = includes;
+        self
+    }
+
+    pub fn with_proto_artifact(mut self, artifact: String) -> Self {
+        self.proto_artifact = Some(artifact);
         self
     }
 
@@ -111,13 +118,26 @@ impl<'a> TypeScript<'a> {
 
         // NOTE: Pre-flight validation (package.json, bun.lockb, entrypoint, @vorpal/sdk)
         // is performed by the CLI in cli/src/command/build.rs before this build step runs.
+
+        // If a proto artifact is provided, copy its generated files into the source tree
+        // before bun install so that TypeScript imports from ./api/ resolve correctly.
+        let proto_copy_script = match &self.proto_artifact {
+            Some(digest) => {
+                let proto_env = get_env_key(digest);
+                formatdoc! {r#"
+                    cp -pr {proto_env}/api src/api
+                "#}
+            }
+            None => String::new(),
+        };
+
         let step_script = formatdoc! {r#"
             set -euo pipefail
 
             pushd {work_dir}
 
             mkdir -p $VORPAL_OUTPUT/bin
-
+            {proto_copy_script}
             {bun_bin}/bun install --frozen-lockfile
             {bun_bin}/bun build --compile {entrypoint} --outfile $VORPAL_OUTPUT/bin/{name}"#,
             name = self.name,
@@ -129,10 +149,18 @@ impl<'a> TypeScript<'a> {
             step_environments.push(env.to_string());
         }
 
+        let mut step_artifacts = vec![bun.clone()];
+
+        if let Some(ref proto) = self.proto_artifact {
+            step_artifacts.push(proto.clone());
+        }
+
+        step_artifacts.extend(self.artifacts);
+
         let steps = vec![
             step::shell(
                 context,
-                [vec![bun.clone()], self.artifacts].concat(),
+                step_artifacts,
                 step_environments,
                 step_script,
                 self.secrets,

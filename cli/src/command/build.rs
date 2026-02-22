@@ -33,6 +33,7 @@ use vorpal_sdk::{
         protoc::Protoc,
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
+        protoc_gen_ts_proto::ProtocGenTsProto,
     },
     context::{build_channel, client_auth_header, ConfigContext},
 };
@@ -562,8 +563,13 @@ pub async fn run(
                 }
             }
 
+            let protoc_gen_ts_proto =
+                ProtocGenTsProto::new().build(&mut config_context).await?;
+
             let mut builder =
                 TypeScript::new(&config.name, vec![config_system]).with_includes(includes);
+
+            builder = builder.with_proto_artifact(protoc_gen_ts_proto);
 
             if !config.environments.is_empty() {
                 builder = builder

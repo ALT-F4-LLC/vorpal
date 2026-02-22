@@ -22,6 +22,7 @@ pub mod pnpm;
 pub mod protoc;
 pub mod protoc_gen_go;
 pub mod protoc_gen_go_grpc;
+pub mod protoc_gen_ts_proto;
 pub mod rsync;
 pub mod rust_analyzer;
 pub mod rust_src;
