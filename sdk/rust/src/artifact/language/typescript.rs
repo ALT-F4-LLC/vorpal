@@ -123,9 +123,7 @@ impl<'a> TypeScript<'a> {
             name = self.name,
         };
 
-        let mut step_environments = vec![
-            format!("PATH={bun_bin}"),
-        ];
+        let mut step_environments = vec![format!("PATH={bun_bin}")];
 
         for env in self.environments {
             step_environments.push(env.to_string());

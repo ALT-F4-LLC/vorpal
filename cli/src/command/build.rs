@@ -667,10 +667,12 @@ pub async fn run(
 
     if !config_file.exists() {
         let lang_hint = match config.language.as_str() {
-            "typescript" => "\n\n  For TypeScript configs, this means the bun build --compile step\n  \
+            "typescript" => {
+                "\n\n  For TypeScript configs, this means the bun build --compile step\n  \
                              may have failed silently, or the binary was not placed in the\n  \
                              expected output location.\n\n  \
-                             Try rebuilding with --level debug to see the full build output.",
+                             Try rebuilding with --level debug to see the full build output."
+            }
             _ => "",
         };
         error!(
