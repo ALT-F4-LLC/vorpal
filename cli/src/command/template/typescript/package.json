@@ -1,0 +1,17 @@
+{
+  "name": "example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "bun run src/main.ts"
+  },
+  "dependencies": {
+    "@vorpal/sdk": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "1.2.4",
+    "typescript": "5.9.3"
+  }
+}

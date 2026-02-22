@@ -29,10 +29,11 @@ use vorpal_sdk::{
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
-        language::{go::Go, rust::Rust},
+        language::{go::Go, rust::Rust, typescript::TypeScript},
         protoc::Protoc,
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
+        protoc_gen_ts_proto::ProtocGenTsProto,
     },
     context::{build_channel, client_auth_header, ConfigContext},
 };
@@ -465,11 +466,176 @@ pub async fn run(
             builder.build(&mut config_context).await?
         }
 
-        _ => "".to_string(),
+        "typescript" => {
+            let source_path = format!("src/{}.ts", config.name);
+
+            let mut includes = vec![&source_path, "package.json", "tsconfig.json", "bun.lock"];
+
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+            }
+
+            // Determine the TypeScript project root. When custom includes are
+            // provided, the project files (package.json, lock file, etc.) may
+            // live inside an include directory rather than the context root.
+            let context_dir = &config.context;
+
+            let project_dir = config
+                .source
+                .as_ref()
+                .and_then(|s| s.includes.as_ref())
+                .and_then(|inc| {
+                    inc.iter().find_map(|dir| {
+                        let candidate = context_dir.join(dir);
+                        if candidate.is_dir() && candidate.join("package.json").exists() {
+                            Some(candidate)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or_else(|| context_dir.to_path_buf());
+
+            let package_json_path = project_dir.join("package.json");
+            if !package_json_path.exists() {
+                bail!(
+                    "TypeScript config requires a package.json file, but none was found at: {}\n\n  \
+                     To fix this, initialize a new project:\n    \
+                     cd {} && bun init\n\n  \
+                     Then add the Vorpal SDK:\n    \
+                     bun add @vorpal/sdk",
+                    package_json_path.display(),
+                    project_dir.display()
+                );
+            }
+
+            // Accept both bun.lock (text, newer) and bun.lockb (binary, older)
+            let lockfile_text = project_dir.join("bun.lock");
+            let lockfile_binary = project_dir.join("bun.lockb");
+            if !lockfile_text.exists() && !lockfile_binary.exists() {
+                bail!(
+                    "TypeScript config requires a bun lock file, but none was found at: {}\n\n  \
+                     This means dependencies have not been installed yet.\n\n  \
+                     To fix this, run:\n    \
+                     cd {} && bun install\n\n  \
+                     This will generate the lock file.",
+                    project_dir.display(),
+                    project_dir.display()
+                );
+            }
+
+            // Check that the entrypoint file exists
+            let entrypoint_file = config
+                .source
+                .as_ref()
+                .and_then(|s| s.typescript.as_ref())
+                .and_then(|t| t.entrypoint.as_ref())
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| source_path.clone());
+
+            let entrypoint_path = context_dir.join(&entrypoint_file);
+            if !entrypoint_path.exists() {
+                bail!(
+                    "TypeScript entrypoint file not found: {}\n\n  \
+                     Expected the config entrypoint at: {}\n\n  \
+                     To fix this, either:\n    \
+                     1. Create the file at '{}'\n    \
+                     2. Set a custom entrypoint in Vorpal.toml:\n\n       \
+                        [source.typescript]\n       \
+                        entrypoint = \"src/your-file.ts\"",
+                    entrypoint_path.display(),
+                    entrypoint_path.display(),
+                    entrypoint_file
+                );
+            }
+
+            // Validate that @vorpal/sdk is in package.json dependencies
+            if let Ok(pkg_contents) = std::fs::read_to_string(&package_json_path) {
+                if !pkg_contents.contains("\"@vorpal/sdk\"") {
+                    bail!(
+                        "@vorpal/sdk is not listed as a dependency in {}\n\n  \
+                         The Vorpal TypeScript SDK is required for TypeScript configs.\n\n  \
+                         To fix this, run:\n    \
+                         cd {} && bun add @vorpal/sdk",
+                        package_json_path.display(),
+                        project_dir.display()
+                    );
+                }
+            }
+
+            let protoc_gen_ts_proto = ProtocGenTsProto::new().build(&mut config_context).await?;
+
+            let mut builder =
+                TypeScript::new(&config.name, vec![config_system]).with_includes(includes);
+
+            builder = builder.with_proto_artifact(protoc_gen_ts_proto);
+
+            if !config.environments.is_empty() {
+                builder = builder
+                    .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
+            }
+
+            if let Some(bun_version) = config
+                .source
+                .as_ref()
+                .and_then(|s| s.typescript.as_ref())
+                .and_then(|t| t.bun_version.as_ref())
+            {
+                builder = builder.with_bun_version(bun_version);
+            }
+
+            // If the project dir differs from the context dir, set the working
+            // directory and strip its prefix from the entrypoint path so that
+            // bun commands run from the correct location inside the sandbox.
+            let working_dir_prefix = project_dir
+                .strip_prefix(context_dir)
+                .ok()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(|p| p.to_string_lossy().to_string());
+
+            if let Some(ref wd) = working_dir_prefix {
+                builder = builder.with_working_dir(wd);
+            }
+
+            let entrypoint_raw = config
+                .source
+                .as_ref()
+                .and_then(|s| s.typescript.as_ref())
+                .and_then(|t| t.entrypoint.as_ref())
+                .map(|e| e.to_string());
+
+            if let Some(ep) = &entrypoint_raw {
+                // Strip working dir prefix from entrypoint since bun runs from that dir
+                let ep_stripped = working_dir_prefix
+                    .as_ref()
+                    .and_then(|wd| ep.strip_prefix(&format!("{}/", wd)))
+                    .unwrap_or(ep);
+                builder = builder.with_entrypoint(ep_stripped);
+            }
+
+            builder.build(&mut config_context).await?
+        }
+
+        other => {
+            bail!(
+                "Unsupported language '{}' in Vorpal.toml\n\n  \
+                 Supported languages are: go, rust, typescript\n\n  \
+                 To fix this, update the 'language' field in your Vorpal.toml:\n    \
+                 language = \"typescript\"  # or \"rust\" or \"go\"",
+                other
+            );
+        }
     };
 
     if config_digest.is_empty() {
-        bail!("no config digest found");
+        bail!(
+            "No config digest was produced for language '{}'\n\n  \
+             The config build completed but did not return a valid artifact digest.\n  \
+             This may indicate an internal error in the {} language builder.\n\n  \
+             Try running with --level debug for more details.",
+            config.language,
+            config.language
+        );
     }
 
     // Prepare lock path early for incremental artifact updates
@@ -505,7 +671,20 @@ pub async fn run(
     let config_file = Path::new(&config_file);
 
     if !config_file.exists() {
-        error!("config not found: {}", config_file.display());
+        let lang_hint = match config.language.as_str() {
+            "typescript" => {
+                "\n\n  For TypeScript configs, this means the bun build --compile step\n  \
+                             may have failed silently, or the binary was not placed in the\n  \
+                             expected output location.\n\n  \
+                             Try rebuilding with --level debug to see the full build output."
+            }
+            _ => "",
+        };
+        error!(
+            "Compiled config binary not found: {}{}\n",
+            config_file.display(),
+            lang_hint
+        );
         exit(1);
     }
 

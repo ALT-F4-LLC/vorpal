@@ -1,0 +1,7 @@
+language = "typescript"
+
+[source]
+includes = ["sdk/typescript"]
+
+[source.typescript]
+entrypoint = "sdk/typescript/src/vorpal.ts"
