@@ -16,6 +16,7 @@ pub struct TypeScript<'a> {
     name: &'a str,
     secrets: Vec<api::artifact::ArtifactStepSecret>,
     systems: Vec<ArtifactSystem>,
+    working_dir: Option<String>,
 }
 
 impl<'a> TypeScript<'a> {
@@ -29,6 +30,7 @@ impl<'a> TypeScript<'a> {
             name,
             secrets: vec![],
             systems,
+            working_dir: None,
         }
     }
 
@@ -54,6 +56,11 @@ impl<'a> TypeScript<'a> {
 
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
         self.includes = includes;
+        self
+    }
+
+    pub fn with_working_dir(mut self, dir: &str) -> Self {
+        self.working_dir = Some(dir.to_string());
         self
     }
 
@@ -85,6 +92,11 @@ impl<'a> TypeScript<'a> {
 
         let source_dir = format!("./source/{}", source.name);
 
+        let work_dir = match &self.working_dir {
+            Some(dir) => format!("{}/{}", source_dir, dir),
+            None => source_dir.clone(),
+        };
+
         let entrypoint = match self.entrypoint {
             Some(ep) => ep.to_string(),
             None => format!("src/{}.ts", self.name),
@@ -102,7 +114,7 @@ impl<'a> TypeScript<'a> {
         let step_script = formatdoc! {r#"
             set -euo pipefail
 
-            pushd {source_dir}
+            pushd {work_dir}
 
             mkdir -p $VORPAL_OUTPUT/bin
 

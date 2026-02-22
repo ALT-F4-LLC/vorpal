@@ -190,7 +190,15 @@ function buildVendorScript(
   return lines.join("\n");
 }
 
-/** Builds the main build step script for `cargo build --release`. */
+/**
+ * Builds the main build step script for `cargo build --release`.
+ *
+ * CRITICAL: The script structure must be IDENTICAL to the Rust and Go SDKs.
+ * Both Rust (formatdoc! in rust.rs) and Go (StepScriptTemplate in rust.go)
+ * always emit `if [ "false"/"true" = "true" ]` conditional blocks for every
+ * option (format, lint, check, build, tests), even when disabled. The
+ * TypeScript SDK must do the same to produce matching artifact digests.
+ */
 function buildMainScript(opts: {
   name: string;
   vendorDigest: string;
@@ -203,6 +211,12 @@ function buildMainScript(opts: {
   build: boolean;
   tests: boolean;
 }): string {
+  const enableFormat = opts.format ? "true" : "false";
+  const enableLint = opts.lint ? "true" : "false";
+  const enableCheck = opts.check ? "true" : "false";
+  const enableBuild = opts.build ? "true" : "false";
+  const enableTests = opts.tests ? "true" : "false";
+
   const lines: string[] = [];
 
   lines.push(`mkdir -pv $HOME`);
@@ -229,41 +243,37 @@ function buildMainScript(opts: {
   lines.push(``);
   lines.push(`bin_names=(${opts.binNames.join(" ")})`);
   lines.push(`manifest_paths=(${opts.manifests.join(" ")})`);
-
-  if (opts.format) {
-    lines.push(``);
-    lines.push(`echo "Running formatter..."`);
-    lines.push(`cargo --offline fmt --all --check`);
-  }
-
-  if (opts.lint) {
-    lines.push(``);
-    lines.push(`for manifest_path in \${manifest_paths[@]}; do`);
-    lines.push(`    echo "Running linter..."`);
-    lines.push(
-      `    cargo --offline clippy --manifest-path \${manifest_path} -- --deny warnings`,
-    );
-    lines.push(`done`);
-  }
-
+  lines.push(``);
+  lines.push(`if [ "${enableFormat}" = "true" ]; then`);
+  lines.push(`    echo "Running formatter..."`);
+  lines.push(`    cargo --offline fmt --all --check`);
+  lines.push(`fi`);
+  lines.push(``);
+  lines.push(`for manifest_path in \${manifest_paths[@]}; do`);
+  lines.push(`    if [ "${enableLint}" = "true" ]; then`);
+  lines.push(`        echo "Running linter..."`);
+  lines.push(
+    `        cargo --offline clippy --manifest-path \${manifest_path} -- --deny warnings`,
+  );
+  lines.push(`    fi`);
+  lines.push(`done`);
   lines.push(``);
   lines.push(`for bin_name in \${bin_names[@]}; do`);
-
-  if (opts.check) {
-    lines.push(`    echo "Running check..."`);
-    lines.push(`    cargo --offline check --bin \${bin_name} --release`);
-  }
-
-  if (opts.build) {
-    lines.push(`    echo "Running build..."`);
-    lines.push(`    cargo --offline build --bin \${bin_name} --release`);
-  }
-
-  if (opts.tests) {
-    lines.push(`    echo "Running tests..."`);
-    lines.push(`    cargo --offline test --bin \${bin_name} --release`);
-  }
-
+  lines.push(`    if [ "${enableCheck}" = "true" ]; then`);
+  lines.push(`        echo "Running check..."`);
+  lines.push(`        cargo --offline check --bin \${bin_name} --release`);
+  lines.push(`    fi`);
+  lines.push(``);
+  lines.push(`    if [ "${enableBuild}" = "true" ]; then`);
+  lines.push(`        echo "Running build..."`);
+  lines.push(`        cargo --offline build --bin \${bin_name} --release`);
+  lines.push(`    fi`);
+  lines.push(``);
+  lines.push(`    if [ "${enableTests}" = "true" ]; then`);
+  lines.push(`        echo "Running tests..."`);
+  lines.push(`        cargo --offline test --bin \${bin_name} --release`);
+  lines.push(`    fi`);
+  lines.push(``);
   lines.push(`    cp -pv ./target/release/\${bin_name} $VORPAL_OUTPUT/bin/`);
   lines.push(`done`);
 
@@ -410,8 +420,19 @@ export class RustBuilder {
     const protoc = await context.fetchArtifactAlias(PROTOC_ALIAS);
 
     // Parse source path
+    //
+    // CRITICAL: Use string concatenation (`${a}/${b}`) instead of
+    // `path.join()` for paths that end up in the build script.  The Rust
+    // SDK uses `PathBuf::join` which preserves a leading `"."` segment
+    // (e.g. `/ctx/./cli/Cargo.toml`), and the Go SDK uses
+    // `fmt.Sprintf("%s/%s", ...)` which does the same.  Node's
+    // `path.join` normalises the dot away, producing a different path
+    // string and therefore a different artifact digest.
     const contextPath = context.getArtifactContextPath();
     const sourcePath = this._source ?? ".";
+    // Raw path preserves "./", matching Rust PathBuf::join and Go Sprintf
+    const contextPathSourceRaw = `${contextPath}/${sourcePath}`;
+    // Normalised path for filesystem operations (existsSync, readFileSync)
     const contextPathSource = join(contextPath, sourcePath);
 
     if (!existsSync(contextPathSource)) {
@@ -422,6 +443,8 @@ export class RustBuilder {
 
     // Parse Cargo.toml
     const sourceCargoPath = join(contextPathSource, "Cargo.toml");
+    // Raw path for embedding in build scripts
+    const sourceCargoPathRaw = `${contextPathSourceRaw}/Cargo.toml`;
 
     if (!existsSync(sourceCargoPath)) {
       throw new Error(`Cargo.toml not found: ${sourceCargoPath}`);
@@ -441,7 +464,9 @@ export class RustBuilder {
     ) {
       for (const member of sourceCargo.workspace.members) {
         const packagePath = join(contextPathSource, member);
+        const packagePathRaw = `${contextPathSourceRaw}/${member}`;
         const packageCargoPath = join(packagePath, "Cargo.toml");
+        const packageCargoPathRaw = `${packagePathRaw}/Cargo.toml`;
 
         if (!existsSync(packageCargoPath)) {
           throw new Error(`Cargo.toml not found: ${packageCargoPath}`);
@@ -475,8 +500,8 @@ export class RustBuilder {
               this._bins.length === 0 ||
               this._bins.includes(bin.name)
             ) {
-              if (!packagesManifests.includes(packageCargoPath)) {
-                packagesManifests.push(packageCargoPath);
+              if (!packagesManifests.includes(packageCargoPathRaw)) {
+                packagesManifests.push(packageCargoPathRaw);
               }
 
               packagesBinNames.push(bin.name);
@@ -599,7 +624,7 @@ export class RustBuilder {
     }
 
     if (packagesManifests.length === 0) {
-      packagesManifests.push(sourceCargoPath);
+      packagesManifests.push(sourceCargoPathRaw);
     }
 
     const stepScript = buildMainScript({

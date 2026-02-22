@@ -156,12 +156,12 @@ All inter-service communication uses gRPC with protobuf. The `.proto` source of 
 **`Artifact`** -- The core data model:
 ```
 Artifact {
-  target: ArtifactSystem       // Target platform for this build
+  aliases: [string]            // Name:tag aliases for resolution
+  name: string                 // Human-readable artifact name
   sources: [ArtifactSource]    // Source inputs (local paths, URLs, git repos)
   steps: [ArtifactStep]        // Build steps to execute
   systems: [ArtifactSystem]    // Platforms this artifact supports
-  aliases: [string]            // Name:tag aliases for resolution
-  name: string                 // Human-readable artifact name
+  target: ArtifactSystem       // Target platform for this build
 }
 ```
 
@@ -170,12 +170,12 @@ Artifact {
 **`ArtifactStep`** -- A single build step:
 ```
 ArtifactStep {
-  entrypoint: string           // Executor binary (bash, bwrap, docker)
-  script: string               // Script to execute
-  secrets: [ArtifactStepSecret]// Build-time secrets
   arguments: [string]          // Arguments to entrypoint
   artifacts: [string]          // Dependency artifact digests
+  entrypoint: string           // Executor binary (bash, bwrap, docker)
   environments: [string]       // Environment variables (KEY=value)
+  script: string               // Script to execute
+  secrets: [ArtifactStepSecret]// Build-time secrets
 }
 ```
 
@@ -336,8 +336,8 @@ packages = ["vorpal-config", "vorpal-sdk"]  # Rust packages to build
 directory = "sdk/go/cmd/vorpal"  # Go module directory
 
 [source.typescript]
-entrypoint = "sdk/typescript/src/vorpal.ts"  # TypeScript entry point
 bun_version = "1.2.1"  # Optional Bun version override
+entrypoint = "sdk/typescript/src/vorpal.ts"  # TypeScript entry point
 ```
 
 ### Layered Settings

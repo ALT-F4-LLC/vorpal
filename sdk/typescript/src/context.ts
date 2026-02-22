@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as grpc from "@grpc/grpc-js";
 import type {
@@ -47,6 +47,188 @@ function getClientCredentials(uri: string): grpc.ChannelCredentials {
 
   // Use system roots (createSsl with no args uses Node's default CA store)
   return grpc.credentials.createSsl();
+}
+
+/**
+ * Converts a URI to a gRPC-js compatible target string.
+ *
+ * `@grpc/grpc-js` does not understand `https://` or `http://` schemes —
+ * it expects `host:port`, `dns:///host:port`, or `unix:///path`.
+ * The Rust SDK's `tonic` handles `https://` natively, so the CLI passes
+ * registry/agent URLs in that format. We convert them here.
+ */
+function toGrpcTarget(uri: string): string {
+  if (uri.startsWith("unix://")) {
+    return uri;
+  }
+  if (uri.startsWith("https://")) {
+    const host = uri.slice("https://".length).replace(/\/+$/, "");
+    return host.includes(":") ? host : `${host}:443`;
+  }
+  if (uri.startsWith("http://")) {
+    const host = uri.slice("http://".length).replace(/\/+$/, "");
+    return host.includes(":") ? host : `${host}:80`;
+  }
+  return uri;
+}
+
+// ---------------------------------------------------------------------------
+// Credential types and auth header — matches Rust client_auth_header()
+// and Go ClientAuthHeader()
+// ---------------------------------------------------------------------------
+
+const VORPAL_CREDENTIALS_PATH = join(VORPAL_ROOT_DIR, "key", "credentials.json");
+
+/** Matches VorpalCredentialsContent (Go) / IssuerCredentials (Rust). */
+interface IssuerCredentials {
+  access_token: string;
+  audience?: string;
+  client_id: string;
+  expires_in: number;
+  issued_at: number;
+  refresh_token: string;
+  scopes: string[];
+}
+
+/** Matches VorpalCredentials (Go/Rust). */
+interface VorpalCredentials {
+  issuer: Record<string, IssuerCredentials>;
+  registry: Record<string, string>;
+}
+
+/** Minimal OIDC discovery document — we only need `token_endpoint`. */
+interface OIDCDiscovery {
+  token_endpoint: string;
+}
+
+/**
+ * Refreshes an expired access token using the OIDC refresh-token grant.
+ *
+ * Mirrors `refreshAccessToken` in Go and `refresh_access_token` in Rust:
+ * 1. Discover the token endpoint via `<issuer>/.well-known/openid-configuration`
+ * 2. POST a `grant_type=refresh_token` form to the token endpoint
+ * 3. Return the new access token, expiry, and issued-at timestamp
+ */
+async function refreshAccessToken(
+  audience: string | undefined,
+  clientId: string,
+  issuer: string,
+  refreshToken: string,
+): Promise<{ accessToken: string; expiresIn: number; issuedAt: number }> {
+  // Discover token endpoint
+  const discoveryUrl = `${issuer}/.well-known/openid-configuration`;
+  const discoveryResp = await fetch(discoveryUrl);
+  if (!discoveryResp.ok) {
+    throw new Error(
+      `Failed to fetch OIDC discovery from ${discoveryUrl}: ${discoveryResp.status} ${discoveryResp.statusText}`,
+    );
+  }
+  const discovery = (await discoveryResp.json()) as OIDCDiscovery;
+  if (!discovery.token_endpoint) {
+    throw new Error("missing token_endpoint in OIDC discovery");
+  }
+
+  // Build refresh token request (application/x-www-form-urlencoded)
+  const params = new URLSearchParams();
+  params.set("grant_type", "refresh_token");
+  params.set("client_id", clientId);
+  params.set("refresh_token", refreshToken);
+  if (audience) {
+    params.set("audience", audience);
+  }
+
+  const tokenResp = await fetch(discovery.token_endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  if (!tokenResp.ok) {
+    throw new Error(
+      `Token refresh failed with status: ${tokenResp.status}`,
+    );
+  }
+
+  const tokenResult = (await tokenResp.json()) as {
+    access_token: string;
+    expires_in?: number;
+  };
+
+  const expiresIn = tokenResult.expires_in ?? 3600; // default 1 hour
+  const issuedAt = Math.floor(Date.now() / 1000);
+
+  return {
+    accessToken: tokenResult.access_token,
+    expiresIn,
+    issuedAt,
+  };
+}
+
+/**
+ * Retrieves the authorization header for a given registry.
+ *
+ * Returns `Bearer <token>` if valid credentials exist, `null` if no
+ * credentials file or no mapping for this registry (allowing
+ * unauthenticated requests), or throws on unrecoverable errors.
+ *
+ * Matches Rust `client_auth_header()` and Go `ClientAuthHeader()`.
+ */
+async function clientAuthHeader(registry: string): Promise<string | null> {
+  // Check if credentials file exists
+  if (!existsSync(VORPAL_CREDENTIALS_PATH)) {
+    return null;
+  }
+
+  // Read and parse credentials
+  const credentialsData = readFileSync(VORPAL_CREDENTIALS_PATH, "utf-8");
+  const credentials: VorpalCredentials = JSON.parse(credentialsData);
+
+  // Lookup registry -> issuer mapping
+  const registryIssuer = credentials.registry[registry];
+  if (!registryIssuer) {
+    // No registry mapping — allow unauthenticated requests
+    return null;
+  }
+
+  // Lookup issuer credentials
+  const issuerCreds = credentials.issuer[registryIssuer];
+  if (!issuerCreds) {
+    throw new Error(`no credentials for issuer: ${registryIssuer}`);
+  }
+
+  // Check if token needs refresh (5-minute buffer, matching Go/Rust)
+  const now = Math.floor(Date.now() / 1000);
+  const tokenAge = now - issuerCreds.issued_at;
+  const needsRefresh = tokenAge + 300 >= issuerCreds.expires_in;
+
+  if (needsRefresh) {
+    if (!issuerCreds.refresh_token) {
+      throw new Error(
+        `Access token expired and no refresh token available. Please run: vorpal login --issuer ${registryIssuer}`,
+      );
+    }
+
+    const refreshed = await refreshAccessToken(
+      issuerCreds.audience,
+      issuerCreds.client_id,
+      registryIssuer,
+      issuerCreds.refresh_token,
+    );
+
+    // Update credentials in memory
+    issuerCreds.access_token = refreshed.accessToken;
+    issuerCreds.expires_in = refreshed.expiresIn;
+    issuerCreds.issued_at = refreshed.issuedAt;
+
+    // Save updated credentials to disk (matching Go/Rust behavior)
+    writeFileSync(
+      VORPAL_CREDENTIALS_PATH,
+      JSON.stringify(credentials, null, 2),
+      { mode: 0o600 },
+    );
+  }
+
+  return `Bearer ${issuerCreds.access_token}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -403,8 +585,9 @@ export class ConfigContext {
     let clientAgent: AgentServiceClient;
     let clientArtifact: ArtifactServiceClient;
     try {
+      const agentTarget = toGrpcTarget(args.agent);
       const agentCredentials = getClientCredentials(args.agent);
-      clientAgent = new AgentServiceClient(args.agent, agentCredentials);
+      clientAgent = new AgentServiceClient(agentTarget, agentCredentials);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(
@@ -415,8 +598,9 @@ export class ConfigContext {
       );
     }
     try {
+      const registryTarget = toGrpcTarget(args.registry);
       const registryCredentials = getClientCredentials(args.registry);
-      clientArtifact = new ArtifactServiceClient(args.registry, registryCredentials);
+      clientArtifact = new ArtifactServiceClient(registryTarget, registryCredentials);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(
@@ -491,7 +675,14 @@ export class ConfigContext {
       artifact: artifact,
     };
 
-    const stream = this._clientAgent.prepareArtifact(request);
+    // Add authorization metadata if credentials exist (matches Go/Rust SDKs)
+    const metadata = new grpc.Metadata();
+    const bearerToken = await clientAuthHeader(this._registry);
+    if (bearerToken) {
+      metadata.set("authorization", bearerToken);
+    }
+
+    const stream = this._clientAgent.prepareArtifact(request, metadata);
 
     let responseArtifact: ArtifactMsg | undefined;
     let responseArtifactDigest: string | undefined;
@@ -574,8 +765,15 @@ export class ConfigContext {
       namespace: this._artifactNamespace,
     };
 
+    // Add authorization metadata if credentials exist (matches Go/Rust SDKs)
+    const metadata = new grpc.Metadata();
+    const bearerToken = await clientAuthHeader(this._registry);
+    if (bearerToken) {
+      metadata.set("authorization", bearerToken);
+    }
+
     const artifact = await new Promise<ArtifactMsg>((resolve, reject) => {
-      this._clientArtifact.getArtifact(request, (err, response) => {
+      this._clientArtifact.getArtifact(request, metadata, (err, response) => {
         if (err) {
           const svcErr = err as grpc.ServiceError;
           if (svcErr.code === grpc.status.NOT_FOUND) {
@@ -631,8 +829,15 @@ export class ConfigContext {
       tag: parsed.tag,
     };
 
+    // Add authorization metadata if credentials exist (matches Go/Rust SDKs)
+    const metadata = new grpc.Metadata();
+    const bearerToken = await clientAuthHeader(this._registry);
+    if (bearerToken) {
+      metadata.set("authorization", bearerToken);
+    }
+
     const response = await new Promise<{ digest: string }>((resolve, reject) => {
-      this._clientArtifact.getArtifactAlias(request, (err, resp) => {
+      this._clientArtifact.getArtifactAlias(request, metadata, (err, resp) => {
         if (err) {
           const svcErr = err as grpc.ServiceError;
           if (svcErr.code === grpc.status.NOT_FOUND) {

@@ -468,16 +468,34 @@ pub async fn run(
         "typescript" => {
             let source_path = format!("src/{}.ts", config.name);
 
-            let mut includes = vec![&source_path, "package.json", "tsconfig.json", "bun.lockb"];
+            let mut includes = vec![&source_path, "package.json", "tsconfig.json", "bun.lock"];
 
             if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
                 includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             }
 
-            // Validate that required TypeScript project files exist in the context directory
+            // Determine the TypeScript project root. When custom includes are
+            // provided, the project files (package.json, lock file, etc.) may
+            // live inside an include directory rather than the context root.
             let context_dir = &config.context;
 
-            let package_json_path = context_dir.join("package.json");
+            let project_dir = config
+                .source
+                .as_ref()
+                .and_then(|s| s.includes.as_ref())
+                .and_then(|inc| {
+                    inc.iter().find_map(|dir| {
+                        let candidate = context_dir.join(dir);
+                        if candidate.is_dir() && candidate.join("package.json").exists() {
+                            Some(candidate)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or_else(|| context_dir.to_path_buf());
+
+            let package_json_path = project_dir.join("package.json");
             if !package_json_path.exists() {
                 bail!(
                     "TypeScript config requires a package.json file, but none was found at: {}\n\n  \
@@ -486,20 +504,22 @@ pub async fn run(
                      Then add the Vorpal SDK:\n    \
                      bun add @vorpal/sdk",
                     package_json_path.display(),
-                    context_dir.display()
+                    project_dir.display()
                 );
             }
 
-            let lockfile_path = context_dir.join("bun.lockb");
-            if !lockfile_path.exists() {
+            // Accept both bun.lock (text, newer) and bun.lockb (binary, older)
+            let lockfile_text = project_dir.join("bun.lock");
+            let lockfile_binary = project_dir.join("bun.lockb");
+            if !lockfile_text.exists() && !lockfile_binary.exists() {
                 bail!(
-                    "TypeScript config requires a bun.lockb file, but none was found at: {}\n\n  \
+                    "TypeScript config requires a bun lock file, but none was found at: {}\n\n  \
                      This means dependencies have not been installed yet.\n\n  \
                      To fix this, run:\n    \
                      cd {} && bun install\n\n  \
-                     This will generate the bun.lockb lock file.",
-                    lockfile_path.display(),
-                    context_dir.display()
+                     This will generate the lock file.",
+                    project_dir.display(),
+                    project_dir.display()
                 );
             }
 
@@ -537,7 +557,7 @@ pub async fn run(
                          To fix this, run:\n    \
                          cd {} && bun add @vorpal/sdk",
                         package_json_path.display(),
-                        context_dir.display()
+                        project_dir.display()
                     );
                 }
             }
@@ -559,13 +579,33 @@ pub async fn run(
                 builder = builder.with_bun_version(bun_version);
             }
 
-            if let Some(entrypoint) = config
+            // If the project dir differs from the context dir, set the working
+            // directory and strip its prefix from the entrypoint path so that
+            // bun commands run from the correct location inside the sandbox.
+            let working_dir_prefix = project_dir
+                .strip_prefix(context_dir)
+                .ok()
+                .filter(|p| p.as_os_str().len() > 0)
+                .map(|p| p.to_string_lossy().to_string());
+
+            if let Some(ref wd) = working_dir_prefix {
+                builder = builder.with_working_dir(wd);
+            }
+
+            let entrypoint_raw = config
                 .source
                 .as_ref()
                 .and_then(|s| s.typescript.as_ref())
                 .and_then(|t| t.entrypoint.as_ref())
-            {
-                builder = builder.with_entrypoint(entrypoint);
+                .map(|e| e.to_string());
+
+            if let Some(ep) = &entrypoint_raw {
+                // Strip working dir prefix from entrypoint since bun runs from that dir
+                let ep_stripped = working_dir_prefix
+                    .as_ref()
+                    .and_then(|wd| ep.strip_prefix(&format!("{}/", wd)))
+                    .unwrap_or(ep);
+                builder = builder.with_entrypoint(ep_stripped);
             }
 
             builder.build(&mut config_context).await?
