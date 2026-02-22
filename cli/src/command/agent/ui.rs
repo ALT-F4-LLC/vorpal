@@ -3,6 +3,7 @@
 //! Builds the ratatui widget tree from application state: tab bar, content
 //! area with scrollable output, status bar, and help overlay.
 
+use super::manager::ClaudeOptions;
 use super::state::{
     self, AgentActivity, AgentState, AgentStatus, App, DiffLine, DisplayLine, InputField,
     InputMode, ResultDisplay, SplitPane, ToastKind, COMMANDS, EFFORT_LEVELS, MODELS,
@@ -2344,6 +2345,173 @@ fn build_status_left_spans<'a>(
         spans.push(Span::raw(format!("{turn_count}t")));
         spans.push(Span::raw("  "));
         spans.push(Span::raw(format!("{tool_count}T")));
+    }
+
+    spans
+}
+
+/// Return a responsive display label for the agent's model setting.
+///
+/// Strips the `claude-` prefix for known models at wider widths, abbreviates to
+/// the family name or a single uppercase letter at narrower widths, and hides
+/// entirely below 45 columns. Non-standard model strings fall back to truncation.
+/// Returns `None` when the input is `None`.
+fn format_model_label(model: &Option<String>, width: u16) -> Option<String> {
+    let value = model.as_deref()?;
+
+    if width < 45 {
+        return None;
+    }
+
+    // Known model families: (full value, stripped, family, initial)
+    let known: &[(&str, &str, &str, &str)] = &[
+        ("claude-opus-4-6", "opus-4-6", "opus", "O"),
+        ("claude-sonnet-4-5", "sonnet-4-5", "sonnet", "S"),
+        ("claude-haiku-4-5", "haiku-4-5", "haiku", "H"),
+    ];
+
+    for &(full, stripped, family, initial) in known {
+        if value == full {
+            return Some(if width >= 100 {
+                stripped.to_string()
+            } else if width >= 80 {
+                family.to_string()
+            } else {
+                initial.to_string()
+            });
+        }
+    }
+
+    // Non-standard model: truncation fallback.
+    Some(if width >= 100 {
+        if value.len() <= 12 {
+            value.to_string()
+        } else {
+            value.chars().take(12).collect()
+        }
+    } else if width >= 80 {
+        if value.len() <= 8 {
+            value.to_string()
+        } else {
+            value.chars().take(8).collect()
+        }
+    } else {
+        // >= 45
+        value
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default()
+    })
+}
+
+/// Return a responsive display label for the agent's permission mode setting.
+///
+/// Known modes (`default`, `plan`, `acceptEdits`, `bypassPermissions`) are
+/// shortened at the 80-column tier and reduced to a single lowercase letter at
+/// 45 columns. Hidden below 45 columns. Returns `None` when the input is `None`.
+fn format_permission_label(perm: &Option<String>, width: u16) -> Option<String> {
+    let value = perm.as_deref()?;
+
+    if width < 45 {
+        return None;
+    }
+
+    // (full value, >= 100, >= 80, >= 45)
+    let known: &[(&str, &str, &str, &str)] = &[
+        ("default", "default", "default", "d"),
+        ("plan", "plan", "plan", "p"),
+        ("acceptEdits", "acceptEdits", "accept", "a"),
+        ("bypassPermissions", "bypassPermissions", "bypass", "b"),
+    ];
+
+    for &(full, wide, medium, narrow) in known {
+        if value == full {
+            return Some(if width >= 100 {
+                wide.to_string()
+            } else if width >= 80 {
+                medium.to_string()
+            } else {
+                narrow.to_string()
+            });
+        }
+    }
+
+    // Unknown permission value: return as-is (shouldn't happen with known constants).
+    Some(value.to_string())
+}
+
+/// Return a responsive display label for the agent's effort level setting.
+///
+/// Full label at >= 100 columns, short form (`hi`/`med`/`lo`) at >= 80 and
+/// >= 45 columns (same abbreviation for both tiers), hidden below 45 columns.
+/// Returns `None` when the input is `None`.
+fn format_effort_label(effort: &Option<String>, width: u16) -> Option<String> {
+    let value = effort.as_deref()?;
+
+    if width < 45 {
+        return None;
+    }
+
+    // (full value, >= 100, >= 80 / >= 45)
+    let known: &[(&str, &str, &str)] = &[
+        ("high", "high", "hi"),
+        ("medium", "medium", "med"),
+        ("low", "low", "lo"),
+    ];
+
+    for &(full, wide, short) in known {
+        if value == full {
+            return Some(if width >= 100 {
+                wide.to_string()
+            } else {
+                short.to_string()
+            });
+        }
+    }
+
+    // Unknown effort value: return as-is.
+    Some(value.to_string())
+}
+
+/// Compose model, permission-mode, and effort-level indicators into styled spans.
+///
+/// Calls each `format_*_label` helper, collects non-`None` results, and joins
+/// them with two-space separators. Returns an empty `Vec` when all options are
+/// `None` or the terminal width is below 45 columns.
+///
+/// The caller is responsible for adding any pipe separator between these spans
+/// and adjacent content (e.g., the token/cost cluster).
+fn build_indicator_spans<'a>(
+    options: &ClaudeOptions,
+    width: u16,
+    theme: &'a Theme,
+) -> Vec<Span<'a>> {
+    if width < 45 {
+        return Vec::new();
+    }
+
+    let labels: Vec<String> = [
+        format_model_label(&options.model, width),
+        format_permission_label(&options.permission_mode, width),
+        format_effort_label(&options.effort, width),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    if labels.is_empty() {
+        return Vec::new();
+    }
+
+    let style = Style::default().fg(theme.status_bar_fg);
+
+    let mut spans = Vec::new();
+    for (i, label) in labels.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("  ", style));
+        }
+        spans.push(Span::styled(label.clone(), style));
     }
 
     spans
