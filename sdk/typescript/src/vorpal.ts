@@ -1,5 +1,5 @@
 import { ArtifactSystem } from "./api/artifact/artifact.js";
-import { getEnvKey, JobBuilder } from "./artifact.js";
+import { getEnvKey, JobBuilder, ProcessBuilder } from "./artifact.js";
 import { RustBuilder } from "./artifact/language/rust.js";
 import { ConfigContext } from "./context.js";
 
@@ -27,6 +27,26 @@ async function buildVorpalJob(context: ConfigContext): Promise<string> {
     .build(context);
 }
 
+async function buildVorpalProcess(context: ConfigContext): Promise<string> {
+  const vorpal = await buildVorpal(context);
+
+  return new ProcessBuilder(
+    "vorpal-process",
+    `${getEnvKey(vorpal)}/bin/vorpal`,
+    SYSTEMS,
+  )
+    .withArguments([
+      "--registry",
+      "https://localhost:50051",
+      "services",
+      "start",
+      "--port",
+      "50051",
+    ])
+    .withArtifacts([vorpal])
+    .build(context);
+}
+
 async function main(): Promise<void> {
   const context = ConfigContext.create();
 
@@ -36,6 +56,9 @@ async function main(): Promise<void> {
       break;
     case "vorpal-job":
       await buildVorpalJob(context);
+      break;
+    case "vorpal-process":
+      await buildVorpalProcess(context);
       break;
     default:
       break;
