@@ -2599,8 +2599,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 
                 // Right side: indicator spans + tokens + cost
                 // Width-aware: drop cost at <80 cols, drop entire right side at <45 cols
-                let indicator_spans =
-                    build_indicator_spans(&agent.claude_options, w, theme);
+                let indicator_spans = build_indicator_spans(&agent.claude_options, w, theme);
 
                 let mut token_cost_spans: Vec<Span> = Vec::new();
                 if w >= 45
@@ -2615,8 +2614,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                         token_cost_spans
                             .push(Span::raw(format!("{input} in  {output} out  {cost} ",)));
                     } else {
-                        token_cost_spans
-                            .push(Span::raw(format!("{input} in  {output} out ",)));
+                        token_cost_spans.push(Span::raw(format!("{input} in  {output} out ",)));
                     }
                 }
 
@@ -6147,8 +6145,14 @@ mod tests {
         let text = spans_text(&spans);
         assert!(text.contains("3t"), "expected '3t' in: {text}");
         assert!(text.contains("12T"), "expected '12T' in: {text}");
-        assert!(!text.contains("3 turns"), "should NOT contain full '3 turns' in: {text}");
-        assert!(!text.contains("12 tools"), "should NOT contain full '12 tools' in: {text}");
+        assert!(
+            !text.contains("3 turns"),
+            "should NOT contain full '3 turns' in: {text}"
+        );
+        assert!(
+            !text.contains("12 tools"),
+            "should NOT contain full '12 tools' in: {text}"
+        );
     }
 
     #[test]
@@ -6185,8 +6189,14 @@ mod tests {
         let text = spans_text(&spans);
         assert!(!text.contains("3t"), "should NOT contain '3t' in: {text}");
         assert!(!text.contains("12T"), "should NOT contain '12T' in: {text}");
-        assert!(!text.contains("turns"), "should NOT contain 'turns' in: {text}");
-        assert!(!text.contains("tools"), "should NOT contain 'tools' in: {text}");
+        assert!(
+            !text.contains("turns"),
+            "should NOT contain 'turns' in: {text}"
+        );
+        assert!(
+            !text.contains("tools"),
+            "should NOT contain 'tools' in: {text}"
+        );
     }
 
     #[test]
@@ -6205,8 +6215,14 @@ mod tests {
         let text = spans_text(&spans);
         assert!(text.contains("1t"), "expected '1t' in: {text}");
         assert!(text.contains("1T"), "expected '1T' in: {text}");
-        assert!(!text.contains("1 turn"), "should NOT contain '1 turn' in: {text}");
-        assert!(!text.contains("1 tool"), "should NOT contain '1 tool' in: {text}");
+        assert!(
+            !text.contains("1 turn"),
+            "should NOT contain '1 turn' in: {text}"
+        );
+        assert!(
+            !text.contains("1 tool"),
+            "should NOT contain '1 tool' in: {text}"
+        );
     }
 
     #[test]
@@ -6225,8 +6241,14 @@ mod tests {
         let text = spans_text(&spans);
         assert!(text.contains("1t"), "expected '1t' in: {text}");
         assert!(text.contains("1T"), "expected '1T' in: {text}");
-        assert!(!text.contains("1 turn"), "should NOT contain '1 turn' in: {text}");
-        assert!(!text.contains("1 tool"), "should NOT contain '1 tool' in: {text}");
+        assert!(
+            !text.contains("1 turn"),
+            "should NOT contain '1 turn' in: {text}"
+        );
+        assert!(
+            !text.contains("1 tool"),
+            "should NOT contain '1 tool' in: {text}"
+        );
     }
 
     #[test]
@@ -6246,8 +6268,14 @@ mod tests {
         assert!(text.contains("1 turn"), "expected '1 turn' in: {text}");
         assert!(text.contains("1 tool"), "expected '1 tool' in: {text}");
         // Ensure it is singular (not "turns"/"tools").
-        assert!(!text.contains("1 turns"), "should NOT contain '1 turns' in: {text}");
-        assert!(!text.contains("1 tools"), "should NOT contain '1 tools' in: {text}");
+        assert!(
+            !text.contains("1 turns"),
+            "should NOT contain '1 turns' in: {text}"
+        );
+        assert!(
+            !text.contains("1 tools"),
+            "should NOT contain '1 tools' in: {text}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -6270,7 +6298,10 @@ mod tests {
         );
         let text = spans_text(&spans);
         // Should NOT contain the full tool name.
-        assert!(!text.contains(long_name), "full tool name should be truncated in: {text}");
+        assert!(
+            !text.contains(long_name),
+            "full tool name should be truncated in: {text}"
+        );
         // Should contain the truncated prefix (first 20 chars) + "...".
         let truncated_prefix: String = long_name.chars().take(20).collect();
         assert!(
@@ -6294,7 +6325,10 @@ mod tests {
             &theme,
         );
         let text = spans_text(&spans);
-        assert!(!text.contains(long_name), "full tool name should be truncated in: {text}");
+        assert!(
+            !text.contains(long_name),
+            "full tool name should be truncated in: {text}"
+        );
         let truncated_prefix: String = long_name.chars().take(12).collect();
         assert!(
             text.contains(&format!("{truncated_prefix}...")),
@@ -6336,7 +6370,10 @@ mod tests {
             &theme,
         );
         let text = spans_text(&spans);
-        assert!(text.contains(name_20_chars), "expected full tool name in: {text}");
+        assert!(
+            text.contains(name_20_chars),
+            "expected full tool name in: {text}"
+        );
         assert!(!text.contains("..."), "should NOT contain '...' in: {text}");
     }
 
@@ -6355,8 +6392,14 @@ mod tests {
     #[test]
     fn model_label_opus_full_at_wide_width() {
         let model = Some("claude-opus-4-6".to_string());
-        assert_eq!(format_model_label(&model, 120), Some("opus-4-6".to_string()));
-        assert_eq!(format_model_label(&model, 100), Some("opus-4-6".to_string()));
+        assert_eq!(
+            format_model_label(&model, 120),
+            Some("opus-4-6".to_string())
+        );
+        assert_eq!(
+            format_model_label(&model, 100),
+            Some("opus-4-6".to_string())
+        );
     }
 
     #[test]
@@ -6384,7 +6427,10 @@ mod tests {
     #[test]
     fn model_label_sonnet_tiers() {
         let model = Some("claude-sonnet-4-5".to_string());
-        assert_eq!(format_model_label(&model, 100), Some("sonnet-4-5".to_string()));
+        assert_eq!(
+            format_model_label(&model, 100),
+            Some("sonnet-4-5".to_string())
+        );
         assert_eq!(format_model_label(&model, 80), Some("sonnet".to_string()));
         assert_eq!(format_model_label(&model, 45), Some("S".to_string()));
         assert_eq!(format_model_label(&model, 44), None);
@@ -6393,7 +6439,10 @@ mod tests {
     #[test]
     fn model_label_haiku_tiers() {
         let model = Some("claude-haiku-4-5".to_string());
-        assert_eq!(format_model_label(&model, 100), Some("haiku-4-5".to_string()));
+        assert_eq!(
+            format_model_label(&model, 100),
+            Some("haiku-4-5".to_string())
+        );
         assert_eq!(format_model_label(&model, 80), Some("haiku".to_string()));
         assert_eq!(format_model_label(&model, 45), Some("H".to_string()));
         assert_eq!(format_model_label(&model, 44), None);
@@ -6407,7 +6456,10 @@ mod tests {
         // Exact boundary at 60: should return family
         assert_eq!(format_model_label(&model, 60), Some("opus".to_string()));
         // Exact boundary at 100: should return stripped
-        assert_eq!(format_model_label(&model, 100), Some("opus-4-6".to_string()));
+        assert_eq!(
+            format_model_label(&model, 100),
+            Some("opus-4-6".to_string())
+        );
     }
 
     #[test]
@@ -6419,15 +6471,9 @@ mod tests {
             Some("custom-model".to_string())
         );
         // >= 60: truncated to 8 chars
-        assert_eq!(
-            format_model_label(&model, 60),
-            Some("custom-m".to_string())
-        );
+        assert_eq!(format_model_label(&model, 60), Some("custom-m".to_string()));
         // >= 45: first char uppercase
-        assert_eq!(
-            format_model_label(&model, 45),
-            Some("C".to_string())
-        );
+        assert_eq!(format_model_label(&model, 45), Some("C".to_string()));
         // < 45: hidden
         assert_eq!(format_model_label(&model, 44), None);
     }
@@ -6447,9 +6493,18 @@ mod tests {
     #[test]
     fn permission_label_default_tiers() {
         let perm = Some("default".to_string());
-        assert_eq!(format_permission_label(&perm, 100), Some("default".to_string()));
-        assert_eq!(format_permission_label(&perm, 80), Some("default".to_string()));
-        assert_eq!(format_permission_label(&perm, 60), Some("default".to_string()));
+        assert_eq!(
+            format_permission_label(&perm, 100),
+            Some("default".to_string())
+        );
+        assert_eq!(
+            format_permission_label(&perm, 80),
+            Some("default".to_string())
+        );
+        assert_eq!(
+            format_permission_label(&perm, 60),
+            Some("default".to_string())
+        );
         assert_eq!(format_permission_label(&perm, 45), Some("d".to_string()));
         assert_eq!(format_permission_label(&perm, 44), None);
     }
@@ -6457,7 +6512,10 @@ mod tests {
     #[test]
     fn permission_label_plan_tiers() {
         let perm = Some("plan".to_string());
-        assert_eq!(format_permission_label(&perm, 100), Some("plan".to_string()));
+        assert_eq!(
+            format_permission_label(&perm, 100),
+            Some("plan".to_string())
+        );
         assert_eq!(format_permission_label(&perm, 80), Some("plan".to_string()));
         assert_eq!(format_permission_label(&perm, 60), Some("plan".to_string()));
         assert_eq!(format_permission_label(&perm, 45), Some("p".to_string()));
@@ -6467,9 +6525,18 @@ mod tests {
     #[test]
     fn permission_label_accept_edits_tiers() {
         let perm = Some("acceptEdits".to_string());
-        assert_eq!(format_permission_label(&perm, 100), Some("acceptEdits".to_string()));
-        assert_eq!(format_permission_label(&perm, 80), Some("accept".to_string()));
-        assert_eq!(format_permission_label(&perm, 60), Some("accept".to_string()));
+        assert_eq!(
+            format_permission_label(&perm, 100),
+            Some("acceptEdits".to_string())
+        );
+        assert_eq!(
+            format_permission_label(&perm, 80),
+            Some("accept".to_string())
+        );
+        assert_eq!(
+            format_permission_label(&perm, 60),
+            Some("accept".to_string())
+        );
         assert_eq!(format_permission_label(&perm, 45), Some("a".to_string()));
         assert_eq!(format_permission_label(&perm, 44), None);
     }
@@ -6477,9 +6544,18 @@ mod tests {
     #[test]
     fn permission_label_bypass_permissions_tiers() {
         let perm = Some("bypassPermissions".to_string());
-        assert_eq!(format_permission_label(&perm, 100), Some("bypassPermissions".to_string()));
-        assert_eq!(format_permission_label(&perm, 80), Some("bypass".to_string()));
-        assert_eq!(format_permission_label(&perm, 60), Some("bypass".to_string()));
+        assert_eq!(
+            format_permission_label(&perm, 100),
+            Some("bypassPermissions".to_string())
+        );
+        assert_eq!(
+            format_permission_label(&perm, 80),
+            Some("bypass".to_string())
+        );
+        assert_eq!(
+            format_permission_label(&perm, 60),
+            Some("bypass".to_string())
+        );
         assert_eq!(format_permission_label(&perm, 45), Some("b".to_string()));
         assert_eq!(format_permission_label(&perm, 44), None);
     }
@@ -6488,8 +6564,14 @@ mod tests {
     fn permission_label_boundary_values() {
         let perm = Some("acceptEdits".to_string());
         assert_eq!(format_permission_label(&perm, 45), Some("a".to_string()));
-        assert_eq!(format_permission_label(&perm, 60), Some("accept".to_string()));
-        assert_eq!(format_permission_label(&perm, 100), Some("acceptEdits".to_string()));
+        assert_eq!(
+            format_permission_label(&perm, 60),
+            Some("accept".to_string())
+        );
+        assert_eq!(
+            format_permission_label(&perm, 100),
+            Some("acceptEdits".to_string())
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -6516,7 +6598,10 @@ mod tests {
     #[test]
     fn effort_label_medium_tiers() {
         let effort = Some("medium".to_string());
-        assert_eq!(format_effort_label(&effort, 100), Some("medium".to_string()));
+        assert_eq!(
+            format_effort_label(&effort, 100),
+            Some("medium".to_string())
+        );
         assert_eq!(format_effort_label(&effort, 80), Some("med".to_string()));
         assert_eq!(format_effort_label(&effort, 45), Some("med".to_string()));
         assert_eq!(format_effort_label(&effort, 44), None);
@@ -6649,7 +6734,11 @@ mod tests {
         let text = spans_text(&spans);
         assert_eq!(text, "opus-4-6");
         // No separator spans expected
-        assert_eq!(spans.len(), 1, "single indicator should produce exactly 1 span");
+        assert_eq!(
+            spans.len(),
+            1,
+            "single indicator should produce exactly 1 span"
+        );
     }
 
     // 8. Only permission set: single indicator
@@ -6663,7 +6752,11 @@ mod tests {
         let spans = build_indicator_spans(&options, 100, &theme);
         let text = spans_text(&spans);
         assert_eq!(text, "acceptEdits");
-        assert_eq!(spans.len(), 1, "single indicator should produce exactly 1 span");
+        assert_eq!(
+            spans.len(),
+            1,
+            "single indicator should produce exactly 1 span"
+        );
     }
 
     // 9. Only effort set: single indicator
@@ -6677,7 +6770,11 @@ mod tests {
         let spans = build_indicator_spans(&options, 100, &theme);
         let text = spans_text(&spans);
         assert_eq!(text, "high");
-        assert_eq!(spans.len(), 1, "single indicator should produce exactly 1 span");
+        assert_eq!(
+            spans.len(),
+            1,
+            "single indicator should produce exactly 1 span"
+        );
     }
 
     // 10. Model and effort set, permission None: two indicators, no gap for missing permission
