@@ -6547,4 +6547,237 @@ mod tests {
         assert_eq!(format_effort_label(&effort, 80), Some("hi".to_string()));
         assert_eq!(format_effort_label(&effort, 100), Some("high".to_string()));
     }
+
+    // -----------------------------------------------------------------------
+    // build_indicator_spans tests (DKT-113)
+    // -----------------------------------------------------------------------
+
+    /// Helper: build a ClaudeOptions with all three indicator fields set.
+    fn all_options_set() -> ClaudeOptions {
+        ClaudeOptions {
+            model: Some("claude-opus-4-6".to_string()),
+            permission_mode: Some("acceptEdits".to_string()),
+            effort: Some("high".to_string()),
+            ..Default::default()
+        }
+    }
+
+    // 1. All options None: returns empty vec at all widths
+    #[test]
+    fn indicator_spans_all_none_returns_empty_at_all_widths() {
+        let theme = test_theme();
+        let options = ClaudeOptions::default();
+        for width in [40, 45, 80, 100, 120] {
+            let spans = build_indicator_spans(&options, width, &theme);
+            assert!(
+                spans.is_empty(),
+                "expected empty spans when all options None at width={width}, got: '{}'",
+                spans_text(&spans)
+            );
+        }
+    }
+
+    // 2. All options set at width 120 (>= 100): full labels
+    #[test]
+    fn indicator_spans_all_set_width_120_full_labels() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 120, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "opus-4-6  acceptEdits  high");
+    }
+
+    // 3. All options set at width 80: short labels
+    #[test]
+    fn indicator_spans_all_set_width_80_short_labels() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 80, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "opus  accept  hi");
+    }
+
+    // 4. All options set at width 60 (45-79 range): initial/short labels
+    #[test]
+    fn indicator_spans_all_set_width_60_initial_labels() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 60, &theme);
+        let text = spans_text(&spans);
+        // Width 60 is < 80, so model and permission use initial form
+        assert_eq!(text, "O  a  hi");
+    }
+
+    // 5. All options set at width 45: initials/short
+    #[test]
+    fn indicator_spans_all_set_width_45_initials() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 45, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "O  a  hi");
+    }
+
+    // 6. All options set at width 40 (< 45): returns empty vec
+    #[test]
+    fn indicator_spans_all_set_width_40_empty() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 40, &theme);
+        assert!(
+            spans.is_empty(),
+            "expected empty spans below width 45, got: '{}'",
+            spans_text(&spans)
+        );
+    }
+
+    // 7. Only model set: single indicator, no separators
+    #[test]
+    fn indicator_spans_only_model_set() {
+        let theme = test_theme();
+        let options = ClaudeOptions {
+            model: Some("claude-opus-4-6".to_string()),
+            ..Default::default()
+        };
+        let spans = build_indicator_spans(&options, 100, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "opus-4-6");
+        // No separator spans expected
+        assert_eq!(spans.len(), 1, "single indicator should produce exactly 1 span");
+    }
+
+    // 8. Only permission set: single indicator
+    #[test]
+    fn indicator_spans_only_permission_set() {
+        let theme = test_theme();
+        let options = ClaudeOptions {
+            permission_mode: Some("acceptEdits".to_string()),
+            ..Default::default()
+        };
+        let spans = build_indicator_spans(&options, 100, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "acceptEdits");
+        assert_eq!(spans.len(), 1, "single indicator should produce exactly 1 span");
+    }
+
+    // 9. Only effort set: single indicator
+    #[test]
+    fn indicator_spans_only_effort_set() {
+        let theme = test_theme();
+        let options = ClaudeOptions {
+            effort: Some("high".to_string()),
+            ..Default::default()
+        };
+        let spans = build_indicator_spans(&options, 100, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "high");
+        assert_eq!(spans.len(), 1, "single indicator should produce exactly 1 span");
+    }
+
+    // 10. Model and effort set, permission None: two indicators, no gap for missing permission
+    #[test]
+    fn indicator_spans_model_and_effort_no_permission() {
+        let theme = test_theme();
+        let options = ClaudeOptions {
+            model: Some("claude-opus-4-6".to_string()),
+            effort: Some("high".to_string()),
+            ..Default::default()
+        };
+        let spans = build_indicator_spans(&options, 80, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "opus  hi", "no extra gap for missing permission");
+    }
+
+    // 11. Model and permission set, effort None: two indicators
+    #[test]
+    fn indicator_spans_model_and_permission_no_effort() {
+        let theme = test_theme();
+        let options = ClaudeOptions {
+            model: Some("claude-opus-4-6".to_string()),
+            permission_mode: Some("acceptEdits".to_string()),
+            ..Default::default()
+        };
+        let spans = build_indicator_spans(&options, 80, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "opus  accept");
+    }
+
+    // 12. Permission and effort set, model None: two indicators
+    #[test]
+    fn indicator_spans_permission_and_effort_no_model() {
+        let theme = test_theme();
+        let options = ClaudeOptions {
+            permission_mode: Some("acceptEdits".to_string()),
+            effort: Some("high".to_string()),
+            ..Default::default()
+        };
+        let spans = build_indicator_spans(&options, 80, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "accept  hi");
+    }
+
+    // 13. Width exactly 45 boundary: indicators appear (initial form)
+    #[test]
+    fn indicator_spans_width_exactly_45_shows_indicators() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 45, &theme);
+        assert!(
+            !spans.is_empty(),
+            "indicators should appear at width exactly 45"
+        );
+        let text = spans_text(&spans);
+        assert_eq!(text, "O  a  hi");
+    }
+
+    // 14. Width exactly 44: indicators hidden (empty vec)
+    #[test]
+    fn indicator_spans_width_exactly_44_hidden() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 44, &theme);
+        assert!(
+            spans.is_empty(),
+            "indicators should be hidden at width 44, got: '{}'",
+            spans_text(&spans)
+        );
+    }
+
+    // 15. Width exactly 80 boundary: short labels
+    #[test]
+    fn indicator_spans_width_exactly_80_short_labels() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 80, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "opus  accept  hi");
+    }
+
+    // 16. Width exactly 100 boundary: full labels
+    #[test]
+    fn indicator_spans_width_exactly_100_full_labels() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let spans = build_indicator_spans(&options, 100, &theme);
+        let text = spans_text(&spans);
+        assert_eq!(text, "opus-4-6  acceptEdits  high");
+    }
+
+    // 17. All spans use theme.status_bar_fg color
+    #[test]
+    fn indicator_spans_use_status_bar_fg_color() {
+        let theme = test_theme();
+        let options = all_options_set();
+        let expected_style = Style::default().fg(theme.status_bar_fg);
+        for width in [45, 80, 100, 120] {
+            let spans = build_indicator_spans(&options, width, &theme);
+            for span in &spans {
+                assert_eq!(
+                    span.style, expected_style,
+                    "span '{}' at width={width} should use status_bar_fg color",
+                    span.content
+                );
+            }
+        }
+    }
 }
