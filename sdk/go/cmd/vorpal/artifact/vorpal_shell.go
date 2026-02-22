@@ -11,6 +11,11 @@ import (
 func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 	contextTarget := context.GetTarget()
 
+	bun, err := artifact.Bun(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bun: %w", err)
+	}
+
 	crane, err := artifact.Crane(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get crane: %w", err)
@@ -34,6 +39,16 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 	grpcurl, err := artifact.Grpcurl(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get grpcurl: %w", err)
+	}
+
+	nodejs, err := artifact.NodeJS(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodejs: %w", err)
+	}
+
+	pnpm, err := artifact.Pnpm(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pnpm: %w", err)
 	}
 
 	protoc, err := artifact.Protoc(context)
@@ -69,11 +84,14 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 	return artifact.
 		NewProjectEnvironment("vorpal-shell", SYSTEMS).
 		WithArtifacts([]*string{
+			bun,
 			crane,
 			gobin,
 			goimports,
 			gopls,
 			grpcurl,
+			nodejs,
+			pnpm,
 			protoc,
 			protocGenGo,
 			protocGenGoGRPC,
