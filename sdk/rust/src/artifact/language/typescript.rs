@@ -139,7 +139,9 @@ impl<'a> TypeScript<'a> {
             mkdir -p $VORPAL_OUTPUT/bin
             {proto_copy_script}
             {bun_bin}/bun install --frozen-lockfile
-            {bun_bin}/bun build --compile {entrypoint} --outfile $VORPAL_OUTPUT/bin/{name}"#,
+            {bun_bin}/bun build --compile {entrypoint} --outfile ./{name}
+            cp ./{name} $VORPAL_OUTPUT/bin/{name}
+            rm ./{name}"#,
             name = self.name,
         };
 
