@@ -147,12 +147,12 @@ describe("template generation", () => {
     expect(content).toContain("X8664_LINUX");
   });
 
-  test("src/vorpal.ts uses JobBuilder", () => {
+  test("src/vorpal.ts uses TypeScriptBuilder", () => {
     const content = readFileSync(
       join(TEMPLATE_DIR, "src/vorpal.ts"),
       "utf-8",
     );
-    expect(content).toContain("JobBuilder");
+    expect(content).toContain("TypeScriptBuilder");
   });
 
   test("src/main.ts contains valid program entry", () => {
@@ -228,7 +228,7 @@ describe("template name substitution", () => {
     expect(pkg.name).toBe("example");
   });
 
-  test("src/vorpal.ts uses 'example' in the JobBuilder name", () => {
+  test("src/vorpal.ts uses 'example' in the TypeScriptBuilder name", () => {
     const content = readFileSync(
       join(TEMPLATE_DIR, "src/vorpal.ts"),
       "utf-8",

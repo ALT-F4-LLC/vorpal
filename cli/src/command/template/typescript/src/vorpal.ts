@@ -1,7 +1,7 @@
 import {
   ArtifactSystem,
   ConfigContext,
-  JobBuilder,
+  TypeScriptBuilder,
 } from "@vorpal/sdk";
 
 const SYSTEMS: ArtifactSystem[] = [
@@ -15,11 +15,9 @@ const context = ConfigContext.create();
 
 // Artifacts
 
-await new JobBuilder(
-  "example",
-  'echo "Hello from example!"',
-  SYSTEMS,
-).build(context);
+await new TypeScriptBuilder("example", SYSTEMS)
+  .withIncludes(["src", "package.json", "tsconfig.json", "bun.lockb"])
+  .build(context);
 
 // Run the build
 
