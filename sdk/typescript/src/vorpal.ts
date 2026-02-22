@@ -4,6 +4,7 @@ import {
   JobBuilder,
   ProcessBuilder,
   ProjectEnvironmentBuilder,
+  UserEnvironmentBuilder,
 } from "./artifact.js";
 import { RustBuilder } from "./artifact/language/rust.js";
 import { ConfigContext } from "./context.js";
@@ -122,6 +123,19 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
     .build(context);
 }
 
+async function buildVorpalUser(context: ConfigContext): Promise<string> {
+  return new UserEnvironmentBuilder("vorpal-user", SYSTEMS)
+    .withArtifacts([])
+    .withEnvironments(["PATH=$HOME/.vorpal/bin"])
+    .withSymlinks([
+      [
+        "$HOME/Development/repository/github.com/ALT-F4-LLC/vorpal.git/main/target/debug/vorpal",
+        "$HOME/.vorpal/bin/vorpal",
+      ],
+    ])
+    .build(context);
+}
+
 async function main(): Promise<void> {
   const context = ConfigContext.create();
 
@@ -137,6 +151,9 @@ async function main(): Promise<void> {
       break;
     case "vorpal-shell":
       await buildVorpalShell(context);
+      break;
+    case "vorpal-user":
+      await buildVorpalUser(context);
       break;
     default:
       break;
