@@ -2281,6 +2281,74 @@ fn render_inline_input(app: &App, frame: &mut Frame, area: Rect) {
     }
 }
 
+/// Build the left-side status spans for the status bar.
+///
+/// This pure function extracts the span-building logic so it can be unit-tested
+/// without requiring a full ratatui terminal/frame setup.
+///
+/// Returns a `Vec<Span>` containing the activity indicator, elapsed time,
+/// and turn/tool counts (abbreviated or full depending on width).
+fn build_status_left_spans<'a>(
+    width: u16,
+    activity: &AgentActivity,
+    status: &AgentStatus,
+    turn_count: usize,
+    tool_count: usize,
+    elapsed_str: &str,
+    theme: &'a Theme,
+) -> Vec<Span<'a>> {
+    let (activity_label, activity_color) = if matches!(status, AgentStatus::Pending) {
+        ("Pending", theme.activity_idle)
+    } else {
+        match activity {
+            AgentActivity::Idle => ("Idle", theme.activity_idle),
+            AgentActivity::Thinking => ("Thinking", theme.activity_thinking),
+            AgentActivity::Tool(_) => ("", theme.activity_tool),
+            AgentActivity::Done => ("Done", theme.activity_done),
+        }
+    };
+
+    let activity_span = if let AgentActivity::Tool(name) = activity {
+        let max_tool_len = if width >= 60 { 20 } else { 12 };
+        let display_name = truncate_chars(name, max_tool_len, "...");
+        Span::styled(
+            format!("{ARROW_RIGHT} {display_name}"),
+            Style::default()
+                .fg(theme.activity_tool)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(
+            activity_label,
+            Style::default()
+                .fg(activity_color)
+                .add_modifier(Modifier::BOLD),
+        )
+    };
+
+    let turns_label = if turn_count == 1 { "turn" } else { "turns" };
+    let tools_label = if tool_count == 1 { "tool" } else { "tools" };
+
+    let mut spans = vec![Span::raw(" "), activity_span];
+    if width >= 45 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::raw(elapsed_str.to_string()));
+    }
+    if width >= 60 {
+        spans.push(Span::raw("    "));
+        spans.push(Span::raw(format!("{} {turns_label}", turn_count)));
+        spans.push(Span::raw("  "));
+        spans.push(Span::raw(format!("{} {tools_label}", tool_count)));
+    } else if width >= 45 {
+        spans.push(Span::raw("    "));
+        spans.push(Span::raw(format!("{turn_count}t")));
+        spans.push(Span::raw("  "));
+        spans.push(Span::raw(format!("{tool_count}T")));
+    }
+
+    spans
+}
+
 /// Render the two-line status bar at the bottom.
 fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
@@ -2312,69 +2380,20 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 Style::default().fg(theme.status_no_agent),
             )),
             Some(agent) => {
-                let (activity_label, activity_color) =
-                    if matches!(agent.status, AgentStatus::Pending) {
-                        ("Pending", theme.activity_idle)
-                    } else {
-                        match &agent.activity {
-                            AgentActivity::Idle => ("Idle", theme.activity_idle),
-                            AgentActivity::Thinking => ("Thinking", theme.activity_thinking),
-                            AgentActivity::Tool(_) => ("", theme.activity_tool),
-                            AgentActivity::Done => ("Done", theme.activity_done),
-                        }
-                    };
-
-                let activity_span = if let AgentActivity::Tool(name) = &agent.activity {
-                    Span::styled(
-                        format!("{ARROW_RIGHT} {name}"),
-                        Style::default()
-                            .fg(theme.activity_tool)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    Span::styled(
-                        activity_label,
-                        Style::default()
-                            .fg(activity_color)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                };
+                let w = area.width;
 
                 let elapsed = agent.active_elapsed();
                 let elapsed_str = format_elapsed(elapsed);
 
-                let turns_label = if agent.turn_count == 1 {
-                    "turn"
-                } else {
-                    "turns"
-                };
-                let tools_label = if agent.tool_count == 1 {
-                    "tool"
-                } else {
-                    "tools"
-                };
-
-                // Left side: activity  elapsed    turns  tools
-                // Spacing: 1 leading, 2 after activity, 4 before metrics, 2 within metrics
-                // Width-aware truncation:
-                //   80+ cols: full layout
-                //   60-79:   drop cost from right side
-                //   45-59:   drop turns/tools from left side
-                //   40-44:   drop elapsed time, show activity label only
-                let w = area.width;
-                let mut left_spans = vec![Span::raw(" "), activity_span];
-                if w >= 45 {
-                    // 45+ cols: show elapsed time
-                    left_spans.push(Span::raw("  "));
-                    left_spans.push(Span::raw(elapsed_str.to_string()));
-                }
-                if w >= 60 {
-                    // 60+ cols: show turns and tools
-                    left_spans.push(Span::raw("    "));
-                    left_spans.push(Span::raw(format!("{} {turns_label}", agent.turn_count)));
-                    left_spans.push(Span::raw("  "));
-                    left_spans.push(Span::raw(format!("{} {tools_label}", agent.tool_count)));
-                }
+                let mut left_spans = build_status_left_spans(
+                    w,
+                    &agent.activity,
+                    &agent.status,
+                    agent.turn_count,
+                    agent.tool_count,
+                    &elapsed_str,
+                    theme,
+                );
 
                 // Queue indicator (only when non-empty)
                 let queue_len = agent.message_queue.len();
@@ -5915,5 +5934,223 @@ mod tests {
     #[test]
     fn format_token_count_millions() {
         assert_eq!(format_token_count(1_500_000), "1.5M");
+    }
+
+    // -----------------------------------------------------------------------
+    // build_status_left_spans — abbreviated turn/tool counts (DKT-103)
+    // -----------------------------------------------------------------------
+
+    /// Helper: concatenate all span text content into a single string for assertions.
+    fn spans_text(spans: &[Span<'_>]) -> String {
+        spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn status_spans_width_50_abbreviated_turns_tools() {
+        // Width 50 (45-59 range): should show abbreviated "3t" and "12T".
+        let theme = test_theme();
+        let spans = build_status_left_spans(
+            50,
+            &AgentActivity::Thinking,
+            &AgentStatus::Running,
+            3,
+            12,
+            "0:42",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(text.contains("3t"), "expected '3t' in: {text}");
+        assert!(text.contains("12T"), "expected '12T' in: {text}");
+        assert!(!text.contains("3 turns"), "should NOT contain full '3 turns' in: {text}");
+        assert!(!text.contains("12 tools"), "should NOT contain full '12 tools' in: {text}");
+    }
+
+    #[test]
+    fn status_spans_width_80_full_turns_tools() {
+        // Width 80 (60+ range): should show full labels "3 turns" and "12 tools".
+        let theme = test_theme();
+        let spans = build_status_left_spans(
+            80,
+            &AgentActivity::Thinking,
+            &AgentStatus::Running,
+            3,
+            12,
+            "0:42",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(text.contains("3 turns"), "expected '3 turns' in: {text}");
+        assert!(text.contains("12 tools"), "expected '12 tools' in: {text}");
+    }
+
+    #[test]
+    fn status_spans_width_42_no_turns_tools() {
+        // Width 42 (40-44 range): should NOT contain turn/tool text at all.
+        let theme = test_theme();
+        let spans = build_status_left_spans(
+            42,
+            &AgentActivity::Thinking,
+            &AgentStatus::Running,
+            3,
+            12,
+            "0:42",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(!text.contains("3t"), "should NOT contain '3t' in: {text}");
+        assert!(!text.contains("12T"), "should NOT contain '12T' in: {text}");
+        assert!(!text.contains("turns"), "should NOT contain 'turns' in: {text}");
+        assert!(!text.contains("tools"), "should NOT contain 'tools' in: {text}");
+    }
+
+    #[test]
+    fn status_spans_width_45_boundary_abbreviated() {
+        // Width exactly 45: should show abbreviated format.
+        let theme = test_theme();
+        let spans = build_status_left_spans(
+            45,
+            &AgentActivity::Thinking,
+            &AgentStatus::Running,
+            1,
+            1,
+            "0:00",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(text.contains("1t"), "expected '1t' in: {text}");
+        assert!(text.contains("1T"), "expected '1T' in: {text}");
+        assert!(!text.contains("1 turn"), "should NOT contain '1 turn' in: {text}");
+        assert!(!text.contains("1 tool"), "should NOT contain '1 tool' in: {text}");
+    }
+
+    #[test]
+    fn status_spans_width_59_boundary_abbreviated() {
+        // Width exactly 59: should still show abbreviated format.
+        let theme = test_theme();
+        let spans = build_status_left_spans(
+            59,
+            &AgentActivity::Thinking,
+            &AgentStatus::Running,
+            1,
+            1,
+            "0:00",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(text.contains("1t"), "expected '1t' in: {text}");
+        assert!(text.contains("1T"), "expected '1T' in: {text}");
+        assert!(!text.contains("1 turn"), "should NOT contain '1 turn' in: {text}");
+        assert!(!text.contains("1 tool"), "should NOT contain '1 tool' in: {text}");
+    }
+
+    #[test]
+    fn status_spans_width_60_boundary_full_labels() {
+        // Width exactly 60: should show full labels with singular form.
+        let theme = test_theme();
+        let spans = build_status_left_spans(
+            60,
+            &AgentActivity::Thinking,
+            &AgentStatus::Running,
+            1,
+            1,
+            "0:00",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(text.contains("1 turn"), "expected '1 turn' in: {text}");
+        assert!(text.contains("1 tool"), "expected '1 tool' in: {text}");
+        // Ensure it is singular (not "turns"/"tools").
+        assert!(!text.contains("1 turns"), "should NOT contain '1 turns' in: {text}");
+        assert!(!text.contains("1 tools"), "should NOT contain '1 tools' in: {text}");
+    }
+
+    // -----------------------------------------------------------------------
+    // build_status_left_spans — tool name truncation (DKT-104)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn status_spans_long_tool_name_truncated_at_wide_width() {
+        // Width 80 (60+): tool name truncated to 20 chars + "...".
+        let theme = test_theme();
+        let long_name = "server:some_very_long_custom_tool_name";
+        let spans = build_status_left_spans(
+            80,
+            &AgentActivity::Tool(long_name.to_string()),
+            &AgentStatus::Running,
+            3,
+            12,
+            "0:42",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        // Should NOT contain the full tool name.
+        assert!(!text.contains(long_name), "full tool name should be truncated in: {text}");
+        // Should contain the truncated prefix (first 20 chars) + "...".
+        let truncated_prefix: String = long_name.chars().take(20).collect();
+        assert!(
+            text.contains(&format!("{truncated_prefix}...")),
+            "expected truncated '{truncated_prefix}...' in: {text}"
+        );
+    }
+
+    #[test]
+    fn status_spans_long_tool_name_truncated_at_narrow_width() {
+        // Width 50 (45-59): tool name truncated to 12 chars + "...".
+        let theme = test_theme();
+        let long_name = "server:some_very_long_custom_tool_name";
+        let spans = build_status_left_spans(
+            50,
+            &AgentActivity::Tool(long_name.to_string()),
+            &AgentStatus::Running,
+            3,
+            12,
+            "0:42",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(!text.contains(long_name), "full tool name should be truncated in: {text}");
+        let truncated_prefix: String = long_name.chars().take(12).collect();
+        assert!(
+            text.contains(&format!("{truncated_prefix}...")),
+            "expected truncated '{truncated_prefix}...' in: {text}"
+        );
+    }
+
+    #[test]
+    fn status_spans_short_tool_name_no_truncation() {
+        // Width 80, short tool name "Bash": displayed in full, no truncation.
+        let theme = test_theme();
+        let spans = build_status_left_spans(
+            80,
+            &AgentActivity::Tool("Bash".to_string()),
+            &AgentStatus::Running,
+            3,
+            12,
+            "0:42",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(text.contains("Bash"), "expected 'Bash' in: {text}");
+        assert!(!text.contains("..."), "should NOT contain '...' in: {text}");
+    }
+
+    #[test]
+    fn status_spans_tool_name_exactly_at_limit_no_truncation() {
+        // Width 80, tool name exactly 20 chars: displayed in full, no "...".
+        let theme = test_theme();
+        let name_20_chars = "abcdefghijklmnopqrst"; // exactly 20 chars
+        assert_eq!(name_20_chars.len(), 20);
+        let spans = build_status_left_spans(
+            80,
+            &AgentActivity::Tool(name_20_chars.to_string()),
+            &AgentStatus::Running,
+            3,
+            12,
+            "0:42",
+            &theme,
+        );
+        let text = spans_text(&spans);
+        assert!(text.contains(name_20_chars), "expected full tool name in: {text}");
+        assert!(!text.contains("..."), "should NOT contain '...' in: {text}");
     }
 }
