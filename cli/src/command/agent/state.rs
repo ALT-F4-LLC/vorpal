@@ -1497,6 +1497,108 @@ impl AgentState {
 }
 
 // ---------------------------------------------------------------------------
+// TextSelection
+// ---------------------------------------------------------------------------
+
+/// Anchor and extent of a mouse text selection within an agent's cached
+/// rendered lines. Positions are `(cached_line_index, byte_offset)` tuples
+/// into the flattened span content of each [`ratatui::text::Line`].
+#[derive(Debug, Clone)]
+pub struct TextSelection {
+    /// Stable agent identifier (from [`AgentState::id`]), not a Vec index.
+    /// Resolved to a Vec index via [`App::agent_vec_index`] at use sites.
+    pub agent_id: usize,
+    /// Starting position: `(cached_line_index, byte_offset_within_flattened_spans)`.
+    pub start: (usize, usize),
+    /// Ending position: `(cached_line_index, byte_offset_within_flattened_spans)`.
+    pub end: (usize, usize),
+    /// The anchor point of the selection (where the mouse was first pressed).
+    /// The non-anchor end moves as the user drags.
+    pub anchor: (usize, usize),
+}
+
+impl TextSelection {
+    /// Return `(start, end)` normalized so that `start <= end` regardless of
+    /// the direction the user dragged. This allows callers to iterate
+    /// line-by-line from start to end without caring about drag direction.
+    pub fn normalized(&self) -> ((usize, usize), (usize, usize)) {
+        if self.start <= self.end {
+            (self.start, self.end)
+        } else {
+            (self.end, self.start)
+        }
+    }
+
+    /// Extract the selected text from the given cached rendered lines.
+    ///
+    /// Returns `None` if the selection is empty or falls outside the provided
+    /// lines. Lines within the selection are joined with `'\n'`.
+    pub fn extract_text(&self, cached_lines: &[ratatui::text::Line<'static>]) -> Option<String> {
+        let (start, end) = self.normalized();
+
+        if start.0 >= cached_lines.len() {
+            return None;
+        }
+
+        let mut result = String::new();
+        let last_line = end.0.min(cached_lines.len() - 1);
+
+        for line_idx in start.0..=last_line {
+            let line = &cached_lines[line_idx];
+            let full_text: String = line
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect();
+
+            let byte_start = if line_idx == start.0 {
+                start.1.min(full_text.len())
+            } else {
+                0
+            };
+            let byte_end = if line_idx == end.0 {
+                end.1.min(full_text.len())
+            } else {
+                full_text.len()
+            };
+
+            if line_idx > start.0 {
+                result.push('\n');
+            }
+            // Clamp to char boundaries to avoid panics on multi-byte chars.
+            let safe_start = if full_text.is_char_boundary(byte_start) {
+                byte_start
+            } else {
+                full_text
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .take_while(|&i| i <= byte_start)
+                    .last()
+                    .unwrap_or(0)
+            };
+            let safe_end = if full_text.is_char_boundary(byte_end) {
+                byte_end
+            } else {
+                full_text
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .find(|&i| i >= byte_end)
+                    .unwrap_or(full_text.len())
+            };
+            if safe_start < safe_end {
+                result.push_str(&full_text[safe_start..safe_end]);
+            }
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
@@ -1711,6 +1813,12 @@ pub struct App {
     /// Set when the indicator is visible so mouse clicks can trigger
     /// scroll-to-bottom.
     pub jump_to_bottom_rect: Option<Rect>,
+
+    /// Active text selection in the content area, if any. Stored on `App`
+    /// (not `AgentState`) because it is a UI-level concern that spans across
+    /// pane focus changes. Cleared when the user switches tabs, scrolls, or
+    /// presses Escape.
+    pub selection: Option<TextSelection>,
 }
 
 impl App {
@@ -1789,6 +1897,7 @@ impl App {
             kill_buffer: String::new(),
             input_field_rects: Vec::new(),
             jump_to_bottom_rect: None,
+            selection: None,
         }
     }
 
@@ -1878,6 +1987,7 @@ impl App {
     /// Clears the unread indicator for the newly focused agent.
     pub fn next_agent(&mut self) {
         if !self.agents.is_empty() {
+            self.selection = None;
             self.focused = (self.focused + 1) % self.agents.len();
             let agent_id = self.agents[self.focused].id;
             self.unread_agents.remove(&agent_id);
@@ -1889,6 +1999,7 @@ impl App {
     /// Clears the unread indicator for the newly focused agent.
     pub fn prev_agent(&mut self) {
         if !self.agents.is_empty() {
+            self.selection = None;
             self.focused = if self.focused == 0 {
                 self.agents.len() - 1
             } else {
@@ -2464,6 +2575,7 @@ impl App {
         let builtins = Theme::builtins();
         self.theme_index = (self.theme_index + 1) % builtins.len();
         self.theme = builtins[self.theme_index]();
+        self.selection = None;
         // Invalidate all agent caches so the new theme colors take effect.
         for agent in &mut self.agents {
             agent.cached_lines = None;
@@ -2475,6 +2587,7 @@ impl App {
     /// Clears the unread indicator for the newly focused agent.
     pub fn focus_agent(&mut self, index: usize) {
         if index < self.agents.len() {
+            self.selection = None;
             self.focused = index;
             let agent_id = self.agents[index].id;
             self.unread_agents.remove(&agent_id);
@@ -2921,6 +3034,12 @@ impl App {
         self.agent_index.clear();
         for (i, agent) in self.agents.iter().enumerate() {
             self.agent_index.insert(agent.id, i);
+        }
+        // Clear any text selection belonging to the removed agent.
+        if let Some(ref sel) = self.selection {
+            if sel.agent_id == removed.id {
+                self.selection = None;
+            }
         }
         // Remove the agent's ID from unread tracking.
         self.unread_agents.remove(&removed.id);

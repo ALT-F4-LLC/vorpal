@@ -8,7 +8,7 @@
 use super::manager::AgentManager;
 use super::state::{
     AgentActivity, AgentState, AgentStatus, App, DiffLine, DisplayLine, InputField, InputMode,
-    SplitPane, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
+    SplitPane, TextSelection, EFFORT_LEVELS, MODELS, PERMISSION_MODES,
 };
 use super::ui::{BLOCK_MARKER, RESULT_CONNECTOR, SESSION_MARKER};
 use crossterm::{
@@ -18,6 +18,7 @@ use crossterm::{
 use path_clean::PathClean;
 use std::time::{Duration, Instant};
 use tracing::warn;
+use unicode_width::UnicodeWidthChar;
 
 // ---------------------------------------------------------------------------
 // Viewport helpers
@@ -50,6 +51,7 @@ pub(super) fn viewport_height() -> usize {
 /// In split-pane mode, scrolls the agent in the focused pane rather than
 /// always scrolling the primary focused agent.
 fn scroll_by(app: &mut App, delta: isize) {
+    app.selection = None;
     if let Some(agent) = app.active_agent_mut() {
         if delta < 0 {
             agent.scroll_offset = agent.scroll_offset.saturating_sub((-delta) as usize);
@@ -208,6 +210,73 @@ fn action_search(app: &mut App) {
     }
 }
 
+/// Copy the active pane's agent output to the system clipboard.
+///
+/// Shared by the `c` hotkey in Normal mode and the `:copy` command palette entry.
+/// Uses the cached rendered lines (which respect the current ResultDisplay mode)
+/// so the clipboard matches exactly what the user sees on screen.
+async fn action_copy(app: &mut App) {
+    // If a text selection is active, copy only the selected text.
+    if app.selection.is_some() {
+        if let Some(selected) = resolve_selection_text(app) {
+            let bytes = selected.len();
+            match copy_to_clipboard(&selected).await {
+                Ok(()) => {
+                    let size = if bytes >= 1024 {
+                        format!("{:.1} KB", bytes as f64 / 1024.0)
+                    } else {
+                        format!("{bytes} bytes")
+                    };
+                    app.selection = None;
+                    app.set_status_message(format!("Copied selection ({size}) to clipboard"));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("Copy failed: {e}"));
+                }
+            }
+            return;
+        }
+        // Selection exists but resolve failed (e.g. empty) -- fall through to full copy.
+    }
+
+    let active_idx = app.active_agent_index();
+    if let Some(agent) = active_idx.and_then(|i| app.agents.get(i)) {
+        let text = if let Some(cached) = &agent.cached_lines {
+            cached
+                .iter()
+                .map(|line| {
+                    line.spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            agent
+                .output
+                .iter()
+                .map(display_line_to_text)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        match copy_to_clipboard(&text).await {
+            Ok(()) => {
+                let bytes = text.len();
+                let size = if bytes >= 1024 {
+                    format!("{:.1} KB", bytes as f64 / 1024.0)
+                } else {
+                    format!("{bytes} bytes")
+                };
+                app.set_status_message(format!("Copied {size} to clipboard"));
+            }
+            Err(e) => {
+                app.set_status_message(format!("Copy failed: {e}"));
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -349,6 +418,12 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         }
     }
 
+    // Clear text selection with Escape before clearing search highlights.
+    if key.code == KeyCode::Esc && app.selection.is_some() {
+        app.selection = None;
+        return;
+    }
+
     // Clear search highlights with Escape when not in any overlay.
     if key.code == KeyCode::Esc && !app.search_matches.is_empty() {
         app.search_matches.clear();
@@ -475,49 +550,8 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
         }
 
         // Copy the active pane's agent output to system clipboard.
-        //
-        // Uses the cached rendered lines (which respect the current
-        // ResultDisplay mode — compact/hidden/full) so the clipboard
-        // matches exactly what the user sees on screen.
-        KeyCode::Char('y') => {
-            let active_idx = app.active_agent_index();
-            if let Some(agent) = active_idx.and_then(|i| app.agents.get(i)) {
-                let text = if let Some(cached) = &agent.cached_lines {
-                    cached
-                        .iter()
-                        .map(|line| {
-                            line.spans
-                                .iter()
-                                .map(|span| span.content.as_ref())
-                                .collect::<String>()
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                } else {
-                    // Fallback: no cached lines yet (shouldn't happen in
-                    // practice since rendering runs before input).
-                    agent
-                        .output
-                        .iter()
-                        .map(display_line_to_text)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                };
-                match copy_to_clipboard(&text).await {
-                    Ok(()) => {
-                        let bytes = text.len();
-                        let size = if bytes >= 1024 {
-                            format!("{:.1} KB", bytes as f64 / 1024.0)
-                        } else {
-                            format!("{bytes} bytes")
-                        };
-                        app.set_status_message(format!("Copied {size} to clipboard"));
-                    }
-                    Err(e) => {
-                        app.set_status_message(format!("Copy failed: {e}"));
-                    }
-                }
-            }
+        KeyCode::Char('c') => {
+            action_copy(app).await;
         }
 
         // Export the focused agent's session to a Markdown file.
@@ -599,6 +633,7 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
 
         // Toggle dependency graph overlay: v.
         KeyCode::Char('v') => {
+            app.selection = None;
             app.show_graph = !app.show_graph;
             if app.show_graph {
                 app.show_dashboard = false;
@@ -610,6 +645,7 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
 
         // Toggle aggregate dashboard overlay: d.
         KeyCode::Char('d') => {
+            app.selection = None;
             app.show_dashboard = !app.show_dashboard;
             if app.show_dashboard {
                 app.show_graph = false;
@@ -622,26 +658,31 @@ pub async fn handle_key(app: &mut App, manager: &mut AgentManager, key: KeyEvent
 
         // Toggle help overlay.
         KeyCode::Char('?') => {
+            app.selection = None;
             app.show_help = !app.show_help;
         }
 
         // Enter search mode: /.
         KeyCode::Char('/') => {
+            app.selection = None;
             action_search(app);
         }
 
         // Enter command mode: :.
         KeyCode::Char(':') => {
+            app.selection = None;
             app.enter_command_mode();
         }
 
         // Open session picker: o.
         KeyCode::Char('o') => {
+            app.selection = None;
             app.enter_session_picker();
         }
 
         // Activate inline chat input: i (when agents exist and not running).
         KeyCode::Char('i') if !app.agents.is_empty() => {
+            app.selection = None;
             app.input_mode = InputMode::Chat;
         }
 
@@ -1843,44 +1884,7 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
         }
         "help" => app.show_help = !app.show_help,
         "quit" => action_quit_tab(app),
-        "copy" => {
-            let active_idx = app.active_agent_index();
-            if let Some(agent) = active_idx.and_then(|i| app.agents.get(i)) {
-                let text = if let Some(cached) = &agent.cached_lines {
-                    cached
-                        .iter()
-                        .map(|line| {
-                            line.spans
-                                .iter()
-                                .map(|span| span.content.as_ref())
-                                .collect::<String>()
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                } else {
-                    agent
-                        .output
-                        .iter()
-                        .map(display_line_to_text)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                };
-                match copy_to_clipboard(&text).await {
-                    Ok(()) => {
-                        let bytes = text.len();
-                        let size = if bytes >= 1024 {
-                            format!("{:.1} KB", bytes as f64 / 1024.0)
-                        } else {
-                            format!("{bytes} bytes")
-                        };
-                        app.set_status_message(format!("Copied {size} to clipboard"));
-                    }
-                    Err(e) => {
-                        app.set_status_message(format!("Copy failed: {e}"));
-                    }
-                }
-            }
-        }
+        "copy" => action_copy(app).await,
         "export" => {
             if let Some(agent) = app.focused_agent() {
                 match super::export::export_session(agent) {
@@ -1945,6 +1949,148 @@ async fn execute_command(app: &mut App, manager: &mut AgentManager, name: &str) 
         }
         _ => app.set_status_message(format!("Unknown command: {name}")),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Text selection coordinate mapping
+// ---------------------------------------------------------------------------
+
+/// Map a screen-relative (row, col) position within the content area to a
+/// `(cached_line_index, byte_offset)` in the cached rendered lines, accounting
+/// for word-wrapping that matches ratatui's `Wrap { trim: false }` behaviour.
+///
+/// `scroll_y` is the Paragraph scroll offset (scroll-from-top, as passed to
+/// `Paragraph::scroll()`). `content_width` is the inner width of the content
+/// area in terminal columns.
+///
+/// Returns `None` if the position falls beyond all rendered content.
+fn screen_to_text_position(
+    cached_lines: &[ratatui::text::Line<'static>],
+    screen_row: u16,
+    screen_col: u16,
+    scroll_y: u16,
+    content_width: u16,
+) -> Option<(usize, usize)> {
+    use super::ui::word_wrap_breaks;
+
+    if content_width == 0 || cached_lines.is_empty() {
+        return None;
+    }
+
+    let w = content_width as usize;
+    let target_row = scroll_y as usize + screen_row as usize;
+    let mut accumulated_rows: usize = 0;
+
+    for (line_idx, line) in cached_lines.iter().enumerate() {
+        let breaks = word_wrap_breaks(line, w);
+        let rows_for_line = breaks.len();
+
+        if target_row < accumulated_rows + rows_for_line {
+            // The target row is within this cached line.
+            let row_within_line = target_row - accumulated_rows;
+
+            // Byte offset where this visual row starts within the cached line.
+            let row_byte_start = breaks[row_within_line];
+
+            // Walk characters from row_byte_start to find the byte offset at
+            // the target column.
+            let col_target = screen_col as usize;
+            let mut current_col: usize = 0;
+            let mut byte_offset: usize = 0;
+            for span in &line.spans {
+                for ch in span.content.chars() {
+                    // Skip characters before this visual row.
+                    if byte_offset < row_byte_start {
+                        byte_offset += ch.len_utf8();
+                        continue;
+                    }
+                    // Stop if we've entered the next visual row.
+                    if row_within_line + 1 < breaks.len()
+                        && byte_offset >= breaks[row_within_line + 1]
+                    {
+                        return Some((line_idx, byte_offset));
+                    }
+                    let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if current_col + ch_width > col_target {
+                        return Some((line_idx, byte_offset));
+                    }
+                    current_col += ch_width;
+                    byte_offset += ch.len_utf8();
+                }
+            }
+            // Past end of line -- clamp to end.
+            return Some((line_idx, byte_offset));
+        }
+
+        accumulated_rows += rows_for_line;
+    }
+
+    None // screen position is beyond all content
+}
+
+/// Resolve the current selection to plain text from the agent's cached
+/// rendered lines.
+///
+/// The `TextSelection` positions are already in `(cached_line_index,
+/// byte_offset)` coordinates — set during mouse Down/Drag by
+/// `screen_to_text_position()`. No further coordinate mapping is needed here.
+///
+/// Returns `None` if there is no selection, the agent index is invalid, the
+/// cache is missing, or the selection is empty.
+fn resolve_selection_text(app: &App) -> Option<String> {
+    let sel = app.selection.as_ref()?;
+    let idx = app.agent_vec_index(sel.agent_id)?;
+    let agent = app.agents.get(idx)?;
+    let cached = agent.cached_lines.as_ref()?;
+    sel.extract_text(cached)
+}
+
+/// Determine which agent index a mouse click at `(col, row)` maps to in split
+/// mode, or return the active agent index in single-pane mode. Also returns
+/// the content area rect for the relevant pane.
+fn agent_and_rect_for_click(app: &App, col: u16, _row: u16) -> Option<(usize, ratatui::layout::Rect)> {
+    let content_rect = app.content_rect?;
+    if !app.split_enabled {
+        return app.active_agent_index().map(|idx| (idx, content_rect));
+    }
+
+    // In split mode, content_rect is the full area; left half is [x, x+w/2),
+    // right half is [x+w/2, x+w).
+    let half_w = content_rect.width / 2;
+    let right_idx = app.split_right_agent_index();
+
+    if col < content_rect.x + half_w {
+        // Left pane.
+        let left_rect = ratatui::layout::Rect {
+            x: content_rect.x,
+            y: content_rect.y,
+            width: half_w,
+            height: content_rect.height,
+        };
+        Some((app.focused, left_rect))
+    } else if let Some(r_idx) = right_idx {
+        // Right pane.
+        let right_rect = ratatui::layout::Rect {
+            x: content_rect.x + half_w,
+            y: content_rect.y,
+            width: content_rect.width - half_w,
+            height: content_rect.height,
+        };
+        Some((r_idx, right_rect))
+    } else {
+        None
+    }
+}
+
+/// Compute `scroll_y` for a given agent in a content area of `height` rows.
+///
+/// Replicates the same conversion used in `render_content` / `render_content_pane`:
+/// `scroll_y = max_scroll - clamped_offset`.
+fn compute_scroll_y(agent: &AgentState, height: usize) -> u16 {
+    let total_rows = agent.cached_row_count;
+    let max_scroll = total_rows.saturating_sub(height);
+    let clamped_offset = agent.scroll_offset.min(max_scroll);
+    max_scroll.saturating_sub(clamped_offset) as u16
 }
 
 // ---------------------------------------------------------------------------
@@ -2029,6 +2175,61 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
                 }
             }
 
+            // Start a text selection if the click is in the content area and
+            // we are in Normal mode. All higher-priority handlers above have
+            // already returned if applicable.
+            if app.input_mode == InputMode::Normal {
+                if let Some(content_rect) = app.content_rect {
+                    if rect_contains(content_rect, col, row) {
+                        if let Some((agent_idx, pane_rect)) = agent_and_rect_for_click(app, col, row) {
+                            if let Some(agent) = app.agents.get(agent_idx) {
+                                if let Some(cached) = &agent.cached_lines {
+                                    // Compute screen-relative coordinates within the pane.
+                                    // In split mode, pane_rect accounts for borders (Block with
+                                    // Borders::ALL adds 1 col on each side and 1 row top/bottom).
+                                    let (rel_col, rel_row, inner_width, inner_height) = if app.split_enabled {
+                                        // Split panes have a bordered Block — inner area is 1 inset.
+                                        let inner_x = pane_rect.x + 1;
+                                        let inner_y = pane_rect.y + 1;
+                                        let inner_w = pane_rect.width.saturating_sub(2);
+                                        let inner_h = pane_rect.height.saturating_sub(2);
+                                        if col < inner_x || row < inner_y
+                                            || col >= inner_x + inner_w
+                                            || row >= inner_y + inner_h
+                                        {
+                                            return false;
+                                        }
+                                        (col - inner_x, row - inner_y, inner_w, inner_h as usize)
+                                    } else {
+                                        // Single-pane: content area has no block border.
+                                        let rel_c = col - content_rect.x;
+                                        let rel_r = row - content_rect.y;
+                                        (rel_c, rel_r, content_rect.width, content_rect.height as usize)
+                                    };
+
+                                    let scroll_y = compute_scroll_y(agent, inner_height);
+                                    if let Some(pos) = screen_to_text_position(
+                                        cached,
+                                        rel_row,
+                                        rel_col,
+                                        scroll_y,
+                                        inner_width,
+                                    ) {
+                                        app.selection = Some(TextSelection {
+                                            agent_id: agent.id,
+                                            start: pos,
+                                            end: pos,
+                                            anchor: pos,
+                                        });
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             false
         }
 
@@ -2054,7 +2255,120 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
             false
         }
 
-        // All other mouse events (drag, move, right-click, middle-click) are
+        // Drag with left button: extend the active text selection.
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if let Some(ref sel) = app.selection {
+                let agent_id = sel.agent_id;
+                let anchor = sel.anchor;
+                let col = event.column;
+                let row = event.row;
+
+                // Resolve the selection's agent by stable id.
+                let agent_idx = match app.agent_vec_index(agent_id) {
+                    Some(idx) => idx,
+                    None => return false,
+                };
+
+                // In split mode, ignore drag events that land in a different
+                // pane than the one where the selection started.
+                if app.split_enabled {
+                    if let Some((pane_idx, _)) = agent_and_rect_for_click(app, col, row) {
+                        if pane_idx != agent_idx {
+                            return false;
+                        }
+                    }
+                }
+
+                if let Some(agent) = app.agents.get(agent_idx) {
+                    if let Some(cached) = &agent.cached_lines {
+                        let content_rect = match app.content_rect {
+                            Some(r) => r,
+                            None => return false,
+                        };
+                        if !rect_contains(content_rect, col, row) {
+                            return false;
+                        }
+
+                        let (rel_col, rel_row, inner_width, inner_height) = if app.split_enabled {
+                            if let Some((_idx, pane_rect)) = agent_and_rect_for_click(app, col, row) {
+                                let inner_x = pane_rect.x + 1;
+                                let inner_y = pane_rect.y + 1;
+                                let inner_w = pane_rect.width.saturating_sub(2);
+                                let inner_h = pane_rect.height.saturating_sub(2);
+                                if col < inner_x || row < inner_y
+                                    || col >= inner_x + inner_w
+                                    || row >= inner_y + inner_h
+                                {
+                                    return false;
+                                }
+                                (col - inner_x, row - inner_y, inner_w, inner_h as usize)
+                            } else {
+                                return false;
+                            }
+                        } else {
+                            let rel_c = col - content_rect.x;
+                            let rel_r = row - content_rect.y;
+                            (rel_c, rel_r, content_rect.width, content_rect.height as usize)
+                        };
+
+                        let scroll_y = compute_scroll_y(agent, inner_height);
+                        if let Some(pos) = screen_to_text_position(
+                            cached,
+                            rel_row,
+                            rel_col,
+                            scroll_y,
+                            inner_width,
+                        ) {
+                            let (start, end) = if anchor <= pos {
+                                (anchor, pos)
+                            } else {
+                                (pos, anchor)
+                            };
+                            app.selection = Some(TextSelection {
+                                agent_id,
+                                start,
+                                end,
+                                anchor,
+                            });
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        }
+
+        // Mouse button release: finalize selection.
+        MouseEventKind::Up(MouseButton::Left) => {
+            if let Some(ref sel) = app.selection {
+                if sel.start == sel.end {
+                    // Click without drag — clear selection.
+                    app.selection = None;
+                    return true;
+                }
+                // Non-empty selection — auto-copy to clipboard with a timeout.
+                if let Some(text) = resolve_selection_text(app) {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        copy_to_clipboard(&text),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            app.set_status_message(format!("auto-copy failed: {e}"));
+                        }
+                        Err(_) => {
+                            app.set_status_message("auto-copy timed out".to_string());
+                        }
+                    }
+                }
+                return true;
+            }
+            false
+        }
+
+        // All other mouse events (move, right-click, middle-click) are
         // intentionally ignored. Middle-click paste is handled by the terminal
         // emulator directly and does not generate a crossterm event, so it
         // continues to work normally.

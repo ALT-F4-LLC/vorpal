@@ -6,8 +6,8 @@
 use super::manager::ClaudeOptions;
 use super::state::{
     self, AgentActivity, AgentState, AgentStatus, App, DiffLine, DisplayLine, InputField,
-    InputMode, ResultDisplay, SplitPane, ToastKind, COMMANDS, EFFORT_LEVELS, MODELS,
-    PERMISSION_MODES,
+    InputMode, ResultDisplay, SplitPane, TextSelection, ToastKind, COMMANDS, EFFORT_LEVELS,
+    MODELS, PERMISSION_MODES,
 };
 use super::theme::Theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -552,6 +552,14 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
                     borrow_cached_lines(cached)
                 };
 
+            // Apply selection highlighting after search highlights.
+            if let Some(ref sel) = app.selection {
+                if app.agent_vec_index(sel.agent_id) == Some(focused) {
+                    display_lines =
+                        apply_selection_highlight(display_lines, sel, &app.theme);
+                }
+            }
+
             maybe_prepend_truncation_notice(
                 &mut display_lines,
                 evicted,
@@ -892,6 +900,14 @@ fn render_content_pane(
 
     let mut display_lines = borrow_cached_lines(cached);
 
+    // Apply selection highlighting for the split pane.
+    if let Some(ref sel) = app.selection {
+        if app.agent_vec_index(sel.agent_id) == Some(agent_idx) {
+            display_lines =
+                apply_selection_highlight(display_lines, sel, &app.theme);
+        }
+    }
+
     maybe_prepend_truncation_notice(
         &mut display_lines,
         evicted,
@@ -925,24 +941,91 @@ fn render_content_pane(
 /// Compute the total number of terminal rows needed to display `lines` in a
 /// viewport of the given `width`, accounting for word-wrapping.
 ///
-/// Each [`Line`] takes at least one row; lines wider than `width` wrap to
-/// additional rows (ceiling division).
+/// This simulates ratatui's `Wrap { trim: false }` word-wrapping algorithm so
+/// that scroll offsets and text-selection coordinate mapping agree with the
+/// actual rendered output.
 fn wrapped_row_count(lines: &[Line<'_>], width: u16) -> usize {
     if width == 0 {
         return lines.len();
     }
     let w = width as usize;
-    lines
-        .iter()
-        .map(|line| {
-            let line_width = line.width();
-            if line_width <= w {
-                1
-            } else {
-                line_width.div_ceil(w)
+    lines.iter().map(|line| word_wrap_row_count(line, w)).sum()
+}
+
+/// Count the number of visual rows a single [`Line`] occupies when
+/// word-wrapped into a viewport of the given `max_width` columns.
+///
+/// The algorithm mirrors ratatui's `Wrap { trim: false }` behaviour:
+///   1. Characters accumulate on the current visual row.
+///   2. When the next character would exceed `max_width`, a line break is
+///      inserted — preferring the last word boundary (whitespace → non-
+///      whitespace transition) if one exists on the current row, otherwise
+///      breaking immediately before the overflowing character.
+///   3. With `trim: false`, whitespace is never stripped from either side of
+///      the break.
+fn word_wrap_row_count(line: &Line<'_>, max_width: usize) -> usize {
+    word_wrap_breaks(line, max_width).len()
+}
+
+/// Return the byte-offset of the start of each visual row produced by word-
+/// wrapping `line` into `max_width` columns (matching ratatui `Wrap { trim:
+/// false }`).
+///
+/// The returned `Vec` always has at least one element (`0`).
+pub(super) fn word_wrap_breaks(line: &Line<'_>, max_width: usize) -> Vec<usize> {
+    if max_width == 0 {
+        return vec![0];
+    }
+
+    // Flatten spans into (byte_offset, char_display_width, is_whitespace).
+    let mut chars: Vec<(usize, usize, bool)> = Vec::new();
+    let mut byte_off: usize = 0;
+    for span in &line.spans {
+        for ch in span.content.chars() {
+            let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+            chars.push((byte_off, w, ch.is_whitespace()));
+            byte_off += ch.len_utf8();
+        }
+    }
+
+    if chars.is_empty() {
+        return vec![0];
+    }
+
+    let mut row_starts: Vec<usize> = vec![0];
+    let mut current_width: usize = 0;
+    // Byte offset of the last eligible word-break point on the current row
+    // (the start of a non-whitespace char preceded by whitespace).
+    let mut last_word_break: Option<(usize, usize)> = None; // (char_index, byte_offset)
+    let mut line_start_idx: usize = 0;
+
+    for (i, &(b_off, ch_w, is_ws)) in chars.iter().enumerate() {
+        // Detect word boundary: non-whitespace preceded by whitespace.
+        if !is_ws && i > line_start_idx {
+            if let Some(&(_, _, true)) = chars.get(i.wrapping_sub(1)) {
+                last_word_break = Some((i, b_off));
             }
-        })
-        .sum()
+        }
+
+        if current_width + ch_w > max_width {
+            if let Some((brk_idx, brk_byte)) = last_word_break {
+                row_starts.push(brk_byte);
+                // Recompute width from break to current char (inclusive).
+                current_width = chars[brk_idx..=i].iter().map(|c| c.1).sum();
+                line_start_idx = brk_idx;
+            } else {
+                // No word boundary — character-level break before this char.
+                row_starts.push(b_off);
+                current_width = ch_w;
+                line_start_idx = i;
+            }
+            last_word_break = None;
+        } else {
+            current_width += ch_w;
+        }
+    }
+
+    row_starts
 }
 
 /// Maximum length of tool result content in compact mode.
@@ -4535,7 +4618,7 @@ fn render_help(theme: &Theme, frame: &mut Frame, area: Rect) {
                 (":", "Open command palette"),
                 ("/", "Search output"),
                 ("n / N", "Next/previous match (in search)"),
-                ("y", "Copy output to clipboard"),
+                ("c", "Copy output to clipboard"),
                 ("e", "Export session to Markdown"),
                 ("Enter", "Toggle tool result section"),
                 ("?", "Toggle this help"),
@@ -5174,6 +5257,136 @@ fn highlight_line(
     }
 
     Line::from(result_spans)
+}
+
+// ---------------------------------------------------------------------------
+// Selection highlight
+// ---------------------------------------------------------------------------
+
+/// Apply visual highlighting to spans that fall within the active text
+/// selection. Operates on the cached line model using byte offsets from
+/// [`TextSelection`] -- the same coordinate system as search highlights.
+///
+/// Lines fully inside the selection get the highlight style on all spans.
+/// The first and last lines are split at the selection byte boundaries so
+/// only the selected portion is highlighted.
+fn apply_selection_highlight<'a>(
+    lines: Vec<Line<'a>>,
+    selection: &TextSelection,
+    theme: &Theme,
+) -> Vec<Line<'a>> {
+    let (sel_start, sel_end) = selection.normalized();
+
+    let sel_style = Style::default()
+        .bg(theme.selection_bg)
+        .fg(theme.selection_fg);
+
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            if idx < sel_start.0 || idx > sel_end.0 {
+                // Outside the selection range entirely.
+                return line;
+            }
+
+            let is_first = idx == sel_start.0;
+            let is_last = idx == sel_end.0;
+
+            if !is_first && !is_last {
+                // Fully selected middle line -- apply style to all spans.
+                let spans: Vec<Span<'a>> = line
+                    .spans
+                    .into_iter()
+                    .map(|span| Span::styled(span.content, sel_style))
+                    .collect();
+                return Line::from(spans);
+            }
+
+            // Partially selected (first and/or last line).
+            // Compute byte boundaries within the flattened span text.
+            let byte_start = if is_first { sel_start.1 } else { 0 };
+            let total_bytes: usize = line
+                .spans
+                .iter()
+                .map(|s| s.content.len())
+                .sum();
+            let byte_end = if is_last {
+                sel_end.1.min(total_bytes)
+            } else {
+                total_bytes
+            };
+
+            if byte_start >= byte_end {
+                return line;
+            }
+
+            // Walk spans and split at selection boundaries.
+            let mut result_spans: Vec<Span<'a>> = Vec::new();
+            let mut offset: usize = 0;
+
+            for span in line.spans {
+                let span_len = span.content.len();
+                let span_end = offset + span_len;
+
+                if span_end <= byte_start || offset >= byte_end {
+                    // Entirely outside the selection.
+                    result_spans.push(span);
+                } else {
+                    // This span overlaps the selection range.
+                    let mut local_sel_start = byte_start.saturating_sub(offset);
+                    let mut local_sel_end = (byte_end - offset).min(span_len);
+
+                    // Snap to char boundaries to avoid panicking on multi-byte
+                    // UTF-8 characters (e.g. CJK, emoji).
+                    while local_sel_start > 0
+                        && !span.content.is_char_boundary(local_sel_start)
+                    {
+                        local_sel_start -= 1;
+                    }
+                    while local_sel_end < span_len
+                        && !span.content.is_char_boundary(local_sel_end)
+                    {
+                        local_sel_end += 1;
+                    }
+
+                    if local_sel_start >= local_sel_end {
+                        result_spans.push(span);
+                        offset = span_end;
+                        continue;
+                    }
+
+                    // Prefix before selection.
+                    if local_sel_start > 0 {
+                        let prefix = &span.content[..local_sel_start];
+                        result_spans.push(Span::styled(
+                            prefix.to_string(),
+                            span.style,
+                        ));
+                    }
+
+                    // Selected portion.
+                    let selected = &span.content[local_sel_start..local_sel_end];
+                    result_spans.push(Span::styled(
+                        selected.to_string(),
+                        sel_style,
+                    ));
+
+                    // Suffix after selection.
+                    if local_sel_end < span_len {
+                        let suffix = &span.content[local_sel_end..];
+                        result_spans.push(Span::styled(
+                            suffix.to_string(),
+                            span.style,
+                        ));
+                    }
+                }
+                offset = span_end;
+            }
+
+            Line::from(result_spans)
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

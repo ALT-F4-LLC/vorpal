@@ -190,6 +190,10 @@ pub struct Theme {
     // -- Jump-to-bottom indicator ---------------------------------------------
     pub jump_to_bottom_bg: Color,
     pub jump_to_bottom_fg: Color,
+
+    // -- Text selection -------------------------------------------------------
+    pub selection_bg: Color,
+    pub selection_fg: Color,
 }
 
 impl Theme {
@@ -345,6 +349,9 @@ impl Theme {
 
             jump_to_bottom_bg: Color::Yellow,
             jump_to_bottom_fg: Color::Black,
+
+            selection_bg: Color::Rgb(60, 60, 120),
+            selection_fg: Color::White,
         }
     }
 
@@ -500,6 +507,9 @@ impl Theme {
 
             jump_to_bottom_bg: Color::Rgb(180, 130, 0),
             jump_to_bottom_fg: Color::White,
+
+            selection_bg: Color::Rgb(180, 210, 255),
+            selection_fg: Color::Black,
         }
     }
 
@@ -659,6 +669,9 @@ impl Theme {
 
             jump_to_bottom_bg: r,
             jump_to_bottom_fg: r,
+
+            selection_bg: r,
+            selection_fg: r,
         }
     }
 
