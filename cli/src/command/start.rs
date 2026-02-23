@@ -33,7 +33,7 @@ mod registry;
 mod worker;
 
 pub struct RunArgs {
-    pub archive_check_cache_ttl: u64,
+    pub archive_cache_ttl: u64,
     pub health_check: bool,
     pub health_check_port: u16,
     pub issuer: Option<String>,
@@ -206,7 +206,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
         )
         .await?;
 
-        let archive_server = ArchiveServer::new(backend_archive, args.archive_check_cache_ttl);
+        let archive_server = ArchiveServer::new(backend_archive, args.archive_cache_ttl);
         let artifact_server = ArtifactServer::new(backend_artifact);
 
         if let Some(issuer) = &args.issuer {
