@@ -287,6 +287,7 @@ type TypeScriptDevelopmentEnvironment struct {
 	artifacts    []*string
 	environments []string
 	name         string
+	nodeModules  map[string]*string
 	secrets      map[string]string
 	systems      []api.ArtifactSystem
 }
@@ -296,6 +297,7 @@ func NewTypeScriptDevelopmentEnvironment(name string, systems []api.ArtifactSyst
 		artifacts:    []*string{},
 		environments: []string{},
 		name:         name,
+		nodeModules:  map[string]*string{},
 		secrets:      map[string]string{},
 		systems:      systems,
 	}
@@ -308,6 +310,11 @@ func (b *TypeScriptDevelopmentEnvironment) WithArtifacts(artifacts []*string) *T
 
 func (b *TypeScriptDevelopmentEnvironment) WithEnvironments(environments []string) *TypeScriptDevelopmentEnvironment {
 	b.environments = append(b.environments, environments...)
+	return b
+}
+
+func (b *TypeScriptDevelopmentEnvironment) WithNodeModule(packageName string, digest *string) *TypeScriptDevelopmentEnvironment {
+	b.nodeModules[packageName] = digest
 	return b
 }
 
@@ -329,9 +336,29 @@ func (b *TypeScriptDevelopmentEnvironment) Build(context *config.ConfigContext) 
 	artifacts := []*string{bun}
 	artifacts = append(artifacts, b.artifacts...)
 
+	environments := make([]string, len(b.environments))
+	copy(environments, b.environments)
+
+	// Add node module artifacts and NODE_PATH entries
+	if len(b.nodeModules) > 0 {
+		var nodePaths []string
+
+		for _, packageName := range artifact.SortedKeys(b.nodeModules) {
+			digest := b.nodeModules[packageName]
+			if digest != nil {
+				artifacts = append(artifacts, digest)
+				nodePaths = append(nodePaths, fmt.Sprintf("%s/..", artifact.GetEnvKey(*digest)))
+			}
+		}
+
+		if len(nodePaths) > 0 {
+			environments = append(environments, fmt.Sprintf("NODE_PATH=%s", strings.Join(nodePaths, ":")))
+		}
+	}
+
 	devenv := artifact.NewDevelopmentEnvironment(b.name, b.systems).
 		WithArtifacts(artifacts).
-		WithEnvironments(b.environments)
+		WithEnvironments(environments)
 
 	if len(b.secrets) > 0 {
 		devenv = devenv.WithSecrets(b.secrets)

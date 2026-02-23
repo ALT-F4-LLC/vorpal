@@ -305,6 +305,7 @@ export class TypeScriptDevelopmentEnvironment {
   private _artifacts: string[] = [];
   private _environments: string[] = [];
   private _name: string;
+  private _nodeModules: Map<string, string> = new Map();
   private _secrets: Array<[string, string]> = [];
   private _systems: ArtifactSystem[];
 
@@ -342,6 +343,19 @@ export class TypeScriptDevelopmentEnvironment {
   }
 
   /**
+   * Makes a TypeScript package artifact available in the dev environment.
+   * Sets NODE_PATH to include the artifact's parent directory so that
+   * Bun/Node.js can resolve the package.
+   *
+   * @param packageName - npm package name (e.g., "@vorpal/sdk")
+   * @param digest - Artifact digest for the package
+   */
+  withNodeModule(packageName: string, digest: string): this {
+    this._nodeModules.set(packageName, digest);
+    return this;
+  }
+
+  /**
    * Builds the TypeScript development environment artifact.
    *
    * Default artifacts fetched:
@@ -356,6 +370,22 @@ export class TypeScriptDevelopmentEnvironment {
     const artifacts: string[] = [bun, ...this._artifacts];
 
     const environments: string[] = [...this._environments];
+
+    // Add node module artifacts and NODE_PATH entries
+    if (this._nodeModules.size > 0) {
+      // Sort alphabetically by package name for deterministic output
+      const sortedNodeModules = [...this._nodeModules.entries()].sort((a, b) =>
+        a[0].localeCompare(b[0])
+      );
+
+      const nodePaths: string[] = [];
+      for (const [, digest] of sortedNodeModules) {
+        artifacts.push(digest);
+        nodePaths.push(`${getEnvKey(digest)}/..`);
+      }
+
+      environments.push(`NODE_PATH=${nodePaths.join(":")}`);
+    }
 
     let devenv = new DevelopmentEnvironment(this._name, this._systems)
       .withArtifacts(artifacts)

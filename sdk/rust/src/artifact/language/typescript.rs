@@ -225,6 +225,7 @@ pub struct TypeScriptDevelopmentEnvironment<'a> {
     artifacts: Vec<String>,
     environments: Vec<String>,
     name: &'a str,
+    node_modules: BTreeMap<String, String>,
     secrets: Vec<(&'a str, &'a str)>,
     systems: Vec<ArtifactSystem>,
 }
@@ -235,6 +236,7 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
             artifacts: vec![],
             environments: vec![],
             name,
+            node_modules: BTreeMap::new(),
             secrets: vec![],
             systems,
         }
@@ -247,6 +249,11 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
 
     pub fn with_environments(mut self, environments: Vec<String>) -> Self {
         self.environments.extend(environments);
+        self
+    }
+
+    pub fn with_node_module(mut self, package_name: &str, digest: String) -> Self {
+        self.node_modules.insert(package_name.to_string(), digest);
         self
     }
 
@@ -265,7 +272,24 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
         let mut artifacts = vec![bun];
         artifacts.extend(self.artifacts);
 
-        let environments = self.environments;
+        // Add node module digests to artifacts (BTreeMap iterates in sorted key order)
+        for digest in self.node_modules.values() {
+            artifacts.push(digest.clone());
+        }
+
+        let mut environments = self.environments;
+
+        // Construct NODE_PATH from node module artifacts
+        if !self.node_modules.is_empty() {
+            let node_path = self
+                .node_modules
+                .values()
+                .map(|digest| format!("{}/..", get_env_key(digest)))
+                .collect::<Vec<String>>()
+                .join(":");
+
+            environments.push(format!("NODE_PATH={node_path}"));
+        }
 
         let mut devenv = DevelopmentEnvironment::new(self.name, self.systems)
             .with_artifacts(artifacts)
@@ -485,5 +509,120 @@ impl<'a> TypeScriptLibrary<'a> {
             .with_sources(vec![source])
             .build(context)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_systems() -> Vec<ArtifactSystem> {
+        vec![ArtifactSystem::Aarch64Darwin, ArtifactSystem::X8664Linux]
+    }
+
+    // -----------------------------------------------------------------------
+    // TypeScriptDevelopmentEnvironment tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ts_devenv_new_returns_valid_struct_with_defaults() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems());
+        assert_eq!(env.name, "test-ts");
+        assert!(env.artifacts.is_empty());
+        assert!(env.environments.is_empty());
+        assert!(env.node_modules.is_empty());
+        assert!(env.secrets.is_empty());
+        assert_eq!(env.systems.len(), 2);
+    }
+
+    #[test]
+    fn ts_devenv_with_artifacts_sets_artifacts() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_artifacts(vec!["artifact-a".to_string(), "artifact-b".to_string()]);
+        assert_eq!(env.artifacts, vec!["artifact-a", "artifact-b"]);
+    }
+
+    #[test]
+    fn ts_devenv_with_environments_sets_environments() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_environments(vec!["FOO=bar".to_string()]);
+        assert_eq!(env.environments, vec!["FOO=bar"]);
+    }
+
+    #[test]
+    fn ts_devenv_with_secrets_sets_secrets() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_secrets(vec![("key", "value")]);
+        assert_eq!(env.secrets, vec![("key", "value")]);
+    }
+
+    #[test]
+    fn ts_devenv_with_node_module_stores_mapping() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_node_module("@vorpal/sdk", "abc123".to_string());
+        assert_eq!(env.node_modules.len(), 1);
+        assert_eq!(
+            env.node_modules.get("@vorpal/sdk"),
+            Some(&"abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn ts_devenv_with_node_module_multiple_calls_accumulate() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_node_module("@vorpal/sdk", "abc123".to_string())
+            .with_node_module("lodash", "def456".to_string());
+        assert_eq!(env.node_modules.len(), 2);
+        assert_eq!(
+            env.node_modules.get("@vorpal/sdk"),
+            Some(&"abc123".to_string())
+        );
+        assert_eq!(
+            env.node_modules.get("lodash"),
+            Some(&"def456".to_string())
+        );
+    }
+
+    #[test]
+    fn ts_devenv_with_node_module_overwrites_duplicate_package() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_node_module("@vorpal/sdk", "old_digest".to_string())
+            .with_node_module("@vorpal/sdk", "new_digest".to_string());
+        assert_eq!(env.node_modules.len(), 1);
+        assert_eq!(
+            env.node_modules.get("@vorpal/sdk"),
+            Some(&"new_digest".to_string())
+        );
+    }
+
+    #[test]
+    fn ts_devenv_builder_methods_can_be_chained() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_artifacts(vec!["a".to_string()])
+            .with_environments(vec!["E=1".to_string()])
+            .with_node_module("@vorpal/sdk", "abc123".to_string())
+            .with_secrets(vec![("s", "v")]);
+        assert_eq!(env.artifacts, vec!["a"]);
+        assert_eq!(env.environments, vec!["E=1"]);
+        assert_eq!(env.node_modules.len(), 1);
+        assert_eq!(env.secrets, vec![("s", "v")]);
+    }
+
+    #[test]
+    fn ts_devenv_node_modules_sorted_by_package_name() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_node_module("zlib", "z_digest".to_string())
+            .with_node_module("@vorpal/sdk", "v_digest".to_string())
+            .with_node_module("lodash", "l_digest".to_string());
+        // BTreeMap iterates in sorted key order
+        let keys: Vec<&String> = env.node_modules.keys().collect();
+        assert_eq!(keys, vec!["@vorpal/sdk", "lodash", "zlib"]);
+    }
+
+    #[test]
+    fn ts_devenv_without_node_modules_has_no_node_path() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems());
+        // When no node modules are configured, environments should not contain NODE_PATH
+        assert!(!env.environments.iter().any(|e| e.starts_with("NODE_PATH=")));
     }
 }

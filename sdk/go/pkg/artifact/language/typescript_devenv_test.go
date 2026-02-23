@@ -29,6 +29,14 @@ func TestNewTypeScriptDevelopmentEnvironment(t *testing.T) {
 		t.Errorf("expected empty environments, got %d", len(builder.environments))
 	}
 
+	if builder.nodeModules == nil {
+		t.Error("expected nodeModules to be initialized (non-nil)")
+	}
+
+	if len(builder.nodeModules) != 0 {
+		t.Errorf("expected empty nodeModules, got %d", len(builder.nodeModules))
+	}
+
 	if len(builder.secrets) != 0 {
 		t.Errorf("expected empty secrets, got %d", len(builder.secrets))
 	}
@@ -80,13 +88,76 @@ func TestTypeScriptDevelopmentEnvironment_WithSecrets(t *testing.T) {
 	}
 }
 
+func TestTypeScriptDevelopmentEnvironment_WithNodeModule(t *testing.T) {
+	digest := "abc123"
+
+	builder := NewTypeScriptDevelopmentEnvironment("test-shell", testSystems)
+	result := builder.WithNodeModule("@vorpal/sdk", &digest)
+
+	if result != builder {
+		t.Error("WithNodeModule should return the same builder for chaining")
+	}
+
+	if len(builder.nodeModules) != 1 {
+		t.Errorf("expected 1 node module, got %d", len(builder.nodeModules))
+	}
+
+	if builder.nodeModules["@vorpal/sdk"] == nil {
+		t.Error("expected node module '@vorpal/sdk' to be set")
+	}
+
+	if *builder.nodeModules["@vorpal/sdk"] != "abc123" {
+		t.Errorf("expected digest %q, got %q", "abc123", *builder.nodeModules["@vorpal/sdk"])
+	}
+}
+
+func TestTypeScriptDevelopmentEnvironment_WithNodeModule_Multiple(t *testing.T) {
+	d1 := "digest-aaa"
+	d2 := "digest-bbb"
+
+	builder := NewTypeScriptDevelopmentEnvironment("test-shell", testSystems).
+		WithNodeModule("@vorpal/sdk", &d1).
+		WithNodeModule("lodash", &d2)
+
+	if len(builder.nodeModules) != 2 {
+		t.Errorf("expected 2 node modules, got %d", len(builder.nodeModules))
+	}
+
+	if *builder.nodeModules["@vorpal/sdk"] != "digest-aaa" {
+		t.Errorf("expected digest %q for @vorpal/sdk, got %q", "digest-aaa", *builder.nodeModules["@vorpal/sdk"])
+	}
+
+	if *builder.nodeModules["lodash"] != "digest-bbb" {
+		t.Errorf("expected digest %q for lodash, got %q", "digest-bbb", *builder.nodeModules["lodash"])
+	}
+}
+
+func TestTypeScriptDevelopmentEnvironment_WithNodeModule_Overwrite(t *testing.T) {
+	d1 := "digest-old"
+	d2 := "digest-new"
+
+	builder := NewTypeScriptDevelopmentEnvironment("test-shell", testSystems).
+		WithNodeModule("@vorpal/sdk", &d1).
+		WithNodeModule("@vorpal/sdk", &d2)
+
+	if len(builder.nodeModules) != 1 {
+		t.Errorf("expected 1 node module after overwrite, got %d", len(builder.nodeModules))
+	}
+
+	if *builder.nodeModules["@vorpal/sdk"] != "digest-new" {
+		t.Errorf("expected digest %q after overwrite, got %q", "digest-new", *builder.nodeModules["@vorpal/sdk"])
+	}
+}
+
 func TestTypeScriptDevelopmentEnvironment_Chaining(t *testing.T) {
 	a := "digest-1"
 	artifacts := []*string{&a}
+	nodeDigest := "node-digest-1"
 
 	builder := NewTypeScriptDevelopmentEnvironment("test-shell", testSystems).
 		WithArtifacts(artifacts).
 		WithEnvironments([]string{"FOO=bar"}).
+		WithNodeModule("@vorpal/sdk", &nodeDigest).
 		WithSecrets(map[string]string{"key": "value"})
 
 	if len(builder.artifacts) != 1 {
@@ -95,6 +166,10 @@ func TestTypeScriptDevelopmentEnvironment_Chaining(t *testing.T) {
 
 	if len(builder.environments) != 1 {
 		t.Errorf("expected 1 environment after chaining, got %d", len(builder.environments))
+	}
+
+	if len(builder.nodeModules) != 1 {
+		t.Errorf("expected 1 node module after chaining, got %d", len(builder.nodeModules))
 	}
 
 	if len(builder.secrets) != 1 {
