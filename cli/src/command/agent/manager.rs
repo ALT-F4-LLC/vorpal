@@ -240,12 +240,17 @@ impl AgentManager {
                                         session_id,
                                     }).await;
                                 }
-                                if let Some(usage) = parser.take_usage() {
+                                let usage = parser.take_usage();
+                                let cost = parser.take_cost();
+                                if usage.is_some() || cost.is_some() {
+                                    let (input_tokens, output_tokens) = usage
+                                        .map(|u| (u.input_tokens, u.output_tokens))
+                                        .unwrap_or((0, 0));
                                     let _ = tx.send(AgentEvent::UsageUpdate {
                                         agent_id,
-                                        input_tokens: usage.input_tokens,
-                                        output_tokens: usage.output_tokens,
-                                        total_cost_usd: parser.take_cost(),
+                                        input_tokens,
+                                        output_tokens,
+                                        total_cost_usd: cost,
                                     }).await;
                                 }
                                 for display_line in display_lines {

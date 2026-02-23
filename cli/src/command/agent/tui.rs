@@ -529,7 +529,7 @@ async fn handle_app_event(app: &mut App, manager: &mut AgentManager, event: Agen
                 agent.input_tokens += input_tokens;
                 agent.output_tokens += output_tokens;
                 if let Some(cost) = total_cost_usd {
-                    agent.total_cost_usd += cost;
+                    agent.total_cost_usd = cost;
                 }
             }
         }
