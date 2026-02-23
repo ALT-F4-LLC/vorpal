@@ -1,7 +1,9 @@
 use crate::artifact::SYSTEMS;
 use anyhow::Result;
 use vorpal_sdk::{
-    artifact::{get_env_key, language::typescript::TypeScriptLibrary, protoc_gen_ts_proto::ProtocGenTsProto},
+    artifact::{
+        get_env_key, language::typescript::TypeScriptLibrary, protoc_gen_ts_proto::ProtocGenTsProto,
+    },
     context::ConfigContext,
 };
 

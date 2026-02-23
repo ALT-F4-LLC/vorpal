@@ -1,8 +1,7 @@
 use crate::artifact::{
     vorpal::Vorpal, vorpal_container_image::VorpalContainerImage, vorpal_job::VorpalJob,
     vorpal_process::VorpalProcess, vorpal_release::VorpalRelease,
-    vorpal_sdk_typescript::VorpalSdkTypescript, vorpal_shell::VorpalShell,
-    vorpal_user::VorpalUser,
+    vorpal_sdk_typescript::VorpalSdkTypescript, vorpal_shell::VorpalShell, vorpal_user::VorpalUser,
 };
 use anyhow::Result;
 use vorpal_sdk::context::get_context;

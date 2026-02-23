@@ -577,10 +577,7 @@ mod tests {
             env.node_modules.get("@vorpal/sdk"),
             Some(&"abc123".to_string())
         );
-        assert_eq!(
-            env.node_modules.get("lodash"),
-            Some(&"def456".to_string())
-        );
+        assert_eq!(env.node_modules.get("lodash"), Some(&"def456".to_string()));
     }
 
     #[test]
