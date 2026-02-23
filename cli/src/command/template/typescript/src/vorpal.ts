@@ -2,6 +2,7 @@ import {
   ArtifactSystem,
   ConfigContext,
   TypeScript,
+  TypeScriptDevelopmentEnvironment,
 } from "@vorpal/sdk";
 
 const SYSTEMS: ArtifactSystem[] = [
@@ -12,6 +13,11 @@ const SYSTEMS: ArtifactSystem[] = [
 ];
 
 const context = ConfigContext.create();
+
+// Development environment
+
+await new TypeScriptDevelopmentEnvironment("example-shell", SYSTEMS)
+  .build(context);
 
 // Artifacts
 
