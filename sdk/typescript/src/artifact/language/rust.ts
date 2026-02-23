@@ -123,7 +123,7 @@ function parseCargo(path: string): CargoToml {
  * Maps an ArtifactSystem enum to the Rust target triple.
  * Matches `sdk/go/pkg/artifact/rust_toolchain.go` RustToolchainTarget().
  */
-function rustToolchainTarget(system: ArtifactSystem): string {
+export function rustToolchainTarget(system: ArtifactSystem): string {
   switch (system) {
     case ArtifactSystem.AARCH64_DARWIN:
       return "aarch64-apple-darwin";

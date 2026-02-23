@@ -382,9 +382,9 @@ func main() {
 |----------|------|
 | Architecture overview | [`docs/spec/architecture.md`](docs/spec/architecture.md) |
 | CLI reference | `vorpal --help` |
-| TypeScript SDK (npm) | [`@vorpal/sdk`](https://www.npmjs.com/package/@vorpal/sdk) |
 | Go SDK | [`sdk/go/`](sdk/go/) |
 | Rust SDK | [`sdk/rust/`](sdk/rust/) |
+| TypeScript SDK | [`sdk/typescript/`](sdk/typescript/) |
 
 ## Contributing
 
