@@ -10,5 +10,6 @@ pub mod vorpal_container_image;
 pub mod vorpal_job;
 pub mod vorpal_process;
 pub mod vorpal_release;
+pub mod vorpal_sdk_typescript;
 pub mod vorpal_shell;
 pub mod vorpal_user;

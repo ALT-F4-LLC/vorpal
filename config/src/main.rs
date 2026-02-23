@@ -1,6 +1,7 @@
 use crate::artifact::{
     vorpal::Vorpal, vorpal_container_image::VorpalContainerImage, vorpal_job::VorpalJob,
-    vorpal_process::VorpalProcess, vorpal_release::VorpalRelease, vorpal_shell::VorpalShell,
+    vorpal_process::VorpalProcess, vorpal_release::VorpalRelease,
+    vorpal_sdk_typescript::VorpalSdkTypescript, vorpal_shell::VorpalShell,
     vorpal_user::VorpalUser,
 };
 use anyhow::Result;
@@ -18,6 +19,7 @@ async fn main() -> Result<()> {
         "vorpal-job" => VorpalJob::new().build(context).await?,
         "vorpal-process" => VorpalProcess::new().build(context).await?,
         "vorpal-release" => VorpalRelease::new().build(context).await?,
+        "vorpal-sdk-typescript" => VorpalSdkTypescript::new().build(context).await?,
         "vorpal-shell" => VorpalShell::new().build(context).await?,
         "vorpal-user" => VorpalUser::new().build(context).await?,
         _ => "".to_string(),
