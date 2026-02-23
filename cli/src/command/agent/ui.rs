@@ -2701,7 +2701,12 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 /// `has_agent` should be `true` when at least one agent window exists. The
 /// `i:chat` hint is suppressed when no agents are present since the keybinding
 /// is also guarded on agent existence.
-fn build_hint_bar(mode: InputMode, agent_active: bool, has_agent: bool, width: u16) -> Line<'static> {
+fn build_hint_bar(
+    mode: InputMode,
+    agent_active: bool,
+    has_agent: bool,
+    width: u16,
+) -> Line<'static> {
     let hints: &[(&str, &str)] = match mode {
         InputMode::Normal if agent_active => &[
             ("Esc", "interrupt"),
