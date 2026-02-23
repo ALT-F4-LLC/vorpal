@@ -22,7 +22,7 @@ await new TypeScriptDevelopmentEnvironment("example-shell", SYSTEMS)
 // Artifacts
 
 await new TypeScript("example", SYSTEMS)
-  .withIncludes(["src", "package.json", "tsconfig.json", "bun.lockb"])
+  .withIncludes(["src", "package.json", "tsconfig.json", "bun.lock"])
   .build(context);
 
 // Run the build

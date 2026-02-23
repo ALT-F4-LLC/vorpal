@@ -308,6 +308,7 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
 // ---------------------------------------------------------------------------
 
 pub struct TypeScriptLibrary<'a> {
+    aliases: Vec<String>,
     artifacts: Vec<String>,
     build_command: Option<&'a str>,
     bun_version: Option<String>,
@@ -325,6 +326,7 @@ pub struct TypeScriptLibrary<'a> {
 impl<'a> TypeScriptLibrary<'a> {
     pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
+            aliases: vec![],
             artifacts: vec![],
             build_command: None,
             bun_version: None,
@@ -338,6 +340,22 @@ impl<'a> TypeScriptLibrary<'a> {
             source_scripts: vec![],
             systems,
         }
+    }
+
+    pub fn with_alias(mut self, alias: String) -> Self {
+        if !self.aliases.contains(&alias) {
+            self.aliases.push(alias);
+        }
+        self
+    }
+
+    pub fn with_aliases(mut self, aliases: Vec<String>) -> Self {
+        for alias in aliases {
+            if !self.aliases.contains(&alias) {
+                self.aliases.push(alias);
+            }
+        }
+        self
     }
 
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
@@ -506,6 +524,7 @@ impl<'a> TypeScriptLibrary<'a> {
         ];
 
         Artifact::new(self.name, steps, self.systems)
+            .with_aliases(self.aliases)
             .with_sources(vec![source])
             .build(context)
             .await
@@ -621,5 +640,62 @@ mod tests {
         let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems());
         // When no node modules are configured, environments should not contain NODE_PATH
         assert!(!env.environments.iter().any(|e| e.starts_with("NODE_PATH=")));
+    }
+
+    // -----------------------------------------------------------------------
+    // TypeScriptLibrary tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ts_library_new_has_empty_aliases_by_default() {
+        let lib = TypeScriptLibrary::new("test-lib", test_systems());
+        assert!(lib.aliases.is_empty());
+    }
+
+    #[test]
+    fn ts_library_with_alias_adds_single_alias() {
+        let lib = TypeScriptLibrary::new("test-lib", test_systems())
+            .with_alias("my-lib:latest".to_string());
+        assert_eq!(lib.aliases, vec!["my-lib:latest"]);
+    }
+
+    #[test]
+    fn ts_library_with_alias_deduplicates() {
+        let lib = TypeScriptLibrary::new("test-lib", test_systems())
+            .with_alias("my-lib:latest".to_string())
+            .with_alias("my-lib:latest".to_string());
+        assert_eq!(lib.aliases, vec!["my-lib:latest"]);
+    }
+
+    #[test]
+    fn ts_library_with_aliases_adds_multiple() {
+        let lib = TypeScriptLibrary::new("test-lib", test_systems())
+            .with_aliases(vec![
+                "my-lib:latest".to_string(),
+                "my-lib:1.0.0".to_string(),
+            ]);
+        assert_eq!(lib.aliases, vec!["my-lib:latest", "my-lib:1.0.0"]);
+    }
+
+    #[test]
+    fn ts_library_with_aliases_deduplicates() {
+        let lib = TypeScriptLibrary::new("test-lib", test_systems())
+            .with_alias("my-lib:latest".to_string())
+            .with_aliases(vec![
+                "my-lib:latest".to_string(),
+                "my-lib:1.0.0".to_string(),
+            ]);
+        assert_eq!(lib.aliases, vec!["my-lib:latest", "my-lib:1.0.0"]);
+    }
+
+    #[test]
+    fn ts_library_builder_methods_can_be_chained_with_aliases() {
+        let lib = TypeScriptLibrary::new("test-lib", test_systems())
+            .with_aliases(vec!["my-lib:latest".to_string()])
+            .with_artifacts(vec!["a".to_string()])
+            .with_includes(vec!["src"]);
+        assert_eq!(lib.aliases, vec!["my-lib:latest"]);
+        assert_eq!(lib.artifacts, vec!["a"]);
+        assert_eq!(lib.includes, vec!["src"]);
     }
 }

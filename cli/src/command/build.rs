@@ -9,7 +9,7 @@ use crate::command::{
     },
     VorpalConfigSource,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -17,7 +17,7 @@ use std::{
 };
 use tokio::fs::{create_dir_all, remove_dir_all, remove_file, write};
 use tonic::{transport::Channel, Code, Request};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use vorpal_sdk::{
     api::{
         agent::agent_service_client::AgentServiceClient,
@@ -70,6 +70,10 @@ pub struct RunArgsService {
 // Uses vec![system] (not all 4 platforms) because the CLI only needs the SDK
 // for the platform it is building on. The config crate's VorpalSdkTypescript
 // uses SYSTEMS (all platforms) for cross-platform artifact publishing.
+//
+// NOTE: This does not call .with_aliases() because the alias is only needed
+// for user projects fetching from the registry. The config crate's
+// VorpalSdkTypescript handles alias registration for published artifacts.
 async fn build_vorpal_sdk_typescript(
     context: &mut ConfigContext,
     system: vorpal_sdk::api::artifact::ArtifactSystem,
@@ -583,19 +587,35 @@ pub async fn run(
                 }
             }
 
-            // Attempt store-based @vorpal/sdk resolution (bootstrap fallback to NPM)
-            let sdk_digest =
-                match build_vorpal_sdk_typescript(&mut config_context, config_system).await {
+            // Resolve @vorpal/sdk: monorepo builds from source, user projects fetch by alias
+            let is_monorepo = config_context
+                .get_artifact_context_path()
+                .join("sdk/typescript")
+                .exists();
+
+            let sdk_digest = if is_monorepo {
+                // Monorepo: build SDK from local source
+                let digest = build_vorpal_sdk_typescript(&mut config_context, config_system)
+                    .await
+                    .context("failed to build @vorpal/sdk from monorepo source")?;
+                info!("using store-built @vorpal/sdk for TypeScript config");
+                Some(digest)
+            } else {
+                // User project: fetch pre-built SDK from registry
+                match config_context.fetch_artifact_alias("vorpal-sdk-typescript:latest").await {
                     Ok(digest) => {
-                        info!("using store-built @vorpal/sdk for TypeScript config");
+                        info!("using registry-published @vorpal/sdk for TypeScript config");
                         Some(digest)
                     }
                     Err(err) => {
-                        warn!("falling back to NPM resolution for @vorpal/sdk: {err}");
-                        tracing::debug!("store-built @vorpal/sdk error chain: {err:?}");
-                        None
+                        bail!(
+                            "failed to fetch @vorpal/sdk from registry: {err}\n\n  \
+                             The alias 'vorpal-sdk-typescript:latest' could not be resolved.\n  \
+                             Ensure the Vorpal SDK has been published to your registry."
+                        );
                     }
-                };
+                }
+            };
 
             let mut builder =
                 TypeScript::new(&config.name, vec![config_system]).with_includes(includes);
@@ -868,20 +888,12 @@ mod tests {
             |ctx, sys| Box::pin(build_vorpal_sdk_typescript(ctx, sys));
     }
 
-    /// Verify the fallback logic: when sdk_digest is Some, with_node_module is
-    /// applied; when None, the builder is unmodified.
+    /// Verify that monorepo SDK build errors propagate (no silent fallback).
     #[test]
-    fn sdk_digest_fallback_pattern() {
-        // Simulate success path
-        let sdk_digest: Option<String> = Some("test-digest-abc123".to_string());
-        assert!(sdk_digest.is_some());
-
-        // Simulate failure path (bootstrap / first build)
-        let result: Result<String> = Err(anyhow!("bootstrap: store artifact not available"));
-        let sdk_digest = match result {
-            Ok(digest) => Some(digest),
-            Err(_) => None,
-        };
-        assert!(sdk_digest.is_none());
+    fn sdk_build_error_propagates() {
+        let result: Result<String> = Err(anyhow!("build failed"));
+        let outer: Result<String> = result.context("failed to build @vorpal/sdk from monorepo source");
+        let err_msg = outer.unwrap_err().to_string();
+        assert!(err_msg.contains("failed to build @vorpal/sdk from monorepo source"));
     }
 }

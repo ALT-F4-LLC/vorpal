@@ -22,6 +22,7 @@ impl VorpalSdkTypescript {
         TypeScriptLibrary::new("vorpal-sdk-typescript", SYSTEMS.to_vec())
             .with_includes(vec!["sdk/typescript"])
             .with_artifacts(vec![proto_artifact])
+            .with_aliases(vec!["vorpal-sdk-typescript:latest".to_string()])
             .with_source_script(format!("cd sdk/typescript\ncp -pr {proto_env}/api src/api"))
             .build(context)
             .await
