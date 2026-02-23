@@ -28,6 +28,21 @@ describe("SDK exports for TypeScript configs", () => {
     expect(mod.DevelopmentEnvironment).toBeDefined();
   });
 
+  test("GoDevelopmentEnvironment is exported", async () => {
+    const mod = await import("../index.js");
+    expect(mod.GoDevelopmentEnvironment).toBeDefined();
+  });
+
+  test("RustDevelopmentEnvironment is exported", async () => {
+    const mod = await import("../index.js");
+    expect(mod.RustDevelopmentEnvironment).toBeDefined();
+  });
+
+  test("TypeScriptDevelopmentEnvironment is exported", async () => {
+    const mod = await import("../index.js");
+    expect(mod.TypeScriptDevelopmentEnvironment).toBeDefined();
+  });
+
   test("UserEnvironment is exported", async () => {
     const mod = await import("../index.js");
     expect(mod.UserEnvironment).toBeDefined();

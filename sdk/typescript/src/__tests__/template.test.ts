@@ -155,6 +155,16 @@ describe("template generation", () => {
     expect(content).toContain("TypeScript");
   });
 
+  test("src/vorpal.ts imports TypeScriptDevelopmentEnvironment", () => {
+    const content = readFileSync(join(TEMPLATE_DIR, "src/vorpal.ts"), "utf-8");
+    expect(content).toContain("TypeScriptDevelopmentEnvironment");
+  });
+
+  test("src/vorpal.ts creates a development environment", () => {
+    const content = readFileSync(join(TEMPLATE_DIR, "src/vorpal.ts"), "utf-8");
+    expect(content).toContain("example-shell");
+  });
+
   test("src/main.ts contains valid program entry", () => {
     const content = readFileSync(
       join(TEMPLATE_DIR, "src/main.ts"),
