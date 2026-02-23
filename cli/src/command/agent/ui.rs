@@ -2531,6 +2531,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         .focused_agent()
         .map(|a| matches!(a.activity, AgentActivity::Thinking | AgentActivity::Tool(_)))
         .unwrap_or(false);
+    let has_agent = !app.agents.is_empty();
 
     // Line 1: transient status message (if active) or agent status info.
     let status_line = if let Some(msg) = app.status_message() {
@@ -2660,7 +2661,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 // (left + right) layout that requires direct `frame.render_widget`
                 // calls, so we render the hint bar here and return early to skip
                 // the single-`Paragraph` fallback path below.
-                let hints = build_hint_bar(app.input_mode, agent_active, area.width);
+                let hints = build_hint_bar(app.input_mode, agent_active, has_agent, area.width);
                 let hints_paragraph = Paragraph::new(hints)
                     .style(Style::default().bg(theme.hint_bar_bg).fg(theme.hint_bar_fg));
                 frame.render_widget(hints_paragraph, rows[1]);
@@ -2682,7 +2683,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(status_paragraph, rows[0]);
 
     // Line 2: keybinding hints — priority-ordered, truncated to fit width.
-    let hints = build_hint_bar(app.input_mode, agent_active, area.width);
+    let hints = build_hint_bar(app.input_mode, agent_active, has_agent, area.width);
 
     let hints_paragraph =
         Paragraph::new(hints).style(Style::default().bg(theme.hint_bar_bg).fg(theme.hint_bar_fg));
@@ -2693,8 +2694,14 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 /// `InputMode` and agent state.
 ///
 /// `agent_active` should be `true` when the focused agent is in `Thinking` or
-/// `Tool` activity, which makes `Esc:interrupt` relevant in Normal mode.
-fn build_hint_bar(mode: InputMode, agent_active: bool, width: u16) -> Line<'static> {
+/// `Tool` activity, which makes `Esc:interrupt` relevant in Normal mode. Note
+/// that `agent_active` implies `has_agent` because `focused_agent()` returns
+/// `None` when the agent list is empty.
+///
+/// `has_agent` should be `true` when at least one agent window exists. The
+/// `i:chat` hint is suppressed when no agents are present since the keybinding
+/// is also guarded on agent existence.
+fn build_hint_bar(mode: InputMode, agent_active: bool, has_agent: bool, width: u16) -> Line<'static> {
     let hints: &[(&str, &str)] = match mode {
         InputMode::Normal if agent_active => &[
             ("Esc", "interrupt"),
@@ -2705,12 +2712,19 @@ fn build_hint_bar(mode: InputMode, agent_active: bool, width: u16) -> Line<'stat
             ("Tab", "next"),
             ("?", "help"),
         ],
-        InputMode::Normal => &[
+        InputMode::Normal if has_agent => &[
             ("i", "chat"),
             ("n", "new"),
             ("o", "sessions"),
             (":", "command"),
             ("Tab", "next"),
+            ("q", "close"),
+            ("?", "help"),
+        ],
+        InputMode::Normal => &[
+            ("n", "new"),
+            ("o", "sessions"),
+            (":", "command"),
             ("q", "close"),
             ("?", "help"),
         ],
