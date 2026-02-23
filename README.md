@@ -6,8 +6,6 @@
 
 Vorpal is a build system that works the way you already write code. Define your build as a program -- not YAML, not a DSL -- using real SDKs in Rust, Go, or TypeScript. Vorpal handles hermetic execution, cross-platform targeting, content-addressed caching, and artifact distribution so you can focus on what you are building.
 
-> Think Nix-level reproducibility, without learning a new language. Think Bazel-level caching, without the configuration overhead. Think Docker builds, but actually deterministic.
-
 ## Contents
 
 - [Install](#install)
@@ -35,8 +33,8 @@ Create a new project and build your first artifact.
 ### 1. Create a project
 
 ```bash
-mkdir hello-vorpal && cd hello-vorpal
-vorpal init hello-vorpal
+mkdir hello-world && cd hello-world
+vorpal init hello-world
 ```
 
 Choose your language (Go, Rust, or TypeScript) when prompted. Vorpal scaffolds a working project with a `Vorpal.toml` and sample build config.
@@ -44,7 +42,7 @@ Choose your language (Go, Rust, or TypeScript) when prompted. Vorpal scaffolds a
 ### 2. Build it
 
 ```bash
-vorpal build vorpal
+vorpal build hello-world
 ```
 
 Vorpal compiles your config, resolves dependencies, and produces a content-addressed artifact. First builds download toolchains; subsequent builds are cached.
@@ -52,7 +50,7 @@ Vorpal compiles your config, resolves dependencies, and produces a content-addre
 ### 3. Run it
 
 ```bash
-vorpal run hello-vorpal
+vorpal run hello-world
 ```
 
 That is it. Your artifact is built, cached, and runnable.
