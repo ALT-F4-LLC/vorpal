@@ -2,7 +2,7 @@ use crate::{
     api::artifact::{ArtifactStepSecret, ArtifactSystem},
     artifact::{
         get_env_key, protoc::Protoc, rust_toolchain, rust_toolchain::RustToolchain, step, Artifact,
-        ArtifactSource,
+        ArtifactSource, DevelopmentEnvironment,
     },
     context::ConfigContext,
 };
@@ -468,5 +468,155 @@ impl<'a> Rust<'a> {
             .with_sources(vec![source])
             .build(context)
             .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rust Development Environment
+// ---------------------------------------------------------------------------
+
+pub struct RustDevelopmentEnvironment<'a> {
+    artifacts: Vec<String>,
+    environments: Vec<String>,
+    include_protoc: bool,
+    name: &'a str,
+    secrets: Vec<(&'a str, &'a str)>,
+    systems: Vec<ArtifactSystem>,
+}
+
+impl<'a> RustDevelopmentEnvironment<'a> {
+    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+        Self {
+            artifacts: vec![],
+            environments: vec![],
+            include_protoc: true,
+            name,
+            secrets: vec![],
+            systems,
+        }
+    }
+
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts.extend(artifacts);
+        self
+    }
+
+    pub fn with_environments(mut self, environments: Vec<String>) -> Self {
+        self.environments.extend(environments);
+        self
+    }
+
+    pub fn without_protoc(mut self) -> Self {
+        self.include_protoc = false;
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&'a str, &'a str)>) -> Self {
+        for secret in secrets {
+            if !self.secrets.iter().any(|(name, _)| *name == secret.0) {
+                self.secrets.push(secret);
+            }
+        }
+        self
+    }
+
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let rust_toolchain_digest = RustToolchain::new().build(context).await?;
+
+        let mut artifacts = vec![];
+
+        if self.include_protoc {
+            let protoc = Protoc::new().build(context).await?;
+            artifacts.push(protoc);
+        }
+
+        artifacts.push(rust_toolchain_digest.clone());
+        artifacts.extend(self.artifacts);
+
+        let toolchain_target = rust_toolchain::target(context.get_system())?;
+        let toolchain_version = rust_toolchain::version();
+        let toolchain_name = format!("{toolchain_version}-{toolchain_target}");
+        let toolchain_bin = format!(
+            "{}/toolchains/{toolchain_name}/bin",
+            get_env_key(&rust_toolchain_digest)
+        );
+
+        let mut environments = vec![
+            format!("PATH={toolchain_bin}"),
+            format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain_digest)),
+            format!("RUSTUP_TOOLCHAIN={toolchain_name}"),
+        ];
+
+        environments.extend(self.environments);
+
+        let mut devenv = DevelopmentEnvironment::new(self.name, self.systems)
+            .with_artifacts(artifacts)
+            .with_environments(environments);
+
+        if !self.secrets.is_empty() {
+            devenv = devenv.with_secrets(self.secrets);
+        }
+
+        devenv.build(context).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_systems() -> Vec<ArtifactSystem> {
+        vec![ArtifactSystem::Aarch64Darwin, ArtifactSystem::X8664Linux]
+    }
+
+    #[test]
+    fn rust_devenv_new_returns_valid_struct_with_defaults() {
+        let env = RustDevelopmentEnvironment::new("test-rust", test_systems());
+        assert_eq!(env.name, "test-rust");
+        assert!(env.artifacts.is_empty());
+        assert!(env.environments.is_empty());
+        assert!(env.secrets.is_empty());
+        assert!(env.include_protoc);
+        assert_eq!(env.systems.len(), 2);
+    }
+
+    #[test]
+    fn rust_devenv_with_artifacts_sets_artifacts() {
+        let env = RustDevelopmentEnvironment::new("test-rust", test_systems())
+            .with_artifacts(vec!["artifact-a".to_string(), "artifact-b".to_string()]);
+        assert_eq!(env.artifacts, vec!["artifact-a", "artifact-b"]);
+    }
+
+    #[test]
+    fn rust_devenv_with_environments_sets_environments() {
+        let env = RustDevelopmentEnvironment::new("test-rust", test_systems())
+            .with_environments(vec!["FOO=bar".to_string()]);
+        assert_eq!(env.environments, vec!["FOO=bar"]);
+    }
+
+    #[test]
+    fn rust_devenv_with_secrets_sets_secrets() {
+        let env = RustDevelopmentEnvironment::new("test-rust", test_systems())
+            .with_secrets(vec![("key", "value")]);
+        assert_eq!(env.secrets, vec![("key", "value")]);
+    }
+
+    #[test]
+    fn rust_devenv_without_protoc_disables_protoc_flag() {
+        let env = RustDevelopmentEnvironment::new("test-rust", test_systems()).without_protoc();
+        assert!(!env.include_protoc);
+    }
+
+    #[test]
+    fn rust_devenv_builder_methods_can_be_chained() {
+        let env = RustDevelopmentEnvironment::new("test-rust", test_systems())
+            .with_artifacts(vec!["a".to_string()])
+            .with_environments(vec!["E=1".to_string()])
+            .with_secrets(vec![("s", "v")])
+            .without_protoc();
+        assert_eq!(env.artifacts, vec!["a"]);
+        assert_eq!(env.environments, vec!["E=1"]);
+        assert_eq!(env.secrets, vec![("s", "v")]);
+        assert!(!env.include_protoc);
     }
 }

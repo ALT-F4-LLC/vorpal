@@ -27,9 +27,9 @@ export { Rust } from "./artifact/language/rust.js";
 export { TypeScript } from "./artifact/language/typescript.js";
 
 // Development environment builders
-export { GoDevelopmentEnvironment } from "./artifact/devenv/go.js";
-export { RustDevelopmentEnvironment } from "./artifact/devenv/rust.js";
-export { TypeScriptDevelopmentEnvironment } from "./artifact/devenv/typescript.js";
+export { GoDevelopmentEnvironment } from "./artifact/language/go.js";
+export { RustDevelopmentEnvironment } from "./artifact/language/rust.js";
+export { TypeScriptDevelopmentEnvironment } from "./artifact/language/typescript.js";
 
 // System utilities
 export {

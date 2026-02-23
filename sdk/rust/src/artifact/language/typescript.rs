@@ -1,7 +1,7 @@
 use crate::{
     api,
     api::artifact::ArtifactSystem,
-    artifact::{bun::Bun, get_env_key, step, Artifact, ArtifactSource},
+    artifact::{bun::Bun, get_env_key, step, Artifact, ArtifactSource, DevelopmentEnvironment},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -174,5 +174,118 @@ impl<'a> TypeScript<'a> {
             .with_sources(vec![source])
             .build(context)
             .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TypeScript Development Environment
+// ---------------------------------------------------------------------------
+
+pub struct TypeScriptDevelopmentEnvironment<'a> {
+    artifacts: Vec<String>,
+    environments: Vec<String>,
+    name: &'a str,
+    secrets: Vec<(&'a str, &'a str)>,
+    systems: Vec<ArtifactSystem>,
+}
+
+impl<'a> TypeScriptDevelopmentEnvironment<'a> {
+    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+        Self {
+            artifacts: vec![],
+            environments: vec![],
+            name,
+            secrets: vec![],
+            systems,
+        }
+    }
+
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts.extend(artifacts);
+        self
+    }
+
+    pub fn with_environments(mut self, environments: Vec<String>) -> Self {
+        self.environments.extend(environments);
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&'a str, &'a str)>) -> Self {
+        for secret in secrets {
+            if !self.secrets.iter().any(|(name, _)| *name == secret.0) {
+                self.secrets.push(secret);
+            }
+        }
+        self
+    }
+
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let bun = Bun::new().build(context).await?;
+
+        let mut artifacts = vec![bun];
+        artifacts.extend(self.artifacts);
+
+        let environments = self.environments;
+
+        let mut devenv = DevelopmentEnvironment::new(self.name, self.systems)
+            .with_artifacts(artifacts)
+            .with_environments(environments);
+
+        if !self.secrets.is_empty() {
+            devenv = devenv.with_secrets(self.secrets);
+        }
+
+        devenv.build(context).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_systems() -> Vec<ArtifactSystem> {
+        vec![ArtifactSystem::Aarch64Darwin, ArtifactSystem::X8664Linux]
+    }
+
+    #[test]
+    fn ts_devenv_new_returns_valid_struct_with_defaults() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems());
+        assert_eq!(env.name, "test-ts");
+        assert!(env.artifacts.is_empty());
+        assert!(env.environments.is_empty());
+        assert!(env.secrets.is_empty());
+        assert_eq!(env.systems.len(), 2);
+    }
+
+    #[test]
+    fn ts_devenv_with_artifacts_sets_artifacts() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_artifacts(vec!["artifact-a".to_string(), "artifact-b".to_string()]);
+        assert_eq!(env.artifacts, vec!["artifact-a", "artifact-b"]);
+    }
+
+    #[test]
+    fn ts_devenv_with_environments_sets_environments() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_environments(vec!["FOO=bar".to_string()]);
+        assert_eq!(env.environments, vec!["FOO=bar"]);
+    }
+
+    #[test]
+    fn ts_devenv_with_secrets_sets_secrets() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_secrets(vec![("key", "value")]);
+        assert_eq!(env.secrets, vec![("key", "value")]);
+    }
+
+    #[test]
+    fn ts_devenv_builder_methods_can_be_chained() {
+        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
+            .with_artifacts(vec!["a".to_string()])
+            .with_environments(vec!["E=1".to_string()])
+            .with_secrets(vec![("s", "v")]);
+        assert_eq!(env.artifacts, vec!["a"]);
+        assert_eq!(env.environments, vec!["E=1"]);
+        assert_eq!(env.secrets, vec![("s", "v")]);
     }
 }

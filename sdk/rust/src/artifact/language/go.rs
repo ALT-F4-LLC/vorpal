@@ -4,7 +4,11 @@ use crate::{
         ArtifactSystem,
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
-    artifact::{get_env_key, git::Git, go::Go as GoDist, step, Artifact, ArtifactSource},
+    artifact::{
+        get_env_key, git::Git, go::Go as GoDist, goimports::Goimports, gopls::Gopls,
+        protoc::Protoc, protoc_gen_go::ProtocGenGo, protoc_gen_go_grpc::ProtocGenGoGrpc,
+        staticcheck::Staticcheck, step, Artifact, ArtifactSource, DevelopmentEnvironment,
+    },
     context,
 };
 use anyhow::{bail, Result};
@@ -206,5 +210,174 @@ impl<'a> Go<'a> {
             .with_sources(vec![source])
             .build(context)
             .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Go Development Environment
+// ---------------------------------------------------------------------------
+
+pub struct GoDevelopmentEnvironment<'a> {
+    artifacts: Vec<String>,
+    environments: Vec<String>,
+    include_protoc: bool,
+    include_protoc_gen_go: bool,
+    include_protoc_gen_go_grpc: bool,
+    name: &'a str,
+    secrets: Vec<(&'a str, &'a str)>,
+    systems: Vec<ArtifactSystem>,
+}
+
+impl<'a> GoDevelopmentEnvironment<'a> {
+    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+        Self {
+            artifacts: vec![],
+            environments: vec![],
+            include_protoc: true,
+            include_protoc_gen_go: true,
+            include_protoc_gen_go_grpc: true,
+            name,
+            secrets: vec![],
+            systems,
+        }
+    }
+
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts.extend(artifacts);
+        self
+    }
+
+    pub fn with_environments(mut self, environments: Vec<String>) -> Self {
+        self.environments.extend(environments);
+        self
+    }
+
+    pub fn without_protoc(mut self) -> Self {
+        self.include_protoc = false;
+        self.include_protoc_gen_go = false;
+        self.include_protoc_gen_go_grpc = false;
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&'a str, &'a str)>) -> Self {
+        for secret in secrets {
+            if !self.secrets.iter().any(|(name, _)| *name == secret.0) {
+                self.secrets.push(secret);
+            }
+        }
+        self
+    }
+
+    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+        let git = Git::new().build(context).await?;
+        let go = GoDist::new().build(context).await?;
+        let goimports = Goimports::new().build(context).await?;
+        let gopls = Gopls::new().build(context).await?;
+        let staticcheck = Staticcheck::new().build(context).await?;
+
+        let mut artifacts = vec![git, go, goimports, gopls];
+
+        if self.include_protoc {
+            let protoc = Protoc::new().build(context).await?;
+            artifacts.push(protoc);
+        }
+
+        if self.include_protoc_gen_go {
+            let protoc_gen_go = ProtocGenGo::new().build(context).await?;
+            artifacts.push(protoc_gen_go);
+        }
+
+        if self.include_protoc_gen_go_grpc {
+            let protoc_gen_go_grpc = ProtocGenGoGrpc::new().build(context).await?;
+            artifacts.push(protoc_gen_go_grpc);
+        }
+
+        artifacts.push(staticcheck);
+        artifacts.extend(self.artifacts);
+
+        let goarch = get_goarch(context.get_system())?;
+        let goos = get_goos(context.get_system())?;
+
+        let mut environments = vec![
+            "CGO_ENABLED=0".to_string(),
+            format!("GOARCH={goarch}"),
+            format!("GOOS={goos}"),
+        ];
+
+        environments.extend(self.environments);
+
+        let mut devenv = DevelopmentEnvironment::new(self.name, self.systems)
+            .with_artifacts(artifacts)
+            .with_environments(environments);
+
+        if !self.secrets.is_empty() {
+            devenv = devenv.with_secrets(self.secrets);
+        }
+
+        devenv.build(context).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_systems() -> Vec<ArtifactSystem> {
+        vec![ArtifactSystem::Aarch64Darwin, ArtifactSystem::X8664Linux]
+    }
+
+    #[test]
+    fn go_devenv_new_returns_valid_struct_with_defaults() {
+        let env = GoDevelopmentEnvironment::new("test-go", test_systems());
+        assert_eq!(env.name, "test-go");
+        assert!(env.artifacts.is_empty());
+        assert!(env.environments.is_empty());
+        assert!(env.secrets.is_empty());
+        assert!(env.include_protoc);
+        assert!(env.include_protoc_gen_go);
+        assert!(env.include_protoc_gen_go_grpc);
+        assert_eq!(env.systems.len(), 2);
+    }
+
+    #[test]
+    fn go_devenv_with_artifacts_sets_artifacts() {
+        let env = GoDevelopmentEnvironment::new("test-go", test_systems())
+            .with_artifacts(vec!["artifact-a".to_string(), "artifact-b".to_string()]);
+        assert_eq!(env.artifacts, vec!["artifact-a", "artifact-b"]);
+    }
+
+    #[test]
+    fn go_devenv_with_environments_sets_environments() {
+        let env = GoDevelopmentEnvironment::new("test-go", test_systems())
+            .with_environments(vec!["FOO=bar".to_string()]);
+        assert_eq!(env.environments, vec!["FOO=bar"]);
+    }
+
+    #[test]
+    fn go_devenv_with_secrets_sets_secrets() {
+        let env = GoDevelopmentEnvironment::new("test-go", test_systems())
+            .with_secrets(vec![("key", "value")]);
+        assert_eq!(env.secrets, vec![("key", "value")]);
+    }
+
+    #[test]
+    fn go_devenv_without_protoc_disables_all_protoc_flags() {
+        let env = GoDevelopmentEnvironment::new("test-go", test_systems()).without_protoc();
+        assert!(!env.include_protoc);
+        assert!(!env.include_protoc_gen_go);
+        assert!(!env.include_protoc_gen_go_grpc);
+    }
+
+    #[test]
+    fn go_devenv_builder_methods_can_be_chained() {
+        let env = GoDevelopmentEnvironment::new("test-go", test_systems())
+            .with_artifacts(vec!["a".to_string()])
+            .with_environments(vec!["E=1".to_string()])
+            .with_secrets(vec![("s", "v")])
+            .without_protoc();
+        assert_eq!(env.artifacts, vec!["a"]);
+        assert_eq!(env.environments, vec!["E=1"]);
+        assert_eq!(env.secrets, vec![("s", "v")]);
+        assert!(!env.include_protoc);
     }
 }

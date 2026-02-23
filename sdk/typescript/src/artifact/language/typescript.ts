@@ -7,6 +7,7 @@ import type { ConfigContext } from "../../context.js";
 import {
   Artifact,
   ArtifactSource,
+  DevelopmentEnvironment,
   getEnvKey,
 } from "../../artifact.js";
 import { shell } from "../step.js";
@@ -226,5 +227,92 @@ ${bunBin}/bun build --compile "${entrypoint}" --outfile "$VORPAL_OUTPUT/bin/${th
     return new Artifact(this._name, [step], this._systems)
       .withSources([source])
       .build(context);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TypeScript Development Environment
+// ---------------------------------------------------------------------------
+
+/**
+ * Builder for TypeScript development environment artifacts.
+ *
+ * Wraps {@link DevelopmentEnvironment} to provide a TypeScript-specific
+ * development environment with Bun pre-configured. This is the simplest
+ * of the language-specific development environment builders -- it includes
+ * only the Bun runtime as a default tool and requires no special
+ * environment variables.
+ *
+ * Usage:
+ * ```typescript
+ * const digest = await new TypeScriptDevelopmentEnvironment("example-shell", SYSTEMS)
+ *   .build(context);
+ * ```
+ */
+export class TypeScriptDevelopmentEnvironment {
+  private _artifacts: string[] = [];
+  private _environments: string[] = [];
+  private _name: string;
+  private _secrets: Array<[string, string]> = [];
+  private _systems: ArtifactSystem[];
+
+  constructor(name: string, systems: ArtifactSystem[]) {
+    this._name = name;
+    this._systems = systems;
+  }
+
+  /**
+   * Adds extra artifact dependencies beyond the default Bun tooling.
+   * These are appended to the default artifacts, not replacing them.
+   */
+  withArtifacts(artifacts: string[]): this {
+    this._artifacts.push(...artifacts);
+    return this;
+  }
+
+  /**
+   * Adds extra environment variables beyond what DevelopmentEnvironment provides.
+   * Format: "KEY=VALUE".
+   */
+  withEnvironments(environments: string[]): this {
+    this._environments.push(...environments);
+    return this;
+  }
+
+  /** Adds secrets available during the environment build step. Duplicates (by name) are ignored. */
+  withSecrets(secrets: Array<[string, string]>): this {
+    for (const [name, value] of secrets) {
+      if (!this._secrets.some(([n]) => n === name)) {
+        this._secrets.push([name, value]);
+      }
+    }
+    return this;
+  }
+
+  /**
+   * Builds the TypeScript development environment artifact.
+   *
+   * Default artifacts fetched:
+   * - bun (Bun runtime)
+   *
+   * No default environment variables beyond what DevelopmentEnvironment provides.
+   * Bun does not require special env vars like Go or Rust do.
+   */
+  async build(context: ConfigContext): Promise<string> {
+    const bun = await context.fetchArtifactAlias(DEFAULT_BUN_ALIAS);
+
+    const artifacts: string[] = [bun, ...this._artifacts];
+
+    const environments: string[] = [...this._environments];
+
+    let devenv = new DevelopmentEnvironment(this._name, this._systems)
+      .withArtifacts(artifacts)
+      .withEnvironments(environments);
+
+    if (this._secrets.length > 0) {
+      devenv = devenv.withSecrets(this._secrets);
+    }
+
+    return devenv.build(context);
   }
 }
