@@ -2048,7 +2048,11 @@ fn resolve_selection_text(app: &App) -> Option<String> {
 /// Determine which agent index a mouse click at `(col, row)` maps to in split
 /// mode, or return the active agent index in single-pane mode. Also returns
 /// the content area rect for the relevant pane.
-fn agent_and_rect_for_click(app: &App, col: u16, _row: u16) -> Option<(usize, ratatui::layout::Rect)> {
+fn agent_and_rect_for_click(
+    app: &App,
+    col: u16,
+    _row: u16,
+) -> Option<(usize, ratatui::layout::Rect)> {
     let content_rect = app.content_rect?;
     if !app.split_enabled {
         return app.active_agent_index().map(|idx| (idx, content_rect));
@@ -2181,19 +2185,24 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
             if app.input_mode == InputMode::Normal {
                 if let Some(content_rect) = app.content_rect {
                     if rect_contains(content_rect, col, row) {
-                        if let Some((agent_idx, pane_rect)) = agent_and_rect_for_click(app, col, row) {
+                        if let Some((agent_idx, pane_rect)) =
+                            agent_and_rect_for_click(app, col, row)
+                        {
                             if let Some(agent) = app.agents.get(agent_idx) {
                                 if let Some(cached) = &agent.cached_lines {
                                     // Compute screen-relative coordinates within the pane.
                                     // In split mode, pane_rect accounts for borders (Block with
                                     // Borders::ALL adds 1 col on each side and 1 row top/bottom).
-                                    let (rel_col, rel_row, inner_width, inner_height) = if app.split_enabled {
+                                    let (rel_col, rel_row, inner_width, inner_height) = if app
+                                        .split_enabled
+                                    {
                                         // Split panes have a bordered Block — inner area is 1 inset.
                                         let inner_x = pane_rect.x + 1;
                                         let inner_y = pane_rect.y + 1;
                                         let inner_w = pane_rect.width.saturating_sub(2);
                                         let inner_h = pane_rect.height.saturating_sub(2);
-                                        if col < inner_x || row < inner_y
+                                        if col < inner_x
+                                            || row < inner_y
                                             || col >= inner_x + inner_w
                                             || row >= inner_y + inner_h
                                         {
@@ -2204,7 +2213,12 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
                                         // Single-pane: content area has no block border.
                                         let rel_c = col - content_rect.x;
                                         let rel_r = row - content_rect.y;
-                                        (rel_c, rel_r, content_rect.width, content_rect.height as usize)
+                                        (
+                                            rel_c,
+                                            rel_r,
+                                            content_rect.width,
+                                            content_rect.height as usize,
+                                        )
                                     };
 
                                     let scroll_y = compute_scroll_y(agent, inner_height);
@@ -2290,12 +2304,14 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
                         }
 
                         let (rel_col, rel_row, inner_width, inner_height) = if app.split_enabled {
-                            if let Some((_idx, pane_rect)) = agent_and_rect_for_click(app, col, row) {
+                            if let Some((_idx, pane_rect)) = agent_and_rect_for_click(app, col, row)
+                            {
                                 let inner_x = pane_rect.x + 1;
                                 let inner_y = pane_rect.y + 1;
                                 let inner_w = pane_rect.width.saturating_sub(2);
                                 let inner_h = pane_rect.height.saturating_sub(2);
-                                if col < inner_x || row < inner_y
+                                if col < inner_x
+                                    || row < inner_y
                                     || col >= inner_x + inner_w
                                     || row >= inner_y + inner_h
                                 {
@@ -2308,17 +2324,18 @@ pub async fn handle_mouse(app: &mut App, event: MouseEvent) -> bool {
                         } else {
                             let rel_c = col - content_rect.x;
                             let rel_r = row - content_rect.y;
-                            (rel_c, rel_r, content_rect.width, content_rect.height as usize)
+                            (
+                                rel_c,
+                                rel_r,
+                                content_rect.width,
+                                content_rect.height as usize,
+                            )
                         };
 
                         let scroll_y = compute_scroll_y(agent, inner_height);
-                        if let Some(pos) = screen_to_text_position(
-                            cached,
-                            rel_row,
-                            rel_col,
-                            scroll_y,
-                            inner_width,
-                        ) {
+                        if let Some(pos) =
+                            screen_to_text_position(cached, rel_row, rel_col, scroll_y, inner_width)
+                        {
                             let (start, end) = if anchor <= pos {
                                 (anchor, pos)
                             } else {

@@ -1545,11 +1545,7 @@ impl TextSelection {
 
         for line_idx in start.0..=last_line {
             let line = &cached_lines[line_idx];
-            let full_text: String = line
-                .spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect();
+            let full_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
 
             let byte_start = if line_idx == start.0 {
                 start.1.min(full_text.len())

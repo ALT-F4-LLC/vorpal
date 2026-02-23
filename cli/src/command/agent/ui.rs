@@ -6,8 +6,8 @@
 use super::manager::ClaudeOptions;
 use super::state::{
     self, AgentActivity, AgentState, AgentStatus, App, DiffLine, DisplayLine, InputField,
-    InputMode, ResultDisplay, SplitPane, TextSelection, ToastKind, COMMANDS, EFFORT_LEVELS,
-    MODELS, PERMISSION_MODES,
+    InputMode, ResultDisplay, SplitPane, TextSelection, ToastKind, COMMANDS, EFFORT_LEVELS, MODELS,
+    PERMISSION_MODES,
 };
 use super::theme::Theme;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -555,8 +555,7 @@ fn render_content(app: &mut App, frame: &mut Frame, area: Rect) {
             // Apply selection highlighting after search highlights.
             if let Some(ref sel) = app.selection {
                 if app.agent_vec_index(sel.agent_id) == Some(focused) {
-                    display_lines =
-                        apply_selection_highlight(display_lines, sel, &app.theme);
+                    display_lines = apply_selection_highlight(display_lines, sel, &app.theme);
                 }
             }
 
@@ -903,8 +902,7 @@ fn render_content_pane(
     // Apply selection highlighting for the split pane.
     if let Some(ref sel) = app.selection {
         if app.agent_vec_index(sel.agent_id) == Some(agent_idx) {
-            display_lines =
-                apply_selection_highlight(display_lines, sel, &app.theme);
+            display_lines = apply_selection_highlight(display_lines, sel, &app.theme);
         }
     }
 
@@ -5306,11 +5304,7 @@ fn apply_selection_highlight<'a>(
             // Partially selected (first and/or last line).
             // Compute byte boundaries within the flattened span text.
             let byte_start = if is_first { sel_start.1 } else { 0 };
-            let total_bytes: usize = line
-                .spans
-                .iter()
-                .map(|s| s.content.len())
-                .sum();
+            let total_bytes: usize = line.spans.iter().map(|s| s.content.len()).sum();
             let byte_end = if is_last {
                 sel_end.1.min(total_bytes)
             } else {
@@ -5339,13 +5333,10 @@ fn apply_selection_highlight<'a>(
 
                     // Snap to char boundaries to avoid panicking on multi-byte
                     // UTF-8 characters (e.g. CJK, emoji).
-                    while local_sel_start > 0
-                        && !span.content.is_char_boundary(local_sel_start)
-                    {
+                    while local_sel_start > 0 && !span.content.is_char_boundary(local_sel_start) {
                         local_sel_start -= 1;
                     }
-                    while local_sel_end < span_len
-                        && !span.content.is_char_boundary(local_sel_end)
+                    while local_sel_end < span_len && !span.content.is_char_boundary(local_sel_end)
                     {
                         local_sel_end += 1;
                     }
@@ -5359,26 +5350,17 @@ fn apply_selection_highlight<'a>(
                     // Prefix before selection.
                     if local_sel_start > 0 {
                         let prefix = &span.content[..local_sel_start];
-                        result_spans.push(Span::styled(
-                            prefix.to_string(),
-                            span.style,
-                        ));
+                        result_spans.push(Span::styled(prefix.to_string(), span.style));
                     }
 
                     // Selected portion.
                     let selected = &span.content[local_sel_start..local_sel_end];
-                    result_spans.push(Span::styled(
-                        selected.to_string(),
-                        sel_style,
-                    ));
+                    result_spans.push(Span::styled(selected.to_string(), sel_style));
 
                     // Suffix after selection.
                     if local_sel_end < span_len {
                         let suffix = &span.content[local_sel_end..];
-                        result_spans.push(Span::styled(
-                            suffix.to_string(),
-                            span.style,
-                        ));
+                        result_spans.push(Span::styled(suffix.to_string(), span.style));
                     }
                 }
                 offset = span_end;
