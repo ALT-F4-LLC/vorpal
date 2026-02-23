@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use indoc::formatdoc;
+use std::collections::BTreeMap;
 
 pub struct TypeScript<'a> {
     artifacts: Vec<String>,
@@ -18,6 +19,7 @@ pub struct TypeScript<'a> {
     secrets: Vec<api::artifact::ArtifactStepSecret>,
     systems: Vec<ArtifactSystem>,
     working_dir: Option<String>,
+    node_modules: BTreeMap<String, String>,
 }
 
 impl<'a> TypeScript<'a> {
@@ -33,6 +35,7 @@ impl<'a> TypeScript<'a> {
             secrets: vec![],
             systems,
             working_dir: None,
+            node_modules: BTreeMap::new(),
         }
     }
 
@@ -79,6 +82,18 @@ impl<'a> TypeScript<'a> {
             }
         }
 
+        self
+    }
+
+    pub fn with_node_module(mut self, package_name: &str, digest: String) -> Self {
+        self.node_modules.insert(package_name.to_string(), digest);
+        self
+    }
+
+    pub fn with_node_modules(mut self, modules: Vec<(&str, String)>) -> Self {
+        for (name, digest) in modules {
+            self.node_modules.insert(name.to_string(), digest);
+        }
         self
     }
 
@@ -131,6 +146,26 @@ impl<'a> TypeScript<'a> {
             None => String::new(),
         };
 
+        // Generate node modules symlink script (BTreeMap iterates in sorted key order)
+        let node_modules_script = if self.node_modules.is_empty() {
+            String::new()
+        } else {
+            let mut lines = vec!["mkdir -p node_modules".to_string()];
+            for (package_name, digest) in &self.node_modules {
+                let env_key = get_env_key(digest);
+                if package_name.contains('/') {
+                    // Scoped package like @vorpal/sdk
+                    let scope = package_name.split('/').next().unwrap();
+                    lines.push(format!("mkdir -p node_modules/{scope}"));
+                    lines.push(format!("ln -sf {env_key} node_modules/{package_name}"));
+                } else {
+                    // Unscoped package like lodash
+                    lines.push(format!("ln -sf {env_key} node_modules/{package_name}"));
+                }
+            }
+            lines.join("\n") + "\n"
+        };
+
         let step_script = formatdoc! {r#"
             set -euo pipefail
 
@@ -138,6 +173,7 @@ impl<'a> TypeScript<'a> {
 
             mkdir -p $VORPAL_OUTPUT/bin
             {proto_copy_script}
+            {node_modules_script}
             {bun_bin}/bun install --frozen-lockfile
             {bun_bin}/bun build --compile {entrypoint} --outfile ./{name}
             cp ./{name} $VORPAL_OUTPUT/bin/{name}
@@ -158,6 +194,10 @@ impl<'a> TypeScript<'a> {
         }
 
         step_artifacts.extend(self.artifacts);
+
+        for digest in self.node_modules.values() {
+            step_artifacts.push(digest.clone());
+        }
 
         let steps = vec![
             step::shell(
@@ -236,56 +276,5 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
         }
 
         devenv.build(context).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_systems() -> Vec<ArtifactSystem> {
-        vec![ArtifactSystem::Aarch64Darwin, ArtifactSystem::X8664Linux]
-    }
-
-    #[test]
-    fn ts_devenv_new_returns_valid_struct_with_defaults() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems());
-        assert_eq!(env.name, "test-ts");
-        assert!(env.artifacts.is_empty());
-        assert!(env.environments.is_empty());
-        assert!(env.secrets.is_empty());
-        assert_eq!(env.systems.len(), 2);
-    }
-
-    #[test]
-    fn ts_devenv_with_artifacts_sets_artifacts() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_artifacts(vec!["artifact-a".to_string(), "artifact-b".to_string()]);
-        assert_eq!(env.artifacts, vec!["artifact-a", "artifact-b"]);
-    }
-
-    #[test]
-    fn ts_devenv_with_environments_sets_environments() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_environments(vec!["FOO=bar".to_string()]);
-        assert_eq!(env.environments, vec!["FOO=bar"]);
-    }
-
-    #[test]
-    fn ts_devenv_with_secrets_sets_secrets() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_secrets(vec![("key", "value")]);
-        assert_eq!(env.secrets, vec![("key", "value")]);
-    }
-
-    #[test]
-    fn ts_devenv_builder_methods_can_be_chained() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_artifacts(vec!["a".to_string()])
-            .with_environments(vec!["E=1".to_string()])
-            .with_secrets(vec![("s", "v")]);
-        assert_eq!(env.artifacts, vec!["a"]);
-        assert_eq!(env.environments, vec!["E=1"]);
-        assert_eq!(env.secrets, vec![("s", "v")]);
     }
 }

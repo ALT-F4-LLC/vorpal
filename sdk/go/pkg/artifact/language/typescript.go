@@ -13,11 +13,12 @@ import (
 )
 
 type TypeScriptScriptTemplateArgs struct {
-	BunBin        string
-	Entrypoint    string
-	Name          string
-	SourceDir     string
-	SourceScripts string
+	BunBin            string
+	Entrypoint        string
+	Name              string
+	NodeModulesScript string
+	SourceDir         string
+	SourceScripts     string
 }
 
 type TypeScript struct {
@@ -28,6 +29,7 @@ type TypeScript struct {
 	excludes      []string
 	includes      []string
 	name          string
+	nodeModules   map[string]*string
 	secrets       []*api.ArtifactStepSecret
 	source        *api.ArtifactSource
 	sourceScripts []string
@@ -40,6 +42,9 @@ pushd "{{.SourceDir}}"
 mkdir -p "$VORPAL_OUTPUT/bin"
 {{- if .SourceScripts}}
 {{.SourceScripts}}
+{{- end}}
+{{- if .NodeModulesScript}}
+{{.NodeModulesScript}}
 {{- end}}
 
 {{.BunBin}}/bun install --frozen-lockfile
@@ -54,6 +59,7 @@ func NewTypeScript(name string, systems []api.ArtifactSystem) *TypeScript {
 		excludes:      []string{},
 		includes:      []string{},
 		name:          name,
+		nodeModules:   map[string]*string{},
 		secrets:       []*api.ArtifactStepSecret{},
 		source:        nil,
 		sourceScripts: []string{},
@@ -121,6 +127,18 @@ func (b *TypeScript) WithSourceScript(script string) *TypeScript {
 	return b
 }
 
+func (b *TypeScript) WithNodeModule(packageName string, digest *string) *TypeScript {
+	b.nodeModules[packageName] = digest
+	return b
+}
+
+func (b *TypeScript) WithNodeModules(modules map[string]*string) *TypeScript {
+	for name, digest := range modules {
+		b.nodeModules[name] = digest
+	}
+	return b
+}
+
 func (builder *TypeScript) Build(context *config.ConfigContext) (*string, error) {
 	// Sort secrets for deterministic output
 	slices.SortFunc(builder.secrets, func(a, b *api.ArtifactStepSecret) int {
@@ -177,13 +195,37 @@ func (builder *TypeScript) Build(context *config.ConfigContext) (*string, error)
 		sourceScripts = strings.Join(builder.sourceScripts, "\n")
 	}
 
+	// Generate node modules symlink script
+	nodeModulesScript := ""
+	if len(builder.nodeModules) > 0 {
+		nodeModuleLines := []string{"mkdir -p node_modules"}
+		for _, packageName := range artifact.SortedKeys(builder.nodeModules) {
+			digest := builder.nodeModules[packageName]
+			if digest == nil {
+				return nil, fmt.Errorf("node module %q has nil digest", packageName)
+			}
+			envKey := artifact.GetEnvKey(*digest)
+			if strings.Contains(packageName, "/") {
+				// Scoped package like @vorpal/sdk
+				scope := strings.Split(packageName, "/")[0]
+				nodeModuleLines = append(nodeModuleLines, fmt.Sprintf("mkdir -p node_modules/%s", scope))
+				nodeModuleLines = append(nodeModuleLines, fmt.Sprintf("ln -sf %s node_modules/%s", envKey, packageName))
+			} else {
+				// Unscoped package like lodash
+				nodeModuleLines = append(nodeModuleLines, fmt.Sprintf("ln -sf %s node_modules/%s", envKey, packageName))
+			}
+		}
+		nodeModulesScript = strings.Join(nodeModuleLines, "\n")
+	}
+
 	// Generate build script
 	stepScriptData := TypeScriptScriptTemplateArgs{
-		BunBin:        bunBin,
-		Entrypoint:    entrypoint,
-		Name:          builder.name,
-		SourceDir:     fmt.Sprintf("./source/%s", source.Name),
-		SourceScripts: sourceScripts,
+		BunBin:            bunBin,
+		Entrypoint:        entrypoint,
+		Name:              builder.name,
+		NodeModulesScript: nodeModulesScript,
+		SourceDir:         fmt.Sprintf("./source/%s", source.Name),
+		SourceScripts:     sourceScripts,
 	}
 
 	tmpl, err := template.New("script").Parse(TypeScriptScriptTemplate)
@@ -203,6 +245,15 @@ func (builder *TypeScript) Build(context *config.ConfigContext) (*string, error)
 	var artifacts []*string
 	artifacts = append(artifacts, bunDigest)
 	artifacts = append(artifacts, builder.artifacts...)
+
+	// Add node module artifact digests
+	for _, packageName := range artifact.SortedKeys(builder.nodeModules) {
+		digest := builder.nodeModules[packageName]
+		if digest == nil {
+			return nil, fmt.Errorf("node module %q has nil digest", packageName)
+		}
+		artifacts = append(artifacts, digest)
+	}
 
 	// Build environments
 	environments := []string{

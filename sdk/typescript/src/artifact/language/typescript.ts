@@ -52,6 +52,7 @@ export class TypeScript {
   private _name: string;
   private _secrets: ArtifactStepSecret[] = [];
   private _source: ArtifactSourceMsg | undefined = undefined;
+  private _nodeModules: Map<string, string> = new Map();
   private _sourceScripts: string[] = [];
   private _systems: ArtifactSystem[];
 
@@ -149,6 +150,31 @@ export class TypeScript {
   }
 
   /**
+   * Maps an npm package name to a Vorpal store artifact.
+   * At build time, a symlink is created in node_modules/ pointing
+   * to the artifact's output directory.
+   *
+   * @param packageName - npm package name (e.g., "@vorpal/sdk")
+   * @param digest - Artifact digest for the package
+   */
+  withNodeModule(packageName: string, digest: string): this {
+    this._nodeModules.set(packageName, digest);
+    return this;
+  }
+
+  /**
+   * Maps multiple npm packages to Vorpal store artifacts.
+   *
+   * @param modules - Array of [packageName, digest] tuples
+   */
+  withNodeModules(modules: Array<[string, string]>): this {
+    for (const [name, digest] of modules) {
+      this._nodeModules.set(name, digest);
+    }
+    return this;
+  }
+
+  /**
    * Builds the TypeScript project artifact.
    *
    * Produces a standalone compiled binary at $VORPAL_OUTPUT/bin/{name}
@@ -163,6 +189,11 @@ export class TypeScript {
   async build(context: ConfigContext): Promise<string> {
     // Sort secrets for deterministic output
     this._secrets.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Sort node modules alphabetically by package name for deterministic output
+    const sortedNodeModules = [...this._nodeModules.entries()].sort((a, b) =>
+      a[0].localeCompare(b[0])
+    );
 
     // Build source
     const sourcePath = ".";
@@ -199,12 +230,28 @@ export class TypeScript {
         ? `\n${this._sourceScripts.join("\n")}\n`
         : "";
 
+    // Build node modules script
+    let nodeModulesScript = "";
+    if (sortedNodeModules.length > 0) {
+      const lines: string[] = ["mkdir -p node_modules"];
+      for (const [packageName, digest] of sortedNodeModules) {
+        if (packageName.includes("/")) {
+          const scope = packageName.split("/")[0];
+          lines.push(`mkdir -p node_modules/${scope}`);
+        }
+        lines.push(
+          `ln -sf ${getEnvKey(digest)} node_modules/${packageName}`
+        );
+      }
+      nodeModulesScript = `\n${lines.join("\n")}`;
+    }
+
     // Build step script -- mirrors the Rust-side TypeScript language builder
     const sourceDir = `./source/${source.name}`;
     const stepScript = `pushd "${sourceDir}"
 
 mkdir -p "$VORPAL_OUTPUT/bin"
-${sourceScriptsStr}
+${sourceScriptsStr}${nodeModulesScript}
 ${bunBin}/bun install --frozen-lockfile
 ${bunBin}/bun build --compile "${entrypoint}" --outfile "$VORPAL_OUTPUT/bin/${this._name}"`;
 
@@ -213,6 +260,11 @@ ${bunBin}/bun build --compile "${entrypoint}" --outfile "$VORPAL_OUTPUT/bin/${th
 
     // Build artifact dependencies
     const stepArtifacts = [bunDigest, ...this._artifacts];
+
+    // Add node module artifact digests
+    for (const [, digest] of sortedNodeModules) {
+      stepArtifacts.push(digest);
+    }
 
     // Create step
     const step = await shell(
