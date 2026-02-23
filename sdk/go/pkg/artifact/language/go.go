@@ -95,7 +95,7 @@ func NewGo(name string, systems []api.ArtifactSystem) *Go {
 }
 
 func (b *Go) WithArtifacts(artifacts []*string) *Go {
-	b.artifacts = append(b.artifacts, artifacts...)
+	b.artifacts = artifacts
 	return b
 }
 
@@ -115,7 +115,7 @@ func (b *Go) WithBuildPath(path string) *Go {
 }
 
 func (b *Go) WithEnvironments(environments []string) *Go {
-	b.environments = append(b.environments, environments...)
+	b.environments = environments
 	return b
 }
 

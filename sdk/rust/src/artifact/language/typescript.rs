@@ -278,3 +278,212 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
         devenv.build(context).await
     }
 }
+
+// ---------------------------------------------------------------------------
+// TypeScript Library Builder
+// ---------------------------------------------------------------------------
+
+pub struct TypeScriptLibrary<'a> {
+    artifacts: Vec<String>,
+    build_command: Option<&'a str>,
+    bun_version: Option<String>,
+    environments: Vec<&'a str>,
+    excludes: Vec<&'a str>,
+    includes: Vec<&'a str>,
+    name: &'a str,
+    node_modules: BTreeMap<String, String>,
+    secrets: Vec<api::artifact::ArtifactStepSecret>,
+    source: Option<api::artifact::ArtifactSource>,
+    source_scripts: Vec<String>,
+    systems: Vec<ArtifactSystem>,
+}
+
+impl<'a> TypeScriptLibrary<'a> {
+    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+        Self {
+            artifacts: vec![],
+            build_command: None,
+            bun_version: None,
+            environments: vec![],
+            excludes: vec![],
+            includes: vec![],
+            name,
+            node_modules: BTreeMap::new(),
+            secrets: vec![],
+            source: None,
+            source_scripts: vec![],
+            systems,
+        }
+    }
+
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts = artifacts;
+        self
+    }
+
+    pub fn with_build_command(mut self, command: &'a str) -> Self {
+        self.build_command = Some(command);
+        self
+    }
+
+    pub fn with_bun_version(mut self, version: &str) -> Self {
+        self.bun_version = Some(version.to_string());
+        self
+    }
+
+    pub fn with_environments(mut self, environments: Vec<&'a str>) -> Self {
+        self.environments = environments;
+        self
+    }
+
+    pub fn with_excludes(mut self, excludes: Vec<&'a str>) -> Self {
+        self.excludes = excludes;
+        self
+    }
+
+    pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
+        self.includes = includes;
+        self
+    }
+
+    pub fn with_node_module(mut self, package_name: &str, digest: String) -> Self {
+        self.node_modules.insert(package_name.to_string(), digest);
+        self
+    }
+
+    pub fn with_node_modules(mut self, modules: Vec<(&str, String)>) -> Self {
+        for (name, digest) in modules {
+            self.node_modules.insert(name.to_string(), digest);
+        }
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(String, String)>) -> Self {
+        for (name, value) in secrets {
+            if !self.secrets.iter().any(|s| s.name == name) {
+                self.secrets
+                    .push(api::artifact::ArtifactStepSecret { name, value });
+            }
+        }
+
+        self
+    }
+
+    pub fn with_source(mut self, source: api::artifact::ArtifactSource) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    pub fn with_source_script(mut self, script: String) -> Self {
+        if !self.source_scripts.contains(&script) {
+            self.source_scripts.push(script);
+        }
+        self
+    }
+
+    pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
+        // Sort for deterministic output
+        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // Build source
+        let source = if let Some(source) = self.source.take() {
+            source
+        } else {
+            let source_path = ".";
+            let mut source_builder = ArtifactSource::new(self.name, source_path);
+
+            if !self.includes.is_empty() {
+                let source_includes = self.includes.iter().map(|s| s.to_string()).collect();
+                source_builder = source_builder.with_includes(source_includes);
+            }
+
+            if !self.excludes.is_empty() {
+                let source_excludes = self.excludes.iter().map(|s| s.to_string()).collect();
+                source_builder = source_builder.with_excludes(source_excludes);
+            }
+
+            source_builder.build()
+        };
+
+        let work_dir = format!("./source/{}", source.name);
+
+        // Resolve bun artifact
+        let mut bun = Bun::new();
+        if let Some(version) = &self.bun_version {
+            bun = bun.with_version(version);
+        }
+        let bun = bun.build(context).await?;
+        let bun_bin = format!("{}/bin", get_env_key(&bun));
+
+        // Build source scripts string
+        let source_scripts = if self.source_scripts.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}\n", self.source_scripts.join("\n"))
+        };
+
+        // Generate node modules symlink script (BTreeMap iterates in sorted key order)
+        let node_modules_script = if self.node_modules.is_empty() {
+            String::new()
+        } else {
+            let mut lines = vec!["mkdir -p node_modules".to_string()];
+            for (package_name, digest) in &self.node_modules {
+                let env_key = get_env_key(digest);
+                if package_name.contains('/') {
+                    // Scoped package like @vorpal/sdk
+                    let scope = package_name.split('/').next().unwrap();
+                    lines.push(format!("mkdir -p node_modules/{scope}"));
+                    lines.push(format!("ln -sf {env_key} node_modules/{package_name}"));
+                } else {
+                    // Unscoped package like lodash
+                    lines.push(format!("ln -sf {env_key} node_modules/{package_name}"));
+                }
+            }
+            format!("\n{}", lines.join("\n"))
+        };
+
+        // Build command defaults to "bun run build"
+        let build_command = self.build_command.unwrap_or("bun run build");
+
+        let step_script = formatdoc! {r#"
+            pushd "{work_dir}"
+            {source_scripts}{node_modules_script}
+            {bun_bin}/bun install --frozen-lockfile
+            {bun_bin}/{build_command}
+
+            mkdir -p "$VORPAL_OUTPUT"
+            cp package.json "$VORPAL_OUTPUT/"
+            cp -r dist "$VORPAL_OUTPUT/"
+            cp -r node_modules "$VORPAL_OUTPUT/""#,
+        };
+
+        let mut step_environments = vec![format!("PATH={bun_bin}")];
+
+        for env in self.environments {
+            step_environments.push(env.to_string());
+        }
+
+        let mut step_artifacts = vec![bun.clone()];
+        step_artifacts.extend(self.artifacts);
+
+        for digest in self.node_modules.values() {
+            step_artifacts.push(digest.clone());
+        }
+
+        let steps = vec![
+            step::shell(
+                context,
+                step_artifacts,
+                step_environments,
+                step_script,
+                self.secrets,
+            )
+            .await?,
+        ];
+
+        Artifact::new(self.name, steps, self.systems)
+            .with_sources(vec![source])
+            .build(context)
+            .await
+    }
+}
