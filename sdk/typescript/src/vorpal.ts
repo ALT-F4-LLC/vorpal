@@ -1,13 +1,13 @@
 import { ArtifactSystem } from "./api/artifact/artifact.js";
 import {
   getEnvKey,
-  JobBuilder,
-  OciImageBuilder,
-  ProcessBuilder,
-  ProjectEnvironmentBuilder,
-  UserEnvironmentBuilder,
+  Job,
+  OciImage,
+  Process,
+  DevelopmentEnvironment,
+  UserEnvironment,
 } from "./artifact.js";
-import { RustBuilder } from "./artifact/language/rust.js";
+import { Rust } from "./artifact/language/rust.js";
 import { ConfigContext } from "./context.js";
 
 const SYSTEMS: ArtifactSystem[] = [
@@ -44,7 +44,7 @@ function getGoos(system: ArtifactSystem): string {
 }
 
 async function buildVorpal(context: ConfigContext): Promise<string> {
-  return new RustBuilder("vorpal", SYSTEMS)
+  return new Rust("vorpal", SYSTEMS)
     .withBins(["vorpal"])
     .withIncludes(["cli", "sdk/rust"])
     .withPackages(["vorpal-cli", "vorpal-sdk"])
@@ -61,7 +61,7 @@ async function buildVorpalContainerImage(
 
   const name = "vorpal-container-image";
 
-  return new OciImageBuilder(name, linuxVorpalSlim)
+  return new OciImage(name, linuxVorpalSlim)
     .withAliases([`${name}:latest`])
     .withArtifacts([vorpal])
     .build(context);
@@ -71,7 +71,7 @@ async function buildVorpalJob(context: ConfigContext): Promise<string> {
   const vorpal = await buildVorpal(context);
   const script = `${getEnvKey(vorpal)}/bin/vorpal --version`;
 
-  return new JobBuilder("vorpal-job", script, SYSTEMS)
+  return new Job("vorpal-job", script, SYSTEMS)
     .withArtifacts([vorpal])
     .build(context);
 }
@@ -79,7 +79,7 @@ async function buildVorpalJob(context: ConfigContext): Promise<string> {
 async function buildVorpalProcess(context: ConfigContext): Promise<string> {
   const vorpal = await buildVorpal(context);
 
-  return new ProcessBuilder(
+  return new Process(
     "vorpal-process",
     `${getEnvKey(vorpal)}/bin/vorpal`,
     SYSTEMS,
@@ -117,7 +117,7 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
   const goarch = getGoarch(context.getSystem());
   const goos = getGoos(context.getSystem());
 
-  return new ProjectEnvironmentBuilder("vorpal-shell", SYSTEMS)
+  return new DevelopmentEnvironment("vorpal-shell", SYSTEMS)
     .withArtifacts([
       bun,
       crane,
@@ -141,7 +141,7 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
 }
 
 async function buildVorpalUser(context: ConfigContext): Promise<string> {
-  return new UserEnvironmentBuilder("vorpal-user", SYSTEMS)
+  return new UserEnvironment("vorpal-user", SYSTEMS)
     .withArtifacts([])
     .withEnvironments(["PATH=$HOME/.vorpal/bin"])
     .withSymlinks([

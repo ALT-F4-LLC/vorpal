@@ -39,7 +39,7 @@ impl VorpalShell {
         let protoc_gen_go_grpc = ProtocGenGoGrpc::new().build(context).await?;
         let staticcheck = Staticcheck::new().build(context).await?;
 
-        artifact::ProjectEnvironment::new("vorpal-shell", SYSTEMS.to_vec())
+        artifact::DevelopmentEnvironment::new("vorpal-shell", SYSTEMS.to_vec())
             .with_artifacts(vec![
                 bun,
                 crane,

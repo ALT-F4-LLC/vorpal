@@ -5,8 +5,8 @@ import type { ArtifactStepSecret } from "../../api/artifact/artifact.js";
 import { ArtifactSystem } from "../../api/artifact/artifact.js";
 import type { ConfigContext } from "../../context.js";
 import {
-  ArtifactBuilder,
-  ArtifactSourceBuilder,
+  Artifact,
+  ArtifactSource,
   getEnvKey,
 } from "../../artifact.js";
 import { shell } from "../step.js";
@@ -281,7 +281,7 @@ function buildMainScript(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// RustBuilder
+// Rust
 // ---------------------------------------------------------------------------
 
 /**
@@ -300,13 +300,13 @@ function buildMainScript(opts: {
  *
  * Usage:
  * ```typescript
- * const digest = await new RustBuilder("vorpal", SYSTEMS)
+ * const digest = await new Rust("vorpal", SYSTEMS)
  *   .withPackages(["vorpal-cli"])
  *   .withBins(["vorpal"])
  *   .build(context);
  * ```
  */
-export class RustBuilder {
+export class Rust {
   private _artifacts: string[] = [];
   private _bins: string[] = [];
   private _build: boolean = true;
@@ -580,11 +580,11 @@ export class RustBuilder {
 
     const vendorName = `${this._name}-vendor`;
 
-    const vendorSource = new ArtifactSourceBuilder(vendorName, sourcePath)
+    const vendorSource = new ArtifactSource(vendorName, sourcePath)
       .withIncludes(vendorCargoPaths)
       .build();
 
-    const vendor = await new ArtifactBuilder(
+    const vendor = await new Artifact(
       vendorName,
       [vendorStep],
       this._systems,
@@ -607,7 +607,7 @@ export class RustBuilder {
       sourceIncludes.push(include);
     }
 
-    const sourceBuilder = new ArtifactSourceBuilder(this._name, sourcePath)
+    const sourceBuilder = new ArtifactSource(this._name, sourcePath)
       .withIncludes(sourceIncludes)
       .withExcludes(sourceExcludes);
 
@@ -650,7 +650,7 @@ export class RustBuilder {
 
     // Create artifact
 
-    return new ArtifactBuilder(this._name, [step], this._systems)
+    return new Artifact(this._name, [step], this._systems)
       .withSources([source])
       .build(context);
   }

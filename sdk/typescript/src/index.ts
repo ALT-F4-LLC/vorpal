@@ -6,15 +6,15 @@ export type { ArtifactAlias } from "./context.js";
 
 // Builders
 export {
-  ArtifactBuilder,
-  ArtifactSourceBuilder,
-  ArtifactStepBuilder,
+  Artifact,
+  ArtifactSource,
+  ArtifactStep,
   Argument,
-  JobBuilder,
-  OciImageBuilder,
-  ProcessBuilder,
-  ProjectEnvironmentBuilder,
-  UserEnvironmentBuilder,
+  Job,
+  OciImage,
+  Process,
+  DevelopmentEnvironment,
+  UserEnvironment,
   getEnvKey,
 } from "./artifact.js";
 
@@ -22,9 +22,9 @@ export {
 export { bash, bwrap, shell, docker } from "./artifact/step.js";
 
 // Language builders
-export { GoBuilder } from "./artifact/language/go.js";
-export { RustBuilder } from "./artifact/language/rust.js";
-export { TypeScriptBuilder } from "./artifact/language/typescript.js";
+export { Go } from "./artifact/language/go.js";
+export { Rust } from "./artifact/language/rust.js";
+export { TypeScript } from "./artifact/language/typescript.js";
 
 // System utilities
 export {
@@ -43,8 +43,5 @@ export {
   ArtifactSystem,
 } from "./api/artifact/artifact.js";
 export type {
-  Artifact,
-  ArtifactSource,
-  ArtifactStep,
   ArtifactStepSecret,
 } from "./api/artifact/artifact.js";

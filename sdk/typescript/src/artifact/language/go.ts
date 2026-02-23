@@ -5,8 +5,8 @@ import type {
 import { ArtifactSystem } from "../../api/artifact/artifact.js";
 import type { ConfigContext } from "../../context.js";
 import {
-  ArtifactBuilder,
-  ArtifactSourceBuilder,
+  Artifact,
+  ArtifactSource,
   getEnvKey,
 } from "../../artifact.js";
 import { shell } from "../step.js";
@@ -52,7 +52,7 @@ export function getGoarch(system: ArtifactSystem): string {
 }
 
 // ---------------------------------------------------------------------------
-// GoBuilder
+// Go
 // ---------------------------------------------------------------------------
 
 /**
@@ -65,19 +65,19 @@ export function getGoarch(system: ArtifactSystem): string {
  * The builder:
  * 1. Fetches the Go distribution artifact from the registry
  * 2. Fetches the Git artifact from the registry
- * 3. Builds source using ArtifactSourceBuilder (or uses an explicit source)
+ * 3. Builds source using ArtifactSource (or uses an explicit source)
  * 4. Computes GOOS and GOARCH from the target system
  * 5. Generates a build script that runs `go build`
  * 6. Creates a shell step and returns the artifact digest
  *
  * Usage:
  * ```typescript
- * const digest = await new GoBuilder("my-go-app", SYSTEMS)
+ * const digest = await new Go("my-go-app", SYSTEMS)
  *   .withIncludes(["cmd", "pkg", "go.mod", "go.sum"])
  *   .build(context);
  * ```
  */
-export class GoBuilder {
+export class Go {
   private _artifacts: string[] = [];
   private _buildDirectory: string = ".";
   private _buildFlags: string = "";
@@ -198,7 +198,7 @@ export class GoBuilder {
     if (this._source !== undefined) {
       source = this._source;
     } else {
-      const sourceBuilder = new ArtifactSourceBuilder(this._name, sourcePath);
+      const sourceBuilder = new ArtifactSource(this._name, sourcePath);
 
       if (this._includes.length > 0) {
         sourceBuilder.withIncludes(this._includes);
@@ -262,7 +262,7 @@ export class GoBuilder {
     );
 
     // Create and return artifact
-    return new ArtifactBuilder(this._name, [step], this._systems)
+    return new Artifact(this._name, [step], this._systems)
       .withSources([source])
       .build(context);
   }

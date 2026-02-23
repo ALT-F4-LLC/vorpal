@@ -78,8 +78,8 @@ Shell scripts (Bash) are used in build steps, CI, and operational tooling under 
 
 - **File names**: `camelCase` or `kebab-case` for source files (e.g., `artifact.ts`, `context.ts`,
   `step.ts`). Test files use `kebab-case` with `.test.ts` suffix in `__tests__/` directory.
-- **Class names**: `PascalCase` with `Builder` suffix (e.g., `ArtifactBuilder`,
-  `ArtifactSourceBuilder`, `JobBuilder`, `RustBuilder`, `TypeScriptBuilder`).
+- **Class names**: `PascalCase` (e.g., `Artifact`,
+  `ArtifactSource`, `Job`, `Rust`, `TypeScript`).
 - **Function names**: `camelCase` (e.g., `getEnvKey`, `parseArtifactAlias`, `getSystemDefaultStr`).
 - **Constants**: `SCREAMING_SNAKE_CASE` (e.g., `DEFAULT_NAMESPACE`, `DEFAULT_TAG`,
   `VORPAL_ROOT_DIR`).
@@ -176,7 +176,7 @@ TypeScript::new(&config.name, vec![config_system])
 `async build()` terminal method that takes a `ConfigContext`:
 
 ```typescript
-new RustBuilder("vorpal", SYSTEMS)
+new Rust("vorpal", SYSTEMS)
     .withBins(["vorpal"])
     .withIncludes(["cli", "sdk/rust"])
     .withPackages(["vorpal-cli", "vorpal-sdk"])
@@ -184,7 +184,7 @@ new RustBuilder("vorpal", SYSTEMS)
 ```
 
 Both SDKs implement the same set of builders: `Artifact`, `ArtifactSource`, `ArtifactStep`,
-`Job`, `Process`, `ProjectEnvironment`, `UserEnvironment`, `Argument`, plus language-specific
+`Job`, `Process`, `DevelopmentEnvironment`, `UserEnvironment`, `Argument`, plus language-specific
 builders (`Rust`, `Go`, `TypeScript`).
 
 ### 5.2 Cross-SDK Parity

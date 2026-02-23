@@ -79,7 +79,7 @@ The primary SDK, published as the `vorpal-sdk` crate.
 - `api` -- Generated protobuf/gRPC types via `tonic`/`prost` (built from `.proto` files at
   `sdk/rust/api/`).
 - `artifact` -- Builder types (`Artifact`, `ArtifactStep`, `ArtifactSource`, `Job`,
-  `Process`, `ProjectEnvironment`, `UserEnvironment`) and tool artifacts (Bun, Cargo,
+  `Process`, `DevelopmentEnvironment`, `UserEnvironment`) and tool artifacts (Bun, Cargo,
   Go, Rust toolchain, Node.js, pnpm, protoc, etc.).
 - `artifact/language/` -- Language-specific build pipelines: `go.rs`, `rust.rs`,
   `typescript.rs`.
@@ -121,8 +121,8 @@ code generation.
 
 **Structure:**
 - `src/api/` -- Generated gRPC client code from protobuf via `ts-proto`.
-- `src/artifact.ts` -- Builder types (`ArtifactBuilder`, `JobBuilder`,
-  `ProjectEnvironmentBuilder`, `UserEnvironmentBuilder`, etc.).
+- `src/artifact.ts` -- Builder types (`Artifact`, `Job`,
+  `DevelopmentEnvironment`, `UserEnvironment`, etc.).
 - `src/artifact/step.ts` -- Step execution strategies (`bash`, `bwrap`, `shell`, `docker`).
 - `src/artifact/language/` -- Language builders (`rust.ts`, `typescript.ts`).
 - `src/context.ts` -- `ConfigContext` with gRPC client/server, artifact store management,

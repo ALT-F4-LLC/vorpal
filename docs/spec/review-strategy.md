@@ -46,7 +46,7 @@ The following dimensions are ranked by importance for this project. Every review
 **What to verify:**
 - `serializeArtifact()` in `sdk/typescript/src/context.ts` must produce JSON identical to Rust's `serde_json::to_vec` for prost-generated structs: snake_case field names, proto field-number order, all fields always present, enums as integers, optional None as null.
 - `computeArtifactDigest()` must use SHA-256 on the same byte representation.
-- Shell script templates in `artifact.ts` (ProcessBuilder, ProjectEnvironmentBuilder, UserEnvironmentBuilder) must be character-for-character identical to their Rust counterparts in `sdk/rust/src/artifact.rs`. Even whitespace differences change the digest.
+- Shell script templates in `artifact.ts` (Process, DevelopmentEnvironment, UserEnvironment) must be character-for-character identical to their Rust counterparts in `sdk/rust/src/artifact.rs`. Even whitespace differences change the digest.
 - `step.ts` `shell()` function must produce the same `ArtifactStep` structure as Rust `step::shell()`.
 - `parseArtifactAlias()` must behave identically across all SDKs (validation, defaults, error messages).
 
@@ -169,7 +169,7 @@ The most common source of bugs is when a change to one SDK's serialization or sc
 
 ### 2. Shell Script Template Mismatch
 
-The `ProcessBuilder`, `ProjectEnvironmentBuilder`, and `UserEnvironmentBuilder` classes in both Rust and TypeScript generate shell scripts that become part of the artifact definition. A single whitespace or newline difference changes the artifact digest.
+The `Process`, `DevelopmentEnvironment`, and `UserEnvironment` classes in both Rust and TypeScript generate shell scripts that become part of the artifact definition. A single whitespace or newline difference changes the artifact digest.
 
 **Prevention:** When modifying a script template in one SDK, diff the output character-by-character against the other SDK. The `sdk/typescript/src/__tests__/step-parity.test.ts` test catches some of these, but manual inspection is still required for new templates.
 

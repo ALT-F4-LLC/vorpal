@@ -71,8 +71,8 @@ includes = ["src", "package.json", "tsconfig.json", "bun.lockb"]
 import {
   ConfigContext,
   ArtifactSystem,
-  JobBuilder,
-  ProjectEnvironmentBuilder,
+  Job,
+  DevelopmentEnvironment,
 } from "@vorpal/sdk";
 
 const SYSTEMS = [
@@ -86,7 +86,7 @@ async function main() {
   const context = ConfigContext.create();
 
   // Define a build job
-  const buildDigest = await new JobBuilder(
+  const buildDigest = await new Job(
     "my-build",
     `
       echo "Building project..."
@@ -96,7 +96,7 @@ async function main() {
   ).build(context);
 
   // Define a development shell
-  await new ProjectEnvironmentBuilder("my-shell", SYSTEMS)
+  await new DevelopmentEnvironment("my-shell", SYSTEMS)
     .withArtifacts([buildDigest])
     .withEnvironments(["NODE_ENV=development"])
     .build(context);
@@ -126,15 +126,15 @@ import {
   formatArtifactAlias,
 
   // Builders
-  ArtifactBuilder,
-  ArtifactSourceBuilder,
-  ArtifactStepBuilder,
+  Artifact,
+  ArtifactSource,
+  ArtifactStep,
   Argument,
-  JobBuilder,
-  ProcessBuilder,
-  ProjectEnvironmentBuilder,
-  TypeScriptBuilder,
-  UserEnvironmentBuilder,
+  Job,
+  Process,
+  DevelopmentEnvironment,
+  TypeScript,
+  UserEnvironment,
   getEnvKey,
 
   // Step functions
@@ -188,65 +188,65 @@ await context.run();
 
 All builders follow the same pattern: construct with required fields, chain `with*` methods for optional fields, and call `.build(context)` to register the artifact. Each `.build()` call returns a `Promise<string>` containing the artifact's SHA-256 digest.
 
-#### JobBuilder
+#### Job
 
 Runs a shell script as a build step.
 
 ```typescript
-const digest = await new JobBuilder("my-job", "echo hello", SYSTEMS)
+const digest = await new Job("my-job", "echo hello", SYSTEMS)
   .withArtifacts([depDigest1, depDigest2])       // artifact dependencies
   .withSecrets([["API_KEY", process.env.API_KEY!]]) // secret name-value pairs
   .build(context);
 ```
 
-#### ProcessBuilder
+#### Process
 
 Creates a managed background process with start/stop/logs helper scripts.
 
 ```typescript
-const digest = await new ProcessBuilder("my-server", "node", SYSTEMS)
+const digest = await new Process("my-server", "node", SYSTEMS)
   .withArguments(["server.js", "--port", "3000"])
   .withArtifacts([nodeDigest])
   .withSecrets([["DB_URL", process.env.DB_URL!]])
   .build(context);
 ```
 
-#### ProjectEnvironmentBuilder
+#### DevelopmentEnvironment
 
 Creates a development environment with a `bin/activate` script that configures PATH and environment variables.
 
 ```typescript
-const digest = await new ProjectEnvironmentBuilder("my-devenv", SYSTEMS)
+const digest = await new DevelopmentEnvironment("my-devenv", SYSTEMS)
   .withArtifacts([toolDigest1, toolDigest2])
   .withEnvironments(["NODE_ENV=development", "FOO=bar"])
   .withSecrets([["TOKEN", process.env.TOKEN!]])
   .build(context);
 ```
 
-#### UserEnvironmentBuilder
+#### UserEnvironment
 
 Creates a user-wide environment with symlink management under `$HOME/.vorpal/bin`.
 
 ```typescript
-const digest = await new UserEnvironmentBuilder("my-userenv", SYSTEMS)
+const digest = await new UserEnvironment("my-userenv", SYSTEMS)
   .withArtifacts([toolDigest])
   .withEnvironments(["EDITOR=nvim"])
   .withSymlinks([["/path/to/source/bin", "$HOME/.vorpal/bin/my-tool"]])
   .build(context);
 ```
 
-#### TypeScriptBuilder
+#### TypeScript
 
 Compiles a TypeScript/Node.js project into a standalone binary using [Bun](https://bun.sh/). By default, the Bun toolchain is fetched from the registry automatically (`bun:1.2.0`). Use `.withBun(digest)` to override with a custom Bun artifact.
 
 ```typescript
 // Minimal -- Bun is fetched from the registry automatically
-const digest = await new TypeScriptBuilder("my-app", SYSTEMS)
+const digest = await new TypeScript("my-app", SYSTEMS)
   .withIncludes(["src", "package.json", "tsconfig.json", "bun.lockb"])
   .build(context);
 
 // With options
-const digest = await new TypeScriptBuilder("my-app", SYSTEMS)
+const digest = await new TypeScript("my-app", SYSTEMS)
   .withBun(customBunDigest)                          // override Bun artifact
   .withEntrypoint("src/main.ts")                     // default: src/{name}.ts
   .withIncludes(["src", "package.json", "bun.lockb"])
@@ -256,34 +256,34 @@ const digest = await new TypeScriptBuilder("my-app", SYSTEMS)
   .build(context);
 ```
 
-#### ArtifactBuilder
+#### Artifact
 
 Low-level builder for custom artifacts with explicit steps and sources.
 
 ```typescript
-import { ArtifactBuilder, ArtifactSourceBuilder, shell } from "@vorpal/sdk";
+import { Artifact, ArtifactSource, shell } from "@vorpal/sdk";
 
-const source = new ArtifactSourceBuilder("my-source", ".")
+const source = new ArtifactSource("my-source", ".")
   .withIncludes(["src/**/*.ts"])
   .withExcludes(["node_modules"])
   .build();
 
 const step = await shell(context, [depDigest], [], "npm run build", []);
 
-const digest = await new ArtifactBuilder("my-artifact", [step], SYSTEMS)
+const digest = await new Artifact("my-artifact", [step], SYSTEMS)
   .withSources([source])
   .withAliases(["my-org/my-artifact:v1.0"])
   .build(context);
 ```
 
-#### ArtifactStepBuilder
+#### ArtifactStep
 
 Low-level builder for custom step definitions with arbitrary entrypoints.
 
 ```typescript
-import { ArtifactStepBuilder } from "@vorpal/sdk";
+import { ArtifactStep } from "@vorpal/sdk";
 
-const step = new ArtifactStepBuilder("docker")
+const step = new ArtifactStep("docker")
   .withArguments(["run", "--rm", "-v", "$VORPAL_OUTPUT:/out", "alpine", "sh", "-lc", "echo hi > /out/hi.txt"])
   .withArtifacts([depDigest])
   .withEnvironments(["FOO=bar"])

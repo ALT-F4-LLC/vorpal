@@ -71,7 +71,7 @@ func main() {
 	}
 
 	_, err = artifact.
-		NewProjectEnvironment("example-shell", Systems).
+		NewDevelopmentEnvironment("example-shell", Systems).
 		WithArtifacts([]*string{
 			gobin,
 			goimports,
@@ -88,7 +88,7 @@ func main() {
 		}).
 		Build(context)
 	if err != nil {
-		log.Fatalf("error building project environment: %v", err)
+		log.Fatalf("error building development environment: %v", err)
 	}
 
 	_, err = language.NewGo("example", Systems).

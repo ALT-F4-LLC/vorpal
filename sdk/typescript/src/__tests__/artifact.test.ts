@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
-  ArtifactBuilder,
-  ArtifactSourceBuilder,
-  ArtifactStepBuilder,
+  Artifact,
+  ArtifactSource,
+  ArtifactStep,
   getEnvKey,
 } from "../artifact.js";
 import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type {
-  ArtifactSource,
+  ArtifactSource as ArtifactSourceMsg,
 } from "../api/artifact/artifact.js";
 
 // ---------------------------------------------------------------------------
@@ -25,12 +25,12 @@ describe("getEnvKey", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ArtifactSourceBuilder
+// ArtifactSource
 // ---------------------------------------------------------------------------
 
-describe("ArtifactSourceBuilder", () => {
+describe("ArtifactSource", () => {
   test("builds basic source with name and path", () => {
-    const source = new ArtifactSourceBuilder("my-source", "/path/to/src").build();
+    const source = new ArtifactSource("my-source", "/path/to/src").build();
 
     expect(source.name).toBe("my-source");
     expect(source.path).toBe("/path/to/src");
@@ -40,7 +40,7 @@ describe("ArtifactSourceBuilder", () => {
   });
 
   test("builds source with digest", () => {
-    const source = new ArtifactSourceBuilder("src", "/path")
+    const source = new ArtifactSource("src", "/path")
       .withDigest("sha256:abc")
       .build();
 
@@ -48,7 +48,7 @@ describe("ArtifactSourceBuilder", () => {
   });
 
   test("builds source with excludes and includes", () => {
-    const source = new ArtifactSourceBuilder("src", "/path")
+    const source = new ArtifactSource("src", "/path")
       .withExcludes(["*.tmp", "*.log"])
       .withIncludes(["src/**", "lib/**"])
       .build();
@@ -58,19 +58,19 @@ describe("ArtifactSourceBuilder", () => {
   });
 
   test("builder is chainable", () => {
-    const builder = new ArtifactSourceBuilder("src", "/path");
+    const builder = new ArtifactSource("src", "/path");
     const result = builder.withDigest("abc").withExcludes([]).withIncludes([]);
     expect(result).toBe(builder);
   });
 });
 
 // ---------------------------------------------------------------------------
-// ArtifactStepBuilder
+// ArtifactStep
 // ---------------------------------------------------------------------------
 
-describe("ArtifactStepBuilder", () => {
+describe("ArtifactStep", () => {
   test("builds basic step with entrypoint", () => {
-    const step = new ArtifactStepBuilder("bash").build();
+    const step = new ArtifactStep("bash").build();
 
     expect(step.entrypoint).toBe("bash");
     expect(step.script).toBeUndefined();
@@ -81,7 +81,7 @@ describe("ArtifactStepBuilder", () => {
   });
 
   test("builds step with all fields", () => {
-    const step = new ArtifactStepBuilder("bash")
+    const step = new ArtifactStep("bash")
       .withScript("echo hello")
       .withArguments(["--flag"])
       .withArtifacts(["dep1"])
@@ -98,7 +98,7 @@ describe("ArtifactStepBuilder", () => {
   });
 
   test("deduplicates secrets by name", () => {
-    const step = new ArtifactStepBuilder("bash")
+    const step = new ArtifactStep("bash")
       .withSecrets([
         { name: "KEY", value: "first" },
         { name: "KEY", value: "second" },
@@ -113,7 +113,7 @@ describe("ArtifactStepBuilder", () => {
   });
 
   test("builder is chainable", () => {
-    const builder = new ArtifactStepBuilder("bash");
+    const builder = new ArtifactStep("bash");
     const result = builder
       .withScript("x")
       .withArguments([])
@@ -125,12 +125,12 @@ describe("ArtifactStepBuilder", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ArtifactBuilder
+// Artifact
 // ---------------------------------------------------------------------------
 
-describe("ArtifactBuilder", () => {
+describe("Artifact", () => {
   test("withAliases deduplicates and preserves order", () => {
-    const builder = new ArtifactBuilder(
+    const builder = new Artifact(
       "test",
       [{ entrypoint: "bash", script: "echo", secrets: [], arguments: [], artifacts: [], environments: [] }],
       [ArtifactSystem.AARCH64_DARWIN],
@@ -144,25 +144,25 @@ describe("ArtifactBuilder", () => {
     // We can verify by building with a mock context - but since build() requires
     // a ConfigContext with gRPC, we test the dedup logic via the Artifact message.
     // Instead, test that the builder returns 'this' for chaining.
-    expect(builder).toBeInstanceOf(ArtifactBuilder);
+    expect(builder).toBeInstanceOf(Artifact);
   });
 
   test("withSources deduplicates by name and preserves order", () => {
-    const sourceA: ArtifactSource = {
+    const sourceA: ArtifactSourceMsg = {
       name: "src-a",
       path: "/a",
       digest: undefined,
       excludes: [],
       includes: [],
     };
-    const sourceB: ArtifactSource = {
+    const sourceB: ArtifactSourceMsg = {
       name: "src-b",
       path: "/b",
       digest: undefined,
       excludes: [],
       includes: [],
     };
-    const sourceADup: ArtifactSource = {
+    const sourceADup: ArtifactSourceMsg = {
       name: "src-a",
       path: "/a-different",
       digest: "new",
@@ -170,7 +170,7 @@ describe("ArtifactBuilder", () => {
       includes: [],
     };
 
-    const builder = new ArtifactBuilder(
+    const builder = new Artifact(
       "test",
       [{ entrypoint: "bash", script: "echo", secrets: [], arguments: [], artifacts: [], environments: [] }],
       [ArtifactSystem.AARCH64_DARWIN],
@@ -179,11 +179,11 @@ describe("ArtifactBuilder", () => {
     builder.withSources([sourceA, sourceB, sourceADup]);
 
     // Verify chaining works
-    expect(builder).toBeInstanceOf(ArtifactBuilder);
+    expect(builder).toBeInstanceOf(Artifact);
   });
 
   test("withAliases returns this for chaining", () => {
-    const builder = new ArtifactBuilder(
+    const builder = new Artifact(
       "test",
       [{ entrypoint: "bash", script: "echo", secrets: [], arguments: [], artifacts: [], environments: [] }],
       [ArtifactSystem.AARCH64_DARWIN],
@@ -194,7 +194,7 @@ describe("ArtifactBuilder", () => {
   });
 
   test("withSources returns this for chaining", () => {
-    const builder = new ArtifactBuilder(
+    const builder = new Artifact(
       "test",
       [{ entrypoint: "bash", script: "echo", secrets: [], arguments: [], artifacts: [], environments: [] }],
       [ArtifactSystem.AARCH64_DARWIN],
@@ -205,7 +205,7 @@ describe("ArtifactBuilder", () => {
   });
 });
 
-// NOTE: JobBuilder, ProcessBuilder, and UserEnvironmentBuilder sorting
+// NOTE: Job, Process, and UserEnvironment sorting
 // behavior is tested indirectly via digest-parity and step-parity tests.
 // Direct builder tests require a gRPC ConfigContext and are covered by
 // integration/e2e tests.

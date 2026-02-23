@@ -5,8 +5,8 @@ import type {
 import type { ArtifactSystem } from "../../api/artifact/artifact.js";
 import type { ConfigContext } from "../../context.js";
 import {
-  ArtifactBuilder,
-  ArtifactSourceBuilder,
+  Artifact,
+  ArtifactSource,
   getEnvKey,
 } from "../../artifact.js";
 import { shell } from "../step.js";
@@ -35,13 +35,13 @@ const DEFAULT_BUN_ALIAS = "bun:1.2.0";
  *
  * Usage:
  * ```typescript
- * const digest = await new TypeScriptBuilder("my-app", SYSTEMS)
+ * const digest = await new TypeScript("my-app", SYSTEMS)
  *   .withEntrypoint("src/index.ts")
  *   .withIncludes(["src", "package.json", "tsconfig.json", "bun.lockb"])
  *   .build(context);
  * ```
  */
-export class TypeScriptBuilder {
+export class TypeScript {
   private _artifacts: string[] = [];
   private _bun: string | undefined = undefined;
   private _entrypoint: string | undefined = undefined;
@@ -170,7 +170,7 @@ export class TypeScriptBuilder {
     if (this._source !== undefined) {
       source = this._source;
     } else {
-      const sourceBuilder = new ArtifactSourceBuilder(this._name, sourcePath);
+      const sourceBuilder = new ArtifactSource(this._name, sourcePath);
 
       if (this._includes.length > 0) {
         sourceBuilder.withIncludes(this._includes);
@@ -223,7 +223,7 @@ ${bunBin}/bun build --compile "${entrypoint}" --outfile "$VORPAL_OUTPUT/bin/${th
     );
 
     // Create and return artifact
-    return new ArtifactBuilder(this._name, [step], this._systems)
+    return new Artifact(this._name, [step], this._systems)
       .withSources([source])
       .build(context);
   }

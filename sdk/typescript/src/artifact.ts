@@ -17,14 +17,14 @@ export function getEnvKey(digest: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// ArtifactSourceBuilder
+// ArtifactSource
 // ---------------------------------------------------------------------------
 
 /**
  * Builder for ArtifactSource messages.
  * Matches Rust sdk/rust/src/artifact.rs ArtifactSource impl.
  */
-export class ArtifactSourceBuilder {
+export class ArtifactSource {
   private _digest: string | undefined = undefined;
   private _excludes: string[] = [];
   private _includes: string[] = [];
@@ -84,14 +84,14 @@ export class ArtifactSourceBuilder {
 }
 
 // ---------------------------------------------------------------------------
-// ArtifactStepBuilder
+// ArtifactStep
 // ---------------------------------------------------------------------------
 
 /**
  * Builder for ArtifactStep messages.
  * Matches Rust sdk/rust/src/artifact.rs ArtifactStep impl.
  */
-export class ArtifactStepBuilder {
+export class ArtifactStep {
   private _arguments: string[] = [];
   private _artifacts: string[] = [];
   private _entrypoint: string;
@@ -176,14 +176,14 @@ export class ArtifactStepBuilder {
 }
 
 // ---------------------------------------------------------------------------
-// ArtifactBuilder
+// Artifact
 // ---------------------------------------------------------------------------
 
 /**
  * Builder for Artifact messages.
  * Matches Rust sdk/rust/src/artifact.rs Artifact impl (lines 211-256).
  */
-export class ArtifactBuilder {
+export class Artifact {
   private _aliases: string[] = [];
   private _name: string;
   private _sources: ArtifactSourceMsg[] = [];
@@ -255,7 +255,7 @@ export class ArtifactBuilder {
 }
 
 // ---------------------------------------------------------------------------
-// JobBuilder
+// Job
 // ---------------------------------------------------------------------------
 
 /**
@@ -264,7 +264,7 @@ export class ArtifactBuilder {
  *
  * CRITICAL: Secrets are sorted by name before building (Rust line 290).
  */
-export class JobBuilder {
+export class Job {
   private _artifacts: string[] = [];
   private _name: string;
   private _secrets: ArtifactStepSecret[] = [];
@@ -323,14 +323,14 @@ export class JobBuilder {
       this._secrets,
     );
 
-    return new ArtifactBuilder(this._name, [step], this._systems).build(
+    return new Artifact(this._name, [step], this._systems).build(
       context,
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// ProcessBuilder
+// Process
 // ---------------------------------------------------------------------------
 
 /**
@@ -340,7 +340,7 @@ export class JobBuilder {
  * CRITICAL: Shell script template must be character-for-character identical.
  * Secrets sorted by name (Rust line 477).
  */
-export class ProcessBuilder {
+export class Process {
   private _arguments: string[] = [];
   private _artifacts: string[] = [];
   private _entrypoint: string;
@@ -479,23 +479,23 @@ chmod +x $VORPAL_OUTPUT/bin/${this._name}-start`;
       this._secrets,
     );
 
-    return new ArtifactBuilder(this._name, [step], this._systems).build(
+    return new Artifact(this._name, [step], this._systems).build(
       context,
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// ProjectEnvironmentBuilder
+// DevelopmentEnvironment
 // ---------------------------------------------------------------------------
 
 /**
- * Builder for ProjectEnvironment artifacts.
- * Matches Rust sdk/rust/src/artifact.rs ProjectEnvironment impl (lines 300-429).
+ * Builder for DevelopmentEnvironment artifacts.
+ * Matches Rust sdk/rust/src/artifact.rs DevelopmentEnvironment impl (lines 300-429).
  *
  * CRITICAL: Shell script template must match exactly. Secrets sorted by name.
  */
-export class ProjectEnvironmentBuilder {
+export class DevelopmentEnvironment {
   private _artifacts: string[] = [];
   private _environments: string[] = [];
   private _name: string;
@@ -548,7 +548,7 @@ export class ProjectEnvironmentBuilder {
   }
 
   /**
-   * Builds the project environment artifact, which includes activate/deactivate
+   * Builds the development environment artifact, which includes activate/deactivate
    * scripts for shell integration.
    *
    * @returns The hex-encoded SHA-256 digest of the artifact
@@ -647,14 +647,14 @@ cp -prv bin "$VORPAL_OUTPUT"`;
       ),
     ];
 
-    return new ArtifactBuilder(this._name, steps, this._systems).build(
+    return new Artifact(this._name, steps, this._systems).build(
       context,
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// UserEnvironmentBuilder
+// UserEnvironment
 // ---------------------------------------------------------------------------
 
 /**
@@ -663,7 +663,7 @@ cp -prv bin "$VORPAL_OUTPUT"`;
  *
  * CRITICAL: Symlinks MUST be sorted by source path (Rust line 586).
  */
-export class UserEnvironmentBuilder {
+export class UserEnvironment {
   private _artifacts: string[] = [];
   private _environments: string[] = [];
   private _name: string;
@@ -812,14 +812,14 @@ chmod +x $VORPAL_OUTPUT/bin/vorpal-activate`;
       await shell(context, this._artifacts, [], stepScript, []),
     ];
 
-    return new ArtifactBuilder(this._name, steps, this._systems).build(
+    return new Artifact(this._name, steps, this._systems).build(
       context,
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// OciImageBuilder
+// OciImage
 // ---------------------------------------------------------------------------
 
 /**
@@ -829,7 +829,7 @@ chmod +x $VORPAL_OUTPUT/bin/vorpal-activate`;
  * Produces a container image tarball using crane, rsync, and a rootfs artifact.
  * Only supports Linux systems (AARCH64_LINUX, X8664_LINUX).
  */
-export class OciImageBuilder {
+export class OciImage {
   private _aliases: string[] = [];
   private _artifacts: string[] = [];
   private _name: string;
@@ -1020,7 +1020,7 @@ echo "Created OCI image \${OCI_IMAGE_NAME}:latest"`;
       ArtifactSystem.X8664_LINUX,
     ];
 
-    return new ArtifactBuilder(this._name, [step], systems)
+    return new Artifact(this._name, [step], systems)
       .withAliases(this._aliases)
       .build(context);
   }

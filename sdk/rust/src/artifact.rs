@@ -81,7 +81,7 @@ pub struct Process<'a> {
     pub systems: Vec<api::artifact::ArtifactSystem>,
 }
 
-pub struct ProjectEnvironment<'a> {
+pub struct DevelopmentEnvironment<'a> {
     pub artifacts: Vec<String>,
     pub environments: Vec<String>,
     pub name: &'a str,
@@ -300,7 +300,7 @@ impl<'a> Job<'a> {
     }
 }
 
-impl<'a> ProjectEnvironment<'a> {
+impl<'a> DevelopmentEnvironment<'a> {
     pub fn new(name: &'a str, systems: Vec<api::artifact::ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],

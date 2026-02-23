@@ -72,7 +72,7 @@ domain logic.
   | File | Tests | Focus |
   |---|---|---|
   | `alias.test.ts` | ~50 | Alias parsing/formatting, round-trip validation |
-  | `artifact.test.ts` | ~15 | `ArtifactBuilder`, `ArtifactSourceBuilder`, `ArtifactStepBuilder` |
+  | `artifact.test.ts` | ~15 | `Artifact`, `ArtifactSource`, `ArtifactStep` |
   | `cli.test.ts` | ~15 | CLI argument parsing (happy path + error cases) |
   | `context.test.ts` | ~8 | `TestStore` simulating `ConfigContext` behavior |
   | `digest-parity.test.ts` | ~15 | Golden test vectors for cross-SDK digest compatibility |

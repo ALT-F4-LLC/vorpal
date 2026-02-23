@@ -1,29 +1,97 @@
 # Vorpal
 
-A cross-language build system that lets you define, build, and share reproducible software artifacts.
+**Build software in Rust, Go, or TypeScript. Get reproducible artifacts on every platform.**
 
-## Why?
-- Declarative: describe steps once, use them anywhere.
-- Cross-language: Rust, Go, and TypeScript SDKs.
-- Reproducible: hermetic steps and pinned toolchains.
-- Scalable: the same artifacts power your end-to-end flow.
+[![CI](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml/badge.svg)](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml) [![Release](https://img.shields.io/github/v/release/ALT-F4-LLC/vorpal?include_prereleases)](https://github.com/ALT-F4-LLC/vorpal/releases) [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE) [![npm](https://img.shields.io/npm/v/@vorpal/sdk)](https://www.npmjs.com/package/@vorpal/sdk)
 
-## Setup
-### Install (prebuilt binaries):
+Vorpal is a build system that works the way you already write code. Define your build as a program -- not YAML, not a DSL -- using real SDKs in Rust, Go, or TypeScript. Vorpal handles hermetic execution, cross-platform targeting, content-addressed caching, and artifact distribution so you can focus on what you are building.
+
+> Think Nix-level reproducibility, without learning a new language. Think Bazel-level caching, without the configuration overhead. Think Docker builds, but actually deterministic.
+
+## Contents
+
+- [Install](#install)
+- [Quickstart](#quickstart)
+- [SDK Examples](#sdk-examples)
+- [Features](#features)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Install
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/refs/heads/main/script/install.sh -o install.sh && sh install.sh
+curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | sh
 ```
 
-### Build from source (macOS & Linux):
-  - macOS only (once): `xcode-select --install`
-  - All platforms: `./script/dev.sh make build` (preferred; installs and uses a consistent toolchain)
-  - Common tasks: `make check`, `make test`, `make format`, `make lint`, `make dist`
+macOS (Apple Silicon, Intel) and Linux (x86_64, ARM64). The installer downloads the latest release, generates TLS keys, and starts background services.
 
-## Using the SDK
-The examples below build a simple artifact for multiple systems and run the context.
-Vorpal provides SDKs in **Rust**, **Go**, and **TypeScript** ([`@vorpal/sdk`](https://www.npmjs.com/package/@vorpal/sdk)).
+> Building from source? See the [Contributing](#contributing) section.
 
-### Rust
+## Quickstart
+
+Create a new project and build your first artifact.
+
+### 1. Create a project
+
+```bash
+mkdir hello-vorpal && cd hello-vorpal
+vorpal init hello-vorpal
+```
+
+Choose your language (Go, Rust, or TypeScript) when prompted. Vorpal scaffolds a working project with a `Vorpal.toml` and sample build config.
+
+### 2. Build it
+
+```bash
+vorpal build vorpal
+```
+
+Vorpal compiles your config, resolves dependencies, and produces a content-addressed artifact. First builds download toolchains; subsequent builds are cached.
+
+### 3. Run it
+
+```bash
+vorpal run hello-vorpal
+```
+
+That is it. Your artifact is built, cached, and runnable.
+
+## SDK Examples
+
+Vorpal build configs are real programs. Write them in the language your project already uses.
+
+### Build an artifact
+
+Define a build artifact targeting multiple platforms with a single config file.
+
+<details open>
+<summary><strong>TypeScript</strong></summary>
+
+```typescript
+import { ArtifactSystem, ConfigContext, TypeScript } from "@vorpal/sdk";
+
+const SYSTEMS = [
+  ArtifactSystem.AARCH64_DARWIN,
+  ArtifactSystem.AARCH64_LINUX,
+  ArtifactSystem.X8664_DARWIN,
+  ArtifactSystem.X8664_LINUX,
+];
+
+const context = ConfigContext.create();
+
+await new TypeScript("example", SYSTEMS)
+  .withIncludes(["src", "package.json", "tsconfig.json", "bun.lockb"])
+  .build(context);
+
+await context.run();
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
@@ -43,15 +111,11 @@ async fn main() -> Result<()> {
 }
 ```
 
-`Vorpal.toml` for Rust:
-```toml
-language = "rust"
+</details>
 
-[source]
-includes = ["src", "Cargo.toml", "Cargo.lock"]
-```
+<details>
+<summary><strong>Go</strong></summary>
 
-### Go
 ```go
 package main
 
@@ -77,20 +141,22 @@ func main() {
 }
 ```
 
-`Vorpal.toml` for Go:
-```toml
-language = "go"
+</details>
 
-[source]
-includes = ["cmd/vorpal", "go.mod", "go.sum"]
+### Dev & user environments
 
-[source.go]
-directory = "cmd/vorpal"
-```
+Create portable development shells and user-wide tool installations with pinned dependencies.
 
-### TypeScript
+<details open>
+<summary><strong>TypeScript</strong></summary>
+
 ```typescript
-import { ArtifactSystem, ConfigContext, TypeScriptBuilder } from "@vorpal/sdk";
+import {
+  ConfigContext,
+  ArtifactSystem,
+  DevelopmentEnvironment,
+  UserEnvironment,
+} from "@vorpal/sdk";
 
 const SYSTEMS = [
   ArtifactSystem.AARCH64_DARWIN,
@@ -99,95 +165,33 @@ const SYSTEMS = [
   ArtifactSystem.X8664_LINUX,
 ];
 
-const context = ConfigContext.create();
+async function main() {
+  const context = ConfigContext.create();
 
-await new TypeScriptBuilder("example", SYSTEMS)
-  .withIncludes(["src", "package.json", "tsconfig.json", "bun.lockb"])
-  .build(context);
+  await new DevelopmentEnvironment("my-project", SYSTEMS)
+    .withEnvironments(["FOO=bar"])
+    .build(context);
 
-await context.run();
+  await new UserEnvironment("my-home", SYSTEMS)
+    .withSymlinks([["/path/to/local/bin/app", "$HOME/.vorpal/bin/app"]])
+    .build(context);
+
+  await context.run();
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
 ```
 
-`Vorpal.toml` for TypeScript:
-```toml
-language = "typescript"
-name = "example"
+</details>
 
-[source]
-includes = ["src", "package.json", "tsconfig.json", "bun.lockb"]
-```
+<details>
+<summary><strong>Rust</strong></summary>
 
-## Quickstart
-These steps assume you installed Vorpal via the installer and have `vorpal` on your PATH.
-
-1) One-time keys
-
-- `vorpal system keys generate`  # installer runs this; safe to re-run
-
-2) Start services (agent, registry, worker)
-
-- If you used the installer, services are already running.
-- Otherwise: `vorpal system services start`  # defaults to https://localhost:23151
-
-3) Create a new project (pick Go, Rust, or TypeScript)
-
-- `mkdir hello-vorpal && cd hello-vorpal`
-- `vorpal artifact init`  # scaffolds Vorpal.toml and a sample
-
-4) Build your artifact
-
-- `vorpal build "vorpal"`  # builds using the local services
-- To get the output path: `vorpal build --path "vorpal"`
-
-5) Run the sample
-
-- `vorpal run example`  # runs the built artifact directly from the store
-- Or manually: `ARTIFACT_PATH=$(vorpal build --path "vorpal")` then `$ARTIFACT_PATH/bin/example`
-
-Build this repository
-
-- From the repo root: `vorpal build "vorpal"`
-- Optional Go parity (if present): `vorpal build --config "Vorpal.go.toml" "vorpal"`
-
-## Running Artifacts
-
-Use `vorpal run` to execute a built artifact directly from the store without manually locating the output path. The command resolves the artifact locally first, then falls back to pulling from the registry.
-
-```bash
-# Basic usage — run an artifact by name
-vorpal run rsync -- --help
-
-# Alias format: [<namespace>/]<name>[:<tag>]
-vorpal run rsync                           # defaults: namespace=library, tag=latest
-vorpal run rsync:3.4.1 -- -avz src/ dest/  # pin a specific version tag
-vorpal run team/my-tool:v2.0               # custom namespace and tag
-
-# Override which binary inside the artifact to execute
-vorpal run my-tool --bin my-tool-helper -- --verbose
-
-# Point to a remote registry (defaults to localhost)
-vorpal run rsync --registry https://registry.example.com:23151
-```
-
-**Resolution flow**: local alias → registry alias lookup → pull artifact archive → execute binary.
-
-**Errors and troubleshooting**:
-- *"artifact alias not found"* — the artifact hasn't been built yet. Run `vorpal build <name>` first.
-- *"binary not found in artifact output"* — the artifact exists but doesn't contain a binary matching the name. The error lists available binaries; use `--bin <name>` to select one.
-- *"artifact output not found for digest"* — the alias exists but the output was cleaned up. Rebuild with `vorpal build <name>`.
-
-## Dev & User Environments
-Manage development and user-wide environments using the builders:
-
-- Development environment (devenv): creates a portable shell activation (`bin/activate`) that prepends tool artifacts to PATH and sets env vars.
-- User environment (userenv): installs activation helpers and safe symlinking under `$HOME/.vorpal/bin`.
-
-**Rust**
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
   api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-  artifact::{ProjectEnvironment, UserEnvironment},
+  artifact::{DevelopmentEnvironment, UserEnvironment},
   context::get_context,
 };
 
@@ -196,7 +200,7 @@ async fn main() -> Result<()> {
   let ctx = &mut get_context().await?;
   let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-  ProjectEnvironment::new("my-project", systems.clone())
+  DevelopmentEnvironment::new("my-project", systems.clone())
     .with_environments(vec!["FOO=bar".into()])
     .build(ctx).await?;
 
@@ -208,7 +212,11 @@ async fn main() -> Result<()> {
 }
 ```
 
-**Go**
+</details>
+
+<details>
+<summary><strong>Go</strong></summary>
+
 ```go
 package main
 
@@ -228,7 +236,7 @@ var systems = []api.ArtifactSystem{
 func main() {
   ctx := config.GetContext()
 
-  artifact.NewProjectEnvironment("my-project", systems).
+  artifact.NewDevelopmentEnvironment("my-project", systems).
     WithEnvironments([]string{"FOO=bar"}).
     Build(ctx)
 
@@ -240,13 +248,25 @@ func main() {
 }
 ```
 
-**TypeScript**
+</details>
+
+**Activate:**
+- Development environments: source generated `bin/activate` inside the artifact output.
+- User environments: run `$HOME/.vorpal/bin/vorpal-activate`, then `source $HOME/.vorpal/bin/vorpal-activate-shell`.
+
+### Custom executors
+
+Swap the default Bash executor for Docker, Bubblewrap, or any custom binary.
+
+<details open>
+<summary><strong>TypeScript</strong></summary>
+
 ```typescript
 import {
   ConfigContext,
   ArtifactSystem,
-  ProjectEnvironmentBuilder,
-  UserEnvironmentBuilder,
+  Artifact,
+  ArtifactStep,
 } from "@vorpal/sdk";
 
 const SYSTEMS = [
@@ -259,12 +279,14 @@ const SYSTEMS = [
 async function main() {
   const context = ConfigContext.create();
 
-  await new ProjectEnvironmentBuilder("my-project", SYSTEMS)
-    .withEnvironments(["FOO=bar"])
-    .build(context);
+  const step = new ArtifactStep("docker")
+    .withArguments([
+      "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
+      "alpine", "sh", "-lc", "echo hi > /out/hi.txt",
+    ])
+    .build();
 
-  await new UserEnvironmentBuilder("my-home", SYSTEMS)
-    .withSymlinks([["/path/to/local/bin/app", "$HOME/.vorpal/bin/app"]])
+  await new Artifact("example-docker", [step], SYSTEMS)
     .build(context);
 
   await context.run();
@@ -273,17 +295,11 @@ async function main() {
 main().catch((e) => { console.error(e); process.exit(1); });
 ```
 
-### Activate
-- Development environments: source generated `bin/activate` inside the artifact output when used within a step or your own wrapper script.
-- User environments: run `$HOME/.vorpal/bin/vorpal-activate`, then `source $HOME/.vorpal/bin/vorpal-activate-shell`.
+</details>
 
-## Executors
-Vorpal does not lock you to a single executor. Each step sets its executor via `artifact.step[].entrypoint` and `artifact.step[].arguments`.
+<details>
+<summary><strong>Rust</strong></summary>
 
-- Default: Bash. SDK "shell" helpers run in Bash (on Linux these run inside Bubblewrap).
-- Custom: Point `entrypoint` to any binary (e.g., `bwrap`, `docker`, `podman`) and pass flags via `arguments`.
-
-**Rust (custom entrypoint/arguments)**
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
@@ -310,7 +326,11 @@ async fn main() -> Result<()> {
 }
 ```
 
-**Go (custom entrypoint/arguments)**
+</details>
+
+<details>
+<summary><strong>Go</strong></summary>
+
 ```go
 package main
 
@@ -332,52 +352,54 @@ func main() {
 
     step, _ := artifact.NewArtifactStep().
         WithEntrypoint("docker", systems).
-        WithArguments([]string{"run", "--rm", "-v", "$VORPAL_OUTPUT:/out", "alpine", "sh", "-lc", "echo hi > /out/hi.txt"}, systems).
+        WithArguments([]string{
+            "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
+            "alpine", "sh", "-lc",
+            "echo hi > /out/hi.txt",
+        }, systems).
         Build(ctx)
 
-    artifact.NewArtifact("example-docker", []*api.ArtifactStep{step}, systems).Build(ctx)
+    artifact.NewArtifact("example-docker",
+        []*api.ArtifactStep{step}, systems).Build(ctx)
 
     ctx.Run()
 }
 ```
 
-**TypeScript (custom entrypoint/arguments)**
-```typescript
-import {
-  ConfigContext,
-  ArtifactSystem,
-  ArtifactBuilder,
-  ArtifactStepBuilder,
-} from "@vorpal/sdk";
+</details>
 
-const SYSTEMS = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
-];
+## Features
 
-async function main() {
-  const context = ConfigContext.create();
+- **Config as code** -- Your build config is a real program, not YAML. Write it in Rust, Go, or TypeScript with full IDE support.
+- **Reproducible by default** -- Content-addressed artifacts with hermetic build steps. Same inputs always produce the same output.
+- **Cross-platform** -- Target macOS (Apple Silicon + Intel) and Linux (x86_64 + ARM64) from a single config.
+- **Built-in caching** -- Artifacts are cached by content hash. Unchanged builds resolve instantly.
+- **Dev environments** -- Define project shells with pinned tools and env vars. Like direnv, but versioned and shareable.
+- **Artifact registry** -- Push, pull, and share artifacts with built-in registry support. Run artifacts directly with `vorpal run`.
+- **Pluggable executors** -- Build steps run in Bash by default. Swap in Docker, Bubblewrap, or any executor.
 
-  const step = new ArtifactStepBuilder("docker")
-    .withArguments([
-      "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
-      "alpine", "sh", "-lc", "echo hi > /out/hi.txt",
-    ])
-    .build();
+## Documentation
 
-  await new ArtifactBuilder("example-docker", [step], SYSTEMS)
-    .build(context);
+| Resource | Link |
+|----------|------|
+| Architecture overview | [`docs/spec/architecture.md`](docs/spec/architecture.md) |
+| CLI reference | `vorpal --help` |
+| TypeScript SDK (npm) | [`@vorpal/sdk`](https://www.npmjs.com/package/@vorpal/sdk) |
+| Go SDK | [`sdk/go/`](sdk/go/) |
+| Rust SDK | [`sdk/rust/`](sdk/rust/) |
 
-  await context.run();
-}
+## Contributing
 
-main().catch((e) => { console.error(e); process.exit(1); });
+Contributions are welcome. See [`docs/spec/`](docs/spec/) for project structure, coding standards, and review workflow.
+
+```bash
+# Build from source
+./script/dev.sh make build
+
+# Before submitting a PR
+make format && make lint && make test
 ```
 
-## Contribute
-- Read the contributor guide: `AGENTS.md` (structure, commands, style, and PR workflow).
-- Before opening a PR: `make format && make lint && make test`.
-- Prefer small, focused changes with clear descriptions and linked issues.
-- For local development, use `./script/dev.sh` or `direnv allow` to get a consistent environment.
+## License
+
+[Apache 2.0](LICENSE)

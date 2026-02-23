@@ -13,39 +13,39 @@ describe("SDK exports for TypeScript configs", () => {
     expect(mod.ConfigContext).toBeDefined();
   });
 
-  test("JobBuilder is exported", async () => {
+  test("Job is exported", async () => {
     const mod = await import("../index.js");
-    expect(mod.JobBuilder).toBeDefined();
+    expect(mod.Job).toBeDefined();
   });
 
-  test("ProcessBuilder is exported", async () => {
+  test("Process is exported", async () => {
     const mod = await import("../index.js");
-    expect(mod.ProcessBuilder).toBeDefined();
+    expect(mod.Process).toBeDefined();
   });
 
-  test("ProjectEnvironmentBuilder is exported", async () => {
+  test("DevelopmentEnvironment is exported", async () => {
     const mod = await import("../index.js");
-    expect(mod.ProjectEnvironmentBuilder).toBeDefined();
+    expect(mod.DevelopmentEnvironment).toBeDefined();
   });
 
-  test("UserEnvironmentBuilder is exported", async () => {
+  test("UserEnvironment is exported", async () => {
     const mod = await import("../index.js");
-    expect(mod.UserEnvironmentBuilder).toBeDefined();
+    expect(mod.UserEnvironment).toBeDefined();
   });
 
-  test("ArtifactBuilder is exported", async () => {
+  test("Artifact is exported", async () => {
     const mod = await import("../index.js");
-    expect(mod.ArtifactBuilder).toBeDefined();
+    expect(mod.Artifact).toBeDefined();
   });
 
-  test("ArtifactSourceBuilder is exported", async () => {
+  test("ArtifactSource is exported", async () => {
     const mod = await import("../index.js");
-    expect(mod.ArtifactSourceBuilder).toBeDefined();
+    expect(mod.ArtifactSource).toBeDefined();
   });
 
-  test("ArtifactStepBuilder is exported", async () => {
+  test("ArtifactStep is exported", async () => {
     const mod = await import("../index.js");
-    expect(mod.ArtifactStepBuilder).toBeDefined();
+    expect(mod.ArtifactStep).toBeDefined();
   });
 
   test("ArtifactSystem enum is exported", async () => {

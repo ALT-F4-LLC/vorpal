@@ -6,7 +6,7 @@ use vorpal_sdk::{
     },
     artifact::{
         get_env_key, language::rust::Rust, protoc::Protoc, rust_toolchain,
-        rust_toolchain::RustToolchain, ProjectEnvironment,
+        rust_toolchain::RustToolchain, DevelopmentEnvironment,
     },
     context::get_context,
 };
@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
         .build(context)
         .await?;
 
-    // Project environment
+    // Development environment
 
     let rust_toolchain_target = rust_toolchain::target(context.get_system())?;
     let rust_toolchain_version = rust_toolchain::version();
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
         rust_toolchain_name
     );
 
-    ProjectEnvironment::new("example-shell", SYSTEMS.to_vec())
+    DevelopmentEnvironment::new("example-shell", SYSTEMS.to_vec())
         .with_artifacts(vec![protoc, rust_toolchain.clone()])
         .with_environments(vec![
             format!("PATH={}", rust_toolchain_bin),

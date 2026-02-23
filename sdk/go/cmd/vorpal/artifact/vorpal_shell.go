@@ -82,7 +82,7 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 	}
 
 	return artifact.
-		NewProjectEnvironment("vorpal-shell", SYSTEMS).
+		NewDevelopmentEnvironment("vorpal-shell", SYSTEMS).
 		WithArtifacts([]*string{
 			bun,
 			crane,
