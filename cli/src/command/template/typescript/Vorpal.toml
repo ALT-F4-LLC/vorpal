@@ -1,5 +1,4 @@
 language = "typescript"
-name = "example"
 
 [source]
 includes = ["src", "package.json", "tsconfig.json", "bun.lockb"]
