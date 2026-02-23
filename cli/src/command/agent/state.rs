@@ -1543,8 +1543,12 @@ impl TextSelection {
         let mut result = String::new();
         let last_line = end.0.min(cached_lines.len() - 1);
 
-        for line_idx in start.0..=last_line {
-            let line = &cached_lines[line_idx];
+        for (line_idx, line) in cached_lines
+            .iter()
+            .enumerate()
+            .take(last_line + 1)
+            .skip(start.0)
+        {
             let full_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
 
             let byte_start = if line_idx == start.0 {
