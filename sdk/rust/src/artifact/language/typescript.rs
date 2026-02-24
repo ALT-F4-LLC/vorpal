@@ -20,6 +20,7 @@ pub struct TypeScript<'a> {
     name: &'a str,
     proto_artifact: Option<String>,
     secrets: Vec<api::artifact::ArtifactStepSecret>,
+    skip_proto: bool,
     systems: Vec<ArtifactSystem>,
     working_dir: Option<String>,
     node_modules: BTreeMap<String, String>,
@@ -36,6 +37,7 @@ impl<'a> TypeScript<'a> {
             name,
             proto_artifact: None,
             secrets: vec![],
+            skip_proto: false,
             systems,
             working_dir: None,
             node_modules: BTreeMap::new(),
@@ -69,6 +71,11 @@ impl<'a> TypeScript<'a> {
 
     pub fn with_proto_artifact(mut self, artifact: String) -> Self {
         self.proto_artifact = Some(artifact);
+        self
+    }
+
+    pub fn with_skip_proto(mut self) -> Self {
+        self.skip_proto = true;
         self
     }
 
@@ -139,42 +146,54 @@ impl<'a> TypeScript<'a> {
 
         // If a proto artifact is provided, copy its generated files into the source tree
         // before bun install so that TypeScript imports from ./api/ resolve correctly.
-        let proto_copy_script = match &self.proto_artifact {
-            Some(digest) => {
-                let proto_env = get_env_key(digest);
-                formatdoc! {r#"
-                    cp -pr {proto_env}/api src/api
-                "#}
-            }
-            None => ProtocGenTsProto::new()
-                .build(context)
-                .await
-                .map(|proto_digest| {
-                    let proto_env = get_env_key(&proto_digest);
+        let proto_copy_script = if self.skip_proto {
+            String::new()
+        } else {
+            match &self.proto_artifact {
+                Some(digest) => {
+                    let proto_env = get_env_key(digest);
                     formatdoc! {r#"
-                    cp -pr {proto_env}/api src/api
-                "#}
-                })?,
+                        cp -pr {proto_env}/api src/api
+                    "#}
+                }
+                None => ProtocGenTsProto::new()
+                    .build(context)
+                    .await
+                    .map(|proto_digest| {
+                        let proto_env = get_env_key(&proto_digest);
+                        formatdoc! {r#"
+                        cp -pr {proto_env}/api src/api
+                    "#}
+                    })?,
+            }
         };
 
-        // Generate node modules symlink script (BTreeMap iterates in sorted key order)
+        // Rewrite package.json to use file: protocol for managed node modules
+        // so bun resolves them from the artifact store instead of fetching from npm.
         let node_modules_script = if self.node_modules.is_empty() {
             String::new()
         } else {
-            let mut lines = vec!["mkdir -p node_modules".to_string()];
+            let mut js_parts = Vec::new();
+            js_parts.push("const fs=require('fs')".to_string());
+            js_parts.push("const p=JSON.parse(fs.readFileSync('package.json','utf8'))".to_string());
             for (package_name, digest) in &self.node_modules {
                 let env_key = get_env_key(digest);
-                if package_name.contains('/') {
-                    // Scoped package like @vorpal/sdk
-                    let scope = package_name.split('/').next().unwrap();
-                    lines.push(format!("mkdir -p node_modules/{scope}"));
-                    lines.push(format!("ln -sf {env_key} node_modules/{package_name}"));
-                } else {
-                    // Unscoped package like lodash
-                    lines.push(format!("ln -sf {env_key} node_modules/{package_name}"));
-                }
+                js_parts.push(format!(
+                    "if(p.dependencies?.['{package_name}'])p.dependencies['{package_name}']='file:{env_key}'"
+                ));
+                js_parts.push(format!(
+                    "if(p.devDependencies?.['{package_name}'])p.devDependencies['{package_name}']='file:{env_key}'"
+                ));
             }
-            lines.join("\n") + "\n"
+            js_parts.push("fs.writeFileSync('package.json',JSON.stringify(p,null,2))".to_string());
+            let js_oneliner = js_parts.join(";") + ";";
+            format!("{bun_bin}/bun -e \"{js_oneliner}\"\n")
+        };
+
+        let bun_install_flags = if self.node_modules.is_empty() {
+            " --frozen-lockfile"
+        } else {
+            ""
         };
 
         let step_script = formatdoc! {r#"
@@ -185,7 +204,7 @@ impl<'a> TypeScript<'a> {
             mkdir -p $VORPAL_OUTPUT/bin
             {proto_copy_script}
             {node_modules_script}
-            {bun_bin}/bun install --frozen-lockfile
+            {bun_bin}/bun install{bun_install_flags}
             {bun_bin}/bun build --compile {entrypoint} --outfile ./{name}
             cp ./{name} $VORPAL_OUTPUT/bin/{name}
             rm ./{name}"#,
@@ -475,24 +494,31 @@ impl<'a> TypeScriptLibrary<'a> {
             format!("\n{}\n", self.source_scripts.join("\n"))
         };
 
-        // Generate node modules symlink script (BTreeMap iterates in sorted key order)
+        // Rewrite package.json to use file: protocol for managed node modules (BTreeMap iterates in sorted key order)
         let node_modules_script = if self.node_modules.is_empty() {
             String::new()
         } else {
-            let mut lines = vec!["mkdir -p node_modules".to_string()];
+            let mut js_parts = Vec::new();
+            js_parts.push("const fs=require('fs')".to_string());
+            js_parts.push("const p=JSON.parse(fs.readFileSync('package.json','utf8'))".to_string());
             for (package_name, digest) in &self.node_modules {
                 let env_key = get_env_key(digest);
-                if package_name.contains('/') {
-                    // Scoped package like @vorpal/sdk
-                    let scope = package_name.split('/').next().unwrap();
-                    lines.push(format!("mkdir -p node_modules/{scope}"));
-                    lines.push(format!("ln -sf {env_key} node_modules/{package_name}"));
-                } else {
-                    // Unscoped package like lodash
-                    lines.push(format!("ln -sf {env_key} node_modules/{package_name}"));
-                }
+                js_parts.push(format!(
+                    "if(p.dependencies?.['{package_name}'])p.dependencies['{package_name}']='file:{env_key}'"
+                ));
+                js_parts.push(format!(
+                    "if(p.devDependencies?.['{package_name}'])p.devDependencies['{package_name}']='file:{env_key}'"
+                ));
             }
-            format!("\n{}", lines.join("\n"))
+            js_parts.push("fs.writeFileSync('package.json',JSON.stringify(p,null,2))".to_string());
+            let js_oneliner = js_parts.join(";") + ";";
+            format!("\n{bun_bin}/bun -e \"{js_oneliner}\"")
+        };
+
+        let bun_install_flags = if self.node_modules.is_empty() {
+            " --frozen-lockfile"
+        } else {
+            ""
         };
 
         // Build command defaults to "bun run build"
@@ -501,7 +527,7 @@ impl<'a> TypeScriptLibrary<'a> {
         let step_script = formatdoc! {r#"
             pushd "{work_dir}"
             {source_scripts}{node_modules_script}
-            {bun_bin}/bun install --frozen-lockfile
+            {bun_bin}/bun install{bun_install_flags}
             {bun_bin}/{build_command}
 
             mkdir -p "$VORPAL_OUTPUT"

@@ -674,6 +674,10 @@ pub async fn run(
                 builder = builder.with_node_module("@vorpal/sdk", digest.clone());
             }
 
+            if !is_monorepo {
+                builder = builder.with_skip_proto();
+            }
+
             builder.build(&mut config_context).await?
         }
 
