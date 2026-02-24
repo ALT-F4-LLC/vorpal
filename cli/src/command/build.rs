@@ -30,7 +30,11 @@ use vorpal_sdk::{
     },
     artifact::{
         get_env_key,
-        language::{go::Go, rust::Rust, typescript::{TypeScript, TypeScriptLibrary}},
+        language::{
+            go::Go,
+            rust::Rust,
+            typescript::{TypeScript, TypeScriptLibrary},
+        },
         protoc::Protoc,
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
@@ -602,7 +606,10 @@ pub async fn run(
                 Some(digest)
             } else {
                 // User project: fetch pre-built SDK from registry
-                match config_context.fetch_artifact_alias("vorpal-sdk-typescript:latest").await {
+                match config_context
+                    .fetch_artifact_alias("vorpal-sdk-typescript:latest")
+                    .await
+                {
                     Ok(digest) => {
                         info!("using registry-published @vorpal/sdk for TypeScript config");
                         Some(digest)
@@ -884,7 +891,11 @@ mod tests {
     /// testing is handled by the QA/e2e suite.
     #[test]
     fn build_vorpal_sdk_typescript_signature() {
-        let _: fn(&mut ConfigContext, ArtifactSystem) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String>> + '_>> =
+        let _: fn(
+            &mut ConfigContext,
+            ArtifactSystem,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String>> + '_>> =
             |ctx, sys| Box::pin(build_vorpal_sdk_typescript(ctx, sys));
     }
 
@@ -892,7 +903,8 @@ mod tests {
     #[test]
     fn sdk_build_error_propagates() {
         let result: Result<String> = Err(anyhow!("build failed"));
-        let outer: Result<String> = result.context("failed to build @vorpal/sdk from monorepo source");
+        let outer: Result<String> =
+            result.context("failed to build @vorpal/sdk from monorepo source");
         let err_msg = outer.unwrap_err().to_string();
         assert!(err_msg.contains("failed to build @vorpal/sdk from monorepo source"));
     }

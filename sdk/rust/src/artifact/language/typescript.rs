@@ -1,7 +1,10 @@
 use crate::{
     api,
     api::artifact::ArtifactSystem,
-    artifact::{bun::Bun, get_env_key, step, Artifact, ArtifactSource, DevelopmentEnvironment},
+    artifact::{
+        bun::Bun, get_env_key, protoc_gen_ts_proto::ProtocGenTsProto, step, Artifact,
+        ArtifactSource, DevelopmentEnvironment,
+    },
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -143,7 +146,15 @@ impl<'a> TypeScript<'a> {
                     cp -pr {proto_env}/api src/api
                 "#}
             }
-            None => String::new(),
+            None => ProtocGenTsProto::new()
+                .build(context)
+                .await
+                .map(|proto_digest| {
+                    let proto_env = get_env_key(&proto_digest);
+                    formatdoc! {r#"
+                    cp -pr {proto_env}/api src/api
+                "#}
+                })?,
         };
 
         // Generate node modules symlink script (BTreeMap iterates in sorted key order)
@@ -669,11 +680,10 @@ mod tests {
 
     #[test]
     fn ts_library_with_aliases_adds_multiple() {
-        let lib = TypeScriptLibrary::new("test-lib", test_systems())
-            .with_aliases(vec![
-                "my-lib:latest".to_string(),
-                "my-lib:1.0.0".to_string(),
-            ]);
+        let lib = TypeScriptLibrary::new("test-lib", test_systems()).with_aliases(vec![
+            "my-lib:latest".to_string(),
+            "my-lib:1.0.0".to_string(),
+        ]);
         assert_eq!(lib.aliases, vec!["my-lib:latest", "my-lib:1.0.0"]);
     }
 
