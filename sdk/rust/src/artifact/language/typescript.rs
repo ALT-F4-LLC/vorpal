@@ -135,6 +135,18 @@ impl<'a> TypeScript<'a> {
             None => step_source_dir.clone(),
         };
 
+        // Setup Vorpal SDK
+
+        if self.vorpal_sdk {
+            let vorpal_sdk = context
+                .fetch_artifact_alias("library/vorpal-sdk-typescript:latest")
+                .await?;
+
+            self.artifacts.push(vorpal_sdk.clone());
+            self.node_modules
+                .insert("@vorpal/sdk".to_string(), vorpal_sdk.clone());
+        }
+
         // Setup node modules in script
 
         let mut step_package_json_js_parts = Vec::new();

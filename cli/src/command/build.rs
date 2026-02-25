@@ -468,10 +468,6 @@ pub async fn run(
         "typescript" => {
             // IMPORTANT: Must be first built in Rust
 
-            let vorpal_sdk = config_context
-                .fetch_artifact_alias("library/vorpal-sdk-typescript:latest")
-                .await?;
-
             let entrypoint = config
                 .source
                 .as_ref()
@@ -495,10 +491,8 @@ pub async fn run(
             }
 
             let mut builder = TypeScript::new(&config.name, vec![config_system])
-                .with_artifacts(vec![vorpal_sdk.clone()])
                 .with_entrypoint(&entrypoint)
-                .with_includes(includes)
-                .with_node_modules(vec![("@vorpal/sdk", vorpal_sdk)]);
+                .with_includes(includes);
 
             if !config.environments.is_empty() {
                 builder = builder
