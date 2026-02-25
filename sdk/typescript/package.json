@@ -1,7 +1,7 @@
 {
   "name": "@altf4llc/vorpal-sdk",
   "version": "0.1.0-beta.0",
-  "description": "Vorpal SDK for building Vorpal configurations in TypeScript",
+  "description": "Vorpal SDK for building artifacts in TypeScript",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -14,11 +14,7 @@
   },
   "keywords": [
     "vorpal",
-    "sdk",
-    "build-system",
-    "artifacts",
-    "grpc",
-    "protobuf"
+    "sdk"
   ],
   "type": "module",
   "main": "./dist/index.js",
@@ -39,17 +35,16 @@
     "access": "public"
   },
   "scripts": {
-    "generate:proto": "protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/api --ts_proto_opt=outputServices=grpc-js --ts_proto_opt=esModuleInterop=true --ts_proto_opt=snakeToCamel=false --ts_proto_opt=forceLong=number --ts_proto_opt=useOptionals=messages --ts_proto_opt=oneof=unions --ts_proto_opt=env=node --ts_proto_opt=importSuffix=.js -I ../rust/api ../rust/api/agent/agent.proto ../rust/api/archive/archive.proto ../rust/api/artifact/artifact.proto ../rust/api/context/context.proto ../rust/api/worker/worker.proto",
-    "clean": "rm -rf dist",
     "build": "tsc",
-    "prepublishOnly": "npm run clean && npm run build",
+    "clean": "rm -rf dist",
+    "generate:proto": "protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/api --ts_proto_opt=outputServices=grpc-js --ts_proto_opt=esModuleInterop=true --ts_proto_opt=snakeToCamel=false --ts_proto_opt=forceLong=number --ts_proto_opt=useOptionals=messages --ts_proto_opt=oneof=unions --ts_proto_opt=env=node --ts_proto_opt=importSuffix=.js -I ../rust/api ../rust/api/agent/agent.proto ../rust/api/archive/archive.proto ../rust/api/artifact/artifact.proto ../rust/api/context/context.proto ../rust/api/worker/worker.proto",
     "test": "bun test",
     "validate:proto": "npx tsx scripts/validate-serialization.ts"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.11.0",
     "@grpc/grpc-js": "1.14.3",
-    "smol-toml": "^1.6.0"
+    "smol-toml": "1.6.0"
   },
   "devDependencies": {
     "@types/bun": "1.2.4",
