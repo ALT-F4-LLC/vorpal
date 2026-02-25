@@ -262,6 +262,7 @@ func (builder *TypeScript) Build(context *config.ConfigContext) (*string, error)
 	steps := []*api.ArtifactStep{step}
 
 	return artifact.NewArtifact(builder.name, steps, builder.systems).
+		WithAliases(builder.aliases).
 		WithSources(sources).
 		Build(context)
 }

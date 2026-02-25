@@ -11,46 +11,8 @@ import {
 } from "../../artifact.js";
 import { shell } from "../step.js";
 
-/**
- * Default Bun artifact alias used when no explicit Bun digest is provided.
- * Matches the alias registered by the Rust-side Bun artifact builder.
- */
 const DEFAULT_BUN_ALIAS = "bun:1.2.0";
 
-/**
- * Builder for TypeScript/Node.js project artifacts.
- *
- * Matches the Rust SDK's `language::TypeScript` builder. Supports two build
- * modes based on the entrypoint value:
- *
- * - **Binary mode** (entrypoint set via `withEntrypoint`): Compiles the
- *   project to a standalone binary using `bun build --compile`. Output is
- *   placed at `$VORPAL_OUTPUT/bin/{name}`.
- *
- * - **Library mode** (entrypoint undefined, the default): Builds the project
- *   using `bun x tsc --project tsconfig.json --outDir dist` and copies
- *   `package.json`, `dist/`, and `node_modules/` to `$VORPAL_OUTPUT/`.
- *
- * By default, the builder fetches the Vorpal SDK TypeScript library
- * (`library/vorpal-sdk-typescript:latest`) and adds it as both an artifact
- * dependency and a node module (`@vorpal/sdk`). Disable with
- * `.withVorpalSdk(false)`.
- *
- * Usage (binary mode):
- * ```typescript
- * const digest = await new TypeScript("my-app", SYSTEMS)
- *   .withEntrypoint("src/index.ts")
- *   .withIncludes(["src", "package.json", "tsconfig.json", "bun.lock"])
- *   .build(context);
- * ```
- *
- * Usage (library mode):
- * ```typescript
- * const digest = await new TypeScript("my-lib", SYSTEMS)
- *   .withIncludes(["src", "package.json", "tsconfig.json", "bun.lock"])
- *   .build(context);
- * ```
- */
 export class TypeScript {
   private _aliases: string[] = [];
   private _artifacts: string[] = [];
@@ -70,12 +32,6 @@ export class TypeScript {
     this._systems = systems;
   }
 
-  /**
-   * Sets artifact aliases. Duplicates are ignored.
-   *
-   * Note: aliases are accepted for API parity with the Rust SDK but are
-   * not yet wired through to Artifact.build (matching Rust SDK limitation).
-   */
   withAliases(aliases: string[]): this {
     for (const alias of aliases) {
       if (!this._aliases.includes(alias)) {
@@ -338,6 +294,7 @@ ${stepBuildCommand}`;
 
     // Create and return artifact
     return new Artifact(this._name, [step], this._systems)
+      .withAliases(this._aliases)
       .withSources([source])
       .build(context);
   }

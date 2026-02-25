@@ -484,18 +484,34 @@ Keycloak instance for local OIDC/OAuth2 development and testing.
    single process. Horizontal scaling requires running separate instances with the
    `--services` flag to select which services to enable.
 
-3. **Limited TypeScript SDK parity:** The TypeScript SDK is newer and does not yet have
-   CI parity validation (unlike Go SDK which validates digest matching against Rust SDK).
+3. **TypeScript builder divergence across SDKs:** The Go and TypeScript SDKs' TypeScript
+   language builders have diverged significantly from the Rust SDK's canonical
+   implementation. Key divergences include: (a) Go/TypeScript SDKs define a separate
+   `TypeScriptLibrary` struct/class that does not exist in Rust (Rust uses a dual-mode
+   `entrypoint` flag on the single `TypeScript` builder); (b) node module resolution uses
+   symlinks in Go/TypeScript vs `package.json`/`bun.lock` rewriting in Rust; (c) Go/TypeScript
+   SDKs include methods (`WithBun`, `WithExcludes`, `WithSource`) that have no Rust equivalent;
+   (d) Rust SDK includes `working_dir` and `aliases` support not present in Go/TypeScript.
+   See `docs/tdd/typescript-builder-parity.md` for the full parity analysis and remediation plan.
 
-4. **Lockfile TODO items:** Several `TODO` comments in the codebase indicate lockfile
+4. **Rust TypeScript builder bugs:** The Rust `TypeScript` builder in
+   `sdk/rust/src/artifact/language/typescript.rs` has two unused fields: `aliases` (accepted
+   via `with_aliases()` but never passed to `Artifact::build()` at line 258) and `vorpal_sdk`
+   (stored and settable via `with_vorpal_sdk()` but never read in `build()`). These must be
+   resolved before Go/TypeScript SDKs can fully align.
+
+5. **Limited TypeScript SDK parity:** The TypeScript SDK does not yet have CI parity
+   validation (unlike Go SDK which validates digest matching against Rust SDK).
+
+6. **Lockfile TODO items:** Several `TODO` comments in the codebase indicate lockfile
    handling is not fully complete (e.g., `context.rs:404` "look in lockfile for artifact
    version").
 
-5. **No artifact garbage collection:** While `system prune` exists, there is no automatic
+7. **No artifact garbage collection:** While `system prune` exists, there is no automatic
    garbage collection of unreferenced artifacts in the store.
 
-6. **In-memory artifact store:** `ConfigContext` stores artifacts in a `HashMap` in memory.
+8. **In-memory artifact store:** `ConfigContext` stores artifacts in a `HashMap` in memory.
    For very large dependency graphs, this could become a memory concern.
 
-7. **Sequential artifact preparation:** A `TODO` in `context.rs:329` notes that artifact
+9. **Sequential artifact preparation:** A `TODO` in `context.rs:329` notes that artifact
    preparation should be parallelized.

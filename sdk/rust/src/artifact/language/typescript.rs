@@ -268,6 +268,7 @@ impl<'a> TypeScript<'a> {
         ];
 
         Artifact::new(self.name, steps, self.systems)
+            .with_aliases(self.aliases)
             .with_sources(vec![source])
             .build(context)
             .await
