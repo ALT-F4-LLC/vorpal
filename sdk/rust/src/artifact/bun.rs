@@ -6,35 +6,8 @@ use crate::{
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
-/// Default Bun version pinned by Vorpal.
-///
-/// This is the single source of truth for the Bun runtime version used by the
-/// TypeScript language builder. All TypeScript config builds use this version
-/// unless explicitly overridden via `Bun::with_version`.
-///
-/// # Upgrade process
-///
-/// 1. Update this constant to the new Bun version.
-/// 2. Run the full test suite to verify TypeScript config builds still work.
-/// 3. Test on all supported platforms (aarch64-darwin, aarch64-linux, x86_64-darwin, x86_64-linux).
-/// 4. Check the Bun changelog (<https://bun.sh/blog>) for breaking changes that
-///    could affect `bun build --compile` or `bun install --frozen-lockfile`.
-/// 5. Note the version bump in the Vorpal release notes.
-///
-/// # Breaking change handling
-///
-/// Bun is pre-1.0-stable in its compile/bundler behavior. When upgrading:
-/// - Verify that `bun build --compile` still produces working standalone binaries.
-/// - Verify that `bun install --frozen-lockfile` still resolves dependencies correctly.
-/// - If a Bun release introduces breaking changes, pin to the last known-good version
-///   and document the incompatibility.
 pub const DEFAULT_BUN_VERSION: &str = "1.2.0";
 
-/// Builder for the Bun runtime artifact.
-///
-/// By default, uses [`DEFAULT_BUN_VERSION`]. Callers can override the version
-/// via [`Bun::with_version`] to support user-specified versions (e.g., from
-/// `Vorpal.toml`).
 pub struct Bun {
     version: String,
 }
@@ -52,14 +25,6 @@ impl Bun {
         Self::default()
     }
 
-    /// Override the Bun version to use instead of [`DEFAULT_BUN_VERSION`].
-    ///
-    /// This enables user-specified Bun versions via `Vorpal.toml`:
-    ///
-    /// ```toml
-    /// [source.typescript]
-    /// bun_version = "1.2.1"
-    /// ```
     pub fn with_version(mut self, version: &str) -> Self {
         self.version = version.to_string();
         self

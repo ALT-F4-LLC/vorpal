@@ -9,7 +9,7 @@ use crate::command::{
     },
     VorpalConfigSource,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -29,16 +29,10 @@ use vorpal_sdk::{
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
-        get_env_key,
-        language::{
-            go::Go,
-            rust::Rust,
-            typescript::{TypeScript, TypeScriptLibrary},
-        },
+        language::{go::Go, rust::Rust, typescript::TypeScript},
         protoc::Protoc,
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
-        protoc_gen_ts_proto::ProtocGenTsProto,
     },
     context::{build_channel, client_auth_header, ConfigContext},
 };
@@ -68,29 +62,6 @@ pub struct RunArgsService {
     pub agent: String,
     pub registry: String,
     pub worker: String,
-}
-
-// Builds @vorpal/sdk as a single-system artifact for the current target.
-// Uses vec![system] (not all 4 platforms) because the CLI only needs the SDK
-// for the platform it is building on. The config crate's VorpalSdkTypescript
-// uses SYSTEMS (all platforms) for cross-platform artifact publishing.
-//
-// NOTE: This does not call .with_aliases() because the alias is only needed
-// for user projects fetching from the registry. The config crate's
-// VorpalSdkTypescript handles alias registration for published artifacts.
-async fn build_vorpal_sdk_typescript(
-    context: &mut ConfigContext,
-    system: vorpal_sdk::api::artifact::ArtifactSystem,
-) -> Result<String> {
-    let proto_artifact = ProtocGenTsProto::new().build(context).await?;
-    let proto_env = get_env_key(&proto_artifact);
-
-    TypeScriptLibrary::new("vorpal-sdk-typescript", vec![system])
-        .with_includes(vec!["sdk/typescript"])
-        .with_artifacts(vec![proto_artifact])
-        .with_source_script(format!("cd sdk/typescript\ncp -pr {proto_env}/api src/api"))
-        .build(context)
-        .await
 }
 
 async fn build(
@@ -495,187 +466,53 @@ pub async fn run(
         }
 
         "typescript" => {
-            let source_path = format!("src/{}.ts", config.name);
+            // IMPORTANT: Must be first built in Rust
 
-            let mut includes = vec![&source_path, "package.json", "tsconfig.json", "bun.lock"];
+            let vorpal_sdk = config_context
+                .fetch_artifact_alias("library/vorpal-sdk-typescript:latest")
+                .await?;
 
-            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
-                includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
-            }
-
-            // Determine the TypeScript project root. When custom includes are
-            // provided, the project files (package.json, lock file, etc.) may
-            // live inside an include directory rather than the context root.
-            let context_dir = &config.context;
-
-            let project_dir = config
-                .source
-                .as_ref()
-                .and_then(|s| s.includes.as_ref())
-                .and_then(|inc| {
-                    inc.iter().find_map(|dir| {
-                        let candidate = context_dir.join(dir);
-                        if candidate.is_dir() && candidate.join("package.json").exists() {
-                            Some(candidate)
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .unwrap_or_else(|| context_dir.to_path_buf());
-
-            let package_json_path = project_dir.join("package.json");
-            if !package_json_path.exists() {
-                bail!(
-                    "TypeScript config requires a package.json file, but none was found at: {}\n\n  \
-                     To fix this, initialize a new project:\n    \
-                     cd {} && bun init\n\n  \
-                     Then add the Vorpal SDK:\n    \
-                     bun add @vorpal/sdk",
-                    package_json_path.display(),
-                    project_dir.display()
-                );
-            }
-
-            // Accept both bun.lock (text, newer) and bun.lockb (binary, older)
-            let lockfile_text = project_dir.join("bun.lock");
-            let lockfile_binary = project_dir.join("bun.lockb");
-            if !lockfile_text.exists() && !lockfile_binary.exists() {
-                bail!(
-                    "TypeScript config requires a bun lock file, but none was found at: {}\n\n  \
-                     This means dependencies have not been installed yet.\n\n  \
-                     To fix this, run:\n    \
-                     cd {} && bun install\n\n  \
-                     This will generate the lock file.",
-                    project_dir.display(),
-                    project_dir.display()
-                );
-            }
-
-            // Check that the entrypoint file exists
-            let entrypoint_file = config
+            let entrypoint = config
                 .source
                 .as_ref()
                 .and_then(|s| s.typescript.as_ref())
                 .and_then(|t| t.entrypoint.as_ref())
                 .map(|e| e.to_string())
-                .unwrap_or_else(|| source_path.clone());
+                .unwrap_or_else(|| format!("src/{}.ts", config.name));
 
-            let entrypoint_path = context_dir.join(&entrypoint_file);
-            if !entrypoint_path.exists() {
-                bail!(
-                    "TypeScript entrypoint file not found: {}\n\n  \
-                     Expected the config entrypoint at: {}\n\n  \
-                     To fix this, either:\n    \
-                     1. Create the file at '{}'\n    \
-                     2. Set a custom entrypoint in Vorpal.toml:\n\n       \
-                        [source.typescript]\n       \
-                        entrypoint = \"src/your-file.ts\"",
-                    entrypoint_path.display(),
-                    entrypoint_path.display(),
-                    entrypoint_file
-                );
-            }
+            let mut includes = vec![
+                "bun.lock",
+                "bun.lockb",
+                "package.json",
+                "tsconfig.json",
+                &entrypoint,
+            ];
 
-            // Validate that @vorpal/sdk is in package.json dependencies
-            if let Ok(pkg_contents) = std::fs::read_to_string(&package_json_path) {
-                if !pkg_contents.contains("\"@vorpal/sdk\"") {
-                    bail!(
-                        "@vorpal/sdk is not listed as a dependency in {}\n\n  \
-                         The Vorpal TypeScript SDK is required for TypeScript configs.\n\n  \
-                         To fix this, run:\n    \
-                         cd {} && bun add @vorpal/sdk",
-                        package_json_path.display(),
-                        project_dir.display()
-                    );
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                if !i.is_empty() {
+                    includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
                 }
             }
 
-            // Resolve @vorpal/sdk: monorepo builds from source, user projects fetch by alias
-            let is_monorepo = config_context
-                .get_artifact_context_path()
-                .join("sdk/typescript")
-                .exists();
-
-            let sdk_digest = if is_monorepo {
-                // Monorepo: build SDK from local source
-                let digest = build_vorpal_sdk_typescript(&mut config_context, config_system)
-                    .await
-                    .context("failed to build @vorpal/sdk from monorepo source")?;
-                info!("using store-built @vorpal/sdk for TypeScript config");
-                Some(digest)
-            } else {
-                // User project: fetch pre-built SDK from registry
-                match config_context
-                    .fetch_artifact_alias("vorpal-sdk-typescript:latest")
-                    .await
-                {
-                    Ok(digest) => {
-                        info!("using registry-published @vorpal/sdk for TypeScript config");
-                        Some(digest)
-                    }
-                    Err(err) => {
-                        bail!(
-                            "failed to fetch @vorpal/sdk from registry: {err}\n\n  \
-                             The alias 'vorpal-sdk-typescript:latest' could not be resolved.\n  \
-                             Ensure the Vorpal SDK has been published to your registry."
-                        );
-                    }
-                }
-            };
-
-            let mut builder =
-                TypeScript::new(&config.name, vec![config_system]).with_includes(includes);
+            let mut builder = TypeScript::new(&config.name, vec![config_system])
+                .with_artifacts(vec![vorpal_sdk.clone()])
+                .with_entrypoint(&entrypoint)
+                .with_includes(includes)
+                .with_node_modules(vec![("@vorpal/sdk", vorpal_sdk)]);
 
             if !config.environments.is_empty() {
                 builder = builder
                     .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
             }
 
-            if let Some(bun_version) = config
+            let working_dir = config
                 .source
                 .as_ref()
                 .and_then(|s| s.typescript.as_ref())
-                .and_then(|t| t.bun_version.as_ref())
-            {
-                builder = builder.with_bun_version(bun_version);
-            }
+                .and_then(|t| t.directory.as_ref());
 
-            // If the project dir differs from the context dir, set the working
-            // directory and strip its prefix from the entrypoint path so that
-            // bun commands run from the correct location inside the sandbox.
-            let working_dir_prefix = project_dir
-                .strip_prefix(context_dir)
-                .ok()
-                .filter(|p| !p.as_os_str().is_empty())
-                .map(|p| p.to_string_lossy().to_string());
-
-            if let Some(ref wd) = working_dir_prefix {
-                builder = builder.with_working_dir(wd);
-            }
-
-            let entrypoint_raw = config
-                .source
-                .as_ref()
-                .and_then(|s| s.typescript.as_ref())
-                .and_then(|t| t.entrypoint.as_ref())
-                .map(|e| e.to_string());
-
-            if let Some(ep) = &entrypoint_raw {
-                // Strip working dir prefix from entrypoint since bun runs from that dir
-                let ep_stripped = working_dir_prefix
-                    .as_ref()
-                    .and_then(|wd| ep.strip_prefix(&format!("{}/", wd)))
-                    .unwrap_or(ep);
-                builder = builder.with_entrypoint(ep_stripped);
-            }
-
-            if let Some(ref digest) = sdk_digest {
-                builder = builder.with_node_module("@vorpal/sdk", digest.clone());
-            }
-
-            if !is_monorepo {
-                builder = builder.with_skip_proto();
+            if let Some(directory) = working_dir {
+                builder = builder.with_working_dir(directory);
             }
 
             builder.build(&mut config_context).await?
@@ -882,34 +719,4 @@ pub async fn run(
     println!("{output}");
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use vorpal_sdk::api::artifact::ArtifactSystem;
-
-    /// Verify the helper function has the expected signature.
-    /// The function requires a real ConfigContext with gRPC clients, so it cannot
-    /// be called in unit tests without a running Vorpal service stack. Integration
-    /// testing is handled by the QA/e2e suite.
-    #[test]
-    fn build_vorpal_sdk_typescript_signature() {
-        let _: fn(
-            &mut ConfigContext,
-            ArtifactSystem,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String>> + '_>> =
-            |ctx, sys| Box::pin(build_vorpal_sdk_typescript(ctx, sys));
-    }
-
-    /// Verify that monorepo SDK build errors propagate (no silent fallback).
-    #[test]
-    fn sdk_build_error_propagates() {
-        let result: Result<String> = Err(anyhow!("build failed"));
-        let outer: Result<String> =
-            result.context("failed to build @vorpal/sdk from monorepo source");
-        let err_msg = outer.unwrap_err().to_string();
-        assert!(err_msg.contains("failed to build @vorpal/sdk from monorepo source"));
-    }
 }

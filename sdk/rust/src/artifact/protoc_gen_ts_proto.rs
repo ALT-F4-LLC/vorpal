@@ -6,11 +6,6 @@ use crate::{
 use anyhow::Result;
 use indoc::formatdoc;
 
-/// Pinned version of the `ts-proto` npm package.
-///
-/// This MUST match the version in `sdk/typescript/package.json` devDependencies
-/// to ensure the generated TypeScript protobuf files are byte-identical to what
-/// developers produce locally with `bun run generate:proto`.
 const TS_PROTO_VERSION: &str = "2.11.2";
 
 #[derive(Default)]

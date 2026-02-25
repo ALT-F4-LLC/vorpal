@@ -1,10 +1,7 @@
 use crate::{
     api,
     api::artifact::ArtifactSystem,
-    artifact::{
-        bun::Bun, get_env_key, protoc_gen_ts_proto::ProtocGenTsProto, step, Artifact,
-        ArtifactSource, DevelopmentEnvironment,
-    },
+    artifact::{bun::Bun, get_env_key, step, Artifact, ArtifactSource, DevelopmentEnvironment},
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -12,45 +9,49 @@ use indoc::formatdoc;
 use std::collections::BTreeMap;
 
 pub struct TypeScript<'a> {
+    aliases: Vec<String>,
     artifacts: Vec<String>,
-    bun_version: Option<String>,
     entrypoint: Option<&'a str>,
     environments: Vec<&'a str>,
-    includes: Vec<&'a str>,
     name: &'a str,
-    proto_artifact: Option<String>,
-    secrets: Vec<api::artifact::ArtifactStepSecret>,
-    skip_proto: bool,
-    systems: Vec<ArtifactSystem>,
-    working_dir: Option<String>,
     node_modules: BTreeMap<String, String>,
+    secrets: Vec<api::artifact::ArtifactStepSecret>,
+    source_includes: Vec<&'a str>,
+    source_scripts: Vec<String>,
+    systems: Vec<ArtifactSystem>,
+    vorpal_sdk: bool,
+    working_dir: Option<String>,
 }
 
 impl<'a> TypeScript<'a> {
     pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
         Self {
+            aliases: vec![],
             artifacts: vec![],
-            bun_version: None,
             entrypoint: None,
             environments: vec![],
-            includes: vec![],
             name,
-            proto_artifact: None,
-            secrets: vec![],
-            skip_proto: false,
-            systems,
-            working_dir: None,
             node_modules: BTreeMap::new(),
+            secrets: vec![],
+            source_includes: vec![],
+            source_scripts: vec![],
+            systems,
+            vorpal_sdk: true,
+            working_dir: None,
         }
+    }
+
+    pub fn with_aliases(mut self, aliases: Vec<String>) -> Self {
+        for alias in aliases {
+            if !self.aliases.contains(&alias) {
+                self.aliases.push(alias);
+            }
+        }
+        self
     }
 
     pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
         self.artifacts = artifacts;
-        self
-    }
-
-    pub fn with_bun_version(mut self, version: &str) -> Self {
-        self.bun_version = Some(version.to_string());
         self
     }
 
@@ -65,22 +66,14 @@ impl<'a> TypeScript<'a> {
     }
 
     pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
-        self.includes = includes;
+        self.source_includes = includes;
         self
     }
 
-    pub fn with_proto_artifact(mut self, artifact: String) -> Self {
-        self.proto_artifact = Some(artifact);
-        self
-    }
-
-    pub fn with_skip_proto(mut self) -> Self {
-        self.skip_proto = true;
-        self
-    }
-
-    pub fn with_working_dir(mut self, dir: &str) -> Self {
-        self.working_dir = Some(dir.to_string());
+    pub fn with_node_modules(mut self, modules: Vec<(&str, String)>) -> Self {
+        for (name, digest) in modules {
+            self.node_modules.insert(name.to_string(), digest);
+        }
         self
     }
 
@@ -95,120 +88,142 @@ impl<'a> TypeScript<'a> {
         self
     }
 
-    pub fn with_node_module(mut self, package_name: &str, digest: String) -> Self {
-        self.node_modules.insert(package_name.to_string(), digest);
-        self
-    }
-
-    pub fn with_node_modules(mut self, modules: Vec<(&str, String)>) -> Self {
-        for (name, digest) in modules {
-            self.node_modules.insert(name.to_string(), digest);
+    pub fn with_source_scripts(mut self, scripts: Vec<String>) -> Self {
+        for script in scripts {
+            if !self.source_scripts.contains(&script) {
+                self.source_scripts.push(script);
+            }
         }
         self
     }
 
+    pub fn with_vorpal_sdk(mut self, include: bool) -> Self {
+        self.vorpal_sdk = include;
+        self
+    }
+
+    pub fn with_working_dir(mut self, dir: &str) -> Self {
+        self.working_dir = Some(dir.to_string());
+        self
+    }
+
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
-        // Sort for deterministic output
-        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+        // Setup artifacts
+
+        let bun = Bun::new().build(context).await?;
+        let bun_bin = format!("{}/bin", get_env_key(&bun));
+
+        // Setup source
 
         let source_path = ".";
 
         let mut source_builder = ArtifactSource::new(self.name, source_path);
 
-        if !self.includes.is_empty() {
-            let source_includes = self.includes.iter().map(|s| s.to_string()).collect();
-            source_builder = source_builder.with_includes(source_includes);
+        if !self.source_includes.is_empty() {
+            source_builder = source_builder
+                .with_includes(self.source_includes.iter().map(|s| s.to_string()).collect());
         }
 
         let source = source_builder.build();
 
-        let source_dir = format!("./source/{}", source.name);
+        // Setup step source directory
 
-        let work_dir = match &self.working_dir {
-            Some(dir) => format!("{}/{}", source_dir, dir),
-            None => source_dir.clone(),
+        let step_source_dir = format!("{}/source/{}", source_path, source.name);
+
+        let step_source_dir = match &self.working_dir {
+            Some(working_dir) => format!("{}/{}", step_source_dir, working_dir),
+            None => step_source_dir.clone(),
         };
 
-        let entrypoint = match self.entrypoint {
-            Some(ep) => ep.to_string(),
-            None => format!("src/{}.ts", self.name),
-        };
+        // Setup node modules in script
 
-        let mut bun = Bun::new();
-        if let Some(version) = &self.bun_version {
-            bun = bun.with_version(version);
-        }
-        let bun = bun.build(context).await?;
-        let bun_bin = format!("{}/bin", get_env_key(&bun));
+        let mut step_package_json_js_parts = Vec::new();
 
-        // NOTE: Pre-flight validation (package.json, bun.lockb, entrypoint, @vorpal/sdk)
-        // is performed by the CLI in cli/src/command/build.rs before this build step runs.
+        step_package_json_js_parts.push("const fs=require('fs')".to_string());
+        step_package_json_js_parts
+            .push("const p=JSON.parse(fs.readFileSync('package.json','utf8'))".to_string());
 
-        // If a proto artifact is provided, copy its generated files into the source tree
-        // before bun install so that TypeScript imports from ./api/ resolve correctly.
-        let proto_copy_script = if self.skip_proto {
-            String::new()
-        } else {
-            match &self.proto_artifact {
-                Some(digest) => {
-                    let proto_env = get_env_key(digest);
-                    formatdoc! {r#"
-                        cp -pr {proto_env}/api src/api
-                    "#}
-                }
-                None => ProtocGenTsProto::new()
-                    .build(context)
-                    .await
-                    .map(|proto_digest| {
-                        let proto_env = get_env_key(&proto_digest);
-                        formatdoc! {r#"
-                        cp -pr {proto_env}/api src/api
-                    "#}
-                    })?,
-            }
-        };
+        for (package_name, digest) in &self.node_modules {
+            let env_key = get_env_key(digest);
 
-        // Rewrite package.json to use file: protocol for managed node modules
-        // so bun resolves them from the artifact store instead of fetching from npm.
-        let node_modules_script = if self.node_modules.is_empty() {
-            String::new()
-        } else {
-            let mut js_parts = Vec::new();
-            js_parts.push("const fs=require('fs')".to_string());
-            js_parts.push("const p=JSON.parse(fs.readFileSync('package.json','utf8'))".to_string());
-            for (package_name, digest) in &self.node_modules {
-                let env_key = get_env_key(digest);
-                js_parts.push(format!(
+            step_package_json_js_parts.push(format!(
                     "if(p.dependencies?.['{package_name}'])p.dependencies['{package_name}']='file:{env_key}'"
                 ));
-                js_parts.push(format!(
+
+            step_package_json_js_parts.push(format!(
                     "if(p.devDependencies?.['{package_name}'])p.devDependencies['{package_name}']='file:{env_key}'"
                 ));
-            }
-            js_parts.push("fs.writeFileSync('package.json',JSON.stringify(p,null,2))".to_string());
-            let js_oneliner = js_parts.join(";") + ";";
-            format!("{bun_bin}/bun -e \"{js_oneliner}\"\n")
+        }
+
+        step_package_json_js_parts
+            .push("fs.writeFileSync('package.json',JSON.stringify(p,null,2))".to_string());
+
+        let step_package_json_js = step_package_json_js_parts.join(";") + ";";
+        let step_package_json_script = format!("{bun_bin}/bun -e \"{step_package_json_js}\"\n");
+
+        // Update bun.lock file if it exists
+
+        let mut step_bun_lock_js_parts = Vec::new();
+
+        step_bun_lock_js_parts.push("const fs=require('fs')".to_string());
+        step_bun_lock_js_parts.push(
+            "if(fs.existsSync('bun.lock')){var t=fs.readFileSync('bun.lock','utf8');var q=String.fromCharCode(34)".to_string(),
+        );
+
+        for (package_name, digest) in &self.node_modules {
+            let env_key = get_env_key(digest);
+
+            // Replace workspace dependency value: "package": "file:/old" -> "package": "file:<env_key>"
+            step_bun_lock_js_parts.push(format!(
+                "var p1=q+'{package_name}'+q+': '+q+'file:';var i=t.indexOf(p1);while(i>=0){{var s=i+p1.length;var e=t.indexOf(q,s);t=t.substring(0,s)+'{env_key}'+t.substring(e);i=t.indexOf(p1,s)}}"
+            ));
+
+            // Replace packages resolved specifier: "package@file:/old" -> "package@file:<env_key>"
+            step_bun_lock_js_parts.push(format!(
+                "var p2=q+'{package_name}@file:';var i=t.indexOf(p2);while(i>=0){{var s=i+p2.length;var e=t.indexOf(q,s);t=t.substring(0,s)+'{env_key}'+t.substring(e);i=t.indexOf(p2,s)}}"
+            ));
+        }
+
+        step_bun_lock_js_parts.push("fs.writeFileSync('bun.lock',t)}".to_string());
+
+        let step_bun_lock_js = step_bun_lock_js_parts.join(";") + ";";
+        let step_bun_lock_script = format!("{bun_bin}/bun -e \"{step_bun_lock_js}\"\n");
+
+        // Setup build command
+
+        let step_build_command = match self.entrypoint {
+            Some(entrypoint) => formatdoc! {r#"
+                mkdir -p $VORPAL_OUTPUT/bin
+
+                {bun_bin}/bun build --compile {entrypoint} --outfile {name}
+
+                cp {name} $VORPAL_OUTPUT/bin/{name}"#,
+                name = self.name,
+            },
+            None => formatdoc! {r#"
+                mkdir -p $VORPAL_OUTPUT
+
+                {bun_bin}/bun x tsc --project tsconfig.json --outDir dist
+
+                cp package.json $VORPAL_OUTPUT/
+                cp -r dist $VORPAL_OUTPUT/
+                cp -r node_modules $VORPAL_OUTPUT/"#,
+            },
         };
 
-        let bun_install_flags = if self.node_modules.is_empty() {
-            " --frozen-lockfile"
-        } else {
-            ""
-        };
+        // Build step script
 
         let step_script = formatdoc! {r#"
-            set -euo pipefail
+            pushd {step_source_dir}
 
-            pushd {work_dir}
+            {step_source_scripts}
+            {step_package_json_script}
+            {step_bun_lock_script}
 
-            mkdir -p $VORPAL_OUTPUT/bin
-            {proto_copy_script}
-            {node_modules_script}
-            {bun_bin}/bun install{bun_install_flags}
-            {bun_bin}/bun build --compile {entrypoint} --outfile ./{name}
-            cp ./{name} $VORPAL_OUTPUT/bin/{name}
-            rm ./{name}"#,
-            name = self.name,
+            {bun_bin}/bun install --frozen-lockfile
+
+            {step_build_command}"#,
+            step_source_scripts = self.source_scripts.join("\n")
         };
 
         let mut step_environments = vec![format!("PATH={bun_bin}")];
@@ -219,15 +234,15 @@ impl<'a> TypeScript<'a> {
 
         let mut step_artifacts = vec![bun.clone()];
 
-        if let Some(ref proto) = self.proto_artifact {
-            step_artifacts.push(proto.clone());
-        }
-
         step_artifacts.extend(self.artifacts);
 
         for digest in self.node_modules.values() {
             step_artifacts.push(digest.clone());
         }
+
+        // Sort for deterministic output
+
+        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
 
         let steps = vec![
             step::shell(
@@ -246,10 +261,6 @@ impl<'a> TypeScript<'a> {
             .await
     }
 }
-
-// ---------------------------------------------------------------------------
-// TypeScript Development Environment
-// ---------------------------------------------------------------------------
 
 pub struct TypeScriptDevelopmentEnvironment<'a> {
     artifacts: Vec<String>,
@@ -330,408 +341,5 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
         }
 
         devenv.build(context).await
-    }
-}
-
-// ---------------------------------------------------------------------------
-// TypeScript Library Builder
-// ---------------------------------------------------------------------------
-
-pub struct TypeScriptLibrary<'a> {
-    aliases: Vec<String>,
-    artifacts: Vec<String>,
-    build_command: Option<&'a str>,
-    bun_version: Option<String>,
-    environments: Vec<&'a str>,
-    excludes: Vec<&'a str>,
-    includes: Vec<&'a str>,
-    name: &'a str,
-    node_modules: BTreeMap<String, String>,
-    secrets: Vec<api::artifact::ArtifactStepSecret>,
-    source: Option<api::artifact::ArtifactSource>,
-    source_scripts: Vec<String>,
-    systems: Vec<ArtifactSystem>,
-}
-
-impl<'a> TypeScriptLibrary<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
-        Self {
-            aliases: vec![],
-            artifacts: vec![],
-            build_command: None,
-            bun_version: None,
-            environments: vec![],
-            excludes: vec![],
-            includes: vec![],
-            name,
-            node_modules: BTreeMap::new(),
-            secrets: vec![],
-            source: None,
-            source_scripts: vec![],
-            systems,
-        }
-    }
-
-    pub fn with_alias(mut self, alias: String) -> Self {
-        if !self.aliases.contains(&alias) {
-            self.aliases.push(alias);
-        }
-        self
-    }
-
-    pub fn with_aliases(mut self, aliases: Vec<String>) -> Self {
-        for alias in aliases {
-            if !self.aliases.contains(&alias) {
-                self.aliases.push(alias);
-            }
-        }
-        self
-    }
-
-    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
-        self.artifacts = artifacts;
-        self
-    }
-
-    pub fn with_build_command(mut self, command: &'a str) -> Self {
-        self.build_command = Some(command);
-        self
-    }
-
-    pub fn with_bun_version(mut self, version: &str) -> Self {
-        self.bun_version = Some(version.to_string());
-        self
-    }
-
-    pub fn with_environments(mut self, environments: Vec<&'a str>) -> Self {
-        self.environments = environments;
-        self
-    }
-
-    pub fn with_excludes(mut self, excludes: Vec<&'a str>) -> Self {
-        self.excludes = excludes;
-        self
-    }
-
-    pub fn with_includes(mut self, includes: Vec<&'a str>) -> Self {
-        self.includes = includes;
-        self
-    }
-
-    pub fn with_node_module(mut self, package_name: &str, digest: String) -> Self {
-        self.node_modules.insert(package_name.to_string(), digest);
-        self
-    }
-
-    pub fn with_node_modules(mut self, modules: Vec<(&str, String)>) -> Self {
-        for (name, digest) in modules {
-            self.node_modules.insert(name.to_string(), digest);
-        }
-        self
-    }
-
-    pub fn with_secrets(mut self, secrets: Vec<(String, String)>) -> Self {
-        for (name, value) in secrets {
-            if !self.secrets.iter().any(|s| s.name == name) {
-                self.secrets
-                    .push(api::artifact::ArtifactStepSecret { name, value });
-            }
-        }
-
-        self
-    }
-
-    pub fn with_source(mut self, source: api::artifact::ArtifactSource) -> Self {
-        self.source = Some(source);
-        self
-    }
-
-    pub fn with_source_script(mut self, script: String) -> Self {
-        if !self.source_scripts.contains(&script) {
-            self.source_scripts.push(script);
-        }
-        self
-    }
-
-    pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
-        // Sort for deterministic output
-        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
-
-        // Build source
-        let source = if let Some(source) = self.source.take() {
-            source
-        } else {
-            let source_path = ".";
-            let mut source_builder = ArtifactSource::new(self.name, source_path);
-
-            if !self.includes.is_empty() {
-                let source_includes = self.includes.iter().map(|s| s.to_string()).collect();
-                source_builder = source_builder.with_includes(source_includes);
-            }
-
-            if !self.excludes.is_empty() {
-                let source_excludes = self.excludes.iter().map(|s| s.to_string()).collect();
-                source_builder = source_builder.with_excludes(source_excludes);
-            }
-
-            source_builder.build()
-        };
-
-        let work_dir = format!("./source/{}", source.name);
-
-        // Resolve bun artifact
-        let mut bun = Bun::new();
-        if let Some(version) = &self.bun_version {
-            bun = bun.with_version(version);
-        }
-        let bun = bun.build(context).await?;
-        let bun_bin = format!("{}/bin", get_env_key(&bun));
-
-        // Build source scripts string
-        let source_scripts = if self.source_scripts.is_empty() {
-            String::new()
-        } else {
-            format!("\n{}\n", self.source_scripts.join("\n"))
-        };
-
-        // Rewrite package.json to use file: protocol for managed node modules (BTreeMap iterates in sorted key order)
-        let node_modules_script = if self.node_modules.is_empty() {
-            String::new()
-        } else {
-            let mut js_parts = Vec::new();
-            js_parts.push("const fs=require('fs')".to_string());
-            js_parts.push("const p=JSON.parse(fs.readFileSync('package.json','utf8'))".to_string());
-            for (package_name, digest) in &self.node_modules {
-                let env_key = get_env_key(digest);
-                js_parts.push(format!(
-                    "if(p.dependencies?.['{package_name}'])p.dependencies['{package_name}']='file:{env_key}'"
-                ));
-                js_parts.push(format!(
-                    "if(p.devDependencies?.['{package_name}'])p.devDependencies['{package_name}']='file:{env_key}'"
-                ));
-            }
-            js_parts.push("fs.writeFileSync('package.json',JSON.stringify(p,null,2))".to_string());
-            let js_oneliner = js_parts.join(";") + ";";
-            format!("\n{bun_bin}/bun -e \"{js_oneliner}\"")
-        };
-
-        let bun_install_flags = if self.node_modules.is_empty() {
-            " --frozen-lockfile"
-        } else {
-            ""
-        };
-
-        // Build command defaults to "bun run build"
-        let build_command = self.build_command.unwrap_or("bun run build");
-
-        let step_script = formatdoc! {r#"
-            pushd "{work_dir}"
-            {source_scripts}{node_modules_script}
-            {bun_bin}/bun install{bun_install_flags}
-            {bun_bin}/{build_command}
-
-            mkdir -p "$VORPAL_OUTPUT"
-            cp package.json "$VORPAL_OUTPUT/"
-            cp -r dist "$VORPAL_OUTPUT/"
-            cp -r node_modules "$VORPAL_OUTPUT/""#,
-        };
-
-        let mut step_environments = vec![format!("PATH={bun_bin}")];
-
-        for env in self.environments {
-            step_environments.push(env.to_string());
-        }
-
-        let mut step_artifacts = vec![bun.clone()];
-        step_artifacts.extend(self.artifacts);
-
-        for digest in self.node_modules.values() {
-            step_artifacts.push(digest.clone());
-        }
-
-        let steps = vec![
-            step::shell(
-                context,
-                step_artifacts,
-                step_environments,
-                step_script,
-                self.secrets,
-            )
-            .await?,
-        ];
-
-        Artifact::new(self.name, steps, self.systems)
-            .with_aliases(self.aliases)
-            .with_sources(vec![source])
-            .build(context)
-            .await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_systems() -> Vec<ArtifactSystem> {
-        vec![ArtifactSystem::Aarch64Darwin, ArtifactSystem::X8664Linux]
-    }
-
-    // -----------------------------------------------------------------------
-    // TypeScriptDevelopmentEnvironment tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn ts_devenv_new_returns_valid_struct_with_defaults() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems());
-        assert_eq!(env.name, "test-ts");
-        assert!(env.artifacts.is_empty());
-        assert!(env.environments.is_empty());
-        assert!(env.node_modules.is_empty());
-        assert!(env.secrets.is_empty());
-        assert_eq!(env.systems.len(), 2);
-    }
-
-    #[test]
-    fn ts_devenv_with_artifacts_sets_artifacts() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_artifacts(vec!["artifact-a".to_string(), "artifact-b".to_string()]);
-        assert_eq!(env.artifacts, vec!["artifact-a", "artifact-b"]);
-    }
-
-    #[test]
-    fn ts_devenv_with_environments_sets_environments() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_environments(vec!["FOO=bar".to_string()]);
-        assert_eq!(env.environments, vec!["FOO=bar"]);
-    }
-
-    #[test]
-    fn ts_devenv_with_secrets_sets_secrets() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_secrets(vec![("key", "value")]);
-        assert_eq!(env.secrets, vec![("key", "value")]);
-    }
-
-    #[test]
-    fn ts_devenv_with_node_module_stores_mapping() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_node_module("@vorpal/sdk", "abc123".to_string());
-        assert_eq!(env.node_modules.len(), 1);
-        assert_eq!(
-            env.node_modules.get("@vorpal/sdk"),
-            Some(&"abc123".to_string())
-        );
-    }
-
-    #[test]
-    fn ts_devenv_with_node_module_multiple_calls_accumulate() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_node_module("@vorpal/sdk", "abc123".to_string())
-            .with_node_module("lodash", "def456".to_string());
-        assert_eq!(env.node_modules.len(), 2);
-        assert_eq!(
-            env.node_modules.get("@vorpal/sdk"),
-            Some(&"abc123".to_string())
-        );
-        assert_eq!(env.node_modules.get("lodash"), Some(&"def456".to_string()));
-    }
-
-    #[test]
-    fn ts_devenv_with_node_module_overwrites_duplicate_package() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_node_module("@vorpal/sdk", "old_digest".to_string())
-            .with_node_module("@vorpal/sdk", "new_digest".to_string());
-        assert_eq!(env.node_modules.len(), 1);
-        assert_eq!(
-            env.node_modules.get("@vorpal/sdk"),
-            Some(&"new_digest".to_string())
-        );
-    }
-
-    #[test]
-    fn ts_devenv_builder_methods_can_be_chained() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_artifacts(vec!["a".to_string()])
-            .with_environments(vec!["E=1".to_string()])
-            .with_node_module("@vorpal/sdk", "abc123".to_string())
-            .with_secrets(vec![("s", "v")]);
-        assert_eq!(env.artifacts, vec!["a"]);
-        assert_eq!(env.environments, vec!["E=1"]);
-        assert_eq!(env.node_modules.len(), 1);
-        assert_eq!(env.secrets, vec![("s", "v")]);
-    }
-
-    #[test]
-    fn ts_devenv_node_modules_sorted_by_package_name() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems())
-            .with_node_module("zlib", "z_digest".to_string())
-            .with_node_module("@vorpal/sdk", "v_digest".to_string())
-            .with_node_module("lodash", "l_digest".to_string());
-        // BTreeMap iterates in sorted key order
-        let keys: Vec<&String> = env.node_modules.keys().collect();
-        assert_eq!(keys, vec!["@vorpal/sdk", "lodash", "zlib"]);
-    }
-
-    #[test]
-    fn ts_devenv_without_node_modules_has_no_node_path() {
-        let env = TypeScriptDevelopmentEnvironment::new("test-ts", test_systems());
-        // When no node modules are configured, environments should not contain NODE_PATH
-        assert!(!env.environments.iter().any(|e| e.starts_with("NODE_PATH=")));
-    }
-
-    // -----------------------------------------------------------------------
-    // TypeScriptLibrary tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn ts_library_new_has_empty_aliases_by_default() {
-        let lib = TypeScriptLibrary::new("test-lib", test_systems());
-        assert!(lib.aliases.is_empty());
-    }
-
-    #[test]
-    fn ts_library_with_alias_adds_single_alias() {
-        let lib = TypeScriptLibrary::new("test-lib", test_systems())
-            .with_alias("my-lib:latest".to_string());
-        assert_eq!(lib.aliases, vec!["my-lib:latest"]);
-    }
-
-    #[test]
-    fn ts_library_with_alias_deduplicates() {
-        let lib = TypeScriptLibrary::new("test-lib", test_systems())
-            .with_alias("my-lib:latest".to_string())
-            .with_alias("my-lib:latest".to_string());
-        assert_eq!(lib.aliases, vec!["my-lib:latest"]);
-    }
-
-    #[test]
-    fn ts_library_with_aliases_adds_multiple() {
-        let lib = TypeScriptLibrary::new("test-lib", test_systems()).with_aliases(vec![
-            "my-lib:latest".to_string(),
-            "my-lib:1.0.0".to_string(),
-        ]);
-        assert_eq!(lib.aliases, vec!["my-lib:latest", "my-lib:1.0.0"]);
-    }
-
-    #[test]
-    fn ts_library_with_aliases_deduplicates() {
-        let lib = TypeScriptLibrary::new("test-lib", test_systems())
-            .with_alias("my-lib:latest".to_string())
-            .with_aliases(vec![
-                "my-lib:latest".to_string(),
-                "my-lib:1.0.0".to_string(),
-            ]);
-        assert_eq!(lib.aliases, vec!["my-lib:latest", "my-lib:1.0.0"]);
-    }
-
-    #[test]
-    fn ts_library_builder_methods_can_be_chained_with_aliases() {
-        let lib = TypeScriptLibrary::new("test-lib", test_systems())
-            .with_aliases(vec!["my-lib:latest".to_string()])
-            .with_artifacts(vec!["a".to_string()])
-            .with_includes(vec!["src"]);
-        assert_eq!(lib.aliases, vec!["my-lib:latest"]);
-        assert_eq!(lib.artifacts, vec!["a"]);
-        assert_eq!(lib.includes, vec!["src"]);
     }
 }

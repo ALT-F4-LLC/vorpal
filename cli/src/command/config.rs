@@ -52,6 +52,8 @@ pub struct VorpalConfigSourceTypeScript {
     pub bun_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

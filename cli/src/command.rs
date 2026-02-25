@@ -378,6 +378,7 @@ pub async fn run() -> Result<()> {
             let mut config_source_rust_packages = None;
             let mut config_source_script = None;
             let mut config_source_typescript_bun_version: Option<String> = None;
+            let mut config_source_typescript_directory = None;
             let mut config_source_typescript_entrypoint = None;
 
             if let Some(environments) = &project_config.environments {
@@ -425,6 +426,12 @@ pub async fn run() -> Result<()> {
                     if let Some(bun_version) = &config_source_typescript.bun_version {
                         if !bun_version.is_empty() {
                             config_source_typescript_bun_version = Some(bun_version.clone());
+                        }
+                    }
+
+                    if let Some(directory) = &config_source_typescript.directory {
+                        if !directory.is_empty() {
+                            config_source_typescript_directory = Some(directory.clone());
                         }
                     }
 
@@ -480,6 +487,7 @@ pub async fn run() -> Result<()> {
                     script: config_source_script,
                     typescript: Some(VorpalConfigSourceTypeScript {
                         bun_version: config_source_typescript_bun_version,
+                        directory: config_source_typescript_directory,
                         entrypoint: config_source_typescript_entrypoint,
                     }),
                 }),
