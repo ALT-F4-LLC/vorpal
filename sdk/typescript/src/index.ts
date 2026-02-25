@@ -24,7 +24,7 @@ export { bash, bwrap, shell, docker } from "./artifact/step.js";
 // Language builders
 export { Go } from "./artifact/language/go.js";
 export { Rust } from "./artifact/language/rust.js";
-export { TypeScript, TypeScriptLibrary } from "./artifact/language/typescript.js";
+export { TypeScript } from "./artifact/language/typescript.js";
 
 // Development environment builders
 export { GoDevelopmentEnvironment } from "./artifact/language/go.js";

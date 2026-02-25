@@ -98,11 +98,6 @@ describe("SDK exports for TypeScript configs", () => {
     expect(typeof mod.parseCliArgs).toBe("function");
   });
 
-  test("TypeScriptLibrary is exported", async () => {
-    const mod = await import("../index.js");
-    expect(mod.TypeScriptLibrary).toBeDefined();
-  });
-
   test("alias functions are exported", async () => {
     const mod = await import("../index.js");
     expect(typeof mod.parseArtifactAlias).toBe("function");
