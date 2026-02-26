@@ -2,7 +2,7 @@
 
 **Build software in Rust, Go, or TypeScript. Get reproducible artifacts on every platform.**
 
-[![CI](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml/badge.svg)](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml) [![Release](https://img.shields.io/github/v/release/ALT-F4-LLC/vorpal?include_prereleases)](https://github.com/ALT-F4-LLC/vorpal/releases) [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE) [![npm](https://img.shields.io/npm/v/@vorpal/sdk)](https://www.npmjs.com/package/@vorpal/sdk)
+[![CI](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml/badge.svg)](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml) [![Release](https://img.shields.io/github/v/release/ALT-F4-LLC/vorpal?include_prereleases)](https://github.com/ALT-F4-LLC/vorpal/releases) [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE) [![npm](https://img.shields.io/npm/v/@altf4llc/vorpal-sdk)](https://www.npmjs.com/package/@altf4llc/vorpal-sdk)
 
 Vorpal is a build system that works the way you already write code. Define your build as a program -- not YAML, not a DSL -- using real SDKs in Rust, Go, or TypeScript. Vorpal handles hermetic execution, cross-platform targeting, content-addressed caching, and artifact distribution so you can focus on what you are building.
 
@@ -67,7 +67,7 @@ Define a build artifact targeting multiple platforms with a single config file.
 <summary><strong>TypeScript</strong></summary>
 
 ```typescript
-import { ArtifactSystem, ConfigContext, TypeScript } from "@vorpal/sdk";
+import { ArtifactSystem, ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
   ArtifactSystem.AARCH64_DARWIN,
@@ -78,8 +78,14 @@ const SYSTEMS = [
 
 const context = ConfigContext.create();
 
+// Artifacts
+
+await new TypeScriptDevelopmentEnvironment("example-shell", SYSTEMS)
+  .build(context);
+
 await new TypeScript("example", SYSTEMS)
-  .withIncludes(["src", "package.json", "tsconfig.json", "bun.lockb"])
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
   .build(context);
 
 await context.run();
@@ -103,7 +109,17 @@ async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    Rust::new("example", systems).build(ctx).await?;
+    // Artifacts
+
+    RustDevelopmentEnvironment::new("example-shell", SYSTEMS.to_vec())
+        .build(context)
+        .await?;
+
+    Rust::new("example", SYSTEMS.to_vec())
+        .with_bins(vec!["example"])
+        .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
+        .build(context)
+        .await?;
 
     ctx.run().await
 }
@@ -133,7 +149,20 @@ var systems = []api.ArtifactSystem{
 func main() {
     ctx := config.GetContext()
 
-    language.NewGo("example", systems).Build(ctx)
+    // Artifacts
+
+	_, err := language.NewGoDevelopmentEnvironment("example-shell", Systems).Build(context)
+	if err != nil {
+		log.Fatalf("error building development environment: %v", err)
+	}
+
+	_, err = language.NewGo("example", Systems).
+		WithBuildDirectory("cmd/example").
+		WithIncludes([]string{"cmd", "go.mod", "go.sum"}).
+		Build(context)
+	if err != nil {
+		log.Fatalf("error building: %v", err)
+	}
 
     ctx.Run()
 }
@@ -154,7 +183,7 @@ import {
   ArtifactSystem,
   DevelopmentEnvironment,
   UserEnvironment,
-} from "@vorpal/sdk";
+} from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
   ArtifactSystem.AARCH64_DARWIN,
@@ -265,7 +294,7 @@ import {
   ArtifactSystem,
   Artifact,
   ArtifactStep,
-} from "@vorpal/sdk";
+} from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
   ArtifactSystem.AARCH64_DARWIN,

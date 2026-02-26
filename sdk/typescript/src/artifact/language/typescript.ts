@@ -20,11 +20,9 @@ export class TypeScript {
   private _environments: string[] = [];
   private _includes: string[] = [];
   private _name: string;
-  private _nodeModules: Map<string, string> = new Map();
   private _secrets: ArtifactStepSecret[] = [];
   private _sourceScripts: string[] = [];
   private _systems: ArtifactSystem[];
-  private _vorpalSdk: boolean = true;
   private _workingDir: string | undefined = undefined;
 
   constructor(name: string, systems: ArtifactSystem[]) {
@@ -77,20 +75,6 @@ export class TypeScript {
   }
 
   /**
-   * Maps multiple npm packages to Vorpal store artifacts.
-   * At build time, package.json and bun.lock are rewritten to point
-   * dependency paths to the artifact environment keys.
-   *
-   * @param modules - Array of [packageName, digest] tuples
-   */
-  withNodeModules(modules: Array<[string, string]>): this {
-    for (const [name, digest] of modules) {
-      this._nodeModules.set(name, digest);
-    }
-    return this;
-  }
-
-  /**
    * Adds secrets available during the build step.
    * Secrets are deduplicated by name.
    */
@@ -114,18 +98,6 @@ export class TypeScript {
         this._sourceScripts.push(script);
       }
     }
-    return this;
-  }
-
-  /**
-   * Controls whether the Vorpal SDK TypeScript library is automatically
-   * fetched and added as a dependency. Defaults to true.
-   *
-   * When true, fetches `library/vorpal-sdk-typescript:latest` and adds
-   * it to both artifacts and node_modules as `@vorpal/sdk`.
-   */
-  withVorpalSdk(include: boolean): this {
-    this._vorpalSdk = include;
     return this;
   }
 
@@ -173,70 +145,6 @@ export class TypeScript {
       stepSourceDir = `${stepSourceDir}/${this._workingDir}`;
     }
 
-    // Setup Vorpal SDK -- must happen BEFORE node module script generation
-    if (this._vorpalSdk) {
-      const vorpalSdk = await context.fetchArtifactAlias(
-        "library/vorpal-sdk-typescript:latest",
-      );
-      this._artifacts.push(vorpalSdk);
-      this._nodeModules.set("@vorpal/sdk", vorpalSdk);
-    }
-
-    // Sort node modules alphabetically by package name for deterministic output
-    const sortedNodeModules = [...this._nodeModules.entries()].sort((a, b) =>
-      a[0].localeCompare(b[0]),
-    );
-
-    // Setup node modules -- package.json rewriting script
-    const stepPackageJsonJsParts: string[] = [];
-    stepPackageJsonJsParts.push("const fs=require('fs')");
-    stepPackageJsonJsParts.push(
-      "const p=JSON.parse(fs.readFileSync('package.json','utf8'))",
-    );
-
-    for (const [packageName, digest] of sortedNodeModules) {
-      const envKey = getEnvKey(digest);
-      stepPackageJsonJsParts.push(
-        `if(p.dependencies?.['${packageName}'])p.dependencies['${packageName}']='file:${envKey}'`,
-      );
-      stepPackageJsonJsParts.push(
-        `if(p.devDependencies?.['${packageName}'])p.devDependencies['${packageName}']='file:${envKey}'`,
-      );
-    }
-
-    stepPackageJsonJsParts.push(
-      "fs.writeFileSync('package.json',JSON.stringify(p,null,2))",
-    );
-
-    const stepPackageJsonJs = stepPackageJsonJsParts.join(";") + ";";
-    const stepPackageJsonScript = `${bunBin}/bun -e "${stepPackageJsonJs}"\n`;
-
-    // Setup node modules -- bun.lock rewriting script
-    const stepBunLockJsParts: string[] = [];
-    stepBunLockJsParts.push("const fs=require('fs')");
-    stepBunLockJsParts.push(
-      "if(fs.existsSync('bun.lock')){var t=fs.readFileSync('bun.lock','utf8');var q=String.fromCharCode(34)",
-    );
-
-    for (const [packageName, digest] of sortedNodeModules) {
-      const envKey = getEnvKey(digest);
-
-      // Replace workspace dependency value: "package": "file:/old" -> "package": "file:<env_key>"
-      stepBunLockJsParts.push(
-        `var p1=q+'${packageName}'+q+': '+q+'file:';var i=t.indexOf(p1);while(i>=0){var s=i+p1.length;var e=t.indexOf(q,s);t=t.substring(0,s)+'${envKey}'+t.substring(e);i=t.indexOf(p1,s)}`,
-      );
-
-      // Replace packages resolved specifier: "package@file:/old" -> "package@file:<env_key>"
-      stepBunLockJsParts.push(
-        `var p2=q+'${packageName}@file:';var i=t.indexOf(p2);while(i>=0){var s=i+p2.length;var e=t.indexOf(q,s);t=t.substring(0,s)+'${envKey}'+t.substring(e);i=t.indexOf(p2,s)}`,
-      );
-    }
-
-    stepBunLockJsParts.push("fs.writeFileSync('bun.lock',t)}");
-
-    const stepBunLockJs = stepBunLockJsParts.join(";") + ";";
-    const stepBunLockScript = `${bunBin}/bun -e "${stepBunLockJs}"\n`;
-
     // Setup build command -- dual mode based on entrypoint
     let stepBuildCommand: string;
 
@@ -262,8 +170,6 @@ cp -r node_modules $VORPAL_OUTPUT/`;
     const stepScript = `pushd ${stepSourceDir}
 
 ${this._sourceScripts.join("\n")}
-${stepPackageJsonScript}
-${stepBunLockScript}
 
 ${bunBin}/bun install --frozen-lockfile
 
@@ -274,11 +180,6 @@ ${stepBuildCommand}`;
 
     // Build artifact dependencies
     const stepArtifacts = [bunDigest, ...this._artifacts];
-
-    // Add node module artifact digests
-    for (const [, digest] of sortedNodeModules) {
-      stepArtifacts.push(digest);
-    }
 
     // Sort secrets for deterministic output
     this._secrets.sort((a, b) => a.name.localeCompare(b.name));
@@ -323,7 +224,6 @@ export class TypeScriptDevelopmentEnvironment {
   private _artifacts: string[] = [];
   private _environments: string[] = [];
   private _name: string;
-  private _nodeModules: Map<string, string> = new Map();
   private _secrets: Array<[string, string]> = [];
   private _systems: ArtifactSystem[];
 
@@ -361,19 +261,6 @@ export class TypeScriptDevelopmentEnvironment {
   }
 
   /**
-   * Makes a TypeScript package artifact available in the dev environment.
-   * Sets NODE_PATH to include the artifact's parent directory so that
-   * Bun/Node.js can resolve the package.
-   *
-   * @param packageName - npm package name (e.g., "@vorpal/sdk")
-   * @param digest - Artifact digest for the package
-   */
-  withNodeModule(packageName: string, digest: string): this {
-    this._nodeModules.set(packageName, digest);
-    return this;
-  }
-
-  /**
    * Builds the TypeScript development environment artifact.
    *
    * Default artifacts fetched:
@@ -387,27 +274,9 @@ export class TypeScriptDevelopmentEnvironment {
 
     const artifacts: string[] = [bun, ...this._artifacts];
 
-    const environments: string[] = [...this._environments];
-
-    // Add node module artifacts and NODE_PATH entries
-    if (this._nodeModules.size > 0) {
-      // Sort alphabetically by package name for deterministic output
-      const sortedNodeModules = [...this._nodeModules.entries()].sort((a, b) =>
-        a[0].localeCompare(b[0])
-      );
-
-      const nodePaths: string[] = [];
-      for (const [, digest] of sortedNodeModules) {
-        artifacts.push(digest);
-        nodePaths.push(`${getEnvKey(digest)}/..`);
-      }
-
-      environments.push(`NODE_PATH=${nodePaths.join(":")}`);
-    }
-
     let devenv = new DevelopmentEnvironment(this._name, this._systems)
       .withArtifacts(artifacts)
-      .withEnvironments(environments);
+      .withEnvironments(this._environments);
 
     if (this._secrets.length > 0) {
       devenv = devenv.withSecrets(this._secrets);

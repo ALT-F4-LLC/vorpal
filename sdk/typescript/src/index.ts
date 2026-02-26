@@ -1,4 +1,4 @@
-// Public API re-exports for @vorpal/sdk
+// Public API re-exports for @altf4llc/vorpal-sdk
 
 // Context
 export { ConfigContext, parseArtifactAlias, formatArtifactAlias } from "./context.js";

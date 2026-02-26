@@ -28,7 +28,6 @@ impl VorpalSdkTypescript {
                 cd sdk/typescript
                 cp -pr {proto_env}/api src/api
             "}])
-            .with_vorpal_sdk(false)
             .build(context)
             .await
     }

@@ -3,7 +3,7 @@ import {
   ConfigContext,
   TypeScript,
   TypeScriptDevelopmentEnvironment,
-} from "@vorpal/sdk";
+} from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS: ArtifactSystem[] = [
   ArtifactSystem.AARCH64_DARWIN,
@@ -22,6 +22,7 @@ await new TypeScriptDevelopmentEnvironment("example-shell", SYSTEMS)
 // Artifacts
 
 await new TypeScript("example", SYSTEMS)
+  .withEntrypoint("src/main.ts")
   .withIncludes(["src", "package.json", "tsconfig.json", "bun.lock"])
   .build(context);
 

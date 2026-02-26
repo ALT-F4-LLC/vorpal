@@ -29,11 +29,12 @@ pub async fn run(name: &str, path: &Path) -> Result<()> {
             }
 
             "Rust" => {
-                template.insert("src/main.rs", include_str!("template/rust/src/main.rs"));
-                template.insert("src/vorpal.rs", include_str!("template/rust/src/vorpal.rs"));
+                template.insert(".gitignore", include_str!("template/rust/.gitignore"));
                 template.insert("Cargo.lock", include_str!("template/rust/Cargo.lock"));
                 template.insert("Cargo.toml", include_str!("template/rust/Cargo.toml"));
                 template.insert("Vorpal.toml", include_str!("template/rust/Vorpal.toml"));
+                template.insert("src/main.rs", include_str!("template/rust/src/main.rs"));
+                template.insert("src/vorpal.rs", include_str!("template/rust/src/vorpal.rs"));
             }
 
             "TypeScript" => {
@@ -57,6 +58,8 @@ pub async fn run(name: &str, path: &Path) -> Result<()> {
                     "Vorpal.toml",
                     include_str!("template/typescript/Vorpal.toml"),
                 );
+                template.insert(".gitignore", include_str!("template/typescript/.gitignore"));
+                template.insert("bun.lock", include_str!("template/typescript/bun.lock"));
             }
 
             _ => bail!("invalid 'language' choice"),
