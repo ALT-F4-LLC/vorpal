@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@altf4llc/vorpal-sdk",
@@ -10,7 +11,7 @@
       },
       "devDependencies": {
         "@types/bun": "1.2.4",
-        "ts-proto": "2.11.2",
+        "ts-proto": "2.11.4",
         "tsx": "4.21.0",
         "typescript": "5.9.3",
       },
@@ -153,7 +154,7 @@
 
     "ts-poet": ["ts-poet@6.12.0", "", { "dependencies": { "dprint-node": "^1.0.8" } }, "sha512-xo+iRNMWqyvXpFTaOAvLPA5QAWO6TZrSUs5s4Odaya3epqofBu/fMLHEWl8jPmjhA0s9sgj9sNvF1BmaQlmQkA=="],
 
-    "ts-proto": ["ts-proto@2.11.2", "", { "dependencies": { "@bufbuild/protobuf": "^2.10.2", "case-anything": "^2.1.13", "ts-poet": "^6.12.0", "ts-proto-descriptors": "2.1.0" }, "bin": { "protoc-gen-ts_proto": "protoc-gen-ts_proto" } }, "sha512-+bPq2zDwNtJHtuyu2fGYgvTDxS7cBcY4u4moO1LyFA+my144Mfj9/sbNyGXKMtBK7DNXVGf76puwGa6hPzJw/g=="],
+    "ts-proto": ["ts-proto@2.11.4", "", { "dependencies": { "@bufbuild/protobuf": "^2.10.2", "case-anything": "^2.1.13", "ts-poet": "^6.12.0", "ts-proto-descriptors": "2.1.0" }, "bin": { "protoc-gen-ts_proto": "protoc-gen-ts_proto" } }, "sha512-LGf1llYT/YsZRIzz3nzBei5mR8Sq0xmrL0cI36Pdiuok2V4PHiDuXQGP+D9i3NzChuwURPo8KAmGV1HLH0xHyw=="],
 
     "ts-proto-descriptors": ["ts-proto-descriptors@2.1.0", "", { "dependencies": { "@bufbuild/protobuf": "^2.0.0" } }, "sha512-S5EZYEQ6L9KLFfjSRpZWDIXDV/W7tAj8uW7pLsihIxyr62EAVSiKuVPwE8iWnr849Bqa53enex1jhDUcpgquzA=="],
 
