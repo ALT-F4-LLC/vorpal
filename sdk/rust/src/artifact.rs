@@ -32,8 +32,6 @@ pub mod rustfmt;
 pub mod staticcheck;
 pub mod step;
 pub mod system;
-pub mod vorpal_sdk_typescript;
-pub mod vorpal_sdk_typescript_proto;
 
 pub struct Argument<'a> {
     pub name: &'a str,

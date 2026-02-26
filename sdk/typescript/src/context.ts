@@ -756,13 +756,22 @@ export class ConfigContext {
    * Recursively fetches all step dependencies.
    */
   async fetchArtifact(digest: string): Promise<string> {
+    return this.fetchArtifactInNamespace(digest, this._artifactNamespace);
+  }
+
+  /**
+   * Fetches an artifact by digest in a specific namespace.
+   * Recursively fetches all step dependencies using the same namespace.
+   * This mirrors the Rust SDK's `fetch_artifact_in_namespace`.
+   */
+  private async fetchArtifactInNamespace(digest: string, namespace: string): Promise<string> {
     if (this._store.artifact.has(digest)) {
       return digest;
     }
 
     const request: ArtifactRequest = {
       digest: digest,
-      namespace: this._artifactNamespace,
+      namespace: namespace,
     };
 
     // Add authorization metadata if credentials exist (matches Go/Rust SDKs)
@@ -808,7 +817,7 @@ export class ConfigContext {
 
     for (const step of artifact.steps) {
       for (const dep of step.artifacts) {
-        await this.fetchArtifact(dep);
+        await this.fetchArtifactInNamespace(dep, namespace);
       }
     }
 
@@ -871,11 +880,15 @@ export class ConfigContext {
 
     const artifactDigest = response.digest;
 
+    if (!artifactDigest) {
+      throw new Error(`Registry returned empty digest for alias: ${alias}`);
+    }
+
     if (this._store.artifact.has(artifactDigest)) {
       return artifactDigest;
     }
 
-    await this.fetchArtifact(artifactDigest);
+    await this.fetchArtifactInNamespace(artifactDigest, parsed.namespace);
 
     return artifactDigest;
   }

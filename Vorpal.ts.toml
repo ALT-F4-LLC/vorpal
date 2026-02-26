@@ -4,4 +4,5 @@ language = "typescript"
 includes = ["sdk/typescript"]
 
 [source.typescript]
-entrypoint = "sdk/typescript/src/vorpal.ts"
+directory = "sdk/typescript"
+entrypoint = "src/vorpal.ts"

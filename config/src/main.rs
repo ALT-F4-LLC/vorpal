@@ -4,7 +4,7 @@ use crate::artifact::{
     vorpal_user::VorpalUser,
 };
 use anyhow::Result;
-use vorpal_sdk::{artifact::vorpal_sdk_typescript::VorpalSdkTypescript, context::get_context};
+use vorpal_sdk::context::get_context;
 
 mod artifact;
 
@@ -18,7 +18,6 @@ async fn main() -> Result<()> {
         "vorpal-job" => VorpalJob::new().build(context).await?,
         "vorpal-process" => VorpalProcess::new().build(context).await?,
         "vorpal-release" => VorpalRelease::new().build(context).await?,
-        "vorpal-sdk-typescript" => VorpalSdkTypescript::new().build(context).await?,
         "vorpal-shell" => VorpalShell::new().build(context).await?,
         "vorpal-user" => VorpalUser::new().build(context).await?,
         _ => "".to_string(),
