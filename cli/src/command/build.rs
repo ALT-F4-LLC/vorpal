@@ -466,8 +466,6 @@ pub async fn run(
         }
 
         "typescript" => {
-            // IMPORTANT: Must be first built in Rust
-
             let entrypoint = config
                 .source
                 .as_ref()

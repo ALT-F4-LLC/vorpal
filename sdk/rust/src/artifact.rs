@@ -22,7 +22,6 @@ pub mod pnpm;
 pub mod protoc;
 pub mod protoc_gen_go;
 pub mod protoc_gen_go_grpc;
-pub mod protoc_gen_ts_proto;
 pub mod rsync;
 pub mod rust_analyzer;
 pub mod rust_src;
@@ -33,6 +32,8 @@ pub mod rustfmt;
 pub mod staticcheck;
 pub mod step;
 pub mod system;
+pub mod vorpal_sdk_typescript;
+pub mod vorpal_sdk_typescript_proto;
 
 pub struct Argument<'a> {
     pub name: &'a str,

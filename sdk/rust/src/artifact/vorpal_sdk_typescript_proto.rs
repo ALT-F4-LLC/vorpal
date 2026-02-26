@@ -9,9 +9,9 @@ use indoc::formatdoc;
 const TS_PROTO_VERSION: &str = "2.11.2";
 
 #[derive(Default)]
-pub struct ProtocGenTsProto {}
+pub struct VorpalSdkTypeScriptProto {}
 
-impl ProtocGenTsProto {
+impl VorpalSdkTypeScriptProto {
     pub fn new() -> Self {
         Self::default()
     }
@@ -71,7 +71,6 @@ impl ProtocGenTsProto {
         let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
         Artifact::new(name, steps, systems)
-            .with_aliases(vec![format!("{name}:{TS_PROTO_VERSION}")])
             .with_sources(vec![source])
             .build(context)
             .await
