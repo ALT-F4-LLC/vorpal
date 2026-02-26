@@ -77,7 +77,7 @@ type ProcessScriptTemplateVars struct {
 	Name       string
 }
 
-type ProjectEnvironment struct {
+type DevelopmentEnvironment struct {
 	Artifacts    []*string
 	Environments []string
 	Name         string
@@ -85,7 +85,7 @@ type ProjectEnvironment struct {
 	Systems      []api.ArtifactSystem
 }
 
-type ProjectEnvironmentTemplateArgs struct {
+type DevelopmentEnvironmentTemplateArgs struct {
 	Backups  string
 	Exports  string
 	Restores string
@@ -162,7 +162,7 @@ EOF
 
 chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
 
-const ScriptProjectEnvironmentTemplate = `
+const ScriptDevelopmentEnvironmentTemplate = `
 mkdir -pv $VORPAL_WORKSPACE/bin
 
 cat > bin/activate << "EOF"
@@ -579,8 +579,8 @@ func (a *Artifact) Build(ctx *config.ConfigContext) (*string, error) {
 	return ctx.AddArtifact(&artifact)
 }
 
-func NewProjectEnvironment(name string, systems []api.ArtifactSystem) *ProjectEnvironment {
-	return &ProjectEnvironment{
+func NewDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *DevelopmentEnvironment {
+	return &DevelopmentEnvironment{
 		Artifacts:    []*string{},
 		Environments: []string{},
 		Name:         name,
@@ -589,17 +589,17 @@ func NewProjectEnvironment(name string, systems []api.ArtifactSystem) *ProjectEn
 	}
 }
 
-func (b *ProjectEnvironment) WithArtifacts(artifacts []*string) *ProjectEnvironment {
+func (b *DevelopmentEnvironment) WithArtifacts(artifacts []*string) *DevelopmentEnvironment {
 	b.Artifacts = artifacts
 	return b
 }
 
-func (b *ProjectEnvironment) WithEnvironments(envs []string) *ProjectEnvironment {
+func (b *DevelopmentEnvironment) WithEnvironments(envs []string) *DevelopmentEnvironment {
 	b.Environments = envs
 	return b
 }
 
-func (b *ProjectEnvironment) WithSecrets(secrets map[string]string) *ProjectEnvironment {
+func (b *DevelopmentEnvironment) WithSecrets(secrets map[string]string) *DevelopmentEnvironment {
 	for _, name := range SortedKeys(secrets) {
 		value := secrets[name]
 		secret := &api.ArtifactStepSecret{Name: name, Value: value}
@@ -610,7 +610,7 @@ func (b *ProjectEnvironment) WithSecrets(secrets map[string]string) *ProjectEnvi
 	return b
 }
 
-func (b *ProjectEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
+func (b *DevelopmentEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 	backups := []string{
 		"export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"",
 		"export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"",
@@ -669,14 +669,14 @@ func (b *ProjectEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 
 	// Setup script
 
-	scriptTemplate, err := template.New("script").Parse(ScriptProjectEnvironmentTemplate)
+	scriptTemplate, err := template.New("script").Parse(ScriptDevelopmentEnvironmentTemplate)
 	if err != nil {
 		return nil, err
 	}
 
 	var scriptBuffer bytes.Buffer
 
-	stepScriptVars := ProjectEnvironmentTemplateArgs{
+	stepScriptVars := DevelopmentEnvironmentTemplateArgs{
 		Backups:  strings.Join(backups, "\n"),
 		Exports:  strings.Join(exports, "\n"),
 		Restores: strings.Join(restores, "\n"),

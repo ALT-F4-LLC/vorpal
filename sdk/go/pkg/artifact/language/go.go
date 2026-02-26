@@ -267,3 +267,143 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 		WithSources(sources).
 		Build(context)
 }
+
+// ---------------------------------------------------------------------------
+// Go Development Environment
+// ---------------------------------------------------------------------------
+
+type GoDevelopmentEnvironment struct {
+	artifacts    []*string
+	environments []string
+	name         string
+	secrets      map[string]string
+	systems      []api.ArtifactSystem
+
+	includeProtoc          bool
+	includeProtocGenGo     bool
+	includeProtocGenGoGRPC bool
+}
+
+func NewGoDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *GoDevelopmentEnvironment {
+	return &GoDevelopmentEnvironment{
+		artifacts:              []*string{},
+		environments:           []string{},
+		name:                   name,
+		secrets:                map[string]string{},
+		systems:                systems,
+		includeProtoc:          true,
+		includeProtocGenGo:     true,
+		includeProtocGenGoGRPC: true,
+	}
+}
+
+func (b *GoDevelopmentEnvironment) WithArtifacts(artifacts []*string) *GoDevelopmentEnvironment {
+	b.artifacts = append(b.artifacts, artifacts...)
+	return b
+}
+
+func (b *GoDevelopmentEnvironment) WithEnvironments(environments []string) *GoDevelopmentEnvironment {
+	b.environments = append(b.environments, environments...)
+	return b
+}
+
+func (b *GoDevelopmentEnvironment) WithoutProtoc() *GoDevelopmentEnvironment {
+	b.includeProtoc = false
+	b.includeProtocGenGo = false
+	b.includeProtocGenGoGRPC = false
+	return b
+}
+
+func (b *GoDevelopmentEnvironment) WithSecrets(secrets map[string]string) *GoDevelopmentEnvironment {
+	for k, v := range secrets {
+		if _, exists := b.secrets[k]; !exists {
+			b.secrets[k] = v
+		}
+	}
+	return b
+}
+
+func (b *GoDevelopmentEnvironment) Build(context *config.ConfigContext) (*string, error) {
+	git, err := artifact.Git(context)
+	if err != nil {
+		return nil, err
+	}
+
+	goBin, err := artifact.GoBin(context)
+	if err != nil {
+		return nil, err
+	}
+
+	goimports, err := artifact.Goimports(context)
+	if err != nil {
+		return nil, err
+	}
+
+	gopls, err := artifact.Gopls(context)
+	if err != nil {
+		return nil, err
+	}
+
+	staticcheck, err := artifact.Staticcheck(context)
+	if err != nil {
+		return nil, err
+	}
+
+	artifacts := []*string{git, goBin, goimports, gopls}
+
+	if b.includeProtoc {
+		protoc, err := artifact.Protoc(context)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, protoc)
+	}
+
+	if b.includeProtocGenGo {
+		protocGenGo, err := artifact.ProtocGenGo(context)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, protocGenGo)
+	}
+
+	if b.includeProtocGenGoGRPC {
+		protocGenGoGRPC, err := artifact.ProtocGenGoGRPC(context)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, protocGenGoGRPC)
+	}
+
+	artifacts = append(artifacts, staticcheck)
+	artifacts = append(artifacts, b.artifacts...)
+
+	system := context.GetTarget()
+
+	goarch, err := GetGOARCH(system)
+	if err != nil {
+		return nil, err
+	}
+
+	goos, err := GetGOOS(system)
+	if err != nil {
+		return nil, err
+	}
+
+	environments := []string{
+		"CGO_ENABLED=0",
+		fmt.Sprintf("GOARCH=%s", *goarch),
+		fmt.Sprintf("GOOS=%s", *goos),
+	}
+	environments = append(environments, b.environments...)
+
+	devenv := artifact.NewDevelopmentEnvironment(b.name, b.systems).
+		WithArtifacts(artifacts).
+		WithEnvironments(environments)
+
+	if len(b.secrets) > 0 {
+		devenv = devenv.WithSecrets(b.secrets)
+	}
+
+	return devenv.Build(context)
+}

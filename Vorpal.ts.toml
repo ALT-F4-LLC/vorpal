@@ -1,0 +1,13 @@
+language = "typescript"
+
+[source]
+includes = [
+    "sdk/typescript/src",
+    "sdk/typescript/bun.lock",
+    "sdk/typescript/package.json",
+    "sdk/typescript/tsconfig.json"
+]
+
+[source.typescript]
+directory = "sdk/typescript"
+entrypoint = "src/vorpal.ts"

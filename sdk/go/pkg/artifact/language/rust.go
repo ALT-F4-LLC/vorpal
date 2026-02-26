@@ -176,7 +176,7 @@ func NewRust(name string, systems []api.ArtifactSystem) *Rust {
 }
 
 func (a *Rust) WithArtifacts(artifacts []*string) *Rust {
-	a.artifacts = artifacts
+	a.artifacts = append(a.artifacts, artifacts...)
 	return a
 }
 
@@ -191,7 +191,7 @@ func (a *Rust) WithCheck() *Rust {
 }
 
 func (a *Rust) WithEnvironments(environments []string) *Rust {
-	a.environments = environments
+	a.environments = append(a.environments, environments...)
 	return a
 }
 
@@ -551,4 +551,101 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 	return artifact.NewArtifact(builder.name, steps, systems).
 		WithSources(sources).
 		Build(context)
+}
+
+// ---------------------------------------------------------------------------
+// Rust Development Environment
+// ---------------------------------------------------------------------------
+
+type RustDevelopmentEnvironment struct {
+	artifacts    []*string
+	environments []string
+	name         string
+	secrets      map[string]string
+	systems      []api.ArtifactSystem
+
+	includeProtoc bool
+}
+
+func NewRustDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *RustDevelopmentEnvironment {
+	return &RustDevelopmentEnvironment{
+		artifacts:     []*string{},
+		environments:  []string{},
+		name:          name,
+		secrets:       map[string]string{},
+		systems:       systems,
+		includeProtoc: true,
+	}
+}
+
+func (b *RustDevelopmentEnvironment) WithArtifacts(artifacts []*string) *RustDevelopmentEnvironment {
+	b.artifacts = append(b.artifacts, artifacts...)
+	return b
+}
+
+func (b *RustDevelopmentEnvironment) WithEnvironments(environments []string) *RustDevelopmentEnvironment {
+	b.environments = append(b.environments, environments...)
+	return b
+}
+
+func (b *RustDevelopmentEnvironment) WithoutProtoc() *RustDevelopmentEnvironment {
+	b.includeProtoc = false
+	return b
+}
+
+func (b *RustDevelopmentEnvironment) WithSecrets(secrets map[string]string) *RustDevelopmentEnvironment {
+	for k, v := range secrets {
+		if _, exists := b.secrets[k]; !exists {
+			b.secrets[k] = v
+		}
+	}
+	return b
+}
+
+func (b *RustDevelopmentEnvironment) Build(context *config.ConfigContext) (*string, error) {
+	rustToolchain, err := artifact.RustToolchain(context)
+	if err != nil {
+		return nil, err
+	}
+
+	artifacts := []*string{}
+
+	if b.includeProtoc {
+		protoc, err := artifact.Protoc(context)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, protoc)
+	}
+
+	artifacts = append(artifacts, rustToolchain)
+	artifacts = append(artifacts, b.artifacts...)
+
+	system := context.GetTarget()
+
+	toolchainTarget, err := artifact.RustToolchainTarget(system)
+	if err != nil {
+		return nil, err
+	}
+
+	toolchainVersion := artifact.RustToolchainVersion()
+	toolchainName := fmt.Sprintf("%s-%s", toolchainVersion, *toolchainTarget)
+	toolchainBin := fmt.Sprintf("%s/toolchains/%s/bin", artifact.GetEnvKey(*rustToolchain), toolchainName)
+
+	environments := []string{
+		fmt.Sprintf("PATH=%s", toolchainBin),
+		fmt.Sprintf("RUSTUP_HOME=%s", artifact.GetEnvKey(*rustToolchain)),
+		fmt.Sprintf("RUSTUP_TOOLCHAIN=%s", toolchainName),
+	}
+	environments = append(environments, b.environments...)
+
+	devenv := artifact.NewDevelopmentEnvironment(b.name, b.systems).
+		WithArtifacts(artifacts).
+		WithEnvironments(environments)
+
+	if len(b.secrets) > 0 {
+		devenv = devenv.WithSecrets(b.secrets)
+	}
+
+	return devenv.Build(context)
 }

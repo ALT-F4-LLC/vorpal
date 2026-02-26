@@ -3,7 +3,7 @@ use crate::{
         agent::{agent_service_client::AgentServiceClient, PrepareArtifactRequest},
         artifact::{
             artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
-            ArtifactSystem, ArtifactsRequest, ArtifactsResponse,
+            ArtifactSystem, ArtifactsRequest, ArtifactsResponse, GetArtifactAliasRequest,
         },
         context::context_service_server::{ContextService, ContextServiceServer},
     },
@@ -397,6 +397,15 @@ impl ConfigContext {
     }
 
     pub async fn fetch_artifact(&mut self, digest: &str) -> Result<String> {
+        self.fetch_artifact_in_namespace(digest, &self.artifact_namespace.clone())
+            .await
+    }
+
+    async fn fetch_artifact_in_namespace(
+        &mut self,
+        digest: &str,
+        namespace: &str,
+    ) -> Result<String> {
         if self.store.artifact.contains_key(digest) {
             return Ok(digest.to_string());
         }
@@ -405,7 +414,7 @@ impl ConfigContext {
 
         let request = ArtifactRequest {
             digest: digest.to_string(),
-            namespace: self.artifact_namespace.clone(),
+            namespace: namespace.to_string(),
         };
 
         let mut request = Request::new(request.clone());
@@ -433,13 +442,58 @@ impl ConfigContext {
 
                 for step in artifact.steps.iter() {
                     for dep in step.artifacts.iter() {
-                        Box::pin(self.fetch_artifact(dep)).await?;
+                        Box::pin(self.fetch_artifact_in_namespace(dep, namespace)).await?;
                     }
                 }
 
                 Ok(digest.to_string())
             }
         }
+    }
+
+    pub async fn fetch_artifact_alias(&mut self, alias: &str) -> Result<String> {
+        let alias_parsed = parse_artifact_alias(alias)?;
+
+        let request = GetArtifactAliasRequest {
+            system: self.artifact_system.into(),
+            name: alias_parsed.name,
+            namespace: alias_parsed.namespace.clone(),
+            tag: alias_parsed.tag,
+        };
+
+        let mut request = Request::new(request);
+        let request_auth = client_auth_header(&self.registry).await?;
+
+        if let Some(header) = request_auth {
+            request.metadata_mut().insert("authorization", header);
+        }
+
+        let response = self
+            .client_artifact
+            .get_artifact_alias(request)
+            .await
+            .map_err(|status| {
+                if status.code() == NotFound {
+                    anyhow!("alias not found in registry: {}", alias)
+                } else {
+                    anyhow!("registry error: {:?}", status)
+                }
+            })?;
+
+        let digest = response.into_inner().digest;
+
+        if digest.is_empty() {
+            bail!("registry returned empty digest for alias: {}", alias);
+        }
+
+        if self.store.artifact.contains_key(&digest) {
+            return Ok(digest);
+        }
+
+        self.fetch_artifact_in_namespace(&digest, &alias_parsed.namespace)
+            .await?;
+
+        Ok(digest)
     }
 
     pub fn get_artifact_store(&self) -> HashMap<String, Artifact> {

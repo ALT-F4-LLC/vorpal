@@ -2,7 +2,7 @@ use crate::{
     api::artifact::{ArtifactStepSecret, ArtifactSystem},
     artifact::{
         get_env_key, protoc::Protoc, rust_toolchain, rust_toolchain::RustToolchain, step, Artifact,
-        ArtifactSource,
+        ArtifactSource, DevelopmentEnvironment,
     },
     context::ConfigContext,
 };
@@ -468,5 +468,95 @@ impl<'a> Rust<'a> {
             .with_sources(vec![source])
             .build(context)
             .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rust Development Environment
+// ---------------------------------------------------------------------------
+
+pub struct RustDevelopmentEnvironment<'a> {
+    artifacts: Vec<String>,
+    environments: Vec<String>,
+    include_protoc: bool,
+    name: &'a str,
+    secrets: Vec<(&'a str, &'a str)>,
+    systems: Vec<ArtifactSystem>,
+}
+
+impl<'a> RustDevelopmentEnvironment<'a> {
+    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+        Self {
+            artifacts: vec![],
+            environments: vec![],
+            include_protoc: true,
+            name,
+            secrets: vec![],
+            systems,
+        }
+    }
+
+    pub fn with_artifacts(mut self, artifacts: Vec<String>) -> Self {
+        self.artifacts.extend(artifacts);
+        self
+    }
+
+    pub fn with_environments(mut self, environments: Vec<String>) -> Self {
+        self.environments.extend(environments);
+        self
+    }
+
+    pub fn without_protoc(mut self) -> Self {
+        self.include_protoc = false;
+        self
+    }
+
+    pub fn with_secrets(mut self, secrets: Vec<(&'a str, &'a str)>) -> Self {
+        for secret in secrets {
+            if !self.secrets.iter().any(|(name, _)| *name == secret.0) {
+                self.secrets.push(secret);
+            }
+        }
+        self
+    }
+
+    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+        let rust_toolchain_digest = RustToolchain::new().build(context).await?;
+
+        let mut artifacts = vec![];
+
+        if self.include_protoc {
+            let protoc = Protoc::new().build(context).await?;
+            artifacts.push(protoc);
+        }
+
+        artifacts.push(rust_toolchain_digest.clone());
+        artifacts.extend(self.artifacts);
+
+        let toolchain_target = rust_toolchain::target(context.get_system())?;
+        let toolchain_version = rust_toolchain::version();
+        let toolchain_name = format!("{toolchain_version}-{toolchain_target}");
+        let toolchain_bin = format!(
+            "{}/toolchains/{toolchain_name}/bin",
+            get_env_key(&rust_toolchain_digest)
+        );
+
+        let mut environments = vec![
+            format!("PATH={toolchain_bin}"),
+            format!("RUSTUP_HOME={}", get_env_key(&rust_toolchain_digest)),
+            format!("RUSTUP_TOOLCHAIN={toolchain_name}"),
+        ];
+
+        environments.extend(self.environments);
+
+        let mut devenv = DevelopmentEnvironment::new(self.name, self.systems)
+            .with_artifacts(artifacts)
+            .with_environments(environments);
+
+        if !self.secrets.is_empty() {
+            devenv = devenv.with_secrets(self.secrets);
+        }
+
+        devenv.build(context).await
     }
 }

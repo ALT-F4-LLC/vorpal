@@ -29,7 +29,7 @@ use vorpal_sdk::{
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
-        language::{go::Go, rust::Rust},
+        language::{go::Go, rust::Rust, typescript::TypeScript},
         protoc::Protoc,
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
@@ -465,11 +465,71 @@ pub async fn run(
             builder.build(&mut config_context).await?
         }
 
-        _ => "".to_string(),
+        "typescript" => {
+            let entrypoint = config
+                .source
+                .as_ref()
+                .and_then(|s| s.typescript.as_ref())
+                .and_then(|t| t.entrypoint.as_ref())
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| format!("src/{}.ts", config.name));
+
+            let mut includes = vec![
+                "bun.lock",
+                "bun.lockb",
+                "package.json",
+                "tsconfig.json",
+                &entrypoint,
+            ];
+
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                if !i.is_empty() {
+                    includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+                }
+            }
+
+            let mut builder = TypeScript::new(&config.name, vec![config_system])
+                .with_entrypoint(&entrypoint)
+                .with_includes(includes);
+
+            if !config.environments.is_empty() {
+                builder = builder
+                    .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
+            }
+
+            let working_dir = config
+                .source
+                .as_ref()
+                .and_then(|s| s.typescript.as_ref())
+                .and_then(|t| t.directory.as_ref());
+
+            if let Some(directory) = working_dir {
+                builder = builder.with_working_dir(directory);
+            }
+
+            builder.build(&mut config_context).await?
+        }
+
+        other => {
+            bail!(
+                "Unsupported language '{}' in Vorpal.toml\n\n  \
+                 Supported languages are: go, rust, typescript\n\n  \
+                 To fix this, update the 'language' field in your Vorpal.toml:\n    \
+                 language = \"typescript\"  # or \"rust\" or \"go\"",
+                other
+            );
+        }
     };
 
     if config_digest.is_empty() {
-        bail!("no config digest found");
+        bail!(
+            "No config digest was produced for language '{}'\n\n  \
+             The config build completed but did not return a valid artifact digest.\n  \
+             This may indicate an internal error in the {} language builder.\n\n  \
+             Try running with --level debug for more details.",
+            config.language,
+            config.language
+        );
     }
 
     // Prepare lock path early for incremental artifact updates
@@ -505,7 +565,20 @@ pub async fn run(
     let config_file = Path::new(&config_file);
 
     if !config_file.exists() {
-        error!("config not found: {}", config_file.display());
+        let lang_hint = match config.language.as_str() {
+            "typescript" => {
+                "\n\n  For TypeScript configs, this means the bun build --compile step\n  \
+                             may have failed silently, or the binary was not placed in the\n  \
+                             expected output location.\n\n  \
+                             Try rebuilding with --level debug to see the full build output."
+            }
+            _ => "",
+        };
+        error!(
+            "Compiled config binary not found: {}{}\n",
+            config_file.display(),
+            lang_hint
+        );
         exit(1);
     }
 

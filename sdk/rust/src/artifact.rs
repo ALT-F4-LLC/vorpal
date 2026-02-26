@@ -2,6 +2,7 @@ use crate::{api, context};
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
+pub mod bun;
 pub mod cargo;
 pub mod clippy;
 pub mod crane;
@@ -15,7 +16,9 @@ pub mod language;
 pub mod linux_debian;
 pub mod linux_vorpal;
 pub mod linux_vorpal_slim;
+pub mod nodejs;
 pub mod oci_image;
+pub mod pnpm;
 pub mod protoc;
 pub mod protoc_gen_go;
 pub mod protoc_gen_go_grpc;
@@ -77,7 +80,7 @@ pub struct Process<'a> {
     pub systems: Vec<api::artifact::ArtifactSystem>,
 }
 
-pub struct ProjectEnvironment<'a> {
+pub struct DevelopmentEnvironment<'a> {
     pub artifacts: Vec<String>,
     pub environments: Vec<String>,
     pub name: &'a str,
@@ -296,7 +299,7 @@ impl<'a> Job<'a> {
     }
 }
 
-impl<'a> ProjectEnvironment<'a> {
+impl<'a> DevelopmentEnvironment<'a> {
     pub fn new(name: &'a str, systems: Vec<api::artifact::ArtifactSystem>) -> Self {
         Self {
             artifacts: vec![],

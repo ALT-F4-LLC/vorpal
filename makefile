@@ -100,6 +100,21 @@ generate:
 		--go-grpc_out=sdk/go/pkg/api \
 		--proto_path=sdk/rust/api \
 		worker/worker.proto
+	rm -rfv sdk/typescript/src/api
+	mkdir -pv sdk/typescript/src/api
+	protoc \
+		--plugin=protoc-gen-ts_proto=sdk/typescript/node_modules/.bin/protoc-gen-ts_proto \
+		--ts_proto_out=sdk/typescript/src/api \
+		--ts_proto_opt=outputServices=grpc-js \
+		--ts_proto_opt=esModuleInterop=true \
+		--ts_proto_opt=snakeToCamel=false \
+		--ts_proto_opt=forceLong=number \
+		--ts_proto_opt=useOptionals=messages \
+		--ts_proto_opt=oneof=unions \
+		--ts_proto_opt=env=node \
+		--ts_proto_opt=importSuffix=.js \
+		--proto_path=sdk/rust/api \
+		agent/agent.proto artifact/artifact.proto archive/archive.proto context/context.proto worker/worker.proto
 
 # Development (with Vorpal)
 
