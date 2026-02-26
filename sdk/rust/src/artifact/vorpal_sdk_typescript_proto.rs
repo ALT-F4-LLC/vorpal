@@ -17,7 +17,7 @@ impl VorpalSdkTypeScriptProto {
     }
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
-        let name = "protoc-gen-ts-proto";
+        let name = "vorpal-sdk-typescript-proto";
 
         // Build dependencies
         let protoc = Protoc::new().build(context).await?;
