@@ -518,15 +518,11 @@ async fn prepare_artifact(
         // Single lock acquisition to check both caches
         let cached_digest = {
             let cache = source_cache.lock().await;
-            cache
-                .by_key
-                .get(&cache_key)
-                .cloned()
-                .or_else(|| {
-                    url_cache_key
-                        .as_ref()
-                        .and_then(|key| cache.by_url.get(key).cloned())
-                })
+            cache.by_key.get(&cache_key).cloned().or_else(|| {
+                url_cache_key
+                    .as_ref()
+                    .and_then(|key| cache.by_url.get(key).cloned())
+            })
         };
 
         let artifact_source_digest = if let Some(digest) = cached_digest {
@@ -535,7 +531,12 @@ async fn prepare_artifact(
                 artifact_source.name, target_platform, digest
             );
             // Backfill the full key if the hit came from the URL cache
-            source_cache.lock().await.by_key.entry(cache_key).or_insert(digest.clone());
+            source_cache
+                .lock()
+                .await
+                .by_key
+                .entry(cache_key)
+                .or_insert(digest.clone());
             digest
         } else {
             let digest = build_source(
