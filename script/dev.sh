@@ -2,9 +2,10 @@
 set -euo pipefail
 
 export ENV_PATH="${PWD}/.env"
+export PATH="${ENV_PATH}/bin:${HOME}/.cargo/bin:$PATH"
 readonly SCRIPT_PATH="${PWD}/script"
 
-scripts=("rustup" "protoc" "terraform")
+scripts=("xz" "amber" "rustup" "protoc" "terraform")
 
 if [[ "$(uname -s)" == "Linux" ]]; then
     . /etc/os-release
@@ -27,6 +28,5 @@ do
   "${SCRIPT_PATH}/dev/${script}.sh" "${ENV_PATH}"
 done
 
-export PATH="${ENV_PATH}/bin:${HOME}/.cargo/bin:$PATH"
 
 "$@"
