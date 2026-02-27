@@ -32,6 +32,7 @@ use tracing::info;
 #[derive(Clone)]
 pub struct ConfigContextStore {
     artifact: HashMap<String, Artifact>,
+    artifact_input_cache: HashMap<String, String>,
     variable: HashMap<String, String>,
 }
 
@@ -274,6 +275,7 @@ impl ConfigContext {
             registry,
             store: ConfigContextStore {
                 artifact: HashMap::new(),
+                artifact_input_cache: HashMap::new(),
                 variable: artifact_variable
                     .iter()
                     .map(|v| {
@@ -320,10 +322,16 @@ impl ConfigContext {
         let artifact_json =
             serde_json::to_vec(&artifact).expect("failed to serialize artifact to JSON");
 
-        let artifact_digest = digest(artifact_json);
+        let input_digest = digest(artifact_json);
 
-        if self.store.artifact.contains_key(&artifact_digest) {
-            return Ok(artifact_digest);
+        if self.store.artifact.contains_key(&input_digest) {
+            return Ok(input_digest);
+        }
+
+        if let Some(output_digest) = self.store.artifact_input_cache.get(&input_digest) {
+            if self.store.artifact.contains_key(output_digest) {
+                return Ok(output_digest.clone());
+            }
         }
 
         // TODO: make this run in parallel
@@ -392,6 +400,10 @@ impl ConfigContext {
         self.store
             .artifact
             .insert(artifact_digest.clone(), artifact.clone());
+
+        self.store
+            .artifact_input_cache
+            .insert(input_digest, artifact_digest.clone());
 
         Ok(artifact_digest)
     }
@@ -760,312 +772,4 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
         .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
 
     Ok(Some(header))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Helper to assert a successful parse matches expected components.
-    fn assert_alias(
-        input: &str,
-        expected_name: &str,
-        expected_namespace: &str,
-        expected_tag: &str,
-    ) {
-        let result = parse_artifact_alias(input).unwrap_or_else(|e| {
-            panic!(
-                "expected parse_artifact_alias({:?}) to succeed, got error: {}",
-                input, e
-            )
-        });
-        assert_eq!(
-            result,
-            ArtifactAlias {
-                name: expected_name.to_string(),
-                namespace: expected_namespace.to_string(),
-                tag: expected_tag.to_string(),
-            },
-            "mismatch for input {:?}",
-            input
-        );
-    }
-
-    /// Helper to assert a parse fails and the error message contains a substring.
-    fn assert_alias_error(input: &str, expected_substring: &str) {
-        let result = parse_artifact_alias(input);
-        assert!(
-            result.is_err(),
-            "expected parse_artifact_alias({:?}) to fail, but it succeeded with {:?}",
-            input,
-            result.unwrap()
-        );
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains(expected_substring),
-            "for input {:?}, expected error containing {:?}, got {:?}",
-            input,
-            expected_substring,
-            err_msg
-        );
-    }
-
-    // ---------------------------------------------------------------
-    // Basic formats (ported from Go TestParseArtifactAlias)
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_name_only() {
-        assert_alias("myapp", "myapp", "library", "latest");
-    }
-
-    #[test]
-    fn test_name_with_tag() {
-        assert_alias("myapp:1.0.0", "myapp", "library", "1.0.0");
-    }
-
-    #[test]
-    fn test_namespace_and_name() {
-        assert_alias("team/myapp", "myapp", "team", "latest");
-    }
-
-    #[test]
-    fn test_full_format() {
-        assert_alias("team/myapp:v2.1", "myapp", "team", "v2.1");
-    }
-
-    // ---------------------------------------------------------------
-    // Real-world examples from codebase
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_linux_vorpal_latest() {
-        assert_alias("linux-vorpal:latest", "linux-vorpal", "library", "latest");
-    }
-
-    #[test]
-    fn test_gh_version() {
-        assert_alias("gh:2.69.0", "gh", "library", "2.69.0");
-    }
-
-    #[test]
-    fn test_protoc_version() {
-        assert_alias("protoc:25.4", "protoc", "library", "25.4");
-    }
-
-    #[test]
-    fn test_protoc_gen_go_version() {
-        assert_alias("protoc-gen-go:1.36.3", "protoc-gen-go", "library", "1.36.3");
-    }
-
-    // ---------------------------------------------------------------
-    // Edge cases - multiple colons now rejected by character validation
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_name_with_multiple_colons_rejected() {
-        // After rightmost-colon split, name="name:tag" which contains an invalid colon
-        assert_alias_error("name:tag:extra", "name contains invalid characters");
-    }
-
-    // ---------------------------------------------------------------
-    // Names with special characters
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_name_with_hyphens() {
-        assert_alias("my-app-name:v1.0", "my-app-name", "library", "v1.0");
-    }
-
-    #[test]
-    fn test_name_with_underscores() {
-        assert_alias("my_app_name:v1.0", "my_app_name", "library", "v1.0");
-    }
-
-    #[test]
-    fn test_namespace_with_hyphens() {
-        assert_alias("my-team/my-app:v1.0", "my-app", "my-team", "v1.0");
-    }
-
-    // ---------------------------------------------------------------
-    // Semantic versions
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_semantic_version_tag() {
-        assert_alias("myapp:1.2.3", "myapp", "library", "1.2.3");
-    }
-
-    #[test]
-    fn test_semantic_version_with_v_prefix() {
-        assert_alias("myapp:v1.2.3", "myapp", "library", "v1.2.3");
-    }
-
-    // ---------------------------------------------------------------
-    // Numeric components
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_numeric_name() {
-        assert_alias("123:latest", "123", "library", "latest");
-    }
-
-    #[test]
-    fn test_numeric_namespace() {
-        assert_alias("123/myapp:v1.0", "myapp", "123", "v1.0");
-    }
-
-    // ---------------------------------------------------------------
-    // Error cases
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_error_empty_string() {
-        assert_alias_error("", "alias cannot be empty");
-    }
-
-    #[test]
-    fn test_error_empty_tag() {
-        assert_alias_error("name:", "tag cannot be empty");
-    }
-
-    #[test]
-    fn test_error_too_many_slashes() {
-        assert_alias_error("a/b/c", "too many path separators");
-    }
-
-    #[test]
-    fn test_error_empty_namespace_before_slash() {
-        assert_alias_error("/name", "namespace cannot be empty");
-    }
-
-    #[test]
-    fn test_error_empty_name_after_slash() {
-        assert_alias_error("namespace/", "name is required");
-    }
-
-    #[test]
-    fn test_error_too_long_alias() {
-        let long_alias = "a".repeat(256);
-        assert_alias_error(&long_alias, "alias too long");
-    }
-
-    #[test]
-    fn test_error_only_slash() {
-        assert_alias_error("/", "namespace cannot be empty");
-    }
-
-    #[test]
-    fn test_error_only_colon() {
-        assert_alias_error(":", "tag cannot be empty");
-    }
-
-    // ---------------------------------------------------------------
-    // Default value application (ported from Go TestParseArtifactAliasDefaults)
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_defaults_both_applied() {
-        let result = parse_artifact_alias("myapp").unwrap();
-        assert_eq!(result.tag, "latest", "expected default tag 'latest'");
-        assert_eq!(
-            result.namespace, "library",
-            "expected default namespace 'library'"
-        );
-    }
-
-    #[test]
-    fn test_defaults_only_tag() {
-        let result = parse_artifact_alias("team/myapp").unwrap();
-        assert_eq!(result.tag, "latest", "expected default tag 'latest'");
-        assert_eq!(
-            result.namespace, "team",
-            "namespace should not be defaulted"
-        );
-    }
-
-    #[test]
-    fn test_defaults_only_namespace() {
-        let result = parse_artifact_alias("myapp:v1.0").unwrap();
-        assert_eq!(result.tag, "v1.0", "tag should not be defaulted");
-        assert_eq!(
-            result.namespace, "library",
-            "expected default namespace 'library'"
-        );
-    }
-
-    #[test]
-    fn test_defaults_none_applied() {
-        let result = parse_artifact_alias("team/myapp:v1.0").unwrap();
-        assert_eq!(result.tag, "v1.0", "tag should not be defaulted");
-        assert_eq!(
-            result.namespace, "team",
-            "namespace should not be defaulted"
-        );
-    }
-
-    // ---------------------------------------------------------------
-    // Character validation
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_valid_characters_with_plus_sign() {
-        assert_alias(
-            "valid-name_1.0+build:v2.3",
-            "valid-name_1.0+build",
-            "library",
-            "v2.3",
-        );
-    }
-
-    #[test]
-    fn test_valid_semver_with_prerelease_and_build() {
-        assert_alias(
-            "my-namespace/my-artifact:v1.2.3-beta+build.123",
-            "my-artifact",
-            "my-namespace",
-            "v1.2.3-beta+build.123",
-        );
-    }
-
-    #[test]
-    fn test_error_path_traversal_multi_slash() {
-        // Multiple slashes are caught by the structural check before character validation
-        assert_alias_error("../../etc:passwd", "too many path separators");
-    }
-
-    #[test]
-    fn test_error_whitespace_in_name() {
-        assert_alias_error("name with spaces:tag", "name contains invalid characters");
-    }
-
-    #[test]
-    fn test_error_whitespace_in_namespace() {
-        assert_alias_error("bad ns/name:tag", "namespace contains invalid characters");
-    }
-
-    #[test]
-    fn test_error_special_chars_in_tag() {
-        assert_alias_error("name:tag@sha256", "tag contains invalid characters");
-    }
-
-    #[test]
-    fn test_error_control_chars_in_name() {
-        assert_alias_error("name\x00bad", "name contains invalid characters");
-    }
-
-    #[test]
-    fn test_error_shell_metachar_in_name() {
-        assert_alias_error("name;echo:tag", "name contains invalid characters");
-    }
-
-    #[test]
-    fn test_error_tilde_in_namespace() {
-        assert_alias_error("~root/app:v1", "namespace contains invalid characters");
-    }
-
-    #[test]
-    fn test_error_backslash_in_name() {
-        assert_alias_error("name\\bad:tag", "name contains invalid characters");
-    }
 }

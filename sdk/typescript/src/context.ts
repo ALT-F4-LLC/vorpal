@@ -490,6 +490,7 @@ export function parseArtifactAlias(alias: string): ArtifactAlias {
 
 interface ConfigContextStore {
   artifact: Map<string, ArtifactMsg>;
+  artifactInputCache: Map<string, string>;
   variable: Map<string, string>;
 }
 
@@ -623,6 +624,7 @@ export class ConfigContext {
       args.registry,
       {
         artifact: new Map(),
+        artifactInputCache: new Map(),
         variable: variables,
       },
     );
@@ -665,6 +667,13 @@ export class ConfigContext {
     if (this._store.artifact.has(artifactDigest)) {
       return artifactDigest;
     }
+
+    const cachedOutputDigest = this._store.artifactInputCache.get(artifactDigest);
+    if (cachedOutputDigest && this._store.artifact.has(cachedOutputDigest)) {
+      return cachedOutputDigest;
+    }
+
+    const inputDigest = artifactDigest;
 
     // Send to agent for preparation
     const request: PrepareArtifactRequest = {
@@ -747,6 +756,7 @@ export class ConfigContext {
     }
 
     this._store.artifact.set(responseArtifactDigest, responseArtifact);
+    this._store.artifactInputCache.set(inputDigest, responseArtifactDigest);
 
     return responseArtifactDigest;
   }
