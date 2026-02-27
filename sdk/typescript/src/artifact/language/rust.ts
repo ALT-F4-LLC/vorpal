@@ -16,7 +16,7 @@ import { shell } from "../step.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-const RUST_TOOLCHAIN_VERSION = "1.89.0";
+const RUST_TOOLCHAIN_VERSION = "1.93.1";
 const PROTOC_ALIAS = "protoc:25.4";
 
 // ---------------------------------------------------------------------------
@@ -275,7 +275,7 @@ function buildMainScript(opts: {
   lines.push(`        cargo --offline test --bin \${bin_name} --release`);
   lines.push(`    fi`);
   lines.push(``);
-  lines.push(`    cp -pv ./target/release/\${bin_name} $VORPAL_OUTPUT/bin/`);
+  lines.push(`    cp -p ./target/release/\${bin_name} $VORPAL_OUTPUT/bin/`);
   lines.push(`done`);
 
   return lines.join("\n");

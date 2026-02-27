@@ -144,7 +144,7 @@ for bin_name in ${{"{"}}bin_names{{"["}}@{{"]"}}{{"}"}}; do
         cargo --offline test --bin ${{"{"}}bin_name{{"}"}} --release
     fi
 
-    cp -pv ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
+    cp -p ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
 done`
 
 func stripPrefix(path, prefix string) string {

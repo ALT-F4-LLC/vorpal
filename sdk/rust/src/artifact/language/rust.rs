@@ -440,7 +440,7 @@ impl<'a> Rust<'a> {
                     cargo --offline test --bin ${{bin_name}} --release
                 fi
 
-                cp -pv ./target/release/${{bin_name}} $VORPAL_OUTPUT/bin/
+                cp -p ./target/release/${{bin_name}} $VORPAL_OUTPUT/bin/
             done"#,
             bin_names = packages_bin_names.join(" "),
             enable_build = if self.build { "true" } else { "false" },

@@ -649,6 +649,28 @@ pub async fn run(
         .ok_or_else(|| anyhow!("selected 'artifact' not found: {}", artifact.name))?;
 
     if artifact.rebuild {
+        // Remove artifact configuration output for rebuild
+
+        let config_artifact_output_lock_path =
+            get_artifact_output_lock_path(&config_digest, &artifact.namespace);
+
+        if config_artifact_output_lock_path.exists() {
+            remove_file(&config_artifact_output_lock_path)
+                .await
+                .expect("failed to remove config artifact lock file");
+        }
+
+        let config_artifact_output_path =
+            get_artifact_output_path(&config_digest, &artifact.namespace);
+
+        if config_artifact_output_path.exists() {
+            remove_dir_all(&config_artifact_output_path)
+                .await
+                .expect("failed to remove config artifact path");
+        }
+
+        // Remove selected artifact output for rebuild
+
         let artifact_output_lock_path =
             get_artifact_output_lock_path(&selected_artifact_digest, &artifact.namespace);
 

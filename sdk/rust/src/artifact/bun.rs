@@ -50,7 +50,7 @@ impl Bun {
 
         let step_script = formatdoc! {"
             mkdir -pv \"$VORPAL_OUTPUT/bin\"
-            cp -pv \"./source/{name}/bun-{source_target}/bun\" \"$VORPAL_OUTPUT/bin/bun\"
+            cp -p \"./source/{name}/bun-{source_target}/bun\" \"$VORPAL_OUTPUT/bin/bun\"
             chmod +x \"$VORPAL_OUTPUT/bin/bun\"
         "};
         let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];

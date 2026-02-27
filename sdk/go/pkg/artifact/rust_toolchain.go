@@ -28,7 +28,7 @@ func RustToolchainTarget(system api.ArtifactSystem) (*string, error) {
 }
 
 func RustToolchainVersion() string {
-	return "1.89.0"
+	return "1.93.1"
 }
 
 func RustToolchain(context *config.ConfigContext) (*string, error) {
