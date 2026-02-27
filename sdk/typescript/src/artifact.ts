@@ -900,7 +900,7 @@ export class OciImage {
       }
     }
 
-    const crane = await context.fetchArtifactAlias("crane:0.20.7");
+    const crane = await context.fetchArtifactAlias("crane:0.21.1");
     const rsync = await context.fetchArtifactAlias("rsync:3.4.1");
 
     const artifactsList = this._artifacts.join(" ");

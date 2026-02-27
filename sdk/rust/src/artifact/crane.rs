@@ -15,7 +15,7 @@ impl Crane {
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "crane";
-        let version = "0.20.7";
+        let version = "0.21.1";
 
         let source_path = format!(
             "https://github.com/google/go-containerregistry/archive/refs/tags/v{version}.tar.gz"

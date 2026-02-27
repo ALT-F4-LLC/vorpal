@@ -6,7 +6,7 @@ use crate::{
 use anyhow::{bail, Result};
 use indoc::formatdoc;
 
-pub const DEFAULT_BUN_VERSION: &str = "1.2.0";
+pub const DEFAULT_BUN_VERSION: &str = "1.3.10";
 
 pub struct Bun {
     version: String,

@@ -26,7 +26,7 @@ impl Protoc {
             _ => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "25.4";
+        let source_version = "34.0";
         let source_path = format!("https://github.com/protocolbuffers/protobuf/releases/download/v{source_version}/protoc-{source_version}-{source_target}.zip");
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 

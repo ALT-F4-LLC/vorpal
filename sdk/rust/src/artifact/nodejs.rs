@@ -26,7 +26,7 @@ impl NodeJS {
             _ => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "22.14.0";
+        let source_version = "22.22.0";
         let source_path = format!(
             "https://nodejs.org/dist/v{source_version}/node-v{source_version}-{source_target}.tar.gz"
         );

@@ -11,7 +11,7 @@ import {
 } from "../../artifact.js";
 import { shell } from "../step.js";
 
-const DEFAULT_BUN_ALIAS = "bun:1.2.0";
+const DEFAULT_BUN_ALIAS = "bun:1.3.10";
 
 export class TypeScript {
   private _aliases: string[] = [];

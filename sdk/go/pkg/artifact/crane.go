@@ -5,5 +5,5 @@ import (
 )
 
 func Crane(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifactAlias("crane:0.20.7")
+	return context.FetchArtifactAlias("crane:0.21.1")
 }

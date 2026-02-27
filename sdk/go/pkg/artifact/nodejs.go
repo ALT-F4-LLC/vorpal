@@ -5,5 +5,5 @@ import (
 )
 
 func NodeJS(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifactAlias("nodejs:22.14.0")
+	return context.FetchArtifactAlias("nodejs:22.22.0")
 }

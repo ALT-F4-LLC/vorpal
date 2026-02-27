@@ -5,5 +5,5 @@ import (
 )
 
 func Bun(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifactAlias("bun:1.2.0")
+	return context.FetchArtifactAlias("bun:1.3.10")
 }

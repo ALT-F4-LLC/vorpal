@@ -97,21 +97,21 @@ async function buildVorpalProcess(context: ConfigContext): Promise<string> {
 }
 
 async function buildVorpalShell(context: ConfigContext): Promise<string> {
-  const bun = await context.fetchArtifactAlias("bun:1.2.0");
-  const crane = await context.fetchArtifactAlias("crane:0.20.7");
-  const go = await context.fetchArtifactAlias("go:1.24.2");
-  const goimports = await context.fetchArtifactAlias("goimports:0.29.0");
-  const gopls = await context.fetchArtifactAlias("gopls:0.29.0");
+  const bun = await context.fetchArtifactAlias("bun:1.3.10");
+  const crane = await context.fetchArtifactAlias("crane:0.21.1");
+  const go = await context.fetchArtifactAlias("go:1.26.0");
+  const goimports = await context.fetchArtifactAlias("goimports:0.42.0");
+  const gopls = await context.fetchArtifactAlias("gopls:0.42.0");
   const grpcurl = await context.fetchArtifactAlias("grpcurl:1.9.3");
-  const nodejs = await context.fetchArtifactAlias("nodejs:22.14.0");
-  const pnpm = await context.fetchArtifactAlias("pnpm:10.5.2");
-  const protoc = await context.fetchArtifactAlias("protoc:25.4");
-  const protocGenGo = await context.fetchArtifactAlias("protoc-gen-go:1.36.3");
+  const nodejs = await context.fetchArtifactAlias("nodejs:22.22.0");
+  const pnpm = await context.fetchArtifactAlias("pnpm:10.30.3");
+  const protoc = await context.fetchArtifactAlias("protoc:34.0");
+  const protocGenGo = await context.fetchArtifactAlias("protoc-gen-go:1.36.11");
   const protocGenGoGrpc = await context.fetchArtifactAlias(
-    "protoc-gen-go-grpc:1.70.0",
+    "protoc-gen-go-grpc:1.79.1",
   );
   const staticcheck = await context.fetchArtifactAlias(
-    "staticcheck:2025.1.1",
+    "staticcheck:2026.1",
   );
 
   const goarch = getGoarch(context.getSystem());

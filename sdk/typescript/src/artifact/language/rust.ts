@@ -17,7 +17,7 @@ import { shell } from "../step.js";
 // ---------------------------------------------------------------------------
 
 const RUST_TOOLCHAIN_VERSION = "1.93.1";
-const PROTOC_ALIAS = "protoc:25.4";
+const PROTOC_ALIAS = "protoc:34.0";
 
 // ---------------------------------------------------------------------------
 // Cargo.toml parsing

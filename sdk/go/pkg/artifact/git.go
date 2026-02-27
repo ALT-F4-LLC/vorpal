@@ -5,5 +5,5 @@ import (
 )
 
 func Git(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifactAlias("git:2.52.0")
+	return context.FetchArtifactAlias("git:2.53.0")
 }

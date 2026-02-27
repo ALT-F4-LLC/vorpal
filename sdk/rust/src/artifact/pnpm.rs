@@ -27,7 +27,7 @@ impl Pnpm {
             _ => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "10.5.2";
+        let source_version = "10.30.3";
         let source_path = format!(
             "https://github.com/pnpm/pnpm/releases/download/v{source_version}/pnpm-{source_target}"
         );

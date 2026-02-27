@@ -17,7 +17,7 @@ impl Git {
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "git";
 
-        let source_version = "2.52.0";
+        let source_version = "2.53.0";
 
         let source_path =
             format!("https://www.kernel.org/pub/software/scm/git/git-{source_version}.tar.gz");
