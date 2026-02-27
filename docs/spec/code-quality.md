@@ -1,357 +1,429 @@
-# Code Quality Specification
+# Code Quality
 
-This document describes the coding standards, naming conventions, error handling patterns,
-design patterns, and project-specific style decisions that exist in the Vorpal codebase today.
-
----
-
-## 1. Languages and Runtimes
-
-The project is polyglot, with three primary implementation languages:
-
-| Language   | Role                        | Location(s)            | Toolchain                       |
-|------------|-----------------------------|------------------------|---------------------------------|
-| Rust       | CLI, SDK, config binaries   | `cli/`, `config/`, `sdk/rust/` | Rust 1.89.0 (pinned via `rust-toolchain.toml`) |
-| TypeScript | SDK (new)                   | `sdk/typescript/`      | TypeScript 5.9.3, Bun (tests), Node 16 module target |
-| Go         | SDK (separate repo tree)    | `sdk/go/` (not in this worktree but referenced) | Standard Go toolchain |
-| Protobuf   | API contract definitions    | `sdk/rust/api/`        | `protoc` with `tonic-prost-build` (Rust), `ts-proto` (TS), `protoc-gen-go` (Go) |
-
-Shell scripts (Bash) are used in build steps, CI, and operational tooling under `script/`.
+Project-specific coding standards, naming conventions, error handling patterns, design patterns in
+use, and style decisions for the Vorpal codebase.
 
 ---
 
-## 2. Formatter and Linter Configuration
+## Languages & Toolchains
 
-### 2.1 Rust
+Vorpal is a polyglot project with three SDK implementations that must produce **byte-identical
+artifact digests** for the same inputs. This parity constraint is the single most important code
+quality concern in the project.
 
-- **Formatter**: `rustfmt` (included in the pinned toolchain via `components = ["rustfmt"]`).
-  No custom `rustfmt.toml` or `.rustfmt.toml` exists -- the project uses default rustfmt settings.
-- **Linter**: `clippy` (included in the pinned toolchain via `components = ["clippy"]`).
-  No custom `clippy.toml` exists. Clippy is invoked with `--deny warnings` in CI
-  (`make lint` target: `cargo clippy $(CARGO_FLAGS) -- --deny warnings`).
-- **CI enforcement**: The `code-quality` job in `.github/workflows/vorpal.yaml` runs
-  `make format` (rustfmt check mode) and `make TARGET=release lint` (clippy deny warnings).
-  Code cannot merge with format or lint violations.
-- **Notable clippy allowances**: `#[allow(clippy::too_many_arguments)]` is used on a few
-  functions with large parameter lists (e.g., `ConfigContext::new`, `config::start`).
+| Language   | Version    | Role                                   |
+|------------|------------|----------------------------------------|
+| Rust       | 1.93.1     | CLI, services (agent/registry/worker), SDK, config binary |
+| Go         | 1.24.2     | SDK, config binary                     |
+| TypeScript | ES2022     | SDK (runs on Bun)                      |
+| Protobuf   | proto3     | API contract definitions               |
 
-### 2.2 TypeScript
+### Rust Toolchain
 
-- **Formatter**: None configured. No `.prettierrc`, `.editorconfig`, or ESLint config exists
-  at the project level for TypeScript code.
-- **Linter**: None configured. No ESLint or Biome config exists for the TypeScript SDK.
-- **TypeScript compiler**: `tsconfig.json` with `"strict": true`, `"forceConsistentCasingInFileNames": true`.
-  Target is `ES2022` with `Node16` module resolution.
-- **Gap**: The TypeScript SDK has no automated formatting or linting enforcement in CI.
-  Only `tsc` (type checking via `bun build`) and `bun test` are run.
+Pinned via `rust-toolchain.toml`:
 
-### 2.3 Shell Scripts
+```toml
+[toolchain]
+auto_self_update = "disable"
+channel = "1.93.1"
+components = [ "clippy", "rust-analyzer", "rustfmt" ]
+profile = "minimal"
+```
 
-- No shellcheck or shell linting configuration exists.
-- Shell scripts in `script/` use `#!/bin/bash` or `#!/usr/bin/env bash`.
-- Build step scripts consistently use `set -euo pipefail` for strict error handling.
+Components `clippy`, `rustfmt`, and `rust-analyzer` are mandated by the toolchain file but **no
+`rustfmt.toml`, `clippy.toml`, or `.clippy.conf`** files exist. The project relies on default
+Clippy and rustfmt rules.
 
-### 2.4 Protobuf
+One explicit Clippy override exists:
+- `#[allow(clippy::too_many_arguments)]` in `cli/src/command/config.rs:387` for the `start()`
+  function.
 
-- No `buf.yaml` or protobuf linting configuration exists.
-- Proto files follow standard proto3 conventions with `go_package` options.
+### Go Toolchain
 
----
+- Go 1.24.2 with minimal dependencies (TOML parser, UUID, gRPC, protobuf).
+- **No `.golangci.yml`** or linter configuration file. Standard `go vet` and `go build` are the
+  implicit quality gates.
+- No `gofmt`/`goimports` configuration beyond defaults.
 
-## 3. Naming Conventions
+### TypeScript Toolchain
 
-### 3.1 Rust
+- TypeScript 5.9.3 with strict mode enabled.
+- Bun as runtime and test runner (`bun test`).
+- ESM modules (`"type": "module"` in package.json, `"module": "Node16"` in tsconfig).
+- **No ESLint, Prettier, or other linter/formatter configuration.**
 
-- **Crate names**: `vorpal-cli`, `vorpal-sdk`, `vorpal-config` (kebab-case, prefixed with `vorpal-`).
-- **Module names**: `snake_case` (e.g., `linux_vorpal`, `protoc_gen_go`, `rust_toolchain`).
-- **Struct names**: `PascalCase` (e.g., `ConfigContext`, `ArtifactSource`, `RunArgsArtifact`).
-- **Function names**: `snake_case` (e.g., `get_default_address`, `build_channel`, `parse_artifact_alias`).
-- **Constants**: `SCREAMING_SNAKE_CASE` (e.g., `DEFAULT_NAMESPACE`, `DEFAULT_TAG`).
-- **Enum variants**: `PascalCase` (e.g., `CommandSystem::Keys`, `SettingsSource::Default`).
-- **Type aliases for generated code**: Proto-generated types are accessed through a nested
-  `api` module (`api::artifact::Artifact`, `api::agent::AgentServiceClient`).
-- **Builder pattern structs**: Named after the concept they build (e.g., `Artifact`, `ArtifactStep`,
-  `TypeScript`, `Go`, `Rust`) with `with_*` methods for optional configuration and a terminal
-  `build()` method.
-
-### 3.2 TypeScript
-
-- **File names**: `camelCase` or `kebab-case` for source files (e.g., `artifact.ts`, `context.ts`,
-  `step.ts`). Test files use `kebab-case` with `.test.ts` suffix in `__tests__/` directory.
-- **Class names**: `PascalCase` (e.g., `Artifact`,
-  `ArtifactSource`, `Job`, `Rust`, `TypeScript`).
-- **Function names**: `camelCase` (e.g., `getEnvKey`, `parseArtifactAlias`, `getSystemDefaultStr`).
-- **Constants**: `SCREAMING_SNAKE_CASE` (e.g., `DEFAULT_NAMESPACE`, `DEFAULT_TAG`,
-  `VORPAL_ROOT_DIR`).
-- **Private members**: Prefixed with underscore (e.g., `_name`, `_artifacts`, `_store`).
-- **Type imports**: Use `import type` for type-only imports, separating runtime from type imports.
-
-### 3.3 Protobuf
-
-- **Package names**: Dot-separated namespace (e.g., `vorpal.artifact`, `vorpal.agent`).
-- **Service names**: `PascalCase` with `Service` suffix (e.g., `ArtifactService`, `AgentService`).
-- **Message names**: `PascalCase` (e.g., `ArtifactSource`, `ArtifactStep`, `PrepareArtifactRequest`).
-- **Enum names**: `PascalCase` (e.g., `ArtifactSystem`).
-- **Enum values**: `SCREAMING_SNAKE_CASE` (e.g., `AARCH64_DARWIN`, `UNKNOWN_SYSTEM`).
-- **Field names**: `snake_case` (e.g., `artifact_namespace`, `artifact_unlock`).
-
-### 3.4 Configuration Files
-
-- **Project config**: `Vorpal.toml` (PascalCase prefix). Language-specific variants use a
-  dot-suffix: `Vorpal.go.toml`, `Vorpal.ts.toml`.
-- **Lock file**: `Vorpal.lock` (PascalCase prefix).
-- **TOML keys**: `snake_case` (e.g., `bun_version`, `source.typescript.entrypoint`).
+`tsconfig.json` enforces:
+```json
+{
+  "strict": true,
+  "forceConsistentCasingInFileNames": true,
+  "esModuleInterop": true,
+  "skipLibCheck": true
+}
+```
 
 ---
 
-## 4. Error Handling Patterns
+## Linter & Formatter Configuration
 
-### 4.1 Rust
+### What Exists
 
-The project uses `anyhow` for error handling throughout, with a consistent pattern:
+| Tool     | Config File       | Status                        |
+|----------|-------------------|-------------------------------|
+| Clippy   | (none)            | Included in toolchain, default rules |
+| rustfmt  | (none)            | Included in toolchain, default rules |
+| go vet   | (none)            | Implicit via Go toolchain     |
+| TSC      | `tsconfig.json`   | Strict mode enabled           |
 
-- **Result type**: `anyhow::Result<T>` is the standard return type for fallible functions.
-  No custom error types are defined; `anyhow::Error` is used exclusively.
-- **Error propagation**: The `?` operator is used for propagation. Context is added via
-  `.with_context(|| format!("..."))` or `.map_err(|e| anyhow!("..."))` at significant
-  boundaries.
-- **Validation errors**: `bail!()` is used for input validation failures (e.g., empty names,
-  unsupported systems, missing files). Error messages are descriptive and often multi-line
-  with remediation hints.
-- **Fatal errors**: `exit(1)` is used in a few places in the CLI after logging an error via
-  `tracing::error!()`. This pattern appears in stream processing loops where recovery is
-  not possible.
-- **`.expect()` usage**: Used for conditions that should never fail (e.g., serialization,
-  regex compilation, channel creation). Messages follow `"failed to ..."` format.
-- **gRPC error handling**: gRPC status codes are matched explicitly (e.g., `Code::NotFound`,
-  `Code::Unavailable`) with different handling per code. Non-NotFound errors are generally
-  treated as fatal.
+### What Does NOT Exist
 
-### 4.2 TypeScript
+- No `.editorconfig`
+- No `.eslintrc` / `eslint.config.js`
+- No `.prettierrc`
+- No `rustfmt.toml`
+- No `clippy.toml`
+- No `.golangci.yml`
+- No pre-commit hooks
+- No CI lint/format check pipeline (no `.github/workflows/` directory)
 
-- **Error type**: Standard `Error` with descriptive messages. No custom error classes.
-- **Error messages**: Multi-line format with context, explanation, and remediation steps
-  (matching the Rust pattern). Example:
-  ```typescript
-  throw new Error(
-    `Agent service is unavailable (connection refused or dropped).\n\n` +
-    `  Could not reach the agent at the configured address.\n\n` +
-    `  To fix this:\n` +
-    `    1. Make sure the Vorpal agent is running:\n` +
-    `         vorpal system services start\n`
-  );
-  ```
-- **gRPC error handling**: Mirrors the Rust approach -- explicit matching on `grpc.status`
-  codes (`NOT_FOUND`, `UNAVAILABLE`, `DEADLINE_EXCEEDED`) with specific error messages per code.
-- **Validation**: Guard clauses with `throw new Error(...)` at the top of functions for
-  precondition checks (e.g., empty name, empty steps, system not in supported list).
-
-### 4.3 Shell Scripts
-
-- Build step scripts use `set -euo pipefail` consistently.
-- No explicit error handling beyond the bash strict mode.
+**Gap:** There is no automated enforcement of formatting or linting. Quality currently depends
+on developer discipline and toolchain defaults.
 
 ---
 
-## 5. Design Patterns
+## Naming Conventions
 
-### 5.1 Builder Pattern
+### Rust
 
-The builder pattern is the dominant design pattern in both Rust and TypeScript SDKs.
-All artifact types use this pattern:
+- **Crates:** `vorpal-cli`, `vorpal-sdk`, `vorpal-config` (hyphenated kebab-case).
+- **Modules:** `snake_case` file names (`artifact.rs`, `linux_vorpal.rs`, `oci_image.rs`).
+- **Functions:** `snake_case` (`get_default_address`, `get_env_key`, `get_system_default_str`).
+- **Types:** `PascalCase` (`ArtifactSource`, `ArtifactStep`, `WorkerServer`).
+- **Enum variants:** `PascalCase` (`Command::Build`, `SettingsSource::Project`).
+- **Constants:** `SCREAMING_SNAKE_CASE` (`DEFAULT_CHUNKS_SIZE`, `DEFAULT_NAMESPACE`).
+- **Builder methods:** `with_*` prefix pattern (`with_artifacts`, `with_secrets`, `with_require`).
 
-**Rust**: Struct with `new()` constructor, `with_*()` chainable methods, and `async build()`
-terminal method that takes a `&mut ConfigContext`:
+### Go
 
+- **Packages:** `lowercase` single-word (`artifact`, `config`, `store`).
+- **Exported types:** `PascalCase` (`ConfigContext`, `ArtifactSource`, `DevelopmentEnvironment`).
+- **Exported functions:** `PascalCase` with `New` prefix for constructors
+  (`NewArtifact`, `NewProcess`, `NewCommand`).
+- **Unexported:** `camelCase` (`parseArtifactAlias`, `fetchArtifacts`, `refreshAccessToken`).
+- **Builder methods:** `With*` prefix pattern (`WithArtifacts`, `WithSecrets`, `WithRequire`).
+- **Test functions:** `Test` prefix with descriptive names
+  (`TestParseArtifactAlias`, `TestClientAuthHeaderValid`).
+
+### TypeScript
+
+- **Classes:** `PascalCase` (`Artifact`, `ArtifactSource`, `ConfigContext`).
+- **Functions:** `camelCase` (`getEnvKey`, `parseCliArgs`, `getSystem`).
+- **Private fields:** `_camelCase` prefix (`_name`, `_digest`, `_artifacts`).
+- **Files:** `camelCase.ts` (`artifact.ts`, `context.ts`, `system.ts`).
+- **Builder methods:** `with*` prefix pattern (`withArtifacts`, `withSecrets`, `withRequire`).
+
+### Protobuf
+
+- **Package:** `vorpal.<domain>` (`vorpal.artifact`, `vorpal.agent`).
+- **Messages:** `PascalCase` (`ArtifactSource`, `ArtifactStep`).
+- **Fields:** `snake_case` (`artifact_namespace`, `access_token`).
+- **Enums:** `SCREAMING_SNAKE_CASE` values (`AARCH64_DARWIN`, `X8664_LINUX`).
+- **Services:** `PascalCase` with `Service` suffix (`ArtifactService`, `WorkerService`).
+- **RPCs:** `PascalCase` verbs (`GetArtifact`, `StoreArtifact`, `BuildArtifact`).
+
+### Cross-Language Naming Parity
+
+Functions that must produce identical results across SDKs share consistent naming adapted to
+each language's conventions:
+
+| Concept          | Rust                  | Go                   | TypeScript           |
+|------------------|-----------------------|----------------------|----------------------|
+| Env key helper   | `get_env_key()`       | `GetEnvKey()`        | `getEnvKey()`        |
+| System default   | `get_system_default_str()` | `GetSystemDefaultStr()` | `getSystemDefaultStr()` |
+| Default address  | `get_default_address()` | (in `NewCommand()`)  | (in `parseCliArgs()`) |
+| Artifact builder | `Artifact::new()`     | `NewArtifact()`      | `new Artifact()`     |
+
+---
+
+## Error Handling Patterns
+
+### Rust
+
+- **`anyhow::Result`** used pervasively for application-level error handling in the CLI and SDK.
+- **`anyhow!()` and `bail!()`** macros for ad-hoc error creation.
+- **`.with_context()`** used for adding context to I/O and parsing errors (seen in config loading).
+- **`thiserror`** is a dependency but not visibly used for custom error types in the current codebase.
+- **gRPC errors:** Worker and service code uses `tonic::Status` with appropriate status codes
+  (`Status::invalid_argument`, `Status::internal`, `Status::not_found`, `Status::already_exists`).
+- **Process exits:** `std::process::exit(1)` used in CLI for fatal user-facing errors after
+  logging via `tracing::error!`.
+- **`.expect()`** used sparingly for truly unrecoverable initialization failures
+  (`ring::default_provider().install_default().expect(...)`).
+
+### Go
+
+- **Standard `error` returns** — no custom error types. All errors are plain `fmt.Errorf()`.
+- **Error wrapping** with `%w` verb used in most places (`fmt.Errorf("failed to ...: %w", err)`).
+- **`log.Fatal` / `log.Fatalf`** used at startup for unrecoverable errors (connection failures,
+  system detection).
+- **No sentinel errors** or error type assertions beyond checking `nil`.
+
+### TypeScript
+
+- **`throw new Error(...)`** for validation failures and missing requirements.
+- **Promise-based** async with `async/await` throughout.
+- **No custom error classes.**
+- TypeScript SDK comments include `@throws` annotations on builder methods.
+
+### Pattern: Errors Do Not Cross SDK Boundaries
+
+Each SDK handles errors locally. The config binary (Rust or Go) communicates with the CLI via
+gRPC status codes, not by propagating language-specific error types. The gRPC layer acts as the
+error boundary between components.
+
+---
+
+## Design Patterns
+
+### Builder Pattern (Core Pattern)
+
+The dominant design pattern across all three SDKs. Every artifact type uses a builder with:
+
+1. **Constructor** that takes required fields.
+2. **`with_*` methods** for optional fields (fluent chaining).
+3. **`build()` method** that produces the final protobuf message or registers with context.
+
+Example (Rust):
 ```rust
-TypeScript::new(&config.name, vec![config_system])
-    .with_includes(includes)
-    .with_bun_version(bun_version)
-    .with_entrypoint(entrypoint)
-    .build(&mut config_context)
-    .await?
+Artifact::new(name, steps, systems)
+    .with_aliases(aliases)
+    .with_sources(sources)
+    .build(context)
+    .await
 ```
 
-**TypeScript**: Class with constructor, `with*()` chainable methods returning `this`, and
-`async build()` terminal method that takes a `ConfigContext`:
+This pattern is replicated identically in Go and TypeScript. The builders are:
+`Artifact`, `ArtifactSource`, `ArtifactStep`, `Argument`, `Job`, `Process`,
+`DevelopmentEnvironment`, `UserEnvironment`, `OciImage`.
 
-```typescript
-new Rust("vorpal", SYSTEMS)
-    .withBins(["vorpal"])
-    .withIncludes(["cli", "sdk/rust"])
-    .withPackages(["vorpal-cli", "vorpal-sdk"])
-    .build(context);
+### Configuration Layering Pattern
+
+Settings resolution follows a three-layer precedence model:
+
+```
+CLI flags > Project config (Vorpal.toml) > User config (~/.vorpal/settings.json) > Built-in defaults
 ```
 
-Both SDKs implement the same set of builders: `Artifact`, `ArtifactSource`, `ArtifactStep`,
-`Job`, `Process`, `DevelopmentEnvironment`, `UserEnvironment`, `Argument`, plus language-specific
-builders (`Rust`, `Go`, `TypeScript`).
+Implemented via `ResolvedSettings::resolve()` in Rust with `SettingsSource` provenance tracking.
 
-### 5.2 Cross-SDK Parity
+### gRPC Service Pattern
 
-A critical design constraint: all three SDKs (Rust, Go, TypeScript) must produce
-**byte-identical JSON serialization** for the same artifact definition. This is because
-artifact digests (SHA-256 of the JSON-serialized artifact) serve as content-addressable
-identifiers throughout the system.
+- Services defined in protobuf with `tonic` (Rust) and `grpc-js` (Go/TypeScript).
+- Server-side streaming for long-running operations (`PrepareArtifact`, `BuildArtifact`).
+- Interceptors for authentication (`apply_auth_to_request`).
+- Channel-based message passing (`mpsc::channel`) for streaming responses.
 
-This manifests as:
-- Custom JSON serialization in TypeScript (`serializeArtifact()`) that matches Rust's
-  `serde_json::to_vec` output field-for-field (snake_case keys, proto field order, all
-  fields always present, enums as integers).
-- Deterministic sorting of secrets, symlinks, and other collections before building.
-- Parity test suites that verify identical digests across SDKs.
-- Comments like `// CRITICAL: Shell script template must be character-for-character identical`
-  appear throughout the TypeScript SDK.
+### Content-Addressable Storage
 
-### 5.3 gRPC Client-Server Architecture
+Artifacts are identified by SHA-256 digest of their JSON-serialized protobuf message. This is
+the core identity mechanism and must produce identical digests across all three SDKs.
 
-- Protobuf definitions serve as the single source of truth for all API contracts.
-- Proto files live in `sdk/rust/api/` and are compiled into each SDK via language-specific
-  code generators.
-- The Rust build uses `tonic-prost-build` in `build.rs` to generate code at compile time.
-- The TypeScript SDK uses `ts-proto` with specific options (`snakeToCamel=false`,
-  `forceLong=number`, `outputServices=grpc-js`).
+### Deterministic Output
 
-### 5.4 Module Organization
-
-**Rust crates:**
-- `vorpal-cli` (`cli/`): The main CLI binary. Organized as `command/` submodules corresponding
-  to CLI subcommands (`build`, `init`, `start`, `system`, `store`, etc.).
-- `vorpal-sdk` (`sdk/rust/`): The SDK library. Public API exposed through `lib.rs` with
-  `api` (generated), `artifact` (builders), `cli` (argument parsing), and `context` (runtime)
-  modules.
-- `vorpal-config` (`config/`): The project's own Vorpal configuration binary (dogfooding).
-  Organized around artifact types.
-
-**TypeScript SDK:**
-- `src/` root: Core modules (`artifact.ts`, `context.ts`, `cli.ts`, `system.ts`, `index.ts`).
-- `src/api/`: Generated protobuf code (gitignored, generated from `ts-proto`).
-- `src/artifact/`: Sub-builders (`step.ts`, `language/rust.ts`, `language/typescript.ts`).
-- `src/__tests__/`: Test files using Bun test runner.
-- `dist/`: Compiled output (gitignored).
-
-### 5.5 Config Resolution Pattern
-
-The CLI uses a three-layer config resolution: built-in defaults < user config
-(`~/.vorpal/settings.json`) < project config (`Vorpal.toml`). CLI flags override all.
-The `ResolvedSettings` struct tracks provenance (`SettingsSource::Default`, `User`, `Project`)
-for debugging.
+Multiple patterns ensure deterministic artifact digests:
+- Secrets sorted by name before building (`self.secrets.sort_by(...)`).
+- Symlinks sorted by source path.
+- `BTreeMap` used for ordered iteration (Rust credentials).
+- `SortedKeys()` helper in Go for deterministic map iteration.
 
 ---
 
-## 6. Code Style Conventions
+## Module Organization
 
-### 6.1 Rust Style
+### Rust Workspace
 
-- **Imports**: Grouped with `use` statements at the top of each file. External crate imports
-  first, then internal crate imports (`use crate::...`), then std library. No explicit
-  ordering enforcement beyond rustfmt defaults.
-- **Blank lines**: Used to separate logical sections within functions. Section comments like
-  `// Setup step` or `// Build artifact` are common.
-- **String formatting**: Uses `format!()` and `formatdoc!{}` (from `indoc` crate) for
-  multi-line strings. String interpolation via format macros is preferred over concatenation.
-- **Comments**: Sparse. Used primarily for:
-  - `TODO:` markers for known future work
-  - Section headers within long functions
-  - Doc comments on public API items (especially in the SDK)
-  - Inline explanations for non-obvious behavior
-- **Function signatures**: Long signatures use multi-line formatting. `#[allow(clippy::too_many_arguments)]`
-  is used rather than introducing parameter objects in most cases.
-- **Async**: `tokio` is the async runtime. `#[tokio::main]` on entry points.
-  `Box::pin()` is used for recursive async calls.
+```
+Cargo.toml              # Workspace root (members: cli, config, sdk/rust)
+cli/                    # vorpal-cli binary
+  src/
+    main.rs             # Entry point (tokio::main, delegates to command::run())
+    command.rs          # CLI command definitions (clap), dispatch logic
+    command/
+      build.rs          # Build command implementation
+      config.rs         # Config layer resolution, VorpalConfig structs
+      config_cmd.rs     # Config get/set/show subcommands
+      init.rs           # Project initialization
+      inspect.rs        # Artifact inspection
+      lock.rs           # Lock file management
+      run.rs            # Artifact execution
+      start/            # Service startup
+        auth.rs         # OAuth2 authentication
+        registry/       # Registry backends (local, S3)
+        worker.rs       # Worker service implementation
+      store/            # Local store management
+        archives.rs     # Compression (zstd)
+        hashes.rs       # Hash computation
+        notary.rs       # Secret encryption/decryption
+        paths.rs        # Store path helpers
+        temps.rs        # Temporary/sandbox file management
+      system/           # System management
+        keys.rs         # Key generation
+        prune.rs        # Store cleanup
+config/                 # vorpal-config binary
+  src/
+    main.rs             # Entry point, dispatches by artifact name
+    artifact/           # Per-artifact build definitions (vorpal, vorpal-job, etc.)
+sdk/rust/               # vorpal-sdk crate
+  api/                  # Protobuf definitions (.proto files)
+  build.rs              # Protobuf code generation (tonic-prost-build)
+  src/
+    lib.rs              # Public API (api, artifact, cli, context modules)
+    artifact.rs         # Builder types (Artifact, Job, Process, etc.)
+    artifact/           # Per-tool artifact definitions (one file per tool)
+    cli.rs              # SDK CLI argument parsing
+```
 
-### 6.2 TypeScript Style
+### Go SDK
 
-- **Imports**: Use `.js` extension in import paths (required for Node16 module resolution
-  with ESM). Type-only imports use `import type { ... }`.
-- **Class members**: Private members use `private` keyword and underscore prefix (`private _name`).
-- **JSDoc comments**: Used on public API items with `@param`, `@returns`, `@throws`, and
-  `@example` tags. Comments reference Rust source locations (e.g., `Matches Rust
-  sdk/rust/src/artifact.rs Artifact impl (lines 211-256)`).
-- **Section separators**: Horizontal rule comments (`// ---------------------------------------------------------------------------`)
-  used to visually separate major sections within files.
-- **Template literals**: Used for string interpolation and multi-line strings.
-- **Promise handling**: `new Promise<T>((resolve, reject) => ...)` wrappers around callback-based
-  gRPC APIs. Async/await for control flow.
-- **Module exports**: Centralized through `index.ts` barrel file with explicit re-exports.
-  Both value and type exports are included.
+```
+sdk/go/
+  go.mod
+  cmd/vorpal/
+    main.go             # Entry point, dispatches by artifact name
+    artifact/           # Per-artifact build definitions
+      builder.go        # Builder types (mirrors Rust artifact.rs)
+      step.go           # Step helpers (shell, bash, bwrap)
+      systems.go        # System constants
+      vorpal.go         # Vorpal artifact definition
+      vorpal_*.go       # Other artifact definitions
+  pkg/
+    api/                # Generated protobuf code (one package per service)
+    artifact/           # Artifact builder utilities
+    config/             # Context, command parsing, system detection
+    store/              # Store path helpers (hash, path, sandbox)
+```
 
-### 6.3 General Conventions
+### TypeScript SDK
 
-- **No docstrings on private/internal code** unless the behavior is non-obvious.
-- **Descriptive error messages** with multi-line format including context, diagnosis, and
-  fix suggestions. This is a deliberate project-wide pattern in both Rust and TypeScript.
-- **Deterministic output**: Collections are sorted before serialization throughout (secrets
-  by name, symlinks by source, artifact digests for listing).
-- **No magic numbers**: Version strings, default paths, and constants are named.
+```
+sdk/typescript/
+  package.json          # @altf4llc/vorpal-sdk
+  tsconfig.json
+  src/
+    index.ts            # Public API re-exports
+    artifact.ts         # Builder types (mirrors Rust artifact.rs)
+    artifact/
+      step.ts           # Step helpers
+      language/         # Language-specific builders (go, rust, typescript)
+    cli.ts              # CLI argument parsing
+    context.ts          # ConfigContext implementation
+    system.ts           # System detection utilities
+    api/                # Generated protobuf types
+```
 
----
+### Pattern: Mirror Structure
 
-## 7. Dependency Management
-
-### 7.1 Rust
-
-- **Workspace**: Cargo workspace with three members (`cli`, `config`, `sdk/rust`).
-  Resolver version 2.
-- **Version pinning**: Dependencies use exact versions (e.g., `anyhow = { version = "1.0.100" }`),
-  not semver ranges.
-- **Vendoring**: `cargo vendor --versioned-dirs` support via `make vendor` and `.cargo/config.toml`.
-  Offline builds supported via `--offline` flag in release mode.
-- **Dependency updates**: Renovate bot configured (`.github/renovate.json`) with weekly
-  lock file maintenance and semantic commit type `chore`.
-- **Toolchain pinning**: `rust-toolchain.toml` pins to Rust 1.89.0 with `profile = "minimal"`
-  and explicit components (`clippy`, `rust-analyzer`, `rustfmt`).
-
-### 7.2 TypeScript
-
-- **Package manager**: Bun (`bun.lock` lockfile format).
-- **Runtime dependencies**: `@bufbuild/protobuf`, `@grpc/grpc-js`, `smol-toml`.
-- **Dev dependencies**: `@types/bun`, `ts-proto`, `tsx`, `typescript`.
-- **Module system**: ESM (`"type": "module"` in `package.json`).
-- **Publishing**: Scoped package `@vorpal/sdk` with `"access": "public"`.
-
----
-
-## 8. CI Quality Gates
-
-The CI pipeline (`.github/workflows/vorpal.yaml`) enforces these quality gates:
-
-1. **vendor**: Dependency vendoring and `cargo check` (compilation check).
-2. **code-quality**: `cargo fmt --all --check` (format check) and
-   `cargo clippy -- --deny warnings` (lint check). Runs on macOS only.
-3. **build**: `cargo build`, `cargo test`, and `cargo dist` (packaging).
-4. **test**: End-to-end integration tests that build artifacts using all three SDKs
-   (Rust, Go, TypeScript) and verify cross-SDK digest parity.
-
-There is no separate CI job for TypeScript formatting, linting, or type checking.
-TypeScript quality is indirectly validated through the build process (which uses `tsc`)
-and `bun test` (which runs the SDK test suite).
-
----
-
-## 9. Known Gaps and Improvement Opportunities
-
-| Area | Gap | Impact |
-|------|-----|--------|
-| TypeScript linting | No ESLint/Biome configuration | Inconsistent TS code style possible |
-| TypeScript formatting | No Prettier/dprint configuration | No automated format enforcement |
-| TypeScript CI | No dedicated TS quality job | TS issues caught late or not at all |
-| Shell linting | No shellcheck integration | Shell script bugs not caught statically |
-| Protobuf linting | No buf.yaml or protolint | Proto style not enforced |
-| Editor config | No `.editorconfig` file | Inconsistent indentation/line endings across editors |
-| Clippy config | No `clippy.toml` customization | Using all defaults, no project-specific tuning |
-| Rustfmt config | No `rustfmt.toml` customization | Using all defaults (acceptable but undocumented) |
-| Custom error types | `anyhow::Error` used everywhere | All errors are opaque strings; no structured error matching possible for callers |
-| Code duplication | Build step logic repeated between Rust and TS SDKs | Must be kept in sync manually; parity tests mitigate but don't prevent drift |
+The Go and TypeScript SDKs intentionally mirror the Rust SDK's module structure. Builder types,
+step helpers, and language-specific artifact definitions are organized identically across all
+three SDKs to make cross-SDK parity easier to maintain.
 
 ---
 
-## 10. Logging and Observability
+## Code Style Observations
 
-- **Rust**: Uses `tracing` crate with `tracing-subscriber` for structured logging.
-  Log level is configurable via `--level` CLI flag (default: `INFO`). Debug/trace levels
-  include file and line numbers. Logs go to stderr.
-- **TypeScript**: Uses `console.log` and `console.error` directly. No structured logging
-  framework.
-- **Build output format**: Both SDKs use `"{artifact_name} |> {message}"` format for
-  build step output, providing consistent log formatting across languages.
+### Rust-Specific
+
+- **Edition 2021** across all crates.
+- **Explicit version pinning** for all dependencies in `Cargo.toml` (no `^` or `~` ranges).
+- **`serde_derive`** used via `features = ["serde_derive"]` rather than separate derive crate.
+- **`skip_serializing_if = "Option::is_none"`** consistently applied to optional config fields.
+- **Async throughout** — `tokio` runtime with multi-thread feature, `async fn` for all I/O.
+- **Structured logging** via `tracing` crate (`info!`, `warn!`, `error!`) to stderr.
+- **No `unwrap()` in library code** — `anyhow::Result` or `tonic::Status` used instead. A few
+  `expect()` calls exist at initialization boundaries.
+
+### Go-Specific
+
+- **`flag` package** used for CLI argument parsing (not `cobra` or `urfave/cli`).
+- **Function variable injection** for testability (`getKeyCredentialsPathFunc` pattern in auth
+  tests).
+- **Table-driven tests** with `t.Run()` subtests (standard Go testing idiom).
+- **`defer` for cleanup** (file handle closing, mock restoration).
+- **No interfaces defined** for dependency injection — concrete types used directly.
+- **`log.Fatal` at boundaries**, `fmt.Errorf` with `%w` wrapping internally.
+
+### TypeScript-Specific
+
+- **JSDoc comments** with `@param`, `@returns`, `@throws` annotations on all public methods.
+- **Private fields** use `_` prefix convention (not `#` private fields).
+- **`this` return type** for fluent builder chaining.
+- **`.js` extension** in import paths (required for ESM + Node16 module resolution).
+- **`type` imports** used where only types are needed (`import type { ... }`).
+- **No runtime type checking** beyond TypeScript's static analysis.
+
+---
+
+## Cross-SDK Parity Requirements
+
+The three SDKs (Rust, Go, TypeScript) must produce **identical artifact digests** for the same
+logical artifact definition. This imposes strict requirements:
+
+1. **Script templates must be character-for-character identical.** The TypeScript SDK includes
+   comments like `// Script template matches Rust formatdoc! in Process::build()` and
+   `// CRITICAL: Shell script template must be character-for-character identical`.
+
+2. **Sorting must be identical.** Secrets sorted by name, symlinks sorted by source path,
+   artifacts sorted consistently.
+
+3. **JSON serialization must match.** SHA-256 is computed over JSON-serialized protobuf messages.
+   Field ordering, null handling, and number representation must align.
+
+4. **Protobuf field numbering is frozen.** Changes to `.proto` files affect all three SDKs
+   simultaneously.
+
+This parity is currently verified by the `sdk-parity` skill which compares artifact digests
+between Rust and Go SDK builds.
+
+---
+
+## Configuration File Conventions
+
+| File            | Format | Purpose                                    |
+|-----------------|--------|--------------------------------------------|
+| `Vorpal.toml`   | TOML   | Project-level config (language, source, etc.) |
+| `~/.vorpal/settings.json` | JSON | User-level settings (registry, namespace) |
+| `Cargo.toml`    | TOML   | Rust workspace and crate manifests         |
+| `go.mod`        | Go mod | Go module definition                       |
+| `package.json`  | JSON   | TypeScript package manifest                |
+| `tsconfig.json` | JSON   | TypeScript compiler configuration          |
+| `rust-toolchain.toml` | TOML | Rust toolchain pinning                |
+
+---
+
+## Gaps & Observations
+
+1. **No automated formatting enforcement.** rustfmt, gofmt, and prettier are not run in CI.
+   No pre-commit hooks exist.
+
+2. **No linter configuration files.** Clippy and go vet run with defaults. No custom rules
+   or suppressions are codified (one `#[allow]` exception noted).
+
+3. **No `.editorconfig`.** No shared editor settings for indentation, line endings, or
+   trailing whitespace.
+
+4. **No CI/CD pipeline visible.** No `.github/workflows/` directory exists in the repository.
+   Quality gates, if any, are external to the codebase.
+
+5. **`thiserror` dependency unused.** Listed in `cli/Cargo.toml` but no `#[derive(Error)]`
+   types found. Consider removing or adopting for structured CLI errors.
+
+6. **Inconsistent CLI parsing across SDKs.** Rust CLI uses `clap` (derive macros), Go uses
+   raw `flag` package, TypeScript uses manual argument parsing. The Go and TypeScript parsers
+   are for the config binary only (simpler use case).
+
+7. **No `cargo-machete` in CI.** The SDK's `Cargo.toml` has `[package.metadata.cargo-machete]`
+   with `ignored` entries, suggesting it has been used but is not automated.
+
+8. **Comments are sparse.** Rust code has minimal inline comments. Go code uses standard
+   godoc-style comments on exported types. TypeScript has the most comprehensive JSDoc
+   annotations.

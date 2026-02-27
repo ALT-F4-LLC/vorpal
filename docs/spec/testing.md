@@ -1,341 +1,223 @@
 # Testing Specification
 
-This document describes the testing strategy, infrastructure, and coverage that **currently exists**
-in the Vorpal codebase. It is derived from direct inspection of the repository and reflects the
-state of the `feature/typescript-support` branch.
+## Overview
 
----
+Vorpal's testing strategy is minimal and focused on specific high-value areas. The project relies
+heavily on CI-level integration and end-to-end testing (SDK parity checks, artifact build
+validation) rather than extensive unit test suites. Test coverage is sparse across most of the
+codebase, with tests concentrated in the Go SDK config package and the Rust CLI registry server.
 
-## 1. Test Landscape Overview
+## Test Pyramid
 
-Vorpal is a multi-language project with three SDK implementations (Rust, Go, TypeScript) and a
-Rust CLI/server. Testing is spread across four distinct ecosystems:
+### Unit Tests
 
-| Component | Language | Test Runner | Test Location |
-|---|---|---|---|
-| CLI (`cli/`) | Rust | `cargo test` | Inline `#[cfg(test)]` modules |
-| Rust SDK (`sdk/rust/`) | Rust | `cargo test` | Inline `#[cfg(test)]` modules |
-| Go SDK (`sdk/go/`) | Go | `go test` | `*_test.go` files alongside source |
-| TypeScript SDK (`sdk/typescript/`) | TypeScript | `bun test` | `src/__tests__/*.test.ts` |
-| Integration tests (`tests/`) | Bash | Shell script | `tests/typescript-integration.sh` |
-| Auth test script (`script/test/`) | Bash | Shell script | `script/test/keycloak.sh` |
+**Rust (CLI crate)**
 
-The top-level `make test` target runs `cargo test` across the Rust workspace (CLI, config, Rust
-SDK). Go and TypeScript tests are run separately.
+- **Location**: `cli/src/command/start/registry.rs` (inline `#[cfg(test)]` module)
+- **Runner**: `cargo test` (standard Rust test harness)
+- **Test count**: 7 async tests using `#[tokio::test]`
+- **Focus**: Archive server caching behavior — cache hits, misses, TTL expiration, negative
+  caching, TTL=0 bypass, and input validation (empty digest)
+- **Mocking pattern**: Hand-rolled `MockBackend` struct implementing `ArchiveBackend` trait, using
+  `Arc<AtomicUsize>` for call-count tracking. No external mocking framework.
+- **Dev dependencies**: `tempfile = 3.24.0` (declared in `cli/Cargo.toml`)
 
----
+**Rust (SDK and Config crates)**
 
-## 2. Test Pyramid Breakdown
+- No unit tests exist in `sdk/rust/` or `config/`.
 
-### 2.1 Unit Tests
+**Go SDK**
 
-Unit tests form the majority of the test suite. All three SDKs have unit tests covering core
-domain logic.
+- **Location**: `sdk/go/pkg/config/context_test.go`, `sdk/go/pkg/config/context_auth_test.go`
+- **Runner**: `go test` (standard Go testing package)
+- **Test count**: 9 test functions across 2 files
+- **Focus**:
+  - `context_test.go`: `parseArtifactAlias` — table-driven tests covering basic formats,
+    real-world examples, edge cases (multiple colons, special chars, numeric components), and
+    error cases (empty string, empty tag, too many slashes, too-long alias). Also tests default
+    value application.
+  - `context_auth_test.go`: `ClientAuthHeader` — tests credential file missing, valid
+    credentials, registry not found, issuer not found, invalid JSON, multiple registries, and
+    path helper functions.
+- **Mocking pattern**: Function variable replacement (`getKeyCredentialsPathFunc`) with deferred
+  restore. Uses `t.TempDir()` for filesystem isolation. No external mocking framework.
+- **Test data**: Inline structs marshaled to JSON files in temp directories. No shared fixtures
+  or testdata directories.
 
-#### Rust SDK (`sdk/rust/src/context.rs`)
+**TypeScript SDK**
 
-- **38 tests** in a single `#[cfg(test)]` module
-- Focus: Artifact alias parsing (`parse_artifact_alias`)
-- Pattern: Table-driven tests using helper functions `assert_alias()` and `assert_alias_error()`
-- Covers: basic formats, real-world aliases, edge cases (multiple colons, special characters,
-  numeric components), error conditions (empty input, too long, invalid characters), default
-  value application, character validation, and security-relevant cases (path traversal, shell
-  metacharacters, control characters)
-- Cross-SDK parity: These tests serve as the **reference implementation** that Go and TypeScript
-  tests are ported from
+- No tests exist in `sdk/typescript/`.
 
-#### Rust CLI (`cli/src/command/start/registry.rs`)
+### Integration Tests
 
-- **7 async tests** (`#[tokio::test]`) in a `#[cfg(test)]` module
-- Focus: Archive server caching behavior
-- Pattern: Mock-based testing with `MockBackend` implementing `ArchiveBackend` trait
-- Covers: cache hits, cache misses (different keys, different namespaces), negative caching,
-  TTL=0 disabling cache, TTL expiration, empty digest validation
-- Uses: `std::sync::atomic::AtomicUsize` for call counting, `Arc` for shared mock state
+There are no dedicated integration test suites (no `tests/` directories, no integration test
+files). The Rust workspace has no `[[test]]` entries in any `Cargo.toml`.
 
-#### Go SDK (`sdk/go/pkg/config/`)
+### End-to-End Tests
 
-- **2 test files** with standard Go `testing` package:
-  - `context_test.go`: Artifact alias parsing (table-driven, mirrors Rust tests)
-  - `context_auth_test.go`: Client authentication header construction
-- `context_test.go` covers: basic formats, real-world aliases, edge cases, error conditions,
-  default value application (mirrors Rust test suite)
-- `context_auth_test.go` covers: no credentials file, valid credentials, registry not found,
-  issuer not found, invalid JSON, multiple registries, path helper functions
-- Pattern: Table-driven tests (`[]struct` + `t.Run`), mock via function variable replacement
-  (`getKeyCredentialsPathFunc`), temp directories via `t.TempDir()`
+E2E testing is performed at two levels:
 
-#### TypeScript SDK (`sdk/typescript/src/__tests__/`)
+**1. CI Pipeline (`.github/workflows/vorpal.yaml`)**
 
-- **9 test files** with `bun:test` runner:
+The `test` job runs after `build` and exercises the full system:
 
-  | File | Tests | Focus |
-  |---|---|---|
-  | `alias.test.ts` | ~50 | Alias parsing/formatting, round-trip validation |
-  | `artifact.test.ts` | ~15 | `Artifact`, `ArtifactSource`, `ArtifactStep` |
-  | `cli.test.ts` | ~15 | CLI argument parsing (happy path + error cases) |
-  | `context.test.ts` | ~8 | `TestStore` simulating `ConfigContext` behavior |
-  | `digest-parity.test.ts` | ~15 | Golden test vectors for cross-SDK digest compatibility |
-  | `sdk-exports.test.ts` | ~13 | Validates all public API exports from `@vorpal/sdk` |
-  | `sdk-parity.test.ts` | ~10 | Cross-SDK parity framework (determinism, field sensitivity) |
-  | `step-parity.test.ts` | ~20 | `bash()`, `bwrap()`, `docker()` step construction parity |
-  | `template.test.ts` | ~20 | Template file existence, syntax, structure, substitution |
+- Sets up Vorpal services with S3 registry backend (`ALT-F4-LLC/setup-vorpal-action@main`)
+- Builds artifacts using the Rust SDK (`vorpal build "vorpal"`, etc.)
+- Builds the same artifacts using the Go SDK (`--config "Vorpal.go.toml"`) and compares digests
+- Builds the same artifacts using the TypeScript SDK (`--config "Vorpal.ts.toml"`) and compares
+  digests
+- Validates cross-SDK parity: the same artifact name must produce identical digests across all
+  three SDKs
+- Tests run across 4 matrix runners: `macos-latest`, `macos-latest-large`, `ubuntu-latest`,
+  `ubuntu-latest-arm64`
+- Container image builds are tested only on Ubuntu runners
 
-- Pattern: `describe`/`test` blocks, `expect` assertions, Bun transpiler for syntax validation
-- Notable: `digest-parity.test.ts` uses **golden test vectors** -- hardcoded JSON strings and
-  SHA-256 digests verified against Rust `serde_json::to_vec` + `sha256::digest` output
+Artifacts tested:
+- `vorpal`, `vorpal-container-image` (Linux only), `vorpal-job`, `vorpal-process`, `vorpal-shell`,
+  `vorpal-user`
 
-### 2.2 Integration Tests
+**2. Claude Code Skills**
 
-#### Shell-based integration (`tests/typescript-integration.sh`)
+- `/e2e-test`: Manual skill that starts Vorpal services, builds an artifact, and reports
+  pass/fail. Uses `make vorpal-start` and `make vorpal`.
+- `/sdk-parity`: Manual skill that runs Rust SDK build then Go SDK build for the same artifact
+  and compares digests.
 
-- **2 test sections**:
-  1. Delegates to `bun test` for TypeScript SDK unit tests
-  2. Cross-SDK parity: builds the same artifact with Rust, Go, and TypeScript configs and
-     compares SHA-256 digests
-- Supports `--quick` mode (skips tests requiring Vorpal services)
-- Prerequisites: Vorpal services running, cargo built, config files present
-- The cross-SDK parity section is partially implemented (TODO: `Vorpal.ts.toml` needs identical
-  artifact definitions to Rust/Go configs)
+## Test Runners and Tools
 
-#### CI pipeline integration (`vorpal.yaml`)
+| Tool | Purpose | Configuration |
+|------|---------|---------------|
+| `cargo test` | Rust unit tests | `makefile` target `test` — runs `cargo test $(CARGO_FLAGS)` |
+| `go test` | Go unit tests | Standard `go test ./...` (no custom config) |
+| `cargo fmt --all --check` | Rust formatting check | `makefile` target `format` |
+| `cargo clippy -- --deny warnings` | Rust linting | `makefile` target `lint` |
+| `cargo check` | Rust type checking | `makefile` target `check` |
 
-- The `test` job in CI performs **end-to-end cross-SDK parity validation**:
-  - Builds artifacts with Rust config (`Vorpal.toml`) and Go config (`Vorpal.go.toml`)
-  - Compares resulting digests to verify both SDKs produce identical outputs
-  - Runs on 4 platforms: `macos-latest`, `macos-latest-large`, `ubuntu-latest`, `ubuntu-latest-arm64`
-  - Validates 6 artifact types: `vorpal`, `vorpal-container-image` (Linux only), `vorpal-job`,
-    `vorpal-process`, `vorpal-shell`, `vorpal-user`
-- TypeScript is **not yet integrated** into the CI parity test matrix
+## CI Pipeline Test Stages
 
-#### Keycloak test script (`script/test/keycloak.sh`)
-
-- Shell script for testing OAuth2/OIDC authentication flow with Keycloak
-- Not automated in CI; used for manual testing of auth features
-- Requires environment variables: `ARCHIVE_CLIENT_SECRET`, `ARTIFACT_CLIENT_SECRET`,
-  `WORKER_CLIENT_SECRET`
-
-### 2.3 End-to-End Tests
-
-- The CI `test` job is the closest thing to e2e testing: it builds the CLI binary, starts Vorpal
-  services, builds real artifacts, and compares cross-SDK outputs
-- No dedicated e2e test framework or test harness exists
-- The `tests/typescript-integration.sh` script provides a local equivalent but requires manual
-  setup
-
----
-
-## 3. Test Runners and Configuration
-
-### 3.1 Rust (`cargo test`)
-
-- **Runner**: Built-in `cargo test` (no external test framework)
-- **Configuration**: None beyond standard Cargo workspace settings
-- **Workspace**: Tests run across all workspace members (`cli`, `config`, `sdk/rust`)
-- **Invocation**: `make test` or `cargo test` at the project root
-- **CI step**: `./script/dev.sh make TARGET=release test` (runs in the build job)
-- **Dev dependency**: `tempfile = "3.24.0"` in `cli/Cargo.toml` (for temporary file/directory
-  management in tests)
-- **Async support**: `#[tokio::test]` for async test functions
-
-### 3.2 Go (`go test`)
-
-- **Runner**: Standard `go test`
-- **Configuration**: None; standard Go conventions
-- **Invocation**: `cd sdk/go && go test ./...`
-- **CI integration**: Not present in CI workflows (gap)
-- **Mocking pattern**: Function variable replacement (e.g., `getKeyCredentialsPathFunc`)
-
-### 3.3 TypeScript (`bun test`)
-
-- **Runner**: Bun's built-in test runner (`bun test`)
-- **Configuration**: `tsconfig.json` excludes `src/__tests__` from compilation output
-- **Test directory**: `sdk/typescript/src/__tests__/`
-- **Package script**: `"test": "bun test"` in `package.json`
-- **Invocation**: `cd sdk/typescript && bun test`
-- **CI integration**: Indirectly via `tests/typescript-integration.sh` (not directly in CI
-  workflow)
-- **Imports**: Tests use `bun:test` for `describe`, `expect`, `test`, `beforeEach`, `afterEach`
-
-### 3.4 Shell scripts
-
-- **Runner**: Bash with `set -euo pipefail`
-- **Pattern**: Custom pass/fail/skip counters, `section()` helper for output grouping
-- **Exit code**: 0 on all pass, 1 on any failure
-
----
-
-## 4. Coverage Tools
-
-**There are no code coverage tools configured in the project.**
-
-- No `tarpaulin`, `llvm-cov`, `grcov`, or `cargo-llvm-cov` for Rust
-- No `go test -coverprofile` configuration or coverage reporting for Go
-- No `bun test --coverage` or equivalent for TypeScript
-- No coverage thresholds, coverage badges, or coverage reporting in CI
-- No Codecov, Coveralls, or similar coverage service integration
-
-This is a significant gap. There is no quantitative measure of how much code is exercised by tests.
-
----
-
-## 5. Test Patterns and Conventions
-
-### 5.1 Cross-SDK Parity Testing
-
-The most distinctive testing pattern in this project is **cross-SDK digest parity**. The core
-invariant is: identical artifact definitions across Rust, Go, and TypeScript SDKs must produce
-byte-for-byte identical JSON serialization and therefore identical SHA-256 digests.
-
-This is enforced at multiple levels:
-
-1. **Golden test vectors** (`digest-parity.test.ts`): Hardcoded expected JSON strings and digests
-   verified against Rust reference output
-2. **Field order tests**: Verify JSON keys appear in protobuf field number order
-3. **Serialization edge cases**: Enums as integers (not strings), `undefined`/`None` as `null`,
-   empty arrays serialized (not omitted)
-4. **CI parity builds**: Same artifact built with Rust and Go configs, digests compared
-5. **Step parity tests** (`step-parity.test.ts`): Verify `bash()`, `bwrap()`, `docker()` produce
-   identical step structures across SDKs
-
-### 5.2 Table-Driven Tests
-
-All three SDKs use table-driven test patterns for alias parsing:
-- Rust: `assert_alias()` / `assert_alias_error()` helpers with individual `#[test]` functions
-- Go: `[]struct` + `t.Run()` subtests (idiomatic Go table-driven testing)
-- TypeScript: `assertAlias()` / `assertAliasError()` helpers with Bun `test()` blocks
-
-The test cases are **intentionally identical across all three SDKs**, with comments referencing
-the source tests they were ported from (e.g., "ported from Rust sdk/rust/src/context.rs lines
-712-1017").
-
-### 5.3 Mock Patterns
-
-- **Rust**: Trait-based mocking (`MockBackend` implements `ArchiveBackend`), with `AtomicUsize`
-  for call counting and `Arc` for shared state
-- **Go**: Function variable replacement (`getKeyCredentialsPathFunc`), `t.TempDir()` for temp
-  files, `json.Marshal` for creating test fixtures
-- **TypeScript**: `TestStore` class simulating `ConfigContext` behavior (in-memory artifact
-  store), `beforeEach`/`afterEach` for environment variable isolation in CLI tests
-
-### 5.4 Test Naming Conventions
-
-- **Rust**: `test_` prefix with snake_case descriptive names (e.g., `test_cache_hit_skips_backend`)
-- **Go**: `Test` prefix with PascalCase (e.g., `TestClientAuthHeaderValid`)
-- **TypeScript**: String descriptions in `test()` blocks (e.g., `"bash step PATH construction
-  with artifacts"`)
-
----
-
-## 6. CI Test Pipeline
-
-The CI pipeline (`vorpal.yaml`) has the following test-related stages:
+The `.github/workflows/vorpal.yaml` pipeline runs on every PR and push to `main`:
 
 ```
-vendor -> code-quality -> build (includes cargo test) -> test (cross-SDK parity)
+vendor → code-quality → build → test → [container-image → container-image-manifest]
+                                     → [release]
 ```
 
-### 6.1 Stage Details
+1. **vendor**: `cargo check` (release mode) across 4 platform matrix
+2. **code-quality**: `cargo fmt --all --check` + `cargo clippy --deny warnings`
+3. **build**: `cargo build` + `cargo test` + `cargo dist` (release mode, 4 platforms)
+4. **test**: Full E2E — Vorpal services + artifact builds + cross-SDK parity checks (4 platforms)
+5. **container-image** / **release**: Tag-triggered only (not part of regular test flow)
 
-| Stage | What it tests | Platforms |
-|---|---|---|
-| `vendor` | `cargo check` (compilation) | 4 platforms |
-| `code-quality` | `cargo fmt --check`, `cargo clippy --deny warnings` | macOS only |
-| `build` | `cargo test` (all Rust unit tests) | 4 platforms |
-| `test` | Cross-SDK parity (Rust vs Go digest comparison) | 4 platforms |
+The nightly workflow (`.github/workflows/vorpal-nightly.yaml`) creates a nightly tag from `main`
+— it does not run additional tests.
 
-### 6.2 What is NOT in CI
+## Coverage
 
-- Go SDK tests (`go test ./...`)
-- TypeScript SDK tests (`bun test`)
-- TypeScript integration tests (`tests/typescript-integration.sh`)
-- Code coverage collection or reporting
-- TypeScript cross-SDK parity validation (only Rust vs Go is tested)
+- **No coverage tooling is configured.** There is no `cargo-tarpaulin`, `cargo-llvm-cov`,
+  `go test -cover`, or any coverage reporting in CI.
+- **No coverage thresholds or gates.**
 
----
+## Test Infrastructure
 
-## 7. How to Run Tests
+### Build System
 
-### All Rust tests (workspace-wide)
+- `makefile` provides all test-related targets: `check`, `format`, `lint`, `build`, `test`, `dist`
+- `script/dev.sh` bootstraps the development environment (xz, amber, rustup, protoc, terraform)
+- `script/dev/debian.sh` installs system dependencies on Debian/Ubuntu CI runners
+
+### External Services for Testing
+
+- **Keycloak** (`docker-compose.yaml`): Local Keycloak instance for auth testing
+  (`quay.io/keycloak/keycloak:26.5.4`)
+- `script/test/keycloak.sh`: Interactive script for testing OAuth2 device authorization flow,
+  token exchange, and token introspection against local Keycloak. Not automated — requires manual
+  browser interaction.
+- **AWS S3**: CI uses real S3 bucket (`altf4llc-vorpal-registry`) for registry backend in E2E
+  tests.
+
+### Rust Toolchain
+
+- Pinned to Rust `1.93.1` via `rust-toolchain.toml`
+- Components: `clippy`, `rust-analyzer`, `rustfmt`
+
+## Mocking Patterns
+
+- **Rust**: Hand-rolled mock structs implementing traits. Uses `Arc<AtomicUsize>` for call
+  tracking. Trait-based design (`ArchiveBackend`) enables mock injection.
+- **Go**: Function variable swapping (`getKeyCredentialsPathFunc`) with `defer` restore. Uses
+  `t.TempDir()` and `os.WriteFile` for filesystem mocking.
+- **No external mocking frameworks** in either language.
+
+## Gaps and Observations
+
+1. **Low unit test coverage**: Only 2 Rust source files and 2 Go source files have tests. The
+   vast majority of application logic (CLI commands, SDK artifact builders, gRPC services,
+   config parsing, store operations) is untested at the unit level.
+2. **No integration tests**: No dedicated integration test suites exist. The gap between unit
+   tests and full E2E (which requires running services + S3) is large.
+3. **No TypeScript SDK tests**: The TypeScript SDK has zero test coverage.
+4. **No Rust SDK tests**: The `vorpal-sdk` Rust crate has no tests despite containing core
+   business logic (artifact definitions, API types, build orchestration).
+5. **No `vorpal-config` tests**: The config binary crate has no tests.
+6. **No coverage tooling**: No way to measure or enforce test coverage.
+7. **No test data directories**: No shared fixtures, testdata, or golden files.
+8. **No property-based testing**: No use of proptest, quickcheck, or similar.
+9. **No benchmark tests**: No `#[bench]` or criterion benchmarks.
+10. **Auth flow testing is manual**: The Keycloak test script (`script/test/keycloak.sh`) requires
+    interactive browser input and cannot run in CI.
+11. **E2E tests depend on external infrastructure**: CI E2E requires AWS S3 credentials and the
+    `setup-vorpal-action` GitHub Action. No local-only E2E path exists for contributors without
+    AWS access.
+12. **SDK parity is the primary quality gate**: Cross-SDK digest comparison is the most rigorous
+    automated test — it validates that all three SDK implementations produce identical build
+    artifacts. This is effectively the project's integration test.
+
+## How to Run Tests
+
+### Local Development
 
 ```bash
+# Run Rust unit tests
 make test
-# or
-cargo test
-```
 
-### Go SDK tests
+# Run with release flags
+make TARGET=release test
 
-```bash
+# Run Go SDK tests
 cd sdk/go && go test ./...
+
+# Run formatting check
+make format
+
+# Run linter
+make lint
+
+# Run type check
+make check
 ```
 
-### TypeScript SDK tests
+### E2E Testing (requires running services)
 
 ```bash
-cd sdk/typescript && bun test
+# Start Vorpal services
+make vorpal-start
+
+# Build an artifact (in another terminal)
+make vorpal
+
+# Or with a specific artifact
+make VORPAL_ARTIFACT="vorpal-shell" vorpal
 ```
 
-### TypeScript integration tests
+### SDK Parity Testing (requires running services)
 
 ```bash
-# Quick mode (no Vorpal services required)
-./tests/typescript-integration.sh --quick
+# Rust SDK build
+make VORPAL_ARTIFACT="vorpal" vorpal
 
-# Full mode (requires Vorpal services running)
-make vorpal-start  # in another terminal
-./tests/typescript-integration.sh
+# Go SDK build (compare digest with Rust)
+make VORPAL_ARTIFACT="vorpal" VORPAL_FLAGS="--config 'Vorpal.go.toml'" vorpal
+
+# TypeScript SDK build (compare digest with Rust)
+make VORPAL_ARTIFACT="vorpal" VORPAL_FLAGS="--config 'Vorpal.ts.toml'" vorpal
 ```
-
-### Rust linting and formatting (code quality checks)
-
-```bash
-make format  # cargo fmt --all --check
-make lint    # cargo clippy -- --deny warnings
-```
-
----
-
-## 8. Gaps and Recommendations
-
-### 8.1 Coverage Gaps
-
-| Gap | Severity | Description |
-|---|---|---|
-| No coverage tooling | High | No way to measure which code paths are exercised by tests |
-| Go SDK not in CI | Medium | Go tests exist but are not run in the CI pipeline |
-| TypeScript SDK not in CI | Medium | TypeScript tests exist but are not run in the CI pipeline |
-| TypeScript not in parity matrix | Medium | CI validates Rust vs Go parity but not TypeScript |
-| Config crate has no tests | Medium | `config/` has zero test functions despite containing artifact build logic |
-| CLI has limited test coverage | Medium | Only `registry.rs` has tests; other CLI commands untested |
-| No e2e test framework | Low | E2e testing is ad-hoc via CI steps and shell scripts |
-| Keycloak auth tests manual only | Low | `script/test/keycloak.sh` is not automated |
-
-### 8.2 What is Well-Tested
-
-| Area | Assessment |
-|---|---|
-| Artifact alias parsing | Excellent -- identical tests across all three SDKs |
-| Digest parity / serialization | Excellent -- golden vectors, field ordering, edge cases |
-| Step construction (TypeScript) | Good -- covers `bash()`, `bwrap()`, `docker()` thoroughly |
-| CLI argument parsing (TypeScript) | Good -- happy path and error cases |
-| Archive caching (Rust) | Good -- mock-based, covers TTL, expiration, edge cases |
-| Go auth credentials | Good -- covers multiple scenarios with filesystem mocking |
-| Template validation (TypeScript) | Good -- file existence, syntax, structure, substitution |
-| SDK public API surface | Good -- validates all expected exports |
-
-### 8.3 Testing Debt
-
-1. The `config/` crate (Rust) defines all artifact build logic (vorpal, vorpal-job,
-   vorpal-process, vorpal-shell, vorpal-user, vorpal-container-image, vorpal-release) but has
-   **zero unit tests**. These artifacts are only tested indirectly via the CI e2e parity builds.
-
-2. The CLI crate has extensive source code across multiple command modules but only the
-   `registry.rs` module has tests. Commands like `build`, `init`, `inspect`, `login`, and
-   `system` are untested at the unit level.
-
-3. TypeScript cross-SDK parity is partially implemented. The `Vorpal.ts.toml` config (referenced
-   in `tests/typescript-integration.sh`) exists in the project root but is not yet tested in CI.
-
-4. The Go and TypeScript test suites run successfully locally but are not gated in CI, meaning
-   regressions in these SDKs could ship undetected.

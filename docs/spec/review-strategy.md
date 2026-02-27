@@ -1,236 +1,318 @@
 # Review Strategy
 
-This document describes the code review strategy for the Vorpal project. It identifies which review dimensions matter most, areas of high risk, common pitfalls, and what reviewers should focus on for different types of changes.
+How code review works for Vorpal, which areas carry the most risk, and what reviewers should
+focus on for each type of change.
 
 ---
 
-## Project Overview for Reviewers
+## 1. Project Review Profile
 
-Vorpal is a multi-language build system with a Rust CLI/server, a Rust SDK, a Go SDK (out-of-tree, generated via protobuf), and a TypeScript SDK. The system uses gRPC (tonic) for communication between CLI, agent, worker, and registry components. Artifacts are content-addressed by SHA-256 digest, with cross-SDK digest parity being a critical correctness requirement.
+Vorpal is a multi-language build system with a Rust CLI/server core, three SDK implementations
+(Rust, Go, TypeScript), gRPC APIs defined in protobuf, and a CI pipeline that enforces
+cross-SDK artifact parity. This combination creates several review dynamics:
 
-The codebase is approximately 22,000 lines across Rust (cli, config, sdk/rust) and TypeScript (sdk/typescript). There is no CONTRIBUTING.md, no PR template, and no formal review checklist today.
-
----
-
-## Review Dimensions by Priority
-
-The following dimensions are ranked by importance for this project. Every review should consider at least the top three; lower dimensions apply based on change type.
-
-### 1. Correctness (Highest Priority)
-
-**Why it matters most:** Vorpal is a build system. Incorrect builds, digest mismatches, or corrupted artifacts can silently produce wrong outputs that propagate downstream. A "wrong" build is worse than a failed build.
-
-**What to verify:**
-- Artifact digest computation must be deterministic and identical across all three SDKs (Rust, Go, TypeScript). The JSON serialization field order, field inclusion rules, and enum encoding must match exactly.
-- Source digest computation (file hashing, timestamp sanitization) must be consistent.
-- Lockfile hydration logic must correctly detect changed vs. unchanged sources.
-- Config parsing (TOML) and resolution (layered settings: user, project, built-in defaults) must follow precedence rules.
-- Build ordering via dependency graph (petgraph) must be topologically correct.
-
-### 2. Security
-
-**Why it matters:** The worker executes arbitrary shell scripts (`run_step` in `worker.rs`), the agent downloads and unpacks archives from HTTP URLs, and the system handles OAuth2 tokens and RSA keys for secret encryption/decryption.
-
-**What to verify:**
-- Any change to `worker.rs` `run_step()`: Does it expand environment variables safely? Does it prevent command injection through artifact names, digests, or environment values?
-- Any change to `agent.rs` `build_source()`: Does it validate URLs and archive formats? Does it verify digests after download? Could a malicious archive path-traverse during unpacking?
-- OIDC/JWT validation in `auth.rs`: Are issuer, audience, and expiration properly validated? Is the JWKS cache refresh safe against race conditions?
-- Secret encryption/decryption via RSA (notary module): Are keys stored with appropriate permissions? Is the encryption padding scheme correct?
-- Credential storage (`credentials.json`): Are tokens written with restrictive file permissions?
-- `expand_env()` in `worker.rs`: Does variable expansion handle edge cases (overlapping prefixes, special characters) correctly?
-
-### 3. Cross-SDK Parity
-
-**Why it matters:** Vorpal's core value proposition is that configurations written in Rust, Go, or TypeScript produce byte-identical artifact digests. Any drift breaks cache sharing and build reproducibility.
-
-**What to verify:**
-- `serializeArtifact()` in `sdk/typescript/src/context.ts` must produce JSON identical to Rust's `serde_json::to_vec` for prost-generated structs: snake_case field names, proto field-number order, all fields always present, enums as integers, optional None as null.
-- `computeArtifactDigest()` must use SHA-256 on the same byte representation.
-- Shell script templates in `artifact.ts` (Process, DevelopmentEnvironment, UserEnvironment) must be character-for-character identical to their Rust counterparts in `sdk/rust/src/artifact.rs`. Even whitespace differences change the digest.
-- `step.ts` `shell()` function must produce the same `ArtifactStep` structure as Rust `step::shell()`.
-- `parseArtifactAlias()` must behave identically across all SDKs (validation, defaults, error messages).
-
-### 4. Architecture & Design
-
-**What to verify:**
-- Does the change respect the existing component boundaries (CLI, Agent, Worker, Registry, SDK)?
-- Does it maintain the clean separation between the SDK (used by config authors) and the CLI (internal machinery)?
-- Are new protobuf messages backward-compatible? Field numbering must never reuse retired numbers.
-- Does the change introduce circular dependencies between crates?
-
-### 5. Operations & Reliability
-
-**What to verify:**
-- gRPC error handling: Does the change distinguish between retriable (UNAVAILABLE) and non-retriable (NOT_FOUND, INVALID_ARGUMENT) errors?
-- Streaming: Are gRPC streams properly consumed to completion? Partial reads can cause resource leaks.
-- File lock management: Does the change properly acquire and release advisory locks (`fs4`)? Does it handle the lock file lifecycle correctly (never delete the lock file itself; rely on advisory lock release on process exit)?
-- Unix domain socket lifecycle: Stale socket detection, cleanup on shutdown, permission setting (0o660).
-- Signal handling: Does the change respect SIGINT/SIGTERM graceful shutdown?
-
-### 6. Performance
-
-**What to verify:**
-- Archive operations: Are large archives streamed or loaded entirely into memory? The current pattern loads full archives into memory (`Vec<u8>`), which is acceptable for typical artifact sizes but should be flagged if sizes grow.
-- gRPC chunk size: The 8KB default (`DEFAULT_CHUNKS_SIZE`) is conservative; the registry uses 2MB chunks. Mixing these creates overhead.
-- Moka cache TTL for archive check results: Changes to `archive_check_cache_ttl` affect the tradeoff between consistency and registry round-trip cost.
+- **Cross-language consistency is critical.** Changes to one SDK often require identical
+  behavior in all three. Reviewers must check whether a change to `sdk/rust/` needs
+  corresponding changes in `sdk/go/` and `sdk/typescript/`.
+- **Proto-first API surface.** The protobuf definitions in `sdk/rust/api/` are the source of
+  truth. Changes to `.proto` files cascade into generated Go and TypeScript code and must be
+  reviewed for backward compatibility.
+- **Content-addressed artifact integrity.** The system relies on SHA-256 digests for
+  correctness. Any change to artifact serialization, hashing, or source handling can silently
+  break reproducibility — and CI's SDK parity tests are the primary safety net.
+- **Relatively small team with high blast radius.** ~303 total commits, no CONTRIBUTING.md,
+  no PR template, no formal review checklist. Changes merge directly after CI passes. This
+  makes careful human review more important, not less.
 
 ---
 
-## Risk Map by File/Module
+## 2. High-Risk Areas
 
-| File / Module | Risk Level | Reason |
-|---|---|---|
-| `cli/src/command/start/worker.rs` | **Critical** | Executes arbitrary scripts, handles secrets, manages build workspace lifecycle |
-| `cli/src/command/start/agent.rs` | **Critical** | Downloads and unpacks remote archives, handles source digest verification and lockfile mutation |
-| `cli/src/command/start/auth.rs` | **High** | OIDC/JWT validation, token refresh, client credentials exchange |
-| `sdk/rust/src/context.rs` | **High** | Artifact digest computation, gRPC channel/TLS setup, credential management |
-| `sdk/typescript/src/context.ts` | **High** | Cross-SDK parity for serialization and digest computation |
-| `sdk/typescript/src/artifact.ts` | **High** | Shell script templates that must be character-identical to Rust |
-| `cli/src/command/build.rs` | **High** | Build orchestration, config process lifecycle, artifact dependency resolution |
-| `cli/src/command/start/registry.rs` | **Medium** | S3/local storage backends, archive push/pull, artifact alias management |
-| `cli/src/command/start.rs` | **Medium** | Service startup, TLS configuration, socket binding, signal handling |
-| `cli/src/command/config.rs` | **Medium** | Layered settings resolution (user + project + defaults) |
-| `sdk/rust/src/artifact/language/*.rs` | **Medium** | Language builder implementations; script templates affect digest parity |
-| `sdk/typescript/src/artifact/language/typescript.ts` | **Medium** | TypeScript language builder; Bun integration |
-| `sdk/rust/api/*.proto` | **Medium** | Protobuf schema changes affect all SDKs and wire compatibility |
-| `config/src/**` | **Low** | Vorpal self-build configuration; changes rarely affect core behavior |
-| `.github/workflows/*.yaml` | **Low** | CI pipeline; changes are low-blast-radius but should be reviewed for correctness |
-| `cli/src/command/store/**` | **Low** | File path utilities, hash computation, archive compression; stable and well-tested |
+These areas of the codebase carry disproportionate risk and warrant thorough review.
 
----
+### 2.1 Worker Build Pipeline (`cli/src/command/start/worker.rs` — 1002 lines)
 
-## Review Checklist by Change Type
+The largest single file in the project. Handles:
+- Artifact building, source pulling, and archive push/pull
+- Sandbox command execution via `tokio::process::Command`
+- Environment variable expansion with custom `expand_env` function
+- Lock file management for build coordination
+- Service-to-service OAuth2 authentication
 
-### Protobuf Schema Changes (`.proto` files)
+**Review focus:** Command injection via environment expansion, lock file race conditions,
+incomplete cleanup on failure paths, correct handling of gRPC streaming errors.
 
-- [ ] No reuse of retired field numbers
-- [ ] New fields have appropriate default values (zero-values for scalars, empty for repeated)
-- [ ] `go_package` option updated if needed
-- [ ] Rust SDK `build.rs` regeneration verified
-- [ ] Go SDK `make generate` regeneration verified
-- [ ] TypeScript SDK generated types updated
-- [ ] Wire-compatibility with existing clients verified (no breaking rename or type change)
+### 2.2 SDK Context / Config (`sdk/rust/src/context.rs` — 776 lines)
 
-### Cross-SDK Changes (any SDK modification)
+Core orchestration layer that:
+- Manages the artifact store (in-memory HashMap)
+- Handles TLS channel construction (including Unix domain sockets)
+- Implements OAuth2 token refresh with credential file I/O
+- Runs a gRPC ContextService server
+- Parses artifact aliases with validation
 
-- [ ] JSON serialization field order matches proto field numbering
-- [ ] All fields are always present in serialized output (no skip-if-default)
-- [ ] Enum values serialize as integers, not strings
-- [ ] Optional fields serialize as `null` when absent
-- [ ] SHA-256 digest computed on identical byte representations
-- [ ] Shell script templates are character-for-character identical across SDKs
-- [ ] `parseArtifactAlias()` behavior is consistent across SDKs
-- [ ] Parity tests pass (`bun test` in `sdk/typescript/src/__tests__/`)
+**Review focus:** Token refresh race conditions, credential file write safety, artifact
+deduplication correctness (input vs output digest caching), TLS configuration security.
 
-### Security-Sensitive Changes
+### 2.3 Build Command (`cli/src/command/build.rs` — 736 lines)
 
-- [ ] No new `unsafe` blocks (currently none in the codebase; keep it that way)
-- [ ] URL/path inputs validated before use (no path traversal, no SSRF)
-- [ ] OAuth2 tokens not logged or included in error messages
-- [ ] File permissions set appropriately for credentials, keys, and sockets
-- [ ] Archive unpacking cannot escape the sandbox directory
-- [ ] Secret values encrypted before transport, decrypted only at point of use
-- [ ] JWT validation includes issuer, audience, and expiration checks
+Orchestrates the full build flow:
+- Config language detection and builder dispatch (Go/Rust/TypeScript)
+- Config binary compilation and execution as a subprocess
+- Artifact dependency resolution and ordered builds
+- Archive pull/unpack with streaming gRPC
 
-### Worker / Build Execution Changes
+**Review focus:** Subprocess execution safety, archive handling (zstd decompress +
+filesystem writes), correct dependency ordering, error propagation vs. `exit(1)`.
 
-- [ ] Environment variable expansion handles overlapping prefixes correctly
-- [ ] Script files created with proper permissions (0o755)
-- [ ] Workspace and lock files cleaned up on both success and failure
-- [ ] Build lock prevents concurrent builds of the same artifact
-- [ ] Output files have timestamps sanitized for reproducibility
-- [ ] Dependencies pulled before build step execution (topological order preserved)
+### 2.4 Authentication System (`cli/src/command/start/auth.rs` — 431 lines)
 
-### CLI Changes
+OIDC-based auth with:
+- JWT validation using JWKS with key rotation support
+- Namespace-based permission model
+- OAuth2 Client Credentials Flow for service-to-service auth
+- Sync-in-async `block_in_place` pattern for gRPC interceptors
 
-- [ ] `clap` defaults and resolved settings interact correctly (explicit CLI flags win over config values)
-- [ ] New subcommands or flags documented in help text
-- [ ] Error messages include actionable remediation steps
-- [ ] Exit codes are consistent (0 for success, 1 for failure)
-- [ ] `tracing` log levels appropriate (INFO for user-facing, DEBUG/TRACE for internal)
+**Review focus:** JWT validation correctness (audience, issuer, expiry), JWKS refresh
+behavior, permission boundary enforcement, the `block_in_place` workaround for potential
+deadlocks.
 
-### CI / Workflow Changes
+### 2.5 Agent Service (`cli/src/command/start/agent.rs` — 711 lines)
 
-- [ ] Matrix still covers all four target platforms (macos-latest, macos-latest-large, ubuntu-latest, ubuntu-latest-arm64)
-- [ ] Cache keys include `Cargo.lock` hash
-- [ ] Cross-SDK parity tests still compare Rust, Go, and TypeScript digests
-- [ ] Release pipeline produces artifacts for all architectures
-- [ ] Build provenance attestation still runs on tagged releases
+Handles artifact preparation including:
+- Source packaging and digest computation
+- Lock file resolution and management
+- Archive upload for sources
+- Interaction with both registry and worker services
 
----
+**Review focus:** Source digest correctness, data integrity during archive operations,
+proper error handling for partial failures.
 
-## Common Pitfalls
+### 2.6 Protobuf API Definitions (`sdk/rust/api/**/*.proto`)
 
-### 1. Digest Parity Drift
+Five proto files define the entire API surface:
+- `artifact.proto` — Artifact CRUD, alias resolution, system enum
+- `agent.proto` — Artifact preparation
+- `archive.proto` — Archive push/pull streaming
+- `context.proto` — Config context service
+- `worker.proto` — Build execution
 
-The most common source of bugs is when a change to one SDK's serialization or script template is not mirrored in the other SDKs. The TypeScript SDK's `serializeArtifact()` must exactly replicate Rust's `serde_json::to_vec` output for prost structs. Even adding a single field to a proto message requires updating the serialization in all SDKs.
+**Review focus:** Backward compatibility of message/field changes, correct field numbering,
+any additions to the `ArtifactSystem` enum (requires updates across all three SDKs).
 
-**Prevention:** Always run the parity test suite (`bun test` in `sdk/typescript/src/__tests__/`) and the CI parity step after any artifact-related change.
+### 2.7 Cross-SDK Parity
 
-### 2. Shell Script Template Mismatch
+The CI pipeline (`vorpal.yaml` test job) builds the same artifacts with Rust, Go, and
+TypeScript SDKs and compares digests. Any divergence fails the build. This makes SDK changes
+especially sensitive:
 
-The `Process`, `DevelopmentEnvironment`, and `UserEnvironment` classes in both Rust and TypeScript generate shell scripts that become part of the artifact definition. A single whitespace or newline difference changes the artifact digest.
+- `sdk/rust/src/artifact/` — Rust artifact builders
+- `sdk/go/pkg/artifact/` — Go artifact builders (must produce identical output)
+- `sdk/typescript/src/artifact/` — TypeScript artifact builders (must produce identical output)
 
-**Prevention:** When modifying a script template in one SDK, diff the output character-by-character against the other SDK. The `sdk/typescript/src/__tests__/step-parity.test.ts` test catches some of these, but manual inspection is still required for new templates.
-
-### 3. Lockfile Concurrency
-
-The agent writes to `Vorpal.lock` immediately after preparing each HTTP source. If multiple agents run against the same project directory simultaneously, the lockfile can be corrupted. There is no file-level locking on the lockfile today (only advisory locking on the socket).
-
-**Prevention:** Flag any change that modifies lockfile write patterns. Consider whether the change introduces new concurrent access paths.
-
-### 4. Memory-Bounded Archive Handling
-
-Archives are currently loaded entirely into `Vec<u8>` before being written to disk or pushed via gRPC. This works for typical artifact sizes (tens of MB) but could OOM for very large artifacts.
-
-**Prevention:** If a change introduces a new archive-handling path, verify it uses streaming or has a documented size limit.
-
-### 5. TLS Configuration Asymmetry
-
-The client TLS config (`get_client_tls_config`) in `context.rs` uses a custom CA certificate if present, otherwise falls back to system roots. The server TLS config in `start.rs` requires explicit cert and key files. Changes to either side must be tested end-to-end.
-
-**Prevention:** Test TLS changes with both the Unix domain socket (no TLS) and TCP (with TLS) transport modes.
-
-### 6. Config Resolution Precedence
-
-The layered settings system (`config.rs`) resolves values as: CLI flag > project config > user config > built-in defaults. The `apply_default()` helper compares parsed values to clap's hardcoded defaults to detect whether the user explicitly set a flag. This is fragile: if a clap default changes without updating `apply_default`, the precedence breaks silently.
-
-**Prevention:** When modifying clap defaults or adding new settings, verify the `apply_default()` comparison values match.
+**Review focus:** Identical default versions for toolchains/packages across SDKs, identical
+step construction logic, identical source handling. The `builder.go` (809 lines) and
+`artifact.ts` (1072 lines) files are the Go and TypeScript equivalents of the Rust
+`artifact.rs` (698 lines).
 
 ---
 
-## Review Effort by Change Size
+## 3. Review Dimensions by Priority
 
-| Change Size | Lines Changed | Review Strategy |
-|---|---|---|
-| **Trivial** | <20 lines | Verify intent, check for hidden parity impact, approve quickly |
-| **Small** | 20-100 lines | Full review of affected dimension(s), verify parity if SDK-related |
-| **Medium** | 100-500 lines | Structured review across all applicable dimensions, run parity tests |
-| **Large** | 500+ lines | Request split if spanning multiple concerns; focus on high-risk modules first |
+For this project, these dimensions are ordered by importance:
 
-For large changes, review in this order:
-1. Protobuf schema changes (affects all SDKs)
-2. Security-sensitive code (auth, worker, agent)
-3. Cross-SDK parity (serialization, script templates)
-4. Core build logic (build.rs, context.rs)
-5. Supporting infrastructure (config, CLI flags, CI)
+| Priority | Dimension | Why |
+|----------|-----------|-----|
+| 1 | **Correctness** | Content-addressed builds must be deterministic. Wrong hashes = broken system. |
+| 2 | **Security** | Worker executes arbitrary commands in sandboxes; auth protects multi-tenant registries. |
+| 3 | **Cross-SDK Consistency** | Unique to this project. Any SDK divergence breaks CI and user trust. |
+| 4 | **API Compatibility** | Proto changes are hard to roll back; clients may be on different versions. |
+| 5 | **Operations** | gRPC services run as long-lived daemons; lock files and temp dirs need cleanup. |
+| 6 | **Code Quality** | Important but secondary to functional correctness. |
 
 ---
 
-## Gaps and Missing Pieces
+## 4. Review Strategy by Change Type
 
-1. **No PR template or review checklist in the repository.** Reviewers must rely on this document for guidance. Consider adding a `.github/pull_request_template.md`.
+### 4.1 SDK Artifact Builder Changes
 
-2. **No CONTRIBUTING.md.** There are no documented expectations for contributors regarding testing, commit conventions, or review process.
+Changes to files in `sdk/rust/src/artifact/`, `sdk/go/pkg/artifact/`, or
+`sdk/typescript/src/artifact/`.
 
-3. **No automated parity enforcement in CI for TypeScript.** The CI workflow validates Rust-Go parity in the `test` job, but TypeScript parity is not yet integrated into the main pipeline. The `Vorpal.ts.toml` config exists but the parity comparison is only in the manual `tests/typescript-integration.sh` script.
+**Checklist:**
+- [ ] Change is replicated identically across all three SDKs (or a tracking issue exists)
+- [ ] Default package/toolchain versions match across SDKs
+- [ ] Step construction produces identical artifact JSON serialization
+- [ ] Source includes/excludes are consistent
+- [ ] CI parity tests pass (Rust vs Go vs TypeScript digest comparison)
 
-4. **No code owners file.** There is no `CODEOWNERS` to automatically route reviews to domain experts for high-risk modules (auth, worker, SDK parity).
+### 4.2 Proto API Changes
 
-5. **Limited Rust test coverage.** Unit tests exist only in `sdk/rust/src/context.rs` (artifact alias parsing). There are no Rust unit tests for build orchestration, config resolution, worker execution, or agent source handling.
+Changes to `sdk/rust/api/**/*.proto`.
 
-6. **TypeScript SDK tests are comprehensive relative to the Rust SDK.** The TypeScript SDK has parity tests, export tests, template tests, and context tests in `sdk/typescript/src/__tests__/`, which is more thorough than the Rust side.
+**Checklist:**
+- [ ] Field numbers are not reused or changed
+- [ ] New fields use `optional` or `repeated` (not required) for forward compatibility
+- [ ] `make generate` has been run to update Go and TypeScript generated code
+- [ ] All three SDKs compile against the updated protos
+- [ ] No breaking changes to existing RPC signatures without a migration plan
 
-7. **No integration test harness.** The `tests/typescript-integration.sh` script is the only integration test, and it requires running Vorpal services manually. There is no automated end-to-end test that spins up services and runs a full build cycle.
+### 4.3 CLI Service Changes (Agent, Worker, Registry)
 
-8. **Renovate manages dependency updates** via `.github/renovate.json`, with weekly lock file maintenance. Template directories are excluded from renovate scans (`cli/src/command/template/**`).
+Changes to `cli/src/command/start/`.
+
+**Checklist:**
+- [ ] Error paths clean up resources (temp dirs, lock files, archive files)
+- [ ] gRPC streaming handlers handle disconnection/cancellation
+- [ ] Auth checks are present on new or modified endpoints
+- [ ] Subprocess commands don't pass unsanitized user input
+- [ ] Lock file operations are safe against concurrent access
+
+### 4.4 Auth/Security Changes
+
+Changes to `cli/src/command/start/auth.rs` or credential-related code in `sdk/rust/src/context.rs`.
+
+**Checklist:**
+- [ ] JWT validation includes audience, issuer, and expiry checks
+- [ ] Namespace permission checks are applied to all data-modifying operations
+- [ ] Credentials are not logged (even at debug level)
+- [ ] Token refresh handles network failures gracefully
+- [ ] OIDC discovery validates the issuer field matches expectation
+
+### 4.5 Dependency Updates
+
+Renovate bot automatically opens PRs for dependency updates. These are usually low-risk but
+need attention for:
+
+**Checklist:**
+- [ ] Rust dependencies: `cargo check` and `cargo clippy` pass
+- [ ] Major version bumps have changelog reviewed for breaking changes
+- [ ] SDK dependency versions (e.g., `tonic`, `prost`, `grpc-js`) stay compatible across SDKs
+- [ ] Lock files are updated (Cargo.lock, go.sum, bun.lock)
+
+### 4.6 Build/CI Changes
+
+Changes to `makefile`, `.github/workflows/`, or `script/`.
+
+**Checklist:**
+- [ ] CI matrix still covers all 4 platforms (aarch64-darwin, aarch64-linux, x86_64-darwin, x86_64-linux)
+- [ ] Cache keys are correct (based on `Cargo.lock` hash)
+- [ ] Secret references are valid
+- [ ] No accidental changes to release/tag workflows
+
+---
+
+## 5. Existing Automated Checks
+
+### CI Pipeline (`.github/workflows/vorpal.yaml`)
+
+The pipeline enforces a strict sequence:
+
+1. **vendor** — `cargo check` on all 4 platforms (validates Rust compilation)
+2. **code-quality** — `cargo fmt --check` + `cargo clippy -- --deny warnings`
+3. **build** — `cargo build` + `cargo test` + binary distribution packaging
+4. **test** — End-to-end SDK parity: builds artifacts with Rust SDK, then rebuilds with Go
+   and TypeScript SDKs, comparing digests for exact match
+5. **container-image** + **release** — Tag-triggered deployment (only on push to tag)
+
+### What CI Catches
+- Rust compilation errors, formatting violations, clippy warnings (treated as errors)
+- SDK parity failures (digest mismatch between Rust/Go/TypeScript builds)
+- Platform-specific build failures (4-platform matrix)
+
+### What CI Does Not Catch
+- Logic errors that produce consistent-but-wrong digests across all SDKs
+- Security vulnerabilities in auth/permission logic
+- Resource leaks (temp dirs, lock files, gRPC connections)
+- Race conditions in concurrent builds
+- Performance regressions
+- Backward compatibility of proto/API changes (no integration test suite for this)
+
+### Renovate (`.github/renovate.json`)
+
+Automated dependency updates with:
+- Weekly lock file maintenance
+- Semantic commit types (`chore`)
+- Template directories excluded from updates (`cli/src/command/template/**`)
+
+---
+
+## 6. Known Gaps and Missing Practices
+
+### No PR Template or Review Checklist
+There is no `.github/PULL_REQUEST_TEMPLATE.md` or `CONTRIBUTING.md`. Reviewers must rely on
+their own judgment about what to check. The checklists in Section 4 above are intended to
+fill this gap.
+
+### No CODEOWNERS
+No GitHub CODEOWNERS file exists. There is no automated routing of reviews based on file
+paths. All changes are reviewed by whoever is available.
+
+### Limited Unit Test Coverage
+- **Rust:** Only one `#[cfg(test)]` module exists (in `cli/src/command/start/registry.rs`
+  for archive cache behavior). No `#[test]` functions outside of that. The entire CLI and
+  SDK Rust codebase has effectively zero unit test coverage.
+- **Go:** Two test files exist (`context_test.go` and `context_auth_test.go`) covering
+  artifact alias parsing and credential handling. No tests for artifact builders, the build
+  pipeline, or store operations.
+- **TypeScript:** No test files found.
+
+This means reviewers must compensate for low test coverage by carefully checking correctness
+manually, especially for edge cases and error paths.
+
+### No Integration Test Suite
+The CI parity check (comparing artifact digests across SDKs) is the closest thing to
+integration testing. There are no tests that validate gRPC service interactions, auth flows,
+or registry operations in isolation.
+
+### 12 Open TODOs in Rust Code
+Several TODO comments indicate incomplete work or known shortcuts:
+- Parallel artifact preparation (`context.rs:337`)
+- Lock file version checking (`context.rs:425`)
+- Docker step secrets support (`step.rs:257`)
+- Archive upload deduplication (`worker.rs:851`)
+- Alias validation (`artifact/local.rs:96`)
+- Registry artifact listing (`registry.rs:401`)
+
+Reviewers should watch for PRs that touch code near these TODOs and evaluate whether the
+TODO should be addressed as part of the change.
+
+### `exit(1)` Instead of Error Propagation
+The build command (`build.rs`) uses `exit(1)` in several error paths instead of propagating
+errors via `Result`. This makes testing harder and can skip cleanup. Reviewers should flag
+new instances of this pattern.
+
+---
+
+## 7. Commit Message Conventions
+
+The project follows conventional commits based on recent history:
+
+- `feat(scope):` — New features (`feat(agent,sdk): add artifact source and digest caching`)
+- `fix(scope):` — Bug fixes (`fix(deps): correct terraform version to 1.14.6`)
+- `chore(scope):` — Maintenance (`chore(deps): upgrade default artifact versions across all SDKs`)
+- `refactor(scope):` — Code restructuring (`refactor(sdk): consolidate TLS client config`)
+
+Renovate bot uses `chore(deps):` for automated updates. Reviewers should verify that commit
+messages accurately reflect the change type (e.g., don't use `chore` for a behavioral change).
+
+---
+
+## 8. Review Workflow Recommendations
+
+### Before Reviewing
+1. Check which SDKs are affected — if one SDK is changed, check the other two
+2. Read the proto definitions if any API-facing change is involved
+3. Understand the artifact digest implications of any change to serialization or hashing
+
+### During Review
+1. Start with the highest-risk files (worker.rs, context.rs, auth.rs, build.rs)
+2. Check error handling and resource cleanup
+3. Verify cross-SDK consistency for artifact builder changes
+4. Look for new `exit(1)` calls, `unwrap()`/`expect()` in non-test code, or missing auth checks
+5. Check that environment variable expansion doesn't introduce injection risks
+
+### After Review
+1. Verify CI passes on all 4 platforms
+2. Confirm SDK parity tests pass (the test job in CI)
+3. For auth changes, consider manual testing against a real OIDC provider

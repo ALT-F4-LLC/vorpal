@@ -1,407 +1,344 @@
 # Performance Specification
 
-This document describes the performance characteristics, caching strategies, known bottlenecks,
-and scaling considerations for the Vorpal project as they actually exist in the codebase today.
+> Describes the performance characteristics, caching strategies, known bottlenecks, and scaling
+> considerations for the Vorpal project as they exist today.
 
 ---
 
-## 1. Runtime and Concurrency Model
+## 1. Architecture Overview (Performance Lens)
 
-### Tokio Async Runtime
+Vorpal is a build system with a client-server architecture communicating over gRPC. The primary
+performance-critical path is the artifact build pipeline:
 
-The CLI and all server components run on the Tokio multi-threaded async runtime
-(`tokio::main` with `rt-multi-thread` feature). This applies to:
+```
+CLI (client) → Agent (source prep) → Worker (build execution) → Registry (archive storage)
+```
 
-- **CLI** (`cli/src/main.rs`): Single `#[tokio::main]` entry point.
-- **SDK** (`sdk/rust/Cargo.toml`): `tokio` with `process` and `rt-multi-thread`.
-- **Config binary** (`config/Cargo.toml`): `tokio` with `rt-multi-thread`.
-
-The default Tokio thread pool size (equal to the number of CPU cores) is used. There is no
-explicit tuning of worker thread count, stack sizes, or blocking thread pool sizes.
-
-### gRPC Server Concurrency
-
-The gRPC server is built with `tonic` (0.14.x). The `tonic::transport::Server` handles concurrent
-connections natively via Tokio's task model. Each incoming RPC spawns into Tokio's task system:
-
-- **Agent `prepare_artifact`**: Uses `tokio::spawn` with a `channel(100)` for streaming responses
-  (`cli/src/command/start/agent.rs:613-621`).
-- **Worker `build_artifact`**: Uses `tokio::spawn` with a `mpsc::channel(100)` for streaming
-  build output (`cli/src/command/start/worker.rs:976-998`).
-- **Archive `pull`**: Uses `tokio::spawn` with a `mpsc::channel(100)` for streaming archive data
-  (`cli/src/command/start/registry.rs:209-234`).
-
-Channel buffer size of 100 messages is hardcoded across all streaming RPCs. This limits
-backpressure propagation -- if a consumer is slow, the producer blocks after 100 buffered messages.
-
-### Build Pipeline Concurrency
-
-**Artifact builds are sequential, not parallel.** The `build_artifacts` function in
-`cli/src/command/build.rs:303-356` iterates through the topologically sorted artifact order and
-builds each artifact one at a time in a `for` loop. There is a `TODO` comment in
-`sdk/rust/src/context.rs:329` acknowledging this: `// TODO: make this run in parallel`.
-
-This means:
-- Independent artifacts in the dependency graph that could be built concurrently are built serially.
-- Build time scales linearly with the number of artifacts, not with the critical path length.
+All services run in a single `vorpal` binary process (co-located by default), communicating over
+Unix domain sockets or TCP. The system is built with **Tokio** (multi-threaded async runtime) and
+**Tonic** (async gRPC framework).
 
 ---
 
-## 2. Caching Strategies
+## 2. Async Runtime & Concurrency
+
+### Tokio Runtime
+
+- **Runtime**: `tokio::main` with `rt-multi-thread` feature — uses a work-stealing thread pool
+  sized to the number of CPU cores by default.
+- **No custom runtime configuration**: The CLI uses the default Tokio runtime settings. There are
+  no tuned worker thread counts, blocking thread pool sizes, or scheduler configurations.
+
+### Concurrency Patterns
+
+| Pattern | Location | Details |
+|---|---|---|
+| `tokio::spawn` | Worker build (`worker.rs:983`), Archive pull (`registry.rs:213`), Health reporter (`start.rs:273`) | Fire-and-forget async tasks for streaming responses and background work |
+| `mpsc::channel(100)` | Worker build, Agent prepare, Archive pull | Bounded channels (capacity 100) for gRPC server streaming responses |
+| `Arc<Mutex<T>>` | Agent source cache (`agent.rs:407`) | Shared mutable state for the source digest cache across concurrent requests |
+| `Arc<RwLock<T>>` | OIDC JWKS cache (`auth.rs:107`) | Read-heavy lock for cached JWK sets; refreshed on cache miss |
+| `tokio::select!` | Signal handling (`start.rs:91`) | Graceful shutdown via SIGINT/SIGTERM |
+| `block_in_place` | Auth interceptor (`auth.rs:268`) | Bridges sync tonic interceptor with async token validation — blocks the current Tokio worker thread |
+
+### Concurrency Gaps
+
+- **Sequential artifact builds**: The `build_artifacts` function in `build.rs:303` processes
+  artifacts in topological order, one at a time. Dependencies are respected, but independent
+  artifacts within the same dependency layer are **not** built in parallel. There is an explicit
+  `// TODO: make this run in parallel` comment in `context.rs:337`.
+- **Sequential source preparation**: Each source in `agent.rs` is prepared sequentially within a
+  single `prepare_artifact` call, even when sources are independent.
+- **No connection pooling**: Each gRPC client connection is created per-operation in several
+  places (e.g., `build.rs:537-541` creates new channels for archive and worker clients). The
+  `build_channel` function (`context.rs:593`) creates a fresh connection each time.
+- **`block_in_place` in auth interceptor**: The OIDC token validation uses
+  `tokio::task::block_in_place` inside a tonic interceptor (`auth.rs:268`). This blocks the
+  current Tokio worker thread during JWT validation and potential JWKS refresh. Under high
+  concurrency, this could cause thread starvation.
+
+---
+
+## 3. Caching Strategies
 
 ### Archive Check Cache (Moka)
 
-The most significant caching mechanism is the archive check cache in the registry's
-`ArchiveServer` (`cli/src/command/start/registry.rs:102-130`). It uses the `moka` crate
-(v0.12.x) -- a high-performance concurrent cache inspired by Caffeine (Java).
+- **Library**: `moka` (v0.12.13) with `future` feature — a concurrent, async-aware cache.
+- **Location**: `ArchiveServer` in `registry.rs:102-106`.
+- **Key format**: `"{namespace}/{digest}"` (string).
+- **TTL**: Configurable via `--archive-cache-ttl` CLI flag. Default: **300 seconds** (5 minutes).
+  Setting to `0` disables caching.
+- **Scope**: Caches the `check` RPC result (exists/not-found) for archive digests. Both positive
+  and negative results are cached (negative caching prevents repeated backend lookups for missing
+  archives).
+- **No size limit**: The cache has no explicit max capacity — entries are only evicted by TTL.
+- **Invalidation**: No manual invalidation mechanism. A newly pushed archive will not be
+  reflected in `check` results until the TTL expires.
+- **Test coverage**: 7 unit tests covering cache hits, misses, negative caching, TTL expiration,
+  and TTL=0 disable behavior (`registry.rs:504-713`).
 
-**Configuration:**
-- Cache key: `"{namespace}/{digest}"` string.
-- Cache value: `bool` (whether the archive exists).
-- TTL: Configurable via `--archive-check-cache-ttl` CLI flag, default 300 seconds (5 minutes).
-- TTL of 0 disables caching (immediate expiry).
-- No maximum entry count is configured -- the cache grows unbounded during the TTL window.
-- Supports negative caching (not-found results are cached too).
+### Agent Source Digest Cache
 
-**Impact:** This cache avoids redundant filesystem checks (local backend) or S3 `HeadObject`
-calls (S3 backend) during a build run. Since a single build can check the same archive digest
-multiple times across different artifact builds, this provides meaningful latency reduction.
+- **Type**: `Arc<Mutex<SourceCacheState>>` (in-memory HashMap).
+- **Location**: `AgentServer` in `agent.rs:680-690`.
+- **Structure**: Two lookup maps:
+  - `by_key`: `SourceCacheKey` (name + path + includes + excludes + platform) → digest
+  - `by_url`: `(url, excludes, includes, platform)` → digest (HTTP sources only)
+- **Lifetime**: Session-scoped — persists for the lifetime of the agent server process.
+- **No TTL or eviction**: Entries accumulate without limit.
+- **Purpose**: Avoids re-downloading and re-hashing identical sources within the same session.
 
-**Test coverage:** The caching behavior is thoroughly tested in
-`cli/src/command/start/registry.rs:504-713` with tests for cache hits, misses, negative caching,
-TTL expiry, and TTL=0 disabling.
+### SDK Artifact Input Cache
 
-### Content-Addressable Store (Filesystem)
+- **Type**: `HashMap<String, String>` inside `ConfigContextStore`.
+- **Location**: `context.rs:35`.
+- **Key**: Input digest (SHA-256 of serialized artifact JSON before agent processing).
+- **Value**: Output digest (SHA-256 after agent processes sources).
+- **Purpose**: Short-circuits `add_artifact` when the same artifact definition is submitted
+  multiple times within a single config evaluation.
 
-Artifacts are stored in a content-addressable filesystem layout under `/var/lib/vorpal/store/`:
+### OIDC JWKS Cache
+
+- **Type**: `Arc<RwLock<JwkSet>>` in `OidcValidator`.
+- **Location**: `auth.rs:107`.
+- **Refresh strategy**: Cache-then-refresh. On validation, the current JWK set is tried first.
+  If the `kid` is not found, JWKS is re-fetched from the provider and retried once.
+- **No TTL**: The JWKS cache is only refreshed on key miss — it does not proactively refresh.
+
+### Filesystem-Level Caching
+
+- **Artifact output deduplication**: Before building, both the worker (`worker.rs:697-701`) and
+  the build client (`build.rs:78-82`) check if `artifact_output_path` already exists on disk. If
+  the output directory is present, the build is skipped entirely.
+- **Archive deduplication**: Before pushing archives, the S3 backend checks `head_object` to
+  avoid re-uploading (`archive/s3.rs:70-79`). The local backend checks file existence
+  (`archive/local.rs:50-53`).
+- **Lockfile hydration**: The agent uses `Vorpal.lock` to hydrate known source digests, allowing
+  the `check` RPC to short-circuit source re-download for locked sources (`agent.rs:461-495`).
+
+---
+
+## 4. Data Transfer & Serialization
+
+### gRPC Streaming
+
+- **Archive push/pull**: Uses gRPC client/server streaming for large binary data (archives).
+- **Chunk sizes**:
+  - Worker → Registry push: **8,192 bytes** (8 KB) — `DEFAULT_CHUNKS_SIZE` in `worker.rs:51`.
+  - Agent → Registry push: **8,192 bytes** (8 KB) — `DEFAULT_CHUNKS_SIZE` in `agent.rs:53`.
+  - Registry local pull: **2,097,152 bytes** (2 MB) — `DEFAULT_GRPC_CHUNK_SIZE` in
+    `registry.rs:44`.
+- **Asymmetry**: Push uses 8 KB chunks while local pull uses 2 MB chunks. The small push chunk
+  size is significantly below the default gRPC max message size (4 MB) and may cause excessive
+  framing overhead for large archives.
+
+### Archive Accumulation in Memory
+
+- The worker accumulates the **entire archive response into memory** before writing to disk
+  (`worker.rs:186-198`, `worker.rs:303-316`). For large artifacts, this means the full
+  compressed archive must fit in memory. The same pattern exists in the build client
+  (`build.rs:111-131`).
+- There is no streaming-to-disk implementation for received archives.
+
+### Compression
+
+- **Algorithm**: Zstandard (zstd) via `async-compression` crate.
+- **Compression level**: Default (not explicitly configured — `ZstdEncoder::new` uses the library
+  default, typically level 3).
+- **Format**: tar.zst (tar archive compressed with zstd).
+- **Implementation**: Fully async using `tokio_tar::Builder` and `async_compression::tokio`.
+- **Decompression**: Also async, using `ZstdDecoder` with `BufReader`.
+- **Other formats supported**: gzip, bzip2, xz, zip — for HTTP source unpacking in the agent.
+
+### Hashing
+
+- **Algorithm**: SHA-256 via `sha256` crate.
+- **Usage**: Content-addressable storage for artifacts and sources.
+- **`get_source_digest`**: Hashes each file individually, then concatenates all hex digests and
+  hashes the result. This is done **synchronously** (blocking) via the `sha256` crate's
+  `try_digest` which reads the entire file.
+- **Performance concern**: For source directories with many files, the sequential file-by-file
+  hashing can be slow. Files are hashed synchronously on the async runtime.
+
+---
+
+## 5. Network & Transport
+
+### Unix Domain Sockets (Default)
+
+- Default transport for local communication. Socket at `/var/lib/vorpal/vorpal.sock`
+  (configurable via `VORPAL_SOCKET_PATH`).
+- Lower latency than TCP for local IPC — no TCP handshake, no Nagle's algorithm, no network
+  stack overhead.
+- `connect_with_connector_lazy` is used for UDS clients (`context.rs:602`) — the connection is
+  deferred until the first RPC, avoiding startup races.
+
+### TCP Transport
+
+- Used when `--port` is specified or `--tls` is enabled.
+- Default port: `23151` (when TLS is enabled).
+- Health check on separate plaintext port: `23152` (configurable).
+
+### TLS
+
+- Optional TLS via `tonic` with `tls-ring` feature (ring crypto provider).
+- Installed as default crypto provider at startup (`command.rs:275-277`).
+- Client TLS uses system native roots or a custom CA certificate from
+  `/var/lib/vorpal/key/ca.pem`.
+
+### HTTP Client
+
+- **Library**: `reqwest` with `rustls-tls` backend.
+- **Usage**: Source downloads (agent), OIDC discovery, token exchange.
+- **No connection reuse**: `reqwest::get()` and `reqwest::Client::new()` are called per-request
+  in several places without reusing a client instance (e.g., `command.rs:539`,
+  `auth.rs:116-122`, `auth.rs:241-247`). Each `Client::new()` creates a new connection pool.
+
+---
+
+## 6. Storage & I/O
+
+### Store Layout
+
+All persistent data lives under `/var/lib/vorpal/`:
 
 ```
-store/artifact/
-  archive/{namespace}/{digest}.tar.zst    # compressed archives
-  config/{namespace}/{digest}.json        # artifact metadata
-  output/{namespace}/{digest}/            # unpacked outputs
+/var/lib/vorpal/
+├── key/                      # TLS certificates, credentials
+├── sandbox/                  # Temporary build workspaces (UUID v7 named)
+├── store/
+│   └── artifact/
+│       ├── alias/            # name → digest mappings
+│       ├── archive/          # compressed tar.zst archives
+│       ├── config/           # artifact JSON configurations
+│       └── output/           # unpacked artifact outputs
+└── vorpal.sock               # Unix domain socket
 ```
 
-**Cache-by-existence pattern:** Before building an artifact, the system checks whether the output
-directory already exists (`get_artifact_output_path`). If it does, the build is skipped entirely
-(`cli/src/command/build.rs:78-82` and `cli/src/command/start/worker.rs:697-701`). This is the
-primary build avoidance mechanism.
+### File I/O Patterns
 
-**Lock file pattern:** Before starting a build, a `.lock.json` file is created
-(`cli/src/command/start/worker.rs:706-728`). This prevents concurrent builds of the same artifact
-but also means a crashed build leaves a stale lock. The `--rebuild` flag removes both lock and
-output files to force a rebuild.
+- **`tokio::fs`** used throughout for async file operations.
+- **`walkdir`** (synchronous) used for directory traversal in `get_file_paths` (`paths.rs:173`).
+  This blocks the async runtime for large directory trees.
+- **`filetime`** used to set all file timestamps to epoch (0) for reproducible builds. This
+  iterates over every file after unpacking — O(n) per file in each archive.
+- **UUID v7** for sandbox directory names — monotonically increasing, time-ordered.
 
-### Source Digest Caching
+### Disk Usage Concerns
 
-Source files are content-addressed by computing SHA-256 digests of all source files:
-- Individual file digests are computed via `sha256::try_digest` (reads entire file into memory)
-  in `cli/src/command/store/hashes.rs:5-11`.
-- All file digests are concatenated and re-hashed to produce a single source digest
-  (`get_source_digest` at `cli/src/command/store/hashes.rs:33-42`).
-- Before pushing a source archive, the agent checks if it already exists in the registry via the
-  `check` RPC (`cli/src/command/start/agent.rs:89-106`).
-
-### OIDC/JWKS Caching
-
-The OIDC validator caches the JWK set in an `Arc<RwLock<JwkSet>>`
-(`cli/src/command/start/auth.rs:106-107`). JWKS is fetched once at startup and re-fetched
-on-demand only when a token's `kid` is not found in the cached set (key rotation handling).
-There is no periodic refresh or TTL on the JWKS cache.
-
-### OAuth2 Token Credential Caching
-
-Client credentials are stored on disk at `/var/lib/vorpal/key/credentials.json` and refreshed
-when the token has less than 5 minutes of validity remaining
-(`sdk/rust/src/context.rs:638-649`). There is no in-memory token caching between requests --
-the credentials file is read from disk on every authenticated request.
+- **No automatic cleanup of archives**: Once an archive is downloaded to the local store, it
+  persists indefinitely. The `system prune` command exists for manual cleanup.
+- **Sandbox cleanup**: Build workspaces are cleaned up after each build, but failure paths may
+  leave orphaned sandboxes.
+- **Lock files**: Advisory file locks (`fs4`) used for single-instance enforcement. Lock file
+  intentionally left on disk after shutdown (released by OS on process exit).
 
 ---
 
-## 3. Data Transfer and Compression
+## 7. Build Pipeline Performance
 
-### Archive Format: Zstandard (tar.zst)
+### Critical Path
 
-All archives use `tar.zst` format (Zstandard compression via `async_compression::tokio`):
+The build pipeline for an artifact follows this sequence:
 
-- **Compression** (`cli/src/command/store/archives.rs:14-63`): Default Zstd compression level
-  (no custom level configured). Compression is streamed through `ZstdEncoder` -> `tokio-tar`
-  builder. Temp files are used as intermediates.
-- **Decompression** (`cli/src/command/store/archives.rs:65-102`): Streamed through `ZstdDecoder`
-  -> `tokio-tar` archive reader. Entries are unpacked individually to handle symlink overwrites.
+1. **Config evaluation** — Run language-specific config binary to produce artifact definitions
+2. **Source preparation** (Agent) — Download/copy sources, hash, compress, push to registry
+3. **Dependency resolution** — Topological sort of artifact DAG
+4. **Dependency builds** — Sequential build of each artifact in dependency order
+5. **Target build** (Worker) — Pull sources, pull dependency artifacts, execute build steps
+6. **Archive & push** — Compress output, push to registry
 
-### gRPC Streaming Chunk Sizes
+### Known Bottlenecks
 
-Two different chunk sizes are used:
+| Bottleneck | Impact | Severity |
+|---|---|---|
+| Sequential artifact builds | Independent artifacts in the same DAG layer wait for each other | High |
+| 8 KB push chunk size | Excessive gRPC framing overhead for large archives | Medium |
+| Full archive in memory | Memory pressure proportional to largest artifact | Medium |
+| Synchronous file hashing | Blocks async runtime during source digest computation | Medium |
+| Synchronous `walkdir` | Blocks async runtime during directory traversal | Low-Medium |
+| Per-request HTTP clients | No connection reuse for OIDC discovery, source downloads | Low |
+| `block_in_place` in auth | Blocks Tokio worker thread during JWT validation | Low (auth off by default) |
+| No parallel source prep | Sources within an artifact are prepared sequentially | Medium |
 
-- **Agent source push**: 8,192 bytes (8 KB) -- defined as `DEFAULT_CHUNKS_SIZE` in
-  `cli/src/command/start/agent.rs:48`.
-- **Registry archive pull**: 2,097,152 bytes (2 MB) -- defined as `DEFAULT_GRPC_CHUNK_SIZE` in
-  `cli/src/command/start/registry.rs:44`.
-- **Worker archive push**: 8,192 bytes (8 KB) -- uses the same `DEFAULT_CHUNKS_SIZE` as agent
-  (`cli/src/command/start/worker.rs:51`).
+### Optimistic Fast Paths
 
-The inconsistency between 8 KB and 2 MB chunk sizes is notable. The 8 KB chunk size for pushing
-creates significantly more gRPC messages for large archives, which adds per-message overhead.
-
-### In-Memory Archive Buffering
-
-Archives are fully buffered in memory during transfer in several places:
-
-- **Build pull** (`cli/src/command/build.rs:111-131`): `stream_data` is a `Vec<u8>` that
-  accumulates the entire archive in memory before writing to disk.
-- **Worker pull** (`cli/src/command/start/worker.rs:186-198`): Same pattern -- entire archive in
-  memory.
-- **Agent push** (`cli/src/command/start/agent.rs:346`): Archive file is read entirely into memory
-  (`read(&source_sandbox_archive)`), then chunked and sent.
-- **Worker push** (`cli/src/command/start/worker.rs:868`): Same pattern -- read entire archive
-  file into memory before streaming.
-- **Registry push** (`cli/src/command/start/registry.rs:243-255`): All incoming chunks are
-  accumulated into a single `Vec<u8>` before writing to storage backend.
-
-This means the maximum archive size is bounded by available memory. For large artifacts
-(hundreds of MB or more), this can cause significant memory pressure.
-
-### S3 Backend
-
-The S3 backend (`cli/src/command/start/registry/archive/s3.rs`) uses the AWS SDK v1.x:
-
-- **Pull**: Uses `get_object` with streaming body -- chunks are forwarded directly to gRPC
-  without full buffering (good).
-- **Push**: Receives the entire archive as a single `request.data` blob and uploads it with
-  `put_object`. No multipart upload is used, so S3's 5 GB single-upload limit applies.
-- **Check**: Uses `head_object` -- a lightweight metadata-only operation.
-- **Idempotent push**: Before uploading, checks if the object already exists via `head_object`
-  to avoid re-uploading.
-
-No connection pooling configuration exists beyond what the AWS SDK provides by default.
+- **Output exists**: If the artifact output directory already exists on disk, the entire
+  build/pull pipeline is skipped.
+- **Archive exists in registry**: The `check` RPC (with moka cache) avoids redundant archive
+  pulls.
+- **Lockfile digest hydration**: Known source digests from `Vorpal.lock` skip the download +
+  hash + push cycle entirely.
+- **SDK input cache**: Identical artifact definitions within a config evaluation return
+  immediately.
 
 ---
 
-## 4. Hashing and Digest Computation
-
-### SHA-256 Everywhere
-
-All content addressing uses SHA-256 via the `sha256` crate:
-
-- **File digests**: `sha256::try_digest` reads the entire file into memory to hash it
-  (`cli/src/command/store/hashes.rs:10`). For large files, this has O(n) memory cost.
-- **Artifact digests**: The artifact struct is serialized to JSON, then SHA-256 hashed
-  (`sdk/rust/src/context.rs:323`). This is fast for typical artifact metadata.
-- **Source digests**: All source file digests are concatenated and re-hashed
-  (`cli/src/command/store/hashes.rs:23-31`). Digest computation is sequential --
-  no parallel file hashing.
-
-### Cross-SDK Parity
-
-The TypeScript SDK (`sdk/typescript/src/context.ts:137-140`) uses Node.js `createHash("sha256")`
-with a custom JSON serializer (`serializeArtifact`) that matches Rust's `serde_json` output
-field ordering. This is critical for cross-SDK digest parity but adds complexity -- any
-divergence in serialization order produces different digests.
-
----
-
-## 5. DAG Resolution and Build Ordering
-
-### Topological Sort
-
-Build ordering is computed using `petgraph::algo::toposort` over a `DiGraphMap`
-(`cli/src/command/config.rs:374-395`). The graph nodes are artifact digest strings, and edges
-represent step dependencies.
-
-**Characteristics:**
-- `toposort` runs in O(V + E) time, which is efficient.
-- The graph is rebuilt from scratch on every build -- no incremental graph maintenance.
-- Cycle detection is handled by `toposort` returning an error.
-
-### Recursive Artifact Fetching
-
-`fetch_artifact` in `sdk/rust/src/context.rs:399-443` recursively fetches artifact dependencies
-using `Box::pin(self.fetch_artifact(dep))`. This is sequential -- each dependency is fetched one
-at a time. For deep dependency trees, this creates a serial chain of gRPC calls.
-
-### Artifact Store Cloning
-
-The artifact store (`HashMap<String, Artifact>`) is cloned in several places:
-- `get_artifact_store()` returns a full clone (`sdk/rust/src/context.rs:445-447`).
-- `config_artifacts_store.clone()` during the selected artifact search
-  (`cli/src/command/build.rs:704`).
-
-For builds with many artifacts, these clones copy significant data unnecessarily.
-
----
-
-## 6. File System Operations
-
-### Timestamp Normalization
-
-All files are normalized to epoch 0 timestamps using `filetime::set_file_times`
-(`cli/src/command/store/paths.rs:214-226`). This is done:
-- After unpacking archives (per-file loop).
-- After copying source files.
-- After downloading remote sources.
-
-For archives with many files, this creates one syscall per file, which is I/O-bound on
-traditional filesystems.
-
-### File Walking
-
-`walkdir::WalkDir` is used for directory traversal
-(`cli/src/command/store/paths.rs:173-190`). The walker iterates synchronously (not async) and
-applies include/exclude filters in-memory. For large source trees, the initial walk can be slow.
-
-### Sandbox Management
-
-Sandboxes are created under `/var/lib/vorpal/sandbox/` with UUID v7 names
-(`cli/src/command/store/paths.rs:152-153`). They are cleaned up after each build but use
-synchronous `remove_dir_all` which can be slow for large build workspaces.
-
----
-
-## 7. gRPC and Networking
-
-### Connection Management
-
-- **Lazy connections**: UDS connections use `connect_with_connector_lazy` to defer actual
-  connection until the first RPC call (`sdk/rust/src/context.rs:536-545`).
-- **Eager connections**: TCP/TLS connections use `endpoint.connect().await` which establishes the
-  connection immediately (`sdk/rust/src/context.rs:566-569`).
-- No connection pooling, keepalive, or retry configuration is set on gRPC channels.
-- Each service client creates a new channel -- there is no channel reuse between the agent,
-  archive, artifact, and worker service clients created during a build.
-
-### Auth Interceptor Blocking
-
-The OIDC auth interceptor uses `tokio::task::block_in_place` with `Handle::current().block_on`
-for async JWT validation (`cli/src/command/start/auth.rs:268-272`). This blocks a Tokio worker
-thread during token validation, which under high concurrency could exhaust the thread pool.
-The code includes a comment acknowledging this: "For high-throughput, prefer a tower layer that
-supports async."
-
-### Config Server Connection Retry
-
-When the CLI starts a config binary as a subprocess, it retries the gRPC connection up to 3
-times with a 500ms delay (`cli/src/command/config.rs:491-520`). This fixed retry strategy means:
-- Maximum wait: 1.5 seconds before giving up.
-- No exponential backoff.
-- No jitter.
-
----
-
-## 8. TypeScript Build Pipeline
-
-The TypeScript language builder (`sdk/rust/src/artifact/language/typescript.rs`) generates a
-build script that:
-
-1. Runs `bun install --frozen-lockfile` (installs dependencies).
-2. Runs `bun build --compile {entrypoint} --outfile $VORPAL_OUTPUT/bin/{name}`.
-
-**Performance characteristics:**
-- Bun is used as the TypeScript runtime and bundler, chosen for its fast startup and build times
-  compared to Node.js/tsc.
-- `bun build --compile` produces a single self-contained binary, which eliminates
-  `node_modules` from the artifact output.
-- The Bun binary itself is an artifact dependency, downloaded and cached through the normal
-  artifact system.
-- `--frozen-lockfile` ensures reproducibility but requires `bun.lockb` to exist.
-
----
-
-## 9. Known Bottlenecks and Gaps
-
-### Critical
-
-1. **Sequential artifact builds**: Independent artifacts are built one at a time even when the
-   DAG allows parallelism. This is the single largest performance bottleneck for projects with
-   many independent artifacts.
-
-2. **Full in-memory archive buffering**: Archives are fully read into memory during transfer.
-   For artifacts larger than available RAM, builds will fail with out-of-memory errors.
-
-3. **Sequential source hashing**: Source file digests are computed one file at a time. For
-   projects with many source files, parallel hashing would improve throughput.
-
-### Moderate
-
-4. **Inconsistent chunk sizes**: Agent and worker use 8 KB chunks while registry uses 2 MB.
-   The 8 KB size creates excessive per-message overhead for large transfers.
-
-5. **No gRPC channel reuse**: Multiple service clients each create their own channel during
-   a build. Connection setup overhead is paid multiple times.
-
-6. **Auth interceptor thread blocking**: `block_in_place` during JWT validation can exhaust
-   Tokio worker threads under high concurrency.
-
-7. **Credential file read per request**: OAuth2 tokens are read from disk on every
-   authenticated request instead of being cached in memory.
-
-8. **S3 single-part upload**: No multipart upload support means S3 uploads are limited to 5 GB
-   and don't benefit from parallel upload throughput.
-
-### Minor
-
-9. **Unbounded Moka cache**: The archive check cache has no maximum entry count, so it can
-   grow without bound during the TTL window.
-
-10. **No JWKS periodic refresh**: JWKS is only refreshed on cache miss (unknown `kid`). If all
-    keys rotate simultaneously and the old key is still used for in-flight tokens, validation
-    failures can occur until the cache refreshes.
-
-11. **HashMap cloning**: The artifact store is cloned in several places where a reference or
-    `Arc` would suffice.
-
----
-
-## 10. Benchmarking and Profiling
+## 8. Benchmarking & Profiling
 
 ### Current State
 
-**There are no benchmarks in the codebase.** The project does not include:
-- No Criterion benchmarks.
-- No flamegraph tooling or profiling scripts.
-- No load testing infrastructure.
-- No build time tracking or performance regression tests.
+- **No benchmarks exist**: There are no `criterion` benchmarks, `cargo bench` targets, or
+  performance test suites in the repository.
+- **No profiling instrumentation**: The codebase uses `tracing` for structured logging (INFO
+  level by default, DEBUG/TRACE available) but has no `#[instrument]` annotations, no span
+  timing, and no metrics collection (no Prometheus, no OpenTelemetry).
+- **No performance CI**: No automated performance regression detection.
 
-The `Cargo.toml` files do not include `[bench]` sections or benchmark dependencies.
+### Observability
 
-### Build Profiling
-
-The CLI supports `--level debug` and `--level trace` log levels via `tracing-subscriber`,
-which can be used for manual timing analysis by examining log timestamps. However, there are
-no structured performance metrics, no span-based timing, and no integration with tracing-based
-flamegraph tools like `tracing-flame`.
+- **Logging only**: `tracing` + `tracing-subscriber` with configurable log level (`--level`).
+  Outputs to stderr. DEBUG/TRACE include file and line numbers.
+- **Health checks**: gRPC health service (`tonic-health`) available on a separate plaintext port.
+  Reports service readiness but no performance metrics.
+- **No metrics endpoint**: No Prometheus scrape target, no StatsD, no custom metrics.
 
 ---
 
-## 11. Scaling Considerations
+## 9. Scaling Considerations
 
-### Single-Server Architecture
+### Single-Process Model
 
-The current architecture runs all services (agent, registry, worker) as gRPC services within a
-single process. The `--services` flag controls which services are enabled on a given instance,
-but there is no built-in service discovery, load balancing, or horizontal scaling mechanism.
+The current architecture runs all services (agent, registry, worker) in a single process. This
+means:
 
-### Storage Scaling
+- **Vertical scaling only**: Performance scales with CPU cores (Tokio thread pool) and available
+  memory.
+- **No horizontal scaling for workers**: There is no built-in mechanism for distributing builds
+  across multiple worker nodes.
+- **Registry backends are pluggable**: Local filesystem and S3 are supported. S3 enables
+  shared artifact storage across machines, but the worker is still single-node.
 
-- **Local backend**: Scales with the underlying filesystem. No cleanup/eviction policy exists
-  beyond manual `vorpal system prune`.
-- **S3 backend**: Scales inherently with S3 but is limited by single-part upload size and the
-  lack of transfer acceleration or parallel upload.
+### Memory Scaling
 
-### Connection Scaling
+- Archive accumulation in memory is O(archive_size) per concurrent build.
+- Source cache grows unbounded over the server lifetime.
+- Moka archive check cache grows unbounded (TTL-evicted only, no max entries).
 
-- **UDS mode** (default): Single Unix socket, limited to local connections. No concurrent listener
-  configuration.
-- **TCP mode**: Binds to `[::]:{port}`, limited by the OS's TCP connection limits and Tokio's
-  default task scheduler.
-- **TLS mode**: Uses `ring` for crypto, which is performant but adds per-connection TLS
-  handshake overhead.
+### Disk Scaling
 
-### Artifact Graph Scaling
+- Artifact storage grows monotonically. No automatic garbage collection.
+- `system prune` provides manual cleanup with granular options (aliases, archives, configs,
+  outputs, sandboxes).
 
-For very large dependency graphs:
-- `petgraph` topological sort is O(V + E), efficient.
-- But sequential building means wall-clock time is O(sum of all build times) rather than
-  O(critical path length).
-- Each artifact's JSON serialization is hashed for digest computation. For deeply nested
-  artifacts with many sources and steps, serialization overhead grows.
+### Multi-Platform Support
+
+The system targets 4 platforms: `aarch64-darwin`, `aarch64-linux`, `x86_64-darwin`,
+`x86_64-linux`. The worker validates that the build target matches the host system
+(`worker.rs:658-665`), meaning cross-compilation requires platform-matched workers.
+
+---
+
+## 10. Gaps & Missing Pieces
+
+| Gap | Description |
+|---|---|
+| No parallel builds | Artifacts within the same dependency layer are built sequentially |
+| No streaming archive writes | Archives are fully accumulated in memory before disk write |
+| No benchmark suite | No `criterion` or similar benchmarks for performance regression detection |
+| No metrics/observability | No Prometheus, OpenTelemetry, or custom performance metrics |
+| No connection pooling | gRPC channels and HTTP clients are created per-operation |
+| No cache size limits | Agent source cache and moka archive cache grow without bounds |
+| No distributed workers | Single-node worker model; no work distribution mechanism |
+| No incremental builds | Entire artifacts are rebuilt if any input changes |
+| Small push chunk size | 8 KB chunks for archive push cause excessive framing overhead |
+| Synchronous I/O in async context | `walkdir` and `sha256::try_digest` block the Tokio runtime |
