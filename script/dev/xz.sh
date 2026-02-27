@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-XZ_VERSION="5.8.1"
+XZ_VERSION="5.8.2"
 
 mkdir -p "${1}/bin"
 
