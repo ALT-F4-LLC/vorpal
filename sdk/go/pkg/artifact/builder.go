@@ -109,7 +109,7 @@ type UserEnvironmentTemplateArgs struct {
 }
 
 const ProcessScriptTemplate = `
-mkdir -pv $VORPAL_OUTPUT/bin
+mkdir -p $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/{{.Name}}-logs << "EOF"
 #!/bin/bash
@@ -163,7 +163,7 @@ EOF
 chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
 
 const ScriptDevelopmentEnvironmentTemplate = `
-mkdir -pv $VORPAL_WORKSPACE/bin
+mkdir -p $VORPAL_WORKSPACE/bin
 
 cat > bin/activate << "EOF"
 #!/bin/bash
@@ -181,12 +181,12 @@ EOF
 
 chmod +x $VORPAL_WORKSPACE/bin/activate
 
-mkdir -pv $VORPAL_OUTPUT/bin
+mkdir -p $VORPAL_OUTPUT/bin
 
-cp -prv bin "$VORPAL_OUTPUT"`
+cp -pr bin "$VORPAL_OUTPUT"`
 
 const ScriptUserEnvironmentTemplate = `
-mkdir -pv $VORPAL_OUTPUT/bin
+mkdir -p $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
 {{.Environments}}
@@ -222,9 +222,9 @@ $VORPAL_OUTPUT/bin/vorpal-activate-symlinks
 
 echo "Vorpal userenv installed. Run 'source vorpal-activate-shell' to activate."
 
-ln -sfv $VORPAL_OUTPUT/bin/vorpal-activate-shell $HOME/.vorpal/bin/vorpal-activate-shell
-ln -sfv $VORPAL_OUTPUT/bin/vorpal-activate-symlinks $HOME/.vorpal/bin/vorpal-activate-symlinks
-ln -sfv $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks $HOME/.vorpal/bin/vorpal-deactivate-symlinks
+ln -sf $VORPAL_OUTPUT/bin/vorpal-activate-shell $HOME/.vorpal/bin/vorpal-activate-shell
+ln -sf $VORPAL_OUTPUT/bin/vorpal-activate-symlinks $HOME/.vorpal/bin/vorpal-activate-symlinks
+ln -sf $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks $HOME/.vorpal/bin/vorpal-deactivate-symlinks
 EOF
 
 
@@ -771,9 +771,9 @@ func (b *UserEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 
 	for _, source := range SortedKeys(b.Symlinks) {
 		target := b.Symlinks[source]
-		symlinksActivate = append(symlinksActivate, fmt.Sprintf("ln -sv %s %s", source, target))
+		symlinksActivate = append(symlinksActivate, fmt.Sprintf("ln -s %s %s", source, target))
 		symlinksCheck = append(symlinksCheck, fmt.Sprintf("if [ -f %s ]; then echo \"ERROR: Symlink target exists -> %s\" && exit 1; fi", target, target))
-		symlinksDeactivate = append(symlinksDeactivate, fmt.Sprintf("rm -fv %s", target))
+		symlinksDeactivate = append(symlinksDeactivate, fmt.Sprintf("rm -f %s", target))
 	}
 
 	environmentsExport := make([]string, 0)

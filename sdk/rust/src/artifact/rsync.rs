@@ -22,7 +22,7 @@ impl Rsync {
         let source = ArtifactSource::new(name, &path).build();
 
         let step_script = formatdoc! {"
-            mkdir -pv \"$VORPAL_OUTPUT\"
+            mkdir -p \"$VORPAL_OUTPUT\"
             pushd ./source/{name}/{name}-{version}
             ./configure \
                 --prefix=\"$VORPAL_OUTPUT\" \

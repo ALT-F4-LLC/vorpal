@@ -31,9 +31,9 @@ impl Protoc {
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = formatdoc! {"
-            mkdir -pv \"$VORPAL_OUTPUT/bin\"
+            mkdir -p \"$VORPAL_OUTPUT/bin\"
 
-            cp -prv \"source/{name}/bin/protoc\" \"$VORPAL_OUTPUT/bin/protoc\"
+            cp -pr \"source/{name}/bin/protoc\" \"$VORPAL_OUTPUT/bin/protoc\"
 
             chmod +x \"$VORPAL_OUTPUT/bin/protoc\"",
         };

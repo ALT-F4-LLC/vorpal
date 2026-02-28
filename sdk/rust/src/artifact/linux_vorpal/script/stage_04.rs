@@ -18,7 +18,7 @@ pub fn script(
 
         ## Build glibc-pass-02
 
-        mkdir -pv $VORPAL_SOURCE/glibc-pass-02/glibc-{glibc_version}/build
+        mkdir -p $VORPAL_SOURCE/glibc-pass-02/glibc-{glibc_version}/build
         pushd $VORPAL_SOURCE/glibc-pass-02/glibc-{glibc_version}/build
 
         echo 'rootsbindir=/usr/sbin' > configparms
@@ -74,7 +74,7 @@ pub fn script(
 
         EOF
 
-        mkdir -pv /etc/ld.so.conf.d
+        mkdir -p /etc/ld.so.conf.d
 
         popd
 
@@ -82,7 +82,7 @@ pub fn script(
 
         ## Build zlib
 
-        mkdir -pv $VORPAL_SOURCE/zlib/zlib-{zlib_version}/build
+        mkdir -p $VORPAL_SOURCE/zlib/zlib-{zlib_version}/build
         pushd $VORPAL_SOURCE/zlib/zlib-{zlib_version}/build
 
         ../configure --prefix=\"/usr\"
@@ -98,7 +98,7 @@ pub fn script(
 
         ## Build binutils-pass-03
 
-        mkdir -pv $VORPAL_SOURCE/binutils-pass-03/binutils-{binutils_version}/build
+        mkdir -p $VORPAL_SOURCE/binutils-pass-03/binutils-{binutils_version}/build
         pushd $VORPAL_SOURCE/binutils-pass-03/binutils-{binutils_version}/build
 
         ../configure \
@@ -125,7 +125,7 @@ pub fn script(
 
         ## Build gcc-pass-03
 
-        mkdir -pv $VORPAL_SOURCE/gcc-pass-03/gcc-{gcc_version}/build
+        mkdir -p $VORPAL_SOURCE/gcc-pass-03/gcc-{gcc_version}/build
         pushd $VORPAL_SOURCE/gcc-pass-03/gcc-{gcc_version}/build
 
         ../configure \
@@ -153,12 +153,12 @@ pub fn script(
 
         make install
 
-        chown -v -R root:root \
+        chown -R root:root \
             /usr/lib/gcc/$(gcc -dumpmachine)/15.2.0/include{{,-fixed}}
 
-        ln -svr /usr/bin/cpp /usr/lib
-        ln -sv gcc.1 /usr/share/man/man1/cc.1
-        ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/15.2.0/liblto_plugin.so \
+        ln -sr /usr/bin/cpp /usr/lib
+        ln -s gcc.1 /usr/share/man/man1/cc.1
+        ln -sf ../../libexec/gcc/$(gcc -dumpmachine)/15.2.0/liblto_plugin.so \
                 /usr/lib/bfd-plugins/
 
         echo 'int main(){{}}' > dummy.c
@@ -171,10 +171,10 @@ pub fn script(
         grep \"/lib.*/libc.so.6 \" dummy.log
         grep found dummy.log
 
-        rm -v dummy.c a.out dummy.log
+        rm dummy.c a.out dummy.log
 
-        mkdir -pv /usr/share/gdb/auto-load/usr/lib
-        mv -v /usr/lib/*gdb.py /usr/share/gdb/auto-load/usr/lib
+        mkdir -p /usr/share/gdb/auto-load/usr/lib
+        mv /usr/lib/*gdb.py /usr/share/gdb/auto-load/usr/lib
 
         popd
 
@@ -182,7 +182,7 @@ pub fn script(
 
         ## Build openssl
 
-        mkdir -pv $VORPAL_SOURCE/openssl/openssl-{openssl_version}/build
+        mkdir -p $VORPAL_SOURCE/openssl/openssl-{openssl_version}/build
         pushd $VORPAL_SOURCE/openssl/openssl-{openssl_version}/build
 
         ../config \
@@ -200,8 +200,8 @@ pub fn script(
 
         make MANSUFFIX=ssl install
 
-        mv -v /usr/share/doc/openssl /usr/share/doc/openssl-3.3.1
-        cp -pfrv doc/* /usr/share/doc/openssl-3.3.1
+        mv /usr/share/doc/openssl /usr/share/doc/openssl-3.3.1
+        cp -pfr doc/* /usr/share/doc/openssl-3.3.1
 
         popd
 

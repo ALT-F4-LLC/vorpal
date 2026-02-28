@@ -45,7 +45,7 @@ case "$(uname -m)" in
     *)       OCI_PLATFORM="linux/$(uname -m)" ;;
 esac
 
-mkdir -pv ${ROOTFS_DIR}
+mkdir -p ${ROOTFS_DIR}
 
 for artifact in ${OCI_IMAGE_ARTIFACTS}; do
     SOURCE_DIR=/${STORE_PREFIX}/${artifact}

@@ -77,8 +77,8 @@ mkdir -p "$INSTALL_DIR/bin"
 curl -s -L "$INSTALL_BINARY_URL" | tar xz -C "$INSTALL_DIR/bin"
 
 # Setup directories
-sudo mkdir -pv /var/lib/vorpal/{key,log,sandbox,store}
-sudo mkdir -pv /var/lib/vorpal/store/artifact/{alias,archive,config,output}
+sudo mkdir -p /var/lib/vorpal/{key,log,sandbox,store}
+sudo mkdir -p /var/lib/vorpal/store/artifact/{alias,archive,config,output}
 sudo chown -R "$(id -u):$(id -g)" /var/lib/vorpal
 
 # Generate a new keypair

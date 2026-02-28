@@ -151,7 +151,7 @@ function buildVendorScript(
 ): string {
   const lines: string[] = [];
 
-  lines.push(`mkdir -pv $HOME`);
+  lines.push(`mkdir -p $HOME`);
   lines.push(``);
   lines.push(`pushd ./source/${name}-vendor`);
 
@@ -170,17 +170,17 @@ function buildVendorScript(
     lines.push(`target_paths=(${quotedTargets})`);
     lines.push(``);
     lines.push(`for target_path in \${target_paths[@]}; do`);
-    lines.push(`    mkdir -pv $(dirname \${target_path})`);
+    lines.push(`    mkdir -p $(dirname \${target_path})`);
     lines.push(`    touch \${target_path}`);
     lines.push(`done`);
   } else {
     lines.push(``);
-    lines.push(`mkdir -pv src`);
+    lines.push(`mkdir -p src`);
     lines.push(`touch src/main.rs`);
   }
 
   lines.push(``);
-  lines.push(`mkdir -pv $VORPAL_OUTPUT/vendor`);
+  lines.push(`mkdir -p $VORPAL_OUTPUT/vendor`);
   lines.push(``);
   lines.push(
     `cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)`,
@@ -220,15 +220,15 @@ function buildMainScript(opts: {
 
   const lines: string[] = [];
 
-  lines.push(`mkdir -pv $HOME`);
+  lines.push(`mkdir -p $HOME`);
   lines.push(``);
   lines.push(`pushd ./source/${opts.name}`);
   lines.push(``);
-  lines.push(`mkdir -pv .cargo`);
-  lines.push(`mkdir -pv $VORPAL_OUTPUT/bin`);
+  lines.push(`mkdir -p .cargo`);
+  lines.push(`mkdir -p $VORPAL_OUTPUT/bin`);
   lines.push(``);
   lines.push(
-    `ln -sv ${getEnvKey(opts.vendorDigest)}/config.toml .cargo/config.toml`,
+    `ln -s ${getEnvKey(opts.vendorDigest)}/config.toml .cargo/config.toml`,
   );
 
   if (opts.packages.length > 0) {

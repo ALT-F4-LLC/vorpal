@@ -23,9 +23,9 @@ pub fn script(
 
         pushd $VORPAL_SOURCE/gcc/gcc-{gcc_version}
 
-        mv -v $VORPAL_SOURCE/mpfr/mpfr-{mpfr_version} mpfr
-        mv -v $VORPAL_SOURCE/gmp/gmp-{gmp_version} gmp
-        mv -v $VORPAL_SOURCE/mpc/mpc-{mpc_version} mpc
+        mv $VORPAL_SOURCE/mpfr/mpfr-{mpfr_version} mpfr
+        mv $VORPAL_SOURCE/gmp/gmp-{gmp_version} gmp
+        mv $VORPAL_SOURCE/mpc/mpc-{mpc_version} mpc
 
         case $(uname -m) in
             x86_64)
@@ -66,9 +66,9 @@ pub fn script(
 
         ## Setup source paths
 
-        mv -v $VORPAL_SOURCE/binutils $VORPAL_SOURCE/binutils-pass-01
-        mv -v $VORPAL_SOURCE/glibc $VORPAL_SOURCE/glibc-pass-01
-        mv -v $VORPAL_SOURCE/gcc $VORPAL_SOURCE/gcc-pass-01
+        mv $VORPAL_SOURCE/binutils $VORPAL_SOURCE/binutils-pass-01
+        mv $VORPAL_SOURCE/glibc $VORPAL_SOURCE/glibc-pass-01
+        mv $VORPAL_SOURCE/gcc $VORPAL_SOURCE/gcc-pass-01
 
         echo \"Copying binutils-pass-01 to binutils-pass-02\"
         cp -pr $VORPAL_SOURCE/binutils-pass-01 $VORPAL_SOURCE/binutils-pass-02
@@ -107,17 +107,17 @@ pub fn script(
 
         ### Setup paths
 
-        mkdir -pv $VORPAL_OUTPUT/{{etc,var}} $VORPAL_OUTPUT/usr/{{bin,lib,sbin}}
+        mkdir -p $VORPAL_OUTPUT/{{etc,var}} $VORPAL_OUTPUT/usr/{{bin,lib,sbin}}
 
         for i in bin lib sbin; do
-          ln -sv usr/$i $VORPAL_OUTPUT/$i
+          ln -s usr/$i $VORPAL_OUTPUT/$i
         done
 
         case $(uname -m) in
-          aarch64) mkdir -pv $VORPAL_OUTPUT/lib64 ;;
-          x86_64) mkdir -pv $VORPAL_OUTPUT/lib64 ;;
+          aarch64) mkdir -p $VORPAL_OUTPUT/lib64 ;;
+          x86_64) mkdir -p $VORPAL_OUTPUT/lib64 ;;
         esac
 
-        mkdir -pv $VORPAL_OUTPUT/tools",
+        mkdir -p $VORPAL_OUTPUT/tools",
     }
 }

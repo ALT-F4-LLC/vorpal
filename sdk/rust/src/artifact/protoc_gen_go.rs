@@ -32,9 +32,9 @@ impl ProtocGenGo {
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = formatdoc! {"
-            mkdir -pv \"$VORPAL_OUTPUT/bin\"
+            mkdir -p \"$VORPAL_OUTPUT/bin\"
 
-            cp -prv \"source/protoc-gen-go/protoc-gen-go\" \"$VORPAL_OUTPUT/bin/protoc-gen-go\"
+            cp -pr \"source/protoc-gen-go/protoc-gen-go\" \"$VORPAL_OUTPUT/bin/protoc-gen-go\"
 
             chmod +x \"$VORPAL_OUTPUT/bin/protoc-gen-go\"",
         };

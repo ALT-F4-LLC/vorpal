@@ -395,7 +395,7 @@ impl<'a> DevelopmentEnvironment<'a> {
         // Setup script
 
         let step_script = formatdoc! {"
-            mkdir -pv $VORPAL_WORKSPACE/bin
+            mkdir -p $VORPAL_WORKSPACE/bin
 
             cat > bin/activate << \"EOF\"
             #!/bin/bash
@@ -413,9 +413,9 @@ impl<'a> DevelopmentEnvironment<'a> {
 
             chmod +x $VORPAL_WORKSPACE/bin/activate
 
-            mkdir -pv $VORPAL_OUTPUT/bin
+            mkdir -p $VORPAL_OUTPUT/bin
 
-            cp -prv bin \"$VORPAL_OUTPUT\"",
+            cp -pr bin \"$VORPAL_OUTPUT\"",
             backups = envs_backup.join("\n"),
             exports = envs_export.join("\n"),
             restores = envs_restore.join("\n"),
@@ -479,7 +479,7 @@ impl<'a> Process<'a> {
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
 
         let script = formatdoc! {r#"
-            mkdir -pv $VORPAL_OUTPUT/bin
+            mkdir -p $VORPAL_OUTPUT/bin
 
             cat > $VORPAL_OUTPUT/bin/{name}-logs << "EOF"
             #!/bin/bash
@@ -607,7 +607,7 @@ impl<'a> UserEnvironment<'a> {
         // Setup script
 
         let step_script = formatdoc! {r#"
-            mkdir -pv $VORPAL_OUTPUT/bin
+            mkdir -p $VORPAL_OUTPUT/bin
 
             cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
             {environments}
@@ -643,9 +643,9 @@ impl<'a> UserEnvironment<'a> {
 
             echo "Vorpal userenv installed. Run 'source vorpal-activate-shell' to activate."
 
-            ln -sfv $VORPAL_OUTPUT/bin/vorpal-activate-shell $HOME/.vorpal/bin/vorpal-activate-shell
-            ln -sfv $VORPAL_OUTPUT/bin/vorpal-activate-symlinks $HOME/.vorpal/bin/vorpal-activate-symlinks
-            ln -sfv $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks $HOME/.vorpal/bin/vorpal-deactivate-symlinks
+            ln -sf $VORPAL_OUTPUT/bin/vorpal-activate-shell $HOME/.vorpal/bin/vorpal-activate-shell
+            ln -sf $VORPAL_OUTPUT/bin/vorpal-activate-symlinks $HOME/.vorpal/bin/vorpal-activate-symlinks
+            ln -sf $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks $HOME/.vorpal/bin/vorpal-deactivate-symlinks
             EOF
 
 
@@ -661,7 +661,7 @@ impl<'a> UserEnvironment<'a> {
                 .join("\n"),
             symlinks_deactivate = self.symlinks
                 .iter()
-                .map(|(_, target)| format!("rm -fv {target}"))
+                .map(|(_, target)| format!("rm -f {target}"))
                 .collect::<Vec<String>>()
                 .join("\n"),
             symlinks_check = self.symlinks
@@ -671,7 +671,7 @@ impl<'a> UserEnvironment<'a> {
                 .join("\n"),
             symlinks_activate = self.symlinks
                 .iter()
-                .map(|(source, target)| format!("ln -sv {source} {target}"))
+                .map(|(source, target)| format!("ln -s {source} {target}"))
                 .collect::<Vec<String>>()
                 .join("\n"),
         };

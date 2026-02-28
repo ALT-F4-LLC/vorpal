@@ -140,7 +140,7 @@ fn generate_dockerfile() -> String {
             && rm -rf /var/lib/apt/lists/*
 
         RUN ln -sf /bin/bash /bin/sh \
-            && [ ! -e /etc/bash.bashrc ] || mv -v /etc/bash.bashrc /etc/bash.bashrc.NOUSE \
+            && [ ! -e /etc/bash.bashrc ] || mv /etc/bash.bashrc /etc/bash.bashrc.NOUSE \
             && groupadd --gid 1000 vorpal \
             && useradd -s /bin/bash -g vorpal -u 1000 -m -k /dev/null vorpal
 
@@ -219,7 +219,7 @@ impl LinuxDebian {
                 vec![],
                 formatdoc! {"
                     ## extract files
-                    tar -xvf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
+                    tar -xf $VORPAL_WORKSPACE/debian.tar -C $VORPAL_OUTPUT
 
                     ## patch files
                     echo \"nameserver 1.1.1.1\" > $VORPAL_OUTPUT/etc/resolv.conf

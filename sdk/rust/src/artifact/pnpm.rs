@@ -35,7 +35,7 @@ impl Pnpm {
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = formatdoc! {"
-            mkdir -pv \"$VORPAL_OUTPUT/bin\"
+            mkdir -p \"$VORPAL_OUTPUT/bin\"
             cp -p \"./source/{name}/pnpm-{source_target}\" \"$VORPAL_OUTPUT/bin/pnpm\"
             chmod +x \"$VORPAL_OUTPUT/bin/pnpm\""
         };

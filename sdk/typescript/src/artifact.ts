@@ -418,7 +418,7 @@ export class Process {
       .join(":");
 
     // Script template matches Rust formatdoc! in Process::build()
-    const script = `mkdir -pv $VORPAL_OUTPUT/bin
+    const script = `mkdir -p $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/${this._name}-logs << "EOF"
 #!/bin/bash
@@ -615,7 +615,7 @@ export class DevelopmentEnvironment {
     envsExport.push(`export PATH=${stepPath}:$PATH`);
 
     // Setup script - matches Rust formatdoc!
-    const stepScript = `mkdir -pv $VORPAL_WORKSPACE/bin
+    const stepScript = `mkdir -p $VORPAL_WORKSPACE/bin
 
 cat > bin/activate << "EOF"
 #!/bin/bash
@@ -633,9 +633,9 @@ EOF
 
 chmod +x $VORPAL_WORKSPACE/bin/activate
 
-mkdir -pv $VORPAL_OUTPUT/bin
+mkdir -p $VORPAL_OUTPUT/bin
 
-cp -prv bin "$VORPAL_OUTPUT"`;
+cp -pr bin "$VORPAL_OUTPUT"`;
 
     const steps = [
       await shell(
@@ -746,7 +746,7 @@ export class UserEnvironment {
       .join("\n");
 
     const symlinksDeactivate = this._symlinks
-      .map(([_, target]) => `rm -fv ${target}`)
+      .map(([_, target]) => `rm -f ${target}`)
       .join("\n");
 
     const symlinksCheck = this._symlinks
@@ -757,11 +757,11 @@ export class UserEnvironment {
       .join("\n");
 
     const symlinksActivate = this._symlinks
-      .map(([source, target]) => `ln -sv ${source} ${target}`)
+      .map(([source, target]) => `ln -s ${source} ${target}`)
       .join("\n");
 
     // Script template matches Rust formatdoc! in UserEnvironment::build()
-    const stepScript = `mkdir -pv $VORPAL_OUTPUT/bin
+    const stepScript = `mkdir -p $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
 ${stepEnvironments}
@@ -797,9 +797,9 @@ $VORPAL_OUTPUT/bin/vorpal-activate-symlinks
 
 echo "Vorpal userenv installed. Run 'source vorpal-activate-shell' to activate."
 
-ln -sfv $VORPAL_OUTPUT/bin/vorpal-activate-shell $HOME/.vorpal/bin/vorpal-activate-shell
-ln -sfv $VORPAL_OUTPUT/bin/vorpal-activate-symlinks $HOME/.vorpal/bin/vorpal-activate-symlinks
-ln -sfv $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks $HOME/.vorpal/bin/vorpal-deactivate-symlinks
+ln -sf $VORPAL_OUTPUT/bin/vorpal-activate-shell $HOME/.vorpal/bin/vorpal-activate-shell
+ln -sf $VORPAL_OUTPUT/bin/vorpal-activate-symlinks $HOME/.vorpal/bin/vorpal-activate-symlinks
+ln -sf $VORPAL_OUTPUT/bin/vorpal-deactivate-symlinks $HOME/.vorpal/bin/vorpal-deactivate-symlinks
 EOF
 
 
@@ -922,7 +922,7 @@ case "$(uname -m)" in
     *)       OCI_PLATFORM="linux/$(uname -m)" ;;
 esac
 
-mkdir -pv \${ROOTFS_DIR}
+mkdir -p \${ROOTFS_DIR}
 
 for artifact in \${OCI_IMAGE_ARTIFACTS}; do
     SOURCE_DIR=/\${STORE_PREFIX}/\${artifact}

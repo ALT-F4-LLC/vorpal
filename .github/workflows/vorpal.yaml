@@ -136,8 +136,8 @@ jobs:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
 
       - run: |
-          mkdir -pv ./dist
-          tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
+          mkdir -p ./dist
+          tar -xzf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
       - uses: ALT-F4-LLC/setup-vorpal-action@main
@@ -300,8 +300,8 @@ jobs:
           name: vorpal-dist-${{ env.ARCH }}-${{ env.OS }}
 
       - run: |
-          mkdir -pv ./dist
-          tar -xzvf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
+          mkdir -p ./dist
+          tar -xzf ./vorpal-${ARCH}-${OS}.tar.gz -C ./dist
           rm -rf ./vorpal-${ARCH}-${OS}.tar.gz
 
       - uses: ALT-F4-LLC/setup-vorpal-action@main
@@ -395,14 +395,14 @@ jobs:
           tag_name: ${{ github.ref }}
 
       - run: |
-          mkdir -pv dist/aarch64-darwin
-          mkdir -pv dist/aarch64-linux
-          mkdir -pv dist/x86_64-darwin
-          mkdir -pv dist/x86_64-linux
-          tar -xzvf vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
-          tar -xzvf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
-          tar -xzvf vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz -C dist/x86_64-darwin
-          tar -xzvf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
+          mkdir -p dist/aarch64-darwin
+          mkdir -p dist/aarch64-linux
+          mkdir -p dist/x86_64-darwin
+          mkdir -p dist/x86_64-linux
+          tar -xzf vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
+          tar -xzf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
+          tar -xzf vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz -C dist/x86_64-darwin
+          tar -xzf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
           mv dist/aarch64-darwin/vorpal dist/aarch64-darwin/vorpal-aarch64-darwin
           mv dist/aarch64-linux/vorpal dist/aarch64-linux/vorpal-aarch64-linux
           mv dist/x86_64-darwin/vorpal dist/x86_64-darwin/vorpal-x86_64-darwin

@@ -19,22 +19,22 @@ pub fn script(
 
         ## Setup system directories
 
-        mkdir -pv /{{boot,home,mnt,opt,srv}}
-        mkdir -pv /etc/{{opt,sysconfig}}
-        mkdir -pv /lib/firmware
-        mkdir -pv /media/{{floppy,cdrom}}
-        mkdir -pv /usr/{{,local/}}{{include,src}}
-        mkdir -pv /usr/lib/locale
-        mkdir -pv /usr/local/{{bin,lib,sbin}}
-        mkdir -pv /usr/{{,local/}}share/{{color,dict,doc,info,locale,man}}
-        mkdir -pv /usr/{{,local/}}share/{{misc,terminfo,zoneinfo}}
-        mkdir -pv /usr/{{,local/}}share/man/man{{1..8}}
-        mkdir -pv /var/{{cache,local,log,mail,opt,spool}}
-        mkdir -pv /var/lib/{{color,misc,locate}}
+        mkdir -p /{{boot,home,mnt,opt,srv}}
+        mkdir -p /etc/{{opt,sysconfig}}
+        mkdir -p /lib/firmware
+        mkdir -p /media/{{floppy,cdrom}}
+        mkdir -p /usr/{{,local/}}{{include,src}}
+        mkdir -p /usr/lib/locale
+        mkdir -p /usr/local/{{bin,lib,sbin}}
+        mkdir -p /usr/{{,local/}}share/{{color,dict,doc,info,locale,man}}
+        mkdir -p /usr/{{,local/}}share/{{misc,terminfo,zoneinfo}}
+        mkdir -p /usr/{{,local/}}share/man/man{{1..8}}
+        mkdir -p /var/{{cache,local,log,mail,opt,spool}}
+        mkdir -p /var/lib/{{color,misc,locate}}
 
         ## Setup root
 
-        install -dv -m 0750 /root
+        install -d -m 0750 /root
 
         ## Setup system files
 
@@ -93,14 +93,14 @@ pub fn script(
 
         ## Build gettext
 
-        mkdir -pv $VORPAL_SOURCE/gettext/gettext-{gettext_version}/build
+        mkdir -p $VORPAL_SOURCE/gettext/gettext-{gettext_version}/build
         pushd $VORPAL_SOURCE/gettext/gettext-{gettext_version}/build
 
         ../configure --disable-shared
 
         make
 
-        cp -pv gettext-tools/src/{{msgfmt,msgmerge,xgettext}} /usr/bin
+        cp -p gettext-tools/src/{{msgfmt,msgmerge,xgettext}} /usr/bin
 
         popd
 
@@ -108,7 +108,7 @@ pub fn script(
 
         ## Build bison
 
-        mkdir -pv $VORPAL_SOURCE/bison/bison-{bison_version}/build
+        mkdir -p $VORPAL_SOURCE/bison/bison-{bison_version}/build
         pushd $VORPAL_SOURCE/bison/bison-{bison_version}/build
 
         ../configure \
@@ -147,7 +147,7 @@ pub fn script(
 
         ## Build Python
 
-        mkdir -pv $VORPAL_SOURCE/python/Python-{python_version}/build
+        mkdir -p $VORPAL_SOURCE/python/Python-{python_version}/build
         pushd $VORPAL_SOURCE/python/Python-{python_version}/build
 
         ../configure \
@@ -164,7 +164,7 @@ pub fn script(
 
         ## Build texinfo
 
-        mkdir -pv $VORPAL_SOURCE/texinfo/texinfo-{texinfo_version}/build
+        mkdir -p $VORPAL_SOURCE/texinfo/texinfo-{texinfo_version}/build
         pushd $VORPAL_SOURCE/texinfo/texinfo-{texinfo_version}/build
 
         ../configure --prefix=\"/usr\"
@@ -178,10 +178,10 @@ pub fn script(
 
         ## Build util-linux
 
-        mkdir -pv $VORPAL_SOURCE/util-linux/util-linux-{util_linux_version}/build
+        mkdir -p $VORPAL_SOURCE/util-linux/util-linux-{util_linux_version}/build
         pushd $VORPAL_SOURCE/util-linux/util-linux-{util_linux_version}/build
 
-        mkdir -pv /var/lib/hwclock
+        mkdir -p /var/lib/hwclock
 
         # note: \"--disable-makeinstall-chown\" for sandbox limitations
 
