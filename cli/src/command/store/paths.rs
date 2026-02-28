@@ -22,7 +22,12 @@ pub fn get_socket_path() -> PathBuf {
 }
 
 pub fn get_lock_path() -> PathBuf {
-    get_root_dir_path().join("vorpal.lock")
+    let socket_path = get_socket_path();
+    let lock_name = socket_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("vorpal");
+    socket_path.with_file_name(format!("{}.lock", lock_name))
 }
 
 pub fn get_root_key_dir_path() -> PathBuf {
