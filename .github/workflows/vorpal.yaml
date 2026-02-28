@@ -12,6 +12,9 @@ concurrency:
   cancel-in-progress: true
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
+env:
+  CI: "true"
+
 jobs:
   vendor:
     runs-on: ${{ matrix.runner }}

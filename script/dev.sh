@@ -5,7 +5,11 @@ export ENV_PATH="${PWD}/.env"
 export PATH="${ENV_PATH}/bin:${HOME}/.cargo/bin:$PATH"
 readonly SCRIPT_PATH="${PWD}/script"
 
-scripts=("xz" "amber" "rustup" "protoc" "terraform")
+scripts=("rustup" "protoc")
+
+if [[ "${CI:-}" != "true" ]]; then
+    scripts=("xz" "amber" "${scripts[@]}" "terraform")
+fi
 
 if [[ "$(uname -s)" == "Linux" ]]; then
     . /etc/os-release
