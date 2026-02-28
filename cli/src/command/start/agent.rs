@@ -229,8 +229,9 @@ pub async fn build_source(
                             let mut sync_writer = SyncIoBridge::new(async_writer);
                             let input = std::io::Cursor::new(compressed.as_ref());
                             let mut decoder = liblzma::read::XzDecoder::new(input);
-                            std::io::copy(&mut decoder, &mut sync_writer)
-                                .map_err(|e| anyhow!("xz decompression failed for {}: {}", url, e))?;
+                            std::io::copy(&mut decoder, &mut sync_writer).map_err(|e| {
+                                anyhow!("xz decompression failed for {}: {}", url, e)
+                            })?;
                             Ok::<(), anyhow::Error>(())
                         });
 
