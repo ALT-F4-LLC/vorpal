@@ -96,79 +96,81 @@ async fn pull_artifact_from_registry(
     namespace: &str,
     output_path: &std::path::Path,
 ) -> Result<()> {
-    let client_channel = build_channel(registry).await?;
-    let mut client_archive = ArchiveServiceClient::new(client_channel);
+    let archive_path = get_artifact_archive_path(digest, namespace);
 
-    // Pull archive from registry
+    if !archive_path.exists() {
+        let client_channel = build_channel(registry).await?;
+        let mut client_archive = ArchiveServiceClient::new(client_channel);
 
-    let request = ArchivePullRequest {
-        digest: digest.to_string(),
-        namespace: namespace.to_string(),
-    };
+        // Pull archive from registry
 
-    let mut request = Request::new(request);
-    let request_auth_header = client_auth_header(registry)
-        .await
-        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+        let request = ArchivePullRequest {
+            digest: digest.to_string(),
+            namespace: namespace.to_string(),
+        };
 
-    if let Some(header) = request_auth_header {
-        request.metadata_mut().insert("authorization", header);
-    }
+        let mut request = Request::new(request);
+        let request_auth_header = client_auth_header(registry)
+            .await
+            .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
 
-    let response = match client_archive.pull(request).await {
-        Ok(response) => response,
-
-        Err(status) => {
-            if status.code() == Code::NotFound {
-                bail!("artifact not found in registry");
-            }
-
-            bail!("registry pull error: {:?}", status);
+        if let Some(header) = request_auth_header {
+            request.metadata_mut().insert("authorization", header);
         }
-    };
 
-    let mut stream = response.into_inner();
-    let mut stream_data = Vec::new();
-
-    loop {
-        match stream.message().await {
-            Ok(Some(chunk)) => {
-                if !chunk.data.is_empty() {
-                    stream_data.extend_from_slice(&chunk.data);
-                }
-            }
-
-            Ok(None) => break,
+        let response = match client_archive.pull(request).await {
+            Ok(response) => response,
 
             Err(status) => {
                 if status.code() == Code::NotFound {
                     bail!("artifact not found in registry");
                 }
 
-                bail!("registry stream error: {:?}", status);
+                bail!("registry pull error: {:?}", status);
+            }
+        };
+
+        let mut stream = response.into_inner();
+        let mut stream_data = Vec::new();
+
+        loop {
+            match stream.message().await {
+                Ok(Some(chunk)) => {
+                    if !chunk.data.is_empty() {
+                        stream_data.extend_from_slice(&chunk.data);
+                    }
+                }
+
+                Ok(None) => break,
+
+                Err(status) => {
+                    if status.code() == Code::NotFound {
+                        bail!("artifact not found in registry");
+                    }
+
+                    bail!("registry stream error: {:?}", status);
+                }
             }
         }
+
+        if stream_data.is_empty() {
+            bail!("registry returned empty archive for digest: {digest}");
+        }
+
+        // Write archive to local store
+
+        let archive_path_parent = archive_path
+            .parent()
+            .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+
+        create_dir_all(archive_path_parent).await?;
+
+        write(&archive_path, &stream_data)
+            .await
+            .with_context(|| format!("failed to write archive: {}", archive_path.display()))?;
+
+        set_timestamps(&archive_path).await?;
     }
-
-    if stream_data.is_empty() {
-        bail!("registry returned empty archive for digest: {digest}");
-    }
-
-    // Write archive to local store
-
-    let archive_path = get_artifact_archive_path(digest, namespace);
-
-    let archive_path_parent = archive_path
-        .parent()
-        .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
-
-    create_dir_all(archive_path_parent).await?;
-
-    write(&archive_path, &stream_data)
-        .await
-        .with_context(|| format!("failed to write archive: {}", archive_path.display()))?;
-
-    set_timestamps(&archive_path).await?;
 
     // Unpack archive to output path
 

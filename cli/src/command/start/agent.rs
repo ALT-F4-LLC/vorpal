@@ -543,14 +543,16 @@ async fn prepare_artifact(
             None
         };
 
-        // Single lock acquisition to check both caches
-        let cached_digest = {
+        // Only cache HTTP sources — local sources must always re-read from disk
+        let cached_digest = if is_http_source {
             let cache = source_cache.lock().await;
             cache.by_key.get(&cache_key).cloned().or_else(|| {
                 url_cache_key
                     .as_ref()
                     .and_then(|key| cache.by_url.get(key).cloned())
             })
+        } else {
+            None
         };
 
         let artifact_source_digest = if let Some(digest) = cached_digest {
@@ -578,8 +580,8 @@ async fn prepare_artifact(
             .await
             .map_err(|err| Status::internal(format!("{err}")))?;
 
-            // Single lock acquisition to populate both caches
-            {
+            // Only populate cache for HTTP sources
+            if is_http_source {
                 let mut cache = source_cache.lock().await;
                 cache.by_key.insert(cache_key, digest.clone());
                 if let Some(url_key) = url_cache_key {

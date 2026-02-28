@@ -83,90 +83,92 @@ async fn build(
 
     // 2. Pull
 
-    let request = ArchivePullRequest {
-        digest: artifact_digest.to_string(),
-        namespace: artifact_namespace.to_string(),
-    };
+    let archive_path = get_artifact_archive_path(artifact_digest, artifact_namespace);
 
-    let mut request = Request::new(request);
-    let request_auth_header = client_auth_header(registry)
-        .await
-        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+    if !archive_path.exists() {
+        let request = ArchivePullRequest {
+            digest: artifact_digest.to_string(),
+            namespace: artifact_namespace.to_string(),
+        };
 
-    if let Some(header) = request_auth_header {
-        request.metadata_mut().insert("authorization", header);
+        let mut request = Request::new(request);
+        let request_auth_header = client_auth_header(registry)
+            .await
+            .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+
+        if let Some(header) = request_auth_header {
+            request.metadata_mut().insert("authorization", header);
+        }
+
+        match client_archive.pull(request).await {
+            Err(status) => {
+                if status.code() != Code::NotFound {
+                    bail!("registry pull error: {:?}", status);
+                }
+            }
+
+            Ok(response) => {
+                let mut stream = response.into_inner();
+                let mut stream_data = Vec::new();
+
+                loop {
+                    match stream.message().await {
+                        Ok(Some(chunk)) => {
+                            if !chunk.data.is_empty() {
+                                stream_data.extend_from_slice(&chunk.data);
+                            }
+                        }
+
+                        Ok(None) => break,
+
+                        Err(status) => {
+                            if status.code() != Code::NotFound {
+                                bail!("registry stream error: {:?}", status);
+                            }
+
+                            break;
+                        }
+                    }
+                }
+
+                if !stream_data.is_empty() {
+                    let archive_path_parent = archive_path
+                        .parent()
+                        .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+
+                    create_dir_all(archive_path_parent).await?;
+
+                    write(&archive_path, &stream_data)
+                        .await
+                        .expect("failed to write archive");
+
+                    set_timestamps(&archive_path).await?;
+                }
+            }
+        };
     }
 
-    // TODO: add check before pulling
+    if archive_path.exists() {
+        info!("{} |> unpack: {}", artifact.name, artifact_digest);
 
-    match client_archive.pull(request).await {
-        Err(status) => {
-            if status.code() != Code::NotFound {
-                bail!("registry pull error: {:?}", status);
-            }
+        create_dir_all(&artifact_path)
+            .await
+            .expect("failed to create artifact path");
+
+        unpack_zstd(&artifact_path, &archive_path).await?;
+
+        let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
+
+        if artifact_files.is_empty() {
+            bail!("Artifact files not found: {:?}", artifact_path);
         }
 
-        Ok(response) => {
-            let mut stream = response.into_inner();
-            let mut stream_data = Vec::new();
-
-            loop {
-                match stream.message().await {
-                    Ok(Some(chunk)) => {
-                        if !chunk.data.is_empty() {
-                            stream_data.extend_from_slice(&chunk.data);
-                        }
-                    }
-
-                    Ok(None) => break,
-
-                    Err(status) => {
-                        if status.code() != Code::NotFound {
-                            bail!("registry stream error: {:?}", status);
-                        }
-
-                        break;
-                    }
-                }
-            }
-
-            if !stream_data.is_empty() {
-                let archive_path = get_artifact_archive_path(artifact_digest, artifact_namespace);
-
-                let archive_path_parent = archive_path
-                    .parent()
-                    .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
-
-                create_dir_all(archive_path_parent).await?;
-
-                write(&archive_path, &stream_data)
-                    .await
-                    .expect("failed to write archive");
-
-                set_timestamps(&archive_path).await?;
-
-                info!("{} |> unpack: {}", artifact.name, artifact_digest);
-
-                create_dir_all(&artifact_path)
-                    .await
-                    .expect("failed to create artifact path");
-
-                unpack_zstd(&artifact_path, &archive_path).await?;
-
-                let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
-
-                if artifact_files.is_empty() {
-                    bail!("Artifact files not found: {:?}", artifact_path);
-                }
-
-                for artifact_files in &artifact_files {
-                    set_timestamps(artifact_files).await?;
-                }
-
-                return Ok(());
-            }
+        for artifact_files in &artifact_files {
+            set_timestamps(artifact_files).await?;
         }
-    };
+
+        return Ok(());
+    }
 
     // Build
 
@@ -213,86 +215,89 @@ async fn build(
     // Pull built artifact back from registry to CLI host
 
     if !artifact_path.exists() {
-        let request = ArchivePullRequest {
-            digest: artifact_digest.to_string(),
-            namespace: artifact_namespace.to_string(),
-        };
+        let archive_path = get_artifact_archive_path(artifact_digest, artifact_namespace);
 
-        let mut request = Request::new(request);
-        let request_auth_header = client_auth_header(registry)
-            .await
-            .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+        if !archive_path.exists() {
+            let request = ArchivePullRequest {
+                digest: artifact_digest.to_string(),
+                namespace: artifact_namespace.to_string(),
+            };
 
-        if let Some(header) = request_auth_header {
-            request.metadata_mut().insert("authorization", header);
-        }
+            let mut request = Request::new(request);
+            let request_auth_header = client_auth_header(registry)
+                .await
+                .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
 
-        match client_archive.pull(request).await {
-            Err(status) => {
-                if status.code() != Code::NotFound {
-                    bail!("registry pull error after build: {:?}", status);
-                }
-
-                info!(
-                    "{} |> artifact has no output files (not found in registry)",
-                    artifact.name
-                );
+            if let Some(header) = request_auth_header {
+                request.metadata_mut().insert("authorization", header);
             }
 
-            Ok(response) => {
-                let mut stream = response.into_inner();
-                let mut stream_data = Vec::new();
-
-                loop {
-                    match stream.message().await {
-                        Ok(Some(chunk)) => {
-                            if !chunk.data.is_empty() {
-                                stream_data.extend_from_slice(&chunk.data);
-                            }
-                        }
-
-                        Ok(None) => break,
-
-                        Err(status) => {
-                            if status.code() != Code::NotFound {
-                                bail!("registry stream error after build: {:?}", status);
-                            }
-
-                            break;
-                        }
+            match client_archive.pull(request).await {
+                Err(status) => {
+                    if status.code() != Code::NotFound {
+                        bail!("registry pull error after build: {:?}", status);
                     }
+
+                    info!(
+                        "{} |> artifact has no output files (not found in registry)",
+                        artifact.name
+                    );
                 }
 
-                if !stream_data.is_empty() {
-                    let archive_path =
-                        get_artifact_archive_path(artifact_digest, artifact_namespace);
+                Ok(response) => {
+                    let mut stream = response.into_inner();
+                    let mut stream_data = Vec::new();
 
-                    let archive_path_parent = archive_path
-                        .parent()
-                        .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+                    loop {
+                        match stream.message().await {
+                            Ok(Some(chunk)) => {
+                                if !chunk.data.is_empty() {
+                                    stream_data.extend_from_slice(&chunk.data);
+                                }
+                            }
 
-                    create_dir_all(archive_path_parent).await?;
+                            Ok(None) => break,
 
-                    write(&archive_path, &stream_data)
-                        .await
-                        .expect("failed to write archive");
+                            Err(status) => {
+                                if status.code() != Code::NotFound {
+                                    bail!("registry stream error after build: {:?}", status);
+                                }
 
-                    set_timestamps(&archive_path).await?;
+                                break;
+                            }
+                        }
+                    }
 
-                    info!("{} |> unpack: {}", artifact.name, artifact_digest);
+                    if !stream_data.is_empty() {
+                        let archive_path_parent = archive_path
+                            .parent()
+                            .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
 
-                    create_dir_all(&artifact_path)
-                        .await
-                        .expect("failed to create artifact path");
+                        create_dir_all(archive_path_parent).await?;
 
-                    unpack_zstd(&artifact_path, &archive_path).await?;
+                        write(&archive_path, &stream_data)
+                            .await
+                            .expect("failed to write archive");
 
-                    let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
-
-                    for artifact_file in &artifact_files {
-                        set_timestamps(artifact_file).await?;
+                        set_timestamps(&archive_path).await?;
                     }
                 }
+            }
+        }
+
+        if archive_path.exists() {
+            info!("{} |> unpack: {}", artifact.name, artifact_digest);
+
+            create_dir_all(&artifact_path)
+                .await
+                .expect("failed to create artifact path");
+
+            unpack_zstd(&artifact_path, &archive_path).await?;
+
+            let artifact_files = get_file_paths(&artifact_path, vec![], vec![])?;
+
+            for artifact_file in &artifact_files {
+                set_timestamps(artifact_file).await?;
             }
         }
     }
