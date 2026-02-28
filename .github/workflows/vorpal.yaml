@@ -101,6 +101,25 @@ jobs:
       - run: ./script/dev.sh # pre-bake
       - run: ./script/dev.sh make .cargo vendor
       - run: ./script/dev.sh make TARGET=release build
+
+      - name: Verify no non-system dynamic deps (macOS)
+        if: ${{ !contains(matrix.runner, 'ubuntu') }}
+        run: |
+          if otool -L target/release/vorpal | grep -qE '/opt/homebrew|/usr/local/lib|liblzma|libzstd|liblz4|libbrotli'; then
+            echo "ERROR: Found non-system dynamic library dependencies:"
+            otool -L target/release/vorpal | grep -E '/opt/homebrew|/usr/local/lib|liblzma|libzstd|liblz4|libbrotli'
+            exit 1
+          fi
+
+      - name: Verify no non-system dynamic deps (Linux)
+        if: ${{ contains(matrix.runner, 'ubuntu') }}
+        run: |
+          if ldd target/release/vorpal | grep -qE 'liblzma|libzstd|liblz4|libbrotli|/usr/local/lib|/opt/'; then
+            echo "ERROR: Found non-system dynamic library dependencies:"
+            ldd target/release/vorpal | grep -E 'liblzma|libzstd|liblz4|libbrotli|/usr/local/lib|/opt/'
+            exit 1
+          fi
+
       - run: ./script/dev.sh make TARGET=release test
       - run: ./script/dev.sh make TARGET=release dist
 

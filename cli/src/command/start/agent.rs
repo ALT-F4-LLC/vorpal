@@ -9,10 +9,11 @@ use crate::command::{
             set_timestamps,
         },
         temps::{create_sandbox_dir, create_sandbox_file},
+        DUPLEX_BUF_SIZE,
     },
 };
 use anyhow::{anyhow, bail, Result};
-use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
+use async_compression::tokio::bufread::{BzDecoder, GzipDecoder};
 use sha256::digest;
 use std::collections::HashMap;
 use std::path::Path;
@@ -26,6 +27,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
+use tokio_util::io::SyncIoBridge;
 use tonic::{Code, Request, Response, Status};
 use tracing::{info, warn};
 use url::Url;
@@ -143,8 +145,8 @@ pub async fn build_source(
             bail!("URL not failed: {:?}", response.status());
         }
 
-        let response_bytes = response.bytes().await.map_err(|e| anyhow!(e))?;
-        let response_bytes = response_bytes.as_ref();
+        let response_bytes_owned = response.bytes().await.map_err(|e| anyhow!(e))?;
+        let response_bytes = response_bytes_owned.as_ref();
         let response_kind = infer::get(response_bytes);
 
         match response_kind {
@@ -219,13 +221,33 @@ pub async fn build_source(
                     }
 
                     "application/x-xz" => {
-                        let decoder = XzDecoder::new(response_bytes);
-                        let mut archive = Archive::new(decoder);
+                        let (async_reader, async_writer) = tokio::io::duplex(DUPLEX_BUF_SIZE);
+                        let compressed = response_bytes_owned.clone();
+                        let url = path.to_string();
 
-                        archive
-                            .unpack(&source_sandbox)
-                            .await
-                            .map_err(|e| anyhow!(e))?;
+                        let decompress_fut = tokio::task::spawn_blocking(move || {
+                            let mut sync_writer = SyncIoBridge::new(async_writer);
+                            let mut input = std::io::Cursor::new(compressed.as_ref());
+                            lzma_rs::xz_decompress(&mut input, &mut sync_writer)
+                                .map_err(|e| anyhow!("xz decompression failed for {}: {}", url, e))
+                        });
+
+                        let mut archive = Archive::new(async_reader);
+
+                        // Use join! (not try_join!) to always await the blocking task.
+                        let (decompress_result, unpack_result) = tokio::join!(
+                            async {
+                                decompress_fut
+                                    .await
+                                    .map_err(|e| anyhow!("xz task join error: {}", e))?
+                            },
+                            async {
+                                archive.unpack(&source_sandbox).await.map_err(|e| anyhow!(e))
+                            },
+                        );
+
+                        unpack_result?;
+                        decompress_result?;
                     }
 
                     "application/zip" => {

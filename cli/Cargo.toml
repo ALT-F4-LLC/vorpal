@@ -10,10 +10,12 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { version = "1.0.100" }
-async-compression = { version = "0.4.37", features = ["all"] }
+async-compression = { version = "0.4.37", features = ["tokio", "gzip", "bzip2"] }
+lzma-rs = { version = "0.3" }
+ruzstd = { version = "0.8.2" }
 async_zip = { version = "0.0.18", features = ["deflate", "tokio"] }
 aws-config = { version = "1.8.1" }
-aws-sdk-s3 = { version = "1.96.0" }
+aws-sdk-s3 = { version = "1.124.0" }
 base64 = { version = "0.22.1" }
 clap = { version = "4.5.57" }
 filetime = { version = "0.2.27" }
@@ -39,7 +41,7 @@ thiserror = { version = "2.0.18" }
 tokio = { version = "1.49.0", features = ["net", "process", "rt-multi-thread", "signal"] }
 tokio-stream = { version = "0.1.18", features = ["io-util", "net"] }
 tokio-tar = { version = "0.3.1" }
-tokio-util = { version = "0.7.18", features = ["compat"] }
+tokio-util = { version = "0.7.18", features = ["compat", "io", "io-util"] }
 toml = { version = "0.9.11" }
 tonic = { version = "0.14.3", features = ["tls-ring"] }
 tonic-health = { version = "0.14.3" }
