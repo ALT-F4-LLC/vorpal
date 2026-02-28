@@ -178,10 +178,44 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
                 }
             }
 
+            // For file entries, ensure the parent directory is writable.
+            // Tar archives (e.g. Rust toolchain) may contain directory entries
+            // with read-only permissions (0555) that appear before their child
+            // file entries, preventing extraction into them.
+            #[cfg(unix)]
+            if !entry_type.is_dir() {
+                if let Ok(path) = entry.path() {
+                    if let Some(parent) = path.parent() {
+                        let parent_dest = target.join(parent);
+                        if let Ok(meta) = tokio::fs::metadata(&parent_dest).await {
+                            use std::os::unix::fs::PermissionsExt;
+                            let mode = meta.permissions().mode();
+                            if mode & 0o200 == 0 {
+                                let mut perms = meta.permissions();
+                                perms.set_mode(mode | 0o200);
+                                let _ = tokio::fs::set_permissions(&parent_dest, perms).await;
+                            }
+                        }
+                    }
+                }
+            }
+
             entry
                 .unpack_in(&target)
                 .await
-                .map_err(|e| anyhow!("failed to unpack entry: {}", e))?;
+                .map_err(|e| {
+                    // Walk the error source chain because TarError::Display
+                    // only shows the description and drops the underlying IO
+                    // error (e.g. "Permission denied", "File exists").
+                    let mut msg = format!("failed to unpack entry: {}", e);
+                    let mut source: Option<&dyn std::error::Error> =
+                        std::error::Error::source(&e);
+                    while let Some(s) = source {
+                        msg.push_str(&format!(": {}", s));
+                        source = s.source();
+                    }
+                    anyhow!(msg)
+                })?;
         }
 
         Ok::<(), anyhow::Error>(())

@@ -219,12 +219,29 @@ pub fn get_file_paths(
 pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
     let epoc = FileTime::from_unix_time(0, 0);
 
-    if !path.is_symlink() {
-        set_file_times(path, epoc, epoc).expect("Failed to set file times");
-    }
-
     if path.is_symlink() {
-        set_symlink_file_times(path, epoc, epoc).expect("Failed to set symlink file times");
+        set_symlink_file_times(path, epoc, epoc)
+            .map_err(|e| anyhow::anyhow!("failed to set symlink file times for {:?}: {}", path, e))?;
+    } else {
+        // Ensure the file/directory is writable before modifying timestamps.
+        // Extracted tar entries (e.g. Rust toolchain) may have read-only
+        // permissions which cause set_file_times to fail with PermissionDenied.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(path) {
+                let mode = meta.permissions().mode();
+                if mode & 0o200 == 0 {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(mode | 0o200);
+                    std::fs::set_permissions(path, perms)
+                        .map_err(|e| anyhow::anyhow!("failed to add write permission for {:?}: {}", path, e))?;
+                }
+            }
+        }
+
+        set_file_times(path, epoc, epoc)
+            .map_err(|e| anyhow::anyhow!("failed to set file times for {:?}: {}", path, e))?;
     }
 
     Ok(())
