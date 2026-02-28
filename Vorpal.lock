@@ -2,11 +2,27 @@ lockfile = 1
 
 [[sources]]
 name = "bun"
+path = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.10/bun-darwin-x64.zip"
+includes = []
+excludes = []
+digest = "53e2e70a6f7ea40998750118e72c9d6581376aabec301e244eb7bb844b4fe5c0"
+platform = "x86_64-darwin"
+
+[[sources]]
+name = "bun"
 path = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.10/bun-darwin-aarch64.zip"
 includes = []
 excludes = []
 digest = "93bb13af9d1586c92a61b6afb94a21ef632b88a9510b56c9102f5ab09f34db89"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "cargo"
+path = "https://static.rust-lang.org/dist/cargo-1.93.1-x86_64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "951f83b94d7db62978f2ced9fad0adb201a7a61b993476aac468ec26c29c3798"
+platform = "x86_64-darwin"
 
 [[sources]]
 name = "cargo"
@@ -25,6 +41,14 @@ digest = "098f2d1d808bc417bfa1dc63419ffedb1781ca65dd780858c0f8f67e9decb57b"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "clippy"
+path = "https://static.rust-lang.org/dist/clippy-1.93.1-x86_64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "ccaa3b8977abdc174d1fa28c6cbcbf81848b2b53885ff1f16915d7e47de76087"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "crane"
 path = "https://github.com/google/go-containerregistry/archive/refs/tags/v0.21.1.tar.gz"
 includes = []
@@ -33,12 +57,36 @@ digest = "a140a303bacb264dae453ef3d65bf6a6ab656ca7f32b8d689fe02edbe541a363"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "crane"
+path = "https://github.com/google/go-containerregistry/archive/refs/tags/v0.21.1.tar.gz"
+includes = []
+excludes = []
+digest = "a140a303bacb264dae453ef3d65bf6a6ab656ca7f32b8d689fe02edbe541a363"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "git"
 path = "https://www.kernel.org/pub/software/scm/git/git-2.53.0.tar.gz"
 includes = []
 excludes = []
 digest = "4c08acf32a9dd52cb4f64d1835bade4128af51dd85742245987643cde0aeb9b1"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "git"
+path = "https://www.kernel.org/pub/software/scm/git/git-2.53.0.tar.gz"
+includes = []
+excludes = []
+digest = "4c08acf32a9dd52cb4f64d1835bade4128af51dd85742245987643cde0aeb9b1"
+platform = "x86_64-darwin"
+
+[[sources]]
+name = "go"
+path = "https://go.dev/dl/go1.26.0.darwin-amd64.tar.gz"
+includes = []
+excludes = []
+digest = "73226b2c27fc779b8e9432dd8a9db76d6baebe3fb123c76028e20bf3ace33808"
+platform = "x86_64-darwin"
 
 [[sources]]
 name = "go"
@@ -57,12 +105,28 @@ digest = "411df8f3301010012a491337a4f5fa884fbcc323fe7e9ad75aa470f4bf921c56"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "goimports"
+path = "https://go.googlesource.com/tools/+archive/refs/tags/v0.42.0.tar.gz"
+includes = []
+excludes = []
+digest = "411df8f3301010012a491337a4f5fa884fbcc323fe7e9ad75aa470f4bf921c56"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "gopls"
 path = "https://go.googlesource.com/tools/+archive/refs/tags/v0.42.0.tar.gz"
 includes = []
 excludes = []
 digest = "411df8f3301010012a491337a4f5fa884fbcc323fe7e9ad75aa470f4bf921c56"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "gopls"
+path = "https://go.googlesource.com/tools/+archive/refs/tags/v0.42.0.tar.gz"
+includes = []
+excludes = []
+digest = "411df8f3301010012a491337a4f5fa884fbcc323fe7e9ad75aa470f4bf921c56"
+platform = "x86_64-darwin"
 
 [[sources]]
 name = "grpcurl"
@@ -73,6 +137,14 @@ digest = "3db5cef04f38e71c4007ed96cc827209ae5a1b6613c710cd656a252fafcde86c"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "grpcurl"
+path = "https://github.com/fullstorydev/grpcurl/archive/refs/tags/v1.9.3.tar.gz"
+includes = []
+excludes = []
+digest = "3db5cef04f38e71c4007ed96cc827209ae5a1b6613c710cd656a252fafcde86c"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "nodejs"
 path = "https://nodejs.org/dist/v22.22.0/node-v22.22.0-darwin-arm64.tar.gz"
 includes = []
@@ -81,12 +153,36 @@ digest = "852a244f9da062f7d22326a7bc3d7836745521232bd44b06468ec48e1cf359e4"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "nodejs"
+path = "https://nodejs.org/dist/v22.22.0/node-v22.22.0-darwin-x64.tar.gz"
+includes = []
+excludes = []
+digest = "b55ad03b2651ed20e6c8c6ea4bd92c5159a53f93885787bb49dc02ee16ce3e8a"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "pnpm"
 path = "https://github.com/pnpm/pnpm/releases/download/v10.30.3/pnpm-macos-arm64"
 includes = []
 excludes = []
 digest = "29fb1b19aa2ab6c9b310987a836681e34a66f6d05cb583a1e6474cd036b6f4cc"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "pnpm"
+path = "https://github.com/pnpm/pnpm/releases/download/v10.30.3/pnpm-macos-x64"
+includes = []
+excludes = []
+digest = "4a93fe91b5059a9100998b3471dde4918c8a9c6d039662e293061ae0ed2d51af"
+platform = "x86_64-darwin"
+
+[[sources]]
+name = "protoc"
+path = "https://github.com/protocolbuffers/protobuf/releases/download/v34.0/protoc-34.0-osx-x86_64.zip"
+includes = []
+excludes = []
+digest = "337d9687929aaccd10b82bd7103f7dfa57080f312d8c249ce27c7a0db0ab81b0"
+platform = "x86_64-darwin"
 
 [[sources]]
 name = "protoc"
@@ -105,12 +201,28 @@ digest = "33e98fb84e72b46f47f06f3452dad81c2804ae6d32a0045862818332a4c2a0cd"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "protoc-gen-go"
+path = "https://github.com/protocolbuffers/protobuf-go/releases/download/v1.36.11/protoc-gen-go.v1.36.11.darwin.amd64.tar.gz"
+includes = []
+excludes = []
+digest = "853fdd384cea7d946dd387167b3b2fe4c5a8b45d7f05425c81fdbc68a2962a21"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "protoc-gen-go-grpc"
 path = "https://github.com/grpc/grpc-go/archive/refs/tags/v1.79.1.tar.gz"
 includes = []
 excludes = []
 digest = "f1d541547bc8d5199a9877209b5a65ee26a3e983965ccbf9000785c75c91c0bd"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "protoc-gen-go-grpc"
+path = "https://github.com/grpc/grpc-go/archive/refs/tags/v1.79.1.tar.gz"
+includes = []
+excludes = []
+digest = "f1d541547bc8d5199a9877209b5a65ee26a3e983965ccbf9000785c75c91c0bd"
+platform = "x86_64-darwin"
 
 [[sources]]
 name = "rust-analyzer"
@@ -121,12 +233,28 @@ digest = "5389db13945d33e320e4ddb44c558fda83923ceeac0d9931d6deae8ec2373bd6"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "rust-analyzer"
+path = "https://static.rust-lang.org/dist/rust-analyzer-1.93.1-x86_64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "58a5c8bb5a20021e546153e23211e806b9918ac147d1dfd0aa64688290dd3449"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "rust-src"
 path = "https://static.rust-lang.org/dist/rust-src-1.93.1.tar.gz"
 includes = []
 excludes = []
 digest = "52da4bcd8bd8e2d0ae2635e1503efa8f5838bd18958b983d52336d73896e7172"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "rust-src"
+path = "https://static.rust-lang.org/dist/rust-src-1.93.1.tar.gz"
+includes = []
+excludes = []
+digest = "52da4bcd8bd8e2d0ae2635e1503efa8f5838bd18958b983d52336d73896e7172"
+platform = "x86_64-darwin"
 
 [[sources]]
 name = "rust-std"
@@ -137,12 +265,28 @@ digest = "0db6b692d4782e80abd92bd18a1f0797229472c62f40417cdc975fb8f3413ee3"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "rust-std"
+path = "https://static.rust-lang.org/dist/rust-std-1.93.1-x86_64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "3aed444a8a36a07a4b6eada82981d10fceb8d89b9cfc7d49dfc0df0cf95f178a"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "rustc"
 path = "https://static.rust-lang.org/dist/rustc-1.93.1-aarch64-apple-darwin.tar.gz"
 includes = []
 excludes = []
 digest = "53c9d5b83e6f2c6b826d29043e36c104a179cc8eeb354424d1799632ec82bd3a"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "rustc"
+path = "https://static.rust-lang.org/dist/rustc-1.93.1-x86_64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "9c776eef2f1d76a8ed6c4245e246700c5cd724f96181fb58edb23a172d460bcb"
+platform = "x86_64-darwin"
 
 [[sources]]
 name = "rustfmt"
@@ -153,9 +297,25 @@ digest = "17b27bfbf46861bc587e5dc0e04fbc32cbd02f9b111867ffc79653261de7796a"
 platform = "aarch64-darwin"
 
 [[sources]]
+name = "rustfmt"
+path = "https://static.rust-lang.org/dist/rustfmt-1.93.1-x86_64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "5e57b9561d9990473dd6713e9b3191da3bb2c4ff0f28e4b03e15f552812f437f"
+platform = "x86_64-darwin"
+
+[[sources]]
 name = "staticcheck"
 path = "https://github.com/dominikh/go-tools/archive/refs/tags/2026.1.tar.gz"
 includes = []
 excludes = []
 digest = "fb3b8a69d94d507016bea39129274c2329704a451c0db6af620bcd8486288241"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "staticcheck"
+path = "https://github.com/dominikh/go-tools/archive/refs/tags/2026.1.tar.gz"
+includes = []
+excludes = []
+digest = "fb3b8a69d94d507016bea39129274c2329704a451c0db6af620bcd8486288241"
+platform = "x86_64-darwin"
