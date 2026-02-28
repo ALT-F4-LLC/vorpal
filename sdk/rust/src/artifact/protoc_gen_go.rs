@@ -26,15 +26,15 @@ impl ProtocGenGo {
             _ => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "1.36.3";
+        let source_version = "1.36.11";
         let source_path = format!("https://github.com/protocolbuffers/protobuf-go/releases/download/v{source_version}/protoc-gen-go.v{source_version}.{source_target}.tar.gz");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = formatdoc! {"
-            mkdir -pv \"$VORPAL_OUTPUT/bin\"
+            mkdir -p \"$VORPAL_OUTPUT/bin\"
 
-            cp -prv \"source/protoc-gen-go/protoc-gen-go\" \"$VORPAL_OUTPUT/bin/protoc-gen-go\"
+            cp -pr \"source/protoc-gen-go/protoc-gen-go\" \"$VORPAL_OUTPUT/bin/protoc-gen-go\"
 
             chmod +x \"$VORPAL_OUTPUT/bin/protoc-gen-go\"",
         };

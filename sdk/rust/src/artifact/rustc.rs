@@ -25,7 +25,7 @@ impl Rustc {
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
-        let step_script = format!("cp -prv \"./source/{name}/{name}-{source_version}-{source_target}/{name}/.\" \"$VORPAL_OUTPUT\"");
+        let step_script = format!("cp -pr \"./source/{name}/{name}-{source_version}-{source_target}/{name}/.\" \"$VORPAL_OUTPUT\"");
         let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
         let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 

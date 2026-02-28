@@ -231,8 +231,8 @@ export class Go {
       `go clean -modcache`;
 
     // Fetch tool artifacts
-    const git = await context.fetchArtifactAlias("git:2.52.0");
-    const go = await context.fetchArtifactAlias("go:1.24.2");
+    const git = await context.fetchArtifactAlias("git:2.53.0");
+    const go = await context.fetchArtifactAlias("go:1.26.0");
 
     // Compute GOOS and GOARCH
     const goarch = getGoarch(context.getSystem());
@@ -274,14 +274,14 @@ export class Go {
 // ---------------------------------------------------------------------------
 
 // Default tool aliases -- centralized so version bumps happen in one place
-const DEFAULT_GO_ALIAS = "go:1.24.2";
-const DEFAULT_GIT_ALIAS = "git:2.52.0";
-const DEFAULT_GOIMPORTS_ALIAS = "goimports:0.29.0";
-const DEFAULT_GOPLS_ALIAS = "gopls:0.29.0";
-const DEFAULT_PROTOC_ALIAS = "protoc:25.4";
-const DEFAULT_PROTOC_GEN_GO_ALIAS = "protoc-gen-go:1.36.3";
-const DEFAULT_PROTOC_GEN_GO_GRPC_ALIAS = "protoc-gen-go-grpc:1.70.0";
-const DEFAULT_STATICCHECK_ALIAS = "staticcheck:2025.1.1";
+const DEFAULT_GO_ALIAS = "go:1.26.0";
+const DEFAULT_GIT_ALIAS = "git:2.53.0";
+const DEFAULT_GOIMPORTS_ALIAS = "goimports:0.42.0";
+const DEFAULT_GOPLS_ALIAS = "gopls:0.42.0";
+const DEFAULT_PROTOC_ALIAS = "protoc:34.0";
+const DEFAULT_PROTOC_GEN_GO_ALIAS = "protoc-gen-go:1.36.11";
+const DEFAULT_PROTOC_GEN_GO_GRPC_ALIAS = "protoc-gen-go-grpc:1.79.1";
+const DEFAULT_STATICCHECK_ALIAS = "staticcheck:2026.1";
 
 /**
  * Builder for Go development environment artifacts.

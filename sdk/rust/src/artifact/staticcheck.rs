@@ -15,7 +15,7 @@ impl Staticcheck {
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let name = "staticcheck";
-        let source_version = "2025.1.1";
+        let source_version = "2026.1";
         let source_path = format!(
             "https://github.com/dominikh/go-tools/archive/refs/tags/{source_version}.tar.gz"
         );

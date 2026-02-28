@@ -283,7 +283,7 @@ impl<'a> Rust<'a> {
         }
 
         let mut vendor_step_script = formatdoc! {r#"
-            mkdir -pv $HOME
+            mkdir -p $HOME
 
             pushd ./source/{name}-vendor"#,
             name = self.name,
@@ -302,7 +302,7 @@ impl<'a> Rust<'a> {
                 target_paths=({target_paths})
 
                 for target_path in ${{target_paths[@]}}; do
-                    mkdir -pv $(dirname ${{target_path}})
+                    mkdir -p $(dirname ${{target_path}})
                     touch ${{target_path}}
                 done"#,
                 packages = packages.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(","),
@@ -312,7 +312,7 @@ impl<'a> Rust<'a> {
             vendor_step_script = formatdoc! {r#"
                 {vendor_step_script}
 
-                mkdir -pv src
+                mkdir -p src
                 touch src/main.rs"#,
             };
         }
@@ -320,7 +320,7 @@ impl<'a> Rust<'a> {
         vendor_step_script = formatdoc! {r#"
             {vendor_step_script}
 
-            mkdir -pv $VORPAL_OUTPUT/vendor
+            mkdir -p $VORPAL_OUTPUT/vendor
 
             cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
@@ -373,14 +373,14 @@ impl<'a> Rust<'a> {
         // Create step
 
         let mut step_script = formatdoc! {r#"
-            mkdir -pv $HOME
+            mkdir -p $HOME
 
             pushd ./source/{name}
 
-            mkdir -pv .cargo
-            mkdir -pv $VORPAL_OUTPUT/bin
+            mkdir -p .cargo
+            mkdir -p $VORPAL_OUTPUT/bin
 
-            ln -sv {vendor}/config.toml .cargo/config.toml"#,
+            ln -s {vendor}/config.toml .cargo/config.toml"#,
             name = self.name,
             vendor = get_env_key(&vendor),
         };
@@ -440,7 +440,7 @@ impl<'a> Rust<'a> {
                     cargo --offline test --bin ${{bin_name}} --release
                 fi
 
-                cp -pv ./target/release/${{bin_name}} $VORPAL_OUTPUT/bin/
+                cp -p ./target/release/${{bin_name}} $VORPAL_OUTPUT/bin/
             done"#,
             bin_names = packages_bin_names.join(" "),
             enable_build = if self.build { "true" } else { "false" },

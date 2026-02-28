@@ -5,6 +5,7 @@
 .env.*
 /.docket
 /dist
+/docs
 target
 vendor
 vorpal-*-*

@@ -22,7 +22,6 @@ use vorpal_sdk::{
     context::{VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE},
 };
 
-mod agent;
 mod build;
 mod config;
 mod config_cmd;
@@ -125,42 +124,6 @@ pub enum CommandSystem {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Manage Vorpal agents
-    Agent {
-        /// Agent prompts (one per agent to spawn)
-        prompts: Vec<String>,
-
-        /// Workspace directory for each prompt, matched by position (e.g. first --workspace
-        /// pairs with first prompt). If fewer --workspace flags than prompts are given, the
-        /// remaining prompts default to the current directory.
-        #[arg(long)]
-        workspace: Vec<PathBuf>,
-
-        /// Claude Code permission mode (e.g. "default", "acceptEdits", "plan", "bypassPermissions")
-        #[arg(default_value = "default", long)]
-        permission_mode: Option<String>,
-
-        /// Claude Code allowed tools (can be repeated, e.g. --allowed-tools Edit --allowed-tools Write)
-        #[arg(long)]
-        allowed_tools: Vec<String>,
-
-        /// Claude Code model (e.g. "claude-sonnet-4-5-20250929", "claude-opus-4-6")
-        #[arg(default_value = "claude-opus-4-6", long)]
-        model: Option<String>,
-
-        /// Claude Code effort level (e.g. "low", "medium", "high")
-        #[arg(default_value = "high", long)]
-        effort: Option<String>,
-
-        /// Claude Code maximum budget in USD
-        #[arg(long)]
-        max_budget_usd: Option<f64>,
-
-        /// Additional directories for Claude Code context (can be repeated)
-        #[arg(long)]
-        add_dir: Vec<String>,
-    },
-
     /// Build an artifact
     Build {
         /// Artifact name
@@ -317,24 +280,20 @@ pub async fn run() -> Result<()> {
 
     let Cli { command, level } = cli;
 
-    // Tracing to stderr corrupts the TUI display, so skip the subscriber
-    // for the agent command. The TUI renders all relevant state itself.
-    if !matches!(&command, Command::Agent { .. }) {
-        let subscriber_writer = std::io::stderr.with_max_level(level);
-        let mut subscriber = FmtSubscriber::builder()
-            .with_max_level(level)
-            .with_target(false)
-            .with_writer(subscriber_writer)
-            .without_time();
+    let subscriber_writer = std::io::stderr.with_max_level(level);
+    let mut subscriber = FmtSubscriber::builder()
+        .with_max_level(level)
+        .with_target(false)
+        .with_writer(subscriber_writer)
+        .without_time();
 
-        if [Level::DEBUG, Level::TRACE].contains(&level) {
-            subscriber = subscriber.with_file(true).with_line_number(true);
-        }
-
-        let subscriber = subscriber.finish();
-
-        subscriber::set_global_default(subscriber).expect("setting default subscriber");
+    if [Level::DEBUG, Level::TRACE].contains(&level) {
+        subscriber = subscriber.with_file(true).with_line_number(true);
     }
+
+    let subscriber = subscriber.finish();
+
+    subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     // Extract the config path from commands that have one, before resolving settings
     let config_for_settings = match &command {
@@ -368,61 +327,6 @@ pub async fn run() -> Result<()> {
     };
 
     match &command {
-        Command::Agent {
-            prompts,
-            workspace,
-            permission_mode,
-            allowed_tools,
-            model,
-            effort,
-            max_budget_usd,
-            add_dir,
-        } => {
-            let cwd = current_dir().expect("failed to get current directory");
-
-            // Pad workspaces with "." for any prompts without an explicit workspace
-            let mut workspaces: Vec<PathBuf> = workspace.clone();
-
-            if !prompts.is_empty() && workspaces.len() < prompts.len() {
-                let defaulted = prompts.len() - workspaces.len();
-                eprintln!(
-                    "Warning: {} prompt(s) have no --workspace flag; defaulting to current directory",
-                    defaulted
-                );
-            }
-
-            workspaces.resize(prompts.len(), PathBuf::from("."));
-
-            // Resolve relative paths to absolute
-            let workspaces: Vec<PathBuf> = workspaces
-                .into_iter()
-                .map(|w| {
-                    if w.is_absolute() {
-                        w.clean()
-                    } else {
-                        cwd.join(w).clean()
-                    }
-                })
-                .collect();
-
-            for ws in &workspaces {
-                if !ws.is_dir() {
-                    return Err(anyhow!("workspace is not a directory: {}", ws.display()));
-                }
-            }
-
-            let claude_options = agent::ClaudeOptions {
-                permission_mode: permission_mode.clone(),
-                allowed_tools: allowed_tools.clone(),
-                model: model.clone(),
-                effort: effort.clone(),
-                max_budget_usd: *max_budget_usd,
-                add_dirs: add_dir.clone(),
-            };
-
-            agent::run(prompts.clone(), workspaces, claude_options).await
-        }
-
         Command::Build {
             agent,
             context,

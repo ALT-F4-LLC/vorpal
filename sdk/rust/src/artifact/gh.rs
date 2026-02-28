@@ -32,14 +32,14 @@ impl Gh {
             _ => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "2.69.0";
+        let source_version = "2.87.3";
         let source_path = format!("https://github.com/cli/cli/releases/download/v{source_version}/gh_{source_version}_{source_target}.{source_extension}");
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = formatdoc! {"
-            mkdir -pv \"$VORPAL_OUTPUT/bin\"
+            mkdir -p \"$VORPAL_OUTPUT/bin\"
 
-            cp -prv \"source/{name}/gh_{source_version}_{source_target}/bin/gh\" \"$VORPAL_OUTPUT/bin/gh\"
+            cp -pr \"source/{name}/gh_{source_version}_{source_target}/bin/gh\" \"$VORPAL_OUTPUT/bin/gh\"
 
             chmod +x \"$VORPAL_OUTPUT/bin/gh\"",
         };

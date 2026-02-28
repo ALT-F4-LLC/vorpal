@@ -27,7 +27,7 @@ impl Pnpm {
             _ => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "10.5.2";
+        let source_version = "10.30.3";
         let source_path = format!(
             "https://github.com/pnpm/pnpm/releases/download/v{source_version}/pnpm-{source_target}"
         );
@@ -35,8 +35,8 @@ impl Pnpm {
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = formatdoc! {"
-            mkdir -pv \"$VORPAL_OUTPUT/bin\"
-            cp -pv \"./source/{name}/pnpm-{source_target}\" \"$VORPAL_OUTPUT/bin/pnpm\"
+            mkdir -p \"$VORPAL_OUTPUT/bin\"
+            cp -p \"./source/{name}/pnpm-{source_target}\" \"$VORPAL_OUTPUT/bin/pnpm\"
             chmod +x \"$VORPAL_OUTPUT/bin/pnpm\""
         };
 

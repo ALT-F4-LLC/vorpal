@@ -33,8 +33,9 @@ type ArtifactAlias struct {
 }
 
 type ConfigContextStore struct {
-	artifact map[string]*artifact.Artifact
-	variable map[string]string
+	artifact          map[string]*artifact.Artifact
+	artifactInputCache map[string]string
+	variable          map[string]string
 }
 
 type ConfigContext struct {
@@ -312,8 +313,9 @@ func GetContext() *ConfigContext {
 	}
 
 	store := ConfigContextStore{
-		artifact: make(map[string]*artifact.Artifact),
-		variable: cmd.ArtifactVariable,
+		artifact:          make(map[string]*artifact.Artifact),
+		artifactInputCache: make(map[string]string),
+		variable:          cmd.ArtifactVariable,
 	}
 
 	system, err := GetSystem(cmd.ArtifactSystem)
@@ -388,6 +390,20 @@ func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error
 		return &artifactDigest, nil
 	}
 
+	// Check the input-to-output digest cache for deduplication.
+	// The input digest (computed from un-hydrated sources) differs from the
+	// output digest (computed after the agent hydrates source digests), so
+	// we maintain a mapping from input -> output to short-circuit repeated
+	// calls for the same logical artifact.
+	if outputDigest, ok := c.store.artifactInputCache[artifactDigest]; ok {
+		if _, exists := c.store.artifact[outputDigest]; exists {
+			return &outputDigest, nil
+		}
+	}
+
+	// Preserve the input digest before it gets reassigned to the response digest
+	inputDigest := artifactDigest
+
 	// TODO: make this run in parallel
 
 	prepareRequest := &agent.PrepareArtifactRequest{
@@ -442,6 +458,10 @@ func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error
 	if _, ok := c.store.artifact[artifactDigest]; !ok {
 		c.store.artifact[artifactDigest] = artifact
 	}
+
+	// Map the input digest to the output digest so subsequent calls with
+	// the same un-hydrated artifact return immediately.
+	c.store.artifactInputCache[inputDigest] = artifactDigest
 
 	return &artifactDigest, nil
 }

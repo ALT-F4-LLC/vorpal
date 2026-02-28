@@ -9,18 +9,25 @@ use crate::command::{
             set_timestamps,
         },
         temps::{create_sandbox_dir, create_sandbox_file},
+        DUPLEX_BUF_SIZE,
     },
 };
 use anyhow::{anyhow, bail, Result};
-use async_compression::tokio::bufread::{BzDecoder, GzipDecoder, XzDecoder};
+use async_compression::tokio::bufread::{BzDecoder, GzipDecoder};
 use sha256::digest;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::{
     fs::{read, remove_dir_all, remove_file, write},
-    sync::mpsc::{channel, Sender},
+    sync::{
+        mpsc::{channel, Sender},
+        Mutex,
+    },
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tar::Archive;
+use tokio_util::io::SyncIoBridge;
 use tonic::{Code, Request, Response, Status};
 use tracing::{info, warn};
 use url::Url;
@@ -45,7 +52,7 @@ enum ArtifactSourceType {
     Http,
 }
 
-const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
+const DEFAULT_CHUNKS_SIZE: usize = 8192; // streaming chunk size
 
 pub async fn build_source(
     artifact_context: String,
@@ -74,7 +81,7 @@ pub async fn build_source(
     let source_type = match &artifact_source.path {
         s if Path::new(s).exists() => ArtifactSourceType::Local,
         s if s.starts_with("git") => ArtifactSourceType::Git,
-        s if s.starts_with("http") => ArtifactSourceType::Http,
+        s if s.starts_with("http://") || s.starts_with("https://") => ArtifactSourceType::Http,
         _ => ArtifactSourceType::Unknown,
     };
 
@@ -138,8 +145,8 @@ pub async fn build_source(
             bail!("URL not failed: {:?}", response.status());
         }
 
-        let response_bytes = response.bytes().await.map_err(|e| anyhow!(e))?;
-        let response_bytes = response_bytes.as_ref();
+        let response_bytes_owned = response.bytes().await.map_err(|e| anyhow!(e))?;
+        let response_bytes = response_bytes_owned.as_ref();
         let response_kind = infer::get(response_bytes);
 
         match response_kind {
@@ -214,13 +221,39 @@ pub async fn build_source(
                     }
 
                     "application/x-xz" => {
-                        let decoder = XzDecoder::new(response_bytes);
-                        let mut archive = Archive::new(decoder);
+                        let (async_reader, async_writer) = tokio::io::duplex(DUPLEX_BUF_SIZE);
+                        let compressed = response_bytes_owned.clone();
+                        let url = path.to_string();
 
-                        archive
-                            .unpack(&source_sandbox)
-                            .await
-                            .map_err(|e| anyhow!(e))?;
+                        let decompress_fut = tokio::task::spawn_blocking(move || {
+                            let mut sync_writer = SyncIoBridge::new(async_writer);
+                            let input = std::io::Cursor::new(compressed.as_ref());
+                            let mut decoder = liblzma::read::XzDecoder::new(input);
+                            std::io::copy(&mut decoder, &mut sync_writer).map_err(|e| {
+                                anyhow!("xz decompression failed for {}: {}", url, e)
+                            })?;
+                            Ok::<(), anyhow::Error>(())
+                        });
+
+                        let mut archive = Archive::new(async_reader);
+
+                        // Use join! (not try_join!) to always await the blocking task.
+                        let (decompress_result, unpack_result) = tokio::join!(
+                            async {
+                                decompress_fut
+                                    .await
+                                    .map_err(|e| anyhow!("xz task join error: {}", e))?
+                            },
+                            async {
+                                archive
+                                    .unpack(&source_sandbox)
+                                    .await
+                                    .map_err(|e| anyhow!(e))
+                            },
+                        );
+
+                        unpack_result?;
+                        decompress_result?;
                     }
 
                     "application/zip" => {
@@ -380,9 +413,31 @@ pub async fn build_source(
     Ok(source_digest)
 }
 
+/// All fields of an artifact source except `digest`, used as a cache key.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct SourceCacheKey {
+    excludes: Vec<String>,
+    includes: Vec<String>,
+    name: String,
+    path: String,
+    platform: String,
+}
+
+/// Combined cache of source digests resolved during this session.
+#[derive(Debug, Default)]
+struct SourceCacheState {
+    /// Key: all source fields (except digest) + platform -> computed source digest
+    by_key: HashMap<SourceCacheKey, String>,
+    /// Key: (source_url, excludes, includes, platform) -> computed source digest (HTTP sources only)
+    by_url: HashMap<(String, Vec<String>, Vec<String>, String), String>,
+}
+
+type SourceCache = Arc<Mutex<SourceCacheState>>;
+
 async fn prepare_artifact(
     request: Request<PrepareArtifactRequest>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
+    source_cache: SourceCache,
 ) -> Result<(), Status> {
     let request = request.into_inner();
 
@@ -467,16 +522,73 @@ async fn prepare_artifact(
             }
         }
 
-        let artifact_source_digest = build_source(
-            request.artifact_context.clone(),
-            request.artifact_namespace.clone(),
-            &artifact_source,
-            request.artifact_unlock,
-            request.registry.clone(),
-            &tx.clone(),
-        )
-        .await
-        .map_err(|err| Status::internal(format!("{err}")))?;
+        let cache_key = SourceCacheKey {
+            excludes: artifact_source.excludes.clone(),
+            includes: artifact_source.includes.clone(),
+            name: artifact_source.name.clone(),
+            path: artifact_source.path.clone(),
+            platform: target_platform.clone(),
+        };
+
+        let is_http_source = artifact_source.path.starts_with("http://")
+            || artifact_source.path.starts_with("https://");
+        let url_cache_key = if is_http_source {
+            Some((
+                artifact_source.path.clone(),
+                artifact_source.excludes.clone(),
+                artifact_source.includes.clone(),
+                target_platform.clone(),
+            ))
+        } else {
+            None
+        };
+
+        // Single lock acquisition to check both caches
+        let cached_digest = {
+            let cache = source_cache.lock().await;
+            cache.by_key.get(&cache_key).cloned().or_else(|| {
+                url_cache_key
+                    .as_ref()
+                    .and_then(|key| cache.by_url.get(key).cloned())
+            })
+        };
+
+        let artifact_source_digest = if let Some(digest) = cached_digest {
+            info!(
+                "agent |> cache hit for source: {} ({}) -> {}",
+                artifact_source.name, target_platform, digest
+            );
+            // Backfill the full key if the hit came from the URL cache
+            source_cache
+                .lock()
+                .await
+                .by_key
+                .entry(cache_key)
+                .or_insert(digest.clone());
+            digest
+        } else {
+            let digest = build_source(
+                request.artifact_context.clone(),
+                request.artifact_namespace.clone(),
+                &artifact_source,
+                request.artifact_unlock,
+                request.registry.clone(),
+                &tx.clone(),
+            )
+            .await
+            .map_err(|err| Status::internal(format!("{err}")))?;
+
+            // Single lock acquisition to populate both caches
+            {
+                let mut cache = source_cache.lock().await;
+                cache.by_key.insert(cache_key, digest.clone());
+                if let Some(url_key) = url_cache_key {
+                    cache.by_url.insert(url_key, digest.clone());
+                }
+            }
+
+            digest
+        };
 
         let artifact_source = ArtifactSource {
             digest: Some(artifact_source_digest.to_string()),
@@ -594,11 +706,15 @@ async fn prepare_artifact(
 }
 
 #[derive(Debug)]
-pub struct AgentServer {}
+pub struct AgentServer {
+    source_cache: SourceCache,
+}
 
 impl AgentServer {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            source_cache: Arc::new(Mutex::new(SourceCacheState::default())),
+        }
     }
 }
 
@@ -611,9 +727,10 @@ impl AgentService for AgentServer {
         request: Request<PrepareArtifactRequest>,
     ) -> Result<Response<Self::PrepareArtifactStream>, Status> {
         let (tx, rx) = channel(100);
+        let source_cache = self.source_cache.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(request, &tx).await {
+            if let Err(err) = prepare_artifact(request, &tx, source_cache).await {
                 let _ = tx.send(Err(err)).await;
             }
         });

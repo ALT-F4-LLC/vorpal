@@ -71,7 +71,7 @@ type StepScriptTemplateArgs struct {
 }
 
 const VendorStepScriptTemplate = `
-mkdir -pv $HOME
+mkdir -p $HOME
 
 pushd ./source/{{.Name}}-vendor
 {{if .Packages}}
@@ -84,28 +84,28 @@ EOF
 target_paths=({{.TargetPaths}})
 
 for target_path in ${{"{"}}target_paths{{"["}}@{{"]"}}{{"}"}}; do
-    mkdir -pv $(dirname ${{"{"}}target_path{{"}"}})
+    mkdir -p $(dirname ${{"{"}}target_path{{"}"}})
     touch ${{"{"}}target_path{{"}"}}
 done
 {{else}}
-mkdir -pv src
+mkdir -p src
 touch src/main.rs
 {{end}}
-mkdir -pv $VORPAL_OUTPUT/vendor
+mkdir -p $VORPAL_OUTPUT/vendor
 
 cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
 echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml`
 
 const StepScriptTemplate = `
-mkdir -pv $HOME
+mkdir -p $HOME
 
 pushd ./source/{{.Name}}
 
-mkdir -pv .cargo
-mkdir -pv $VORPAL_OUTPUT/bin
+mkdir -p .cargo
+mkdir -p $VORPAL_OUTPUT/bin
 
-ln -sv {{.Vendor}}/config.toml .cargo/config.toml
+ln -s {{.Vendor}}/config.toml .cargo/config.toml
 {{if .Packages}}
 cat > Cargo.toml << "EOF"
 [workspace]
@@ -144,7 +144,7 @@ for bin_name in ${{"{"}}bin_names{{"["}}@{{"]"}}{{"}"}}; do
         cargo --offline test --bin ${{"{"}}bin_name{{"}"}} --release
     fi
 
-    cp -pv ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
+    cp -p ./target/release/${{"{"}}bin_name{{"}"}} $VORPAL_OUTPUT/bin/
 done`
 
 func stripPrefix(path, prefix string) string {

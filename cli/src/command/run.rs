@@ -181,7 +181,7 @@ async fn pull_artifact_from_registry(
         )
     })?;
 
-    unpack_zstd(&output_path.to_path_buf(), &archive_path).await?;
+    unpack_zstd(output_path, &archive_path).await?;
 
     let artifact_files = get_file_paths(&output_path.to_path_buf(), vec![], vec![])?;
 

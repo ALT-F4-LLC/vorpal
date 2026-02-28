@@ -35,7 +35,7 @@ pub fn script(
 
         ## Build m4
 
-        mkdir -pv $VORPAL_SOURCE/m4/m4-{m4_version}/build
+        mkdir -p $VORPAL_SOURCE/m4/m4-{m4_version}/build
         pushd $VORPAL_SOURCE/m4/m4-{m4_version}/build
 
         ../configure \
@@ -52,10 +52,10 @@ pub fn script(
 
         ## Build ncurses
 
-        mkdir -pv $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
+        mkdir -p $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
         pushd $VORPAL_SOURCE/ncurses/ncurses-{ncurses_version}
 
-        mkdir -pv build
+        mkdir -p build
         pushd build
 
         ../configure --prefix=$VORPAL_OUTPUT/tools AWK=gawk
@@ -83,7 +83,7 @@ pub fn script(
         make
         make DESTDIR=\"$VORPAL_OUTPUT\" TIC_PATH=\"$(pwd)/build/progs/tic\" install
 
-        ln -sv libncursesw.so $VORPAL_OUTPUT/usr/lib/libncurses.so
+        ln -s libncursesw.so $VORPAL_OUTPUT/usr/lib/libncurses.so
 
         sed -e 's/^#if.*XOPEN.*$/#if 1/' \
             -i $VORPAL_OUTPUT/usr/include/curses.h
@@ -94,7 +94,7 @@ pub fn script(
 
         ## Build bash
 
-        mkdir -pv $VORPAL_SOURCE/bash/bash-{bash_version}/build
+        mkdir -p $VORPAL_SOURCE/bash/bash-{bash_version}/build
         pushd $VORPAL_SOURCE/bash/bash-{bash_version}/build
 
         ../configure \
@@ -106,7 +106,7 @@ pub fn script(
         make
         make DESTDIR=\"$VORPAL_OUTPUT\" install
 
-        ln -sv bash $VORPAL_OUTPUT/usr/bin/sh
+        ln -s bash $VORPAL_OUTPUT/usr/bin/sh
 
         popd
 
@@ -114,7 +114,7 @@ pub fn script(
 
         ## Build coreutils
 
-        mkdir -pv $VORPAL_SOURCE/coreutils/coreutils-{coreutils_version}/build
+        mkdir -p $VORPAL_SOURCE/coreutils/coreutils-{coreutils_version}/build
         pushd $VORPAL_SOURCE/coreutils/coreutils-{coreutils_version}/build
 
         ../configure \
@@ -127,11 +127,11 @@ pub fn script(
         make
         make DESTDIR=\"$VORPAL_OUTPUT\" install
 
-        mv -v $VORPAL_OUTPUT/usr/bin/chroot $VORPAL_OUTPUT/usr/sbin
+        mv $VORPAL_OUTPUT/usr/bin/chroot $VORPAL_OUTPUT/usr/sbin
 
-        mkdir -pv $VORPAL_OUTPUT/usr/share/man/man8
+        mkdir -p $VORPAL_OUTPUT/usr/share/man/man8
 
-        mv -v $VORPAL_OUTPUT/usr/share/man/man1/chroot.1 \
+        mv $VORPAL_OUTPUT/usr/share/man/man1/chroot.1 \
             $VORPAL_OUTPUT/usr/share/man/man8/chroot.8
 
         sed -i 's/\"1\"/\"8\"/' \
@@ -143,7 +143,7 @@ pub fn script(
 
         ## Build diffutils
 
-        mkdir -pv $VORPAL_SOURCE/diffutils/diffutils-{diffutils_version}/build
+        mkdir -p $VORPAL_SOURCE/diffutils/diffutils-{diffutils_version}/build
         pushd $VORPAL_SOURCE/diffutils/diffutils-{diffutils_version}/build
 
         ../configure \
@@ -161,10 +161,10 @@ pub fn script(
 
         ## Build file
 
-        mkdir -pv $VORPAL_SOURCE/file/file-{file_version}
+        mkdir -p $VORPAL_SOURCE/file/file-{file_version}
         pushd $VORPAL_SOURCE/file/file-{file_version}
 
-        mkdir -pv build
+        mkdir -p build
         pushd build
 
         ../configure \
@@ -185,7 +185,7 @@ pub fn script(
         make FILE_COMPILE=\"$(pwd)/build/src/file\"
         make DESTDIR=\"$VORPAL_OUTPUT\" install
 
-        rm -v $VORPAL_OUTPUT/usr/lib/libmagic.la
+        rm $VORPAL_OUTPUT/usr/lib/libmagic.la
 
         popd
 
@@ -193,7 +193,7 @@ pub fn script(
 
         ## Build findutils
 
-        mkdir -pv $VORPAL_SOURCE/findutils/findutils-{findutils_version}/build
+        mkdir -p $VORPAL_SOURCE/findutils/findutils-{findutils_version}/build
         pushd $VORPAL_SOURCE/findutils/findutils-{findutils_version}/build
 
         ../configure \
@@ -211,7 +211,7 @@ pub fn script(
 
         ## Build gawk
 
-        mkdir -pv $VORPAL_SOURCE/gawk/gawk-{gawk_version}/build
+        mkdir -p $VORPAL_SOURCE/gawk/gawk-{gawk_version}/build
         pushd $VORPAL_SOURCE/gawk/gawk-{gawk_version}/build
 
         ../configure \
@@ -228,7 +228,7 @@ pub fn script(
 
         ## Build grep
 
-        mkdir -pv $VORPAL_SOURCE/grep/grep-{grep_version}/build
+        mkdir -p $VORPAL_SOURCE/grep/grep-{grep_version}/build
         pushd $VORPAL_SOURCE/grep/grep-{grep_version}/build
 
         ../configure \
@@ -245,7 +245,7 @@ pub fn script(
 
         ## Build gzip
 
-        mkdir -pv $VORPAL_SOURCE/gzip/gzip-{gzip_version}/build
+        mkdir -p $VORPAL_SOURCE/gzip/gzip-{gzip_version}/build
         pushd $VORPAL_SOURCE/gzip/gzip-{gzip_version}/build
 
         ../configure \
@@ -261,7 +261,7 @@ pub fn script(
 
         ## Build make
 
-        mkdir -pv $VORPAL_SOURCE/make/make-{make_version}/build
+        mkdir -p $VORPAL_SOURCE/make/make-{make_version}/build
         pushd $VORPAL_SOURCE/make/make-{make_version}/build
 
         ../configure \
@@ -279,7 +279,7 @@ pub fn script(
 
         ## Build patch
 
-        mkdir -pv $VORPAL_SOURCE/patch/patch-{patch_version}/build
+        mkdir -p $VORPAL_SOURCE/patch/patch-{patch_version}/build
         pushd $VORPAL_SOURCE/patch/patch-{patch_version}/build
 
         ../configure \
@@ -296,7 +296,7 @@ pub fn script(
 
         ## Build sed
 
-        mkdir -pv $VORPAL_SOURCE/sed/sed-{sed_version}/build
+        mkdir -p $VORPAL_SOURCE/sed/sed-{sed_version}/build
         pushd $VORPAL_SOURCE/sed/sed-{sed_version}/build
 
         ../configure \
@@ -313,7 +313,7 @@ pub fn script(
 
         ## Build tar
 
-        mkdir -pv $VORPAL_SOURCE/tar/tar-{tar_version}/build
+        mkdir -p $VORPAL_SOURCE/tar/tar-{tar_version}/build
         pushd $VORPAL_SOURCE/tar/tar-{tar_version}/build
 
         ../configure \
@@ -330,7 +330,7 @@ pub fn script(
 
         ## Build xz
 
-        mkdir -pv $VORPAL_SOURCE/xz/xz-{xz_version}/build
+        mkdir -p $VORPAL_SOURCE/xz/xz-{xz_version}/build
         pushd $VORPAL_SOURCE/xz/xz-{xz_version}/build
 
         ../configure \
@@ -343,7 +343,7 @@ pub fn script(
         make
         make DESTDIR=\"$VORPAL_OUTPUT\" install
 
-        rm -v $VORPAL_OUTPUT/usr/lib/liblzma.la
+        rm $VORPAL_OUTPUT/usr/lib/liblzma.la
 
         popd
 
@@ -351,7 +351,7 @@ pub fn script(
 
         ## Build binutils (pass 02)
 
-        mkdir -pv $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}/build
+        mkdir -p $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}/build
         pushd $VORPAL_SOURCE/binutils-pass-02/binutils-{binutils_version}/build
 
         ../configure \
@@ -369,7 +369,7 @@ pub fn script(
         make
         make DESTDIR=\"$VORPAL_OUTPUT\" install
 
-        rm -v $VORPAL_OUTPUT/usr/lib/lib{{bfd,ctf,ctf-nobfd,opcodes,sframe}}.{{a,la}}
+        rm $VORPAL_OUTPUT/usr/lib/lib{{bfd,ctf,ctf-nobfd,opcodes,sframe}}.{{a,la}}
 
         popd
 
@@ -377,7 +377,7 @@ pub fn script(
 
         ## Build gcc (pass 02)
 
-        mkdir -pv $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}/build
+        mkdir -p $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}/build
         pushd $VORPAL_SOURCE/gcc-pass-02/gcc-{gcc_version}/build
 
         ../configure \
@@ -402,7 +402,7 @@ pub fn script(
         make
         make DESTDIR=\"$VORPAL_OUTPUT\" install
 
-        ln -sv gcc $VORPAL_OUTPUT/usr/bin/cc
+        ln -s gcc $VORPAL_OUTPUT/usr/bin/cc
 
         popd
 
@@ -410,8 +410,8 @@ pub fn script(
 
         ## Setup root symlinks
 
-        ln -svf usr/bin $VORPAL_OUTPUT/bin
-        ln -svf usr/lib $VORPAL_OUTPUT/lib
-        ln -svf usr/sbin $VORPAL_OUTPUT/sbin",
+        ln -sf usr/bin $VORPAL_OUTPUT/bin
+        ln -sf usr/lib $VORPAL_OUTPUT/lib
+        ln -sf usr/sbin $VORPAL_OUTPUT/sbin",
     }
 }

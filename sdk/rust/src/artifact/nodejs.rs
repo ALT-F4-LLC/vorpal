@@ -26,7 +26,7 @@ impl NodeJS {
             _ => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 
-        let source_version = "22.14.0";
+        let source_version = "22.22.0";
         let source_path = format!(
             "https://nodejs.org/dist/v{source_version}/node-v{source_version}-{source_target}.tar.gz"
         );
@@ -34,7 +34,7 @@ impl NodeJS {
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = format!(
-            "cp -prv \"./source/{name}/node-v{source_version}-{source_target}/.\" \"$VORPAL_OUTPUT\""
+            "cp -pr \"./source/{name}/node-v{source_version}-{source_target}/.\" \"$VORPAL_OUTPUT\""
         );
         let steps = vec![step::shell(context, vec![], vec![], step_script, vec![]).await?];
         let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];

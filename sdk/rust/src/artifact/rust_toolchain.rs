@@ -25,7 +25,7 @@ pub fn target(system: ArtifactSystem) -> Result<String> {
 }
 
 pub fn version() -> String {
-    "1.89.0".to_string()
+    "1.93.1".to_string()
 }
 
 #[derive(Default)]
@@ -137,24 +137,26 @@ impl<'a> RustToolchain<'a> {
         let step_script = formatdoc! {"
             toolchain_dir=\"$VORPAL_OUTPUT/toolchains/{toolchain_version}-{toolchain_target}\"
 
-            mkdir -pv \"$toolchain_dir\"
+            mkdir -p \"$toolchain_dir\"
 
             components=({component_paths})
 
+            echo \"Copying Rust toolchain components to $toolchain_dir...\"
+
             for component in \"${{components[@]}}\"; do
+                echo \"Processing component: $component\"
+
                 find \"$component\" | while read -r file; do
                     relative_path=$(echo \"$file\" | sed -e \"s|$component||\")
-
-                    echo \"Copying $file to $toolchain_dir$relative_path\"
 
                     if [[ \"$relative_path\" == \"/manifest.in\" ]]; then
                         continue
                     fi
 
                     if [ -d \"$file\" ]; then
-                        mkdir -pv \"$toolchain_dir$relative_path\"
+                        mkdir -p \"$toolchain_dir$relative_path\"
                     else
-                        cp -pv \"$file\" \"$toolchain_dir$relative_path\"
+                        cp -p \"$file\" \"$toolchain_dir$relative_path\"
                     fi
                 done
             done

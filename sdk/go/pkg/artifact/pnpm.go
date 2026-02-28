@@ -5,5 +5,5 @@ import (
 )
 
 func Pnpm(context *config.ConfigContext) (*string, error) {
-	return context.FetchArtifactAlias("pnpm:10.5.2")
+	return context.FetchArtifactAlias("pnpm:10.30.3")
 }

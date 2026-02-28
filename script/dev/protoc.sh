@@ -4,7 +4,7 @@ set -euo pipefail
 ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
 OS="$(uname | tr '[:upper:]' '[:lower:]')"
 PROTOC_SYSTEM=""
-PROTOC_VERSION="28.0"
+PROTOC_VERSION="34.0"
 
 if [[ -f "${1}/bin/protoc" ]]; then
     "${1}/bin/protoc" --version

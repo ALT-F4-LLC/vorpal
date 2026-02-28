@@ -8,6 +8,7 @@ VENDOR_DIR := $(WORK_DIR)/vendor
 VORPAL_ARTIFACT := vorpal
 VORPAL_DIR := /var/lib/vorpal
 VORPAL_NAMESPACE := library
+VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
 LIMA_ARCH := $(ARCH)
@@ -53,7 +54,7 @@ test:
 
 dist:
 	mkdir -p $(DIST_DIR)
-	tar -czvf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
+	tar -czf $(DIST_DIR)/vorpal-$(ARCH)-$(OS).tar.gz \
 		-C $(WORK_DIR)/target/$(TARGET) \
 		vorpal
 
@@ -63,8 +64,8 @@ vendor:
 # Vorpal
 
 generate:
-	rm -rfv sdk/go/pkg/api
-	mkdir -pv sdk/go/pkg/api
+	rm -rf sdk/go/pkg/api
+	mkdir -p sdk/go/pkg/api
 	protoc \
 		--go_opt=paths=source_relative \
 		--go_out=sdk/go/pkg/api \
@@ -100,8 +101,8 @@ generate:
 		--go-grpc_out=sdk/go/pkg/api \
 		--proto_path=sdk/rust/api \
 		worker/worker.proto
-	rm -rfv sdk/typescript/src/api
-	mkdir -pv sdk/typescript/src/api
+	rm -rf sdk/typescript/src/api
+	mkdir -p sdk/typescript/src/api
 	protoc \
 		--plugin=protoc-gen-ts_proto=sdk/typescript/node_modules/.bin/protoc-gen-ts_proto \
 		--ts_proto_out=sdk/typescript/src/api \
@@ -119,10 +120,10 @@ generate:
 # Development (with Vorpal)
 
 vorpal:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- build $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- build $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
-	cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start $(VORPAL_FLAGS)
+	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start $(VORPAL_FLAGS)
 
 # Lima environment
 

@@ -21,7 +21,7 @@ pub fn script(
 
         ### Build binutils (pass 01)
 
-        mkdir -pv $VORPAL_SOURCE/binutils-pass-01/binutils-{binutils_version}/build
+        mkdir -p $VORPAL_SOURCE/binutils-pass-01/binutils-{binutils_version}/build
         pushd $VORPAL_SOURCE/binutils-pass-01/binutils-{binutils_version}/build
 
         ../configure \
@@ -43,7 +43,7 @@ pub fn script(
 
         ### Build gcc (pass 01)
 
-        mkdir -pv $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
+        mkdir -p $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
         pushd $VORPAL_SOURCE/gcc-pass-01/gcc-{gcc_version}/build
 
         ../configure \
@@ -94,7 +94,7 @@ pub fn script(
 
         find usr/include -type f ! -name '*.h' -delete
 
-        cp -prv usr/include \"$VORPAL_OUTPUT/usr\"
+        cp -pr usr/include \"$VORPAL_OUTPUT/usr\"
 
         popd
 
@@ -102,16 +102,16 @@ pub fn script(
 
         ### Build glibc-pass-01
 
-        mkdir -pv $VORPAL_SOURCE/glibc-pass-01/glibc-{glibc_version}/build
+        mkdir -p $VORPAL_SOURCE/glibc-pass-01/glibc-{glibc_version}/build
         pushd $VORPAL_SOURCE/glibc-pass-01/glibc-{glibc_version}/build
 
         case $(uname -m) in
-            aarch64) ln -sfv ../lib/ld-linux-aarch64.so.1 $VORPAL_OUTPUT/lib64
+            aarch64) ln -sf ../lib/ld-linux-aarch64.so.1 $VORPAL_OUTPUT/lib64
             ;;
-            i?86)   ln -sfv ld-linux.so.2 $VORPAL_OUTPUT/lib/ld-lsb.so.3
+            i?86)   ln -sf ld-linux.so.2 $VORPAL_OUTPUT/lib/ld-lsb.so.3
             ;;
-            x86_64) ln -sfv ../lib/ld-linux-x86-64.so.2 $VORPAL_OUTPUT/lib64
-                    ln -sfv ../lib/ld-linux-x86-64.so.2 $VORPAL_OUTPUT/lib64/ld-lsb-x86-64.so.3
+            x86_64) ln -sf ../lib/ld-linux-x86-64.so.2 $VORPAL_OUTPUT/lib64
+                    ln -sf ../lib/ld-linux-x86-64.so.2 $VORPAL_OUTPUT/lib64/ld-lsb-x86-64.so.3
             ;;
         esac
 
@@ -142,11 +142,11 @@ pub fn script(
 
         readelf -l a.out | grep ld-linux
 
-        rm -v a.out
+        rm a.out
 
         ## Build libstdc++
 
-        mkdir -pv $VORPAL_SOURCE/libstdc++/gcc-{gcc_version}/build
+        mkdir -p $VORPAL_SOURCE/libstdc++/gcc-{gcc_version}/build
         pushd $VORPAL_SOURCE/libstdc++/gcc-{gcc_version}/build
 
         ../libstdc++-v3/configure \
@@ -161,7 +161,7 @@ pub fn script(
         make
         make DESTDIR=\"$VORPAL_OUTPUT\" install
 
-        rm -v $VORPAL_OUTPUT/usr/lib/lib{{stdc++{{,exp,fs}},supc++}}.la
+        rm $VORPAL_OUTPUT/usr/lib/lib{{stdc++{{,exp,fs}},supc++}}.la
 
         popd
 

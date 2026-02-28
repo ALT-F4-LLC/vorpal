@@ -16,7 +16,7 @@ pub fn script(
 
         ## Build libunistring
 
-        mkdir -pv $VORPAL_SOURCE/libunistring/libunistring-{libunistring_version}/build
+        mkdir -p $VORPAL_SOURCE/libunistring/libunistring-{libunistring_version}/build
         pushd $VORPAL_SOURCE/libunistring/libunistring-{libunistring_version}/build
 
         ../configure \
@@ -33,7 +33,7 @@ pub fn script(
 
         ## Build libidn2
 
-        mkdir -pv $VORPAL_SOURCE/libidn2/libidn2-{libidn2_version}/build
+        mkdir -p $VORPAL_SOURCE/libidn2/libidn2-{libidn2_version}/build
         pushd $VORPAL_SOURCE/libidn2/libidn2-{libidn2_version}/build
 
         ../configure \
@@ -49,7 +49,7 @@ pub fn script(
 
         ## Build libpsl
 
-        mkdir -pv $VORPAL_SOURCE/libpsl/libpsl-{libpsl_version}/build
+        mkdir -p $VORPAL_SOURCE/libpsl/libpsl-{libpsl_version}/build
         pushd $VORPAL_SOURCE/libpsl/libpsl-{libpsl_version}/build
 
         ../configure --prefix=\"/usr\"
@@ -63,11 +63,11 @@ pub fn script(
 
         ## Build CA certificates
 
-        cp -pv $VORPAL_SOURCE/curl-cacert/cacert.pem /etc/ssl/certs/ca-certificates.crt
+        cp -p $VORPAL_SOURCE/curl-cacert/cacert.pem /etc/ssl/certs/ca-certificates.crt
 
         ## Build curl
 
-        mkdir -pv $VORPAL_SOURCE/curl/curl-{curl_version}/build
+        mkdir -p $VORPAL_SOURCE/curl/curl-{curl_version}/build
         pushd $VORPAL_SOURCE/curl/curl-{curl_version}/build
 
         ../configure \
