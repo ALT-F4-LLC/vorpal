@@ -20,7 +20,7 @@ serde = { version = "1.0.228", features = ["serde_derive"] }
 serde_json = { version = "1.0.149" }
 sha256 = { version = "1.6.0" }
 tokio = { version = "1.49.0", features = ["process", "rt-multi-thread"] }
-toml = { version = "0.9.11" }
+toml = { version = "1.0.0" }
 tonic = { version = "0.14.3", features = ["tls-ring", "tls-native-roots"] }
 tower = { version = "0.5.3" }
 tonic-prost = { version = "0.14.3" }
