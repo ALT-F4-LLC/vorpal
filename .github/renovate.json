@@ -4,13 +4,99 @@
         "config:base",
         ":semanticCommitTypeAll(chore)"
     ],
+    "automerge": false,
+    "platformAutomerge": true,
     "lockFileMaintenance": {
         "enabled": true,
+        "automerge": true,
         "extends": [
             "schedule:weekly"
         ]
     },
     "ignorePaths": [
         "cli/src/command/template/**"
+    ],
+    "packageRules": [
+        {
+            "description": "Automerge GitHub Actions minor and patch updates",
+            "matchManagers": ["github-actions"],
+            "matchUpdateTypes": ["minor", "patch"],
+            "automerge": true
+        },
+        {
+            "description": "Automerge devDependencies patch updates (all ecosystems)",
+            "matchDepTypes": ["devDependencies", "dev-dependencies"],
+            "matchUpdateTypes": ["patch"],
+            "automerge": true
+        },
+        {
+            "description": "Automerge devDependencies minor updates for stable (>= 1.0) only (all ecosystems)",
+            "matchDepTypes": ["devDependencies", "dev-dependencies"],
+            "matchUpdateTypes": ["minor"],
+            "matchCurrentVersion": "!/^v?0\\./",
+            "automerge": true
+        },
+        {
+            "description": "Automerge Rust crate production deps patch updates",
+            "matchManagers": ["cargo"],
+            "matchDepTypes": ["dependencies", "build-dependencies"],
+            "matchUpdateTypes": ["patch"],
+            "minimumReleaseAge": "3 days",
+            "automerge": true
+        },
+        {
+            "description": "Automerge Rust crate production deps minor updates for stable (>= 1.0) crates only",
+            "matchManagers": ["cargo"],
+            "matchDepTypes": ["dependencies", "build-dependencies"],
+            "matchUpdateTypes": ["minor"],
+            "matchCurrentVersion": "!/^v?0\\./",
+            "minimumReleaseAge": "3 days",
+            "automerge": true
+        },
+        {
+            "description": "Automerge Go module production deps patch updates",
+            "matchManagers": ["gomod"],
+            "matchDepTypes": ["require"],
+            "matchUpdateTypes": ["patch"],
+            "minimumReleaseAge": "3 days",
+            "automerge": true
+        },
+        {
+            "description": "Automerge Go module production deps minor updates for stable (>= 1.0) only",
+            "matchManagers": ["gomod"],
+            "matchDepTypes": ["require"],
+            "matchUpdateTypes": ["minor"],
+            "matchCurrentVersion": "!/^v?0\\./",
+            "minimumReleaseAge": "3 days",
+            "automerge": true
+        },
+        {
+            "description": "Automerge TypeScript production deps patch updates",
+            "matchManagers": ["npm"],
+            "matchDepTypes": ["dependencies"],
+            "matchUpdateTypes": ["patch"],
+            "minimumReleaseAge": "3 days",
+            "automerge": true
+        },
+        {
+            "description": "Automerge TypeScript production deps minor updates for stable (>= 1.0) only",
+            "matchManagers": ["npm"],
+            "matchDepTypes": ["dependencies"],
+            "matchUpdateTypes": ["minor"],
+            "matchCurrentVersion": "!/^v?0\\./",
+            "minimumReleaseAge": "3 days",
+            "automerge": true
+        },
+        {
+            "description": "Do NOT automerge Go indirect dependency updates",
+            "matchManagers": ["gomod"],
+            "matchDepTypes": ["indirect"],
+            "automerge": false
+        },
+        {
+            "description": "Do NOT automerge Terraform provider updates",
+            "matchManagers": ["terraform"],
+            "automerge": false
+        }
     ]
 }
