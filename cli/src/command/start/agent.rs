@@ -227,9 +227,11 @@ pub async fn build_source(
 
                         let decompress_fut = tokio::task::spawn_blocking(move || {
                             let mut sync_writer = SyncIoBridge::new(async_writer);
-                            let mut input = std::io::Cursor::new(compressed.as_ref());
-                            lzma_rs::xz_decompress(&mut input, &mut sync_writer)
-                                .map_err(|e| anyhow!("xz decompression failed for {}: {}", url, e))
+                            let input = std::io::Cursor::new(compressed.as_ref());
+                            let mut decoder = liblzma::read::XzDecoder::new(input);
+                            std::io::copy(&mut decoder, &mut sync_writer)
+                                .map_err(|e| anyhow!("xz decompression failed for {}: {}", url, e))?;
+                            Ok::<(), anyhow::Error>(())
                         });
 
                         let mut archive = Archive::new(async_reader);

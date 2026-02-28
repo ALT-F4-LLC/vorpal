@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { version = "1.0.100" }
 async-compression = { version = "0.4.37", features = ["tokio", "gzip", "bzip2"] }
-lzma-rs = { version = "0.3" }
+liblzma = { version = "0.4.6", features = ["static"] }
 ruzstd = { version = "0.8.2" }
 async_zip = { version = "0.0.18", features = ["deflate", "tokio"] }
 aws-config = { version = "1.8.1" }
