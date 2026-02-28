@@ -220,8 +220,9 @@ pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
     let epoc = FileTime::from_unix_time(0, 0);
 
     if path.is_symlink() {
-        set_symlink_file_times(path, epoc, epoc)
-            .map_err(|e| anyhow::anyhow!("failed to set symlink file times for {:?}: {}", path, e))?;
+        set_symlink_file_times(path, epoc, epoc).map_err(|e| {
+            anyhow::anyhow!("failed to set symlink file times for {:?}: {}", path, e)
+        })?;
     } else {
         // Ensure the file/directory is writable before modifying timestamps.
         // Extracted tar entries (e.g. Rust toolchain) may have read-only
@@ -234,8 +235,9 @@ pub async fn set_timestamps(path: &PathBuf) -> Result<(), Error> {
                 if mode & 0o200 == 0 {
                     let mut perms = meta.permissions();
                     perms.set_mode(mode | 0o200);
-                    std::fs::set_permissions(path, perms)
-                        .map_err(|e| anyhow::anyhow!("failed to add write permission for {:?}: {}", path, e))?;
+                    std::fs::set_permissions(path, perms).map_err(|e| {
+                        anyhow::anyhow!("failed to add write permission for {:?}: {}", path, e)
+                    })?;
                 }
             }
         }

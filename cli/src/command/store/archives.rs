@@ -200,22 +200,18 @@ pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Er
                 }
             }
 
-            entry
-                .unpack_in(&target)
-                .await
-                .map_err(|e| {
-                    // Walk the error source chain because TarError::Display
-                    // only shows the description and drops the underlying IO
-                    // error (e.g. "Permission denied", "File exists").
-                    let mut msg = format!("failed to unpack entry: {}", e);
-                    let mut source: Option<&dyn std::error::Error> =
-                        std::error::Error::source(&e);
-                    while let Some(s) = source {
-                        msg.push_str(&format!(": {}", s));
-                        source = s.source();
-                    }
-                    anyhow!(msg)
-                })?;
+            entry.unpack_in(&target).await.map_err(|e| {
+                // Walk the error source chain because TarError::Display
+                // only shows the description and drops the underlying IO
+                // error (e.g. "Permission denied", "File exists").
+                let mut msg = format!("failed to unpack entry: {}", e);
+                let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
+                while let Some(s) = source {
+                    msg.push_str(&format!(": {}", s));
+                    source = s.source();
+                }
+                anyhow!(msg)
+            })?;
         }
 
         Ok::<(), anyhow::Error>(())
