@@ -75,6 +75,14 @@ One explicit Clippy override exists:
 | go vet   | (none)            | Implicit via Go toolchain     |
 | TSC      | `tsconfig.json`   | Strict mode enabled           |
 
+### CI Enforcement
+
+The `.github/workflows/vorpal.yaml` pipeline enforces Rust formatting and linting in the
+`code-quality` stage:
+
+- `cargo fmt --all --check` — fails on any formatting violation
+- `cargo clippy --offline --release -- --deny warnings` — fails on any Clippy warning
+
 ### What Does NOT Exist
 
 - No `.editorconfig`
@@ -84,10 +92,9 @@ One explicit Clippy override exists:
 - No `clippy.toml`
 - No `.golangci.yml`
 - No pre-commit hooks
-- No CI lint/format check pipeline (no `.github/workflows/` directory)
 
-**Gap:** There is no automated enforcement of formatting or linting. Quality currently depends
-on developer discipline and toolchain defaults.
+**Gap:** Go and TypeScript formatting/linting are not enforced in CI. Only Rust has automated
+quality gates.
 
 ---
 
@@ -152,7 +159,8 @@ each language's conventions:
 - **`anyhow::Result`** used pervasively for application-level error handling in the CLI and SDK.
 - **`anyhow!()` and `bail!()`** macros for ad-hoc error creation.
 - **`.with_context()`** used for adding context to I/O and parsing errors (seen in config loading).
-- **`thiserror`** is a dependency but not visibly used for custom error types in the current codebase.
+- **`thiserror`** is used for custom error types in `cli/src/command/start/registry.rs` and
+  `cli/src/command/start/auth.rs` via `#[derive(thiserror::Error)]`.
 - **gRPC errors:** Worker and service code uses `tonic::Status` with appropriate status codes
   (`Status::invalid_argument`, `Status::internal`, `Status::not_found`, `Status::already_exists`).
 - **Process exits:** `std::process::exit(1)` used in CLI for fatal user-facing errors after
@@ -402,8 +410,9 @@ between Rust and Go SDK builds.
 
 ## Gaps & Observations
 
-1. **No automated formatting enforcement.** rustfmt, gofmt, and prettier are not run in CI.
-   No pre-commit hooks exist.
+1. **No Go or TypeScript formatting enforcement.** Rust formatting and linting are enforced
+   in CI (`cargo fmt --check`, `cargo clippy --deny warnings`), but Go and TypeScript have
+   no automated quality gates. No pre-commit hooks exist.
 
 2. **No linter configuration files.** Clippy and go vet run with defaults. No custom rules
    or suppressions are codified (one `#[allow]` exception noted).
@@ -411,19 +420,13 @@ between Rust and Go SDK builds.
 3. **No `.editorconfig`.** No shared editor settings for indentation, line endings, or
    trailing whitespace.
 
-4. **No CI/CD pipeline visible.** No `.github/workflows/` directory exists in the repository.
-   Quality gates, if any, are external to the codebase.
-
-5. **`thiserror` dependency unused.** Listed in `cli/Cargo.toml` but no `#[derive(Error)]`
-   types found. Consider removing or adopting for structured CLI errors.
-
-6. **Inconsistent CLI parsing across SDKs.** Rust CLI uses `clap` (derive macros), Go uses
+4. **Inconsistent CLI parsing across SDKs.** Rust CLI uses `clap` (derive macros), Go uses
    raw `flag` package, TypeScript uses manual argument parsing. The Go and TypeScript parsers
    are for the config binary only (simpler use case).
 
-7. **No `cargo-machete` in CI.** The SDK's `Cargo.toml` has `[package.metadata.cargo-machete]`
+5. **No `cargo-machete` in CI.** The SDK's `Cargo.toml` has `[package.metadata.cargo-machete]`
    with `ignored` entries, suggesting it has been used but is not automated.
 
-8. **Comments are sparse.** Rust code has minimal inline comments. Go code uses standard
+6. **Comments are sparse.** Rust code has minimal inline comments. Go code uses standard
    godoc-style comments on exported types. TypeScript has the most comprehensive JSDoc
    annotations.

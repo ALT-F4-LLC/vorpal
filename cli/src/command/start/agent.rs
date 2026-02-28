@@ -52,7 +52,7 @@ enum ArtifactSourceType {
     Http,
 }
 
-const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
+const DEFAULT_CHUNKS_SIZE: usize = 8192; // streaming chunk size
 
 pub async fn build_source(
     artifact_context: String,

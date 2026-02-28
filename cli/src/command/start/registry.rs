@@ -89,7 +89,7 @@ pub trait ArchiveBackend: Send + Sync + 'static {
 
     async fn push(&self, req: &ArchivePushRequest) -> Result<(), Status>;
 
-    /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
+    /// Return a new `Box<dyn ArchiveBackend>` cloned from `self`.
     fn box_clone(&self) -> Box<dyn ArchiveBackend>;
 }
 
@@ -299,7 +299,7 @@ pub trait ArtifactBackend: Send + Sync + 'static {
         artifact_namespace: String,
     ) -> Result<String, Status>;
 
-    /// Return a new `Box<dyn RegistryBackend>` cloned from `self`.
+    /// Return a new `Box<dyn ArtifactBackend>` cloned from `self`.
     fn box_clone(&self) -> Box<dyn ArtifactBackend>;
 }
 

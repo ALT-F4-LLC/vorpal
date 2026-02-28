@@ -141,13 +141,16 @@ Unix domain sockets or TCP. The system is built with **Tokio** (multi-threaded a
 
 ### Compression
 
-- **Algorithm**: Zstandard (zstd) via `async-compression` crate.
-- **Compression level**: Default (not explicitly configured — `ZstdEncoder::new` uses the library
-  default, typically level 3).
+- **Algorithm**: Zstandard (zstd) via `ruzstd` crate (pure-Rust, no C dependencies).
+- **Compression level**: `Fastest` (≈ zstd level 1). Higher levels are not yet available in
+  ruzstd 0.8. See TODO in `cli/src/command/store/archives.rs`.
 - **Format**: tar.zst (tar archive compressed with zstd).
-- **Implementation**: Fully async using `tokio_tar::Builder` and `async_compression::tokio`.
-- **Decompression**: Also async, using `ZstdDecoder` with `BufReader`.
-- **Other formats supported**: gzip, bzip2, xz, zip — for HTTP source unpacking in the agent.
+- **Implementation**: `tokio_tar::Builder` for tar, `ruzstd::encoding::FrameCompressor` via
+  `spawn_blocking` + `SyncIoBridge` for compression. Uses `catch_unwind` because ruzstd 0.8's
+  `FrameCompressor::compress()` panics on errors instead of returning `Result`.
+- **Decompression**: `ruzstd::decoding::StreamingDecoder` via `spawn_blocking` + `SyncIoBridge`.
+- **Other formats supported**: gzip, bzip2 (via `async-compression`), xz (via `liblzma` with
+  static linking), zip (via `async_zip`) — for HTTP source unpacking in the agent.
 
 ### Hashing
 

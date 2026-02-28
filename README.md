@@ -111,14 +111,14 @@ async fn main() -> Result<()> {
 
     // Artifacts
 
-    RustDevelopmentEnvironment::new("example-shell", SYSTEMS.to_vec())
-        .build(context)
+    RustDevelopmentEnvironment::new("example-shell", systems.clone())
+        .build(ctx)
         .await?;
 
-    Rust::new("example", SYSTEMS.to_vec())
+    Rust::new("example", systems)
         .with_bins(vec!["example"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(context)
+        .build(ctx)
         .await?;
 
     ctx.run().await
@@ -151,15 +151,15 @@ func main() {
 
     // Artifacts
 
-	_, err := language.NewGoDevelopmentEnvironment("example-shell", Systems).Build(context)
+	_, err := language.NewGoDevelopmentEnvironment("example-shell", systems).Build(ctx)
 	if err != nil {
 		log.Fatalf("error building development environment: %v", err)
 	}
 
-	_, err = language.NewGo("example", Systems).
+	_, err = language.NewGo("example", systems).
 		WithBuildDirectory("cmd/example").
 		WithIncludes([]string{"cmd", "go.mod", "go.sum"}).
-		Build(context)
+		Build(ctx)
 	if err != nil {
 		log.Fatalf("error building: %v", err)
 	}

@@ -271,7 +271,6 @@ pub async fn unpack_zip(source_path: &PathBuf, target_dir: &Path) -> Result<(), 
                 .await
                 .expect("Failed to copy to extracted file");
 
-            // Closes the file and manipulates its metadata here if you wish to preserve its metadata from the archive.
         }
     }
 
