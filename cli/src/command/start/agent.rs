@@ -242,7 +242,10 @@ pub async fn build_source(
                                     .map_err(|e| anyhow!("xz task join error: {}", e))?
                             },
                             async {
-                                archive.unpack(&source_sandbox).await.map_err(|e| anyhow!(e))
+                                archive
+                                    .unpack(&source_sandbox)
+                                    .await
+                                    .map_err(|e| anyhow!(e))
                             },
                         );
 

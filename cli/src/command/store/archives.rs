@@ -52,8 +52,7 @@ pub async fn compress_zstd(
             compressor.compress();
         })) {
             Ok(()) => {
-                std::io::Write::flush(&mut buffered)
-                    .map_err(|e| anyhow!("flush failed: {}", e))?;
+                std::io::Write::flush(&mut buffered).map_err(|e| anyhow!("flush failed: {}", e))?;
             }
             Err(panic_info) => {
                 // Discard the internal buffer so BufWriter::drop does not
@@ -110,7 +109,11 @@ pub async fn compress_zstd(
     // Use join! (not try_join!) to always await the blocking task, preventing
     // a resource leak if the tar side fails before compression finishes.
     let (compress_result, tar_result) = tokio::join!(
-        async { compress_fut.await.map_err(|e| anyhow!("zstd task join error: {}", e))? },
+        async {
+            compress_fut
+                .await
+                .map_err(|e| anyhow!("zstd task join error: {}", e))?
+        },
         tar_fut,
     );
 
@@ -137,8 +140,8 @@ pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(),
 
     let source_path = source_zstd.to_path_buf();
     let decompress_fut = tokio::task::spawn_blocking(move || {
-        let file = std::fs::File::open(&source_path)
-            .map_err(|e| anyhow!("Failed to open file: {}", e))?;
+        let file =
+            std::fs::File::open(&source_path).map_err(|e| anyhow!("Failed to open file: {}", e))?;
         let buf_reader = std::io::BufReader::new(file);
         let mut decoder = ruzstd::decoding::StreamingDecoder::new(buf_reader)
             .map_err(|e| anyhow!("zstd decoder init failed: {}", e))?;
@@ -187,7 +190,11 @@ pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(),
     // Use join! (not try_join!) to always await the blocking task, preventing
     // a resource leak if the unpack side fails before decompression finishes.
     let (decompress_result, unpack_result) = tokio::join!(
-        async { decompress_fut.await.map_err(|e| anyhow!("zstd task join error: {}", e))? },
+        async {
+            decompress_fut
+                .await
+                .map_err(|e| anyhow!("zstd task join error: {}", e))?
+        },
         unpack_fut,
     );
 
