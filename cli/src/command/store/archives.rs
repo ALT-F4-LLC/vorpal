@@ -270,7 +270,6 @@ pub async fn unpack_zip(source_path: &PathBuf, target_dir: &Path) -> Result<(), 
             futures_lite::io::copy(&mut entry_reader, &mut writer.compat_write())
                 .await
                 .expect("Failed to copy to extracted file");
-
         }
     }
 
