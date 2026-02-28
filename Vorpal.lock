@@ -9,6 +9,14 @@ digest = "8e8da18fe5560d744bd6ca32d4128badb699394567b6b7ae18b8a734268655a4"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "bash"
+path = "https://ftpmirror.gnu.org/gnu/bash/bash-5.3.tar.gz"
+includes = []
+excludes = []
+digest = "8e8da18fe5560d744bd6ca32d4128badb699394567b6b7ae18b8a734268655a4"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "binutils"
 path = "https://ftpmirror.gnu.org/gnu/binutils/binutils-2.45.tar.gz"
 includes = []
@@ -17,12 +25,28 @@ digest = "ef4e00c3b96def973211d311ea2874d15f2bbcdce670053759bf09584db2d545"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "binutils"
+path = "https://ftpmirror.gnu.org/gnu/binutils/binutils-2.45.tar.gz"
+includes = []
+excludes = []
+digest = "ef4e00c3b96def973211d311ea2874d15f2bbcdce670053759bf09584db2d545"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "bison"
 path = "https://ftpmirror.gnu.org/gnu/bison/bison-3.8.2.tar.gz"
 includes = []
 excludes = []
 digest = "cb18c2c8562fc01bf3ae17ffe9cf8274e3dd49d39f89397c1a8bac7ee14ce85f"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "bison"
+path = "https://ftpmirror.gnu.org/gnu/bison/bison-3.8.2.tar.gz"
+includes = []
+excludes = []
+digest = "cb18c2c8562fc01bf3ae17ffe9cf8274e3dd49d39f89397c1a8bac7ee14ce85f"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "bun"
@@ -42,6 +66,14 @@ platform = "x86_64-darwin"
 
 [[sources]]
 name = "bun"
+path = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.10/bun-linux-aarch64.zip"
+includes = []
+excludes = []
+digest = "56e59802c5b606ecccd5e4d1a825eaad58b9ad12b71853b35d459bc3dbd0bf25"
+platform = "aarch64-linux"
+
+[[sources]]
+name = "bun"
 path = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.10/bun-darwin-aarch64.zip"
 includes = []
 excludes = []
@@ -55,6 +87,14 @@ includes = []
 excludes = []
 digest = "379b758b6be27ddd82ce70a5bbdb4bfe1030cd535271377f8fd51a426080ddee"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "cargo"
+path = "https://static.rust-lang.org/dist/cargo-1.93.1-aarch64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "6b773215302a46b6cfd565539dabc0af9dad01bdd9c37587e7041907ab5b9212"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "cargo"
@@ -82,6 +122,14 @@ platform = "aarch64-darwin"
 
 [[sources]]
 name = "clippy"
+path = "https://static.rust-lang.org/dist/clippy-1.93.1-aarch64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "4c20fc23ed2870442608ced8a9e9c314a4b27fe78fed356e0092efd377c44681"
+platform = "aarch64-linux"
+
+[[sources]]
+name = "clippy"
 path = "https://static.rust-lang.org/dist/clippy-1.93.1-x86_64-unknown-linux-gnu.tar.gz"
 includes = []
 excludes = []
@@ -105,6 +153,14 @@ digest = "a7abdad032ae6c318dbb4c9b444d9031ab34d1308700005c4bd5eb5156cad523"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "coreutils"
+path = "https://ftpmirror.gnu.org/gnu/coreutils/coreutils-9.7.tar.gz"
+includes = []
+excludes = []
+digest = "a7abdad032ae6c318dbb4c9b444d9031ab34d1308700005c4bd5eb5156cad523"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "crane"
 path = "https://github.com/google/go-containerregistry/archive/refs/tags/v0.21.1.tar.gz"
 includes = []
@@ -127,6 +183,14 @@ includes = []
 excludes = []
 digest = "a140a303bacb264dae453ef3d65bf6a6ab656ca7f32b8d689fe02edbe541a363"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "crane"
+path = "https://github.com/google/go-containerregistry/archive/refs/tags/v0.21.1.tar.gz"
+includes = []
+excludes = []
+digest = "a140a303bacb264dae453ef3d65bf6a6ab656ca7f32b8d689fe02edbe541a363"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "curl"
@@ -137,12 +201,28 @@ digest = "565e83672abb0ba470bbfcb07f49877b54abc68a51c4dd7831c61129fed9e244"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "curl"
+path = "https://curl.se/download/curl-8.15.0.tar.xz"
+includes = []
+excludes = []
+digest = "565e83672abb0ba470bbfcb07f49877b54abc68a51c4dd7831c61129fed9e244"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "curl-cacert"
 path = "https://curl.se/ca/cacert.pem"
 includes = []
 excludes = []
 digest = "0fef43b996f6c91c7d727a900f16e0ab0fb376617b7e1fd85646d92cb2993a87"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "curl-cacert"
+path = "https://curl.se/ca/cacert.pem"
+includes = []
+excludes = []
+digest = "0fef43b996f6c91c7d727a900f16e0ab0fb376617b7e1fd85646d92cb2993a87"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "diffutils"
@@ -153,12 +233,28 @@ digest = "7e416707fa95ffddaae20d11541834bad8d6df24b6bcc8044c2f16a7fb27755e"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "diffutils"
+path = "https://ftpmirror.gnu.org/gnu/diffutils/diffutils-3.12.tar.xz"
+includes = []
+excludes = []
+digest = "7e416707fa95ffddaae20d11541834bad8d6df24b6bcc8044c2f16a7fb27755e"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "file"
 path = "https://astron.com/pub/file/file-5.46.tar.gz"
 includes = []
 excludes = []
 digest = "07a8a2f5e1458359d20f420865e4a246c55c1b85176274dfee81e109e9789fb2"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "file"
+path = "https://astron.com/pub/file/file-5.46.tar.gz"
+includes = []
+excludes = []
+digest = "07a8a2f5e1458359d20f420865e4a246c55c1b85176274dfee81e109e9789fb2"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "findutils"
@@ -169,12 +265,28 @@ digest = "242f804d87a5036bb0fab99966227dc61e853e5a67e1b10c3cc45681c792657e"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "findutils"
+path = "https://ftpmirror.gnu.org/gnu/findutils/findutils-4.10.0.tar.xz"
+includes = []
+excludes = []
+digest = "242f804d87a5036bb0fab99966227dc61e853e5a67e1b10c3cc45681c792657e"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "gawk"
 path = "https://ftpmirror.gnu.org/gnu/gawk/gawk-5.3.2.tar.gz"
 includes = []
 excludes = []
 digest = "33ad80dd59a028d9ac67cffeb9cb35483b268c530bd90d18bb245596d3847103"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "gawk"
+path = "https://ftpmirror.gnu.org/gnu/gawk/gawk-5.3.2.tar.gz"
+includes = []
+excludes = []
+digest = "33ad80dd59a028d9ac67cffeb9cb35483b268c530bd90d18bb245596d3847103"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "gcc"
@@ -185,12 +297,28 @@ digest = "cf322f18454e1f54a0ebf661b4c3b556de43651aea8bc7a3bb14ee3863ed56d4"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "gcc"
+path = "https://ftpmirror.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz"
+includes = []
+excludes = []
+digest = "cf322f18454e1f54a0ebf661b4c3b556de43651aea8bc7a3bb14ee3863ed56d4"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "gettext"
 path = "https://ftpmirror.gnu.org/gnu/gettext/gettext-0.26.tar.gz"
 includes = []
 excludes = []
 digest = "459265943fcb010124e5056bfff3e9fc95d571f3abef9d022b0af18cbc282b02"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "gettext"
+path = "https://ftpmirror.gnu.org/gnu/gettext/gettext-0.26.tar.gz"
+includes = []
+excludes = []
+digest = "459265943fcb010124e5056bfff3e9fc95d571f3abef9d022b0af18cbc282b02"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "git"
@@ -217,12 +345,28 @@ digest = "4c08acf32a9dd52cb4f64d1835bade4128af51dd85742245987643cde0aeb9b1"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "git"
+path = "https://www.kernel.org/pub/software/scm/git/git-2.53.0.tar.gz"
+includes = []
+excludes = []
+digest = "4c08acf32a9dd52cb4f64d1835bade4128af51dd85742245987643cde0aeb9b1"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "glibc"
 path = "https://ftpmirror.gnu.org/gnu/glibc/glibc-2.42.tar.gz"
 includes = []
 excludes = []
 digest = "ce551ab3767e6b55726d763a14f98bfc4bff9ebcd3516f478885408e454942b1"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "glibc"
+path = "https://ftpmirror.gnu.org/gnu/glibc/glibc-2.42.tar.gz"
+includes = []
+excludes = []
+digest = "ce551ab3767e6b55726d763a14f98bfc4bff9ebcd3516f478885408e454942b1"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "glibc-patch"
@@ -233,12 +377,28 @@ digest = "69cf0653ad0a6a178366d291f30629d4e1cb633178aa4b8efbea0c851fb944ca"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "glibc-patch"
+path = "https://www.linuxfromscratch.org/patches/lfs/12.4/glibc-2.42-fhs-1.patch"
+includes = []
+excludes = []
+digest = "69cf0653ad0a6a178366d291f30629d4e1cb633178aa4b8efbea0c851fb944ca"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "gmp"
 path = "https://ftpmirror.gnu.org/gnu/gmp/gmp-6.3.0.tar.gz"
 includes = []
 excludes = []
 digest = "191226cef6e9ce60e291e178db47682aadea28cb3e92f35f006ba317f3e10195"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "gmp"
+path = "https://ftpmirror.gnu.org/gnu/gmp/gmp-6.3.0.tar.gz"
+includes = []
+excludes = []
+digest = "191226cef6e9ce60e291e178db47682aadea28cb3e92f35f006ba317f3e10195"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "go"
@@ -255,6 +415,14 @@ includes = []
 excludes = []
 digest = "83d3ebad7958766647de4d3a8a1b2d3860da607632ac07889085b933e3e97f0f"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "go"
+path = "https://go.dev/dl/go1.26.0.linux-arm64.tar.gz"
+includes = []
+excludes = []
+digest = "bcee4e23358013d48b6ad5eb2152dc64dc320d7a6dfac8ed56767f2243b0213a"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "go"
@@ -289,6 +457,14 @@ digest = "411df8f3301010012a491337a4f5fa884fbcc323fe7e9ad75aa470f4bf921c56"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "goimports"
+path = "https://go.googlesource.com/tools/+archive/refs/tags/v0.42.0.tar.gz"
+includes = []
+excludes = []
+digest = "411df8f3301010012a491337a4f5fa884fbcc323fe7e9ad75aa470f4bf921c56"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "gopls"
 path = "https://go.googlesource.com/tools/+archive/refs/tags/v0.42.0.tar.gz"
 includes = []
@@ -311,6 +487,14 @@ includes = []
 excludes = []
 digest = "411df8f3301010012a491337a4f5fa884fbcc323fe7e9ad75aa470f4bf921c56"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "gopls"
+path = "https://go.googlesource.com/tools/+archive/refs/tags/v0.42.0.tar.gz"
+includes = []
+excludes = []
+digest = "411df8f3301010012a491337a4f5fa884fbcc323fe7e9ad75aa470f4bf921c56"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "grep"
@@ -321,6 +505,14 @@ digest = "127096050676822f1f9f18e2bdf847f74907ec691562959cdcbf07e7d524012c"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "grep"
+path = "https://ftpmirror.gnu.org/gnu/grep/grep-3.12.tar.gz"
+includes = []
+excludes = []
+digest = "127096050676822f1f9f18e2bdf847f74907ec691562959cdcbf07e7d524012c"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "grpcurl"
 path = "https://github.com/fullstorydev/grpcurl/archive/refs/tags/v1.9.3.tar.gz"
 includes = []
@@ -345,12 +537,28 @@ digest = "3db5cef04f38e71c4007ed96cc827209ae5a1b6613c710cd656a252fafcde86c"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "grpcurl"
+path = "https://github.com/fullstorydev/grpcurl/archive/refs/tags/v1.9.3.tar.gz"
+includes = []
+excludes = []
+digest = "3db5cef04f38e71c4007ed96cc827209ae5a1b6613c710cd656a252fafcde86c"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "gzip"
 path = "https://ftpmirror.gnu.org/gnu/gzip/gzip-1.14.tar.gz"
 includes = []
 excludes = []
 digest = "82c708cb0f1ae98c1bcd38edb744ece2cc13cbbd65379a11ff030f86a140ce3d"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "gzip"
+path = "https://ftpmirror.gnu.org/gnu/gzip/gzip-1.14.tar.gz"
+includes = []
+excludes = []
+digest = "82c708cb0f1ae98c1bcd38edb744ece2cc13cbbd65379a11ff030f86a140ce3d"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "libidn2"
@@ -361,12 +569,28 @@ digest = "a5a46eb63af153ca526f17133b2f5be09bc434b7cdc25f924a2580b879ab9b9c"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "libidn2"
+path = "https://ftpmirror.gnu.org/gnu/libidn/libidn2-2.3.8.tar.gz"
+includes = []
+excludes = []
+digest = "a5a46eb63af153ca526f17133b2f5be09bc434b7cdc25f924a2580b879ab9b9c"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "libpsl"
 path = "https://github.com/rockdaboot/libpsl/releases/download/0.21.5/libpsl-0.21.5.tar.gz"
 includes = []
 excludes = []
 digest = "65ecfe61646c50119a018a2003149833c11387efd92462f974f1ff9f907c1d78"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "libpsl"
+path = "https://github.com/rockdaboot/libpsl/releases/download/0.21.5/libpsl-0.21.5.tar.gz"
+includes = []
+excludes = []
+digest = "65ecfe61646c50119a018a2003149833c11387efd92462f974f1ff9f907c1d78"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "libunistring"
@@ -377,12 +601,28 @@ digest = "e9d4afe75ff42ffce5e55c7267a45d2b6a2c3909d8d8e1ba09cdb99f28896b4d"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "libunistring"
+path = "https://ftpmirror.gnu.org/gnu/libunistring/libunistring-1.3.tar.gz"
+includes = []
+excludes = []
+digest = "e9d4afe75ff42ffce5e55c7267a45d2b6a2c3909d8d8e1ba09cdb99f28896b4d"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "linux"
 path = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.16.1.tar.xz"
 includes = []
 excludes = []
 digest = "40d7204e3d3f1112f0fb32d32cd18421db103a8564c7b277c2b83d54df5b2ff2"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "linux"
+path = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.16.1.tar.xz"
+includes = []
+excludes = []
+digest = "40d7204e3d3f1112f0fb32d32cd18421db103a8564c7b277c2b83d54df5b2ff2"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "m4"
@@ -393,12 +633,28 @@ digest = "633adb94257b39e0e3f9785ea7ccad7ce9b31b22914fdacdcc5accf2b09fba16"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "m4"
+path = "https://ftpmirror.gnu.org/gnu/m4/m4-1.4.20.tar.gz"
+includes = []
+excludes = []
+digest = "633adb94257b39e0e3f9785ea7ccad7ce9b31b22914fdacdcc5accf2b09fba16"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "make"
 path = "https://ftpmirror.gnu.org/gnu/make/make-4.4.1.tar.gz"
 includes = []
 excludes = []
 digest = "8dfe7b0e51b3e190cd75e046880855ac1be76cf36961e5cfcc82bfa91b2c3ba8"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "make"
+path = "https://ftpmirror.gnu.org/gnu/make/make-4.4.1.tar.gz"
+includes = []
+excludes = []
+digest = "8dfe7b0e51b3e190cd75e046880855ac1be76cf36961e5cfcc82bfa91b2c3ba8"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "mpc"
@@ -409,6 +665,14 @@ digest = "c179fbcd6e48931a16c0af37d0c4a5e1688dd07d71e2b4a532c68cd5edbb5b72"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "mpc"
+path = "https://ftpmirror.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz"
+includes = []
+excludes = []
+digest = "c179fbcd6e48931a16c0af37d0c4a5e1688dd07d71e2b4a532c68cd5edbb5b72"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "mpfr"
 path = "https://ftpmirror.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz"
 includes = []
@@ -417,12 +681,36 @@ digest = "837f1bf914eb615761136e6bcd2d49502865b18c0f0d18b4decb513355c4449b"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "mpfr"
+path = "https://ftpmirror.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz"
+includes = []
+excludes = []
+digest = "837f1bf914eb615761136e6bcd2d49502865b18c0f0d18b4decb513355c4449b"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "ncurses"
 path = "https://invisible-mirror.net/archives/ncurses/current/ncurses-6.5-20250809.tgz"
 includes = []
 excludes = []
 digest = "e67077219f4e56cc6cc56958104a9271871ef65ef7985081aced1fd5024f9f47"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "ncurses"
+path = "https://invisible-mirror.net/archives/ncurses/current/ncurses-6.5-20250809.tgz"
+includes = []
+excludes = []
+digest = "e67077219f4e56cc6cc56958104a9271871ef65ef7985081aced1fd5024f9f47"
+platform = "aarch64-linux"
+
+[[sources]]
+name = "nodejs"
+path = "https://nodejs.org/dist/v22.22.0/node-v22.22.0-linux-arm64.tar.gz"
+includes = []
+excludes = []
+digest = "34c6e1d1b1d2da8e90f2a3480f1d3e57a73c80900a27fccfac9e15f1a44809be"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "nodejs"
@@ -457,6 +745,14 @@ digest = "c18db5dccbd9ee71d1454dbf275b508c1fa452b133f0e8e9812d6f8135c29362"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "openssl"
+path = "https://www.openssl.org/source/openssl-3.5.2.tar.gz"
+includes = []
+excludes = []
+digest = "c18db5dccbd9ee71d1454dbf275b508c1fa452b133f0e8e9812d6f8135c29362"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "patch"
 path = "https://ftpmirror.gnu.org/gnu/patch/patch-2.8.tar.gz"
 includes = []
@@ -465,12 +761,28 @@ digest = "a003cf376248ecf2dc3edbce55f672f7677ff95ef94dd7ce6fdcef8353ecde7c"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "patch"
+path = "https://ftpmirror.gnu.org/gnu/patch/patch-2.8.tar.gz"
+includes = []
+excludes = []
+digest = "a003cf376248ecf2dc3edbce55f672f7677ff95ef94dd7ce6fdcef8353ecde7c"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "perl"
 path = "https://www.cpan.org/src/5.0/perl-5.42.0.tar.xz"
 includes = []
 excludes = []
 digest = "43a6f8cf15fcedeb66e95c4957ec8bc43db40515de89483e507c01c255fce853"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "perl"
+path = "https://www.cpan.org/src/5.0/perl-5.42.0.tar.xz"
+includes = []
+excludes = []
+digest = "43a6f8cf15fcedeb66e95c4957ec8bc43db40515de89483e507c01c255fce853"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "pnpm"
@@ -497,6 +809,14 @@ digest = "8c460b3846f657c7833bc8a42c1ae30c48ef81f1d80adeb41139c7204b4ea129"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "pnpm"
+path = "https://github.com/pnpm/pnpm/releases/download/v10.30.3/pnpm-linux-arm64"
+includes = []
+excludes = []
+digest = "9f21233c7a93c57224f3fdadc52a5f581fae63eacf2a2a521bc4e8495f3e3630"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "protoc"
 path = "https://github.com/protocolbuffers/protobuf/releases/download/v34.0/protoc-34.0-osx-x86_64.zip"
 includes = []
@@ -511,6 +831,14 @@ includes = []
 excludes = []
 digest = "72ef7563c9bc34409ec1bbc2632479a47a1c99e458346fcb7f4e1ca0c2f4f008"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "protoc"
+path = "https://github.com/protocolbuffers/protobuf/releases/download/v34.0/protoc-34.0-linux-aarch_64.zip"
+includes = []
+excludes = []
+digest = "7c9aae2782708d82aee85e682d364a8cc11f352d55b5fe8ccfc8a6f3ab950d30"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "protoc"
@@ -545,6 +873,14 @@ digest = "853fdd384cea7d946dd387167b3b2fe4c5a8b45d7f05425c81fdbc68a2962a21"
 platform = "x86_64-darwin"
 
 [[sources]]
+name = "protoc-gen-go"
+path = "https://github.com/protocolbuffers/protobuf-go/releases/download/v1.36.11/protoc-gen-go.v1.36.11.linux.arm64.tar.gz"
+includes = []
+excludes = []
+digest = "efac8a58051b6bab6730bb1df2555bcd4088cb4b5f3261c995d65715a1bdfa1e"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "protoc-gen-go-grpc"
 path = "https://github.com/grpc/grpc-go/archive/refs/tags/v1.79.1.tar.gz"
 includes = []
@@ -569,6 +905,14 @@ digest = "f1d541547bc8d5199a9877209b5a65ee26a3e983965ccbf9000785c75c91c0bd"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "protoc-gen-go-grpc"
+path = "https://github.com/grpc/grpc-go/archive/refs/tags/v1.79.1.tar.gz"
+includes = []
+excludes = []
+digest = "f1d541547bc8d5199a9877209b5a65ee26a3e983965ccbf9000785c75c91c0bd"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "python"
 path = "https://www.python.org/ftp/python/3.13.7/Python-3.13.7.tar.xz"
 includes = []
@@ -577,12 +921,36 @@ digest = "2118e11e9ee7b73a88e2fb7c9122455c314660de29beb4d4f15af2d21e15ec42"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "python"
+path = "https://www.python.org/ftp/python/3.13.7/Python-3.13.7.tar.xz"
+includes = []
+excludes = []
+digest = "2118e11e9ee7b73a88e2fb7c9122455c314660de29beb4d4f15af2d21e15ec42"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "rsync"
 path = "https://download.samba.org/pub/rsync/src/rsync-3.4.1.tar.gz"
 includes = []
 excludes = []
 digest = "5ca18fad3772ffe2a04feaffd4639482632baa0fc6b357622b51ea9d17658ec0"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "rsync"
+path = "https://download.samba.org/pub/rsync/src/rsync-3.4.1.tar.gz"
+includes = []
+excludes = []
+digest = "5ca18fad3772ffe2a04feaffd4639482632baa0fc6b357622b51ea9d17658ec0"
+platform = "aarch64-linux"
+
+[[sources]]
+name = "rust-analyzer"
+path = "https://static.rust-lang.org/dist/rust-analyzer-1.93.1-aarch64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "5223513027a92ae11735b44130ac325b97ec0a0192dcf39c6a2c153fa888e05b"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "rust-analyzer"
@@ -633,6 +1001,14 @@ digest = "52da4bcd8bd8e2d0ae2635e1503efa8f5838bd18958b983d52336d73896e7172"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "rust-src"
+path = "https://static.rust-lang.org/dist/rust-src-1.93.1.tar.gz"
+includes = []
+excludes = []
+digest = "52da4bcd8bd8e2d0ae2635e1503efa8f5838bd18958b983d52336d73896e7172"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "rust-std"
 path = "https://static.rust-lang.org/dist/rust-std-1.93.1-aarch64-apple-darwin.tar.gz"
 includes = []
@@ -650,11 +1026,27 @@ platform = "x86_64-darwin"
 
 [[sources]]
 name = "rust-std"
+path = "https://static.rust-lang.org/dist/rust-std-1.93.1-aarch64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "a1f91e63d9d4183645c49505752051c052b9b59a0a949de04673132bdcd85345"
+platform = "aarch64-linux"
+
+[[sources]]
+name = "rust-std"
 path = "https://static.rust-lang.org/dist/rust-std-1.93.1-x86_64-unknown-linux-gnu.tar.gz"
 includes = []
 excludes = []
 digest = "d2a48d1e65027c3382c76850179f85ac03c25f318adbf2a97f5b02271bb1eacf"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "rustc"
+path = "https://static.rust-lang.org/dist/rustc-1.93.1-aarch64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "02c90dcbfd3609d669f037e58b2197b73e67519712cebd016bf38e146df41db1"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "rustc"
@@ -705,12 +1097,28 @@ digest = "5e57b9561d9990473dd6713e9b3191da3bb2c4ff0f28e4b03e15f552812f437f"
 platform = "x86_64-darwin"
 
 [[sources]]
+name = "rustfmt"
+path = "https://static.rust-lang.org/dist/rustfmt-1.93.1-aarch64-unknown-linux-gnu.tar.gz"
+includes = []
+excludes = []
+digest = "7df0c4d99214e09a0826f9d4cd6259341be8cb324dd5c3d78103705374b76e6c"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "sed"
 path = "https://ftpmirror.gnu.org/gnu/sed/sed-4.9.tar.gz"
 includes = []
 excludes = []
 digest = "434ff552af89340088e0d8cb206c251761297909bbee401176bc8f655e8e7cf2"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "sed"
+path = "https://ftpmirror.gnu.org/gnu/sed/sed-4.9.tar.gz"
+includes = []
+excludes = []
+digest = "434ff552af89340088e0d8cb206c251761297909bbee401176bc8f655e8e7cf2"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "staticcheck"
@@ -737,12 +1145,28 @@ digest = "fb3b8a69d94d507016bea39129274c2329704a451c0db6af620bcd8486288241"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "staticcheck"
+path = "https://github.com/dominikh/go-tools/archive/refs/tags/2026.1.tar.gz"
+includes = []
+excludes = []
+digest = "fb3b8a69d94d507016bea39129274c2329704a451c0db6af620bcd8486288241"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "tar"
 path = "https://ftpmirror.gnu.org/gnu/tar/tar-1.35.tar.gz"
 includes = []
 excludes = []
 digest = "f9bb5f39ed45b1c6a324470515d2ef73e74422c5f345503106d861576d3f02f3"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "tar"
+path = "https://ftpmirror.gnu.org/gnu/tar/tar-1.35.tar.gz"
+includes = []
+excludes = []
+digest = "f9bb5f39ed45b1c6a324470515d2ef73e74422c5f345503106d861576d3f02f3"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "texinfo"
@@ -753,12 +1177,28 @@ digest = "6bc4aa1be570367196b2488d4783f02dae702822db9d2aa9e5d650339e0f770e"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "texinfo"
+path = "https://ftpmirror.gnu.org/gnu/texinfo/texinfo-7.2.tar.gz"
+includes = []
+excludes = []
+digest = "6bc4aa1be570367196b2488d4783f02dae702822db9d2aa9e5d650339e0f770e"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "unzip"
 path = "https://cytranet-dal.dl.sourceforge.net/project/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip60.tar.gz?viasf=1"
 includes = []
 excludes = []
 digest = "4585067be297ae977da3f81587fcf0a141a8d6ceb6137d199255683ed189c3ed"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "unzip"
+path = "https://cytranet-dal.dl.sourceforge.net/project/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip60.tar.gz?viasf=1"
+includes = []
+excludes = []
+digest = "4585067be297ae977da3f81587fcf0a141a8d6ceb6137d199255683ed189c3ed"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "unzip-patch-fixes"
@@ -769,12 +1209,28 @@ digest = "11350935be5bbb743f1a97ec069b78fc2904f92b24abbc7fb3d7f0ff8bb889ea"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "unzip-patch-fixes"
+path = "https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-6.0-consolidated_fixes-1.patch"
+includes = []
+excludes = []
+digest = "11350935be5bbb743f1a97ec069b78fc2904f92b24abbc7fb3d7f0ff8bb889ea"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "unzip-patch-gcc14"
 path = "https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-6.0-gcc14-1.patch"
 includes = []
 excludes = []
 digest = "d6ac941672086ea4c8d5047d550b40047825a685cc7c48626d2f0939e1a0c797"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "unzip-patch-gcc14"
+path = "https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-6.0-gcc14-1.patch"
+includes = []
+excludes = []
+digest = "d6ac941672086ea4c8d5047d550b40047825a685cc7c48626d2f0939e1a0c797"
+platform = "aarch64-linux"
 
 [[sources]]
 name = "util-linux"
@@ -785,6 +1241,14 @@ digest = "1f10bfbd4ac7b3e8058fe837b0ed9274d2b3f603dc2d7cbc3d325dc612b06aaa"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "util-linux"
+path = "https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-2.41.1.tar.xz"
+includes = []
+excludes = []
+digest = "1f10bfbd4ac7b3e8058fe837b0ed9274d2b3f603dc2d7cbc3d325dc612b06aaa"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "xz"
 path = "https://github.com/tukaani-project/xz/releases/download/v5.8.1/xz-5.8.1.tar.xz"
 includes = []
@@ -793,9 +1257,25 @@ digest = "24827cfbd8504ed6499a08262caf7d4c4584a5ee2505843526f0f020daf9ab93"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "xz"
+path = "https://github.com/tukaani-project/xz/releases/download/v5.8.1/xz-5.8.1.tar.xz"
+includes = []
+excludes = []
+digest = "24827cfbd8504ed6499a08262caf7d4c4584a5ee2505843526f0f020daf9ab93"
+platform = "aarch64-linux"
+
+[[sources]]
 name = "zlib"
 path = "https://zlib.net/fossils/zlib-1.3.1.tar.gz"
 includes = []
 excludes = []
 digest = "3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "zlib"
+path = "https://zlib.net/fossils/zlib-1.3.1.tar.gz"
+includes = []
+excludes = []
+digest = "3f7995d5f103719283f509c23624287ce95c349439e881ed935a3c2c807bb683"
+platform = "aarch64-linux"
