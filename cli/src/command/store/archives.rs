@@ -135,7 +135,7 @@ pub async fn compress_zstd(
     Ok(())
 }
 
-pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(), Error> {
+pub async fn unpack_zstd(target_dir: &Path, source_zstd: &Path) -> Result<(), Error> {
     let (async_reader, async_writer) = tokio::io::duplex(DUPLEX_BUF_SIZE);
 
     let source_path = source_zstd.to_path_buf();
@@ -151,7 +151,7 @@ pub async fn unpack_zstd(target_dir: &PathBuf, source_zstd: &Path) -> Result<(),
         Ok::<(), anyhow::Error>(())
     });
 
-    let target = target_dir.clone();
+    let target = target_dir.to_path_buf();
     let unpack_fut = async move {
         let mut archive = Archive::new(async_reader);
 
