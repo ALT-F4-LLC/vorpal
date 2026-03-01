@@ -91,8 +91,8 @@ impl<'a> Rust<'a> {
         self
     }
 
-    pub fn with_check(mut self) -> Self {
-        self.check = true;
+    pub fn with_check(mut self, check: bool) -> Self {
+        self.check = check;
         self
     }
 

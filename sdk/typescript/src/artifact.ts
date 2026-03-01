@@ -16,6 +16,15 @@ export function getEnvKey(digest: string): string {
   return `$VORPAL_ARTIFACT_${digest}`;
 }
 
+/**
+ * Converts a Map of secrets to a sorted array of proto objects.
+ * Matches Go SDK's SecretsToProto function.
+ */
+export function secretsToProto(secrets: Map<string, string>): ArtifactStepSecret[] {
+  const keys = Array.from(secrets.keys()).sort();
+  return keys.map((name) => ({ name, value: secrets.get(name)! }));
+}
+
 // ---------------------------------------------------------------------------
 // ArtifactSource
 // ---------------------------------------------------------------------------
@@ -267,7 +276,7 @@ export class Artifact {
 export class Job {
   private _artifacts: string[] = [];
   private _name: string;
-  private _secrets: ArtifactStepSecret[] = [];
+  private _secrets: Map<string, string> = new Map();
   private _script: string;
   private _systems: ArtifactSystem[];
 
@@ -293,14 +302,14 @@ export class Job {
   }
 
   /**
-   * Adds secrets available during the job's build step. Duplicates (by name) are ignored.
+   * Adds secrets available during the job's build step.
    *
-   * @param secrets - Array of `[name, value]` tuples
+   * @param secrets - Map of secret name to value
    */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some((s) => s.name === name)) {
-        this._secrets.push({ name, value });
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -312,15 +321,12 @@ export class Job {
    * @returns The hex-encoded SHA-256 digest of the artifact
    */
   async build(context: ConfigContext): Promise<string> {
-    // Sort for deterministic output
-    this._secrets.sort((a, b) => a.name.localeCompare(b.name));
-
     const step = await shell(
       context,
       this._artifacts,
       [],
       this._script,
-      this._secrets,
+      secretsToProto(this._secrets),
     );
 
     return new Artifact(this._name, [step], this._systems).build(
@@ -345,7 +351,7 @@ export class Process {
   private _artifacts: string[] = [];
   private _entrypoint: string;
   private _name: string;
-  private _secrets: ArtifactStepSecret[] = [];
+  private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
 
   /**
@@ -389,14 +395,14 @@ export class Process {
   }
 
   /**
-   * Adds secrets available during the process build step. Duplicates (by name) are ignored.
+   * Adds secrets available during the process build step.
    *
-   * @param secrets - Array of `[name, value]` tuples
+   * @param secrets - Map of secret name to value
    */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some((s) => s.name === name)) {
-        this._secrets.push({ name, value });
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -408,9 +414,6 @@ export class Process {
    * @returns The hex-encoded SHA-256 digest of the artifact
    */
   async build(context: ConfigContext): Promise<string> {
-    // Sort for deterministic output
-    this._secrets.sort((a, b) => a.name.localeCompare(b.name));
-
     const argumentsStr = this._arguments.join(" ");
 
     const artifactsStr = this._artifacts
@@ -476,7 +479,7 @@ chmod +x $VORPAL_OUTPUT/bin/${this._name}-start`;
       this._artifacts,
       [],
       script,
-      this._secrets,
+      secretsToProto(this._secrets),
     );
 
     return new Artifact(this._name, [step], this._systems).build(
@@ -499,7 +502,7 @@ export class DevelopmentEnvironment {
   private _artifacts: string[] = [];
   private _environments: string[] = [];
   private _name: string;
-  private _secrets: ArtifactStepSecret[] = [];
+  private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
 
   /**
@@ -534,14 +537,14 @@ export class DevelopmentEnvironment {
   }
 
   /**
-   * Adds secrets available during the environment build step. Duplicates (by name) are ignored.
+   * Adds secrets available during the environment build step.
    *
-   * @param secrets - Array of `[name, value]` tuples
+   * @param secrets - Map of secret name to value
    */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some((s) => s.name === name)) {
-        this._secrets.push({ name, value });
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -554,8 +557,6 @@ export class DevelopmentEnvironment {
    * @returns The hex-encoded SHA-256 digest of the artifact
    */
   async build(context: ConfigContext): Promise<string> {
-    // Sort for deterministic output
-    this._secrets.sort((a, b) => a.name.localeCompare(b.name));
 
     const envsBackup = [
       'export VORPAL_SHELL_BACKUP_PATH="$PATH"',
@@ -643,7 +644,7 @@ cp -pr bin "$VORPAL_OUTPUT"`;
         this._artifacts,
         [],
         stepScript,
-        this._secrets,
+        secretsToProto(this._secrets),
       ),
     ];
 
@@ -832,8 +833,10 @@ chmod +x $VORPAL_OUTPUT/bin/vorpal-activate`;
 export class OciImage {
   private _aliases: string[] = [];
   private _artifacts: string[] = [];
+  private _crane: string | undefined = undefined;
   private _name: string;
   private _rootfs: string;
+  private _rsync: string | undefined = undefined;
 
   /**
    * @param name - OCI image name (must be lowercase, valid chars: a-z, 0-9, / : - . _)
@@ -862,6 +865,28 @@ export class OciImage {
    */
   withArtifacts(artifacts: string[]): this {
     this._artifacts = artifacts;
+    return this;
+  }
+
+  /**
+   * Overrides the default crane artifact used for building the OCI image.
+   * When not set, crane is fetched from the registry alias "crane:0.21.1".
+   *
+   * @param crane - Artifact digest for crane
+   */
+  withCrane(crane: string): this {
+    this._crane = crane;
+    return this;
+  }
+
+  /**
+   * Overrides the default rsync artifact used for building the OCI image.
+   * When not set, rsync is fetched from the registry alias "rsync:3.4.1".
+   *
+   * @param rsync - Artifact digest for rsync
+   */
+  withRsync(rsync: string): this {
+    this._rsync = rsync;
     return this;
   }
 
@@ -900,8 +925,8 @@ export class OciImage {
       }
     }
 
-    const crane = await context.fetchArtifactAlias("crane:0.21.1");
-    const rsync = await context.fetchArtifactAlias("rsync:3.4.1");
+    const crane = this._crane ?? await context.fetchArtifactAlias("crane:0.21.1");
+    const rsync = this._rsync ?? await context.fetchArtifactAlias("rsync:3.4.1");
 
     const artifactsList = this._artifacts.join(" ");
     const namespace = context.getArtifactNamespace();

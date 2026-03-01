@@ -34,6 +34,7 @@ type RustArtifactCargoTomlWorkspace struct {
 }
 
 type Rust struct {
+	aliases      []string
 	artifacts    []*string
 	bins         []string
 	build        bool
@@ -45,7 +46,7 @@ type Rust struct {
 	lint         bool
 	name         string
 	packages     []string
-	secrets      []*api.ArtifactStepSecret
+	secrets      map[string]string
 	source       *string
 	tests        bool
 	systems      []api.ArtifactSystem
@@ -157,6 +158,7 @@ func stripPrefix(path, prefix string) string {
 
 func NewRust(name string, systems []api.ArtifactSystem) *Rust {
 	return &Rust{
+		aliases:      make([]string, 0),
 		artifacts:    make([]*string, 0),
 		bins:         make([]string, 0),
 		build:        true,
@@ -168,11 +170,16 @@ func NewRust(name string, systems []api.ArtifactSystem) *Rust {
 		lint:         false,
 		name:         name,
 		packages:     make([]string, 0),
-		secrets:      make([]*api.ArtifactStepSecret, 0),
+		secrets:      map[string]string{},
 		source:       nil,
 		tests:        false,
 		systems:      systems,
 	}
+}
+
+func (a *Rust) WithAliases(aliases []string) *Rust {
+	a.aliases = aliases
+	return a
 }
 
 func (a *Rust) WithArtifacts(artifacts []*string) *Rust {
@@ -185,8 +192,8 @@ func (a *Rust) WithBins(bins []string) *Rust {
 	return a
 }
 
-func (a *Rust) WithCheck() *Rust {
-	a.check = true
+func (a *Rust) WithCheck(check bool) *Rust {
+	a.check = check
 	return a
 }
 
@@ -200,8 +207,8 @@ func (a *Rust) WithExcludes(excludes []string) *Rust {
 	return a
 }
 
-func (a *Rust) WithFormat() *Rust {
-	a.format = true
+func (a *Rust) WithFormat(format bool) *Rust {
+	a.format = format
 	return a
 }
 
@@ -210,8 +217,8 @@ func (a *Rust) WithIncludes(includes []string) *Rust {
 	return a
 }
 
-func (a *Rust) WithLint() *Rust {
-	a.lint = true
+func (a *Rust) WithLint(lint bool) *Rust {
+	a.lint = lint
 	return a
 }
 
@@ -221,20 +228,11 @@ func (a *Rust) WithPackages(packages []string) *Rust {
 }
 
 func (a *Rust) WithSecrets(secrets map[string]string) *Rust {
-	for _, name := range artifact.SortedKeys(secrets) {
-		value := secrets[name]
-		secret := &api.ArtifactStepSecret{
-			Name:  name,
-			Value: value,
+	for k, v := range secrets {
+		if _, exists := a.secrets[k]; !exists {
+			a.secrets[k] = v
 		}
-
-		if slices.ContainsFunc(a.secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
-			continue
-		}
-
-		a.secrets = append(a.secrets, secret)
 	}
-
 	return a
 }
 
@@ -243,8 +241,8 @@ func (a *Rust) WithSource(source *string) *Rust {
 	return a
 }
 
-func (a *Rust) WithTests() *Rust {
-	a.tests = true
+func (a *Rust) WithTests(tests bool) *Rust {
+	a.tests = tests
 	return a
 }
 
@@ -446,8 +444,11 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 		stepArtifacts,
 		stepEnvironments,
 		vendorStepScriptBuffer.String(),
-		builder.secrets,
+		artifact.SecretsToProto(builder.secrets),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	vendorName := fmt.Sprintf("%s-vendor", builder.name)
 
@@ -457,16 +458,9 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 
 	vendorSteps := []*api.ArtifactStep{vendorStep}
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
-	}
-
 	vendorSources := []*api.ArtifactSource{&vendorSource}
 
-	vendor, err := artifact.NewArtifact(vendorName, vendorSteps, systems).
+	vendor, err := artifact.NewArtifact(vendorName, vendorSteps, builder.systems).
 		WithSources(vendorSources).
 		Build(context)
 	if err != nil {
@@ -540,7 +534,7 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 		stepArtifacts,
 		stepEnvironments,
 		stepScriptBuffer.String(),
-		builder.secrets,
+		artifact.SecretsToProto(builder.secrets),
 	)
 	if err != nil {
 		return nil, err
@@ -548,7 +542,8 @@ func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
 
 	steps := []*api.ArtifactStep{step}
 
-	return artifact.NewArtifact(builder.name, steps, systems).
+	return artifact.NewArtifact(builder.name, steps, builder.systems).
+		WithAliases(builder.aliases).
 		WithSources(sources).
 		Build(context)
 }
