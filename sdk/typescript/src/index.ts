@@ -16,6 +16,7 @@ export {
   DevelopmentEnvironment,
   UserEnvironment,
   getEnvKey,
+  secretsToProto,
 } from "./artifact.js";
 
 // Step functions

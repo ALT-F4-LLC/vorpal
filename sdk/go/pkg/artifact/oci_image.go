@@ -159,6 +159,11 @@ func (o *OciImage) WithRootfs(rootfs string) *OciImage {
 	return o
 }
 
+func (o *OciImage) WithRsync(rsync *string) *OciImage {
+	o.rsync = rsync
+	return o
+}
+
 func (o *OciImage) WithAliases(aliases []string) *OciImage {
 	o.aliases = aliases
 	return o
@@ -201,9 +206,12 @@ func (o *OciImage) Build(context *config.ConfigContext) (*string, error) {
 		rsync = r
 	}
 
-	artifactDigests := make([]string, len(o.artifacts))
-	for i, artifact := range o.artifacts {
-		artifactDigests[i] = *artifact
+	artifactDigests := make([]string, 0, len(o.artifacts))
+	for _, artifact := range o.artifacts {
+		if artifact == nil {
+			continue
+		}
+		artifactDigests = append(artifactDigests, *artifact)
 	}
 
 	scriptTemplate, err := template.New("script").Parse(ociImageScript)

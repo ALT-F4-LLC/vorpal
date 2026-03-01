@@ -17,7 +17,7 @@ type TypeScript struct {
 	environments  []string
 	includes      []string
 	name          string
-	secrets       []*api.ArtifactStepSecret
+	secrets       map[string]string
 	sourceScripts []string
 	systems       []api.ArtifactSystem
 	workingDir    *string
@@ -31,7 +31,7 @@ func NewTypeScript(name string, systems []api.ArtifactSystem) *TypeScript {
 		environments:  []string{},
 		includes:      []string{},
 		name:          name,
-		secrets:       []*api.ArtifactStepSecret{},
+		secrets:       map[string]string{},
 		sourceScripts: []string{},
 		systems:       systems,
 		workingDir:    nil,
@@ -39,11 +39,7 @@ func NewTypeScript(name string, systems []api.ArtifactSystem) *TypeScript {
 }
 
 func (b *TypeScript) WithAliases(aliases []string) *TypeScript {
-	for _, alias := range aliases {
-		if !slices.Contains(b.aliases, alias) {
-			b.aliases = append(b.aliases, alias)
-		}
-	}
+	b.aliases = aliases
 	return b
 }
 
@@ -68,20 +64,11 @@ func (b *TypeScript) WithIncludes(includes []string) *TypeScript {
 }
 
 func (b *TypeScript) WithSecrets(secrets map[string]string) *TypeScript {
-	for _, name := range artifact.SortedKeys(secrets) {
-		value := secrets[name]
-		secret := &api.ArtifactStepSecret{
-			Name:  name,
-			Value: value,
+	for k, v := range secrets {
+		if _, exists := b.secrets[k]; !exists {
+			b.secrets[k] = v
 		}
-
-		if slices.ContainsFunc(b.secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
-			continue
-		}
-
-		b.secrets = append(b.secrets, secret)
 	}
-
 	return b
 }
 
@@ -100,11 +87,6 @@ func (b *TypeScript) WithWorkingDir(dir string) *TypeScript {
 }
 
 func (builder *TypeScript) Build(context *config.ConfigContext) (*string, error) {
-	// Sort secrets for deterministic output
-	slices.SortFunc(builder.secrets, func(a, b *api.ArtifactStepSecret) int {
-		return strings.Compare(a.Name, b.Name)
-	})
-
 	// Resolve Bun artifact
 	bunDigest, err := artifact.Bun(context)
 	if err != nil {
@@ -166,7 +148,7 @@ func (builder *TypeScript) Build(context *config.ConfigContext) (*string, error)
 	// Create step and artifact
 	sources := []*api.ArtifactSource{source}
 
-	step, err := artifact.Shell(context, artifacts, environments, stepScript, builder.secrets)
+	step, err := artifact.Shell(context, artifacts, environments, stepScript, artifact.SecretsToProto(builder.secrets))
 	if err != nil {
 		return nil, err
 	}

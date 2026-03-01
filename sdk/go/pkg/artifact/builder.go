@@ -23,6 +23,15 @@ func SortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// SecretsToProto converts a map[string]string of secrets to a sorted slice of proto objects.
+func SecretsToProto(secrets map[string]string) []*api.ArtifactStepSecret {
+	result := make([]*api.ArtifactStepSecret, 0, len(secrets))
+	for _, name := range SortedKeys(secrets) {
+		result = append(result, &api.ArtifactStepSecret{Name: name, Value: secrets[name]})
+	}
+	return result
+}
+
 type Argument struct {
 	Name    string
 	Require bool
@@ -37,12 +46,12 @@ type ArtifactSource struct {
 }
 
 type ArtifactStep struct {
-	Arguments    map[api.ArtifactSystem][]string
-	Artifacts    map[api.ArtifactSystem][]*string
-	Entrypoint   map[api.ArtifactSystem]string
-	Environments map[api.ArtifactSystem][]string
-	Secrets      map[api.ArtifactSystem][]*api.ArtifactStepSecret
-	Script       map[api.ArtifactSystem]string
+	Arguments    []string
+	Artifacts    []*string
+	Entrypoint   string
+	Environments []string
+	Secrets      []*api.ArtifactStepSecret
+	Script       string
 }
 
 type Artifact struct {
@@ -57,7 +66,7 @@ type Job struct {
 	Artifacts []*string
 	Name      string
 	Script    string
-	Secrets   []*api.ArtifactStepSecret
+	Secrets   map[string]string
 	Systems   []api.ArtifactSystem
 }
 
@@ -66,7 +75,7 @@ type Process struct {
 	Artifacts  []*string
 	Entrypoint string
 	Name       string
-	Secrets    []*api.ArtifactStepSecret
+	Secrets    map[string]string
 	Systems    []api.ArtifactSystem
 }
 
@@ -81,7 +90,7 @@ type DevelopmentEnvironment struct {
 	Artifacts    []*string
 	Environments []string
 	Name         string
-	Secrets      []*api.ArtifactStepSecret
+	Secrets      map[string]string
 	Systems      []api.ArtifactSystem
 }
 
@@ -265,7 +274,7 @@ func NewProcess(name string, entrypoint string, systems []api.ArtifactSystem) *P
 		Artifacts:  []*string{},
 		Entrypoint: entrypoint,
 		Name:       name,
-		Secrets:    []*api.ArtifactStepSecret{},
+		Secrets:    map[string]string{},
 		Systems:    systems,
 	}
 }
@@ -284,16 +293,18 @@ func (a *Process) WithArtifacts(artifacts []*string) *Process {
 	return a
 }
 
-func (a *Process) WithSecrets(secrets []*api.ArtifactStepSecret) *Process {
-	for _, secret := range secrets {
-		if !slices.Contains(a.Secrets, secret) {
-			a.Secrets = append(a.Secrets, secret)
+func (a *Process) WithSecrets(secrets map[string]string) *Process {
+	for k, v := range secrets {
+		if _, exists := a.Secrets[k]; !exists {
+			a.Secrets[k] = v
 		}
 	}
 	return a
 }
 
 func (a *Process) Build(ctx *config.ConfigContext) (*string, error) {
+	secrets := SecretsToProto(a.Secrets)
+
 	arguments := strings.Join(a.Arguments, " ")
 
 	artifacts := []string{}
@@ -322,7 +333,7 @@ func (a *Process) Build(ctx *config.ConfigContext) (*string, error) {
 		return nil, err
 	}
 
-	step, err := Shell(ctx, a.Artifacts, []string{}, scriptBuffer.String(), a.Secrets)
+	step, err := Shell(ctx, a.Artifacts, []string{}, scriptBuffer.String(), secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -348,8 +359,8 @@ func (a *ArtifactSource) WithExcludes(excludes []string) *ArtifactSource {
 	return a
 }
 
-func (a *ArtifactSource) WithHash(hash string) *ArtifactSource {
-	a.Digest = &hash
+func (a *ArtifactSource) WithDigest(digest string) *ArtifactSource {
+	a.Digest = &digest
 	return a
 }
 
@@ -373,118 +384,74 @@ func (a *ArtifactSource) Build() api.ArtifactSource {
 	}
 }
 
-func NewArtifactStep() *ArtifactStep {
+func NewArtifactStep(entrypoint string) *ArtifactStep {
 	return &ArtifactStep{
-		Arguments:    make(map[api.ArtifactSystem][]string),
-		Artifacts:    make(map[api.ArtifactSystem][]*string),
-		Entrypoint:   make(map[api.ArtifactSystem]string),
-		Environments: make(map[api.ArtifactSystem][]string),
-		Secrets:      make(map[api.ArtifactSystem][]*api.ArtifactStepSecret),
-		Script:       make(map[api.ArtifactSystem]string),
+		Arguments:    []string{},
+		Artifacts:    []*string{},
+		Entrypoint:   entrypoint,
+		Environments: []string{},
+		Secrets:      []*api.ArtifactStepSecret{},
 	}
 }
 
-func (a *ArtifactStep) WithArguments(arguments []string, systems []api.ArtifactSystem) *ArtifactStep {
-	for _, system := range systems {
-		a.Arguments[system] = arguments
-	}
+func (a *ArtifactStep) WithArguments(arguments []string) *ArtifactStep {
+	a.Arguments = arguments
 	return a
 }
 
-func (a *ArtifactStep) WithArtifacts(artifacts []*string, systems []api.ArtifactSystem) *ArtifactStep {
-	for _, system := range systems {
-		a.Artifacts[system] = artifacts
-	}
+func (a *ArtifactStep) WithArtifacts(artifacts []*string) *ArtifactStep {
+	a.Artifacts = artifacts
 	return a
 }
 
-func (a *ArtifactStep) WithEntrypoint(entrypoint string, systems []api.ArtifactSystem) *ArtifactStep {
-	for _, system := range systems {
-		a.Entrypoint[system] = entrypoint
-	}
+func (a *ArtifactStep) WithEnvironments(environments []string) *ArtifactStep {
+	a.Environments = environments
 	return a
 }
 
-func (a *ArtifactStep) WithEnvironments(environments []string, systems []api.ArtifactSystem) *ArtifactStep {
-	for _, system := range systems {
-		a.Environments[system] = environments
-	}
+func (a *ArtifactStep) WithScript(script string) *ArtifactStep {
+	a.Script = script
 	return a
 }
 
-func (a *ArtifactStep) WithScript(script string, systems []api.ArtifactSystem) *ArtifactStep {
-	for _, system := range systems {
-		a.Script[system] = script
-	}
+func (a *ArtifactStep) WithSecrets(secrets []*api.ArtifactStepSecret) *ArtifactStep {
+	a.Secrets = append(a.Secrets, secrets...)
 	return a
 }
 
-func (a *ArtifactStep) WithSecrets(secrets []*api.ArtifactStepSecret, systems []api.ArtifactSystem) *ArtifactStep {
-	for _, system := range systems {
-		if _, ok := a.Secrets[system]; !ok {
-			a.Secrets[system] = []*api.ArtifactStepSecret{}
+func (a *ArtifactStep) Build() *api.ArtifactStep {
+	stepArtifacts := make([]string, 0, len(a.Artifacts))
+	for _, art := range a.Artifacts {
+		if art != nil {
+			stepArtifacts = append(stepArtifacts, *art)
 		}
-		a.Secrets[system] = append(a.Secrets[system], secrets...)
-	}
-	return a
-}
-
-func (a *ArtifactStep) Build(ctx *config.ConfigContext) (*api.ArtifactStep, error) {
-	stepTarget := ctx.GetTarget()
-
-	stepArguments := []string{}
-	if args, ok := a.Arguments[stepTarget]; ok {
-		stepArguments = args
 	}
 
-	stepArtifacts := []string{}
-	if arts, ok := a.Artifacts[stepTarget]; ok {
-		artifacts := make([]string, len(arts))
-
-		for i, art := range arts {
-			if art != nil {
-				artifacts[i] = *art
-			}
-		}
-
-		stepArtifacts = artifacts
-	}
-
-	stepEnvironments := []string{}
-	if envs, ok := a.Environments[stepTarget]; ok {
-		stepEnvironments = envs
-	}
-
-	var stepEntrypoint *string
-	if entry, ok := a.Entrypoint[stepTarget]; ok {
-		stepEntrypoint = &entry
-	}
-
-	var stepSecrets []*api.ArtifactStepSecret
-	if secrets, ok := a.Secrets[stepTarget]; ok {
-		stepSecrets = secrets
-	}
-
-	var stepScript *string
-	if scr, ok := a.Script[stepTarget]; ok {
-		stepScript = &scr
-	}
-
-	return &api.ArtifactStep{
-		Arguments:    stepArguments,
+	step := &api.ArtifactStep{
+		Arguments:    a.Arguments,
 		Artifacts:    stepArtifacts,
-		Entrypoint:   stepEntrypoint,
-		Environments: stepEnvironments,
-		Secrets:      stepSecrets,
-		Script:       stepScript,
-	}, nil
+		Environments: a.Environments,
+		Secrets:      a.Secrets,
+	}
+
+	if a.Entrypoint != "" {
+		entrypoint := a.Entrypoint
+		step.Entrypoint = &entrypoint
+	}
+
+	if a.Script != "" {
+		script := a.Script
+		step.Script = &script
+	}
+
+	return step
 }
 
-func NewTask(name string, script string, systems []api.ArtifactSystem) *Job {
+func NewJob(name string, script string, systems []api.ArtifactSystem) *Job {
 	return &Job{
 		Artifacts: []*string{},
 		Name:      name,
-		Secrets:   []*api.ArtifactStepSecret{},
+		Secrets:   map[string]string{},
 		Script:    script,
 		Systems:   systems,
 	}
@@ -495,17 +462,19 @@ func (a *Job) WithArtifacts(artifacts []*string) *Job {
 	return a
 }
 
-func (a *Job) WithSecrets(secrets []*api.ArtifactStepSecret) *Job {
-	for _, secret := range secrets {
-		if !slices.Contains(a.Secrets, secret) {
-			a.Secrets = append(a.Secrets, secret)
+func (a *Job) WithSecrets(secrets map[string]string) *Job {
+	for k, v := range secrets {
+		if _, exists := a.Secrets[k]; !exists {
+			a.Secrets[k] = v
 		}
 	}
 	return a
 }
 
 func (a *Job) Build(ctx *config.ConfigContext) (*string, error) {
-	step, err := Shell(ctx, a.Artifacts, []string{}, a.Script, a.Secrets)
+	secrets := SecretsToProto(a.Secrets)
+
+	step, err := Shell(ctx, a.Artifacts, []string{}, a.Script, secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -546,22 +515,6 @@ func (a *Artifact) WithSources(source []*api.ArtifactSource) *Artifact {
 	return a
 }
 
-func (a *Artifact) WithStep(step *api.ArtifactStep) *Artifact {
-	if !slices.Contains(a.Steps, step) {
-		a.Steps = append(a.Steps, step)
-	}
-
-	return a
-}
-
-func (a *Artifact) WithSystem(system api.ArtifactSystem) *Artifact {
-	if !slices.Contains(a.Systems, system) {
-		a.Systems = append(a.Systems, system)
-	}
-
-	return a
-}
-
 func (a *Artifact) Build(ctx *config.ConfigContext) (*string, error) {
 	artifact := api.Artifact{
 		Aliases: a.Aliases,
@@ -584,7 +537,7 @@ func NewDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *Devel
 		Artifacts:    []*string{},
 		Environments: []string{},
 		Name:         name,
-		Secrets:      []*api.ArtifactStepSecret{},
+		Secrets:      map[string]string{},
 		Systems:      systems,
 	}
 }
@@ -600,11 +553,9 @@ func (b *DevelopmentEnvironment) WithEnvironments(envs []string) *DevelopmentEnv
 }
 
 func (b *DevelopmentEnvironment) WithSecrets(secrets map[string]string) *DevelopmentEnvironment {
-	for _, name := range SortedKeys(secrets) {
-		value := secrets[name]
-		secret := &api.ArtifactStepSecret{Name: name, Value: value}
-		if !slices.ContainsFunc(b.Secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
-			b.Secrets = append(b.Secrets, secret)
+	for k, v := range secrets {
+		if _, exists := b.Secrets[k]; !exists {
+			b.Secrets[k] = v
 		}
 	}
 	return b
@@ -635,9 +586,14 @@ func (b *DevelopmentEnvironment) Build(ctx *config.ConfigContext) (*string, erro
 	}
 
 	for _, envvar := range b.Environments {
-		key := strings.Split(envvar, "=")[0]
+		parts := strings.SplitN(envvar, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
 
-		if strings.Contains(envvar, "PATH=") {
+		key := parts[0]
+
+		if key == "PATH" {
 			continue
 		}
 
@@ -660,8 +616,8 @@ func (b *DevelopmentEnvironment) Build(ctx *config.ConfigContext) (*string, erro
 	stepPath := strings.Join(stepPathArtifacts, ":")
 
 	for _, envvar := range b.Environments {
-		if strings.Contains(envvar, "PATH=") {
-			stepPath = fmt.Sprintf("%s:%s", strings.Replace(envvar, "PATH=", "", 1), stepPath)
+		if pathValue, ok := strings.CutPrefix(envvar, "PATH="); ok {
+			stepPath = fmt.Sprintf("%s:%s", pathValue, stepPath)
 		}
 	}
 
@@ -689,7 +645,9 @@ func (b *DevelopmentEnvironment) Build(ctx *config.ConfigContext) (*string, erro
 
 	stepScript := scriptBuffer.String()
 
-	step, err := Shell(ctx, b.Artifacts, []string{}, stepScript, b.Secrets)
+	secrets := SecretsToProto(b.Secrets)
+
+	step, err := Shell(ctx, b.Artifacts, []string{}, stepScript, secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -748,8 +706,8 @@ func (b *UserEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 	stepPath := strings.Join(stepPathArtifacts, ":")
 
 	for _, envvar := range b.Environments {
-		if strings.Contains(envvar, "PATH=") {
-			stepPath = fmt.Sprintf("%s:%s", strings.Replace(envvar, "PATH=", "", 1), stepPath)
+		if pathValue, ok := strings.CutPrefix(envvar, "PATH="); ok {
+			stepPath = fmt.Sprintf("%s:%s", pathValue, stepPath)
 			continue
 		}
 

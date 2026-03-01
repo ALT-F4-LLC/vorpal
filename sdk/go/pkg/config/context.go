@@ -495,12 +495,32 @@ func fetchArtifacts(client artifact.ArtifactServiceClient, digest string, namesp
 	for _, step := range clientResponse.Steps {
 		if step != nil {
 			for _, digest := range step.Artifacts {
-				fetchArtifacts(client, digest, namespace, store, registry)
+				if err := fetchArtifacts(client, digest, namespace, store, registry); err != nil {
+					return err
+				}
 			}
 		}
 	}
 
 	return nil
+}
+
+// isValidComponent returns true if s is non-empty and every character is in
+// the allowed set for alias components: alphanumeric (a-z, A-Z, 0-9), hyphens
+// (-), dots (.), underscores (_), and plus signs (+).
+func isValidComponent(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') ||
+			c == '-' || c == '.' || c == '_' || c == '+') {
+			return false
+		}
+	}
+	return true
 }
 
 // parseArtifactAlias parses an artifact alias into its components.
@@ -559,7 +579,20 @@ func parseArtifactAlias(alias string) (*ArtifactAlias, error) {
 		return nil, fmt.Errorf("name is required")
 	}
 
-	// Step 3: Apply defaults
+	// Step 3: Validate component characters
+	if !isValidComponent(name) {
+		return nil, fmt.Errorf("name contains invalid characters (allowed: alphanumeric, hyphens, dots, underscores, plus signs)")
+	}
+
+	if namespace != "" && !isValidComponent(namespace) {
+		return nil, fmt.Errorf("namespace contains invalid characters (allowed: alphanumeric, hyphens, dots, underscores, plus signs)")
+	}
+
+	if tag != "" && !isValidComponent(tag) {
+		return nil, fmt.Errorf("tag contains invalid characters (allowed: alphanumeric, hyphens, dots, underscores, plus signs)")
+	}
+
+	// Step 4: Apply defaults
 	if tag == "" {
 		tag = "latest"
 	}

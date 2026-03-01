@@ -1,5 +1,4 @@
 import type {
-  ArtifactStepSecret,
   ArtifactSystem,
 } from "../../api/artifact/artifact.js";
 import type { ConfigContext } from "../../context.js";
@@ -8,6 +7,7 @@ import {
   ArtifactSource,
   DevelopmentEnvironment,
   getEnvKey,
+  secretsToProto,
 } from "../../artifact.js";
 import { shell } from "../step.js";
 
@@ -20,7 +20,7 @@ export class TypeScript {
   private _environments: string[] = [];
   private _includes: string[] = [];
   private _name: string;
-  private _secrets: ArtifactStepSecret[] = [];
+  private _secrets: Map<string, string> = new Map();
   private _sourceScripts: string[] = [];
   private _systems: ArtifactSystem[];
   private _workingDir: string | undefined = undefined;
@@ -31,11 +31,7 @@ export class TypeScript {
   }
 
   withAliases(aliases: string[]): this {
-    for (const alias of aliases) {
-      if (!this._aliases.includes(alias)) {
-        this._aliases.push(alias);
-      }
-    }
+    this._aliases = aliases;
     return this;
   }
 
@@ -76,12 +72,13 @@ export class TypeScript {
 
   /**
    * Adds secrets available during the build step.
-   * Secrets are deduplicated by name.
+   *
+   * @param secrets - Map of secret name to value
    */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some((s) => s.name === name)) {
-        this._secrets.push({ name, value });
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -181,16 +178,13 @@ ${stepBuildCommand}`;
     // Build artifact dependencies
     const stepArtifacts = [bunDigest, ...this._artifacts];
 
-    // Sort secrets for deterministic output
-    this._secrets.sort((a, b) => a.name.localeCompare(b.name));
-
     // Create step
     const step = await shell(
       context,
       stepArtifacts,
       stepEnvironments,
       stepScript,
-      this._secrets,
+      secretsToProto(this._secrets),
     );
 
     // Create and return artifact
@@ -224,7 +218,7 @@ export class TypeScriptDevelopmentEnvironment {
   private _artifacts: string[] = [];
   private _environments: string[] = [];
   private _name: string;
-  private _secrets: Array<[string, string]> = [];
+  private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
 
   constructor(name: string, systems: ArtifactSystem[]) {
@@ -250,11 +244,11 @@ export class TypeScriptDevelopmentEnvironment {
     return this;
   }
 
-  /** Adds secrets available during the environment build step. Duplicates (by name) are ignored. */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some(([n]) => n === name)) {
-        this._secrets.push([name, value]);
+  /** Adds secrets available during the environment build step. */
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -278,7 +272,7 @@ export class TypeScriptDevelopmentEnvironment {
       .withArtifacts(artifacts)
       .withEnvironments(this._environments);
 
-    if (this._secrets.length > 0) {
+    if (this._secrets.size > 0) {
       devenv = devenv.withSecrets(this._secrets);
     }
 

@@ -29,19 +29,17 @@ set -euo pipefail
 `
 
 func Bash(
-	context *config.ConfigContext,
 	artifacts []*string,
 	environments []string,
-	script *string,
+	script string,
 	secrets []*api.ArtifactStepSecret,
-	systems []api.ArtifactSystem,
 ) (*api.ArtifactStep, error) {
 	stepEnvironments := make([]string, 0)
 
 	stepEntrypoint := "bash"
 
 	for _, value := range environments {
-		if strings.Contains(value, "PATH=") {
+		if strings.HasPrefix(value, "PATH=") {
 			continue
 		}
 
@@ -61,8 +59,8 @@ func Bash(
 	stepPath := fmt.Sprintf("%s:%s", strings.Join(stepPathBins, ":"), stepPathDefault)
 
 	for _, value := range environments {
-		if strings.Contains(value, "PATH=") {
-			stepPath = fmt.Sprintf("%s:%s", strings.ReplaceAll(value, "PATH=", ""), stepPath)
+		if pathValue, ok := strings.CutPrefix(value, "PATH="); ok {
+			stepPath = fmt.Sprintf("%s:%s", pathValue, stepPath)
 		}
 	}
 
@@ -77,33 +75,30 @@ func Bash(
 	var scriptBuffer bytes.Buffer
 
 	scriptTemplateVars := BashScriptTemplateArgs{
-		Script: *script,
+		Script: script,
 	}
 
 	if err := scriptTemplate.Execute(&scriptBuffer, scriptTemplateVars); err != nil {
 		return nil, err
 	}
 
-	step := NewArtifactStep()
+	step := NewArtifactStep(stepEntrypoint)
 
-	step = step.WithArtifacts(artifacts, systems)
-	step = step.WithEntrypoint(stepEntrypoint, systems)
-	step = step.WithEnvironments(stepEnvironments, systems)
-	step = step.WithScript(scriptBuffer.String(), systems)
-	step = step.WithSecrets(secrets, systems)
+	step = step.WithArtifacts(artifacts)
+	step = step.WithEnvironments(stepEnvironments)
+	step = step.WithScript(scriptBuffer.String())
+	step = step.WithSecrets(secrets)
 
-	return step.Build(context)
+	return step.Build(), nil
 }
 
 func Bwrap(
-	context *config.ConfigContext,
 	arguments []string,
 	artifacts []*string,
 	environments []string,
 	rootfs *string,
 	script string,
 	secrets []*api.ArtifactStepSecret,
-	systems []api.ArtifactSystem,
 ) (*api.ArtifactStep, error) {
 	// Setup arguments
 
@@ -198,8 +193,8 @@ func Bwrap(
 	stepPath := fmt.Sprintf("%s:%s", strings.Join(stepPathBins, ":"), "/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin")
 
 	for _, envvar := range environments {
-		if strings.HasPrefix(envvar, "PATH=") {
-			stepPath = fmt.Sprintf("%s:%s", strings.ReplaceAll(envvar, "PATH=", ""), stepPath)
+		if pathValue, ok := strings.CutPrefix(envvar, "PATH="); ok {
+			stepPath = fmt.Sprintf("%s:%s", pathValue, stepPath)
 		}
 	}
 
@@ -208,10 +203,15 @@ func Bwrap(
 	stepArguments = append(stepArguments, stepPath)
 
 	for _, envvar := range environments {
-		key := strings.Split(envvar, "=")[0]
-		value := strings.Split(envvar, "=")[1]
+		parts := strings.SplitN(envvar, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
 
-		if strings.HasPrefix(key, "PATH") {
+		key := parts[0]
+		value := parts[1]
+
+		if key == "PATH" {
 			continue
 		}
 
@@ -245,16 +245,15 @@ func Bwrap(
 
 	// Setup step
 
-	step := NewArtifactStep()
+	step := NewArtifactStep("bwrap")
 
-	step = step.WithArguments(stepArguments, systems)
-	step = step.WithArtifacts(stepArtifacts, systems)
-	step = step.WithEntrypoint("bwrap", systems)
-	step = step.WithEnvironments([]string{"PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"}, systems)
-	step = step.WithScript(scriptBuffer.String(), systems)
-	step = step.WithSecrets(secrets, systems)
+	step = step.WithArguments(stepArguments)
+	step = step.WithArtifacts(stepArtifacts)
+	step = step.WithEnvironments([]string{"PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"})
+	step = step.WithScript(scriptBuffer.String())
+	step = step.WithSecrets(secrets)
 
-	return step.Build(context)
+	return step.Build(), nil
 }
 
 func Shell(
@@ -268,15 +267,10 @@ func Shell(
 
 	if stepSystem == api.ArtifactSystem_AARCH64_DARWIN || stepSystem == api.ArtifactSystem_X8664_DARWIN {
 		return Bash(
-			context,
 			artifacts,
 			environments,
-			&script,
+			script,
 			secrets,
-			[]api.ArtifactSystem{
-				api.ArtifactSystem_AARCH64_DARWIN,
-				api.ArtifactSystem_X8664_DARWIN,
-			},
 		)
 	}
 
@@ -287,17 +281,12 @@ func Shell(
 		}
 
 		return Bwrap(
-			context,
 			[]string{},
 			artifacts,
 			environments,
 			linux_vorpal,
 			script,
 			secrets,
-			[]api.ArtifactSystem{
-				api.ArtifactSystem_AARCH64_LINUX,
-				api.ArtifactSystem_X8664_LINUX,
-			},
 		)
 	}
 
@@ -307,17 +296,14 @@ func Shell(
 // TODO: Add support for secrets with docker step
 
 func Docker(
-	context *config.ConfigContext,
 	arguments []string,
 	artifacts []*string,
-	systems []api.ArtifactSystem,
 ) (*api.ArtifactStep, error) {
-	step := NewArtifactStep()
+	step := NewArtifactStep("docker")
 
-	step = step.WithArguments(arguments, systems)
-	step = step.WithArtifacts(artifacts, systems)
-	step = step.WithEntrypoint("docker", systems)
-	step = step.WithEnvironments([]string{"PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"}, systems)
+	step = step.WithArguments(arguments)
+	step = step.WithArtifacts(artifacts)
+	step = step.WithEnvironments([]string{"PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin"})
 
-	return step.Build(context)
+	return step.Build(), nil
 }

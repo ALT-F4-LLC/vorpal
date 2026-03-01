@@ -1,6 +1,5 @@
 import type {
   ArtifactSource as ArtifactSourceMsg,
-  ArtifactStepSecret,
 } from "../../api/artifact/artifact.js";
 import { ArtifactSystem } from "../../api/artifact/artifact.js";
 import type { ConfigContext } from "../../context.js";
@@ -9,6 +8,7 @@ import {
   ArtifactSource,
   DevelopmentEnvironment,
   getEnvKey,
+  secretsToProto,
 } from "../../artifact.js";
 import { shell } from "../step.js";
 
@@ -79,6 +79,7 @@ export function getGoarch(system: ArtifactSystem): string {
  * ```
  */
 export class Go {
+  private _aliases: string[] = [];
   private _artifacts: string[] = [];
   private _buildDirectory: string = ".";
   private _buildFlags: string = "";
@@ -86,7 +87,7 @@ export class Go {
   private _environments: string[] = [];
   private _includes: string[] = [];
   private _name: string;
-  private _secrets: ArtifactStepSecret[] = [];
+  private _secrets: Map<string, string> = new Map();
   private _source: ArtifactSourceMsg | undefined = undefined;
   private _sourceScripts: string[] = [];
   private _systems: ArtifactSystem[];
@@ -94,6 +95,12 @@ export class Go {
   constructor(name: string, systems: ArtifactSystem[]) {
     this._name = name;
     this._systems = systems;
+  }
+
+  /** Adds human-readable aliases for this artifact. */
+  withAliases(aliases: string[]): this {
+    this._aliases = aliases;
+    return this;
   }
 
   /** Adds artifact dependencies available during the build step. */
@@ -149,12 +156,13 @@ export class Go {
 
   /**
    * Adds secrets available during the build step.
-   * Secrets are deduplicated by name.
+   *
+   * @param secrets - Map of secret name to value
    */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some((s) => s.name === name)) {
-        this._secrets.push({ name, value });
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -189,9 +197,6 @@ export class Go {
    * @returns The artifact digest string
    */
   async build(context: ConfigContext): Promise<string> {
-    // Sort secrets for deterministic output
-    this._secrets.sort((a, b) => a.name.localeCompare(b.name));
-
     // Build source
     const sourcePath = ".";
     let source: ArtifactSourceMsg;
@@ -259,11 +264,12 @@ export class Go {
       stepArtifacts,
       stepEnvironments,
       stepScript,
-      this._secrets,
+      secretsToProto(this._secrets),
     );
 
     // Create and return artifact
     return new Artifact(this._name, [step], this._systems)
+      .withAliases(this._aliases)
       .withSources([source])
       .build(context);
   }
@@ -300,7 +306,7 @@ export class GoDevelopmentEnvironment {
   private _artifacts: string[] = [];
   private _environments: string[] = [];
   private _name: string;
-  private _secrets: Array<[string, string]> = [];
+  private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
 
   // Flags to include/exclude optional default tools
@@ -340,11 +346,11 @@ export class GoDevelopmentEnvironment {
     return this;
   }
 
-  /** Adds secrets available during the environment build step. Duplicates (by name) are ignored. */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some(([n]) => n === name)) {
-        this._secrets.push([name, value]);
+  /** Adds secrets available during the environment build step. */
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -412,7 +418,7 @@ export class GoDevelopmentEnvironment {
       .withArtifacts(artifacts)
       .withEnvironments(environments);
 
-    if (this._secrets.length > 0) {
+    if (this._secrets.size > 0) {
       devenv = devenv.withSecrets(this._secrets);
     }
 

@@ -22,6 +22,7 @@ type GoScriptTemplateArgs struct {
 }
 
 type Go struct {
+	aliases        []string
 	artifacts      []*string
 	buildDirectory *string
 	buildFlags     *string
@@ -29,7 +30,7 @@ type Go struct {
 	environments   []string
 	includes       []string
 	name           string
-	secrets        []*api.ArtifactStepSecret
+	secrets        map[string]string
 	source         *api.ArtifactSource
 	sourceScripts  []string
 	systems        []api.ArtifactSystem
@@ -80,6 +81,7 @@ func GetGOARCH(target api.ArtifactSystem) (*string, error) {
 
 func NewGo(name string, systems []api.ArtifactSystem) *Go {
 	return &Go{
+		aliases:        []string{},
 		artifacts:      []*string{},
 		buildDirectory: nil,
 		buildFlags:     nil,
@@ -87,11 +89,16 @@ func NewGo(name string, systems []api.ArtifactSystem) *Go {
 		environments:   []string{},
 		includes:       []string{},
 		name:           name,
-		secrets:        []*api.ArtifactStepSecret{},
+		secrets:        map[string]string{},
 		source:         nil,
 		sourceScripts:  []string{},
 		systems:        systems,
 	}
+}
+
+func (b *Go) WithAliases(aliases []string) *Go {
+	b.aliases = aliases
+	return b
 }
 
 func (b *Go) WithArtifacts(artifacts []*string) *Go {
@@ -125,18 +132,10 @@ func (b *Go) WithIncludes(includes []string) *Go {
 }
 
 func (b *Go) WithSecrets(secrets map[string]string) *Go {
-	for _, name := range artifact.SortedKeys(secrets) {
-		value := secrets[name]
-		secret := &api.ArtifactStepSecret{
-			Name:  name,
-			Value: value,
+	for k, v := range secrets {
+		if _, exists := b.secrets[k]; !exists {
+			b.secrets[k] = v
 		}
-
-		if slices.ContainsFunc(b.secrets, func(s *api.ArtifactStepSecret) bool { return s.Name == name }) {
-			continue
-		}
-
-		b.secrets = append(b.secrets, secret)
 	}
 
 	return b
@@ -256,7 +255,7 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 
 	sources := []*api.ArtifactSource{source}
 
-	step, err := artifact.Shell(context, artifacts, environments, stepScript, builder.secrets)
+	step, err := artifact.Shell(context, artifacts, environments, stepScript, artifact.SecretsToProto(builder.secrets))
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +263,7 @@ func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
 	steps := []*api.ArtifactStep{step}
 
 	return artifact.NewArtifact(builder.name, steps, builder.systems).
+		WithAliases(builder.aliases).
 		WithSources(sources).
 		Build(context)
 }

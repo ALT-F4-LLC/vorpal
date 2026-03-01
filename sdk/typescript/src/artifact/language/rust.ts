@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import type { ArtifactStepSecret } from "../../api/artifact/artifact.js";
 import { ArtifactSystem } from "../../api/artifact/artifact.js";
 import type { ConfigContext } from "../../context.js";
 import {
@@ -9,6 +8,7 @@ import {
   ArtifactSource,
   DevelopmentEnvironment,
   getEnvKey,
+  secretsToProto,
 } from "../../artifact.js";
 import { shell } from "../step.js";
 
@@ -308,6 +308,7 @@ function buildMainScript(opts: {
  * ```
  */
 export class Rust {
+  private _aliases: string[] = [];
   private _artifacts: string[] = [];
   private _bins: string[] = [];
   private _build: boolean = true;
@@ -319,7 +320,7 @@ export class Rust {
   private _lint: boolean = false;
   private _name: string;
   private _packages: string[] = [];
-  private _secrets: ArtifactStepSecret[] = [];
+  private _secrets: Map<string, string> = new Map();
   private _source: string | undefined = undefined;
   private _systems: ArtifactSystem[];
   private _tests: boolean = false;
@@ -327,6 +328,12 @@ export class Rust {
   constructor(name: string, systems: ArtifactSystem[]) {
     this._name = name;
     this._systems = systems;
+  }
+
+  /** Sets aliases for the artifact. */
+  withAliases(aliases: string[]): this {
+    this._aliases = aliases;
+    return this;
   }
 
   /** Adds artifact dependencies available during the build step. */
@@ -341,9 +348,9 @@ export class Rust {
     return this;
   }
 
-  /** Enables `cargo check` during the build step. */
-  withCheck(): this {
-    this._check = true;
+  /** Enables or disables `cargo check` during the build step. */
+  withCheck(check: boolean): this {
+    this._check = check;
     return this;
   }
 
@@ -385,12 +392,13 @@ export class Rust {
 
   /**
    * Adds secrets available during the build step.
-   * Secrets are deduplicated by name.
+   *
+   * @param secrets - Map of secret name to value
    */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some((s) => s.name === name)) {
-        this._secrets.push({ name, value });
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -414,9 +422,6 @@ export class Rust {
    * @returns The artifact digest string
    */
   async build(context: ConfigContext): Promise<string> {
-    // Sort secrets for deterministic output
-    this._secrets.sort((a, b) => a.name.localeCompare(b.name));
-
     // Fetch protoc artifact
     const protoc = await context.fetchArtifactAlias(PROTOC_ALIAS);
 
@@ -571,12 +576,14 @@ export class Rust {
 
     let stepArtifacts: string[] = [rustToolchain];
 
+    const protoSecrets = secretsToProto(this._secrets);
+
     const vendorStep = await shell(
       context,
       stepArtifacts,
       stepEnvironments,
       vendorStepScript,
-      this._secrets,
+      protoSecrets,
     );
 
     const vendorName = `${this._name}-vendor`;
@@ -646,12 +653,13 @@ export class Rust {
       stepArtifacts,
       stepEnvironments,
       stepScript,
-      this._secrets,
+      protoSecrets,
     );
 
     // Create artifact
 
     return new Artifact(this._name, [step], this._systems)
+      .withAliases(this._aliases)
       .withSources([source])
       .build(context);
   }
@@ -679,7 +687,7 @@ export class RustDevelopmentEnvironment {
   private _artifacts: string[] = [];
   private _environments: string[] = [];
   private _name: string;
-  private _secrets: Array<[string, string]> = [];
+  private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
   private _includeProtoc: boolean = true;
 
@@ -713,11 +721,11 @@ export class RustDevelopmentEnvironment {
     return this;
   }
 
-  /** Adds secrets available during the environment build step. Duplicates (by name) are ignored. */
-  withSecrets(secrets: Array<[string, string]>): this {
-    for (const [name, value] of secrets) {
-      if (!this._secrets.some(([n]) => n === name)) {
-        this._secrets.push([name, value]);
+  /** Adds secrets available during the environment build step. */
+  withSecrets(secrets: Map<string, string>): this {
+    for (const [k, v] of secrets) {
+      if (!this._secrets.has(k)) {
+        this._secrets.set(k, v);
       }
     }
     return this;
@@ -767,7 +775,7 @@ export class RustDevelopmentEnvironment {
       .withArtifacts(artifacts)
       .withEnvironments(environments);
 
-    if (this._secrets.length > 0) {
+    if (this._secrets.size > 0) {
       devenv = devenv.withSecrets(this._secrets);
     }
 

@@ -83,17 +83,15 @@ func TestParseArtifactAlias(t *testing.T) {
 			expectError:       false,
 		},
 
-		// Edge cases - multiple colons (rightmost is split point)
+		// Edge cases - multiple colons (rightmost is split point, but colon in name is invalid)
 		{
-			name:              "name with multiple colons",
-			alias:             "name:tag:extra",
-			expectedName:      "name:tag",
-			expectedNamespace: "library",
-			expectedTag:       "extra",
-			expectError:       false,
+			name:          "name with multiple colons",
+			alias:         "name:tag:extra",
+			expectError:   true,
+			errorContains: "name contains invalid characters",
 		},
 
-		// Names with special characters
+		// Names with valid special characters
 		{
 			name:              "name with hyphens",
 			alias:             "my-app-name:v1.0",
@@ -203,6 +201,74 @@ func TestParseArtifactAlias(t *testing.T) {
 			alias:         ":",
 			expectError:   true,
 			errorContains: "tag cannot be empty",
+		},
+
+		// Invalid character cases
+		{
+			name:          "name with space",
+			alias:         "my app",
+			expectError:   true,
+			errorContains: "name contains invalid characters",
+		},
+		{
+			name:          "name with @",
+			alias:         "my@app",
+			expectError:   true,
+			errorContains: "name contains invalid characters",
+		},
+		{
+			name:          "name with #",
+			alias:         "my#app",
+			expectError:   true,
+			errorContains: "name contains invalid characters",
+		},
+		{
+			name:          "namespace with space",
+			alias:         "my team/myapp",
+			expectError:   true,
+			errorContains: "namespace contains invalid characters",
+		},
+		{
+			name:          "namespace with @",
+			alias:         "te@m/myapp",
+			expectError:   true,
+			errorContains: "namespace contains invalid characters",
+		},
+		{
+			name:          "tag with space",
+			alias:         "myapp:v 1.0",
+			expectError:   true,
+			errorContains: "tag contains invalid characters",
+		},
+		{
+			name:          "tag with #",
+			alias:         "myapp:v1#beta",
+			expectError:   true,
+			errorContains: "tag contains invalid characters",
+		},
+		{
+			name:          "name with exclamation mark",
+			alias:         "myapp!:v1.0",
+			expectError:   true,
+			errorContains: "name contains invalid characters",
+		},
+
+		// Plus signs are valid
+		{
+			name:              "name with plus sign",
+			alias:             "c++:latest",
+			expectedName:      "c++",
+			expectedNamespace: "library",
+			expectedTag:       "latest",
+			expectError:       false,
+		},
+		{
+			name:              "tag with plus sign",
+			alias:             "myapp:v1.0+build.1",
+			expectedName:      "myapp",
+			expectedNamespace: "library",
+			expectedTag:       "v1.0+build.1",
+			expectError:       false,
 		},
 	}
 
