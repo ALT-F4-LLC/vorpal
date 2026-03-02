@@ -1,7 +1,5 @@
 # Vorpal
 
-**Build software in Rust, Go, or TypeScript. Get reproducible artifacts on every platform.**
-
 [![CI](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml/badge.svg)](https://github.com/ALT-F4-LLC/vorpal/actions/workflows/vorpal.yaml) [![Release](https://img.shields.io/github/v/release/ALT-F4-LLC/vorpal?include_prereleases)](https://github.com/ALT-F4-LLC/vorpal/releases) [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE) [![npm](https://img.shields.io/npm/v/@altf4llc/vorpal-sdk)](https://www.npmjs.com/package/@altf4llc/vorpal-sdk)
 
 Vorpal is a build system that works the way you already write code. Define your build as a program -- not YAML, not a DSL -- using real SDKs in Rust, Go, or TypeScript. Vorpal handles hermetic execution, cross-platform targeting, content-addressed caching, and artifact distribution so you can focus on what you are building.
