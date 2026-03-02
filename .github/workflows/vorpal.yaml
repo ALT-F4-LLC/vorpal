@@ -288,7 +288,59 @@ jobs:
           name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
           path: Vorpal.lock
 
-  container-image:
+  release:
+    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
+    needs:
+      - test
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          fail-on-cache-miss: true
+          pattern: vorpal-dist-*
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz
+            vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz
+            vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz
+            vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz
+          name: ${{ github.ref_name }}
+          prerelease: true
+          tag_name: ${{ github.ref }}
+
+      - run: |
+          mkdir -p dist/aarch64-darwin
+          mkdir -p dist/aarch64-linux
+          mkdir -p dist/x86_64-darwin
+          mkdir -p dist/x86_64-linux
+          tar -xzf vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
+          tar -xzf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
+          tar -xzf vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz -C dist/x86_64-darwin
+          tar -xzf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
+          mv dist/aarch64-darwin/vorpal dist/aarch64-darwin/vorpal-aarch64-darwin
+          mv dist/aarch64-linux/vorpal dist/aarch64-linux/vorpal-aarch64-linux
+          mv dist/x86_64-darwin/vorpal dist/x86_64-darwin/vorpal-x86_64-darwin
+          mv dist/x86_64-linux/vorpal dist/x86_64-linux/vorpal-x86_64-linux
+
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/aarch64-darwin/vorpal-aarch64-darwin
+            dist/aarch64-linux/vorpal-aarch64-linux
+            dist/x86_64-darwin/vorpal-x86_64-darwin
+            dist/x86_64-linux/vorpal-x86_64-linux
+
+  release-container-image:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
     needs:
       - test
@@ -365,7 +417,7 @@ jobs:
           fi
           docker image push "docker.io/altf4llc/vorpal:${{ github.ref_name }}-${TAG_SUFFIX}"
 
-  container-image-manifest:
+  release-container-image-manifest:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
     needs:
       - container-image
@@ -386,54 +438,48 @@ jobs:
 
       - run: docker manifest push docker.io/altf4llc/vorpal:${{ github.ref_name }}
 
-  release:
+  release-sdk-rust:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
     needs:
       - test
     permissions:
-      attestations: write
-      contents: write
-      id-token: write
-      packages: write
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/cache/restore@v5
         with:
-          fail-on-cache-miss: true
-          pattern: vorpal-dist-*
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-target
+          path: target
 
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/cache/restore@v5
         with:
-          fail_on_unmatched_files: true
-          files: |
-            vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz
-            vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz
-            vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz
-            vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz
-          name: ${{ github.ref_name }}
-          prerelease: true
-          tag_name: ${{ github.ref }}
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
+          path: vendor
 
-      - run: |
-          mkdir -p dist/aarch64-darwin
-          mkdir -p dist/aarch64-linux
-          mkdir -p dist/x86_64-darwin
-          mkdir -p dist/x86_64-linux
-          tar -xzf vorpal-dist-aarch64-darwin/vorpal-aarch64-darwin.tar.gz -C dist/aarch64-darwin
-          tar -xzf vorpal-dist-aarch64-linux/vorpal-aarch64-linux.tar.gz -C dist/aarch64-linux
-          tar -xzf vorpal-dist-x86_64-darwin/vorpal-x86_64-darwin.tar.gz -C dist/x86_64-darwin
-          tar -xzf vorpal-dist-x86_64-linux/vorpal-x86_64-linux.tar.gz -C dist/x86_64-linux
-          mv dist/aarch64-darwin/vorpal dist/aarch64-darwin/vorpal-aarch64-darwin
-          mv dist/aarch64-linux/vorpal dist/aarch64-linux/vorpal-aarch64-linux
-          mv dist/x86_64-darwin/vorpal dist/x86_64-darwin/vorpal-x86_64-darwin
-          mv dist/x86_64-linux/vorpal dist/x86_64-linux/vorpal-x86_64-linux
+      - run: ./script/dev.sh # pre-bake
+      - run: ./script/dev.sh make .cargo vendor
+      - run: cargo publish -p vorpal-sdk --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: |
-            dist/aarch64-darwin/vorpal-aarch64-darwin
-            dist/aarch64-linux/vorpal-aarch64-linux
-            dist/x86_64-darwin/vorpal-x86_64-darwin
-            dist/x86_64-linux/vorpal-x86_64-linux
+  release-sdk-typescript:
+    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
+    needs:
+      - test
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+        working-directory: sdk/typescript
+
+      - run: bun run build
+        working-directory: sdk/typescript
+
+      - run: npm publish --access public
+        working-directory: sdk/typescript
