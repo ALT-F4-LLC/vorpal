@@ -1,0 +1,15 @@
+name: renovate
+
+on: pull_request_target
+
+permissions:
+  pull-requests: write
+
+jobs:
+  approve:
+    if: github.actor == 'renovate[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr review --approve "${{ github.event.pull_request.html_url }}"

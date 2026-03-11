@@ -88,6 +88,21 @@
             "automerge": true
         },
         {
+            "description": "Automerge Docker image patch updates",
+            "matchManagers": ["docker-compose", "dockerfile"],
+            "matchUpdateTypes": ["patch"],
+            "minimumReleaseAge": "3 days",
+            "automerge": true
+        },
+        {
+            "description": "Automerge Docker image minor updates for stable (>= 1.0) only",
+            "matchManagers": ["docker-compose", "dockerfile"],
+            "matchUpdateTypes": ["minor"],
+            "matchCurrentVersion": "!/^v?0\\./",
+            "minimumReleaseAge": "3 days",
+            "automerge": true
+        },
+        {
             "description": "Do NOT automerge Go indirect dependency updates",
             "matchManagers": ["gomod"],
             "matchDepTypes": ["indirect"],
