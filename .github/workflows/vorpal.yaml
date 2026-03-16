@@ -439,7 +439,7 @@ jobs:
       - run: docker manifest push docker.io/altf4llc/vorpal:${{ github.ref_name }}
 
   release-sdk-rust:
-    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
+    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') && !contains(github.ref, 'nightly') }}
     needs:
       - test
     permissions:
@@ -463,7 +463,7 @@ jobs:
       - run: cargo publish -p vorpal-sdk --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release-sdk-typescript:
-    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
+    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') && !contains(github.ref, 'nightly') }}
     needs:
       - test
     permissions:
