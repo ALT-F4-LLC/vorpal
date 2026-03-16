@@ -459,7 +459,10 @@ jobs:
           path: vendor
 
       - run: ./script/dev.sh # pre-bake
-      - run: cargo publish -p vorpal-sdk --registry crates-io --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - env:
+          PATH: "${PWD}/.env/bin:${PATH}"
+        run: cargo publish -p vorpal-sdk --registry crates-io --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release-sdk-typescript:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') && !contains(github.ref, 'nightly') }}
