@@ -488,7 +488,5 @@ jobs:
       - run: bun run build
         working-directory: sdk/typescript
 
-      - run: npm publish --tag next
+      - run: npm publish --tag next --provenance
         working-directory: sdk/typescript
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
