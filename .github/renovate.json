@@ -13,9 +13,6 @@
             "schedule:weekly"
         ]
     },
-    "ignorePaths": [
-        "cli/src/command/template/**"
-    ],
     "packageRules": [
         {
             "description": "Automerge GitHub Actions minor and patch updates",
@@ -112,6 +109,13 @@
             "description": "Do NOT automerge Terraform provider updates",
             "matchManagers": ["terraform"],
             "automerge": false
+        },
+        {
+            "description": "Ignore Vorpal SDK updates in Go template",
+            "matchManagers": ["gomod"],
+            "matchPackageNames": ["github.com/ALT-F4-LLC/vorpal/sdk/go"],
+            "matchFileNames": ["cli/src/command/template/go/**"],
+            "enabled": false
         }
     ]
 }
