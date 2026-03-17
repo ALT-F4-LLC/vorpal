@@ -460,7 +460,21 @@ jobs:
 
       - run: ./script/dev.sh # pre-bake
 
-      - run: |
+      - name: Check if version exists on crates.io
+        run: |
+          VERSION=$(grep '^version' sdk/rust/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "Checking crates.io for vorpal-sdk@${VERSION}"
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/vorpal-sdk/${VERSION}")
+          if [ "$RESPONSE" = "200" ]; then
+            echo "VERSION_EXISTS=true" >> "$GITHUB_ENV"
+            echo "Version ${VERSION} already exists on crates.io, skipping publish"
+          else
+            echo "VERSION_EXISTS=false" >> "$GITHUB_ENV"
+            echo "Version ${VERSION} not found on crates.io, will publish"
+          fi
+
+      - if: env.VERSION_EXISTS != 'true'
+        run: |
           ./script/dev.sh cargo publish \
             --package vorpal-sdk \
             --registry crates-io \
@@ -490,5 +504,18 @@ jobs:
       - run: bun run build
         working-directory: sdk/typescript
 
-      - run: npm publish --provenance --tag next
+      - name: Check if version exists on npm
+        run: |
+          VERSION=$(node -p "require('./sdk/typescript/package.json').version")
+          echo "Checking npm for @altf4llc/vorpal-sdk@${VERSION}"
+          if npm view "@altf4llc/vorpal-sdk@${VERSION}" version > /dev/null 2>&1; then
+            echo "VERSION_EXISTS=true" >> "$GITHUB_ENV"
+            echo "Version ${VERSION} already exists on npm, skipping publish"
+          else
+            echo "VERSION_EXISTS=false" >> "$GITHUB_ENV"
+            echo "Version ${VERSION} not found on npm, will publish"
+          fi
+
+      - if: env.VERSION_EXISTS != 'true'
+        run: npm publish --provenance --tag next
         working-directory: sdk/typescript
