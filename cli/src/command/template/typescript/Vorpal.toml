@@ -1,1 +1,9 @@
 language = "typescript"
+
+[source]
+includes = [
+    "bun.lock",
+    "package.json",
+    "src/vorpal.ts",
+    "tsconfig.json"
+]

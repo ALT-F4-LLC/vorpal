@@ -1,4 +1,8 @@
 language = "rust"
 
 [source]
-includes = ["src", "Cargo.toml", "Cargo.lock"]
+includes = [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src/vorpal.rs"
+]
