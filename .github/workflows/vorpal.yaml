@@ -490,5 +490,5 @@ jobs:
       - run: bun run build
         working-directory: sdk/typescript
 
-      - run: npm publish --tag next --provenance
+      - run: npm publish --provenance --tag next
         working-directory: sdk/typescript
