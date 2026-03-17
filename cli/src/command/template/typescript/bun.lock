@@ -5,7 +5,7 @@
     "": {
       "name": "example",
       "dependencies": {
-        "@altf4llc/vorpal-sdk": "0.1.0-alpha.0",
+        "@altf4llc/vorpal-sdk": "0.1.0-beta.0",
       },
       "devDependencies": {
         "@types/bun": "1.2.4",
@@ -14,7 +14,7 @@
     },
   },
   "packages": {
-    "@altf4llc/vorpal-sdk": ["@altf4llc/vorpal-sdk@0.1.0-alpha.0", "", { "dependencies": { "@bufbuild/protobuf": "2.11.0", "@grpc/grpc-js": "1.14.3", "smol-toml": "1.6.0" } }, "sha512-48+gI/+qGZo0GDwi3pVBC3XksQpbCVmChiSxE0M0I+witIBt9vSXBcJM/PNoHf5tCgWDhSqSshD/1ztB24Dw6g=="],
+    "@altf4llc/vorpal-sdk": ["@altf4llc/vorpal-sdk@0.1.0-beta.0", "", { "dependencies": { "@bufbuild/protobuf": "2.11.0", "@grpc/grpc-js": "1.14.3", "smol-toml": "1.6.0" } }, "sha512-OrOOa48r1RdS2/nQ6mowedHWUgqjc4d4kNPZ8rTTpObhZFnR65Zfjo0IhkmYq+t8t/L6OiA7GtMEzLSnPLKphA=="],
 
     "@bufbuild/protobuf": ["@bufbuild/protobuf@2.11.0", "", {}, "sha512-sBXGT13cpmPR5BMgHE6UEEfEaShh5Ror6rfN3yEK5si7QVrtZg8LEPQb0VVhiLRUslD2yLnXtnRzG035J/mZXQ=="],
 
