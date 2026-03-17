@@ -492,5 +492,3 @@ jobs:
 
       - run: npm publish --tag next --provenance
         working-directory: sdk/typescript
-        env:
-          NODE_AUTH_TOKEN: "" # https://github.com/actions/setup-node/issues/1440
