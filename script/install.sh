@@ -12,6 +12,7 @@ set -euo pipefail
 #   VORPAL_VERSION=<ver>       Version to install (default: nightly)
 #   VORPAL_NO_SERVICE=1        Skip service installation
 #   VORPAL_NO_PATH=1           Skip PATH configuration
+#   VORPAL_DRY_RUN=1           Show what would be done without making changes
 #   NO_COLOR=1                 Disable color output
 # =============================================================================
 
@@ -27,6 +28,7 @@ VORPAL_GITHUB_URL="https://github.com/$VORPAL_REPO"
 
 FLAG_YES=0
 FLAG_UNINSTALL=0
+FLAG_DRY_RUN="${VORPAL_DRY_RUN:-0}"
 NO_SERVICE="${VORPAL_NO_SERVICE:-0}"
 NO_PATH="${VORPAL_NO_PATH:-0}"
 
@@ -137,18 +139,23 @@ print_banner() {
 
     printf '%s' "${_fmt_cyan}"
     cat <<'BANNER'
-                           __
- _   _____  _________  ____ _/ /
+                               __
+ _   _ ____  _________  ____ _/ /
 | | / / __ \/ ___/ __ \/ __ `/ /
 | |/ / /_/ / /  / /_/ / /_/ / /
 |___/\____/_/  / .___/\__,_/_/
               /_/
 BANNER
-    printf '%s\n' "${_fmt_reset}"
-    printf '  %s\n' "Build system that works as code."
+    printf '%s' "${_fmt_reset}"
+    printf '\n  %s\n' "Build system that works as code."
     printf '\n'
     printf '  Version:  %s%s%s\n' "${_fmt_dim}" "$VORPAL_VERSION" "${_fmt_reset}"
     printf '  Platform: %s%s (%s)%s\n' "${_fmt_dim}" "$PLATFORM" "${ARCH}-${OS}" "${_fmt_reset}"
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        printf '\n  %s%s[DRY RUN]%s %sNo changes will be made%s\n' \
+            "${_fmt_bold}" "${_fmt_yellow}" "${_fmt_reset}" \
+            "${_fmt_dim}" "${_fmt_reset}"
+    fi
 }
 
 print_header() {
@@ -347,6 +354,7 @@ Options:
   -v, --version <ver>    Version to install (default: nightly)
       --no-service       Skip service installation
       --no-path          Skip PATH configuration
+      --dry-run          Show what would be done without making changes
       --uninstall        Uninstall Vorpal
   -h, --help             Show this help message
 
@@ -356,6 +364,7 @@ Environment variables:
   VORPAL_VERSION=<ver>       Version to install (default: nightly)
   VORPAL_NO_SERVICE=1        Skip service installation
   VORPAL_NO_PATH=1           Skip PATH configuration
+  VORPAL_DRY_RUN=1           Show what would be done without making changes
   NO_COLOR=1                 Disable color output
 EOF
 }
@@ -383,6 +392,10 @@ parse_args() {
                 ;;
             --no-path)
                 NO_PATH=1
+                shift
+                ;;
+            --dry-run)
+                FLAG_DRY_RUN=1
                 shift
                 ;;
             --uninstall)
@@ -473,6 +486,8 @@ check_prerequisites() {
 # -- Phase 2: Download & version resolution -----------------------------------
 
 resolve_version() {
+    # Note: Version resolution runs during --dry-run to validate the plan is realistic.
+    # This makes read-only HTTP requests (API query, HEAD validation).
     local version="$VORPAL_VERSION"
     local artifact="vorpal-${ARCH}-${OS}.tar.gz"
 
@@ -538,6 +553,13 @@ handle_existing() {
     # Get current installed version
     EXISTING_VERSION="$("$binary" --version 2>/dev/null || printf 'unknown')"
 
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        # Dry-run: show default choice without prompting
+        IS_UPGRADE=1
+        print_warning "Vorpal is already installed (${EXISTING_VERSION}). Would upgrade to ${RESOLVED_VERSION} (default)."
+        return 0
+    fi
+
     if ! is_interactive; then
         # Non-interactive: auto-upgrade
         IS_UPGRADE=1
@@ -578,6 +600,14 @@ handle_existing() {
 
 download_binary() {
     print_header "Downloading"
+
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        print_step "Would download Vorpal ${RESOLVED_VERSION} from ${DOWNLOAD_URL}"
+        print_step "Would extract to ${VORPAL_INSTALL_DIR}/bin/vorpal"
+        print_step "Would verify binary"
+        print_success "Download (dry run)"
+        return 0
+    fi
 
     # Create temp dir for atomic download
     TEMP_DIR="$(mktemp -d)"
@@ -700,6 +730,13 @@ setup_system_dirs() {
         fi
     fi
 
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        print_step "Would create ${system_dir}/{key,log,sandbox,store,...}"
+        print_step "Would set ownership to current user (${current_uid}:${current_gid})"
+        print_success "System directories (dry run)"
+        return 0
+    fi
+
     # Pre-announce sudo requirement per UX spec
     print_warning "Vorpal needs to create ${system_dir} (requires sudo)"
 
@@ -744,6 +781,12 @@ setup_system_dirs() {
 
 generate_keys() {
     print_header "Generating security keys"
+
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        print_step "Would generate security keys"
+        print_success "Security keys (dry run)"
+        return 0
+    fi
 
     local vorpal_bin="${VORPAL_INSTALL_DIR}/bin/vorpal"
     local key_output
@@ -896,6 +939,20 @@ UNIT
 install_service() {
     print_header "Starting services"
 
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        case "$OS" in
+            darwin)
+                print_step "Would install LaunchAgent (com.altf4llc.vorpal)"
+                ;;
+            linux)
+                print_step "Would install systemd user service (vorpal.service)"
+                ;;
+        esac
+        print_step "Would start services"
+        print_success "Services (dry run)"
+        return 0
+    fi
+
     case "$OS" in
         darwin)
             install_service_macos
@@ -907,6 +964,11 @@ install_service() {
 }
 
 verify_service() {
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        print_step "Would verify services"
+        return 0
+    fi
+
     local max_wait=5
     local waited=0
 
@@ -979,6 +1041,8 @@ configure_path() {
     if [[ -f "$bash_rc" ]]; then
         if grep -qF "$marker" "$bash_rc" 2>/dev/null; then
             print_success "PATH already configured in ${bash_rc/#$HOME/~}"
+        elif [[ "$FLAG_DRY_RUN" = 1 ]]; then
+            print_step "Would add PATH to ${bash_rc/#$HOME/~}: ${path_line}"
         else
             printf '\n%s\n%s\n' "$marker" "$path_line" >> "$bash_rc"
             print_success "Added ~/.vorpal/bin to PATH in ${bash_rc/#$HOME/~}"
@@ -995,6 +1059,8 @@ configure_path() {
     if [[ -f "$zsh_rc" ]]; then
         if grep -qF "$marker" "$zsh_rc" 2>/dev/null; then
             print_success "PATH already configured in ~/.zshrc"
+        elif [[ "$FLAG_DRY_RUN" = 1 ]]; then
+            print_step "Would add PATH to ~/.zshrc: ${path_line}"
         else
             printf '\n%s\n%s\n' "$marker" "$path_line" >> "$zsh_rc"
             print_success "Added ~/.vorpal/bin to PATH in ~/.zshrc"
@@ -1011,6 +1077,8 @@ configure_path() {
     if [[ -f "$fish_rc" ]]; then
         if grep -qF "$marker" "$fish_rc" 2>/dev/null; then
             print_success "PATH already configured in ~/.config/fish/config.fish"
+        elif [[ "$FLAG_DRY_RUN" = 1 ]]; then
+            print_step "Would add PATH to ~/.config/fish/config.fish: ${fish_path_line}"
         else
             printf '\n%s\n%s\n' "$marker" "$fish_path_line" >> "$fish_rc"
             print_success "Added ~/.vorpal/bin to PATH in ~/.config/fish/config.fish"
@@ -1029,6 +1097,10 @@ configure_path() {
         return 0
     fi
 
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        return 0
+    fi
+
     # Source hint for the active shell
     if [[ -n "$active_shell_rc" ]]; then
         local display_rc="${active_shell_rc/#$HOME/~}"
@@ -1039,6 +1111,16 @@ configure_path() {
 print_summary() {
     printf '\n'
     printf '  %s-------------------------------------------------------%s\n' "${_fmt_dim}" "${_fmt_reset}"
+
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        printf '\n  %s%sDry run complete. No changes were made.%s\n' "${_fmt_bold}" "${_fmt_yellow}" "${_fmt_reset}"
+        printf '\n'
+        printf '  Run without --dry-run to install Vorpal %s.\n' "$RESOLVED_VERSION"
+        printf '\n'
+        printf '  Docs:     %s%s%s\n' "${_fmt_cyan}" "${VORPAL_GITHUB_URL}" "${_fmt_reset}"
+        printf '  Issues:   %s%s/issues%s\n' "${_fmt_cyan}" "${VORPAL_GITHUB_URL}" "${_fmt_reset}"
+        return 0
+    fi
 
     if [[ "$IS_UPGRADE" = 1 ]]; then
         printf '\n  %s%sVorpal upgraded to %s.%s\n' "${_fmt_bold}" "${_fmt_green}" "$RESOLVED_VERSION" "${_fmt_reset}"
@@ -1195,6 +1277,12 @@ main() {
     setup_trap
     _setup_formatting
     detect_platform
+
+    if [[ "$FLAG_DRY_RUN" = 1 ]] && [[ "$FLAG_UNINSTALL" = 1 ]]; then
+        print_error "Cannot use --dry-run with --uninstall" \
+            "These flags are mutually exclusive."
+        exit 1
+    fi
 
     if [[ "$FLAG_UNINSTALL" = 1 ]]; then
         run_uninstall
