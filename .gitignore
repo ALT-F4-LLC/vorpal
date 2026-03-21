@@ -8,3 +8,5 @@
 target
 vendor
 vorpal-*-*
+website/dist/
+website/node_modules/

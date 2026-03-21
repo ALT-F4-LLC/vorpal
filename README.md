@@ -22,11 +22,11 @@ curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/insta
 
 macOS (Apple Silicon, Intel) and Linux (x86_64, ARM64). The installer downloads the latest release, generates TLS keys, and starts background services.
 
-> Building from source? See the [Contributing](#contributing) section.
+> Building from source? See the [Contributing](#contributing) section. For detailed installation options, see the [Installation Guide](https://docs.vorpal.build/getting-started/installation/).
 
 ## Quickstart
 
-Create a new project and build your first artifact.
+Create a new project and build your first artifact. For a more detailed walkthrough, see the [Quickstart tutorial](https://docs.vorpal.build/getting-started/quickstart/).
 
 ### 1. Create a project
 
@@ -55,7 +55,7 @@ That is it. Your artifact is built, cached, and runnable.
 
 ## SDK Examples
 
-Vorpal build configs are real programs. Write them in the language your project already uses.
+Vorpal build configs are real programs. Write them in the language your project already uses. See the full SDK guides for [Rust](https://docs.vorpal.build/guides/rust/), [Go](https://docs.vorpal.build/guides/go/), and [TypeScript](https://docs.vorpal.build/guides/typescript/).
 
 ### Build an artifact
 
@@ -405,13 +405,17 @@ func main() {
 
 ## Documentation
 
+Full documentation is available at **[docs.vorpal.build](https://docs.vorpal.build)**.
+
 | Resource | Link |
 |----------|------|
-| Architecture overview | [`docs/spec/architecture.md`](docs/spec/architecture.md) |
-| CLI reference | `vorpal --help` |
-| Go SDK | [`sdk/go/`](sdk/go/) |
-| Rust SDK | [`sdk/rust/`](sdk/rust/) |
-| TypeScript SDK | [`sdk/typescript/`](sdk/typescript/) |
+| Installation guide | [docs.vorpal.build/getting-started/installation](https://docs.vorpal.build/getting-started/installation/) |
+| Quickstart tutorial | [docs.vorpal.build/getting-started/quickstart](https://docs.vorpal.build/getting-started/quickstart/) |
+| Architecture overview | [docs.vorpal.build/concepts/architecture](https://docs.vorpal.build/concepts/architecture/) |
+| CLI reference | [docs.vorpal.build/reference/cli](https://docs.vorpal.build/reference/cli/) |
+| Go SDK guide | [docs.vorpal.build/guides/go](https://docs.vorpal.build/guides/go/) |
+| Rust SDK guide | [docs.vorpal.build/guides/rust](https://docs.vorpal.build/guides/rust/) |
+| TypeScript SDK guide | [docs.vorpal.build/guides/typescript](https://docs.vorpal.build/guides/typescript/) |
 
 ## Contributing
 

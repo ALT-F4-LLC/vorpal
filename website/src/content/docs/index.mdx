@@ -1,0 +1,147 @@
+---
+title: Vorpal
+description: A build system that works as code. Define builds, environments, CI, and services as real programs in Go, Rust, or TypeScript.
+template: splash
+hero:
+  tagline: Define your builds, environments, CI, and services as real programs — not JSON, not YAML — using SDKs in Go, Rust, or TypeScript.
+  actions:
+    - text: Get Started
+      link: /getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/ALT-F4-LLC/vorpal
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<hr class="landing-divider" />
+
+<div class="landing-section landing-section-wide">
+
+## Your build, your language
+
+<p class="landing-subtitle">Choose the SDK that fits your project. All three produce identical artifacts.</p>
+
+<CardGrid>
+  <Card title="Platform native" icon="laptop">
+    Runs directly on your OS with no containers or VMs. Native performance on macOS and Linux.
+  </Card>
+  <Card title="Built-in caching" icon="star">
+    Artifacts cached by content hash. Unchanged builds resolve instantly with no re-work.
+  </Card>
+  <Card title="Reproducible" icon="approve-check-circle">
+    Content-addressed artifacts with hermetic steps. Same inputs, same output, everywhere.
+  </Card>
+  <Card title="Config as code" icon="seti:config">
+    Build configs are real programs with full IDE support. No more YAML or JSON wrangling.
+  </Card>
+  <Card title="CI as code" icon="rocket">
+    Define tests, linting, and deploys as Jobs. Run locally or in CI with identical results.
+  </Card>
+  <Card title="Dev & User Envs" icon="setting">
+    Project shells with pinned tools and env vars. Services and secrets management coming soon.
+  </Card>
+</CardGrid>
+
+</div>
+
+<div class="landing-section">
+
+### Go SDK
+
+Minimal boilerplate, maximum clarity.
+
+```go title="main.go"
+package main
+
+import (
+    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+)
+
+func main() {
+    ctx := config.GetContext()
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
+
+    language.NewGo("my-app", systems).
+        WithBuildDirectory("cmd/app").
+        WithIncludes([]string{"cmd", "go.mod", "go.sum"}).
+        Build(ctx)
+
+    ctx.Run()
+}
+```
+
+### Rust SDK
+
+The canonical SDK with full type safety.
+
+```rust title="main.rs"
+use vorpal_sdk::{
+    api::artifact::ArtifactSystem::*,
+    artifact::language::rust::Rust,
+    context::get_context,
+};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let ctx = &mut get_context().await?;
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+
+    Rust::new("my-app", systems)
+        .with_bins(vec!["my-app"])
+        .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
+        .build(ctx)
+        .await?;
+
+    ctx.run().await
+}
+```
+
+### TypeScript SDK
+
+Get started in minutes with async/await.
+
+```typescript title="vorpal.ts"
+import { ArtifactSystem, ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
+
+const systems = [
+  ArtifactSystem.AARCH64_DARWIN,
+  ArtifactSystem.AARCH64_LINUX,
+  ArtifactSystem.X8664_DARWIN,
+  ArtifactSystem.X8664_LINUX,
+];
+
+const context = ConfigContext.create();
+
+await new TypeScript("my-app", systems)
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
+  .build(context);
+
+await context.run();
+```
+
+</div>
+
+<div class="landing-section cta-section">
+
+## Ready to get started?
+
+Install Vorpal in seconds and build your first artifact.
+
+<div class="cta-actions">
+  <a href="/getting-started/installation/" class="sl-link-button primary">Install Vorpal</a>
+  <a href="/getting-started/quickstart/" class="sl-link-button minimal">Read the quickstart →</a>
+</div>
+
+</div>
