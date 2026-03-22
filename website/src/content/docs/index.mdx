@@ -18,6 +18,7 @@ hero:
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
+import CarouselScript from '../../components/CarouselScript.astro';
 
 <div class="landing-section landing-section-wide">
 
@@ -41,6 +42,16 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <p class="landing-subtitle">Choose the SDK that fits your project. All SDKs produce identical artifacts.</p>
 
+<div class="sdk-carousel" data-carousel>
+  <div class="sdk-carousel-tabs" role="tablist" aria-label="SDK language selector">
+    <button role="tab" id="tab-go" aria-selected="true" aria-controls="panel-go" tabindex="0">Go</button>
+    <button role="tab" id="tab-rust" aria-selected="false" aria-controls="panel-rust" tabindex="-1">Rust</button>
+    <button role="tab" id="tab-ts" aria-selected="false" aria-controls="panel-ts" tabindex="-1">TypeScript</button>
+  </div>
+
+  <div class="sdk-carousel-panels">
+    <div role="tabpanel" id="panel-go" aria-labelledby="tab-go" class="sdk-carousel-panel active">
+
 <Card title="Go SDK" icon="seti:go">
   For full-stack and platform engineers who want builds that read like the rest of their code.
 
@@ -49,7 +60,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
   ```
 </Card>
 
-```go title="main.go"
+```go title="vorpal.go"
 package main
 
 import (
@@ -77,6 +88,10 @@ func main() {
 }
 ```
 
+    </div>
+
+    <div role="tabpanel" id="panel-rust" aria-labelledby="tab-rust" class="sdk-carousel-panel">
+
 <Card title="Rust SDK" icon="seti:rust">
   For systems programmers who expect compile-time guarantees — even from their build system.
 
@@ -85,7 +100,7 @@ func main() {
   ```
 </Card>
 
-```rust title="main.rs"
+```rust title="vorpal.rs"
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::*,
     artifact::language::rust::Rust,
@@ -107,6 +122,10 @@ async fn main() -> anyhow::Result<()> {
     ctx.run().await
 }
 ```
+
+    </div>
+
+    <div role="tabpanel" id="panel-ts" aria-labelledby="tab-ts" class="sdk-carousel-panel">
 
 <Card title="TypeScript SDK" icon="seti:typescript">
   For frontend and tooling engineers who want builds in the language they already ship.
@@ -135,6 +154,18 @@ await new TypeScript("my-app", systems)
 
 await ctx.run();
 ```
+
+    </div>
+  </div>
+
+  <div class="sdk-carousel-dots" aria-hidden="true">
+    <span class="sdk-carousel-dot active"></span>
+    <span class="sdk-carousel-dot"></span>
+    <span class="sdk-carousel-dot"></span>
+  </div>
+</div>
+
+<CarouselScript />
 
 </div>
 

@@ -1,0 +1,73 @@
+<script is:inline>
+document.addEventListener('DOMContentLoaded', () => {
+  const carousel = document.querySelector('[data-carousel]');
+  if (!carousel) return;
+  carousel.classList.add('sdk-carousel--active');
+
+  const tabs = [...carousel.querySelectorAll('[role="tab"]')];
+  const panels = [...carousel.querySelectorAll('[role="tabpanel"]')];
+  const dots = [...carousel.querySelectorAll('.sdk-carousel-dot')];
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let currentIndex = 0;
+  let timerId = null;
+  let transitioning = false;
+
+  function switchTo(index) {
+    if (index === currentIndex && !transitioning) return;
+    // Cancel any in-progress transition
+    panels.forEach(p => { p.classList.remove('sdk-carousel-panel--exiting'); });
+    const oldPanel = panels[currentIndex];
+    const newPanel = panels[index];
+
+    const finish = () => {
+      oldPanel.classList.remove('active', 'sdk-carousel-panel--exiting');
+      newPanel.classList.add('active');
+      tabs.forEach((t, i) => { t.setAttribute('aria-selected', i === index ? 'true' : 'false'); t.setAttribute('tabindex', i === index ? '0' : '-1'); });
+      dots.forEach((d, i) => { d.classList.toggle('active', i === index); });
+      currentIndex = index;
+      transitioning = false;
+    };
+
+    if (reducedMotion.matches || index === currentIndex) {
+      finish();
+      return;
+    }
+
+    transitioning = true;
+    oldPanel.classList.add('sdk-carousel-panel--exiting');
+    const onEnd = () => { oldPanel.removeEventListener('transitionend', onEnd); finish(); };
+    oldPanel.addEventListener('transitionend', onEnd);
+    // Safety fallback in case transitionend doesn't fire
+    setTimeout(() => { if (transitioning) { oldPanel.removeEventListener('transitionend', onEnd); finish(); } }, 250);
+  }
+
+  tabs.forEach((tab, i) => {
+    tab.addEventListener('click', () => { switchTo(i); startTimer(); });
+  });
+
+  // Keyboard navigation (WAI-ARIA Tabs pattern)
+  carousel.querySelector('[role="tablist"]').addEventListener('keydown', (e) => {
+    let idx = tabs.indexOf(document.activeElement);
+    if (idx < 0) return;
+    let handled = true;
+    if (e.key === 'ArrowRight') idx = (idx + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') idx = (idx - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') idx = 0;
+    else if (e.key === 'End') idx = tabs.length - 1;
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchTo(idx); startTimer(); return; }
+    else handled = false;
+    if (handled) { e.preventDefault(); tabs[idx].setAttribute('tabindex', '0'); tabs.forEach((t, i) => { if (i !== idx) t.setAttribute('tabindex', '-1'); }); tabs[idx].focus(); }
+  });
+
+  function startTimer() {
+    clearInterval(timerId);
+    timerId = setInterval(() => switchTo((currentIndex + 1) % tabs.length), 5000);
+  }
+  startTimer();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearInterval(timerId);
+    else startTimer();
+  });
+});
+</script>
