@@ -124,3 +124,54 @@ When you build an artifact, Vorpal only builds it for the current host platform.
 ## Aliases
 
 Artifacts can have named aliases like `latest` or a version string. Aliases let you run artifacts by name (`vorpal run my-app`) instead of by their full content digest. The Registry stores the mapping from alias to digest.
+
+## Built-in artifacts
+
+The Vorpal SDK ships with pre-built artifact definitions for common tools and runtimes. These can be used as dependencies in your own artifacts via `with_artifacts` / `WithArtifacts`.
+
+### Tools
+
+| Artifact | Description |
+|----------|-------------|
+| `Bun` | JavaScript/TypeScript runtime and package manager |
+| `Cargo` | Rust package manager |
+| `Clippy` | Rust linter |
+| `Crane` | Container image tool |
+| `Gh` | GitHub CLI |
+| `Git` | Version control |
+| `Go` | Go compiler and tools |
+| `Goimports` | Go import formatter |
+| `Gopls` | Go language server |
+| `Grpcurl` | gRPC command-line client |
+| `NodeJS` | Node.js runtime |
+| `Pnpm` | Node.js package manager |
+| `Protoc` | Protocol Buffers compiler |
+| `ProtocGenGo` | Protobuf Go code generator |
+| `ProtocGenGoGrpc` | Protobuf Go gRPC code generator |
+| `Rsync` | File synchronization tool |
+| `RustAnalyzer` | Rust language server |
+| `Rustc` | Rust compiler |
+| `Rustfmt` | Rust formatter |
+| `Staticcheck` | Go static analysis tool |
+
+### Rust toolchain
+
+| Artifact | Description |
+|----------|-------------|
+| `RustSrc` | Rust source code (for rust-analyzer) |
+| `RustStd` | Rust standard library |
+| `RustToolchain` | Complete Rust toolchain bundle |
+
+### Linux images
+
+| Artifact | Description |
+|----------|-------------|
+| `LinuxDebian` | Debian-based Linux base image |
+| `LinuxVorpal` | Vorpal Linux base image |
+| `LinuxVorpalSlim` | Minimal Vorpal Linux image |
+
+### Container images
+
+| Artifact | Description |
+|----------|-------------|
+| `OciImage` | OCI container image builder |

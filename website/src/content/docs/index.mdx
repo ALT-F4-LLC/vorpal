@@ -17,13 +17,7 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-<hr class="landing-divider" />
-
 <div class="landing-section landing-section-wide">
-
-## Your build, your language
-
-<p class="landing-subtitle">Choose the SDK that fits your project. All three produce identical artifacts.</p>
 
 <CardGrid>
   <Card title="Platform native" icon="laptop">
@@ -35,14 +29,14 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
   <Card title="Reproducible" icon="approve-check-circle">
     Content-addressed artifacts with hermetic steps. Same inputs, same output, everywhere.
   </Card>
-  <Card title="Config as code" icon="seti:config">
-    Build configs are real programs with full IDE support. No more YAML or JSON wrangling.
+  <Card title="All as code" icon="seti:config">
+    Builds, CI, environments, and services — defined as real programs with full IDE support.
   </Card>
-  <Card title="CI as code" icon="rocket">
-    Define tests, linting, and deploys as Jobs. Run locally or in CI with identical results.
+  <Card title="Local or distributed" icon="rocket">
+    Run builds on your machine or distribute them across remote workers. Same result either way.
   </Card>
-  <Card title="Dev & User Envs" icon="setting">
-    Project shells with pinned tools and env vars. Services and secrets management coming soon.
+  <Card title="Multi-environment" icon="setting">
+    Dev environments, user configs, and long-running services — all defined and managed as artifacts.
   </Card>
 </CardGrid>
 
@@ -50,9 +44,17 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <div class="landing-section">
 
-### Go SDK
+## Your build, your language
 
-Minimal boilerplate, maximum clarity.
+<p class="landing-subtitle">Choose the SDK that fits your project. All SDKs produce identical artifacts.</p>
+
+<Card title="Go SDK" icon="seti:go">
+  For full-stack and platform engineers who want builds that read like the rest of their code.
+
+  ```bash title="Install"
+  go get github.com/ALT-F4-LLC/vorpal/sdk/go
+  ```
+</Card>
 
 ```go title="main.go"
 package main
@@ -81,9 +83,13 @@ func main() {
 }
 ```
 
-### Rust SDK
+<Card title="Rust SDK" icon="seti:rust">
+  For systems programmers who expect compile-time guarantees — even from their build system.
 
-The canonical SDK with full type safety.
+  ```bash title="Install"
+  cargo add vorpal-sdk
+  ```
+</Card>
 
 ```rust title="main.rs"
 use vorpal_sdk::{
@@ -107,9 +113,13 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-### TypeScript SDK
+<Card title="TypeScript SDK" icon="seti:typescript">
+  For frontend and tooling engineers who want builds in the language they already ship.
 
-Get started in minutes with async/await.
+  ```bash title="Install"
+  bun add @altf4llc/vorpal-sdk
+  ```
+</Card>
 
 ```typescript title="vorpal.ts"
 import { ArtifactSystem, ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
@@ -130,6 +140,31 @@ await new TypeScript("my-app", systems)
 
 await context.run();
 ```
+
+</div>
+
+<div class="landing-section">
+
+## One CLI to build and run
+
+<p class="landing-subtitle">After defining your config in any SDK, the Vorpal CLI handles the rest.</p>
+
+<CardGrid>
+  <Card title="Build" icon="rocket">
+    Produce a content-addressed artifact. Cached builds resolve instantly.
+
+    ```bash title="Terminal"
+    vorpal build my-app
+    ```
+  </Card>
+  <Card title="Run" icon="right-arrow">
+    Execute any built artifact by name — locally or from a remote registry.
+
+    ```bash title="Terminal"
+    vorpal run my-app
+    ```
+  </Card>
+</CardGrid>
 
 </div>
 

@@ -44,7 +44,7 @@
 .landing-section {
 	max-width: 52rem;
 	margin: 0 auto;
-	padding: 1rem 1rem 0;
+	padding: 5rem 1rem 0;
 }
 
 .landing-section:first-of-type {
@@ -67,10 +67,19 @@
 	margin-bottom: 2rem;
 }
 
+.landing-section .card + .expressive-code + .card {
+	margin-top: 5rem;
+}
+
 .landing-subtitle {
 	text-align: center;
 	color: var(--sl-color-gray-2);
 	margin-bottom: 5rem !important;
+}
+
+.landing-section code:not(pre code) {
+	display: inline-block;
+	margin-bottom: 1.5rem;
 }
 
 .landing-divider {
@@ -83,7 +92,7 @@
 .landing-section.landing-section-wide {
 	max-width: 100%;
 	padding-inline: 0;
-	padding: 3rem 0 2rem;
+	padding: 0;
 }
 
 .landing-section .card-grid {
@@ -97,8 +106,11 @@
 }
 
 @media (min-width: 60rem) {
-	.landing-section .card-grid {
+	.landing-section-wide .card-grid {
 		grid-template-columns: repeat(3, 1fr) !important;
+	}
+	.landing-section:not(.landing-section-wide) .card-grid {
+		grid-template-columns: repeat(2, 1fr) !important;
 	}
 }
 

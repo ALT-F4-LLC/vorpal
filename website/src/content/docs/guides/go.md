@@ -15,9 +15,27 @@ go get github.com/ALT-F4-LLC/vorpal/sdk/go
 
 ## Project setup
 
-Create a build configuration in `main.go`:
+Create a `Vorpal.toml` manifest in your project root:
 
-```go title="main.go"
+:::note
+This example follows the [Standard Go Project Layout](https://github.com/golang-standards/project-layout).
+:::
+
+```toml title="Vorpal.toml"
+language = "go"
+
+[source]
+includes = ["cmd/vorpal", "go.mod", "go.sum"]
+
+[source.go]
+directory = "cmd/vorpal"
+```
+
+The `language` field tells Vorpal to use the Go SDK. `includes` lists only the files Vorpal needs to track — keeping this minimal maximizes caching between artifacts. `[source.go]` sets the directory containing your build config's `main` package.
+
+Then create a build configuration in `cmd/vorpal/main.go`:
+
+```go title="cmd/vorpal/main.go"
 package main
 
 import (
@@ -25,15 +43,15 @@ import (
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-var systems = []api.ArtifactSystem{
-    api.ArtifactSystem_AARCH64_DARWIN,
-    api.ArtifactSystem_AARCH64_LINUX,
-    api.ArtifactSystem_X8664_DARWIN,
-    api.ArtifactSystem_X8664_LINUX,
-}
-
 func main() {
     ctx := config.GetContext()
+
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
 
     // Define your artifacts here
 
@@ -45,11 +63,17 @@ Every Vorpal config starts by creating a context and defining target systems. Th
 
 ## Defining artifacts
 
-### Build a Go project
+Artifacts are the core building blocks in Vorpal. Each artifact defines what to build, which platforms to target, what files to include, and more.
+
+### Define an artifact
 
 Use the `Go` builder from `language` package to compile a Go project into a cross-platform artifact:
 
-```go title="main.go" {5,20-25}
+:::note
+`Go` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
+:::
+
+```go title="cmd/vorpal/main.go" {5,20-26}
 package main
 
 import (
@@ -59,19 +83,19 @@ import (
     "log"
 )
 
-var systems = []api.ArtifactSystem{
-    api.ArtifactSystem_AARCH64_DARWIN,
-    api.ArtifactSystem_AARCH64_LINUX,
-    api.ArtifactSystem_X8664_DARWIN,
-    api.ArtifactSystem_X8664_LINUX,
-}
-
 func main() {
     ctx := config.GetContext()
 
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
+
     _, err := language.NewGo("my-app", systems).
         WithBuildDirectory("cmd/my-app").
-        WithIncludes([]string{"cmd", "go.mod", "go.sum"}).
+        WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
         Build(ctx)
     if err != nil {
         log.Fatalf("error building: %v", err)
@@ -85,44 +109,293 @@ The `Go` builder:
 - **`WithBuildDirectory`** — Sets the directory containing the `main` package
 - **`WithIncludes`** — Lists files and directories to include in the build source
 
-### Development environments
+The `Go` builder supports additional configuration:
 
-Create a portable development shell with pinned tools and environment variables:
+| Method | Description |
+|--------|-------------|
+| `WithAliases(aliases)` | Alternative names for the artifact |
+| `WithArtifacts(artifacts)` | Artifact dependencies available during build |
+| `WithBuildDirectory(dir)` | Directory containing the `main` package |
+| `WithBuildFlags(flags)` | Additional `go build` flags |
+| `WithBuildPath(path)` | Custom build path |
+| `WithEnvironments(vars)` | Environment variables for the build |
+| `WithIncludes(paths)` | Source files to include |
+| `WithSecrets(map)` | Build-time secrets |
+| `WithSource(source)` | Custom artifact source |
+| `WithSourceScript(script)` | Script to run before build |
 
-```go title="main.go" {5,18-22}
+See [Artifacts](/concepts/artifacts/) to learn more.
+
+### Define artifact dependencies
+
+Build artifacts like `protoc` and pass them as dependencies to your language artifact:
+
+:::note
+`Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
+:::
+
+```go title="cmd/vorpal/main.go" {20-23,26}
 package main
 
 import (
     api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
-    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+    "log"
 )
-
-var systems = []api.ArtifactSystem{
-    api.ArtifactSystem_AARCH64_DARWIN,
-    api.ArtifactSystem_AARCH64_LINUX,
-    api.ArtifactSystem_X8664_DARWIN,
-    api.ArtifactSystem_X8664_LINUX,
-}
 
 func main() {
     ctx := config.GetContext()
 
-    artifact.NewDevelopmentEnvironment("my-project", systems).
-        WithEnvironments([]string{"FOO=bar"}).
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
+
+    protoc, err := ctx.FetchArtifactAlias("protoc:34.0")
+    if err != nil {
+        log.Fatalf("error fetching protoc: %v", err)
+    }
+
+    _, err = language.NewGo("my-app", systems).
+        WithArtifacts([]*string{protoc}).
+        WithBuildDirectory("cmd/my-app").
+        WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
+        Build(ctx)
+    if err != nil {
+        log.Fatalf("error building: %v", err)
+    }
+
+    ctx.Run()
+}
+```
+
+The dependent artifact's output is available at `$VORPAL_ARTIFACT_<digest>` during execution. Use `GetEnvKey` to resolve the path.
+
+See [Artifacts](/concepts/artifacts/) to learn more.
+
+### Define development environments
+
+Create a portable development shell with pinned tools, environment variables, and more:
+
+```go title="cmd/vorpal/main.go" {34-37}
+package main
+
+import (
+    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+    "log"
+)
+
+func main() {
+    ctx := config.GetContext()
+
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
+
+    protoc, err := ctx.FetchArtifactAlias("protoc:34.0")
+    if err != nil {
+        log.Fatalf("error fetching protoc: %v", err)
+    }
+
+    _, err = language.NewGo("my-app", systems).
+        WithBuildDirectory("cmd/my-app").
+        WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
+        WithArtifacts([]*string{protoc}).
+        Build(ctx)
+    if err != nil {
+        log.Fatalf("error building: %v", err)
+    }
+
+    language.NewGoDevelopmentEnvironment("my-project-shell", systems).
+        WithArtifacts([]*string{protoc}).
+        WithEnvironments([]string{"CGO_ENABLED=0"}).
         Build(ctx)
 
     ctx.Run()
 }
 ```
 
-Activate the environment by sourcing the generated `bin/activate` script inside the artifact output.
+Activate the environment:
 
-### User environments
+```bash title="Terminal"
+source $(vorpal build --path my-project-shell)/bin/activate
+```
+
+Verify that dependencies are coming from the Vorpal store:
+
+```bash title="Terminal"
+$ which protoc
+/var/lib/vorpal/store/artifact/output/library/512b7dd.../bin/protoc
+```
+
+To exit, run `deactivate` or close the shell.
+
+The development environment builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `WithArtifacts(artifacts)` | Artifact dependencies available in the shell |
+| `WithEnvironments(vars)` | Environment variables set in the shell |
+| `WithoutProtoc()` | Exclude the default Protoc artifact |
+| `WithSecrets(map)` | Secrets available in the shell |
+
+See [Environments](/concepts/environments/) to learn more.
+
+### Define jobs
+
+Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
+
+```go title="cmd/vorpal/main.go" {7,41-43,45-47}
+package main
+
+import (
+    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+    "fmt"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+    "log"
+)
+
+func main() {
+    ctx := config.GetContext()
+
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
+
+    protoc, err := ctx.FetchArtifactAlias("protoc:34.0")
+    if err != nil {
+        log.Fatalf("error fetching protoc: %v", err)
+    }
+
+    myApp, err := language.NewGo("my-app", systems).
+        WithArtifacts([]*string{protoc}).
+        WithBuildDirectory("cmd/my-app").
+        WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
+        Build(ctx)
+    if err != nil {
+        log.Fatalf("error building: %v", err)
+    }
+
+    language.NewGoDevelopmentEnvironment("my-project-shell", systems).
+        WithArtifacts([]*string{protoc}).
+        WithEnvironments([]string{"CGO_ENABLED=0"}).
+        Build(ctx)
+
+    script := fmt.Sprintf(`
+        %s/bin/my-app --version
+    `, artifact.GetEnvKey(*myApp))
+
+    artifact.NewJob("my-job", script, systems).
+        WithArtifacts([]*string{myApp}).
+        Build(ctx)
+
+    ctx.Run()
+}
+```
+
+The `Job` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `WithArtifacts(artifacts)` | Artifact dependencies available during execution |
+| `WithSecrets(map)` | Secrets available during execution |
+
+See [Jobs](/concepts/jobs/) to learn more.
+
+### Define processes
+
+Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
+
+```go title="cmd/vorpal/main.go" {49-56}
+package main
+
+import (
+    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+    "fmt"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+    "log"
+)
+
+func main() {
+    ctx := config.GetContext()
+
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
+
+    protoc, err := ctx.FetchArtifactAlias("protoc:34.0")
+    if err != nil {
+        log.Fatalf("error fetching protoc: %v", err)
+    }
+
+    myApp, err := language.NewGo("my-app", systems).
+        WithArtifacts([]*string{protoc}).
+        WithBuildDirectory("cmd/my-app").
+        WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
+        Build(ctx)
+    if err != nil {
+        log.Fatalf("error building: %v", err)
+    }
+
+    language.NewGoDevelopmentEnvironment("my-project-shell", systems).
+        WithArtifacts([]*string{protoc}).
+        WithEnvironments([]string{"CGO_ENABLED=0"}).
+        Build(ctx)
+
+    script := fmt.Sprintf(`
+        %s/bin/my-app --version
+    `, artifact.GetEnvKey(*myApp))
+
+    artifact.NewJob("my-job", script, systems).
+        WithArtifacts([]*string{myApp}).
+        Build(ctx)
+
+    artifact.NewProcess(
+        "my-server",
+        fmt.Sprintf("%s/bin/my-server", artifact.GetEnvKey(*myApp)),
+        systems,
+    ).
+        WithArguments([]string{"--port", "8080"}).
+        WithArtifacts([]*string{myApp}).
+        Build(ctx)
+
+    ctx.Run()
+}
+```
+
+The `Process` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `WithArguments(args)` | Command-line arguments for the process |
+| `WithArtifacts(artifacts)` | Artifact dependencies available during execution |
+| `WithSecrets(map)` | Secrets available during execution |
+
+See [Processes](/concepts/processes/) to learn more.
+
+### Define user environments
 
 Install tools into your user-wide environment with symlinks:
 
-```go title="main.go" {5,18-20}
+```go title="cmd/vorpal/main.go" {5,19-21}
 package main
 
 import (
@@ -131,15 +404,15 @@ import (
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-var systems = []api.ArtifactSystem{
-    api.ArtifactSystem_AARCH64_DARWIN,
-    api.ArtifactSystem_AARCH64_LINUX,
-    api.ArtifactSystem_X8664_DARWIN,
-    api.ArtifactSystem_X8664_LINUX,
-}
-
 func main() {
     ctx := config.GetContext()
+
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
 
     artifact.NewUserEnvironment("my-home", systems).
         WithSymlinks(map[string]string{"/path/to/local/bin/app": "$HOME/.vorpal/bin/app"}).
@@ -151,11 +424,21 @@ func main() {
 
 Activate with `$HOME/.vorpal/bin/vorpal-activate`, then `source $HOME/.vorpal/bin/vorpal-activate-shell`.
 
+The `UserEnvironment` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `WithArtifacts(artifacts)` | Artifact dependencies available in the environment |
+| `WithEnvironments(vars)` | Environment variables set in the environment |
+| `WithSymlinks(links)` | Symlinks to create from artifact outputs to local paths |
+
+See [Environments](/concepts/environments/) to learn more.
+
 ## Custom executors
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```go title="main.go" {5,18-28}
+```go title="cmd/vorpal/main.go" {5,19-25,27-28}
 package main
 
 import (
@@ -164,24 +447,23 @@ import (
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-var systems = []api.ArtifactSystem{
-    api.ArtifactSystem_AARCH64_DARWIN,
-    api.ArtifactSystem_AARCH64_LINUX,
-    api.ArtifactSystem_X8664_DARWIN,
-    api.ArtifactSystem_X8664_LINUX,
-}
-
 func main() {
     ctx := config.GetContext()
 
-    step, _ := artifact.NewArtifactStep().
-        WithEntrypoint("docker", systems).
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
+
+    step := artifact.NewArtifactStep("docker").
         WithArguments([]string{
             "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
             "alpine", "sh", "-lc",
             "echo hi > /out/hi.txt",
-        }, systems).
-        Build(ctx)
+        }).
+        Build()
 
     artifact.NewArtifact("example-docker",
         []*api.ArtifactStep{step}, systems).Build(ctx)
@@ -189,6 +471,25 @@ func main() {
     ctx.Run()
 }
 ```
+
+The `ArtifactStep` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `WithArguments(args)` | Arguments passed to the entrypoint |
+| `WithArtifacts(artifacts)` | Artifact dependencies available during execution |
+| `WithEnvironments(vars)` | Environment variables for the step |
+| `WithScript(script)` | Script to execute in the step |
+| `WithSecrets(secrets)` | Secrets available during execution |
+
+The `Artifact` builder supports additional configuration:
+
+| Method | Description |
+|--------|-------------|
+| `WithAliases(aliases)` | Alternative names for the artifact |
+| `WithSources(sources)` | Source files to include in the artifact |
+
+See [Artifacts](/concepts/artifacts/) to learn more.
 
 ## Building
 
@@ -199,37 +500,3 @@ vorpal build my-app
 ```
 
 First builds download toolchains and dependencies. Subsequent builds with the same inputs resolve instantly from the content-addressed cache.
-
-## Common patterns
-
-### Builder options
-
-The `Go` builder supports additional configuration:
-
-| Method | Description |
-|--------|-------------|
-| `WithBuildDirectory(dir)` | Directory containing the `main` package |
-| `WithIncludes(paths)` | Source files to include |
-| `WithBuildFlags(flags)` | Additional `go build` flags |
-| `WithBuildPath(path)` | Custom build path |
-| `WithEnvironments(vars)` | Environment variables for the build |
-| `WithSecrets(map)` | Build-time secrets |
-| `WithSourceScripts(scripts)` | Scripts to run before build |
-
-### Multiple artifacts
-
-Chain multiple artifacts in a single config — they share the same context and build graph:
-
-```go
-language.NewGo("lib-core", systems).
-    WithIncludes([]string{"pkg", "go.mod", "go.sum"}).
-    Build(ctx)
-
-language.NewGo("bin-server", systems).
-    WithBuildDirectory("cmd/server").
-    WithIncludes([]string{"cmd", "pkg", "go.mod", "go.sum"}).
-    Build(ctx)
-
-language.NewGoDevelopmentEnvironment("dev-shell", systems).
-    Build(ctx)
-```

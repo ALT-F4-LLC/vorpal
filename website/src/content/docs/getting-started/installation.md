@@ -101,4 +101,4 @@ If you need to build Vorpal from source instead of using the install script, see
 
 ## Next steps
 
-With Vorpal installed, head to the [Quickstart](./quickstart) to create and build your first project.
+With Vorpal installed, head to the [Quickstart](/getting-started/quickstart/) to create and build your first project.
