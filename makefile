@@ -125,6 +125,9 @@ vorpal:
 vorpal-start:
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start $(VORPAL_FLAGS)
 
+vorpal-website-start:
+	bun run --cwd=website dev
+
 # Lima environment
 
 lima-clean:

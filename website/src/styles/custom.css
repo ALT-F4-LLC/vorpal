@@ -133,7 +133,7 @@
 
 .cta-actions .primary {
 	background-color: var(--sl-color-accent);
-	color: var(--sl-color-white);
+	color: #ffffff;
 	padding: 0.75rem 1.5rem;
 	border-radius: 0.5rem;
 	font-weight: 600;

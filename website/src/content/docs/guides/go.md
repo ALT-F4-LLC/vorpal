@@ -18,7 +18,7 @@ go get github.com/ALT-F4-LLC/vorpal/sdk/go
 Create a `Vorpal.toml` manifest in your project root:
 
 :::note
-This example follows the [Standard Go Project Layout](https://github.com/golang-standards/project-layout).
+This example follows the <a href="https://github.com/golang-standards/project-layout" target="_blank">Standard Go Project Layout</a>.
 :::
 
 ```toml title="Vorpal.toml"

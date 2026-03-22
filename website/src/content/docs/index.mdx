@@ -13,6 +13,8 @@ hero:
       link: https://github.com/ALT-F4-LLC/vorpal
       icon: external
       variant: minimal
+      attrs:
+        target: _blank
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
@@ -20,23 +22,14 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 <div class="landing-section landing-section-wide">
 
 <CardGrid>
-  <Card title="Platform native" icon="laptop">
-    Runs directly on your OS with no containers or VMs. Native performance on macOS and Linux.
-  </Card>
-  <Card title="Built-in caching" icon="star">
-    Artifacts cached by content hash. Unchanged builds resolve instantly with no re-work.
-  </Card>
-  <Card title="Reproducible" icon="approve-check-circle">
-    Content-addressed artifacts with hermetic steps. Same inputs, same output, everywhere.
-  </Card>
-  <Card title="All as code" icon="seti:config">
+  <Card title="Multi-language" icon="seti:config">
     Builds, CI, environments, and services — defined as real programs with full IDE support.
   </Card>
-  <Card title="Local or distributed" icon="rocket">
-    Run builds on your machine or distribute them across remote workers. Same result either way.
-  </Card>
-  <Card title="Multi-environment" icon="setting">
+  <Card title="Multi-purpose" icon="setting">
     Dev environments, user configs, and long-running services — all defined and managed as artifacts.
+  </Card>
+  <Card title="Multi-service" icon="rocket">
+    Run builds on your machine or distribute them across remote workers. Same result either way.
   </Card>
 </CardGrid>
 
@@ -44,7 +37,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <div class="landing-section">
 
-## Your build, your language
+## Your build, your language.
 
 <p class="landing-subtitle">Choose the SDK that fits your project. All SDKs produce identical artifacts.</p>
 
@@ -67,6 +60,7 @@ import (
 
 func main() {
     ctx := config.GetContext()
+
     systems := []api.ArtifactSystem{
         api.ArtifactSystem_AARCH64_DARWIN,
         api.ArtifactSystem_AARCH64_LINUX,
@@ -101,6 +95,7 @@ use vorpal_sdk::{
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let ctx = &mut get_context().await?;
+
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
     Rust::new("my-app", systems)
@@ -124,6 +119,8 @@ async fn main() -> anyhow::Result<()> {
 ```typescript title="vorpal.ts"
 import { ArtifactSystem, ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
 
+const ctx = ConfigContext.create();
+
 const systems = [
   ArtifactSystem.AARCH64_DARWIN,
   ArtifactSystem.AARCH64_LINUX,
@@ -131,21 +128,19 @@ const systems = [
   ArtifactSystem.X8664_LINUX,
 ];
 
-const context = ConfigContext.create();
-
 await new TypeScript("my-app", systems)
   .withEntrypoint("src/main.ts")
   .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
-  .build(context);
+  .build(ctx);
 
-await context.run();
+await ctx.run();
 ```
 
 </div>
 
 <div class="landing-section">
 
-## One CLI to build and run
+## One simple CLI.
 
 <p class="landing-subtitle">After defining your config in any SDK, the Vorpal CLI handles the rest.</p>
 

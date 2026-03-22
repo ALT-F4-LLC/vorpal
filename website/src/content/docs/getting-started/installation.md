@@ -97,7 +97,7 @@ systemctl --user restart vorpal.service
 
 ### Building from source
 
-If you need to build Vorpal from source instead of using the install script, see the [contributing guide](https://github.com/ALT-F4-LLC/vorpal/blob/main/docs/spec/operations.md) for build instructions.
+If you need to build Vorpal from source instead of using the install script, see the <a href="https://github.com/ALT-F4-LLC/vorpal/blob/main/docs/spec/operations.md" target="_blank">contributing guide</a> for build instructions.
 
 ## Next steps
 

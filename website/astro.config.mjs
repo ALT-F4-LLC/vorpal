@@ -8,6 +8,17 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Vorpal',
+			head: [
+				{
+					tag: 'script',
+					content: `document.addEventListener('DOMContentLoaded', () => {
+						document.querySelectorAll('a[href*="github.com"]').forEach(a => {
+							a.setAttribute('target', '_blank');
+							a.setAttribute('rel', 'noopener noreferrer');
+						});
+					});`,
+				},
+			],
 			social: [
 				{
 					icon: 'github',
