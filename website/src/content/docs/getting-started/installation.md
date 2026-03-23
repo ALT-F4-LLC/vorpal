@@ -34,30 +34,54 @@ On macOS, services run via a LaunchAgent (`com.altf4llc.vorpal`). On Linux, serv
 
 ### Installer options
 
-The installer accepts environment variables to customize behavior:
+#### CLI flags
 
-| Variable                | Effect                          |
-|-------------------------|---------------------------------|
-| `VORPAL_VERSION=<ver>`  | Install a specific version (default: `nightly`) |
-| `VORPAL_SERVICES=<list>` | Comma-separated services to install (default: `agent,registry,worker`) |
-| `VORPAL_NO_SERVICE=1`   | Skip service installation entirely |
-| `VORPAL_NO_PATH=1`      | Skip PATH configuration         |
-| `VORPAL_NONINTERACTIVE=1` | Run without prompts           |
-| `VORPAL_DRY_RUN=1`      | Show what would be done without making changes |
+The installer accepts the following flags. When piping through `curl`, pass flags after `bash -s --`:
 
-The installer also accepts CLI flags. Run `install.sh --help` for the full list.
+| Flag | Description |
+|------|-------------|
+| `-y`, `--yes` | Run in non-interactive mode (skip prompts) |
+| `-v`, `--version <ver>` | Version to install (default: `nightly`) |
+| `--services <list>` | Comma-separated services to install (default: `agent,registry,worker`) |
+| `--no-service` | Skip service installation |
+| `--no-path` | Skip PATH configuration |
+| `--dry-run` | Show what would be done without making changes |
+| `--uninstall` | Uninstall Vorpal |
+| `-h`, `--help` | Show the help message |
 
 For example, to install only the agent and worker services:
 
 ```bash
-VORPAL_SERVICES=agent,worker \
-  curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash -s -- --services agent,worker
 ```
 
 To install a specific version without starting any services:
 
 ```bash
-VORPAL_VERSION=v0.1.0 VORPAL_NO_SERVICE=1 \
+curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash -s -- --version v0.1.0 --no-service
+```
+
+#### Environment variables
+
+As an alternative, the installer also accepts environment variables. These are useful when piping through `curl` without `bash -s --`:
+
+| Variable | Effect |
+|----------|--------|
+| `VORPAL_NONINTERACTIVE=1` | Enable non-interactive mode |
+| `CI=true` | Enable non-interactive mode |
+| `VORPAL_VERSION=<ver>` | Version to install (default: `nightly`) |
+| `VORPAL_SERVICES=<list>` | Comma-separated services to install (default: `agent,registry,worker`) |
+| `VORPAL_NO_SERVICE=1` | Skip service installation |
+| `VORPAL_NO_PATH=1` | Skip PATH configuration |
+| `VORPAL_DRY_RUN=1` | Show what would be done without making changes |
+| `NO_COLOR=1` | Disable color output |
+
+Note that `CI` and `NO_COLOR` are environment-variable-only options with no flag equivalents. Conversely, `--uninstall` and `--help` are flag-only with no environment variable equivalents.
+
+For example, using environment variables:
+
+```bash
+VORPAL_SERVICES=agent,worker \
   curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash
 ```
 
@@ -99,7 +123,8 @@ To restart services manually:
 
 ```bash
 # macOS
-launchctl kickstart gui/$(id -u)/com.altf4llc.vorpal
+launchctl bootout gui/$(id -u)/com.altf4llc.vorpal
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.altf4llc.vorpal.plist
 
 # Linux
 systemctl --user restart vorpal.service
