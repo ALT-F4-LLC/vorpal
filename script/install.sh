@@ -11,6 +11,7 @@ set -euo pipefail
 #   CI=true                    Enable non-interactive mode
 #   VORPAL_VERSION=<ver>       Version to install (default: nightly)
 #   VORPAL_NO_SERVICE=1        Skip service installation
+#   VORPAL_SERVICES=<list>     Comma-separated services to install (default: agent,registry,worker)
 #   VORPAL_NO_PATH=1           Skip PATH configuration
 #   VORPAL_DRY_RUN=1           Show what would be done without making changes
 #   NO_COLOR=1                 Disable color output
@@ -31,6 +32,7 @@ FLAG_UNINSTALL=0
 FLAG_DRY_RUN="${VORPAL_DRY_RUN:-0}"
 NO_SERVICE="${VORPAL_NO_SERVICE:-0}"
 NO_PATH="${VORPAL_NO_PATH:-0}"
+SERVICES="${VORPAL_SERVICES:-agent,registry,worker}"
 
 # -- State (set during execution) --------------------------------------------
 
@@ -352,6 +354,7 @@ Install Vorpal to ~/.vorpal and configure system services.
 Options:
   -y, --yes              Run in non-interactive mode (skip prompts)
   -v, --version <ver>    Version to install (default: nightly)
+      --services <list>  Comma-separated services to install (default: agent,registry,worker)
       --no-service       Skip service installation
       --no-path          Skip PATH configuration
       --dry-run          Show what would be done without making changes
@@ -363,6 +366,7 @@ Environment variables:
   CI=true                    Enable non-interactive mode
   VORPAL_VERSION=<ver>       Version to install (default: nightly)
   VORPAL_NO_SERVICE=1        Skip service installation
+  VORPAL_SERVICES=<list>     Comma-separated services (default: agent,registry,worker)
   VORPAL_NO_PATH=1           Skip PATH configuration
   VORPAL_DRY_RUN=1           Show what would be done without making changes
   NO_COLOR=1                 Disable color output
@@ -384,6 +388,16 @@ parse_args() {
                     exit 1
                 fi
                 VORPAL_VERSION="$2"
+                shift 2
+                ;;
+            --services)
+                if [[ $# -lt 2 ]]; then
+                    print_error "Missing value for $1" \
+                        "The $1 flag requires a comma-separated list of services." \
+                        "Example: install.sh $1 agent,registry,worker"
+                    exit 1
+                fi
+                SERVICES="$2"
                 shift 2
                 ;;
             --no-service)
@@ -410,6 +424,23 @@ parse_args() {
                 print_error "Unknown option: $1" \
                     "" \
                     "Run 'install.sh --help' for usage information."
+                exit 1
+                ;;
+        esac
+    done
+}
+
+validate_services() {
+    local valid_services="agent registry worker"
+    local IFS=','
+    for svc in $SERVICES; do
+        case " $valid_services " in
+            *" $svc "*)
+                ;;
+            *)
+                print_error "Invalid service: '$svc'" \
+                    "Valid services are: agent, registry, worker" \
+                    "Example: install.sh --services agent,registry,worker"
                 exit 1
                 ;;
         esac
@@ -830,6 +861,8 @@ install_service_macos() {
         <string>system</string>
         <string>services</string>
         <string>start</string>
+        <string>--services</string>
+        <string>${SERVICES}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -884,7 +917,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${vorpal_bin} system services start
+ExecStart=${vorpal_bin} system services start --services ${SERVICES}
 Restart=on-failure
 RestartSec=5
 
@@ -948,7 +981,7 @@ install_service() {
                 print_step "Would install systemd user service (vorpal.service)"
                 ;;
         esac
-        print_step "Would start services"
+        print_step "Would start services: ${SERVICES}"
         print_success "Services (dry run)"
         return 0
     fi
@@ -1298,6 +1331,7 @@ main() {
     generate_keys
 
     if [[ "$NO_SERVICE" != 1 ]]; then
+        validate_services
         install_service
         verify_service
     else

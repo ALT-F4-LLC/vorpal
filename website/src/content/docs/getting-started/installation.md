@@ -39,12 +39,22 @@ The installer accepts environment variables to customize behavior:
 | Variable                | Effect                          |
 |-------------------------|---------------------------------|
 | `VORPAL_VERSION=<ver>`  | Install a specific version (default: `nightly`) |
-| `VORPAL_NO_SERVICE=1`   | Skip service installation       |
+| `VORPAL_SERVICES=<list>` | Comma-separated services to install (default: `agent,registry,worker`) |
+| `VORPAL_NO_SERVICE=1`   | Skip service installation entirely |
 | `VORPAL_NO_PATH=1`      | Skip PATH configuration         |
 | `VORPAL_NONINTERACTIVE=1` | Run without prompts           |
 | `VORPAL_DRY_RUN=1`      | Show what would be done without making changes |
 
-For example, to install a specific version without starting services:
+The installer also accepts CLI flags. Run `install.sh --help` for the full list.
+
+For example, to install only the agent and worker services:
+
+```bash
+VORPAL_SERVICES=agent,worker \
+  curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash
+```
+
+To install a specific version without starting any services:
 
 ```bash
 VORPAL_VERSION=v0.1.0 VORPAL_NO_SERVICE=1 \
