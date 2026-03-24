@@ -328,11 +328,11 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```rust title="src/main.rs" {4,14-16}
+```rust title="src/main.rs" {4,14-20}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::UserEnvironment,
+    artifact::{get_env_key, language::rust::Rust, UserEnvironment},
     context::get_context,
 };
 
@@ -342,8 +342,14 @@ async fn main() -> Result<()> {
 
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
+    let my_app = Rust::new("my-app", systems.clone())
+        .with_bins(vec!["my-app"])
+        .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
+        .build(ctx).await?;
+
     UserEnvironment::new("my-home", systems)
-        .with_symlinks(vec![("/path/to/local/bin/app", "$HOME/.vorpal/bin/app")])
+        .with_artifacts(vec![my_app.clone()])
+        .with_symlinks(vec![(&format!("{}/bin/my-app", get_env_key(&my_app)), "$HOME/.vorpal/bin/my-app")])
         .build(ctx).await?;
 
     ctx.run().await

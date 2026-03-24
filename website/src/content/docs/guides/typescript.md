@@ -332,10 +332,12 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```typescript title="vorpal.ts" {4,16-18}
+```typescript title="vorpal.ts" {4-5,17-21,23-25}
 import {
   ArtifactSystem,
   ConfigContext,
+  TypeScript,
+  getEnvKey,
   UserEnvironment,
 } from "@altf4llc/vorpal-sdk";
 
@@ -348,8 +350,14 @@ const SYSTEMS = [
   ArtifactSystem.X8664_LINUX,
 ];
 
+const myApp = await new TypeScript("my-app", SYSTEMS)
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
+  .build(context);
+
 await new UserEnvironment("my-home", SYSTEMS)
-  .withSymlinks([["/path/to/local/bin/app", "$HOME/.vorpal/bin/app"]])
+  .withArtifacts([myApp])
+  .withSymlinks([[`${getEnvKey(myApp)}/bin/my-app`, "$HOME/.vorpal/bin/my-app"]])
   .build(context);
 
 await context.run();

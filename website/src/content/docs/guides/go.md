@@ -395,13 +395,16 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```go title="cmd/vorpal/main.go" {5,19-21}
+```go title="cmd/vorpal/main.go" {7,22-28,30-33}
 package main
 
 import (
     api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+    "fmt"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+    "log"
 )
 
 func main() {
@@ -414,8 +417,17 @@ func main() {
         api.ArtifactSystem_X8664_LINUX,
     }
 
+    myApp, err := language.NewGo("my-app", systems).
+        WithBuildDirectory("cmd/my-app").
+        WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
+        Build(ctx)
+    if err != nil {
+        log.Fatalf("error building: %v", err)
+    }
+
     artifact.NewUserEnvironment("my-home", systems).
-        WithSymlinks(map[string]string{"/path/to/local/bin/app": "$HOME/.vorpal/bin/app"}).
+        WithArtifacts([]*string{myApp}).
+        WithSymlinks(map[string]string{fmt.Sprintf("%s/bin/my-app", artifact.GetEnvKey(*myApp)): "$HOME/.vorpal/bin/my-app"}).
         Build(ctx)
 
     ctx.Run()
