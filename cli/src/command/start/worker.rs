@@ -893,10 +893,7 @@ async fn build_artifact(
             }
         };
 
-        if let Err(err) = client_archive
-            .push(request_stream)
-            .await
-        {
+        if let Err(err) = client_archive.push(request_stream).await {
             error!("worker |> failed to push artifact: {:?}", err);
             return Err(Status::internal(format!(
                 "failed to push artifact: {err:?}"

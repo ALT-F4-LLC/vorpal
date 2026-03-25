@@ -3,7 +3,7 @@ use crate::command::{
     store::paths::{get_artifact_archive_path, set_timestamps},
 };
 use tokio::{
-    fs::{create_dir_all, read, rename, remove_file},
+    fs::{create_dir_all, read, remove_file, rename},
     io::{AsyncWriteExt, BufWriter},
     sync::mpsc,
 };
@@ -75,10 +75,7 @@ impl ArchiveBackend for LocalBackend {
         // Create temp file in the same directory for atomic rename.
         let temp_path = parent.join(format!(
             "{}.{}.tmp",
-            final_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy(),
+            final_path.file_name().unwrap_or_default().to_string_lossy(),
             Uuid::now_v7()
         ));
 

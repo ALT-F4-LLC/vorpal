@@ -121,9 +121,9 @@ impl ArchiveBackend for S3Backend {
                         upload_id = create_resp.upload_id().map(|s| s.to_string());
                     }
 
-                    let uid = upload_id.as_ref().ok_or_else(|| {
-                        Status::internal("S3 did not return an upload ID")
-                    })?;
+                    let uid = upload_id
+                        .as_ref()
+                        .ok_or_else(|| Status::internal("S3 did not return an upload ID"))?;
 
                     // Drain the buffer up to full parts.
                     while buffer.len() >= S3_MIN_PART_SIZE {
@@ -167,9 +167,7 @@ impl ArchiveBackend for S3Backend {
                     .body(body.into())
                     .send()
                     .await
-                    .map_err(|err| {
-                        Status::internal(format!("failed to put object: {err}"))
-                    })?;
+                    .map_err(|err| Status::internal(format!("failed to put object: {err}")))?;
 
                 info!("registry |> archive push (single put): {archive_key}");
                 return Ok(());
@@ -233,9 +231,7 @@ impl ArchiveBackend for S3Backend {
         // On ANY error after multipart was initiated, abort the upload.
         if result.is_err() {
             if let Some(uid) = &upload_id {
-                warn!(
-                    "registry |> aborting multipart upload {uid} for {archive_key}"
-                );
+                warn!("registry |> aborting multipart upload {uid} for {archive_key}");
 
                 if let Err(abort_err) = client
                     .abort_multipart_upload()
@@ -245,9 +241,7 @@ impl ArchiveBackend for S3Backend {
                     .send()
                     .await
                 {
-                    warn!(
-                        "registry |> failed to abort multipart upload {uid}: {abort_err}"
-                    );
+                    warn!("registry |> failed to abort multipart upload {uid}: {abort_err}");
                 }
             }
         }

@@ -2,10 +2,10 @@ use crate::command::start::auth::{get_user_context, require_namespace_permission
 use anyhow::{bail, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
-use tokio_stream::Stream;
 use moka::future::Cache;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio_stream::Stream;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info};
@@ -605,7 +605,10 @@ mod tests {
                 push_call_count: Arc::clone(&self.push_call_count),
                 should_exist: self.should_exist,
                 push_calls: Arc::clone(&self.push_calls),
-                push_error: self.push_error.as_ref().map(|e| Status::new(e.code(), e.message())),
+                push_error: self
+                    .push_error
+                    .as_ref()
+                    .map(|e| Status::new(e.code(), e.message())),
             })
         }
     }
@@ -887,21 +890,18 @@ mod tests {
 
         let (r1, r2, r3) = tokio::join!(
             async {
-                let mut stream = byte_stream_from_chunks(vec![
-                    Ok(bytes::Bytes::from_static(b"archive-1")),
-                ]);
+                let mut stream =
+                    byte_stream_from_chunks(vec![Ok(bytes::Bytes::from_static(b"archive-1"))]);
                 b1.push("sha256:aaa", "ns1", &mut stream).await
             },
             async {
-                let mut stream = byte_stream_from_chunks(vec![
-                    Ok(bytes::Bytes::from_static(b"archive-2")),
-                ]);
+                let mut stream =
+                    byte_stream_from_chunks(vec![Ok(bytes::Bytes::from_static(b"archive-2"))]);
                 b2.push("sha256:bbb", "ns2", &mut stream).await
             },
             async {
-                let mut stream = byte_stream_from_chunks(vec![
-                    Ok(bytes::Bytes::from_static(b"archive-3")),
-                ]);
+                let mut stream =
+                    byte_stream_from_chunks(vec![Ok(bytes::Bytes::from_static(b"archive-3"))]);
                 b3.push("sha256:ccc", "ns3", &mut stream).await
             },
         );
