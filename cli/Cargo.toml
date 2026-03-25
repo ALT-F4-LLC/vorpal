@@ -11,11 +11,12 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { version = "1.0.100" }
 async-compression = { version = "0.4.37", features = ["tokio", "gzip", "bzip2", "zstd"] }
-liblzma = { version = "0.4.6", features = ["static"] }
+async-stream = { version = "0.3.6" }
 async_zip = { version = "0.0.18", features = ["deflate", "tokio"] }
 aws-config = { version = "1.8.1" }
 aws-sdk-s3 = { version = "1.124.0" }
 base64 = { version = "0.22.1" }
+bytes = { version = "1.11.1" }
 clap = { version = "4.5.57" }
 filetime = { version = "0.2.27" }
 fs4 = { version = "0.13.1" }
@@ -23,6 +24,7 @@ futures-lite = { version = "2.6.1" }
 infer = { version = "0.19.0" }
 inquire = { version = "0.9.2" }
 jsonwebtoken = { version = "10.3.0", features = ["aws_lc_rs"] }
+liblzma = { version = "0.4.6", features = ["static"] }
 moka = { version = "0.12.13", features = ["future"] }
 oauth2 = { version = "5.0.0", features = ["reqwest"] }
 path-clean = { version = "1.0.1" }
