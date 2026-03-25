@@ -41,6 +41,7 @@ pub struct RunArgsArtifact {
     pub aliases: Vec<String>,
     pub context: PathBuf,
     pub export: bool,
+    pub list: bool,
     pub name: String,
     pub namespace: String,
     pub path: bool,
@@ -704,6 +705,25 @@ pub async fn run(
         &config_artifacts_store,
     )
     .await?;
+
+    if artifact.list {
+        let order = get_order(&build_store).await?;
+
+        let max_name_len = order
+            .iter()
+            .filter_map(|d| build_store.get(d))
+            .map(|a| a.name.len())
+            .max()
+            .unwrap_or(0);
+
+        for digest in order {
+            if let Some(a) = build_store.get(&digest) {
+                println!("{:<width$}  {}", a.name, digest, width = max_name_len);
+            }
+        }
+
+        return Ok(());
+    }
 
     if artifact.export {
         let export =

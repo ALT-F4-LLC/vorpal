@@ -145,6 +145,10 @@ pub enum Command {
         #[arg(default_value_t = false, long)]
         export: bool,
 
+        /// List artifact and dependencies (name + digest) without building
+        #[arg(default_value_t = false, long, conflicts_with = "export")]
+        list: bool,
+
         /// Artifact namespace
         #[arg(default_value_t = get_default_namespace(), long)]
         namespace: String,
@@ -331,6 +335,7 @@ pub async fn run() -> Result<()> {
             agent,
             context,
             export,
+            list,
             name,
             namespace,
             path,
@@ -451,6 +456,7 @@ pub async fn run() -> Result<()> {
                 aliases: vec![],
                 context: context.clone(),
                 export: *export,
+                list: *list,
                 name: name.clone(),
                 namespace: effective_namespace.clone(),
                 path: *path,
