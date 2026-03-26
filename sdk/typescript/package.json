@@ -50,6 +50,6 @@
     "@types/bun": "1.3.11",
     "ts-proto": "2.11.6",
     "tsx": "4.21.0",
-    "typescript": "5.9.3"
+    "typescript": "6.0.2"
   }
 }
