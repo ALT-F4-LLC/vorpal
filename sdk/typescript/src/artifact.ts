@@ -5,6 +5,8 @@ import type {
   ArtifactStepSecret,
 } from "./api/artifact/artifact.js";
 import { ArtifactSystem } from "./api/artifact/artifact.js";
+import { Crane } from "./artifact/crane.js";
+import { Rsync } from "./artifact/rsync.js";
 import { shell } from "./artifact/step.js";
 import type { ConfigContext } from "./context.js";
 
@@ -925,8 +927,8 @@ export class OciImage {
       }
     }
 
-    const crane = this._crane ?? await context.fetchArtifactAlias("crane:0.21.1");
-    const rsync = this._rsync ?? await context.fetchArtifactAlias("rsync:3.4.1");
+    const crane = this._crane ?? await new Crane().build(context);
+    const rsync = this._rsync ?? await new Rsync().build(context);
 
     const artifactsList = this._artifacts.join(" ");
     const namespace = context.getArtifactNamespace();

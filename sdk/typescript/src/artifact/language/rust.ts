@@ -10,6 +10,8 @@ import {
   getEnvKey,
   secretsToProto,
 } from "../../artifact.js";
+import { Protoc } from "../protoc.js";
+import { RustToolchain } from "../rust_toolchain.js";
 import { shell } from "../step.js";
 
 // ---------------------------------------------------------------------------
@@ -17,7 +19,6 @@ import { shell } from "../step.js";
 // ---------------------------------------------------------------------------
 
 const RUST_TOOLCHAIN_VERSION = "1.93.1";
-const PROTOC_ALIAS = "protoc:34.0";
 
 // ---------------------------------------------------------------------------
 // Cargo.toml parsing
@@ -423,7 +424,7 @@ export class Rust {
    */
   async build(context: ConfigContext): Promise<string> {
     // Fetch protoc artifact
-    const protoc = await context.fetchArtifactAlias(PROTOC_ALIAS);
+    const protoc = await new Protoc().build(context);
 
     // Parse source path
     //
@@ -542,9 +543,7 @@ export class Rust {
     // 2. CREATE ARTIFACTS
 
     // Get rust toolchain artifact
-    const rustToolchain = await context.fetchArtifactAlias(
-      `rust-toolchain:${RUST_TOOLCHAIN_VERSION}`,
-    );
+    const rustToolchain = await new RustToolchain().build(context);
 
     const rustToolchainTargetStr = rustToolchainTarget(context.getSystem());
     const rustToolchainName = `${RUST_TOOLCHAIN_VERSION}-${rustToolchainTargetStr}`;
@@ -744,14 +743,12 @@ export class RustDevelopmentEnvironment {
    * - RUSTUP_TOOLCHAIN={version}-{target}
    */
   async build(context: ConfigContext): Promise<string> {
-    const rustToolchain = await context.fetchArtifactAlias(
-      `rust-toolchain:${RUST_TOOLCHAIN_VERSION}`
-    );
+    const rustToolchain = await new RustToolchain().build(context);
 
     const artifacts: string[] = [];
 
     if (this._includeProtoc) {
-      const protoc = await context.fetchArtifactAlias(PROTOC_ALIAS);
+      const protoc = await new Protoc().build(context);
       artifacts.push(protoc);
     }
 

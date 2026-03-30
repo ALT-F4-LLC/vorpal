@@ -7,23 +7,22 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-func Rsync(context *config.ConfigContext) (*string, error) {
-	name := "rsync"
-	version := "3.4.1"
+func Rustfmt(context *config.ConfigContext) (*string, error) {
+	name := "rustfmt"
 
-	sourcePath := fmt.Sprintf("https://download.samba.org/pub/rsync/src/rsync-%s.tar.gz", version)
+	system := context.GetTarget()
+
+	sourceTarget, err := RustToolchainTarget(system)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceVersion := RustToolchainVersion()
+	sourcePath := fmt.Sprintf("https://static.rust-lang.org/dist/%s-%s-%s.tar.gz", name, sourceVersion, *sourceTarget)
+
 	source := NewArtifactSource(name, sourcePath).Build()
 
-	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT"
-pushd ./source/%s/%s-%s
-./configure \
-    --prefix="$VORPAL_OUTPUT" \
-    --disable-openssl \
-    --disable-xxhash \
-    --disable-zstd \
-    --disable-lz4
-make
-make install`, name, name, version)
+	stepScript := fmt.Sprintf(`cp -pr "./source/%s/%s-%s-%s/%s-preview/." "$VORPAL_OUTPUT"`, name, name, sourceVersion, *sourceTarget, name)
 
 	step, err := Shell(context, []*string{}, []string{}, stepScript, nil)
 	if err != nil {
@@ -38,7 +37,6 @@ make install`, name, name, version)
 	}
 
 	return NewArtifact(name, []*api.ArtifactStep{step}, systems).
-		WithAliases([]string{fmt.Sprintf("%s:%s", name, version)}).
 		WithSources([]*api.ArtifactSource{&source}).
 		Build(context)
 }

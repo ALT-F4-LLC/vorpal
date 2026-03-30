@@ -9,9 +9,8 @@ import {
   getEnvKey,
   secretsToProto,
 } from "../../artifact.js";
+import { Bun } from "../bun.js";
 import { shell } from "../step.js";
-
-const DEFAULT_BUN_ALIAS = "bun:1.3.10";
 
 export class TypeScript {
   private _aliases: string[] = [];
@@ -122,7 +121,7 @@ export class TypeScript {
    */
   async build(context: ConfigContext): Promise<string> {
     // Setup artifacts -- resolve Bun
-    const bunDigest = await context.fetchArtifactAlias(DEFAULT_BUN_ALIAS);
+    const bunDigest = await new Bun().build(context);
     const bunBin = `${getEnvKey(bunDigest)}/bin`;
 
     // Setup source
@@ -264,7 +263,7 @@ export class TypeScriptDevelopmentEnvironment {
    * Bun does not require special env vars like Go or Rust do.
    */
   async build(context: ConfigContext): Promise<string> {
-    const bun = await context.fetchArtifactAlias(DEFAULT_BUN_ALIAS);
+    const bun = await new Bun().build(context);
 
     const artifacts: string[] = [bun, ...this._artifacts];
 
