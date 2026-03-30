@@ -131,14 +131,15 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 Build artifacts like `protoc` and pass them as dependencies to your language artifact:
 
 :::note
-`Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
+`Protoc` is an artifact builder provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```go title="cmd/vorpal/main.go" {20-23,26}
+```go title="cmd/vorpal/main.go" {21-24,27}
 package main
 
 import (
     api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
     "log"
@@ -154,9 +155,9 @@ func main() {
         api.ArtifactSystem_X8664_LINUX,
     }
 
-    protoc, err := ctx.FetchArtifactAlias("protoc:34.0")
+    protoc, err := artifact.Protoc(ctx)
     if err != nil {
-        log.Fatalf("error fetching protoc: %v", err)
+        log.Fatalf("error building protoc: %v", err)
     }
 
     _, err = language.NewGo("my-app", systems).
@@ -180,11 +181,12 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```go title="cmd/vorpal/main.go" {34-37}
+```go title="cmd/vorpal/main.go" {35-38}
 package main
 
 import (
     api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
     "log"
@@ -200,9 +202,9 @@ func main() {
         api.ArtifactSystem_X8664_LINUX,
     }
 
-    protoc, err := ctx.FetchArtifactAlias("protoc:34.0")
+    protoc, err := artifact.Protoc(ctx)
     if err != nil {
-        log.Fatalf("error fetching protoc: %v", err)
+        log.Fatalf("error building protoc: %v", err)
     }
 
     _, err = language.NewGo("my-app", systems).
@@ -275,9 +277,9 @@ func main() {
         api.ArtifactSystem_X8664_LINUX,
     }
 
-    protoc, err := ctx.FetchArtifactAlias("protoc:34.0")
+    protoc, err := artifact.Protoc(ctx)
     if err != nil {
-        log.Fatalf("error fetching protoc: %v", err)
+        log.Fatalf("error building protoc: %v", err)
     }
 
     myApp, err := language.NewGo("my-app", systems).
@@ -341,9 +343,9 @@ func main() {
         api.ArtifactSystem_X8664_LINUX,
     }
 
-    protoc, err := ctx.FetchArtifactAlias("protoc:34.0")
+    protoc, err := artifact.Protoc(ctx)
     if err != nil {
-        log.Fatalf("error fetching protoc: %v", err)
+        log.Fatalf("error building protoc: %v", err)
     }
 
     myApp, err := language.NewGo("my-app", systems).
