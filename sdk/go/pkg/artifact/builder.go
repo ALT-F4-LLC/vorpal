@@ -192,8 +192,7 @@ mkdir -p $VORPAL_OUTPUT/bin
 
 cp -pr bin "$VORPAL_OUTPUT"`
 
-const ScriptUserEnvironmentTemplate = `
-mkdir -p $VORPAL_OUTPUT/bin
+const ScriptUserEnvironmentTemplate = `mkdir -p $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
 {{.Environments}}
