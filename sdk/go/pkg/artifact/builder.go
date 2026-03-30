@@ -117,8 +117,7 @@ type UserEnvironmentTemplateArgs struct {
 	SymlinksDeactivate string
 }
 
-const ProcessScriptTemplate = `
-mkdir -p $VORPAL_OUTPUT/bin
+const ProcessScriptTemplate = `mkdir -p $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/{{.Name}}-logs << "EOF"
 #!/bin/bash

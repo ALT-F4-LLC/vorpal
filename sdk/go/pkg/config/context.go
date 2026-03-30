@@ -379,9 +379,9 @@ func (c *ConfigContext) AddArtifact(artifact *artifact.Artifact) (*string, error
 		)
 	}
 
-	artifactJson, err := json.Marshal(artifact)
+	artifactJson, err := SerializeArtifactJSON(artifact)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to serialize artifact for digest: %w", err)
 	}
 
 	artifactDigest := fmt.Sprintf("%x", sha256.Sum256(artifactJson))
