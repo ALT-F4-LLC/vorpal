@@ -71,8 +71,7 @@ type StepScriptTemplateArgs struct {
 	Vendor        string
 }
 
-const VendorStepScriptTemplate = `
-mkdir -p $HOME
+const VendorStepScriptTemplate = `mkdir -p $HOME
 
 pushd ./source/{{.Name}}-vendor
 {{if .Packages}}
@@ -98,8 +97,7 @@ cargo_vendor=$(cargo vendor --versioned-dirs $VORPAL_OUTPUT/vendor)
 
 echo "$cargo_vendor" > $VORPAL_OUTPUT/config.toml`
 
-const StepScriptTemplate = `
-mkdir -p $HOME
+const StepScriptTemplate = `mkdir -p $HOME
 
 pushd ./source/{{.Name}}
 
