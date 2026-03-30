@@ -170,8 +170,7 @@ EOF
 
 chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
 
-const ScriptDevelopmentEnvironmentTemplate = `
-mkdir -p $VORPAL_WORKSPACE/bin
+const ScriptDevelopmentEnvironmentTemplate = `mkdir -p $VORPAL_WORKSPACE/bin
 
 cat > bin/activate << "EOF"
 #!/bin/bash
