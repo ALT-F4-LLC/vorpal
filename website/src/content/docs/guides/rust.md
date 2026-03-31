@@ -10,10 +10,23 @@ The Rust SDK lets you define Vorpal build configurations as native Rust programs
 Add the SDK to your project's `Cargo.toml`:
 
 ```toml title="Cargo.toml"
+[package]
+edition = "2021"
+name = "my-app"
+version = "0.1.0"
+
+[[bin]]
+name = "my-app"
+path = "src/main.rs"
+
+[[bin]]
+name = "vorpal"
+path = "src/vorpal.rs"
+
 [dependencies]
-vorpal-sdk = "0.1.0-alpha.0"
-tokio = { version = "1", features = ["full"] }
+vorpal-sdk = { version = "0.1.0-alpha.1" }
 anyhow = "1"
+tokio = { features = ["rt-multi-thread"], version = "1" }
 ```
 
 ## Project setup
@@ -22,20 +35,20 @@ Create a `Vorpal.toml` manifest in your project root:
 
 ```toml title="Vorpal.toml"
 language = "rust"
-name = "my-config"
 
 [source]
-includes = ["src", "Cargo.lock", "Cargo.toml"]
-
-[source.rust]
-packages = ["my-config"]
+includes = [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src/vorpal.rs"
+]
 ```
 
-The `language` field tells Vorpal which SDK to use. The `name` field sets the config binary name. The `[source]` section defines which files to include, and `[source.rust]` lists the workspace packages needed to compile the config.
+The `language` field tells Vorpal which SDK to use. The `[source]` section with `includes` defines which files to include when compiling the config.
 
-Then create a build configuration in `src/main.rs`:
+Then create a build configuration in `src/vorpal.rs`:
 
-```rust title="src/main.rs"
+```rust title="src/vorpal.rs"
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
@@ -68,7 +81,7 @@ Use the `Rust` builder to compile a Rust project into a cross-platform artifact:
 `Rust` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```rust title="src/main.rs" {4,14-18}
+```rust title="src/vorpal.rs" {4,14-18}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
@@ -123,11 +136,11 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```rust title="src/main.rs" {14,17}
+```rust title="src/vorpal.rs" {14,17}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::language::rust::Rust,
+    artifact::{language::rust::Rust, protoc::Protoc},
     context::get_context,
 };
 
@@ -137,7 +150,7 @@ async fn main() -> Result<()> {
 
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    let protoc = ctx.fetch_artifact_alias("protoc:34.0").await?;
+    let protoc = Protoc::new().build(ctx).await?;
 
     Rust::new("my-app", systems)
         .with_artifacts(vec![protoc])
@@ -157,11 +170,11 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```rust title="src/main.rs" {4,22-25}
+```rust title="src/vorpal.rs" {4,22-25}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::language::rust::{Rust, RustDevelopmentEnvironment},
+    artifact::{language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc},
     context::get_context,
 };
 
@@ -171,7 +184,7 @@ async fn main() -> Result<()> {
 
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    let protoc = ctx.fetch_artifact_alias("protoc:34.0").await?;
+    let protoc = Protoc::new().build(ctx).await?;
 
     Rust::new("my-app", systems.clone())
         .with_bins(vec!["my-app"])
@@ -218,11 +231,11 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```rust title="src/main.rs" {4,27,29-31}
+```rust title="src/vorpal.rs" {4,27,29-31}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{get_env_key, language::rust::{Rust, RustDevelopmentEnvironment}, Job},
+    artifact::{get_env_key, language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc, Job},
     context::get_context,
 };
 
@@ -232,7 +245,7 @@ async fn main() -> Result<()> {
 
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    let protoc = ctx.fetch_artifact_alias("protoc:34.0").await?;
+    let protoc = Protoc::new().build(ctx).await?;
 
     let my_app = Rust::new("my-app", systems.clone())
         .with_artifacts(vec![protoc.clone()])
@@ -268,11 +281,11 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```rust title="src/main.rs" {4,33-40}
+```rust title="src/vorpal.rs" {4,33-40}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{get_env_key, language::rust::{Rust, RustDevelopmentEnvironment}, Job, Process},
+    artifact::{get_env_key, language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc, Job, Process},
     context::get_context,
 };
 
@@ -282,7 +295,7 @@ async fn main() -> Result<()> {
 
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
-    let protoc = ctx.fetch_artifact_alias("protoc:34.0").await?;
+    let protoc = Protoc::new().build(ctx).await?;
 
     let my_app = Rust::new("my-app", systems.clone())
         .with_artifacts(vec![protoc.clone()])
@@ -328,7 +341,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```rust title="src/main.rs" {4,14-20}
+```rust title="src/vorpal.rs" {4,19-22}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
@@ -372,7 +385,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```rust title="src/main.rs" {3-4,14-19,21-22}
+```rust title="src/vorpal.rs" {3-4,14-19,21-22}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
