@@ -1,6 +1,6 @@
 {
   "name": "@altf4llc/vorpal-sdk",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "description": "Vorpal SDK for building artifacts in TypeScript",
   "license": "Apache-2.0",
   "repository": {
@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@types/bun": "1.3.11",
-    "ts-proto": "2.11.5",
+    "ts-proto": "2.11.6",
     "tsx": "4.21.0",
     "typescript": "5.9.3"
   }

@@ -260,7 +260,10 @@ func getTransportCredentials(address string) (credentials.TransportCredentials, 
 		caCertPath := GetKeyCaPath()
 		caCert, err := os.ReadFile(caCertPath)
 		if err == nil {
-			caCertPool := x509.NewCertPool()
+			caCertPool, poolErr := x509.SystemCertPool()
+			if poolErr != nil {
+				caCertPool = x509.NewCertPool()
+			}
 			if !caCertPool.AppendCertsFromPEM(caCert) {
 				log.Printf("WARNING: CA certificate at %s could not be parsed, falling back to system trust store", caCertPath)
 			} else {

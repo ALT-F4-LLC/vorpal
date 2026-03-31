@@ -174,10 +174,11 @@ pub async fn bwrap(
     step_arguments.push(step_path);
 
     for env in environments.iter() {
-        let key = env.split("=").next().unwrap();
-        let value = env.split("=").last().unwrap();
+        let Some((key, value)) = env.split_once('=') else {
+            continue;
+        };
 
-        if key.starts_with("PATH") {
+        if key == "PATH" {
             continue;
         }
 

@@ -19,7 +19,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::{
-    fs::{read, remove_dir_all, remove_file, write},
+    fs::{remove_dir_all, remove_file, write, File},
+    io::{AsyncReadExt, BufReader},
     sync::{
         mpsc::{channel, Sender},
         Mutex,
@@ -376,20 +377,6 @@ pub async fn build_source(
             bail!("Private key not found: {}", private_key_path.display());
         }
 
-        let source_archive_data = read(&source_sandbox_archive).await?;
-
-        let mut source_stream = vec![];
-
-        for chunk in source_archive_data.chunks(DEFAULT_CHUNKS_SIZE) {
-            let request_push = ArchivePushRequest {
-                data: chunk.to_vec(),
-                digest: source_digest.clone(),
-                namespace: artifact_namespace.clone(),
-            };
-
-            source_stream.push(request_push);
-        }
-
         let _ = tx
             .send(Ok(PrepareArtifactResponse {
                 artifact: None,
@@ -399,7 +386,46 @@ pub async fn build_source(
             .await
             .map_err(|_| Status::internal("failed to send response"));
 
-        let request = Request::new(tokio_stream::iter(source_stream));
+        let (stream_tx, stream_rx) = tokio::sync::mpsc::channel(4);
+        let archive_path = source_sandbox_archive.clone();
+        let digest_clone = source_digest.clone();
+        let namespace_clone = artifact_namespace.clone();
+
+        tokio::spawn(async move {
+            let file = match File::open(&archive_path).await {
+                Ok(f) => f,
+                Err(e) => {
+                    warn!("agent |> failed to open archive: {}", e);
+                    return;
+                }
+            };
+            let mut reader = BufReader::new(file);
+            let mut buf = vec![0u8; DEFAULT_CHUNKS_SIZE];
+
+            loop {
+                let n = match reader.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => n,
+                    Err(e) => {
+                        warn!("agent |> failed to read archive chunk: {}", e);
+                        return;
+                    }
+                };
+
+                let request_push = ArchivePushRequest {
+                    data: buf[..n].to_vec(),
+                    digest: digest_clone.clone(),
+                    namespace: namespace_clone.clone(),
+                };
+
+                if stream_tx.send(request_push).await.is_err() {
+                    warn!("agent |> stream receiver dropped");
+                    return;
+                }
+            }
+        });
+
+        let request = Request::new(ReceiverStream::new(stream_rx));
 
         client_archive.push(request).await.expect("failed to push");
 

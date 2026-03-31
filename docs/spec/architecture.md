@@ -1,9 +1,9 @@
 ---
 project: "vorpal"
 maturity: "experimental"
-last_updated: "2026-03-21"
+last_updated: "2026-03-24"
 updated_by: "@staff-engineer"
-scope: "System architecture overview of the Vorpal build system"
+scope: "System architecture, component boundaries, data flow, and integration points for the Vorpal build system"
 owner: "@staff-engineer"
 dependencies:
   - security.md
@@ -11,321 +11,448 @@ dependencies:
   - performance.md
 ---
 
-# Architecture
+# Architecture Specification
 
-Vorpal is a build system that treats build configurations as real programs. Users define builds in Rust, Go, or TypeScript using language-native SDKs. The system provides hermetic execution, content-addressed caching, cross-platform targeting, and artifact distribution through a client-server architecture built on gRPC.
+## 1. System Overview
 
-## System Overview
+Vorpal is a cross-platform build system where build configurations are written as real programs (not YAML or DSLs) using SDKs in Rust, Go, or TypeScript. The system provides hermetic execution, content-addressed caching, and artifact distribution through a client-server architecture communicating over gRPC.
 
-Vorpal consists of three main layers:
+### Design Philosophy
 
-1. **CLI** (`vorpal`) -- the user-facing command-line tool that orchestrates builds, manages system services, and runs artifacts.
-2. **SDK** -- multi-language libraries (Rust, Go, TypeScript) that provide the API for defining build configurations as code.
-3. **Services** -- backend gRPC services (Agent, Worker, Registry) that handle source preparation, artifact building, and artifact storage/distribution.
+- **Config as code**: Build definitions are executable programs compiled and run by the CLI, not declarative configuration files.
+- **Content-addressed**: Artifacts are identified by SHA-256 digests of their serialized JSON representation, enabling deterministic caching and deduplication.
+- **Multi-language SDK parity**: Rust, Go, and TypeScript SDKs expose equivalent APIs; CI verifies that all three produce identical artifact digests for the same inputs.
+- **Pluggable executors**: Build steps run via `bash` (macOS), `bwrap` (Linux sandboxed), `docker`, or arbitrary binaries.
 
-```
-                          +-------------------+
-                          |   User Config     |
-                          | (Rust/Go/TS code) |
-                          +--------+----------+
-                                   |
-                              SDK (language)
-                                   |
-                          +--------v----------+
-                          |     vorpal CLI    |
-                          +---+-----+-----+---+
-                              |     |     |
-                    +---------+  +--+--+  +---------+
-                    |            |     |            |
-               +----v----+ +----v----+ +----v------+
-               |  Agent  | | Worker  | |  Registry |
-               | Service | | Service | | (Archive  |
-               |         | |         | |  Artifact)|
-               +---------+ +---------+ +-----------+
-```
-
-## Component Architecture
-
-### CLI (`cli/`)
-
-The CLI is a Rust binary (`vorpal`) built with `clap` for argument parsing. It is the single entry point for all user interactions.
-
-**Commands:**
-
-| Command | Purpose |
-|---------|---------|
-| `build <name>` | Build an artifact by name from a `Vorpal.toml` config |
-| `config` | Manage project and user-level configuration settings |
-| `init <name>` | Scaffold a new Vorpal project with language selection |
-| `inspect <digest>` | Inspect a stored artifact by its content digest |
-| `login` | Authenticate via OAuth2 device flow (Keycloak) |
-| `run <alias>` | Execute a previously built artifact by alias |
-| `system keys generate` | Generate TLS key pairs for service communication |
-| `system prune` | Clean up local artifact store (archives, outputs, configs, sandboxes, aliases) |
-| `system services start` | Start the gRPC backend services |
-
-**Configuration resolution** follows a three-layer precedence model (highest to lowest):
-1. CLI flags (explicit)
-2. Project-level config (`Vorpal.toml`)
-3. User-level config (`~/.vorpal/settings.json`)
-4. Built-in defaults
-
-The `VorpalConfig` struct (`cli/src/command/config.rs`) defines all configurable settings: `registry`, `namespace`, `language`, `name`, `system`, `worker`. Each resolved value carries provenance tracking (`SettingsSource::Default | User | Project`).
-
-### SDK (`sdk/`)
-
-Multi-language SDK providing the programmatic interface for defining build artifacts.
-
-#### Protobuf API (`sdk/rust/api/`)
-
-All inter-service communication is defined via Protocol Buffers. Five service definitions exist:
-
-| Proto Package | Service | Purpose |
-|---------------|---------|---------|
-| `vorpal.agent` | `AgentService` | Source preparation and artifact assembly |
-| `vorpal.archive` | `ArchiveService` | Binary archive storage (push/pull/check) |
-| `vorpal.artifact` | `ArtifactService` | Artifact metadata storage and retrieval |
-| `vorpal.context` | `ContextService` | Artifact retrieval from config context |
-| `vorpal.worker` | `WorkerService` | Artifact building and step execution |
-
-Code generation:
-- **Rust**: `tonic-prost-build` via `sdk/rust/build.rs`, with serde derives on artifact messages for JSON serialization.
-- **Go**: `protoc` with `protoc-gen-go` / `protoc-gen-go-grpc` (generated into `sdk/go/pkg/api/`).
-- **TypeScript**: `protoc-gen-ts_proto` (generated into `sdk/typescript/src/api/`).
-
-#### Rust SDK (`sdk/rust/`)
-
-Published as `vorpal-sdk` (Apache-2.0, `0.1.0-alpha.0`). Provides:
-
-- **`artifact` module** -- Builder pattern types for defining artifacts:
-  - `Artifact` -- core build unit with name, sources, steps, and target systems.
-  - `ArtifactStep` -- individual build step with entrypoint, arguments, environments, and secrets.
-  - `ArtifactSource` -- source input with content digest, includes/excludes, and path (local, HTTP, or git).
-  - `DevelopmentEnvironment` -- generates shell activation scripts with environment variable management.
-  - `UserEnvironment` -- generates user-wide tool installations with symlink management.
-  - `Job` -- script-based build unit (wraps shell step).
-  - `Process` -- long-running process artifact with start/stop/logs scripts.
-- **`context` module** -- `ConfigContext` for managing the build session, artifact store, and gRPC client connections.
-- **Language builders** (`artifact/language/`) -- `Rust`, `Go`, `TypeScript` builders that produce complete artifact definitions from high-level configuration.
-- **Tool artifacts** -- Pre-built tool definitions for `bun`, `cargo`, `clippy`, `crane`, `gh`, `git`, `nodejs`, `protoc`, `rsync`, `rustc`, `rustfmt`, `staticcheck`, `gopls`, `goimports`, `grpcurl`, etc.
-
-#### Go SDK (`sdk/go/`)
-
-Mirrors the Rust SDK's artifact/config capabilities:
-- `pkg/config/` -- `ConfigContext`, command parsing, system detection, path management.
-- `pkg/artifact/` -- Builder types for `Go`, `Rust`, `TypeScript` languages, plus tools (`bun`, `protoc`, `crane`, `gh`, `git`, `nodejs`, etc.).
-- `pkg/store/` -- Local store operations (sandbox, hash, path management).
-- `cmd/vorpal/` -- Vorpal's own build configuration (self-hosting).
-
-#### TypeScript SDK (`sdk/typescript/`)
-
-Published as `@altf4llc/vorpal-sdk` on npm. Uses Bun as the runtime:
-- `src/context.ts` -- Config context management.
-- `src/artifact.ts` -- Artifact, step, and environment builder types.
-- `src/artifact/language/` -- Language-specific builders (`typescript.ts`, `go.ts`, `rust.ts`).
-- `src/system.ts` -- Platform detection and system enum mapping.
-
-### Services
-
-All services run within a single `vorpal` process, started via `vorpal system services start`. The service composition is configurable via `--services` flag (default: `agent,registry,worker`).
-
-#### Transport
-
-- **Unix Domain Socket** (default): `/var/lib/vorpal/vorpal.sock` (overridable via `VORPAL_SOCKET_PATH`).
-- **TCP**: When `--port` is specified or `--tls` is enabled (default TLS port: `23151`).
-- **TLS**: Optional, using self-signed certificates generated by `vorpal system keys generate`.
-- **Health checks**: Optional plaintext TCP health endpoint (default port `23152`) using `tonic-health`.
-
-A file-based advisory lock (`fs4`) prevents multiple instances from binding the same socket.
-
-#### Agent Service (`cli/src/command/start/agent.rs`)
-
-Responsible for preparing artifacts before building. Handles:
-
-1. **Source resolution** -- Determines source type (local filesystem, HTTP URL, or git) and fetches content.
-2. **Archive format detection** -- Auto-detects MIME types (gzip, bzip2, xz, zip, executables) and unpacks accordingly.
-3. **Content hashing** -- Computes SHA-256 digests of source files for content-addressing.
-4. **Lockfile management** -- Reads/writes `Vorpal.lock` to pin remote source digests per platform. Sources changed without `--unlock` flag are rejected.
-5. **Secret encryption** -- Encrypts step secrets using the service's RSA public key before forwarding to workers.
-6. **Source caching** -- In-memory cache (`SourceCache`) deduplicates HTTP source downloads within a session.
-7. **Registry interaction** -- Pushes prepared source archives to the registry for worker consumption.
-
-The agent streams `PrepareArtifactResponse` messages back to the CLI, providing progress updates and the final prepared artifact with its content digest.
-
-#### Worker Service (`cli/src/command/start/worker.rs`)
-
-Executes the actual build steps. Handles:
-
-1. **Source pulling** -- Downloads source archives from the registry and unpacks them into a workspace.
-2. **Dependency resolution** -- Pulls dependency artifact archives that build steps reference.
-3. **Step execution** -- Runs each `ArtifactStep` as a subprocess with:
-   - Environment variables: `VORPAL_OUTPUT` (output path), `VORPAL_WORKSPACE` (workspace path), `VORPAL_ARTIFACT_<digest>` (dependency paths), custom environments, decrypted secrets.
-   - Script handling: Writes inline scripts to workspace, sets permissions, executes via entrypoint.
-   - Variable expansion: Supports `$VAR` and `${VAR}` syntax in arguments and scripts.
-4. **Output archiving** -- Compresses build output with zstd and pushes to the registry.
-5. **Artifact storage** -- Registers the built artifact with its digest in the artifact service.
-6. **Lock management** -- Creates/removes lock files to prevent concurrent builds of the same artifact.
-7. **Service-to-service auth** -- Obtains OAuth2 client credentials for authenticated registry access.
-
-Target system validation ensures workers only build artifacts matching the host platform.
-
-#### Registry Services (`cli/src/command/start/registry/`)
-
-Two sub-services compose the registry:
-
-**ArchiveService** -- Binary blob storage for source and artifact archives:
-- Backends: `local` (filesystem at `/var/lib/vorpal/`) or `s3` (AWS S3 bucket).
-- Operations: `Check` (existence), `Pull` (streaming download), `Push` (streaming upload).
-- Caching: Configurable TTL for archive check results (`--archive-cache-ttl`, default 300s).
-
-**ArtifactService** -- Artifact metadata storage:
-- Backends: `local` (filesystem) or `s3`.
-- Operations: `GetArtifact`, `GetArtifacts`, `GetArtifactAlias`, `StoreArtifact`.
-- Aliases: Named references (with system and tag) to artifact digests, enabling `vorpal run <alias>`.
-
-#### Authentication (`cli/src/command/start/auth.rs`)
-
-- **OIDC/OAuth2** -- Optional JWT validation via OIDC discovery. Uses Keycloak as the identity provider (see `docker-compose.yaml`, `terraform/module/keycloak/`).
-- **Device flow** -- CLI login uses OAuth2 device authorization flow.
-- **Client credentials** -- Worker-to-registry authentication uses OAuth2 client credentials flow.
-- **Interceptors** -- gRPC interceptors validate JWT tokens on registry and worker endpoints when an issuer is configured.
-- **Namespace authorization** -- JWT claims can restrict access to specific namespaces.
-
-### Local Store (`cli/src/command/store/`)
-
-On-disk storage layout under `/var/lib/vorpal/`:
-
-| Module | Purpose |
-|--------|---------|
-| `archives` | zstd compression/decompression, zip unpacking |
-| `hashes` | SHA-256 content digest computation for source files |
-| `notary` | RSA encryption/decryption for build step secrets |
-| `paths` | Path resolution for artifacts, archives, keys, sockets, aliases |
-| `temps` | Sandbox directory/file creation for isolated build workspaces |
-
-File timestamps are normalized (set to Unix epoch) to ensure reproducible content hashes regardless of when files were created.
-
-## Data Model
-
-### Core Types
-
-```
-Artifact
-  |-- name: String
-  |-- target: ArtifactSystem (host platform for this build)
-  |-- systems: [ArtifactSystem] (platforms this artifact supports)
-  |-- aliases: [String] (named references like "latest")
-  |-- sources: [ArtifactSource]
-  |     |-- name, path, digest, includes, excludes
-  |-- steps: [ArtifactStep]
-        |-- entrypoint, script, arguments
-        |-- artifacts: [digest] (dependency references)
-        |-- environments: [String] (KEY=VALUE)
-        |-- secrets: [ArtifactStepSecret] (encrypted at rest)
-
-ArtifactSystem: AARCH64_DARWIN | AARCH64_LINUX | X8664_DARWIN | X8664_LINUX
-```
-
-### Content Addressing
-
-Artifacts are identified by SHA-256 digest of their serialized JSON representation. This digest serves as the cache key and storage path. Two artifacts with identical inputs always produce the same digest, enabling deterministic caching.
-
-### Lockfile (`Vorpal.lock`)
-
-JSON file tracking pinned source digests per platform. Sources are locked after first resolution and cannot change without `--unlock`. Format:
-
-```json
-{
-  "lockfile": 1,
-  "sources": [
-    {
-      "name": "source-name",
-      "digest": "sha256-hex",
-      "platform": "aarch64-darwin",
-      "path": "https://...",
-      "includes": [],
-      "excludes": []
-    }
-  ]
-}
-```
-
-## Build Flow
-
-A `vorpal build <name>` invocation follows this sequence:
-
-1. **Config resolution** -- CLI loads and merges `Vorpal.toml` (project) + `~/.vorpal/settings.json` (user) + defaults.
-2. **Config compilation** -- Based on the configured language, the CLI:
-   - Builds the config program itself (e.g., compiles the Rust/Go/TypeScript config source via the SDK's language builders).
-   - Starts the compiled config binary as a subprocess exposing a `ContextService` gRPC server.
-   - Queries the config for all artifact definitions.
-3. **Dependency ordering** -- Artifacts are topologically sorted using `petgraph` based on step dependency references.
-4. **For each artifact in order:**
-   a. **Check cache** -- If the artifact output already exists locally, skip.
-   b. **Pull from registry** -- Attempt to pull a cached archive from the registry.
-   c. **Build via worker** -- If not cached, send the artifact to the worker service which:
-      - Pulls sources and dependencies from the registry
-      - Executes build steps in sandboxed workspaces
-      - Archives and pushes the output back to the registry
-5. **Output** -- Print the artifact digest (or path with `--path` flag).
-
-## Platform Support
+### Target Platforms
 
 | Platform | Architecture | Status |
 |----------|-------------|--------|
 | macOS | Apple Silicon (aarch64) | Supported |
 | macOS | Intel (x86_64) | Supported |
-| Linux | x86_64 | Supported |
 | Linux | ARM64 (aarch64) | Supported |
+| Linux | x86_64 | Supported |
 
-Platform detection uses `uname` values mapped to `ArtifactSystem` enum variants.
+Defined as the `ArtifactSystem` protobuf enum with values: `AARCH64_DARWIN`, `AARCH64_LINUX`, `X8664_DARWIN`, `X8664_LINUX`.
 
-## Infrastructure
+## 2. Repository Structure
 
-### Development Environment
+```
+vorpal/
+  cli/                    # Rust CLI binary (vorpal-cli crate, binary name: "vorpal")
+    src/
+      command/
+        build.rs          # Build orchestration: config compilation + artifact building
+        config.rs         # Vorpal.toml parsing, layered settings resolution
+        config_cmd.rs     # `vorpal config` subcommand (get/set/show)
+        init.rs           # `vorpal init` project scaffolding
+        inspect.rs        # `vorpal inspect` artifact inspection
+        lock.rs           # Vorpal.lock lockfile management
+        run.rs            # `vorpal run` artifact execution
+        start/            # Service startup
+          agent.rs        # Agent gRPC service implementation
+          auth.rs         # OIDC token validation, namespace authorization
+          registry.rs     # Archive + Artifact registry services
+          worker.rs       # Worker gRPC service (build execution)
+        store/            # Local store operations
+          archives.rs     # zstd compression/decompression
+          hashes.rs       # Source digest computation
+          notary.rs       # RSA encrypt/decrypt for secrets
+          paths.rs        # Filesystem path conventions (/var/lib/vorpal/...)
+          temps.rs        # Sandbox directory management
+        system/           # System management (keys, prune)
+  config/                 # Vorpal's own build config (vorpal-config crate)
+    src/
+      artifact/           # Self-referential artifacts (vorpal builds itself)
+  sdk/
+    rust/                 # Rust SDK (vorpal-sdk crate, published to crates.io)
+      api/                # Protobuf definitions (source of truth)
+        agent/agent.proto
+        archive/archive.proto
+        artifact/artifact.proto
+        context/context.proto
+        worker/worker.proto
+      src/
+        artifact/         # Artifact builders (language, tool, system)
+        context.rs        # ConfigContext, gRPC channel builder, credentials
+        cli.rs            # SDK-side CLI argument parsing for config binaries
+    go/                   # Go SDK
+      pkg/
+        api/              # Generated protobuf code (from sdk/rust/api/)
+        artifact/         # Artifact builders
+        config/           # ConfigContext equivalent
+        store/            # Hash, path, sandbox utilities
+      cmd/vorpal/         # Vorpal's own Go config entry point
+    typescript/           # TypeScript SDK (published to npm as @altf4llc/vorpal-sdk)
+      src/
+        api/              # Generated protobuf code (from sdk/rust/api/)
+        artifact/         # Artifact builders
+        context.ts        # ConfigContext equivalent
+  terraform/              # AWS infrastructure for dev/CI workers
+  script/                 # Shell scripts (install, dev environment setup)
+  docs/
+    tdd/                  # Technical design documents
+    spec/                 # Project specifications (this directory)
+```
 
-- **Lima** -- Linux VM management for cross-platform testing (`lima.yaml`, `makefile` lima targets).
-- **Docker Compose** -- Keycloak identity provider for local auth development.
-- **Terraform** -- Keycloak realm/client configuration (`terraform/module/keycloak/`), worker provisioning (`terraform/module/workers/`).
+### Cargo Workspace
 
-### CI/CD
+The Rust workspace (`Cargo.toml`) contains three members:
 
-- GitHub Actions workflows: `vorpal.yaml` (main CI), `vorpal-nightly.yaml` (nightly builds).
-- Renovate for automated dependency updates (`.github/renovate.json`).
+| Crate | Type | Published | Description |
+|-------|------|-----------|-------------|
+| `vorpal-cli` (cli/) | Binary | No | CLI binary, all server implementations |
+| `vorpal-config` (config/) | Binary | No | Vorpal's own build configuration |
+| `vorpal-sdk` (sdk/rust/) | Library | crates.io | Public SDK for writing build configs |
 
-### Self-Hosting
+## 3. Component Architecture
 
-Vorpal builds itself. The `Vorpal.toml` at the repo root defines the build config for the `vorpal-config` binary, which uses the Rust SDK to build the CLI and related artifacts. The Go SDK config (`Vorpal.go.toml`) and TypeScript SDK config (`Vorpal.ts.toml`) define builds for the SDK packages themselves.
+### 3.1 CLI (`vorpal`)
 
-## Architectural Decisions
+The single `vorpal` binary serves as both the client-side build tool and the server daemon. Key subcommands:
 
-### Config-as-Code over DSL
+| Command | Role |
+|---------|------|
+| `vorpal build <name>` | Compile config, resolve dependencies, execute builds |
+| `vorpal run <alias>` | Execute a built artifact from the store |
+| `vorpal init <name>` | Scaffold a new project |
+| `vorpal inspect <digest>` | Inspect artifact metadata in the registry |
+| `vorpal login` | OAuth2 device code flow for registry authentication |
+| `vorpal config` | Get/set/show layered configuration |
+| `vorpal system services start` | Start background services (agent, registry, worker) |
+| `vorpal system keys generate` | Generate TLS CA + service certificates |
+| `vorpal system prune` | Clean up local store (aliases, archives, configs, outputs, sandboxes) |
 
-Build configurations are real programs in general-purpose languages rather than YAML or a custom DSL. This provides full IDE support, type checking, conditional logic, and code reuse.
+#### Configuration Layering
 
-### Content-Addressed Storage
+Settings are resolved in priority order (highest wins):
 
-All artifacts and sources are identified by SHA-256 content digests. This ensures cache correctness -- identical inputs always resolve to the same cached output -- and enables safe sharing across machines and teams.
+1. CLI flags (explicit `--flag` values)
+2. Project config (`Vorpal.toml` in working directory)
+3. User config (`~/.vorpal/settings.json`)
+4. Built-in defaults
 
-### Monolithic Service Process
+The `Vorpal.toml` file specifies:
 
-Agent, Worker, and Registry run in a single process rather than as separate microservices. This simplifies deployment and local development while still maintaining clean service boundaries via gRPC interfaces. Services can be selectively enabled via the `--services` flag.
+```toml
+language = "rust"       # go | rust | typescript
+name = "vorpal-config"  # config binary name
 
-### gRPC for All Communication
+[source]
+includes = ["config", "sdk/rust"]
 
-All inter-component communication uses gRPC with Protocol Buffers. This provides:
-- Strongly-typed contracts across all three SDK languages.
-- Streaming support for large archive transfers.
-- Built-in TLS and authentication interceptor support.
+[source.rust]
+packages = ["vorpal-config", "vorpal-sdk"]
+```
 
-### Reproducibility via Timestamp Normalization
+### 3.2 Services
 
-File timestamps are set to Unix epoch (1970-01-01) after all file operations. This ensures that content hashes are deterministic regardless of when builds occur, a key requirement for reproducible builds.
+All services run within a single process started by `vorpal system services start`. They share a single gRPC server (either Unix domain socket or TCP with optional TLS).
 
-## Known Gaps
+**Selectable services** via `--services` flag (default: `agent,registry,worker`):
 
-- **Git source type**: Declared in the agent's source type detection but returns a "not supported" error. Only local and HTTP sources are functional.
-- **Post-build scripts**: A `TODO` in the build flow indicates planned but unimplemented post-build script execution.
-- **Sandbox isolation**: Build steps run as subprocesses without containerization or filesystem isolation on the worker. The `temps` module creates sandbox directories but does not enforce process-level isolation. A `sandbox.go` file exists in the Go SDK's store package suggesting planned work.
-- **Credential storage**: The login flow has a `TODO` noting that existing credentials should be loaded before overwriting.
-- **Combined source digest**: A `TODO` in the agent notes exploring a combined source digest for the artifact rather than per-source digests.
+#### Agent Service
+
+**Proto**: `vorpal.agent.AgentService`
+**RPC**: `PrepareArtifact(PrepareArtifactRequest) -> stream PrepareArtifactResponse`
+
+Responsibilities:
+- Receives raw artifact definitions from config binaries
+- Resolves artifact sources (local files, HTTP downloads, git -- git not yet implemented)
+- Computes content-addressed digests for sources
+- Encrypts secrets using RSA public key
+- Pushes source archives to the registry
+- Manages `Vorpal.lock` lockfile for HTTP sources
+- Caches HTTP source digests within a session (avoids re-downloading identical URLs)
+
+Source types supported:
+- **Local**: Files from the project context directory
+- **HTTP/HTTPS**: Downloaded, auto-detected by MIME type (gzip, bzip2, xz, zip, binaries), unpacked into sandbox
+- **Git**: Declared in code but currently returns an error ("git not supported")
+
+#### Registry Service
+
+**Protos**: `vorpal.archive.ArchiveService`, `vorpal.artifact.ArtifactService`
+
+Two sub-services share the "registry" role:
+
+**ArchiveService** RPCs:
+- `Check(ArchivePullRequest) -> ArchiveResponse` -- check if archive exists
+- `Pull(ArchivePullRequest) -> stream ArchivePullResponse` -- download archive
+- `Push(stream ArchivePushRequest) -> ArchiveResponse` -- upload archive
+
+**ArtifactService** RPCs:
+- `GetArtifact(ArtifactRequest) -> Artifact` -- fetch artifact metadata by digest
+- `GetArtifactAlias(GetArtifactAliasRequest) -> GetArtifactAliasResponse` -- resolve alias to digest
+- `GetArtifacts(ArtifactsRequest) -> ArtifactsResponse` -- list artifact digests
+- `StoreArtifact(StoreArtifactRequest) -> ArtifactResponse` -- store artifact with aliases
+
+**Storage backends**:
+- `local`: Filesystem at `/var/lib/vorpal/store/` (default)
+- `s3`: AWS S3 bucket (configured via `--registry-backend-s3-bucket`)
+
+Archive caching: `moka` in-memory cache with configurable TTL (default 300s) for `Check` results to avoid repeated S3 HEAD requests.
+
+#### Worker Service
+
+**Proto**: `vorpal.worker.WorkerService`
+**RPC**: `BuildArtifact(BuildArtifactRequest) -> stream BuildArtifactResponse`
+
+Responsibilities:
+- Receives artifact build requests with fully resolved sources
+- Validates target system matches the worker's host system
+- Pulls sources and dependency artifacts from the registry
+- Creates sandboxed workspace directories
+- Executes build steps sequentially (process spawning with stdout/stderr streaming)
+- Packs output into zstd-compressed tar archives
+- Pushes built archives back to the registry
+- Stores artifact metadata in the registry
+- Manages artifact output lock files to prevent concurrent builds
+
+#### Context Service
+
+**Proto**: `vorpal.context.ContextService`
+**RPCs**: `GetArtifact`, `GetArtifacts`
+
+A short-lived gRPC server spawned by the CLI during `vorpal build`. It runs the compiled config binary as a child process, which connects back to this service to register its artifact definitions. After the config binary exits, the CLI reads the registered artifacts and proceeds with building.
+
+### 3.3 SDKs
+
+All three SDKs expose equivalent APIs for defining artifacts programmatically. The canonical protobuf definitions live in `sdk/rust/api/` and are generated for Go and TypeScript via `make generate` using `protoc`.
+
+#### SDK Public API Surface
+
+Each SDK provides:
+
+- **ConfigContext**: Connection to agent + artifact services, artifact store, variable resolution
+- **Artifact builders**: `Artifact`, `ArtifactSource`, `ArtifactStep`, `Job`, `Process`, `OciImage`
+- **Language builders**: `Go`, `Rust`, `TypeScript` (plus corresponding `DevelopmentEnvironment` variants)
+- **Environment builders**: `DevelopmentEnvironment`, `UserEnvironment`
+- **Step functions**: `bash()`, `bwrap()`, `shell()`, `docker()` -- platform-aware step construction
+- **Tool artifacts**: Pre-built toolchains (bun, cargo, crane, gh, git, go, nodejs, protoc, rsync, rust-toolchain, staticcheck, etc.)
+
+#### Config Binary Lifecycle
+
+1. CLI compiles the config source into a binary using the appropriate toolchain
+2. CLI starts a `ContextService` gRPC server on a random port
+3. CLI spawns the config binary, which connects to the `ContextService`
+4. Config binary creates artifacts via `context.add_artifact()`, which calls the Agent to prepare sources
+5. Config binary exits; CLI queries `ContextService.GetArtifacts()` to retrieve the full artifact graph
+6. CLI builds artifacts in dependency order via the Worker
+
+## 4. Data Flow
+
+### Build Pipeline
+
+```
+User runs: vorpal build <name>
+    |
+    v
+1. Parse Vorpal.toml (language, source config)
+2. Compile config binary (using language-specific builder)
+3. Build config dependencies (sdk toolchain, protoc, etc.)
+4. Start ContextService, spawn config binary
+5. Config binary registers artifacts via Agent
+    |
+    v
+Agent: PrepareArtifact
+    - Resolve sources (local/HTTP)
+    - Compute source digests
+    - Encrypt secrets
+    - Push source archives to registry
+    - Return artifact with resolved digests
+    |
+    v
+6. CLI reads artifact graph from ContextService
+7. Topological sort (petgraph) for build order
+8. For each artifact (in dependency order):
+    |
+    v
+    a. Check local store for existing output
+    b. Try pulling from registry
+    c. If not found: Worker.BuildArtifact
+        - Pull sources from registry
+        - Pull dependency artifacts
+        - Execute steps (bash/bwrap/docker)
+        - Pack output, push to registry
+    d. Pull built artifact to local store
+    |
+    v
+9. Print artifact digest (or path with --path)
+```
+
+### Content Addressing
+
+Artifacts are identified by SHA-256 of their JSON-serialized `Artifact` protobuf message. This means the digest incorporates:
+- Target system
+- All source definitions (including source digests)
+- All build steps (entrypoints, scripts, arguments, environments, dependency digests)
+- Artifact name and aliases
+
+Source digests are computed by hashing all file contents in sorted order after timestamp normalization.
+
+### Local Store Layout
+
+```
+/var/lib/vorpal/
+  key/
+    ca.pem              # CA certificate
+    ca.key.pem          # CA private key
+    service.pem         # Service certificate
+    service.key.pem     # Service private key
+    service.public.pem  # Service public key (for secret encryption)
+    credentials.json    # OAuth2 credentials
+  sandbox/              # Temporary build workspaces
+  store/
+    <namespace>/
+      archive/
+        <digest>.tar.zst  # Compressed archives (sources and built artifacts)
+      config/
+        <digest>.json     # Artifact metadata
+      output/
+        <digest>/         # Unpacked artifact outputs
+          bin/            # Executables
+          ...
+      alias/
+        <name>-<system>-<tag>  # Alias -> digest mapping
+  vorpal.sock           # Unix domain socket (default)
+  vorpal.lock           # Advisory lock file
+```
+
+## 5. Communication Protocols
+
+### gRPC Transport
+
+- **Local mode** (default): Unix domain socket at `/var/lib/vorpal/vorpal.sock` (overridable via `VORPAL_SOCKET_PATH` env var)
+- **TCP mode**: `--port <port>` flag enables TCP listener on `[::]:<port>`
+- **TLS mode**: `--tls` flag enables TLS on TCP (default port 23151), requires generated certificates
+- **Health checks**: Optional plaintext TCP health endpoint on port 23152 (`--health-check` flag), uses `tonic-health`
+
+Transport selection in SDK `build_channel()`:
+- `unix://` prefix -> Unix domain socket via tower connector
+- `http://` prefix -> plaintext TCP
+- `https://` prefix -> TLS TCP (uses CA cert from `/var/lib/vorpal/key/ca.pem` or native roots)
+
+### Streaming Patterns
+
+- Agent `PrepareArtifact`: Server-streaming (progress messages + final artifact)
+- Worker `BuildArtifact`: Server-streaming (build output lines + completion)
+- Archive `Pull`: Server-streaming (chunked binary data, 2MB chunks for S3, 8KB for push)
+- Archive `Push`: Client-streaming (chunked binary data, 8KB chunks)
+
+## 6. Build Isolation
+
+### macOS
+
+Build steps execute directly via `bash` with controlled environment variables. No filesystem sandboxing. The `PATH` is constructed from artifact `bin/` directories plus system defaults.
+
+### Linux
+
+Build steps execute inside `bwrap` (Bubblewrap) containers with:
+- `--unshare-all --share-net`: Namespace isolation with network access
+- `--clearenv`: Clean environment
+- `--chdir $VORPAL_WORKSPACE`: Working directory set to sandbox
+- `--gid 1000 --uid 1000`: Non-root user
+- `--dev /dev`, `--proc /proc`, `--tmpfs /tmp`: Minimal filesystem
+- `--ro-bind` for rootfs (from `LinuxVorpal` artifact) and dependency artifacts
+- `--bind` for output and workspace directories
+
+The rootfs is a custom Linux distribution built from source (`linux_vorpal/` module with multi-stage build scripts). A slim variant (`linux_vorpal_slim`) is also available.
+
+### Docker Executor
+
+An alternative executor that delegates to `docker run` with volume mounts for `$VORPAL_OUTPUT`.
+
+## 7. Dependency Management
+
+### Artifact Dependencies
+
+Artifacts declare step-level dependencies via `step.artifacts[]` (list of digest strings). These form a DAG resolved via `petgraph` topological sort. The CLI builds dependencies before dependents.
+
+### Lockfile (`Vorpal.lock`)
+
+TOML format tracking source digests by `(name, platform)`:
+
+```toml
+lockfile = 1
+
+[[sources]]
+digest = "sha256:..."
+excludes = []
+includes = ["..."]
+name = "source-name"
+path = "https://..."
+platform = "aarch64-darwin"
+```
+
+The agent updates the lockfile incrementally for HTTP sources after each source is prepared. Local sources are not locked. The `--unlock` flag allows source digest changes.
+
+### Vorpal Configuration Files
+
+Multiple config files can coexist in a project:
+- `Vorpal.toml` -- default (Rust config)
+- `Vorpal.go.toml` -- Go config
+- `Vorpal.ts.toml` -- TypeScript config
+
+Each specifies `language`, `name`, `[source]` includes, and language-specific build settings.
+
+## 8. Authentication and Authorization
+
+### OIDC Integration
+
+- **CLI login**: OAuth2 Device Code flow (`vorpal login --issuer <url>`)
+- **Server validation**: OIDC JWT validation via JWKS endpoint discovery
+- **Token refresh**: Automatic refresh using stored refresh tokens (5-minute expiry buffer)
+- **Service-to-service**: Worker uses OAuth2 Client Credentials flow for registry access
+
+### Namespace Authorization
+
+When auth is enabled (`--issuer` flag on service start):
+- Registry and Worker services apply OIDC interceptors to validate JWT tokens
+- Namespace permissions are enforced via JWT claims (`resource_access.<client>.roles`)
+- Keycloak is the reference IdP (Terraform modules provision realm, clients, roles, scopes)
+
+### Secret Management
+
+Build step secrets are encrypted with the service RSA public key by the Agent and decrypted with the private key by the Worker at execution time. Secrets are passed as environment variables to build steps.
+
+## 9. Infrastructure
+
+### Terraform (Development)
+
+The `terraform/` directory provisions AWS resources for development and CI:
+- **VPC**: Single-AZ with public subnet
+- **Registry instance**: `t4g.large` (ARM64 Ubuntu 24.04)
+- **Worker instances**: Per-platform EC2 instances
+  - `aarch64-linux`: `t4g.large`
+  - `x8664-linux`: `t3a.large`
+  - `aarch64-darwin`: `mac2.metal` (optional, dedicated host)
+  - `x8664-darwin`: `mac1.metal` (optional, dedicated host)
+- **Keycloak module**: Identity provider configuration for auth testing
+
+### CI Pipeline (GitHub Actions)
+
+Workflow: `.github/workflows/vorpal.yaml`
+
+Stages:
+1. **vendor**: Restore caches, vendor dependencies, cargo check (4 runners: macOS x2, Ubuntu x2)
+2. **code-quality**: Format check (`cargo fmt --check`), lint (`cargo clippy --deny warnings`)
+3. **build**: Release build, verify no non-system dynamic deps, test, dist (4 runners)
+4. **test**: Integration test -- build artifacts using all three SDKs, verify digest parity across Rust/Go/TypeScript
+5. **release**: Tag-triggered GitHub release with build provenance attestation
+6. **release-container-image**: Docker image build and push to Docker Hub (multi-arch manifest)
+7. **release-sdk-rust**: Publish `vorpal-sdk` to crates.io
+8. **release-sdk-typescript**: Publish `@altf4llc/vorpal-sdk` to npm
+
+## 10. Known Gaps and Limitations
+
+- **Git source type**: Declared in code but returns an error at runtime ("git not supported")
+- **No parallel artifact preparation**: `ConfigContext.add_artifact()` processes artifacts sequentially (marked with TODO)
+- **No combined source digest**: Artifact digest does not incorporate a combined sources hash (marked with TODO)
+- **No incremental builds**: Changing any source or step invalidates the entire artifact
+- **Single worker per platform**: No work distribution or queue -- one worker handles all builds for its platform
+- **No Windows support**: Platform enum and all tooling target only macOS and Linux
+- **Local-only sandboxing on macOS**: No filesystem isolation on macOS (bash only, no bwrap equivalent)
+- **Credentials file management**: `vorpal login` overwrites the entire credentials file rather than merging (marked with TODO)
+- **No artifact garbage collection policy**: `vorpal system prune` is manual; no automatic eviction
+- **Lockfile race conditions**: Lockfile updates during parallel builds could conflict (currently mitigated by sequential processing)

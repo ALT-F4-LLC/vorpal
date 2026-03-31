@@ -16,8 +16,8 @@ use std::{
     collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio,
 };
 use tokio::{
-    fs::{create_dir_all, read, remove_dir_all, remove_file, set_permissions, write},
-    io::{AsyncBufReadExt, BufReader},
+    fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
     sync::{mpsc, mpsc::Sender},
 };
@@ -865,24 +865,35 @@ async fn build_artifact(
 
         send_message(format!("push: {artifact_digest}"), &tx).await?;
 
-        let artifact_data = read(&artifact_archive)
+        let artifact_file = tokio::fs::File::open(&artifact_archive)
             .await
-            .map_err(|err| Status::internal(format!("failed to read artifact archive: {err}")))?;
+            .map_err(|err| Status::internal(format!("failed to open artifact archive: {err}")))?;
 
-        let mut request_stream = vec![];
+        let digest_for_stream = artifact_digest.to_string();
+        let namespace_for_stream = artifact_namespace.to_string();
 
-        for chunk in artifact_data.chunks(DEFAULT_CHUNKS_SIZE) {
-            request_stream.push(ArchivePushRequest {
-                data: chunk.to_vec(),
-                digest: artifact_digest.clone(),
-                namespace: artifact_namespace.clone(),
-            });
-        }
+        let request_stream = async_stream::stream! {
+            let mut reader = BufReader::new(artifact_file);
+            let mut buf = vec![0u8; DEFAULT_CHUNKS_SIZE];
+            loop {
+                match reader.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        yield ArchivePushRequest {
+                            data: buf[..n].to_vec(),
+                            digest: digest_for_stream.clone(),
+                            namespace: namespace_for_stream.clone(),
+                        };
+                    }
+                    Err(err) => {
+                        error!("worker |> failed to read artifact archive chunk: {err}");
+                        break;
+                    }
+                }
+            }
+        };
 
-        if let Err(err) = client_archive
-            .push(tokio_stream::iter(request_stream))
-            .await
-        {
+        if let Err(err) = client_archive.push(request_stream).await {
             error!("worker |> failed to push artifact: {:?}", err);
             return Err(Status::internal(format!(
                 "failed to push artifact: {err:?}"

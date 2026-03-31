@@ -1,9 +1,9 @@
 ---
 project: "vorpal"
 maturity: "experimental"
-last_updated: "2026-03-21"
+last_updated: "2026-03-24"
 updated_by: "@staff-engineer"
-scope: "Authentication, authorization, cryptographic operations, secret management, and transport security in the Vorpal build system"
+scope: "Security posture: authentication, authorization, cryptography, secrets, build isolation, supply chain, and trust boundaries"
 owner: "@staff-engineer"
 dependencies:
   - architecture.md
@@ -13,289 +13,256 @@ dependencies:
 
 ## 1. Overview
 
-Vorpal is a build system with a client/server architecture comprising an Agent, Registry (Archive + Artifact services), Worker, and SDK. Security features are opt-in: the system defaults to unauthenticated, plaintext communication and must be explicitly configured for TLS and OIDC-based authentication.
+Vorpal is a build system and artifact registry with a multi-service gRPC architecture (agent, registry, worker). Security concerns span: TLS/mTLS for transport, OIDC-based authentication and authorization, build-time sandboxing, secret management, supply chain integrity, and infrastructure access control. Authentication is optional -- services run unauthenticated by default in local/development mode.
 
 ## 2. Authentication
 
-### 2.1 OIDC / OAuth2 Integration
+### 2.1 OIDC Integration
 
-Vorpal supports OpenID Connect (OIDC) authentication via an external identity provider. The reference deployment uses Keycloak (v26.5.5), provisioned via Terraform in `terraform/module/keycloak/`.
+Vorpal supports OIDC-based authentication via an external identity provider (Keycloak is the reference implementation, managed via Terraform in `terraform/module/keycloak/`).
 
-**Client-side authentication (CLI login):**
+**Server-side validation** (`cli/src/command/start/auth.rs`):
 
-- Implemented via the OAuth2 Device Authorization Grant flow (`cli/src/command.rs:523-645`)
-- The CLI (`vorpal login`) performs OIDC discovery against the issuer's `.well-known/openid-configuration` endpoint, then initiates the device code flow
-- Users authenticate out-of-band (browser) and the CLI polls for the resulting token
-- Obtained tokens (access token, refresh token, expiry, scopes) are stored in a local credentials file at `/var/lib/vorpal/key/credentials.json`
-- The `cli` OIDC client is configured as `PUBLIC` access type with device authorization grant enabled
+- `OidcValidator` performs OIDC discovery (`/.well-known/openid-configuration`) at startup
+- Validates issuer match (normalized, trailing-slash tolerant for Auth0 compatibility)
+- Fetches JWKS and caches keys in-memory with automatic refresh on `kid` miss (handles key rotation)
+- Token validation enforces: RS256 algorithm, `kid` matching, audience, issuer, expiration (`exp`), and not-before (`nbf`)
+- Claims are extracted and stashed in gRPC request extensions for downstream handlers
 
-**Server-side token validation:**
+**Client-side flows**:
 
-- Implemented in `cli/src/command/start/auth.rs` via the `OidcValidator` struct
-- On startup, the server discovers the issuer's JWKS URI and fetches the JSON Web Key Set
-- JWT validation enforces: RS256 algorithm, `kid` matching, audience (`aud`), issuer (`iss`), expiration (`exp`), and not-before (`nbf`)
-- JWKS are cached in-memory with automatic refresh on `kid` miss (handles key rotation)
-- Issuer comparison is normalized (trailing slash tolerance) for Auth0 compatibility
-- Validation is applied as a gRPC interceptor using `tonic::Request` — runs synchronously via `block_in_place` for simplicity
+- **Device Authorization Grant** (`cli/src/command.rs`, `Command::Login`): The `vorpal login` command uses OAuth2 device code flow for interactive CLI authentication. Tokens (access + refresh) are stored in `/var/lib/vorpal/key/credentials.json`.
+- **Client Credentials Grant** (`cli/src/command/start/auth.rs`, `exchange_client_credentials`): Workers use service-to-service OAuth2 client credentials flow to authenticate with registry services. Client ID and secret are passed via CLI flags (`--issuer-client-id`, `--issuer-client-secret`).
+- **Token refresh** (`sdk/rust/src/context.rs`, `refresh_access_token`): The SDK automatically refreshes expired access tokens using stored refresh tokens before making registry calls. Tokens are refreshed when less than 5 minutes remain before expiration.
 
-**Service-to-service authentication (worker):**
+**Keycloak realm configuration** (`terraform/module/keycloak/local.tf`):
 
-- The Worker service uses OAuth2 Client Credentials flow to obtain tokens for calling the Registry (Archive and Artifact services)
-- Credentials (`issuer_client_id`, `issuer_client_secret`) are passed via CLI flags — not stored in files
-- Separate scoped tokens are obtained for archive operations (`read:archive write:archive`) and artifact operations (`read:artifact write:artifact`)
-- The `worker` OIDC client is configured as `CONFIDENTIAL` with service accounts enabled
+- Realm: `vorpal`
+- Clients: `cli` (PUBLIC, device auth grant), `archive` (CONFIDENTIAL), `artifact` (CONFIDENTIAL), `worker` (CONFIDENTIAL, service accounts enabled)
+- Client scopes: `archive`, `artifact`, `worker` -- each with audience protocol mapper and role protocol mapper
+- Development user: `admin` / `password` (hardcoded in Terraform locals -- development only)
 
-**Token refresh:**
+### 2.2 Authentication as Optional
 
-- Client-side tokens are automatically refreshed when within 5 minutes of expiration (`sdk/rust/src/context.rs:700-760`)
-- Refresh uses the stored refresh token; if absent, the user is prompted to re-login
-- Updated credentials are persisted back to the credentials file
+Authentication is entirely opt-in. When `--issuer` is not provided to `vorpal system services start`, all gRPC services run without any interceptor, meaning any client can call any endpoint. The worker checks `request.extensions().get::<auth::Claims>().is_some()` before enforcing namespace permissions -- if no claims are present (no auth configured), the check is skipped entirely (`cli/src/command/start/worker.rs:964`).
 
-### 2.2 Authentication is Optional
+**Gap**: There is no warning or log message when services start without authentication enabled. In production deployments, this could lead to accidentally running unauthenticated.
 
-Authentication is **not enforced by default**. When the `--issuer` flag is omitted from `vorpal system services start`, all gRPC services operate without authentication. The interceptor is only attached when an issuer is provided. This means:
+### 2.3 gRPC Interceptor
 
-- Local development operates fully unauthenticated
-- Production deployments must explicitly enable auth via `--issuer`, `--issuer-audience`, `--issuer-client-id`, and `--issuer-client-secret` flags
-
-**Gap:** There is no warning emitted when services start without authentication enabled.
+The auth interceptor (`cli/src/command/start/auth.rs`, `new_interceptor`) is synchronous (required by tonic's `Interceptor` trait) but wraps async OIDC validation via `tokio::task::block_in_place`. This is noted in a code comment as acceptable for current throughput but potentially worth replacing with a tower layer for high-throughput scenarios.
 
 ## 3. Authorization
 
-### 3.1 Namespace-based Permissions
+### 3.1 Namespace-Based Permissions
 
-Authorization is implemented via custom JWT claims (`cli/src/command/start/auth.rs:49-69`):
+Authorization is namespace-scoped. Claims include a `namespaces` field mapping namespace names to permission arrays.
 
-- A `namespaces` claim in the JWT maps namespace names to arrays of permission strings
-- The `require_namespace_permission()` helper checks this claim before allowing gRPC operations
-- Wildcard namespace (`*`) grants access to all namespaces for a given permission
-- Permissions are checked per-operation: `read` for pulls/gets, `write` for pushes/stores/builds
+**`Claims::has_namespace_permission`** (`cli/src/command/start/auth.rs:55-69`):
+- Checks exact namespace match first
+- Falls back to wildcard (`*`) namespace for admin access
+- Permissions are string-based (e.g., `"write"`, `"read"`)
 
-**Services with authorization checks:**
+**`require_namespace_permission`** (`cli/src/command/start/auth.rs:405-423`):
+- Extracts claims from gRPC request extensions
+- Returns `UNAUTHENTICATED` if no claims found
+- Returns `PERMISSION_DENIED` if namespace permission is missing
 
-| Service | Endpoint | Permission |
-|---------|----------|------------|
-| Archive | `pull` | `read` on namespace |
-| Archive | `push` | None (no auth check on push) |
-| Artifact | `get_artifact` | `read` on namespace |
-| Artifact | `get_artifact_alias` | `read` on namespace |
-| Artifact | `store_artifact` | `write` on namespace |
-| Worker | `build_artifact` | `write` on namespace |
+**Current enforcement points**:
+- Worker `build_artifact`: requires `write` permission on the artifact namespace (`cli/src/command/start/worker.rs:966`)
 
-**Gap:** Archive `push` does not enforce authorization even when auth is enabled. The `check` endpoint also lacks authorization.
+**Gap**: The registry services (archive push/pull, artifact get/store) apply the OIDC interceptor at the service level when `--issuer` is configured (`cli/src/command/start.rs:212-235`), but individual RPC handlers do not perform namespace-level permission checks. The interceptor validates the token is valid but does not enforce what the caller is allowed to do within specific namespaces for registry operations.
 
-### 3.2 Authorization is Conditional
+### 3.2 Audit Logging
 
-Authorization checks only execute when `Claims` are present in the gRPC request extensions. If authentication is disabled (no issuer configured), no claims are injected and all authorization checks are skipped. The check pattern is:
+`get_user_context` (`cli/src/command/start/auth.rs:426-431`) extracts the `sub` claim for audit logging. Currently used in the worker's `build_artifact` to log which user initiated a build. Not systematically applied across all services.
 
-```
-if request.extensions().get::<auth::Claims>().is_some() {
-    require_namespace_permission(&request, &namespace, "write")?;
-}
-```
+## 4. Cryptography
 
-### 3.3 Audit Logging
+### 4.1 TLS / mTLS
 
-User context extraction (`get_user_context`) is available for audit logging via the JWT `sub` claim. Audit log entries are written via `tracing::info!` at the point of authorization check. This provides basic who-did-what logging but is not structured for security audit purposes.
+**Server TLS** (`cli/src/command/start.rs`, `new_tls_config`):
+- Optional, enabled via `--tls` flag on `vorpal system services start`
+- Uses service certificate and private key from `/var/lib/vorpal/key/service.pem` and `/var/lib/vorpal/key/service.key.pem`
+- TLS implies TCP mode (default port 23151); without TLS, services default to Unix domain socket
 
-**Gap:** Audit logging is informational-level tracing, not a dedicated security audit log.
+**Client TLS** (`sdk/rust/src/context.rs`, `get_client_tls_config`):
+- Automatically enabled for `https://` URIs
+- Uses local CA certificate (`/var/lib/vorpal/key/ca.pem`) if present for custom CA trust
+- Falls back to system native roots if no local CA exists
+- No TLS for `http://` or `unix://` URIs
 
-## 4. Transport Security
+### 4.2 Key Generation
 
-### 4.1 TLS Configuration
+`vorpal system keys generate` (`cli/src/command/system/keys.rs`) produces a complete PKI:
 
-TLS is opt-in for the main gRPC listener, controlled by the `--tls` flag.
+| File | Algorithm | Purpose |
+|------|-----------|---------|
+| `ca.key.pem` | RSA (PKCS_RSA_SHA256 via `rcgen`) | CA private key |
+| `ca.pem` | Self-signed X.509 | CA certificate (KeyCertSign, CrlSign, DigitalSignature) |
+| `service.key.pem` | RSA (PKCS_RSA_SHA256) | Service private key |
+| `service.public.pem` | RSA public key (PKCS8) | Service public key (used for secret encryption) |
+| `service.pem` | X.509 signed by CA | Service certificate (SAN: localhost, ServerAuth EKU) |
+| `service.secret` | UUID v7 | Service secret (opaque string) |
 
-**Server-side TLS:**
+All keys are stored under `/var/lib/vorpal/key/`. Generation is idempotent -- each file is only created if it does not already exist.
 
-- Uses `tonic::transport::ServerTlsConfig` with PEM-encoded certificate and private key
-- Certificate and key are read from `/var/lib/vorpal/key/service.pem` and `/var/lib/vorpal/key/service.key.pem`
-- TLS implies TCP mode (default port 23151); without TLS, the server may use Unix domain sockets
+**Observations**:
+- Service certificate SAN is hardcoded to `localhost` only. Remote TLS connections to non-localhost addresses will fail certificate verification unless clients disable hostname verification.
+- No certificate expiration is configured (rcgen defaults apply).
+- No key rotation mechanism exists. Keys persist until manually deleted.
+- The CA is unconstrained (`BasicConstraints::Unconstrained`) -- it can sign any number of subordinate CAs.
 
-**Client-side TLS:**
+### 4.3 Notary (Secret Encryption)
 
-- For `https://` URIs, the client uses `tonic::transport::ClientTlsConfig`
-- If a CA certificate exists at `/var/lib/vorpal/key/ca.pem`, it is used for certificate verification
-- If no local CA cert exists, system native root certificates are used (`with_native_roots()`)
-- For `http://` and `unix://` URIs, TLS is not used
-- HTTP client (reqwest) uses `rustls-tls` backend (not OpenSSL)
+`cli/src/command/store/notary.rs` provides RSA-based secret encryption:
 
-**Health check listener:**
+- **Encrypt**: Uses `RsaPublicKey` with `Pkcs1v15Encrypt` padding, returns base64-encoded ciphertext
+- **Decrypt**: Uses `RsaPrivateKey` with `Pkcs1v15Encrypt` padding
 
-- The health check endpoint (`--health-check`, port 23152) always runs in plaintext, even when the main listener uses TLS
-- This is intentional for load balancer health probes but is worth noting
+This is used in the worker's `run_step` to decrypt artifact step secrets before injecting them as environment variables during builds.
 
-### 4.2 Unix Domain Socket Security
+**Security note**: PKCS#1 v1.5 encryption padding is generally considered legacy. OAEP padding would be preferred for new implementations, though the risk is low here since the encryption is used for short-lived build secrets between trusted components.
 
-When no `--port` is specified and TLS is disabled, the server listens on a Unix domain socket:
+### 4.4 Credential Storage
 
-- Default path: `/var/lib/vorpal/vorpal.sock` (overridable via `VORPAL_SOCKET_PATH`)
+Credentials from `vorpal login` are stored at `/var/lib/vorpal/key/credentials.json` containing:
+- Access tokens (JWT)
+- Refresh tokens
+- Client ID, audience, scopes, expiry metadata
+- Registry-to-issuer mapping
+
+**Gap**: The credentials file is stored in plaintext JSON on disk. File permissions are not explicitly set during write -- they inherit the process umask. The file sits alongside private keys in the same directory.
+
+## 5. Build Isolation
+
+### 5.1 Linux: bubblewrap (bwrap)
+
+On Linux, build steps use bubblewrap (`bwrap`) for sandboxing (`sdk/rust/src/artifact/step.rs:60-218`):
+
+- `--unshare-all`: Unshares all namespaces (PID, network, mount, UTS, IPC, user)
+- `--share-net`: Re-shares network (builds can access the network)
+- `--clearenv`: Clears environment, then selectively sets variables
+- `--gid 1000 --uid 1000`: Runs as unprivileged user inside the sandbox
+- `--dev /dev`, `--proc /proc`, `--tmpfs /tmp`: Minimal device/proc/tmp
+- Root filesystem is read-only bound (`--ro-bind`) from a Vorpal-built Linux rootfs
+- Artifact dependencies are read-only bound
+- Only `$VORPAL_OUTPUT` and `$VORPAL_WORKSPACE` are writable (bind-mounted)
+
+### 5.2 macOS: No Sandbox
+
+On macOS, build steps run as plain bash processes with no isolation (`sdk/rust/src/artifact/step.rs:234`). The build script executes directly via `Command::new` with full access to the host filesystem and network.
+
+**Gap**: macOS builds have no sandboxing whatsoever. Any build script has full access to the user's filesystem, environment, and network.
+
+### 5.3 Build Environment Variables
+
+Build steps receive controlled environment variables:
+- `VORPAL_OUTPUT`: Path to the artifact output directory (writable)
+- `VORPAL_WORKSPACE`: Path to the workspace directory (writable)
+- `VORPAL_ARTIFACT_<digest>`: Paths to dependency artifacts (read-only in bwrap, writable on macOS)
+- `HOME` is set to `$VORPAL_WORKSPACE`
+- `PATH` is constructed from artifact `bin/` directories plus standard system paths
+- Secrets are decrypted and injected as environment variables by name
+
+## 6. Supply Chain Security
+
+### 6.1 Build Provenance
+
+Binary releases use `actions/attest-build-provenance@v4` in the CI workflow (`vorpal.yaml:335-341`) with:
+- `id-token: write` permission for Sigstore
+- Subject paths cover all four platform binaries
+
+**Gap**: No SHA-256 checksums are published alongside release tarballs. The installer (`script/install.sh`) does not verify download integrity beyond running `vorpal --version` after extraction.
+
+### 6.2 Artifact Integrity
+
+Artifacts are content-addressed by SHA-256 digest of their JSON configuration. The digest serves as both identifier and integrity check for the artifact definition. However, the archive contents (the actual built output) are not independently verified against a digest after download -- the archive is unpacked directly.
+
+### 6.3 Dependency Management
+
+- **Renovate** (`.github/renovate.json`): Automated dependency updates with tiered automerge policy:
+  - GitHub Actions: minor/patch automerge
+  - Production deps (Rust, Go, TypeScript): patch automerge with 3-day release age gate; minor automerge only for stable (>= 1.0) crates
+  - Terraform providers: no automerge
+  - Lock file maintenance: weekly, automerge
+- **Cargo vendor**: Dependencies are vendored (Cargo workspace uses vendored deps via `script/dev.sh`)
+- **TLS**: `reqwest` is configured with `rustls-tls` feature (no OpenSSL dependency). The CLI uses `ring` as the default crypto provider.
+
+### 6.4 SDK Publishing
+
+- **Rust SDK** (`crates.io`): Uses `CARGO_REGISTRY_TOKEN` secret (legacy token)
+- **TypeScript SDK** (`npmjs.com`): Uses `NPM_TOKEN` secret with `NODE_AUTH_TOKEN` env var. The `id-token: write` permission is declared but not consumed (no `--provenance` flag). A TDD exists for migrating to OIDC trusted publishing (`docs/tdd/npm-oidc-trusted-publishing.md`).
+- **Container images** (Docker Hub): Uses `DOCKERHUB_TOKEN` and `DOCKERHUB_USERNAME` secrets
+
+## 7. Network Security
+
+### 7.1 Transport Modes
+
+| Mode | Transport | Authentication | Encryption |
+|------|-----------|----------------|------------|
+| Default (no flags) | Unix domain socket | None | N/A (local IPC) |
+| `--port <N>` | TCP plaintext | Optional OIDC | None |
+| `--tls` | TCP with TLS | Optional OIDC | TLS (rustls) |
+
+### 7.2 Unix Domain Socket Security
+
+When running in UDS mode (`cli/src/command/start.rs`):
 - Socket permissions are set to `0o660` (owner + group read/write)
-- Advisory file locking prevents multiple instances (`/var/lib/vorpal/vorpal.lock`)
-- Stale socket detection: attempts to connect before removing, checks for permission-denied (different user)
+- Advisory file lock prevents multiple instances (`fs4::FileExt::try_lock_exclusive`)
+- Stale socket detection: attempts connection before removing existing socket file
+- Permission denied on existing socket is treated as a hard error (may belong to another user)
 
-## 5. Cryptographic Operations
+### 7.3 Health Check Endpoint
 
-### 5.1 PKI / Certificate Generation
+When enabled via `--health-check`, a separate plaintext TCP listener runs on port 23152 (default). This endpoint has no TLS and no authentication -- it serves only gRPC health check responses. The port must differ from the main service port.
 
-The `vorpal system keys generate` command (`cli/src/command/system/keys.rs`) creates a local PKI:
+## 8. Infrastructure Security
 
-- **CA key pair:** RSA (PKCS_RSA_SHA256) via `rcgen`, stored at `/var/lib/vorpal/key/ca.key.pem` and `ca.pem`
-- **Service certificate:** Signed by the local CA, SAN set to `localhost`, valid for server authentication
-- **Service key pair:** RSA, stored at `/var/lib/vorpal/key/service.key.pem`, `service.pem`, `service.public.pem`
-- **Service secret:** UUID v7, stored at `/var/lib/vorpal/key/service.secret`
-- All key generation is idempotent (skips if file already exists)
+### 8.1 AWS Infrastructure (Terraform)
 
-**Gaps:**
-- No certificate expiration / rotation mechanism
-- No file permission restrictions on generated key files
-- CA is unconstrained (`BasicConstraints::Unconstrained`) — the CA can sign any certificate, not just for the Vorpal domain
-- Service certificate is hardcoded to `localhost` SAN — won't work for remote deployments without regeneration
+The `terraform/module/workers/` module provisions dev infrastructure:
 
-### 5.2 Secret Encryption (Notary)
+- VPC with public subnets only (no private subnets, no NAT gateway)
+- Security group allows all ingress from `var.ssh_ingress_cidr` and all egress
+- EC2 instances (registry + workers across 4 platforms) with public IP addresses
+- SSH key pair generated by Terraform, private key stored in AWS SSM Parameter Store as SecureString
+- All instances on public subnets with direct internet access
 
-Build step secrets are encrypted at rest during transit through the agent/worker pipeline (`cli/src/command/store/notary.rs`):
+**Observations**: This is development infrastructure. The security group rule `ingress_rules = ["all-all"]` allows all ports from the configured CIDR, not just SSH. All instances are publicly accessible.
 
-- **Encryption:** RSA PKCS1v15 with the service public key, then Base64-encoded
-- **Decryption:** Base64-decoded, then RSA PKCS1v15 with the service private key
-- Secrets are encrypted by the Agent when preparing artifacts and decrypted by the Worker when executing build steps
-- Decrypted secret values are injected as environment variables during build step execution
+### 8.2 Local Development (Docker Compose)
 
-**Gaps:**
-- PKCS1v15 padding is used instead of the recommended OAEP padding scheme
-- Error handling uses `expect()` (panics) rather than returning errors gracefully
-- No key size is specified — the key size depends on what `rcgen` generates for `PKCS_RSA_SHA256`
+Keycloak runs in `start-dev` mode with hardcoded admin credentials (`admin`/`password`), bound to `127.0.0.1:8080`. This is development-only configuration.
 
-### 5.3 Content Integrity
+## 9. CI/CD Security
 
-- Artifact and source integrity is verified using SHA-256 digests (`cli/src/command/store/hashes.rs`)
-- Source digest is computed from individual file hashes concatenated and re-hashed
-- Artifact digest is computed from the JSON serialization of the artifact metadata
-- Source digest verification can be bypassed with the `--unlock` flag
-- Digests are used as content-addressable storage keys
+### 9.1 GitHub Actions
 
-## 6. Credential Storage
+- Workflow permissions use least-privilege per job (e.g., `contents: read` for test, `contents: write` + `attestations: write` + `id-token: write` for release)
+- Concurrency groups prevent parallel runs on the same branch/PR
+- Secrets used: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `CARGO_REGISTRY_TOKEN`, `NPM_TOKEN`, `DOCKERHUB_TOKEN`, `DOCKERHUB_USERNAME`
+- Build verification: Static linking is verified on both macOS (`otool -L`) and Linux (`ldd`) to ensure no non-system dynamic dependencies leak into release binaries
 
-### 6.1 File Locations
+### 9.2 Branch Protection
 
-All credentials and keys are stored under `/var/lib/vorpal/key/`:
+No branch protection rules are visible in the repository files. This would need to be verified in GitHub settings.
 
-| File | Contents | Format |
-|------|----------|--------|
-| `ca.pem` | CA certificate | PEM |
-| `ca.key.pem` | CA private key | PEM |
-| `service.pem` | Service certificate | PEM |
-| `service.key.pem` | Service private key | PEM |
-| `service.public.pem` | Service public key | PEM |
-| `service.secret` | Service secret (UUID v7) | Plaintext |
-| `credentials.json` | OAuth2 tokens (access, refresh) | JSON |
+## 10. Known Gaps and Risks
 
-**Gaps:**
-- No file permission enforcement on key material (keys are written with default umask)
-- Credentials file contains plaintext access tokens and refresh tokens
-- No encryption-at-rest for stored credentials
-- The credentials file is a single JSON object keyed by issuer — multiple registries store all tokens in one file
-
-### 6.2 Environment Variables
-
-| Variable | Purpose |
-|----------|---------|
-| `VORPAL_SOCKET_PATH` | Override default Unix socket path |
-| AWS SDK environment variables | Used by S3 backend for registry storage (standard AWS credential chain) |
-
-Issuer secrets (`--issuer-client-secret`) are passed as CLI arguments, which are visible in process listings.
-
-## 7. Build Sandbox Security
-
-### 7.1 Process Isolation
-
-Build steps are executed as child processes via `tokio::process::Command` (`cli/src/command/start/worker.rs:423-607`):
-
-- Each build runs in a sandbox directory under `/var/lib/vorpal/sandbox/<uuid>/`
-- Working directory is set to the sandbox workspace
-- Environment variables are explicitly set (not inherited from parent)
-- Scripts are written to disk and executed with `0o755` permissions
-- Sandbox directories are cleaned up after build completion
-
-**Gaps:**
-- No filesystem-level isolation (no chroot, no containers, no namespaces)
-- No resource limits (CPU, memory, disk, network)
-- No network isolation — build steps can make arbitrary network requests
-- Build steps run as the same user as the Vorpal server process
-- Script execution allows arbitrary code execution by design — security depends entirely on trust in artifact definitions
-- Environment variable expansion (`expand_env`) processes all environment variables including secrets, which could leak into logs if commands echo their arguments
-
-### 7.2 Artifact Source Handling
-
-- HTTP sources are downloaded and unpacked (gzip, bzip2, xz, zip) without additional validation beyond digest verification
-- Archive unpacking (tar) does not enforce path traversal protection — relies on the `tokio-tar` crate's defaults
-- Local sources are copied from the filesystem with path validation limited to existence checks
-
-## 8. Keycloak Configuration (Development)
-
-The reference Keycloak deployment (`docker-compose.yaml`, `terraform/module/keycloak/`) defines:
-
-**OIDC Clients:**
-- `cli`: Public client, device authorization grant, optional scopes for archive/artifact/worker
-- `archive`: Confidential client, token exchange enabled, roles: `archive:check`, `archive:push`, `archive:pull`
-- `artifact`: Confidential client, token exchange enabled, roles: `artifact:get`, `artifact:get-alias`, `artifact:store`
-- `worker`: Confidential client, service accounts enabled, optional scopes for archive/artifact, roles: `worker:build-artifact`
-
-**Development credentials:**
-- Keycloak admin: `admin` / `password`
-- Test user: `admin@localhost` / `password`
-- Keycloak runs in `start-dev` mode (not production-hardened)
-- Keycloak is bound to `127.0.0.1:8080` (localhost only)
-
-**Gap:** The namespace-based permission model (`namespaces` claim) referenced in the code is not provisioned in the Keycloak Terraform configuration. The Terraform defines client roles (e.g., `archive:push`, `artifact:store`) but the code checks a `namespaces` JWT claim that is not mapped via any protocol mapper. This means the namespace authorization system is defined in code but not yet wired up to the identity provider.
-
-## 9. Dependency Security Profile
-
-Security-critical dependencies (from `Cargo.toml` files):
-
-| Crate | Version | Purpose | Notes |
-|-------|---------|---------|-------|
-| `jsonwebtoken` | 10.3.0 | JWT validation | Uses `aws_lc_rs` feature |
-| `oauth2` | 5.0.0 | OAuth2 flows | Uses `reqwest` feature |
-| `rcgen` | 0.14.7 | Certificate generation | Uses `aws_lc_rs`, `x509-parser` |
-| `reqwest` | 0.12.28 | HTTP client | `rustls-tls` (no OpenSSL dependency) |
-| `rsa` | 0.9.10 | RSA encrypt/decrypt | Used for secret notary |
-| `rustls` | 0.23.36 | TLS implementation | Used by server |
-| `tonic` | 0.14.3 | gRPC framework | `tls-ring` feature |
-| `sha256` | 1.6.0 | Content hashing | Used for digest computation |
-| `base64` | 0.22.1 | Encoding | Used in notary |
-| `aws-config` / `aws-sdk-s3` | 1.8.1 / 1.124.0 | S3 backend | Standard AWS credential chain |
-
-The project uses `ring` as the default crypto provider (`ring::default_provider().install_default()`), installed at CLI startup.
-
-## 10. .gitignore Security
-
-The root `.gitignore` excludes `.env` and `.env.*` files, preventing accidental commit of environment-based secrets. The Terraform `.gitignore` excludes `*.tfvars`, `*.tfstate`, and `.terraform/`, preventing state and variable files from being committed.
-
-## 11. Known Gaps and Risks
-
-### Critical
-
-1. **No sandbox isolation:** Build steps execute as the server user without filesystem, network, or resource isolation. This is by design for the current architecture but represents a significant trust boundary — artifact definitions must be trusted.
-
-2. **Archive push lacks authorization:** When OIDC auth is enabled, the archive `push` endpoint does not check namespace permissions, allowing any authenticated user to push archives to any namespace.
-
-### High
-
-3. **PKCS1v15 padding for secrets:** The notary module uses PKCS1v15 padding, which is vulnerable to padding oracle attacks in certain contexts. OAEP is the recommended RSA encryption padding scheme.
-
-4. **CLI arguments expose secrets:** The `--issuer-client-secret` flag is visible in process listings (`ps`). Consider reading from a file or environment variable.
-
-5. **No key file permissions:** Generated private keys are written with the default umask, potentially readable by other users.
-
-### Medium
-
-6. **No certificate rotation:** The PKI has no expiration or rotation mechanism.
-
-7. **Namespace auth not wired:** The `namespaces` claim-based authorization is implemented in code but the corresponding Keycloak configuration does not provision this claim. The system will effectively deny all namespace-scoped operations for authenticated users unless manually configured.
-
-8. **Credentials stored in plaintext:** Access and refresh tokens in `credentials.json` are not encrypted at rest.
-
-9. **Unconstrained CA:** The CA certificate allows signing any certificate, not limited to Vorpal service certificates.
-
-10. **Health check always plaintext:** The health check listener runs without TLS even when the main listener uses TLS.
+| # | Gap | Severity | Area |
+|---|-----|----------|------|
+| 1 | No warning when services start without authentication | Medium | Authentication |
+| 2 | Registry RPC handlers lack namespace-level permission checks | High | Authorization |
+| 3 | macOS builds have no sandboxing | Medium | Build Isolation |
+| 4 | Credential file permissions not explicitly set | Medium | Credential Storage |
+| 5 | Service certificate SAN hardcoded to `localhost` | Medium | TLS |
+| 6 | No certificate expiration or rotation mechanism | Low | TLS |
+| 7 | No SHA-256 checksums published for release artifacts | Medium | Supply Chain |
+| 8 | NPM publish lacks `--provenance` flag (TDD exists) | Low | Supply Chain |
+| 9 | Cargo publish uses legacy token (no OIDC) | Low | Supply Chain |
+| 10 | Archive contents not integrity-verified after download | Medium | Artifact Integrity |
+| 11 | PKCS#1 v1.5 encryption padding in notary (legacy) | Low | Cryptography |
+| 12 | Dev Terraform security group allows all ports, not just SSH | Low | Infrastructure |
+| 13 | No rate limiting on gRPC endpoints | Low | DoS Protection |
+| 14 | `block_in_place` in auth interceptor could block tokio runtime under load | Low | Performance/Security |
