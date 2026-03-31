@@ -18,6 +18,22 @@ export default defineConfig({
 						});
 					});`,
 				},
+				{
+					tag: 'script',
+					attrs: { type: 'module' },
+					content: `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+document.querySelectorAll('pre[data-language="mermaid"]').forEach((pre) => {
+  const ec = pre.closest('.expressive-code');
+  const lines = pre.querySelectorAll('.ec-line');
+  const text = Array.from(lines).map((l) => l.textContent).join('\\n');
+  const div = document.createElement('div');
+  div.classList.add('mermaid');
+  div.textContent = text;
+  if (ec) { ec.after(div); ec.style.display = 'none'; } else { pre.after(div); pre.style.display = 'none'; }
+});
+await mermaid.run({ querySelector: '.mermaid' });`,
+				},
 			],
 			social: [
 				{

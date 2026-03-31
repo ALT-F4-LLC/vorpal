@@ -83,14 +83,14 @@ await new UserEnvironment("my-tools", SYSTEMS)
 await context.run();
 ```
 
-User environments work by creating symlinks from artifact outputs into `~/.vorpal/bin/`. To activate:
+User environments work by creating symlinks from artifact outputs into well-known paths (such as `~/.vorpal/bin/`). To activate:
 
 ```bash
 $HOME/.vorpal/bin/vorpal-activate
 source $HOME/.vorpal/bin/vorpal-activate-shell
 ```
 
-This adds `~/.vorpal/bin/` to your `PATH`, making all symlinked tools available in every shell session.
+The `vorpal-activate` script manages symlinks -- removing any from a previous activation and creating the new ones. The `vorpal-activate-shell` script adds the artifact output directories to your `PATH`, making the environment's tools available in the current shell session.
 
 ## How environments differ from containers
 

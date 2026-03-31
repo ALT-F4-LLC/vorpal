@@ -14,18 +14,11 @@ Every artifact has four components:
 - **Steps** -- The build instructions. Each step has an entrypoint (the program that runs the step), arguments, environment variables, and optional secrets.
 - **Target systems** -- The platforms this artifact can be built for (e.g., `AARCH64_DARWIN` for macOS Apple Silicon, `X8664_LINUX` for Linux x86_64)
 
-```
-Artifact
-  |-- name: "my-app"
-  |-- systems: [AARCH64_DARWIN, X8664_LINUX, ...]
-  |-- sources:
-  |     |-- name, path, digest, includes, excludes
-  |-- steps:
-        |-- entrypoint (e.g., "bash", "docker")
-        |-- script or arguments
-        |-- dependency artifacts (by digest)
-        |-- environment variables
-        |-- secrets (encrypted)
+```mermaid
+graph LR
+    A[Artifact] --> SRC[Sources]
+    A --> STEPS[Steps]
+    A --> SYS[Target Systems]
 ```
 
 ## Content addressing
@@ -54,18 +47,14 @@ For local sources, Vorpal reads files from disk and computes their content hash.
 
 Source digests are recorded in `Vorpal.lock`. Once a source is locked, Vorpal rejects changes to that source unless you explicitly pass `--unlock`. This prevents builds from silently changing because an upstream URL started serving different content.
 
-```json
-{
-  "lockfile": 1,
-  "sources": [
-    {
-      "name": "toolchain",
-      "digest": "a1b2c3...",
-      "platform": "aarch64-darwin",
-      "path": "https://example.com/toolchain.tar.gz"
-    }
-  ]
-}
+```toml
+lockfile = 1
+
+[[sources]]
+name = "toolchain"
+digest = "a1b2c3..."
+platform = "aarch64-darwin"
+path = "https://example.com/toolchain.tar.gz"
 ```
 
 The lockfile pins digests per-platform because the same source URL may serve different binaries for different architectures.
@@ -129,49 +118,53 @@ Artifacts can have named aliases like `latest` or a version string. Aliases let 
 
 The Vorpal SDK ships with pre-built artifact definitions for common tools and runtimes. These can be used as dependencies in your own artifacts via `with_artifacts` / `WithArtifacts`.
 
+Not all built-in artifacts are available in every SDK. The tables below indicate availability with checkmarks.
+
 ### Tools
 
-| Artifact | Description |
-|----------|-------------|
-| `Bun` | JavaScript/TypeScript runtime and package manager |
-| `Cargo` | Rust package manager |
-| `Clippy` | Rust linter |
-| `Crane` | Container image tool |
-| `Gh` | GitHub CLI |
-| `Git` | Version control |
-| `Go` | Go compiler and tools |
-| `Goimports` | Go import formatter |
-| `Gopls` | Go language server |
-| `Grpcurl` | gRPC command-line client |
-| `NodeJS` | Node.js runtime |
-| `Pnpm` | Node.js package manager |
-| `Protoc` | Protocol Buffers compiler |
-| `ProtocGenGo` | Protobuf Go code generator |
-| `ProtocGenGoGrpc` | Protobuf Go gRPC code generator |
-| `Rsync` | File synchronization tool |
-| `RustAnalyzer` | Rust language server |
-| `Rustc` | Rust compiler |
-| `Rustfmt` | Rust formatter |
-| `Staticcheck` | Go static analysis tool |
+| Artifact | Description | Rust | Go | TypeScript |
+|----------|-------------|:----:|:--:|:----------:|
+| `Bun` | JavaScript/TypeScript runtime and package manager | ✅ | ✅ | ✅ |
+| `Cargo` | Rust package manager | ✅ | ✅ | ✅ |
+| `Clippy` | Rust linter | ✅ | ✅ | ✅ |
+| `Crane` | Container image tool | ✅ | ✅ | ✅ |
+| `Gh` | GitHub CLI | ✅ | ✅ | ✅ |
+| `Git` | Version control | ✅ | ✅ | ✅ |
+| `Go` / `GoBin` | Go compiler and tools | ✅ | ✅ | ✅ |
+| `Goimports` | Go import formatter | ✅ | ✅ | ✅ |
+| `Gopls` | Go language server | ✅ | ✅ | ✅ |
+| `Grpcurl` | gRPC command-line client | ✅ | ✅ | ✅ |
+| `NodeJS` | Node.js runtime | ✅ | ✅ | ✅ |
+| `Pnpm` | Node.js package manager | ✅ | ✅ | ✅ |
+| `Protoc` | Protocol Buffers compiler | ✅ | ✅ | ✅ |
+| `ProtocGenGo` | Protobuf Go code generator | ✅ | ✅ | ✅ |
+| `ProtocGenGoGrpc` | Protobuf Go gRPC code generator | ✅ | ✅ | ✅ |
+| `Rsync` | File synchronization tool | ✅ | ✅ | ✅ |
+| `RustAnalyzer` | Rust language server | ✅ | ✅ | ✅ |
+| `Rustc` | Rust compiler | ✅ | ✅ | ✅ |
+| `Rustfmt` | Rust formatter | ✅ | ✅ | ✅ |
+| `Staticcheck` | Go static analysis tool | ✅ | ✅ | ✅ |
+
+> **Note:** The Go SDK names the Go compiler artifact `GoBin` instead of `Go`. The TypeScript SDK exports it as `GoBin` from `artifact/go.ts`.
 
 ### Rust toolchain
 
-| Artifact | Description |
-|----------|-------------|
-| `RustSrc` | Rust source code (for rust-analyzer) |
-| `RustStd` | Rust standard library |
-| `RustToolchain` | Complete Rust toolchain bundle |
+| Artifact | Description | Rust | Go | TypeScript |
+|----------|-------------|:----:|:--:|:----------:|
+| `RustSrc` | Rust source code (for rust-analyzer) | ✅ | ✅ | ✅ |
+| `RustStd` | Rust standard library | ✅ | ✅ | ✅ |
+| `RustToolchain` | Complete Rust toolchain bundle | ✅ | ✅ | ✅ |
 
 ### Linux images
 
-| Artifact | Description |
-|----------|-------------|
-| `LinuxDebian` | Debian-based Linux base image |
-| `LinuxVorpal` | Vorpal Linux base image |
-| `LinuxVorpalSlim` | Minimal Vorpal Linux image |
+| Artifact | Description | Rust | Go | TypeScript |
+|----------|-------------|:----:|:--:|:----------:|
+| `LinuxDebian` | Debian-based Linux base image | ✅ | ❌ | ❌ |
+| `LinuxVorpal` | Vorpal Linux base image | ✅ | ❌ | ❌ |
+| `LinuxVorpalSlim` | Minimal Vorpal Linux image | ✅ | ✅ | ❌ |
 
 ### Container images
 
-| Artifact | Description |
-|----------|-------------|
-| `OciImage` | OCI container image builder |
+| Artifact | Description | Rust | Go | TypeScript |
+|----------|-------------|:----:|:--:|:----------:|
+| `OciImage` | OCI container image builder | ✅ | ✅ | ✅ |

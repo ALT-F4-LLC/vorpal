@@ -9,14 +9,10 @@ A **Job** is a script-based build unit that wraps a shell command into a content
 
 A Job takes a name, a shell script, and a list of target systems. Under the hood, it creates an [artifact](/concepts/artifacts/) with a single shell step that executes your script. The output is content-addressed and cached like any other Vorpal artifact.
 
-```
-Job("my-job", script, systems)
-    │
-    ▼
-Artifact with single shell step
-    │
-    ▼
-Cached, reproducible output
+```mermaid
+flowchart TD
+    A["Job(name, script, systems)"] --> B["Artifact with single shell step"]
+    B --> C["Content-addressed, cached output"]
 ```
 
 ## When to use a Job
@@ -67,6 +63,35 @@ artifact.NewJob("my-job", script, systems).
     Build(ctx)
 ```
 
+### TypeScript
+
+```typescript
+import {
+  ConfigContext,
+  ArtifactSystem,
+  Job,
+  getEnvKey,
+} from "@altf4llc/vorpal-sdk";
+
+const SYSTEMS = [
+  ArtifactSystem.AARCH64_DARWIN,
+  ArtifactSystem.AARCH64_LINUX,
+  ArtifactSystem.X8664_DARWIN,
+  ArtifactSystem.X8664_LINUX,
+];
+
+const context = ConfigContext.create();
+
+const tool = await buildMyTool(context);
+const script = `${getEnvKey(tool)}/bin/my-tool --version`;
+
+await new Job("my-job", script, SYSTEMS)
+  .withArtifacts([tool])
+  .build(context);
+
+await context.run();
+```
+
 ## Builder options
 
 | Method | Description |
@@ -77,14 +102,12 @@ artifact.NewJob("my-job", script, systems).
 
 ## How it differs from an Artifact
 
-[Artifacts](/concepts/artifacts/) are content-addressed and cached -- once built, identical inputs produce a cache hit and the build is skipped entirely. **Jobs are the opposite.** They never store output in the Vorpal store, so they always re-run when invoked. You can optionally enable caching for a Job, but the default is fresh execution every time.
+A Job is a thin convenience wrapper around an [Artifact](/concepts/artifacts/). Under the hood, `Job.build()` creates an Artifact with a single shell step and calls `Artifact.build()`, so Jobs go through the same content-addressed pipeline -- identical inputs produce a cache hit and the build is skipped.
 
-This makes Jobs ideal for anything where a cached result would be stale or meaningless:
+The difference is ergonomic, not behavioral:
 
-- Running tests
-- Linting and formatting checks
-- Version checks and validations
-- Deployments and release automation
+- An **Artifact** gives you full control over multiple steps, sources, and build logic.
+- A **Job** provides a streamlined API for the common case of running a single shell script with optional artifact dependencies and secrets.
 
 ### CI and automation as code
 

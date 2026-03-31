@@ -65,13 +65,24 @@ Cached artifacts are stored as zstd-compressed tar archives. Zstd was chosen for
 
 ## Cache management
 
-Vorpal does not automatically evict cached artifacts. Outputs accumulate in `/var/lib/vorpal/` until you explicitly clean them up:
+Vorpal does not automatically evict cached artifacts. Outputs accumulate in `/var/lib/vorpal/` until you explicitly clean them up using `vorpal system prune` with one or more flags:
 
 ```bash
-vorpal system prune
+# Remove everything (archives, outputs, configs, aliases, sandboxes)
+vorpal system prune --all
+
+# Remove specific cache types
+vorpal system prune --artifact-archives --artifact-outputs
 ```
 
-This removes cached archives, outputs, build configs, sandbox directories, and aliases. Run it when you need to reclaim disk space or want a clean slate.
+Running `vorpal system prune` without any flags does nothing. The available flags are:
+
+- `--all` -- remove all cached resources
+- `--artifact-aliases` -- remove artifact aliases
+- `--artifact-archives` -- remove artifact archives
+- `--artifact-configs` -- remove artifact build configs
+- `--artifact-outputs` -- remove artifact outputs
+- `--sandboxes` -- remove sandbox directories
 
 ## Sharing caches across machines
 

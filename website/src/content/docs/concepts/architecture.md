@@ -9,24 +9,13 @@ Vorpal uses a client-server architecture where your build configuration is a rea
 
 Vorpal consists of three layers that work together to turn your build configuration into reproducible artifacts:
 
-```
-                      +-------------------+
-                      |   Your Config     |
-                      | (Rust/Go/TS code) |
-                      +--------+----------+
-                               |
-                          SDK (language)
-                               |
-                      +--------v----------+
-                      |    vorpal CLI     |
-                      +---+-----+-----+---+
-                          |     |     |
-                +---------+  +--+--+  +---------+
-                |            |     |            |
-           +----v----+ +----v----+ +----v------+
-           |  Agent  | | Worker  | | Registry  |
-           | Service | | Service | | Service   |
-           +---------+ +---------+ +-----------+
+```mermaid
+flowchart TD
+    Config["Your Config\n(Rust / Go / TS code)"]
+    Config -->|SDK| CLI["Vorpal CLI"]
+    CLI --> Agent["Agent Service"]
+    CLI --> Worker["Worker Service"]
+    CLI --> Registry["Registry Service"]
 ```
 
 **SDK** -- You write your build configuration as a program using the Vorpal SDK in Rust, Go, or TypeScript. The SDK provides builder types for defining artifacts, sources, build steps, and target platforms. Your config is compiled and executed like any other program.

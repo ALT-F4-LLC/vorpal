@@ -15,17 +15,15 @@ A Process takes a name, an entrypoint binary, and target systems. Vorpal generat
 | `bin/{name}-stop` | Stop the process by sending SIGTERM to the recorded PID |
 | `bin/{name}-logs` | Tail the process log file |
 
-```
-Process("my-process", "/path/to/binary", systems)
-    │
-    ▼
-Artifact output:
-    bin/my-process-start
-    bin/my-process-stop
-    bin/my-process-logs
+```mermaid
+flowchart LR
+    A["Process(&quot;my-process&quot;, &quot;/path/to/binary&quot;, systems)"] --> B["Artifact output"]
+    B --> C["bin/my-process-start"]
+    B --> D["bin/my-process-stop"]
+    B --> E["bin/my-process-logs"]
 ```
 
-The process runs in the background. The start script writes the PID to `$VORPAL_OUTPUT/pid.txt` and streams stdout/stderr to `$VORPAL_OUTPUT/logs.txt`.
+The process runs in the background. The start script writes the PID to `$VORPAL_OUTPUT/pid` and streams stdout/stderr to `$VORPAL_OUTPUT/logs.txt`.
 
 ## When to use a Process
 
@@ -82,6 +80,39 @@ process, _ := artifact.NewProcess(
     Build(ctx)
 ```
 
+### TypeScript
+
+```typescript
+import {
+  ConfigContext,
+  ArtifactSystem,
+  Process,
+  getEnvKey,
+} from "@altf4llc/vorpal-sdk";
+
+const SYSTEMS = [
+  ArtifactSystem.AARCH64_DARWIN,
+  ArtifactSystem.AARCH64_LINUX,
+  ArtifactSystem.X8664_DARWIN,
+  ArtifactSystem.X8664_LINUX,
+];
+
+const context = ConfigContext.create();
+
+const server = await buildMyServer(context);
+
+await new Process(
+  "my-server",
+  `${getEnvKey(server)}/bin/my-server`,
+  SYSTEMS,
+)
+  .withArguments(["--port", "8080"])
+  .withArtifacts([server])
+  .build(context);
+
+await context.run();
+```
+
 ## Builder options
 
 | Method | Description |
@@ -108,16 +139,14 @@ $(vorpal build --path my-server)/bin/my-server-stop
 
 ## How it differs from an Artifact
 
-[Artifacts](/concepts/artifacts/) are content-addressed and cached -- once built, identical inputs produce a cache hit and the build is skipped entirely. **Processes are the opposite.** They never store output in the Vorpal store, so they always re-run when invoked. You can optionally enable caching for a Process, but the default is fresh execution every time.
+A Process is built on top of an [Artifact](/concepts/artifacts/) -- internally, `Process.build()` calls `Artifact.build()`, so Processes go through the same content-addressed caching pipeline as any other artifact. If the inputs (entrypoint, arguments, dependencies, secrets) have not changed, Vorpal returns a cache hit and skips the build step entirely. What makes a Process different is what it produces: the artifact output contains generated lifecycle scripts (start, stop, logs) for managing a long-running service rather than a one-shot result.
 
-This makes Processes ideal for anything that needs to stay alive:
+Unlike [Jobs](/concepts/jobs/), which run a script to completion and exit, Processes are designed for anything that needs to stay alive:
 
 - API servers and backend services
 - Build registries and artifact stores
 - Background workers and daemons
 - Development servers for local workflows
-
-Unlike [Jobs](/concepts/jobs/), which run a script to completion and exit, Processes run continuously and include generated lifecycle scripts (start, stop, logs) for managing them.
 
 ### Infrastructure as code
 
