@@ -190,14 +190,13 @@ Vorpal stores all data under `/var/lib/vorpal/`:
 | Path | Purpose |
 |------|---------|
 | `vorpal.sock` | Unix domain socket for service communication |
-| `vorpal.lock` | Advisory lock file preventing concurrent server instances |
+| `vorpal.lock` | Advisory lock file preventing concurrent server instances (name derived from the socket path stem) |
 | `key/` | TLS certificates, keypairs, and credentials |
 | `store/artifact/alias/` | Named references mapping aliases to artifact digests |
 | `store/artifact/archive/` | Compressed (zstd) artifact archives |
 | `store/artifact/config/` | Compiled configuration outputs |
 | `store/artifact/output/` | Unpacked artifact outputs |
 | `sandbox/` | Isolated build workspaces |
-| `log/` | Service log files |
 
 ## Supported Systems
 

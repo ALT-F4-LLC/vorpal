@@ -13,7 +13,7 @@ Proto source files are located at `sdk/rust/api/` in the repository.
 |----------|------|--------|
 | Rust | `tonic-prost-build` via `sdk/rust/build.rs` | Inline (generated at build time) |
 | Go | `protoc` + `protoc-gen-go` / `protoc-gen-go-grpc` | `sdk/go/pkg/api/` |
-| TypeScript | `protoc-gen-ts_proto` | `sdk/typescript/src/api/` |
+| TypeScript | `ts-proto` | `sdk/typescript/src/api/` |
 
 Regenerate all generated code with `make generate`.
 
@@ -310,7 +310,8 @@ When a worker executes a build step, these environment variables are available:
 |----------|-------------|
 | `VORPAL_OUTPUT` | Path to the artifact output directory |
 | `VORPAL_WORKSPACE` | Path to the build workspace directory |
-| `VORPAL_ARTIFACT_<DIGEST>` | Path to each dependency artifact's output |
+| `VORPAL_ARTIFACTS` | Space-separated list of all dependency artifact output paths |
+| `VORPAL_ARTIFACT_<DIGEST>` | Path to a dependency artifact's output directory. Also set for the artifact being built itself, pointing to its own output directory |
 
 Additionally, all entries in the step's `environments` list are set as environment variables, and all `secrets` are decrypted and set as environment variables by name.
 

@@ -34,19 +34,21 @@ Documentation pages live under `website/src/content/docs/` organized by section:
 
 ```
 src/content/docs/
-  index.md                          # Landing page
+  index.mdx                         # Landing page
   getting-started/
     installation.md                 # Install guide
     quickstart.md                   # First project walkthrough
   guides/
     rust.md                         # Rust SDK guide
     go.md                           # Go SDK guide
-    typescript.md                   # TypeScript SDK guide
+    typescript.mdx                  # TypeScript SDK guide
   concepts/
     architecture.md                 # System design
     artifacts.md                    # Artifact model
     caching.md                      # Caching strategy
     environments.md                 # Dev/user environments
+    jobs.md                         # Job model
+    processes.md                    # Process model
   reference/
     cli.md                          # CLI command reference
     configuration.md                # Config file reference
@@ -156,6 +158,10 @@ When you open a pull request that changes files in `website/`, the CI pipeline a
 3. Deploys a preview to Cloudflare Pages
 
 The preview URL appears in the PR checks. Reviewers can use it to see your rendered changes without building locally.
+
+## Production deployment
+
+Pushes to `main` trigger a production deployment to Cloudflare Pages via Wrangler. The CI pipeline builds the site, then deploys the output to the `vorpal-docs` Cloudflare Pages project using `wrangler pages deploy`. No manual steps are needed -- merging to `main` is all it takes to publish.
 
 ## Further reading
 

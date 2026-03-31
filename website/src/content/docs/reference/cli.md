@@ -161,9 +161,9 @@ vorpal init <NAME> [OPTIONS]
 
 The command presents an interactive language selector:
 
-- **Go** -- Generates `cmd/`, `go.mod`, `go.sum`, `Vorpal.toml`
-- **Rust** -- Generates `Cargo.toml`, `Cargo.lock`, `src/`, `Vorpal.toml`, `.gitignore`
-- **TypeScript** -- Generates `src/`, `package.json`, `tsconfig.json`, `bun.lock`, `Vorpal.toml`, `.gitignore`
+- **Go** -- Generates `cmd/<name>/main.go`, `cmd/vorpal/main.go`, `go.mod`, `go.sum`, `Vorpal.toml`. The template directory `cmd/example/` is dynamically renamed to `cmd/<name>/` using the project name.
+- **Rust** -- Generates `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `src/vorpal.rs`, `Vorpal.toml`, `.gitignore`
+- **TypeScript** -- Generates `src/vorpal.ts`, `src/main.ts`, `package.json`, `tsconfig.json`, `Vorpal.toml`, `.gitignore`, `bun.lock`
 
 ```bash
 # Create a new project in the current directory
