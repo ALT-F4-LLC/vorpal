@@ -136,7 +136,7 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```rust title="src/vorpal.rs" {14,17}
+```rust title="src/vorpal.rs" {4,14,17}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
@@ -170,7 +170,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```rust title="src/vorpal.rs" {4,22-25}
+```rust title="src/vorpal.rs" {4,16-19}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
@@ -185,12 +185,6 @@ async fn main() -> Result<()> {
     let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
 
     let protoc = Protoc::new().build(ctx).await?;
-
-    Rust::new("my-app", systems.clone())
-        .with_bins(vec!["my-app"])
-        .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .with_artifacts(vec![protoc.clone()])
-        .build(ctx).await?;
 
     RustDevelopmentEnvironment::new("my-project-shell", systems)
         .with_artifacts(vec![protoc])
@@ -231,7 +225,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```rust title="src/vorpal.rs" {4,27,29-31}
+```rust title="src/vorpal.rs" {4,22,24-26}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
@@ -251,11 +245,6 @@ async fn main() -> Result<()> {
         .with_artifacts(vec![protoc.clone()])
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx).await?;
-
-    RustDevelopmentEnvironment::new("my-project-shell", systems.clone())
-        .with_artifacts(vec![protoc])
-        .with_environments(vec!["RUST_LOG=debug".into(), "RUST_BACKTRACE=1".into()])
         .build(ctx).await?;
 
     let script = format!("{}/bin/my-app --version", get_env_key(&my_app));
@@ -281,7 +270,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```rust title="src/vorpal.rs" {4,33-40}
+```rust title="src/vorpal.rs" {4,22-29}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
@@ -301,17 +290,6 @@ async fn main() -> Result<()> {
         .with_artifacts(vec![protoc.clone()])
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
-        .build(ctx).await?;
-
-    RustDevelopmentEnvironment::new("my-project-shell", systems.clone())
-        .with_artifacts(vec![protoc])
-        .with_environments(vec!["RUST_LOG=debug".into(), "RUST_BACKTRACE=1".into()])
-        .build(ctx).await?;
-
-    let script = format!("{}/bin/my-app --version", get_env_key(&my_app));
-
-    Job::new("my-job", script, systems.clone())
-        .with_artifacts(vec![my_app.clone()])
         .build(ctx).await?;
 
     Process::new(
@@ -385,7 +363,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```rust title="src/vorpal.rs" {3-4,14-19,21-22}
+```rust title="src/vorpal.rs" {4,14-19,21-22}
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},

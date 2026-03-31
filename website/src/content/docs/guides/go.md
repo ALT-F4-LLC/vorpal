@@ -73,7 +73,7 @@ Use the `Go` builder from `language` package to compile a Go project into a cros
 `Go` is a language-specific abstraction over the generic [Artifact](/concepts/artifacts/) type.
 :::
 
-```go title="cmd/vorpal/main.go" {5,20-26}
+```go title="cmd/vorpal/main.go" {5,7,20-26}
 package main
 
 import (
@@ -134,7 +134,7 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 `Protoc` is an artifact builder provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```go title="cmd/vorpal/main.go" {21-24,27}
+```go title="cmd/vorpal/main.go" {5,21-24,27}
 package main
 
 import (
@@ -181,7 +181,7 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```go title="cmd/vorpal/main.go" {35-38}
+```go title="cmd/vorpal/main.go" {6, 26-29}
 package main
 
 import (
@@ -205,15 +205,6 @@ func main() {
     protoc, err := artifact.Protoc(ctx)
     if err != nil {
         log.Fatalf("error building protoc: %v", err)
-    }
-
-    _, err = language.NewGo("my-app", systems).
-        WithBuildDirectory("cmd/my-app").
-        WithIncludes([]string{"cmd/my-app", "go.mod", "go.sum"}).
-        WithArtifacts([]*string{protoc}).
-        Build(ctx)
-    if err != nil {
-        log.Fatalf("error building: %v", err)
     }
 
     language.NewGoDevelopmentEnvironment("my-project-shell", systems).
@@ -255,7 +246,7 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```go title="cmd/vorpal/main.go" {7,41-43,45-47}
+```go title="cmd/vorpal/main.go" {6,36-38,40-42}
 package main
 
 import (
@@ -290,11 +281,6 @@ func main() {
     if err != nil {
         log.Fatalf("error building: %v", err)
     }
-
-    language.NewGoDevelopmentEnvironment("my-project-shell", systems).
-        WithArtifacts([]*string{protoc}).
-        WithEnvironments([]string{"CGO_ENABLED=0"}).
-        Build(ctx)
 
     script := fmt.Sprintf(`
         %s/bin/my-app --version
@@ -321,7 +307,7 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```go title="cmd/vorpal/main.go" {49-56}
+```go title="cmd/vorpal/main.go" {6,36-43}
 package main
 
 import (
@@ -356,19 +342,6 @@ func main() {
     if err != nil {
         log.Fatalf("error building: %v", err)
     }
-
-    language.NewGoDevelopmentEnvironment("my-project-shell", systems).
-        WithArtifacts([]*string{protoc}).
-        WithEnvironments([]string{"CGO_ENABLED=0"}).
-        Build(ctx)
-
-    script := fmt.Sprintf(`
-        %s/bin/my-app --version
-    `, artifact.GetEnvKey(*myApp))
-
-    artifact.NewJob("my-job", script, systems).
-        WithArtifacts([]*string{myApp}).
-        Build(ctx)
 
     artifact.NewProcess(
         "my-server",
@@ -397,7 +370,7 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```go title="cmd/vorpal/main.go" {7,22-28,30-33}
+```go title="cmd/vorpal/main.go" {5,30-33}
 package main
 
 import (

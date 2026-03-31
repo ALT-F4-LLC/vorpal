@@ -25,6 +25,9 @@ export { GoBin, sourceTools as goSourceTools } from "./artifact/go.js";
 // Node.js artifact
 export { NodeJS } from "./artifact/nodejs.js";
 
+// Protoc artifact
+export { Protoc } from "./artifact/protoc.js";
+
 // Step functions
 export { bash, bwrap, shell, docker } from "./artifact/step.js";
 
