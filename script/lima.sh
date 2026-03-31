@@ -16,6 +16,7 @@ function sync {
     --exclude=".git" \
     --exclude="dist" \
     --exclude="target" \
+    --exclude="website" \
     "$PWD/." "$HOME/vorpal/."
 
     pushd "$HOME/vorpal"

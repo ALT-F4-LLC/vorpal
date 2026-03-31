@@ -7,6 +7,7 @@ on:
       - "main"
     tags:
       - "*"
+  workflow_dispatch:
 
 concurrency:
   cancel-in-progress: true
@@ -283,6 +284,34 @@ jobs:
             exit 1
           fi
 
+      - if: matrix.runner == 'ubuntu-latest'
+        run: |
+          VORPAL_WEBSITE_PATH=$(vorpal build --path "vorpal-website")
+          echo "VORPAL_WEBSITE_PATH=$VORPAL_WEBSITE_PATH" >> $GITHUB_ENV
+          if [ ! -f "$VORPAL_WEBSITE_PATH/index.html" ]; then
+            echo "ERROR: website build output missing index.html"
+            ls -la "$VORPAL_WEBSITE_PATH/" || true
+            exit 1
+          fi
+
+      - if: matrix.runner == 'ubuntu-latest'
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --base ${{ env.VORPAL_WEBSITE_PATH }}
+            --no-progress
+            --timeout 30
+            --max-retries 3
+            --retry-wait-time 5
+            --exclude-path ${{ env.VORPAL_WEBSITE_PATH }}/pagefind
+            ${{ env.VORPAL_WEBSITE_PATH }}
+
+      - if: matrix.runner == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: website-dist
+          path: ${{ env.VORPAL_WEBSITE_PATH }}
+
       - uses: actions/upload-artifact@v7
         with:
           name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
@@ -519,3 +548,48 @@ jobs:
       - if: env.VERSION_EXISTS != 'true'
         run: npm publish --provenance --tag next
         working-directory: sdk/typescript
+
+  release-website:
+    if: >-
+      ${{
+        (github.event_name == 'push' && contains(github.ref, 'refs/tags/') && !contains(github.ref, 'nightly'))
+        || github.event_name == 'workflow_dispatch'
+      }}
+    needs:
+      - test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: website-dist
+          path: website/dist
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy website/dist/ --project-name=vorpal-docs
+
+  preview-website:
+    if: github.event_name == 'pull_request'
+    needs:
+      - test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: website-dist
+          path: website/dist
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy website/dist/ --project-name=vorpal-docs --branch=${{ github.head_ref }}
