@@ -5,6 +5,7 @@ import type {
 import { ArtifactSystem } from "../api/artifact/artifact.js";
 import type { ConfigContext } from "../context.js";
 import { getEnvKey } from "../artifact.js";
+import { linuxVorpal } from "./linux_vorpal/linux_vorpal.js";
 
 /**
  * Creates a bash step. Matches Rust sdk/rust/src/artifact/step.rs bash().
@@ -251,11 +252,9 @@ export async function shell(
     stepSystem === ArtifactSystem.AARCH64_LINUX ||
     stepSystem === ArtifactSystem.X8664_LINUX
   ) {
-    const linuxVorpal = await context.fetchArtifactAlias(
-      "library/linux-vorpal:latest",
-    );
+    const linuxVorpalDigest = await linuxVorpal(context);
 
-    return bwrap([], artifacts, environments, linuxVorpal, secrets, script);
+    return bwrap([], artifacts, environments, linuxVorpalDigest, secrets, script);
   }
 
   throw new Error(`unsupported system: ${stepSystem}`);

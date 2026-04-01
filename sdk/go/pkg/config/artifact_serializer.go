@@ -16,6 +16,7 @@ package config
 //   - Empty strings serialize as ""
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -139,5 +140,17 @@ func SerializeArtifactJSON(a *artifact.Artifact) ([]byte, error) {
 		Name:    a.GetName(),
 	}
 
-	return json.Marshal(sa)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(sa); err != nil {
+		return nil, err
+	}
+	// json.Encoder.Encode appends a trailing newline; trim it to match
+	// serde_json::to_vec which does not.
+	b := buf.Bytes()
+	if len(b) > 0 && b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	return b, nil
 }

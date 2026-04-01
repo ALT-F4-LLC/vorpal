@@ -322,7 +322,7 @@ impl ConfigContext {
         let artifact_json =
             serde_json::to_vec(&artifact).expect("failed to serialize artifact to JSON");
 
-        let input_digest = digest(artifact_json);
+        let input_digest = digest(artifact_json.clone());
 
         if self.store.artifact.contains_key(&input_digest) {
             return Ok(input_digest);

@@ -116,6 +116,7 @@ generate:
 		--ts_proto_opt=importSuffix=.js \
 		--proto_path=sdk/rust/api \
 		agent/agent.proto artifact/artifact.proto archive/archive.proto context/context.proto worker/worker.proto
+	cargo run -p linux-vorpal-codegen
 
 # Development (with Vorpal)
 
