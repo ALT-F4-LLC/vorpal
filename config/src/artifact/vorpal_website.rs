@@ -18,13 +18,20 @@ impl VorpalWebsite {
         let bun = Bun::new().build(context).await?;
         let bun_bin = format!("{}/bin", get_env_key(&bun));
 
-        let source = ArtifactSource::new("vorpal-website", "website")
-            .with_excludes(vec!["node_modules".to_string(), "dist".to_string()])
+        let name = "vorpal-website";
+
+        let source = ArtifactSource::new(name, ".")
+            .with_includes(vec!["website".to_string()])
+            .with_excludes(vec![
+                "website/.astro".to_string(),
+                "website/README.md".to_string(),
+                "website/dist".to_string(),
+                "website/node_modules".to_string(),
+            ])
             .build();
 
         let step_script = formatdoc! {r#"
-            export SHARP_IGNORE_GLOBAL_LIBVIPS=1
-            cd ./source/vorpal-website
+            pushd ./source/vorpal-website/website
             {bun_bin}/bun install
             {bun_bin}/bun run build
             cp -r dist/* $VORPAL_OUTPUT/
@@ -34,7 +41,10 @@ impl VorpalWebsite {
             step::shell(
                 context,
                 vec![bun.clone()],
-                vec![format!("PATH={bun_bin}")],
+                vec![
+                    "ASTRO_TELEMETRY_DISABLED=1".to_string(),
+                    format!("PATH={bun_bin}"),
+                ],
                 step_script,
                 vec![],
             )
