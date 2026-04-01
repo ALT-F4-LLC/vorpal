@@ -159,9 +159,9 @@ Not all built-in artifacts are available in every SDK. The tables below indicate
 
 | Artifact | Description | Rust | Go | TypeScript |
 |----------|-------------|:----:|:--:|:----------:|
-| `LinuxDebian` | Debian-based Linux base image | ✅ | ❌ | ❌ |
-| `LinuxVorpal` | Vorpal Linux base image | ✅ | ❌ | ❌ |
-| `LinuxVorpalSlim` | Minimal Vorpal Linux image | ✅ | ✅ | ❌ |
+| `LinuxDebian` | Debian-based Linux base image | ✅ | ✅ | ✅ |
+| `LinuxVorpal` | Vorpal Linux base image | ✅ | ✅ | ✅ |
+| `LinuxVorpalSlim` | Minimal Vorpal Linux image | ✅ | ✅ | ✅ |
 
 ### Container images
 
