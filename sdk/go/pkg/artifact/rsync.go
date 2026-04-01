@@ -16,12 +16,7 @@ func Rsync(context *config.ConfigContext) (*string, error) {
 
 	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT"
 pushd ./source/%s/%s-%s
-./configure \
-    --prefix="$VORPAL_OUTPUT" \
-    --disable-openssl \
-    --disable-xxhash \
-    --disable-zstd \
-    --disable-lz4
+./configure --prefix="$VORPAL_OUTPUT" --disable-openssl --disable-xxhash --disable-zstd --disable-lz4
 make
 make install`, name, name, version)
 

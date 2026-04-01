@@ -21,12 +21,7 @@ export class Rsync {
 
     const stepScript = `mkdir -p "$VORPAL_OUTPUT"
 pushd ./source/${name}/${name}-${version}
-./configure \\
-    --prefix="$VORPAL_OUTPUT" \\
-    --disable-openssl \\
-    --disable-xxhash \\
-    --disable-zstd \\
-    --disable-lz4
+./configure --prefix="$VORPAL_OUTPUT" --disable-openssl --disable-xxhash --disable-zstd --disable-lz4
 make
 make install`;
 
