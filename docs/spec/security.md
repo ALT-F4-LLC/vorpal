@@ -7,7 +7,6 @@ scope: "Security posture: authentication, authorization, cryptography, secrets, 
 owner: "@staff-engineer"
 dependencies:
   - architecture.md
-  - operations.md
 ---
 
 # Security Specification

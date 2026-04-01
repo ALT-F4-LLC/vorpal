@@ -116,6 +116,7 @@ generate:
 		--ts_proto_opt=importSuffix=.js \
 		--proto_path=sdk/rust/api \
 		agent/agent.proto artifact/artifact.proto archive/archive.proto context/context.proto worker/worker.proto
+	cargo run -p linux-vorpal-codegen
 
 # Development (with Vorpal)
 
@@ -124,6 +125,9 @@ vorpal:
 
 vorpal-start:
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start $(VORPAL_FLAGS)
+
+vorpal-website-start:
+	bun run --cwd=website dev
 
 # Lima environment
 

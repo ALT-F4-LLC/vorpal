@@ -13,7 +13,7 @@ func BuildVorpalJob(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("failed to build vorpal: %w", err)
 	}
 
-	script := fmt.Sprintf("\n%s/bin/vorpal --version", artifact.GetEnvKey(*vorpal))
+	script := fmt.Sprintf("%s/bin/vorpal --version", artifact.GetEnvKey(*vorpal))
 
 	return artifact.NewJob("vorpal-job", script, SYSTEMS).
 		WithArtifacts([]*string{vorpal}).

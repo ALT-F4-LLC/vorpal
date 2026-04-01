@@ -11,8 +11,13 @@ set -euo pipefail
 #   CI=true                    Enable non-interactive mode
 #   VORPAL_VERSION=<ver>       Version to install (default: nightly)
 #   VORPAL_NO_SERVICE=1        Skip service installation
+#   VORPAL_SERVICES=<list>     Comma-separated services to install (default: agent,registry,worker)
 #   VORPAL_NO_PATH=1           Skip PATH configuration
 #   VORPAL_DRY_RUN=1           Show what would be done without making changes
+#   VORPAL_ISSUER=<url>        OIDC issuer URL for authenticated services
+#   VORPAL_ISSUER_AUDIENCE=<v> OIDC issuer audience
+#   VORPAL_ISSUER_CLIENT_ID=<v>    OIDC issuer client ID
+#   VORPAL_ISSUER_CLIENT_SECRET=<v> OIDC issuer client secret
 #   NO_COLOR=1                 Disable color output
 # =============================================================================
 
@@ -31,6 +36,11 @@ FLAG_UNINSTALL=0
 FLAG_DRY_RUN="${VORPAL_DRY_RUN:-0}"
 NO_SERVICE="${VORPAL_NO_SERVICE:-0}"
 NO_PATH="${VORPAL_NO_PATH:-0}"
+SERVICES="${VORPAL_SERVICES:-agent,registry,worker}"
+ISSUER="${VORPAL_ISSUER:-}"
+ISSUER_AUDIENCE="${VORPAL_ISSUER_AUDIENCE:-}"
+ISSUER_CLIENT_ID="${VORPAL_ISSUER_CLIENT_ID:-}"
+ISSUER_CLIENT_SECRET="${VORPAL_ISSUER_CLIENT_SECRET:-}"
 
 # -- State (set during execution) --------------------------------------------
 
@@ -352,10 +362,15 @@ Install Vorpal to ~/.vorpal and configure system services.
 Options:
   -y, --yes              Run in non-interactive mode (skip prompts)
   -v, --version <ver>    Version to install (default: nightly)
+      --services <list>  Comma-separated services to install (default: agent,registry,worker)
       --no-service       Skip service installation
       --no-path          Skip PATH configuration
       --dry-run          Show what would be done without making changes
       --uninstall        Uninstall Vorpal
+      --issuer <url>             OIDC issuer URL
+      --issuer-audience <value>  OIDC issuer audience
+      --issuer-client-id <value> OIDC issuer client ID
+      --issuer-client-secret <value> OIDC issuer client secret
   -h, --help             Show this help message
 
 Environment variables:
@@ -363,8 +378,13 @@ Environment variables:
   CI=true                    Enable non-interactive mode
   VORPAL_VERSION=<ver>       Version to install (default: nightly)
   VORPAL_NO_SERVICE=1        Skip service installation
+  VORPAL_SERVICES=<list>     Comma-separated services (default: agent,registry,worker)
   VORPAL_NO_PATH=1           Skip PATH configuration
   VORPAL_DRY_RUN=1           Show what would be done without making changes
+  VORPAL_ISSUER=<url>        OIDC issuer URL
+  VORPAL_ISSUER_AUDIENCE=<v> OIDC issuer audience
+  VORPAL_ISSUER_CLIENT_ID=<v>    OIDC issuer client ID
+  VORPAL_ISSUER_CLIENT_SECRET=<v> OIDC issuer client secret
   NO_COLOR=1                 Disable color output
 EOF
 }
@@ -386,6 +406,16 @@ parse_args() {
                 VORPAL_VERSION="$2"
                 shift 2
                 ;;
+            --services)
+                if [[ $# -lt 2 ]]; then
+                    print_error "Missing value for $1" \
+                        "The $1 flag requires a comma-separated list of services." \
+                        "Example: install.sh $1 agent,registry,worker"
+                    exit 1
+                fi
+                SERVICES="$2"
+                shift 2
+                ;;
             --no-service)
                 NO_SERVICE=1
                 shift
@@ -397,6 +427,46 @@ parse_args() {
             --dry-run)
                 FLAG_DRY_RUN=1
                 shift
+                ;;
+            --issuer)
+                if [[ $# -lt 2 ]]; then
+                    print_error "Missing value for $1" \
+                        "The $1 flag requires a URL argument." \
+                        "Example: install.sh $1 https://accounts.example.com"
+                    exit 1
+                fi
+                ISSUER="$2"
+                shift 2
+                ;;
+            --issuer-audience)
+                if [[ $# -lt 2 ]]; then
+                    print_error "Missing value for $1" \
+                        "The $1 flag requires a value argument." \
+                        "Example: install.sh $1 my-audience"
+                    exit 1
+                fi
+                ISSUER_AUDIENCE="$2"
+                shift 2
+                ;;
+            --issuer-client-id)
+                if [[ $# -lt 2 ]]; then
+                    print_error "Missing value for $1" \
+                        "The $1 flag requires a value argument." \
+                        "Example: install.sh $1 my-client-id"
+                    exit 1
+                fi
+                ISSUER_CLIENT_ID="$2"
+                shift 2
+                ;;
+            --issuer-client-secret)
+                if [[ $# -lt 2 ]]; then
+                    print_error "Missing value for $1" \
+                        "The $1 flag requires a value argument." \
+                        "Example: install.sh $1 my-client-secret"
+                    exit 1
+                fi
+                ISSUER_CLIENT_SECRET="$2"
+                shift 2
                 ;;
             --uninstall)
                 FLAG_UNINSTALL=1
@@ -410,6 +480,23 @@ parse_args() {
                 print_error "Unknown option: $1" \
                     "" \
                     "Run 'install.sh --help' for usage information."
+                exit 1
+                ;;
+        esac
+    done
+}
+
+validate_services() {
+    local valid_services="agent registry worker"
+    local IFS=','
+    for svc in $SERVICES; do
+        case " $valid_services " in
+            *" $svc "*)
+                ;;
+            *)
+                print_error "Invalid service: '$svc'" \
+                    "Valid services are: agent, registry, worker" \
+                    "Example: install.sh --services agent,registry,worker"
                 exit 1
                 ;;
         esac
@@ -481,6 +568,144 @@ check_prerequisites() {
             "Install them and re-run the installer."
         exit 1
     fi
+}
+
+install_linux_prerequisites() {
+    print_header "Installing Linux prerequisites"
+
+    if ! command -v apt-get >/dev/null 2>&1; then
+        print_error \
+            "apt-get not found" \
+            "This installer uses apt-get to install prerequisites (Debian/Ubuntu).
+  Your system does not appear to have apt-get." \
+            "Install the following packages manually using your package manager:
+    ${_sym_bullet} bubblewrap (provides bwrap)
+    ${_sym_bullet} docker.io (or docker)
+  Then re-run the installer."
+        exit 1
+    fi
+
+    local need_bwrap=0
+    local need_docker=0
+
+    if command -v bwrap >/dev/null 2>&1; then
+        print_success "bubblewrap (already installed)"
+    else
+        need_bwrap=1
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        print_success "docker (already installed)"
+    else
+        need_docker=1
+    fi
+
+    if [[ "$need_bwrap" = 0 ]] && [[ "$need_docker" = 0 ]]; then
+        return 0
+    fi
+
+    local packages=()
+    if [[ "$need_bwrap" = 1 ]]; then
+        packages+=("bubblewrap")
+    fi
+    if [[ "$need_docker" = 1 ]]; then
+        packages+=("docker.io")
+    fi
+
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        local pkg
+        for pkg in "${packages[@]}"; do
+            print_step "Would install ${pkg} via apt-get"
+        done
+        print_success "Linux prerequisites (dry run)"
+        return 0
+    fi
+
+    print_warning "Vorpal needs to install ${packages[*]} (requires sudo)"
+
+    if ! sudo apt-get update -y >/dev/null 2>&1; then
+        print_error \
+            "Failed to update package lists" \
+            "apt-get update failed. This is required before installing packages." \
+            "Options:
+    ${_sym_bullet} Check your internet connection
+    ${_sym_bullet} Run 'sudo apt-get update' manually and re-run the installer"
+        exit 1
+    fi
+
+    if [[ "$need_bwrap" = 1 ]]; then
+        if ! sudo apt-get install -y bubblewrap >/dev/null 2>&1; then
+            print_error \
+                "Failed to install bubblewrap" \
+                "Vorpal requires bubblewrap (bwrap) for sandboxed builds on Linux." \
+                "Options:
+    ${_sym_bullet} Run 'sudo apt-get install -y bubblewrap' manually
+    ${_sym_bullet} Check that your package sources include bubblewrap"
+            exit 1
+        fi
+        print_success "bubblewrap (installed)"
+    fi
+
+    if [[ "$need_docker" = 1 ]]; then
+        if ! sudo apt-get install -y docker.io >/dev/null 2>&1; then
+            print_error \
+                "Failed to install docker" \
+                "Vorpal requires docker as a container runtime on Linux." \
+                "Options:
+    ${_sym_bullet} Run 'sudo apt-get install -y docker.io' manually
+    ${_sym_bullet} Install Docker from https://docs.docker.com/engine/install/"
+            exit 1
+        fi
+        print_success "docker (installed)"
+    fi
+}
+
+setup_apparmor_profile() {
+    print_header "Setting up AppArmor profile for bubblewrap"
+
+    local profile_path="/etc/apparmor.d/bwrap"
+
+    if [[ -f "$profile_path" ]]; then
+        print_success "AppArmor bwrap profile (already exists)"
+        return 0
+    fi
+
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        print_step "Would create ${profile_path} with bubblewrap AppArmor profile"
+        print_success "AppArmor bwrap profile (dry run)"
+        return 0
+    fi
+
+    print_warning "Vorpal needs to create ${profile_path} (requires sudo)"
+
+    if ! sudo tee "$profile_path" >/dev/null 2>&1 <<'APPARMOR_EOF'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/bwrap>
+}
+APPARMOR_EOF
+    then
+        print_error \
+            "Failed to create AppArmor profile for bubblewrap" \
+            "Vorpal needs an AppArmor profile at ${profile_path} to allow bubblewrap
+  to use user namespaces." \
+            "Options:
+    ${_sym_bullet} Re-run and enter your password when prompted
+    ${_sym_bullet} Ask your system administrator for sudo access
+    ${_sym_bullet} Create the profile manually:
+        sudo tee ${profile_path} with the bubblewrap profile content"
+        exit 1
+    fi
+
+    sudo apparmor_parser -r "$profile_path" 2>/dev/null \
+        || print_warning "AppArmor profile created but could not be loaded. A reboot may be required."
+
+    print_success "AppArmor bwrap profile (created)"
 }
 
 # -- Phase 2: Download & version resolution -----------------------------------
@@ -830,6 +1055,13 @@ install_service_macos() {
         <string>system</string>
         <string>services</string>
         <string>start</string>
+        <string>--services</string>
+        <string>${SERVICES}</string>$(
+[[ -n "$ISSUER" ]] && printf '\n        <string>--issuer</string>\n        <string>%s</string>' "$ISSUER"
+[[ -n "$ISSUER_AUDIENCE" ]] && printf '\n        <string>--issuer-audience</string>\n        <string>%s</string>' "$ISSUER_AUDIENCE"
+[[ -n "$ISSUER_CLIENT_ID" ]] && printf '\n        <string>--issuer-client-id</string>\n        <string>%s</string>' "$ISSUER_CLIENT_ID"
+[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf '\n        <string>--issuer-client-secret</string>\n        <string>%s</string>' "$ISSUER_CLIENT_SECRET"
+)
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -884,7 +1116,12 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${vorpal_bin} system services start
+ExecStart=${vorpal_bin} system services start --services ${SERVICES}$(
+[[ -n "$ISSUER" ]] && printf ' --issuer "%s"' "$ISSUER"
+[[ -n "$ISSUER_AUDIENCE" ]] && printf ' --issuer-audience "%s"' "$ISSUER_AUDIENCE"
+[[ -n "$ISSUER_CLIENT_ID" ]] && printf ' --issuer-client-id "%s"' "$ISSUER_CLIENT_ID"
+[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf ' --issuer-client-secret "%s"' "$ISSUER_CLIENT_SECRET"
+)
 Restart=on-failure
 RestartSec=5
 
@@ -934,6 +1171,13 @@ UNIT
     fi
 
     spin_stop "success" "Installed systemd user service"
+
+    # Enable lingering so user services persist after logout
+    if loginctl enable-linger 2>/dev/null; then
+        print_success "Enabled login lingering (services persist after logout)"
+    else
+        print_warning "Could not enable lingering. Run manually: loginctl enable-linger"
+    fi
 }
 
 install_service() {
@@ -948,7 +1192,11 @@ install_service() {
                 print_step "Would install systemd user service (vorpal.service)"
                 ;;
         esac
-        print_step "Would start services"
+        print_step "Would start services: ${SERVICES}"
+        [[ -n "$ISSUER" ]] && print_step "Would pass --issuer ${ISSUER}"
+        [[ -n "$ISSUER_AUDIENCE" ]] && print_step "Would pass --issuer-audience ${ISSUER_AUDIENCE}"
+        [[ -n "$ISSUER_CLIENT_ID" ]] && print_step "Would pass --issuer-client-id ${ISSUER_CLIENT_ID}"
+        [[ -n "$ISSUER_CLIENT_SECRET" ]] && print_step "Would pass --issuer-client-secret (set)"
         print_success "Services (dry run)"
         return 0
     fi
@@ -1141,11 +1389,6 @@ print_summary() {
     printf '  Docs:     %s%s%s\n' "${_fmt_cyan}" "${VORPAL_GITHUB_URL}" "${_fmt_reset}"
     printf '  Issues:   %s%s/issues%s\n' "${_fmt_cyan}" "${VORPAL_GITHUB_URL}" "${_fmt_reset}"
 
-    # loginctl enable-linger note for Linux (per TDD section 8, risk #5)
-    if [[ "$OS" = "linux" ]]; then
-        printf '\n'
-        print_warning "To keep services running after logout: loginctl enable-linger"
-    fi
 }
 
 run_uninstall() {
@@ -1291,6 +1534,14 @@ main() {
 
     print_banner
     check_prerequisites
+
+    if [[ "$OS" = "linux" ]]; then
+        install_linux_prerequisites
+        if command -v apparmor_parser >/dev/null 2>&1 || [[ -d /etc/apparmor.d ]]; then
+            setup_apparmor_profile
+        fi
+    fi
+
     resolve_version
     handle_existing
     download_binary
@@ -1298,6 +1549,7 @@ main() {
     generate_keys
 
     if [[ "$NO_SERVICE" != 1 ]]; then
+        validate_services
         install_service
         verify_service
     else

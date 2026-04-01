@@ -12,7 +12,7 @@ dependencies:
 
 # Code Quality
 
-## Overview
+This document describes the code quality tooling, naming conventions, error handling patterns, and enforcement mechanisms that exist in the Vorpal project today.
 
 Vorpal is a polyglot project with three primary languages: Rust (CLI and SDK core), Go (SDK), and TypeScript (SDK). Each language follows its ecosystem's idiomatic conventions. Code quality enforcement is tooling-based rather than documentation-based -- there are no written style guides, but the Makefile and language-specific configs enforce standards at build time.
 
@@ -29,7 +29,12 @@ Rust is the primary implementation language. Go and TypeScript SDKs provide alte
 
 ## Toolchain and Formatting
 
-### Rust
+| Language   | Role                          | Toolchain Version | Package Manager |
+|------------|-------------------------------|-------------------|-----------------|
+| Rust       | CLI, SDK, core runtime        | 1.93.1 (pinned)   | Cargo           |
+| Go         | SDK, config runner            | 1.26.0            | Go modules      |
+| TypeScript | SDK, config runner            | 5.9.3             | Bun / npm       |
+| Protobuf   | API contract definitions      | N/A (external)    | protoc          |
 
 - **Toolchain**: Pinned via `rust-toolchain.toml` to channel `1.93.1` with `minimal` profile.
 - **Components**: `clippy`, `rust-analyzer`, `rustfmt` are explicitly included in the toolchain.
@@ -38,13 +43,13 @@ Rust is the primary implementation language. Go and TypeScript SDKs provide alte
 - **Linter**: `clippy` -- enforced via `cargo clippy -- --deny warnings` (Makefile `lint` target).
 - **No custom rustfmt.toml or clippy.toml**: The project relies entirely on default rustfmt and clippy configurations. No overrides or custom lint rules exist.
 
-### Go
+### 2.1 Rust
 
 - **Version**: Go 1.26.0 (specified in `sdk/go/go.mod`).
 - **No explicit linter configuration**: No `golangci-lint` config, `.golangci.yml`, or similar tooling is present. Standard `go vet` and `go fmt` are assumed but not enforced by any visible CI or Makefile target.
 - **Module path**: `github.com/ALT-F4-LLC/vorpal/sdk/go`.
 
-### TypeScript
+### 2.2 Go
 
 - **Runtime**: Bun (test runner via `bun test`; referenced in `package.json`).
 - **Compiler**: TypeScript 5.9.3 with strict mode enabled (`"strict": true` in `tsconfig.json`).
@@ -52,7 +57,7 @@ Rust is the primary implementation language. Go and TypeScript SDKs provide alte
 - **No linter**: No ESLint, Biome, or other linter configuration exists. No `.eslintrc`, `.prettierrc`, or equivalent files are present.
 - **No formatter**: No Prettier or equivalent is configured.
 
-### Editor Configuration
+### 2.3 TypeScript
 
 - **No `.editorconfig`** file exists in the repository.
 
@@ -80,9 +85,11 @@ The project uses a dual approach to error handling:
 
 - TypeScript SDK is primarily generated protobuf bindings and thin wrappers. Error handling delegates to gRPC client error propagation.
 
-## Naming Conventions
+### 2.4 Protobuf
 
-### Rust
+- Proto files use `proto3` syntax with package namespacing (`vorpal.agent`, `vorpal.artifact`, etc.).
+- `go_package` option is set on all proto files for Go code generation.
+- No proto linter (e.g., `buf lint`) is configured.
 
 - **Crate names**: Hyphenated (`vorpal-cli`, `vorpal-sdk`, `vorpal-config`).
 - **Module organization**: File-per-module pattern. Subcommands map 1:1 to module files under `cli/src/command/`. SDK artifacts each get their own module file under `sdk/rust/src/artifact/`.
@@ -157,11 +164,11 @@ Server-side services implement tonic-generated traits (e.g., `ContextService`, `
 - Offline builds supported via `cargo vendor` (Makefile `vendor` target, `.cargo/config.toml` for vendored sources).
 - `cargo-machete` metadata in SDK's `Cargo.toml` for unused dependency detection.
 
-### Go
+The GitHub Actions workflow (`.github/workflows/vorpal.yaml`) enforces code quality through a dedicated `code-quality` job that gates the `build` job:
 
 - `go.mod` with pinned versions. Minimal dependency set: `toml`, `uuid`, `grpc`, `protobuf`.
 
-### TypeScript
+The `code-quality` job runs on `macos-latest` only and executes:
 
 - `package.json` with exact version pins (no `^` or `~`). Minimal runtime deps: `@bufbuild/protobuf`, `@grpc/grpc-js`, `smol-toml`.
 
@@ -183,7 +190,7 @@ The `Makefile` serves as the single entry point for development workflows:
 
 The Makefile supports both debug and release builds via `TARGET` variable, and offline builds via vendored sources.
 
-## Gaps and Areas for Improvement
+## 9. Identified Gaps
 
 ### No CI Configuration in Repository
 

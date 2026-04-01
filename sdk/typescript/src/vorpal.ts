@@ -1,5 +1,7 @@
 import { ArtifactSystem } from "./api/artifact/artifact.js";
 import {
+  Artifact,
+  ArtifactSource,
   getEnvKey,
   Job,
   OciImage,
@@ -7,7 +9,20 @@ import {
   DevelopmentEnvironment,
   UserEnvironment,
 } from "./artifact.js";
+import { shell } from "./artifact/step.js";
+import { Bun } from "./artifact/bun.js";
+import { Crane } from "./artifact/crane.js";
+import { GoBin } from "./artifact/go.js";
+import { Goimports } from "./artifact/goimports.js";
+import { Gopls } from "./artifact/gopls.js";
+import { Grpcurl } from "./artifact/grpcurl.js";
 import { Rust } from "./artifact/language/rust.js";
+import { NodeJS } from "./artifact/nodejs.js";
+import { Pnpm } from "./artifact/pnpm.js";
+import { Protoc } from "./artifact/protoc.js";
+import { ProtocGenGo } from "./artifact/protoc_gen_go.js";
+import { ProtocGenGoGrpc } from "./artifact/protoc_gen_go_grpc.js";
+import { Staticcheck } from "./artifact/staticcheck.js";
 import { ConfigContext } from "./context.js";
 
 const SYSTEMS: ArtifactSystem[] = [
@@ -97,22 +112,18 @@ async function buildVorpalProcess(context: ConfigContext): Promise<string> {
 }
 
 async function buildVorpalShell(context: ConfigContext): Promise<string> {
-  const bun = await context.fetchArtifactAlias("bun:1.3.10");
-  const crane = await context.fetchArtifactAlias("crane:0.21.1");
-  const go = await context.fetchArtifactAlias("go:1.26.0");
-  const goimports = await context.fetchArtifactAlias("goimports:0.42.0");
-  const gopls = await context.fetchArtifactAlias("gopls:0.42.0");
-  const grpcurl = await context.fetchArtifactAlias("grpcurl:1.9.3");
-  const nodejs = await context.fetchArtifactAlias("nodejs:22.22.0");
-  const pnpm = await context.fetchArtifactAlias("pnpm:10.30.3");
-  const protoc = await context.fetchArtifactAlias("protoc:34.0");
-  const protocGenGo = await context.fetchArtifactAlias("protoc-gen-go:1.36.11");
-  const protocGenGoGrpc = await context.fetchArtifactAlias(
-    "protoc-gen-go-grpc:1.79.1",
-  );
-  const staticcheck = await context.fetchArtifactAlias(
-    "staticcheck:2026.1",
-  );
+  const bun = await new Bun().build(context);
+  const crane = await new Crane().build(context);
+  const go = await new GoBin().build(context);
+  const goimports = await new Goimports().build(context);
+  const gopls = await new Gopls().build(context);
+  const grpcurl = await new Grpcurl().build(context);
+  const nodejs = await new NodeJS().build(context);
+  const pnpm = await new Pnpm().build(context);
+  const protoc = await new Protoc().build(context);
+  const protocGenGo = await new ProtocGenGo().build(context);
+  const protocGenGoGrpc = await new ProtocGenGoGrpc().build(context);
+  const staticcheck = await new Staticcheck().build(context);
 
   const goarch = getGoarch(context.getSystem());
   const goos = getGoos(context.getSystem());
@@ -137,6 +148,46 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
       `GOARCH=${goarch}`,
       `GOOS=${goos}`,
     ])
+    .build(context);
+}
+
+async function buildVorpalWebsite(context: ConfigContext): Promise<string> {
+  const bun = await new Bun().build(context);
+  const bunBin = `${getEnvKey(bun)}/bin`;
+
+  const name = "vorpal-website";
+
+  const source = new ArtifactSource(name, ".")
+    .withIncludes(["website"])
+    .withExcludes([
+      "website/.astro",
+      "website/README.md",
+      "website/dist",
+      "website/node_modules",
+    ])
+    .build();
+
+  const stepScript = `pushd ./source/vorpal-website/website
+${bunBin}/bun install
+${bunBin}/bun run build
+cp -r dist/* $VORPAL_OUTPUT/
+`;
+
+  const steps = [
+    await shell(
+      context,
+      [bun],
+      [
+        "ASTRO_TELEMETRY_DISABLED=1",
+        `PATH=${bunBin}`,
+      ],
+      stepScript,
+      [],
+    ),
+  ];
+
+  return new Artifact(name, steps, SYSTEMS)
+    .withSources([source])
     .build(context);
 }
 
@@ -174,6 +225,9 @@ async function main(): Promise<void> {
       break;
     case "vorpal-user":
       await buildVorpalUser(context);
+      break;
+    case "vorpal-website":
+      await buildVorpalWebsite(context);
       break;
     default:
       break;

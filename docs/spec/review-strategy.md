@@ -8,6 +8,7 @@ owner: "@staff-engineer"
 dependencies:
   - code-quality.md
   - testing.md
+  - security.md
 ---
 
 # Review Strategy

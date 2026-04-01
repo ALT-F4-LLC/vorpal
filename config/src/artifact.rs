@@ -12,3 +12,4 @@ pub mod vorpal_process;
 pub mod vorpal_release;
 pub mod vorpal_shell;
 pub mod vorpal_user;
+pub mod vorpal_website;

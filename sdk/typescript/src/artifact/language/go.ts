@@ -10,6 +10,14 @@ import {
   getEnvKey,
   secretsToProto,
 } from "../../artifact.js";
+import { Git } from "../git.js";
+import { GoBin } from "../go.js";
+import { Goimports } from "../goimports.js";
+import { Gopls } from "../gopls.js";
+import { Protoc } from "../protoc.js";
+import { ProtocGenGo } from "../protoc_gen_go.js";
+import { ProtocGenGoGrpc } from "../protoc_gen_go_grpc.js";
+import { Staticcheck } from "../staticcheck.js";
 import { shell } from "../step.js";
 
 // ---------------------------------------------------------------------------
@@ -235,9 +243,9 @@ export class Go {
       `go build -C ${this._buildDirectory} -o $VORPAL_OUTPUT/bin/${this._name} ${this._buildFlags} ${this._buildPath}\n\n` +
       `go clean -modcache`;
 
-    // Fetch tool artifacts
-    const git = await context.fetchArtifactAlias("git:2.53.0");
-    const go = await context.fetchArtifactAlias("go:1.26.0");
+    // Build tool artifacts
+    const git = await new Git().build(context);
+    const go = await new GoBin().build(context);
 
     // Compute GOOS and GOARCH
     const goarch = getGoarch(context.getSystem());
@@ -278,16 +286,6 @@ export class Go {
 // ---------------------------------------------------------------------------
 // Go Development Environment
 // ---------------------------------------------------------------------------
-
-// Default tool aliases -- centralized so version bumps happen in one place
-const DEFAULT_GO_ALIAS = "go:1.26.0";
-const DEFAULT_GIT_ALIAS = "git:2.53.0";
-const DEFAULT_GOIMPORTS_ALIAS = "goimports:0.42.0";
-const DEFAULT_GOPLS_ALIAS = "gopls:0.42.0";
-const DEFAULT_PROTOC_ALIAS = "protoc:34.0";
-const DEFAULT_PROTOC_GEN_GO_ALIAS = "protoc-gen-go:1.36.11";
-const DEFAULT_PROTOC_GEN_GO_GRPC_ALIAS = "protoc-gen-go-grpc:1.79.1";
-const DEFAULT_STATICCHECK_ALIAS = "staticcheck:2026.1";
 
 /**
  * Builder for Go development environment artifacts.
@@ -375,27 +373,27 @@ export class GoDevelopmentEnvironment {
    * - GOOS={platform-specific}
    */
   async build(context: ConfigContext): Promise<string> {
-    // Fetch default tool artifacts
-    const go = await context.fetchArtifactAlias(DEFAULT_GO_ALIAS);
-    const git = await context.fetchArtifactAlias(DEFAULT_GIT_ALIAS);
-    const goimports = await context.fetchArtifactAlias(DEFAULT_GOIMPORTS_ALIAS);
-    const gopls = await context.fetchArtifactAlias(DEFAULT_GOPLS_ALIAS);
-    const staticcheck = await context.fetchArtifactAlias(DEFAULT_STATICCHECK_ALIAS);
+    // Build default tool artifacts
+    const go = await new GoBin().build(context);
+    const git = await new Git().build(context);
+    const goimports = await new Goimports().build(context);
+    const gopls = await new Gopls().build(context);
+    const staticcheck = await new Staticcheck().build(context);
 
     const artifacts: string[] = [git, go, goimports, gopls];
 
     if (this._includeProtoc) {
-      const protoc = await context.fetchArtifactAlias(DEFAULT_PROTOC_ALIAS);
+      const protoc = await new Protoc().build(context);
       artifacts.push(protoc);
     }
 
     if (this._includeProtocGenGo) {
-      const protocGenGo = await context.fetchArtifactAlias(DEFAULT_PROTOC_GEN_GO_ALIAS);
+      const protocGenGo = await new ProtocGenGo().build(context);
       artifacts.push(protocGenGo);
     }
 
     if (this._includeProtocGenGoGrpc) {
-      const protocGenGoGrpc = await context.fetchArtifactAlias(DEFAULT_PROTOC_GEN_GO_GRPC_ALIAS);
+      const protocGenGoGrpc = await new ProtocGenGoGrpc().build(context);
       artifacts.push(protocGenGoGrpc);
     }
 

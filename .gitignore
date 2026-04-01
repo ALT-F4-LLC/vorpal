@@ -5,6 +5,10 @@
 .env.*
 /.docket
 /dist
+/docs/tdd/
+/docs/ux/
 target
 vendor
 vorpal-*-*
+website/dist/
+website/node_modules/

@@ -117,8 +117,7 @@ type UserEnvironmentTemplateArgs struct {
 	SymlinksDeactivate string
 }
 
-const ProcessScriptTemplate = `
-mkdir -p $VORPAL_OUTPUT/bin
+const ProcessScriptTemplate = `mkdir -p $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/{{.Name}}-logs << "EOF"
 #!/bin/bash
@@ -171,8 +170,7 @@ EOF
 
 chmod +x $VORPAL_OUTPUT/bin/{{.Name}}-start`
 
-const ScriptDevelopmentEnvironmentTemplate = `
-mkdir -p $VORPAL_WORKSPACE/bin
+const ScriptDevelopmentEnvironmentTemplate = `mkdir -p $VORPAL_WORKSPACE/bin
 
 cat > bin/activate << "EOF"
 #!/bin/bash
@@ -194,8 +192,7 @@ mkdir -p $VORPAL_OUTPUT/bin
 
 cp -pr bin "$VORPAL_OUTPUT"`
 
-const ScriptUserEnvironmentTemplate = `
-mkdir -p $VORPAL_OUTPUT/bin
+const ScriptUserEnvironmentTemplate = `mkdir -p $VORPAL_OUTPUT/bin
 
 cat > $VORPAL_OUTPUT/bin/vorpal-activate-shell << "EOF"
 {{.Environments}}

@@ -1,0 +1,85 @@
+// @ts-check
+import { defineConfig } from 'astro/config';
+import starlight from '@astrojs/starlight';
+
+// https://astro.build/config
+export default defineConfig({
+	site: 'https://docs.vorpal.build',
+	integrations: [
+		starlight({
+			title: 'Vorpal',
+			head: [
+				{
+					tag: 'script',
+					content: `document.addEventListener('DOMContentLoaded', () => {
+						document.querySelectorAll('a[href*="github.com"]').forEach(a => {
+							a.setAttribute('target', '_blank');
+							a.setAttribute('rel', 'noopener noreferrer');
+						});
+					});`,
+				},
+				{
+					tag: 'script',
+					attrs: { type: 'module' },
+					content: `import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+document.querySelectorAll('pre[data-language="mermaid"]').forEach((pre) => {
+  const ec = pre.closest('.expressive-code');
+  const lines = pre.querySelectorAll('.ec-line');
+  const text = Array.from(lines).map((l) => l.textContent).join('\\n');
+  const div = document.createElement('div');
+  div.classList.add('mermaid');
+  div.textContent = text;
+  if (ec) { ec.after(div); ec.style.display = 'none'; } else { pre.after(div); pre.style.display = 'none'; }
+});
+await mermaid.run({ querySelector: '.mermaid' });`,
+				},
+			],
+			social: [
+				{
+					icon: 'github',
+					label: 'GitHub',
+					href: 'https://github.com/ALT-F4-LLC/vorpal',
+				},
+			],
+			customCss: ['./src/styles/custom.css'],
+			sidebar: [
+				{
+					label: 'Getting Started',
+					items: [
+						{ label: 'Installation', slug: 'getting-started/installation' },
+						{ label: 'Quickstart', slug: 'getting-started/quickstart' },
+					],
+				},
+				{
+					label: 'Guides',
+					items: [
+						{ label: 'Go', slug: 'guides/go' },
+						{ label: 'Rust', slug: 'guides/rust' },
+						{ label: 'TypeScript', slug: 'guides/typescript' },
+					],
+				},
+				{
+					label: 'Concepts',
+					items: [
+						{ label: 'Architecture', slug: 'concepts/architecture' },
+						{ label: 'Artifacts', slug: 'concepts/artifacts' },
+						{ label: 'Caching', slug: 'concepts/caching' },
+						{ label: 'Environments', slug: 'concepts/environments' },
+						{ label: 'Jobs', slug: 'concepts/jobs' },
+						{ label: 'Processes', slug: 'concepts/processes' },
+					],
+				},
+				{
+					label: 'Reference',
+					items: [
+						{ label: 'Command-line (CLI)', slug: 'reference/cli' },
+						{ label: 'Configuration', slug: 'reference/configuration' },
+						{ label: 'API', slug: 'reference/api' },
+						{ label: 'Contributing to Docs', slug: 'reference/contributing' },
+					],
+				},
+			],
+		}),
+	],
+});

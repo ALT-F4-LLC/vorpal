@@ -1,0 +1,208 @@
+---
+title: Vorpal
+description: A build system that works as code. Define builds, environments, CI, and services as real programs in Go, Rust, or TypeScript.
+template: splash
+hero:
+  tagline: Define your builds, environments, CI, and services as real programs — not JSON, not YAML — using SDKs in Go, Rust, or TypeScript.
+  actions:
+    - text: Get Started
+      link: /getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/ALT-F4-LLC/vorpal
+      icon: external
+      variant: minimal
+      attrs:
+        target: _blank
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import CarouselScript from '../../components/CarouselScript.astro';
+
+<div class="landing-section landing-section-wide">
+
+<CardGrid>
+  <Card title="Multi-language" icon="seti:config">
+    Builds, CI, environments, and services — defined as real programs with full IDE support.
+  </Card>
+  <Card title="Multi-purpose" icon="setting">
+    Dev environments, user configs, and long-running services — all defined and managed as artifacts.
+  </Card>
+  <Card title="Multi-service" icon="rocket">
+    Run builds on your machine or distribute them across remote workers. Same result either way.
+  </Card>
+</CardGrid>
+
+</div>
+
+<div class="landing-section">
+
+## Your build, your language.
+
+<p class="landing-subtitle">Choose the SDK that fits your project. All SDKs produce identical artifacts.</p>
+
+<div class="sdk-carousel" data-carousel>
+  <div class="sdk-carousel-tabs" role="tablist" aria-label="SDK language selector">
+    <button role="tab" id="tab-go" aria-selected="true" aria-controls="panel-go" tabindex="0">Go</button>
+    <button role="tab" id="tab-rust" aria-selected="false" aria-controls="panel-rust" tabindex="-1">Rust</button>
+    <button role="tab" id="tab-ts" aria-selected="false" aria-controls="panel-ts" tabindex="-1">TypeScript</button>
+  </div>
+
+  <div class="sdk-carousel-panels">
+    <div role="tabpanel" id="panel-go" aria-labelledby="tab-go" class="sdk-carousel-panel active">
+
+<Card title="Go SDK" icon="seti:go">
+  For full-stack and platform engineers who want builds that read like the rest of their code.
+
+  ```bash title="Install"
+  go get github.com/ALT-F4-LLC/vorpal/sdk/go
+  ```
+</Card>
+
+```go title="vorpal.go"
+package main
+
+import (
+    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
+    "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
+)
+
+func main() {
+    ctx := config.GetContext()
+
+    systems := []api.ArtifactSystem{
+        api.ArtifactSystem_AARCH64_DARWIN,
+        api.ArtifactSystem_AARCH64_LINUX,
+        api.ArtifactSystem_X8664_DARWIN,
+        api.ArtifactSystem_X8664_LINUX,
+    }
+
+    language.NewGo("my-app", systems).
+        WithBuildDirectory("cmd/app").
+        WithIncludes([]string{"cmd", "go.mod", "go.sum"}).
+        Build(ctx)
+
+    ctx.Run()
+}
+```
+
+    </div>
+
+    <div role="tabpanel" id="panel-rust" aria-labelledby="tab-rust" class="sdk-carousel-panel">
+
+<Card title="Rust SDK" icon="seti:rust">
+  For systems programmers who expect compile-time guarantees — even from their build system.
+
+  ```bash title="Install"
+  cargo add vorpal-sdk
+  ```
+</Card>
+
+```rust title="vorpal.rs"
+use vorpal_sdk::{
+    api::artifact::ArtifactSystem::*,
+    artifact::language::rust::Rust,
+    context::get_context,
+};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let ctx = &mut get_context().await?;
+
+    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+
+    Rust::new("my-app", systems)
+        .with_bins(vec!["my-app"])
+        .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
+        .build(ctx)
+        .await?;
+
+    ctx.run().await
+}
+```
+
+    </div>
+
+    <div role="tabpanel" id="panel-ts" aria-labelledby="tab-ts" class="sdk-carousel-panel">
+
+<Card title="TypeScript SDK" icon="seti:typescript">
+  For frontend and tooling engineers who want builds in the language they already ship.
+
+  ```bash title="Install"
+  bun add @altf4llc/vorpal-sdk
+  ```
+</Card>
+
+```typescript title="vorpal.ts"
+import { ArtifactSystem, ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
+
+const ctx = ConfigContext.create();
+
+const systems = [
+  ArtifactSystem.AARCH64_DARWIN,
+  ArtifactSystem.AARCH64_LINUX,
+  ArtifactSystem.X8664_DARWIN,
+  ArtifactSystem.X8664_LINUX,
+];
+
+await new TypeScript("my-app", systems)
+  .withEntrypoint("src/main.ts")
+  .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
+  .build(ctx);
+
+await ctx.run();
+```
+
+    </div>
+  </div>
+
+  <div class="sdk-carousel-dots" aria-hidden="true">
+    <span class="sdk-carousel-dot active"></span>
+    <span class="sdk-carousel-dot"></span>
+    <span class="sdk-carousel-dot"></span>
+  </div>
+</div>
+
+<CarouselScript />
+
+</div>
+
+<div class="landing-section">
+
+## One simple CLI.
+
+<p class="landing-subtitle">After defining your config in any SDK, the Vorpal CLI handles the rest.</p>
+
+<CardGrid>
+  <Card title="Build" icon="rocket">
+    Produce a content-addressed artifact. Cached builds resolve instantly.
+
+    ```bash title="Terminal"
+    vorpal build my-app
+    ```
+  </Card>
+  <Card title="Run" icon="right-arrow">
+    Execute any built artifact by name — locally or from a remote registry.
+
+    ```bash title="Terminal"
+    vorpal run my-app
+    ```
+  </Card>
+</CardGrid>
+
+</div>
+
+<div class="landing-section cta-section">
+
+## Ready to get started?
+
+Install Vorpal in seconds and build your first artifact.
+
+<div class="cta-actions">
+  <a href="/getting-started/installation/" class="sl-link-button primary">Install Vorpal</a>
+  <a href="/getting-started/quickstart/" class="sl-link-button minimal">Read the quickstart →</a>
+</div>
+
+</div>

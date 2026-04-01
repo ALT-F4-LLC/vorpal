@@ -28,8 +28,7 @@ type OciImage struct {
 	rsync     *string
 }
 
-const ociImageScript = `
-OCI_IMAGE_ARTIFACTS="{{.ArtifactsList}}"
+const ociImageScript = `OCI_IMAGE_ARTIFACTS="{{.ArtifactsList}}"
 OCI_IMAGE_CRANE="{{.Crane}}"
 OCI_IMAGE_NAME="{{.Name}}"
 OCI_IMAGE_ROOTFS="{{.Rootfs}}"

@@ -10,7 +10,7 @@ dependencies:
   - operations.md
 ---
 
-# Performance
+# Performance Specification
 
 This document describes the performance characteristics of the Vorpal build system as they exist in the codebase today, including caching strategies, concurrency patterns, compression choices, streaming behavior, and known bottlenecks.
 
