@@ -27,12 +27,13 @@ Extract the artifact name from the arguments. If no argument is provided, use `v
 
 The artifact must be one of the following known artifacts:
 
-- `vorpal`
 - `vorpal-container-image` (linux only)
 - `vorpal-job`
 - `vorpal-process`
 - `vorpal-shell`
 - `vorpal-user`
+- `vorpal-website`
+- `vorpal`
 
 If the artifact name is not in this list, report an error and list the valid options.
 

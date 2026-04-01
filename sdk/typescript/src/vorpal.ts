@@ -1,5 +1,7 @@
 import { ArtifactSystem } from "./api/artifact/artifact.js";
 import {
+  Artifact,
+  ArtifactSource,
   getEnvKey,
   Job,
   OciImage,
@@ -7,6 +9,7 @@ import {
   DevelopmentEnvironment,
   UserEnvironment,
 } from "./artifact.js";
+import { shell } from "./artifact/step.js";
 import { Bun } from "./artifact/bun.js";
 import { Crane } from "./artifact/crane.js";
 import { GoBin } from "./artifact/go.js";
@@ -148,6 +151,46 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
     .build(context);
 }
 
+async function buildVorpalWebsite(context: ConfigContext): Promise<string> {
+  const bun = await new Bun().build(context);
+  const bunBin = `${getEnvKey(bun)}/bin`;
+
+  const name = "vorpal-website";
+
+  const source = new ArtifactSource(name, ".")
+    .withIncludes(["website"])
+    .withExcludes([
+      "website/.astro",
+      "website/README.md",
+      "website/dist",
+      "website/node_modules",
+    ])
+    .build();
+
+  const stepScript = `pushd ./source/vorpal-website/website
+${bunBin}/bun install
+${bunBin}/bun run build
+cp -r dist/* $VORPAL_OUTPUT/
+`;
+
+  const steps = [
+    await shell(
+      context,
+      [bun],
+      [
+        "ASTRO_TELEMETRY_DISABLED=1",
+        `PATH=${bunBin}`,
+      ],
+      stepScript,
+      [],
+    ),
+  ];
+
+  return new Artifact(name, steps, SYSTEMS)
+    .withSources([source])
+    .build(context);
+}
+
 async function buildVorpalUser(context: ConfigContext): Promise<string> {
   return new UserEnvironment("vorpal-user", SYSTEMS)
     .withArtifacts([])
@@ -182,6 +225,9 @@ async function main(): Promise<void> {
       break;
     case "vorpal-user":
       await buildVorpalUser(context);
+      break;
+    case "vorpal-website":
+      await buildVorpalWebsite(context);
       break;
     default:
       break;

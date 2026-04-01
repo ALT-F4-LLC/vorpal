@@ -198,6 +198,10 @@ jobs:
           echo "VORPAL_USER_ARTIFACT=$VORPAL_USER_ARTIFACT" >> $GITHUB_ENV
 
       - run: |
+          VORPAL_WEBSITE_ARTIFACT=$(vorpal build "vorpal-website")
+          echo "VORPAL_WEBSITE_ARTIFACT=$VORPAL_WEBSITE_ARTIFACT" >> $GITHUB_ENV
+
+      - run: |
           ARTIFACT=$(vorpal build --config "Vorpal.go.toml" "vorpal")
           if [ "$ARTIFACT" != "$VORPAL_ARTIFACT" ]; then
             echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_ARTIFACT"
@@ -241,6 +245,13 @@ jobs:
           fi
 
       - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.go.toml" "vorpal-website")
+          if [ "$ARTIFACT" != "$VORPAL_WEBSITE_ARTIFACT" ]; then
+            echo "Go SDK invalid match to Rust: $ARTIFACT != $VORPAL_WEBSITE_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
           ARTIFACT=$(vorpal build --config "Vorpal.ts.toml" "vorpal")
           if [ "$ARTIFACT" != "$VORPAL_ARTIFACT" ]; then
             echo "TypeScript SDK invalid match to Rust: $ARTIFACT != $VORPAL_ARTIFACT"
@@ -280,6 +291,13 @@ jobs:
           ARTIFACT=$(vorpal build --config "Vorpal.ts.toml" "vorpal-user")
           if [ "$ARTIFACT" != "$VORPAL_USER_ARTIFACT" ]; then
             echo "TypeScript SDK invalid match to Rust: $ARTIFACT != $VORPAL_USER_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.ts.toml" "vorpal-website")
+          if [ "$ARTIFACT" != "$VORPAL_WEBSITE_ARTIFACT" ]; then
+            echo "TypeScript SDK invalid match to Rust: $ARTIFACT != $VORPAL_WEBSITE_ARTIFACT"
             exit 1
           fi
 

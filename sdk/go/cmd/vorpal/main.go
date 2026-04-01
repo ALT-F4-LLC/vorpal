@@ -29,6 +29,8 @@ func main() {
 		_, err = artifact.BuildVorpalShell(context)
 	case "vorpal-user":
 		_, err = artifact.BuildVorpalUser(context)
+	case "vorpal-website":
+		_, err = artifact.BuildVorpalWebsite(context)
 	}
 
 	if err != nil {
