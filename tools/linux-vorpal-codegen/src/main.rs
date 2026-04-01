@@ -297,7 +297,10 @@ fn to_go_camel(s: &str) -> String {
         }
     }
     // Avoid shadowing Go builtins
-    let go_reserved = ["make", "new", "len", "cap", "close", "delete", "copy", "append", "print", "println", "panic", "recover", "complex", "real", "imag"];
+    let go_reserved = [
+        "make", "new", "len", "cap", "close", "delete", "copy", "append", "print", "println",
+        "panic", "recover", "complex", "real", "imag",
+    ];
     if go_reserved.contains(&result.as_str()) {
         result.push_str("Src");
     }
@@ -422,9 +425,7 @@ fn generate_go_script(
         )
     } else {
         // Import strings if any named arg uses strings.ReplaceAll
-        let needs_strings_import = named_args
-            .iter()
-            .any(|(_, expr)| expr.contains("replace"));
+        let needs_strings_import = named_args.iter().any(|(_, expr)| expr.contains("replace"));
 
         let imports = if needs_strings_import {
             "import (\n\t\"fmt\"\n\t\"strings\"\n)"
@@ -641,7 +642,10 @@ fn build_go_source_path(template: &str, has_version_replace: bool, func_name: &s
     }
 
     // Escape existing % as %% before replacing placeholders (Go fmt.Sprintf treats bare % as format verb)
-    let mut go_fmt = template.replace('%', "%%").replace("{name}", "%s").replace("{version}", "%s");
+    let mut go_fmt = template
+        .replace('%', "%%")
+        .replace("{name}", "%s")
+        .replace("{version}", "%s");
 
     // Build args list
     let mut args = Vec::new();
@@ -714,8 +718,7 @@ fn generate_ts_source(sources: &[ParsedSourceFn]) -> String {
             out.push_str("  const versionClean = version.replaceAll(\".\", \"\");\n");
         }
 
-        let ts_path =
-            build_ts_source_path(&src.path_template, src.has_version_replace, &src.name);
+        let ts_path = build_ts_source_path(&src.path_template, src.has_version_replace, &src.name);
         let name_ref = if src.source_name_is_param {
             to_ts_camel(&src.source_name)
         } else {
@@ -934,11 +937,7 @@ fn generate_go_orchestration(
 
     // Version constants
     for v in versions {
-        out.push_str(&format!(
-            "\t{} := \"{}\"\n",
-            to_go_camel(&v.name),
-            v.value
-        ));
+        out.push_str(&format!("\t{} := \"{}\"\n", to_go_camel(&v.name), v.value));
     }
     out.push('\n');
 
@@ -1201,7 +1200,7 @@ fn generate_go_bwrap_arguments() -> String {
      \t\t\"--uid\",\n\
      \t\t\"0\",\n\
      \t}\n"
-    .to_string()
+        .to_string()
 }
 
 /// Generate TypeScript linux_vorpal.ts orchestration file.
@@ -1496,7 +1495,7 @@ fn generate_ts_bwrap_arguments() -> String {
      \t\"--uid\",\n\
      \t\"0\",\n\
      ];\n"
-    .to_string()
+        .to_string()
 }
 
 // ─── File writing and check mode ──────────────────────────────────────────
@@ -1575,12 +1574,14 @@ fn main() {
         let template = strip_indoc(&parsed.template);
 
         // Generate Go
-        let go_content = generate_go_script(func_name, &template, &parsed.params, &parsed.named_args);
+        let go_content =
+            generate_go_script(func_name, &template, &parsed.params, &parsed.named_args);
         let go_path = go_output_dir.join(format!("script_{}.go", func_name));
         write_or_check(&go_path, &go_content, check_mode, &mut mismatches);
 
         // Generate TypeScript
-        let ts_content = generate_ts_script(func_name, &template, &parsed.params, &parsed.named_args);
+        let ts_content =
+            generate_ts_script(func_name, &template, &parsed.params, &parsed.named_args);
         let ts_path = ts_output_dir.join(format!("script_{}.ts", func_name));
         write_or_check(&ts_path, &ts_content, check_mode, &mut mismatches);
     }
