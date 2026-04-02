@@ -5,9 +5,6 @@ import (
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/cmd/vorpal/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
-
-	// Register linux_vorpal builder for Shell() on Linux targets
-	_ "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/linux_vorpal"
 )
 
 func main() {

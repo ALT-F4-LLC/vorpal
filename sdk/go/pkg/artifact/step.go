@@ -10,10 +10,6 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-// LinuxVorpalBuilder is set by the linux_vorpal package (or caller) to break the import cycle.
-// It must be assigned before Shell() is called for Linux targets.
-var LinuxVorpalBuilder func(ctx *config.ConfigContext) (*string, error)
-
 type BashScriptTemplateArgs struct {
 	Script string
 }
@@ -281,11 +277,7 @@ func Shell(
 	}
 
 	if stepSystem == api.ArtifactSystem_AARCH64_LINUX || stepSystem == api.ArtifactSystem_X8664_LINUX {
-		if LinuxVorpalBuilder == nil {
-			return nil, fmt.Errorf("LinuxVorpalBuilder not set: register linux_vorpal.Build before calling Shell for Linux targets")
-		}
-
-		linuxVorpal, err := LinuxVorpalBuilder(context)
+		linuxVorpal, err := linuxVorpalBuild(context)
 		if err != nil {
 			return nil, err
 		}

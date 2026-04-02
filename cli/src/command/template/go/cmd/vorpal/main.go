@@ -6,9 +6,6 @@ import (
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
-
-	// Register linux_vorpal builder for Shell() on Linux targets
-	_ "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/linux_vorpal"
 )
 
 var Systems = []api.ArtifactSystem{
