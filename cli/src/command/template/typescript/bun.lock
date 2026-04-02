@@ -5,7 +5,7 @@
     "": {
       "name": "example",
       "dependencies": {
-        "@altf4llc/vorpal-sdk": "0.1.0-alpha.0",
+        "@altf4llc/vorpal-sdk": "0.1.0-alpha.3",
       },
       "devDependencies": {
         "@types/bun": "1.3.11",
@@ -14,7 +14,7 @@
     },
   },
   "packages": {
-    "@altf4llc/vorpal-sdk": ["@altf4llc/vorpal-sdk@0.1.0-alpha.0", "", { "dependencies": { "@bufbuild/protobuf": "2.11.0", "@grpc/grpc-js": "1.14.3", "smol-toml": "1.6.0" } }, "sha512-48+gI/+qGZo0GDwi3pVBC3XksQpbCVmChiSxE0M0I+witIBt9vSXBcJM/PNoHf5tCgWDhSqSshD/1ztB24Dw6g=="],
+    "@altf4llc/vorpal-sdk": ["@altf4llc/vorpal-sdk@0.1.0-alpha.3", "", { "dependencies": { "@bufbuild/protobuf": "2.11.0", "@grpc/grpc-js": "1.14.3", "smol-toml": "1.6.1" } }, "sha512-joKAtRKZTTYwTKt3WtbjDxyGFnyPMcNApMyyZVwTF2mBcRUhi41HmCzqC6u6W1cPE23hJiN3A/FM/M3t/c+P7w=="],
 
     "@bufbuild/protobuf": ["@bufbuild/protobuf@2.11.0", "", {}, "sha512-sBXGT13cpmPR5BMgHE6UEEfEaShh5Ror6rfN3yEK5si7QVrtZg8LEPQb0VVhiLRUslD2yLnXtnRzG035J/mZXQ=="],
 
@@ -76,7 +76,7 @@
 
     "require-directory": ["require-directory@2.1.1", "", {}, "sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q=="],
 
-    "smol-toml": ["smol-toml@1.6.0", "", {}, "sha512-4zemZi0HvTnYwLfrpk/CF9LOd9Lt87kAt50GnqhMpyF9U3poDAP2+iukq2bZsO/ufegbYehBkqINbsWxj4l4cw=="],
+    "smol-toml": ["smol-toml@1.6.1", "", {}, "sha512-dWUG8F5sIIARXih1DTaQAX4SsiTXhInKf1buxdY9DIg4ZYPZK5nGM1VRIYmEbDbsHt7USo99xSLFu5Q1IqTmsg=="],
 
     "string-width": ["string-width@4.2.3", "", { "dependencies": { "emoji-regex": "^8.0.0", "is-fullwidth-code-point": "^3.0.0", "strip-ansi": "^6.0.1" } }, "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g=="],
 
