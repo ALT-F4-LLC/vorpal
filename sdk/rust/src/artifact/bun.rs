@@ -39,7 +39,7 @@ impl Bun {
             Aarch64Darwin => "darwin-aarch64",
             Aarch64Linux => "linux-aarch64",
             X8664Darwin => "darwin-x64",
-            X8664Linux => "linux-x64",
+            X8664Linux => "linux-x64-baseline",
             _ => bail!("unsupported {name} system: {}", system.as_str_name()),
         };
 

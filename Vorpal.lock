@@ -50,30 +50,6 @@ platform = "aarch64-linux"
 
 [[sources]]
 name = "bun"
-path = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.10/bun-linux-x64.zip"
-includes = []
-excludes = []
-digest = "009612fae6fc4c7f8d37deff1d5e0026526b7775725dd10b673836a565a31ec9"
-platform = "x86_64-linux"
-
-[[sources]]
-name = "bun"
-path = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.10/bun-darwin-x64.zip"
-includes = []
-excludes = []
-digest = "53e2e70a6f7ea40998750118e72c9d6581376aabec301e244eb7bb844b4fe5c0"
-platform = "x86_64-darwin"
-
-[[sources]]
-name = "bun"
-path = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.10/bun-linux-aarch64.zip"
-includes = []
-excludes = []
-digest = "56e59802c5b606ecccd5e4d1a825eaad58b9ad12b71853b35d459bc3dbd0bf25"
-platform = "aarch64-linux"
-
-[[sources]]
-name = "bun"
 path = "https://github.com/oven-sh/bun/releases/download/bun-v1.3.10/bun-darwin-aarch64.zip"
 includes = []
 excludes = []

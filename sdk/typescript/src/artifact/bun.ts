@@ -40,7 +40,7 @@ export class Bun {
         sourceTarget = "darwin-x64";
         break;
       case ArtifactSystem.X8664_LINUX:
-        sourceTarget = "linux-x64";
+        sourceTarget = "linux-x64-baseline";
         break;
       default:
         throw new Error(`unsupported ${name} system: ${system}`);

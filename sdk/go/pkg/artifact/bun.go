@@ -23,7 +23,7 @@ func Bun(context *config.ConfigContext) (*string, error) {
 	case api.ArtifactSystem_X8664_DARWIN:
 		sourceTarget = "darwin-x64"
 	case api.ArtifactSystem_X8664_LINUX:
-		sourceTarget = "linux-x64"
+		sourceTarget = "linux-x64-baseline"
 	default:
 		return nil, fmt.Errorf("unsupported %s system: %s", name, system.String())
 	}
