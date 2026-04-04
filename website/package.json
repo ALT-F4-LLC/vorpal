@@ -1,17 +1,20 @@
 {
   "name": "website",
   "type": "module",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.4",
   "scripts": {
-    "dev": "astro dev",
-    "start": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
-    "astro": "astro"
+    "dev": "bun x astro dev",
+    "start": "bun x astro dev",
+    "build": "bun x astro build",
+    "preview": "bun x astro preview",
+    "astro": "bun x astro"
   },
   "dependencies": {
     "@astrojs/starlight": "0.38.2",
     "astro": "6.0.1",
     "sharp": "0.34.5"
+  },
+  "devDependencies": {
+    "wrangler": "4.80.0"
   }
 }
