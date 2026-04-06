@@ -1,0 +1,9 @@
+# Lychee link checker configuration
+# Excludes false-positive patterns from Astro-generated HTML
+
+exclude = [
+  # Root-relative links resolved as file:// protocol URLs
+  "^file://",
+  # Fragment anchors URL-encoded as %23 and treated as file paths
+  "%23",
+]
