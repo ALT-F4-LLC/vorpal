@@ -263,8 +263,18 @@ pub enum Command {
     System(CommandSystem),
 }
 
+const VERSION_INFO: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (commit:",
+    env!("VORPAL_GIT_HASH"),
+    " build:",
+    env!("VORPAL_BUILD_TIME"),
+    ")",
+);
+
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, about, long_about = None)]
+#[command(version = VERSION_INFO, long_version = VERSION_INFO)]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
