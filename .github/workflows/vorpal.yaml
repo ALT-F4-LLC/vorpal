@@ -602,4 +602,4 @@ jobs:
         with:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: pages deploy website/dist/ --project-name=vorpal-website-docs
+          command: pages deploy ${{ env.VORPAL_WEBSITE_PATH }} --project-name=vorpal-website-docs
