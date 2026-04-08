@@ -1,6 +1,6 @@
 [package]
 name = "linux-vorpal-codegen"
-version = "0.1.0-alpha.5"
+version = "0.1.0-beta.0"
 edition = "2021"
 
 [dependencies]
