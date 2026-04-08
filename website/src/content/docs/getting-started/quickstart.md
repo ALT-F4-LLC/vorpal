@@ -52,17 +52,19 @@ vorpal build --rebuild hello-world
 
 See [`vorpal build`](/reference/cli/#vorpal-build) in the CLI reference for all available options.
 
-## 4. Run your project (optional)
+## 4. Access your artifact output
 
-If your artifact produces an executable in `/bin` with the same name as the artifact, you can run it directly:
+Using the `--path` flag from the previous step, you can inspect the artifact's contents with standard tools:
 
 ```bash
-vorpal run hello-world
+ls $(vorpal build --path hello-world)
 ```
 
-The `run` command looks up the artifact by name, finds the matching binary in the artifact's `/bin` directory, and executes it. This is useful for CLI tools, servers, and any artifact that produces a runnable binary.
+:::caution
+The Vorpal store is immutable. Do not modify, add, or remove files in the artifact output directory outside of the Vorpal build process.
+:::
 
-See [`vorpal run`](/reference/cli/#vorpal-run) in the CLI reference for all available options.
+This is useful for inspecting build output, copying files into a deployment pipeline, or verifying that your artifact contains the expected structure.
 
 ## Next steps
 
