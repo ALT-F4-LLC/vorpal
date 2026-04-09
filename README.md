@@ -10,6 +10,7 @@ Vorpal is a build system that works the way you already write code. Define your 
 - [Quickstart](#quickstart)
 - [SDK Examples](#sdk-examples)
 - [Features](#features)
+- [CLI Reference](#cli-reference)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
 - [License](#license)
@@ -65,7 +66,7 @@ Define a build artifact targeting multiple platforms with a single config file.
 <summary><strong>TypeScript</strong></summary>
 
 ```typescript
-import { ArtifactSystem, ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
+import { ArtifactSystem, ConfigContext, TypeScript, TypeScriptDevelopmentEnvironment } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
   ArtifactSystem.AARCH64_DARWIN,
@@ -98,7 +99,7 @@ await context.run();
 use anyhow::Result;
 use vorpal_sdk::{
     api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::language::rust::Rust,
+    artifact::language::rust::{Rust, RustDevelopmentEnvironment},
     context::get_context,
 };
 
@@ -132,6 +133,8 @@ async fn main() -> Result<()> {
 package main
 
 import (
+    "log"
+
     api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
@@ -360,6 +363,8 @@ async fn main() -> Result<()> {
 package main
 
 import (
+    "log"
+
     api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
@@ -375,17 +380,19 @@ var systems = []api.ArtifactSystem{
 func main() {
     ctx := config.GetContext()
 
-    step, _ := artifact.NewArtifactStep().
-        WithEntrypoint("docker", systems).
+    step := artifact.NewArtifactStep("docker").
         WithArguments([]string{
             "run", "--rm", "-v", "$VORPAL_OUTPUT:/out",
             "alpine", "sh", "-lc",
             "echo hi > /out/hi.txt",
-        }, systems).
-        Build(ctx)
+        }).
+        Build()
 
-    artifact.NewArtifact("example-docker",
+    _, err := artifact.NewArtifact("example-docker",
         []*api.ArtifactStep{step}, systems).Build(ctx)
+    if err != nil {
+        log.Fatalf("error building artifact: %v", err)
+    }
 
     ctx.Run()
 }
@@ -402,6 +409,22 @@ func main() {
 - **Dev environments** -- Define project shells with pinned tools and env vars. Like direnv, but versioned and shareable.
 - **Artifact registry** -- Push, pull, and share artifacts with built-in registry support. Run artifacts directly with `vorpal run`.
 - **Pluggable executors** -- Build steps run in Bash by default. Swap in Docker, Bubblewrap, or any executor.
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `vorpal init <name>` | Initialize Vorpal in a directory |
+| `vorpal build <name>` | Build an artifact |
+| `vorpal run <alias>` | Run a built artifact from the store |
+| `vorpal config <action>` | Manage configuration settings (get, set, show) |
+| `vorpal login` | Login to an OAuth2 provider |
+| `vorpal inspect <digest>` | Inspect an artifact by digest |
+| `vorpal system keys generate` | Generate TLS keys |
+| `vorpal system services start` | Start Vorpal services (agent, registry, worker) |
+| `vorpal system prune` | Prune artifacts, sandboxes, and other resources |
+
+For full usage details and flags, run `vorpal --help` or `vorpal <command> --help`. See the complete [CLI reference](https://docs.vorpal.build/reference/cli/) for more.
 
 ## Documentation
 
