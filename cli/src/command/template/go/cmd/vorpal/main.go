@@ -8,36 +8,39 @@ import (
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-var Systems = []api.ArtifactSystem{
-	api.ArtifactSystem_AARCH64_DARWIN,
-	api.ArtifactSystem_AARCH64_LINUX,
-	api.ArtifactSystem_X8664_DARWIN,
-	api.ArtifactSystem_X8664_LINUX,
-}
-
 func main() {
-	context := config.GetContext()
+	// Define build context
 
-	// Development environment
+	ctx := config.GetContext()
 
-	_, err := language.NewGoDevelopmentEnvironment("example-shell", Systems).Build(context)
+	// Define supported artifact systems
+
+	systems := []api.ArtifactSystem{
+		api.ArtifactSystem_AARCH64_DARWIN,
+		api.ArtifactSystem_AARCH64_LINUX,
+		api.ArtifactSystem_X8664_DARWIN,
+		api.ArtifactSystem_X8664_LINUX,
+	}
+
+	// Define language-specific development environment artifact
+
+	_, err := language.NewGoDevelopmentEnvironment("example-shell", systems).
+		Build(ctx)
 	if err != nil {
 		log.Fatalf("error building development environment: %v", err)
 	}
 
-	_, err = language.NewGo("example", Systems).
+	// Define application artifact 
+
+	_, err = language.NewGo("example", systems).
 		WithBuildDirectory("cmd/example").
-		WithIncludes([]string{
-			"cmd/example",
-			"go.mod",
-			"go.sum",
-		}).
-		Build(context)
+		WithIncludes([]string{"cmd/example", "go.mod", "go.sum"}).
+		Build(ctx)
 	if err != nil {
 		log.Fatalf("error building: %v", err)
 	}
 
-	// Run the build
+	// Run context to build
 
-	context.Run()
+	ctx.Run()
 }

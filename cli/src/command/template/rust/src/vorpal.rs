@@ -4,29 +4,35 @@ use vorpal_sdk::{
         ArtifactSystem,
         ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     },
-    artifact::{language::rust::{Rust, RustDevelopmentEnvironment}},
+    artifact::language::rust::{Rust, RustDevelopmentEnvironment},
     context::get_context,
 };
 
-const SYSTEMS: [ArtifactSystem; 4] = [Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let context = &mut get_context().await?;
+    // Define build context
 
-    // Source artifact
+    let ctx = &mut get_context().await?;
 
-    Rust::new("example", SYSTEMS.to_vec())
+    // Define supported artifact systems
+
+    let systems: [ArtifactSystem; 4] = [Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+
+    // Define language-specific development environment artifact
+
+    RustDevelopmentEnvironment::new("example-shell", systems.to_vec())
+        .build(ctx)
+        .await?;
+
+    // Define application artifact
+
+    Rust::new("example", systems.to_vec())
         .with_bins(vec!["example"])
         .with_includes(vec!["src/main.rs", "Cargo.lock", "Cargo.toml"])
-        .build(context)
+        .build(ctx)
         .await?;
 
-    // Development environment
+    // Run context to build
 
-    RustDevelopmentEnvironment::new("example-shell", SYSTEMS.to_vec())
-        .build(context)
-        .await?;
-
-    context.run().await
+    ctx.run().await
 }

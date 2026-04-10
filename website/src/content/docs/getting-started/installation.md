@@ -69,7 +69,7 @@ As an alternative, the installer also accepts environment variables. These are u
 |----------|--------|
 | `VORPAL_NONINTERACTIVE=1` | Enable non-interactive mode |
 | `CI=true` | Enable non-interactive mode |
-| `VORPAL_VERSION=<ver>` | Version to install (default: `nightly`) |
+| `VORPAL_VERSION=<ver>` | Version to install (default: `0.1.0`) |
 | `VORPAL_SERVICES=<list>` | Comma-separated services to install (default: `agent,registry,worker`) |
 | `VORPAL_NO_SERVICE=1` | Skip service installation |
 | `VORPAL_NO_PATH=1` | Skip PATH configuration |
