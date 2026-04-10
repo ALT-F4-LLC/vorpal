@@ -7,6 +7,7 @@
 /dist
 /docs/tdd/
 /docs/ux/
+/sdk/typescript/dist/
 target
 vendor
 vorpal-*-*
