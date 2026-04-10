@@ -23,4 +23,4 @@ curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/refs/heads/main/s
 
 **Documentation**
 
-[Getting Started →](https://vorpal.cloud/docs) <!-- or docs.vorpal.cloud -->
+[Getting Started →](https://docs.vorpal.build)
