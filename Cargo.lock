@@ -2109,15 +2109,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
-name = "linux-vorpal-codegen"
-version = "0.1.0-rc.2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "litemap"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4043,7 +4034,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vorpal-cli"
-version = "0.1.0-rc.2"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -4093,7 +4084,7 @@ dependencies = [
 
 [[package]]
 name = "vorpal-config"
-version = "0.1.0-rc.2"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "indoc",
@@ -4103,7 +4094,7 @@ dependencies = [
 
 [[package]]
 name = "vorpal-sdk"
-version = "0.1.0-rc.2"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4123,6 +4114,15 @@ dependencies = [
  "tonic-prost-build",
  "tower",
  "tracing",
+]
+
+[[package]]
+name = "vorpal-sdk-codegen"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

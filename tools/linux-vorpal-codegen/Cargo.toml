@@ -1,9 +1,0 @@
-[package]
-name = "linux-vorpal-codegen"
-version = "0.1.0-rc.2"
-edition = "2021"
-
-[dependencies]
-syn = { version = "2", features = ["full"] }
-quote = "1"
-proc-macro2 = "1"
