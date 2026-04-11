@@ -11,7 +11,7 @@
     "@altf4llc/vorpal-sdk": "0.1.0"
   },
   "devDependencies": {
-    "@types/bun": "1.3.11",
+    "@types/bun": "1.3.12",
     "typescript": "6.0.2"
   }
 }
