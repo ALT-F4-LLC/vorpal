@@ -12,6 +12,7 @@ import {
 import { shell } from "./artifact/step.js";
 import { Bun } from "./artifact/bun.js";
 import { Crane } from "./artifact/crane.js";
+import { Gh } from "./artifact/gh.js";
 import { GoBin } from "./artifact/go.js";
 import { Goimports } from "./artifact/goimports.js";
 import { Gopls } from "./artifact/gopls.js";
@@ -22,6 +23,7 @@ import { Pnpm } from "./artifact/pnpm.js";
 import { Protoc } from "./artifact/protoc.js";
 import { ProtocGenGo } from "./artifact/protoc_gen_go.js";
 import { ProtocGenGoGrpc } from "./artifact/protoc_gen_go_grpc.js";
+import { Rsync } from "./artifact/rsync.js";
 import { Staticcheck } from "./artifact/staticcheck.js";
 import { ConfigContext } from "./context.js";
 
@@ -114,6 +116,7 @@ async function buildVorpalProcess(context: ConfigContext): Promise<string> {
 async function buildVorpalShell(context: ConfigContext): Promise<string> {
   const bun = await new Bun().build(context);
   const crane = await new Crane().build(context);
+  const gh = await new Gh().build(context);
   const go = await new GoBin().build(context);
   const goimports = await new Goimports().build(context);
   const gopls = await new Gopls().build(context);
@@ -123,6 +126,7 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
   const protoc = await new Protoc().build(context);
   const protocGenGo = await new ProtocGenGo().build(context);
   const protocGenGoGrpc = await new ProtocGenGoGrpc().build(context);
+  const rsync = await new Rsync().build(context);
   const staticcheck = await new Staticcheck().build(context);
 
   const goarch = getGoarch(context.getSystem());
@@ -132,6 +136,7 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
     .withArtifacts([
       bun,
       crane,
+      gh,
       go,
       goimports,
       gopls,
@@ -141,6 +146,7 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
       protoc,
       protocGenGo,
       protocGenGoGrpc,
+      rsync,
       staticcheck,
     ])
     .withEnvironments([

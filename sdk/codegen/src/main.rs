@@ -627,7 +627,7 @@ fn source_func_name_to_go(name: &str) -> String {
 }
 
 /// Build a Go fmt.Sprintf or string expression for a source path URL.
-fn build_go_source_path(template: &str, has_version_replace: bool, func_name: &str) -> String {
+fn build_go_source_path(template: &str, has_version_replace: bool, _func_name: &str) -> String {
     if template.is_empty() {
         return "\"\"".to_string();
     }
@@ -671,11 +671,6 @@ fn build_go_source_path(template: &str, has_version_replace: bool, func_name: &s
             }
         }
         remaining = &remaining[end + 1..];
-    }
-
-    // Special case: curl_cacert has no format args
-    if func_name == "curl_cacert" {
-        return format!("\"{}\"", template);
     }
 
     if args.is_empty() {
@@ -748,13 +743,9 @@ fn source_func_name_to_ts(name: &str) -> String {
 }
 
 /// Build a TypeScript template literal for a source path URL.
-fn build_ts_source_path(template: &str, has_version_replace: bool, func_name: &str) -> String {
+fn build_ts_source_path(template: &str, has_version_replace: bool, _func_name: &str) -> String {
     if template.is_empty() {
         return "\"\"".to_string();
-    }
-
-    if func_name == "curl_cacert" {
-        return format!("\"{}\"", template);
     }
 
     // Check if we need template literal (has placeholders)

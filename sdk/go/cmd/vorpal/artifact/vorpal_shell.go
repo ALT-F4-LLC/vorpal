@@ -21,6 +21,11 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("failed to get crane: %w", err)
 	}
 
+	gh, err := artifact.Gh(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get gh: %w", err)
+	}
+
 	gobin, err := artifact.GoBin(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get go: %w", err)
@@ -66,6 +71,11 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("failed to get protoc-gen-go-grpc: %w", err)
 	}
 
+	rsync, err := artifact.Rsync(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rsync: %w", err)
+	}
+
 	staticcheck, err := artifact.Staticcheck(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get staticcheck: %w", err)
@@ -86,6 +96,7 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 		WithArtifacts([]*string{
 			bun,
 			crane,
+			gh,
 			gobin,
 			goimports,
 			gopls,
@@ -95,6 +106,7 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 			protoc,
 			protocGenGo,
 			protocGenGoGRPC,
+			rsync,
 			staticcheck,
 		}).
 		WithEnvironments([]string{
