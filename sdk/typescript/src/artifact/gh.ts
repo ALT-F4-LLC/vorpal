@@ -49,8 +49,7 @@ export class Gh {
 
 cp -pr "source/${name}/gh_${sourceVersion}_${sourceTarget}/bin/gh" "$VORPAL_OUTPUT/bin/gh"
 
-chmod +x "$VORPAL_OUTPUT/bin/gh"
-`;
+chmod +x "$VORPAL_OUTPUT/bin/gh"`;
     const steps = [await shell(context, [], [], stepScript, [])];
     const systems = [
       ArtifactSystem.AARCH64_DARWIN,
