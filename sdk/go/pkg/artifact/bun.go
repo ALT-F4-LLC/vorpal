@@ -29,7 +29,7 @@ func Bun(context *config.ConfigContext) (*string, error) {
 	}
 
 	sourceVersion := defaultBunVersion
-	sourcePath := fmt.Sprintf("https://github.com/oven-sh/bun/releases/download/bun-v%s/bun-%s.zip", sourceVersion, sourceTarget)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/bun-%s-%s.zip", sourceVersion, sourceTarget)
 
 	source := NewArtifactSource(name, sourcePath).Build()
 

@@ -47,7 +47,7 @@ export class Bun {
     }
 
     const sourceVersion = this.version;
-    const sourcePath = `https://github.com/oven-sh/bun/releases/download/bun-v${sourceVersion}/bun-${sourceTarget}.zip`;
+    const sourcePath = `https://sdk.vorpal.build/source/bun-${sourceVersion}-${sourceTarget}.zip`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

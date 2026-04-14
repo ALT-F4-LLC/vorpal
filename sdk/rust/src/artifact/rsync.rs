@@ -18,7 +18,7 @@ impl Rsync {
         let name = "rsync";
         let version = "3.4.1";
 
-        let path = format!("https://download.samba.org/pub/rsync/src/rsync-{version}.tar.gz");
+        let path = format!("https://sdk.vorpal.build/source/rsync-{version}.tar.gz");
         let source = ArtifactSource::new(name, &path).build();
 
         let step_script = formatdoc! {"

@@ -11,7 +11,7 @@ func Staticcheck(context *config.ConfigContext) (*string, error) {
 	name := "staticcheck"
 	version := "2026.1"
 
-	sourcePath := fmt.Sprintf("https://github.com/dominikh/go-tools/archive/refs/tags/%s.tar.gz", version)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/staticcheck-%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	buildDirectory := fmt.Sprintf("go-tools-%s", version)

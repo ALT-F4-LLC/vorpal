@@ -26,7 +26,7 @@ func Pnpm(context *config.ConfigContext) (*string, error) {
 	}
 
 	sourceVersion := "10.30.3"
-	sourcePath := fmt.Sprintf("https://github.com/pnpm/pnpm/releases/download/v%s/pnpm-%s", sourceVersion, sourceTarget)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/pnpm-%s-%s", sourceVersion, sourceTarget)
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT/bin"

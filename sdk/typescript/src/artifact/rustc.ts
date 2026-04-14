@@ -17,7 +17,7 @@ export class Rustc {
 
     const sourceTarget = rustToolchainTarget(system);
     const sourceVersion = RUST_TOOLCHAIN_VERSION;
-    const sourcePath = `https://static.rust-lang.org/dist/${name}-${sourceVersion}-${sourceTarget}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/${name}-${sourceVersion}-${sourceTarget}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

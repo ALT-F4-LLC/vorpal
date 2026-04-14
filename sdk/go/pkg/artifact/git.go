@@ -12,7 +12,7 @@ func Git(context *config.ConfigContext) (*string, error) {
 
 	sourceVersion := "2.53.0"
 
-	sourcePath := fmt.Sprintf("https://www.kernel.org/pub/software/scm/git/git-%s.tar.gz", sourceVersion)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/git-%s.tar.gz", sourceVersion)
 
 	source := NewArtifactSource(name, sourcePath).Build()
 

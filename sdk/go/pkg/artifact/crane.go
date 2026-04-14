@@ -11,7 +11,7 @@ func Crane(context *config.ConfigContext) (*string, error) {
 	name := "crane"
 	version := "0.21.1"
 
-	sourcePath := fmt.Sprintf("https://github.com/google/go-containerregistry/archive/refs/tags/v%s.tar.gz", version)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/crane-v%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	buildDirectory := fmt.Sprintf("./go-containerregistry-%s", version)

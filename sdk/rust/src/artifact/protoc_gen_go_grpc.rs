@@ -18,7 +18,7 @@ impl ProtocGenGoGrpc {
 
         let source_version = "1.79.1";
         let source_path =
-            format!("https://github.com/grpc/grpc-go/archive/refs/tags/v{source_version}.tar.gz");
+            format!("https://sdk.vorpal.build/source/protoc-gen-go-grpc-v{source_version}.tar.gz");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 

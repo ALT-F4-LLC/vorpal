@@ -11,7 +11,7 @@ func RustSrc(context *config.ConfigContext) (*string, error) {
 	name := "rust-src"
 
 	sourceVersion := RustToolchainVersion()
-	sourcePath := fmt.Sprintf("https://static.rust-lang.org/dist/rust-src-%s.tar.gz", sourceVersion)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/rust-src-%s.tar.gz", sourceVersion)
 
 	source := NewArtifactSource(name, sourcePath).Build()
 

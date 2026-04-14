@@ -27,7 +27,8 @@ impl Protoc {
         };
 
         let source_version = "34.0";
-        let source_path = format!("https://github.com/protocolbuffers/protobuf/releases/download/v{source_version}/protoc-{source_version}-{source_target}.zip");
+        let source_path =
+            format!("https://sdk.vorpal.build/source/protoc-{source_version}-{source_target}.zip");
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = formatdoc! {"

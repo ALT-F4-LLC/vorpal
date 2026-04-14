@@ -9,7 +9,7 @@ import (
 
 func sourceTools(name string) api.ArtifactSource {
 	version := "0.42.0"
-	path := fmt.Sprintf("https://go.googlesource.com/tools/+archive/refs/tags/v%s.tar.gz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/go-tools-v%s.tar.gz", version)
 	return NewArtifactSource(name, path).Build()
 }
 
@@ -33,7 +33,7 @@ func GoBin(context *config.ConfigContext) (*string, error) {
 	}
 
 	sourceVersion := "1.26.0"
-	sourcePath := fmt.Sprintf("https://go.dev/dl/go%s.%s.tar.gz", sourceVersion, sourceTarget)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/go%s.%s.tar.gz", sourceVersion, sourceTarget)
 
 	source := NewArtifactSource(name, sourcePath).Build()
 

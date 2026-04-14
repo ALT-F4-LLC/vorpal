@@ -31,7 +31,7 @@ export class Grpcurl {
     const name = "grpcurl";
 
     const sourceVersion = "1.9.3";
-    const sourcePath = `https://github.com/fullstorydev/grpcurl/archive/refs/tags/v${sourceVersion}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/grpcurl-v${sourceVersion}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

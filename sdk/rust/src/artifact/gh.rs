@@ -33,7 +33,7 @@ impl Gh {
         };
 
         let source_version = "2.87.3";
-        let source_path = format!("https://github.com/cli/cli/releases/download/v{source_version}/gh_{source_version}_{source_target}.{source_extension}");
+        let source_path = format!("https://sdk.vorpal.build/source/gh_{source_version}_{source_target}.{source_extension}");
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let step_script = formatdoc! {"

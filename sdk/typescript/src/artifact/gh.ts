@@ -41,7 +41,7 @@ export class Gh {
     }
 
     const sourceVersion = DEFAULT_GH_VERSION;
-    const sourcePath = `https://github.com/cli/cli/releases/download/v${sourceVersion}/gh_${sourceVersion}_${sourceTarget}.${sourceExtension}`;
+    const sourcePath = `https://sdk.vorpal.build/source/gh_${sourceVersion}_${sourceTarget}.${sourceExtension}`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

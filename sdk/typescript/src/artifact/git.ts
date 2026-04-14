@@ -15,7 +15,7 @@ export class Git {
 
     const sourceVersion = "2.53.0";
 
-    const sourcePath = `https://www.kernel.org/pub/software/scm/git/git-${sourceVersion}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/git-${sourceVersion}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

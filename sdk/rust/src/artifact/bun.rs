@@ -44,7 +44,8 @@ impl Bun {
         };
 
         let source_version = &self.version;
-        let source_path = format!("https://github.com/oven-sh/bun/releases/download/bun-v{source_version}/bun-{source_target}.zip");
+        let source_path =
+            format!("https://sdk.vorpal.build/source/bun-{source_version}-{source_target}.zip");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 

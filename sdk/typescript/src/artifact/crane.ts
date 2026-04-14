@@ -14,7 +14,7 @@ export class Crane {
     const name = "crane";
     const version = "0.21.1";
 
-    const sourcePath = `https://github.com/google/go-containerregistry/archive/refs/tags/v${version}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/crane-v${version}.tar.gz`;
     const source = new ArtifactSource(name, sourcePath).build();
 
     const buildDirectory = `./go-containerregistry-${version}`;

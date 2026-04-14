@@ -14,7 +14,7 @@ export class ProtocGenGoGrpc {
     const name = "protoc-gen-go-grpc";
 
     const sourceVersion = "1.79.1";
-    const sourcePath = `https://github.com/grpc/grpc-go/archive/refs/tags/v${sourceVersion}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/protoc-gen-go-grpc-v${sourceVersion}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

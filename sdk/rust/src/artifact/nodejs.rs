@@ -28,7 +28,7 @@ impl NodeJS {
 
         let source_version = "22.22.0";
         let source_path = format!(
-            "https://nodejs.org/dist/v{source_version}/node-v{source_version}-{source_target}.tar.gz"
+            "https://sdk.vorpal.build/source/node-v{source_version}-{source_target}.tar.gz"
         );
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();

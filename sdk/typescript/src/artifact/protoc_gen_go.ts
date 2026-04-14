@@ -34,7 +34,7 @@ export class ProtocGenGo {
     }
 
     const sourceVersion = "1.36.11";
-    const sourcePath = `https://github.com/protocolbuffers/protobuf-go/releases/download/v${sourceVersion}/protoc-gen-go.v${sourceVersion}.${sourceTarget}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/protoc-gen-go.v${sourceVersion}.${sourceTarget}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

@@ -29,9 +29,8 @@ impl<'a> Grpcurl<'a> {
         let name = "grpcurl";
 
         let source_version = "1.9.3";
-        let source_path = format!(
-            "https://github.com/fullstorydev/grpcurl/archive/refs/tags/v{source_version}.tar.gz"
-        );
+        let source_path =
+            format!("https://sdk.vorpal.build/source/grpcurl-v{source_version}.tar.gz");
 
         let source = ArtifactSource::new(name, &source_path).build();
 

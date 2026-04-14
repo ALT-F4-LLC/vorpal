@@ -14,7 +14,7 @@ import { shell } from "./step.js";
  */
 export function sourceTools(name: string): ArtifactSourceMsg {
   const version = "0.42.0";
-  const path = `https://go.googlesource.com/tools/+archive/refs/tags/v${version}.tar.gz`;
+  const path = `https://sdk.vorpal.build/source/go-tools-v${version}.tar.gz`;
   return new ArtifactSource(name, path).build();
 }
 
@@ -53,7 +53,7 @@ export class GoBin {
     }
 
     const sourceVersion = "1.26.0";
-    const sourcePath = `https://go.dev/dl/go${sourceVersion}.${sourceTarget}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/go${sourceVersion}.${sourceTarget}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

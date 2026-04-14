@@ -19,8 +19,7 @@ impl Git {
 
         let source_version = "2.53.0";
 
-        let source_path =
-            format!("https://www.kernel.org/pub/software/scm/git/git-{source_version}.tar.gz");
+        let source_path = format!("https://sdk.vorpal.build/source/git-{source_version}.tar.gz");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 

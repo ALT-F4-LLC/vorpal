@@ -11,110 +11,110 @@ import (
 
 func linuxVorpalSourceCurl(version string) api.ArtifactSource {
 	name := "curl"
-	path := fmt.Sprintf("https://curl.se/download/%s-%s.tar.xz", name, version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/%s-%s.tar.xz", name, version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
-func linuxVorpalSourceCurlCacert() api.ArtifactSource {
+func linuxVorpalSourceCurlCacert(version string) api.ArtifactSource {
 	name := "curl-cacert"
-	path := "https://curl.se/ca/cacert.pem"
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/cacert-%s.pem", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceFile(version string) api.ArtifactSource {
 	name := "file"
-	path := fmt.Sprintf("https://astron.com/pub/file/file-%s.tar.gz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/file-%s.tar.gz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceGnu(name string, version string) api.ArtifactSource {
-	path := fmt.Sprintf("https://ftpmirror.gnu.org/gnu/%s/%s-%s.tar.gz", name, name, version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/%s-%s.tar.gz", name, version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceGnuXz(name string, version string) api.ArtifactSource {
-	path := fmt.Sprintf("https://ftpmirror.gnu.org/gnu/%s/%s-%s.tar.xz", name, name, version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/%s-%s.tar.xz", name, version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceGnuGcc(version string) api.ArtifactSource {
 	name := "gcc"
-	path := fmt.Sprintf("https://ftpmirror.gnu.org/gnu/gcc/gcc-%s/gcc-%s.tar.xz", version, version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/gcc-%s.tar.xz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceGnuGlibcPatch(version string) api.ArtifactSource {
 	name := "glibc-patch"
-	path := fmt.Sprintf("https://www.linuxfromscratch.org/patches/lfs/12.4/glibc-%s-fhs-1.patch", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/glibc-%s-fhs-1.patch", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceLibidn2(version string) api.ArtifactSource {
 	name := "libidn2"
-	path := fmt.Sprintf("https://ftpmirror.gnu.org/gnu/libidn/libidn2-%s.tar.gz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/libidn2-%s.tar.gz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceLibpsl(version string) api.ArtifactSource {
 	name := "libpsl"
-	path := fmt.Sprintf("https://github.com/rockdaboot/libpsl/releases/download/%s/libpsl-%s.tar.gz", version, version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/libpsl-%s.tar.gz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceLinux(version string) api.ArtifactSource {
 	name := "linux"
-	path := fmt.Sprintf("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-%s.tar.xz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/linux-%s.tar.xz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceNcurses(version string) api.ArtifactSource {
 	name := "ncurses"
-	path := fmt.Sprintf("https://invisible-mirror.net/archives/ncurses/current/ncurses-%s.tgz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/ncurses-%s.tar.gz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceOpenssl(version string) api.ArtifactSource {
 	name := "openssl"
-	path := fmt.Sprintf("https://www.openssl.org/source/openssl-%s.tar.gz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/openssl-%s.tar.gz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourcePerl(version string) api.ArtifactSource {
 	name := "perl"
-	path := fmt.Sprintf("https://www.cpan.org/src/5.0/perl-%s.tar.xz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/perl-%s.tar.xz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourcePython(version string) api.ArtifactSource {
 	name := "python"
-	path := fmt.Sprintf("https://www.python.org/ftp/python/%s/Python-%s.tar.xz", version, version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/Python-%s.tar.xz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceUnzipPatchFixes(version string) api.ArtifactSource {
 	name := "unzip-patch-fixes"
-	path := fmt.Sprintf("https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-%s-consolidated_fixes-1.patch", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/unzip-%s-consolidated_fixes-1.patch", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceUnzipPatchGcc14(version string) api.ArtifactSource {
 	name := "unzip-patch-gcc14"
-	path := fmt.Sprintf("https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-%s-gcc14-1.patch", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/unzip-%s-gcc14-1.patch", version)
 
 	return NewArtifactSource(name, path).Build()
 }
@@ -122,28 +122,28 @@ func linuxVorpalSourceUnzipPatchGcc14(version string) api.ArtifactSource {
 func linuxVorpalSourceUnzip(version string) api.ArtifactSource {
 	name := "unzip"
 	versionClean := strings.ReplaceAll(version, ".", "")
-	path := fmt.Sprintf("https://cytranet-dal.dl.sourceforge.net/project/infozip/UnZip%%206.x%%20%%28latest%%29/UnZip%%206.0/unzip%s.tar.gz?viasf=1", versionClean)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/unzip%s.tar.gz", versionClean)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceUtilLinux(version string) api.ArtifactSource {
 	name := "util-linux"
-	path := fmt.Sprintf("https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-%s.tar.xz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/util-linux-%s.tar.xz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceXz(version string) api.ArtifactSource {
 	name := "xz"
-	path := fmt.Sprintf("https://github.com/tukaani-project/xz/releases/download/v%s/xz-%s.tar.xz", version, version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/xz-%s.tar.xz", version)
 
 	return NewArtifactSource(name, path).Build()
 }
 
 func linuxVorpalSourceZlib(version string) api.ArtifactSource {
 	name := "zlib"
-	path := fmt.Sprintf("https://zlib.net/fossils/zlib-%s.tar.gz", version)
+	path := fmt.Sprintf("https://sdk.vorpal.build/source/zlib-%s.tar.gz", version)
 
 	return NewArtifactSource(name, path).Build()
 }

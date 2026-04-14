@@ -47,7 +47,7 @@ export class Pnpm {
     }
 
     const sourceVersion = this.version;
-    const sourcePath = `https://github.com/pnpm/pnpm/releases/download/v${sourceVersion}/pnpm-${sourceTarget}`;
+    const sourcePath = `https://sdk.vorpal.build/source/pnpm-${sourceVersion}-${sourceTarget}`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

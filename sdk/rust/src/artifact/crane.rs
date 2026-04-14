@@ -17,9 +17,7 @@ impl Crane {
         let name = "crane";
         let version = "0.21.1";
 
-        let source_path = format!(
-            "https://github.com/google/go-containerregistry/archive/refs/tags/v{version}.tar.gz"
-        );
+        let source_path = format!("https://sdk.vorpal.build/source/crane-v{version}.tar.gz");
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
         let build_directory = format!("./go-containerregistry-{version}");

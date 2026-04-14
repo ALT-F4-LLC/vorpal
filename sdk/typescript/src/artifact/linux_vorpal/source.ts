@@ -5,110 +5,110 @@ import { ArtifactSource as ArtifactSourceBuilder } from "../../artifact.js";
 
 export function sourceCurl(version: string): ArtifactSource {
   const name = "curl";
-  const path = `https://curl.se/download/${name}-${version}.tar.xz`;
+  const path = `https://sdk.vorpal.build/source/${name}-${version}.tar.xz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
-export function sourceCurlCacert(): ArtifactSource {
+export function sourceCurlCacert(version: string): ArtifactSource {
   const name = "curl-cacert";
-  const path = "https://curl.se/ca/cacert.pem";
+  const path = `https://sdk.vorpal.build/source/cacert-${version}.pem`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceFile(version: string): ArtifactSource {
   const name = "file";
-  const path = `https://astron.com/pub/file/file-${version}.tar.gz`;
+  const path = `https://sdk.vorpal.build/source/file-${version}.tar.gz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceGnu(name: string, version: string): ArtifactSource {
-  const path = `https://ftpmirror.gnu.org/gnu/${name}/${name}-${version}.tar.gz`;
+  const path = `https://sdk.vorpal.build/source/${name}-${version}.tar.gz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceGnuXz(name: string, version: string): ArtifactSource {
-  const path = `https://ftpmirror.gnu.org/gnu/${name}/${name}-${version}.tar.xz`;
+  const path = `https://sdk.vorpal.build/source/${name}-${version}.tar.xz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceGnuGcc(version: string): ArtifactSource {
   const name = "gcc";
-  const path = `https://ftpmirror.gnu.org/gnu/gcc/gcc-${version}/gcc-${version}.tar.xz`;
+  const path = `https://sdk.vorpal.build/source/gcc-${version}.tar.xz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceGnuGlibcPatch(version: string): ArtifactSource {
   const name = "glibc-patch";
-  const path = `https://www.linuxfromscratch.org/patches/lfs/12.4/glibc-${version}-fhs-1.patch`;
+  const path = `https://sdk.vorpal.build/source/glibc-${version}-fhs-1.patch`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceLibidn2(version: string): ArtifactSource {
   const name = "libidn2";
-  const path = `https://ftpmirror.gnu.org/gnu/libidn/libidn2-${version}.tar.gz`;
+  const path = `https://sdk.vorpal.build/source/libidn2-${version}.tar.gz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceLibpsl(version: string): ArtifactSource {
   const name = "libpsl";
-  const path = `https://github.com/rockdaboot/libpsl/releases/download/${version}/libpsl-${version}.tar.gz`;
+  const path = `https://sdk.vorpal.build/source/libpsl-${version}.tar.gz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceLinux(version: string): ArtifactSource {
   const name = "linux";
-  const path = `https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${version}.tar.xz`;
+  const path = `https://sdk.vorpal.build/source/linux-${version}.tar.xz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceNcurses(version: string): ArtifactSource {
   const name = "ncurses";
-  const path = `https://invisible-mirror.net/archives/ncurses/current/ncurses-${version}.tgz`;
+  const path = `https://sdk.vorpal.build/source/ncurses-${version}.tar.gz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceOpenssl(version: string): ArtifactSource {
   const name = "openssl";
-  const path = `https://www.openssl.org/source/openssl-${version}.tar.gz`;
+  const path = `https://sdk.vorpal.build/source/openssl-${version}.tar.gz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourcePerl(version: string): ArtifactSource {
   const name = "perl";
-  const path = `https://www.cpan.org/src/5.0/perl-${version}.tar.xz`;
+  const path = `https://sdk.vorpal.build/source/perl-${version}.tar.xz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourcePython(version: string): ArtifactSource {
   const name = "python";
-  const path = `https://www.python.org/ftp/python/${version}/Python-${version}.tar.xz`;
+  const path = `https://sdk.vorpal.build/source/Python-${version}.tar.xz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceUnzipPatchFixes(version: string): ArtifactSource {
   const name = "unzip-patch-fixes";
-  const path = `https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-${version}-consolidated_fixes-1.patch`;
+  const path = `https://sdk.vorpal.build/source/unzip-${version}-consolidated_fixes-1.patch`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceUnzipPatchGcc14(version: string): ArtifactSource {
   const name = "unzip-patch-gcc14";
-  const path = `https://www.linuxfromscratch.org/patches/downloads/unzip/unzip-${version}-gcc14-1.patch`;
+  const path = `https://sdk.vorpal.build/source/unzip-${version}-gcc14-1.patch`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
@@ -116,28 +116,28 @@ export function sourceUnzipPatchGcc14(version: string): ArtifactSource {
 export function sourceUnzip(version: string): ArtifactSource {
   const name = "unzip";
   const versionClean = version.replaceAll(".", "");
-  const path = `https://cytranet-dal.dl.sourceforge.net/project/infozip/UnZip%206.x%20%28latest%29/UnZip%206.0/unzip${versionClean}.tar.gz?viasf=1`;
+  const path = `https://sdk.vorpal.build/source/unzip${versionClean}.tar.gz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceUtilLinux(version: string): ArtifactSource {
   const name = "util-linux";
-  const path = `https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-${version}.tar.xz`;
+  const path = `https://sdk.vorpal.build/source/util-linux-${version}.tar.xz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceXz(version: string): ArtifactSource {
   const name = "xz";
-  const path = `https://github.com/tukaani-project/xz/releases/download/v${version}/xz-${version}.tar.xz`;
+  const path = `https://sdk.vorpal.build/source/xz-${version}.tar.xz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }
 
 export function sourceZlib(version: string): ArtifactSource {
   const name = "zlib";
-  const path = `https://zlib.net/fossils/zlib-${version}.tar.gz`;
+  const path = `https://sdk.vorpal.build/source/zlib-${version}.tar.gz`;
 
   return new ArtifactSourceBuilder(name, path).build();
 }

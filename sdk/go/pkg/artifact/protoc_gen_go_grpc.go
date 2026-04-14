@@ -11,7 +11,7 @@ func ProtocGenGoGRPC(context *config.ConfigContext) (*string, error) {
 	name := "protoc-gen-go-grpc"
 	version := "1.79.1"
 
-	sourcePath := fmt.Sprintf("https://github.com/grpc/grpc-go/archive/refs/tags/v%s.tar.gz", version)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/protoc-gen-go-grpc-v%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	buildDirectory := fmt.Sprintf("grpc-go-%s/cmd/%s", version, name)

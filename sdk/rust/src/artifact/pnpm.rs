@@ -28,9 +28,8 @@ impl Pnpm {
         };
 
         let source_version = "10.30.3";
-        let source_path = format!(
-            "https://github.com/pnpm/pnpm/releases/download/v{source_version}/pnpm-{source_target}"
-        );
+        let source_path =
+            format!("https://sdk.vorpal.build/source/pnpm-{source_version}-{source_target}");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 

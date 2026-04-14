@@ -34,7 +34,7 @@ export class Protoc {
     }
 
     const sourceVersion = "34.0";
-    const sourcePath = `https://github.com/protocolbuffers/protobuf/releases/download/v${sourceVersion}/protoc-${sourceVersion}-${sourceTarget}.zip`;
+    const sourcePath = `https://sdk.vorpal.build/source/protoc-${sourceVersion}-${sourceTarget}.zip`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 
