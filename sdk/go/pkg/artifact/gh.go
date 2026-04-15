@@ -36,7 +36,7 @@ func Gh(context *config.ConfigContext) (*string, error) {
 	}
 
 	sourceVersion := "2.87.3"
-	sourcePath := fmt.Sprintf("https://github.com/cli/cli/releases/download/v%s/gh_%s_%s.%s", sourceVersion, sourceVersion, sourceTarget, sourceExtension)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/gh_%s_%s.%s", sourceVersion, sourceTarget, sourceExtension)
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT/bin"

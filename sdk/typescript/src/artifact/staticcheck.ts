@@ -13,7 +13,7 @@ export class Staticcheck {
   async build(context: ConfigContext): Promise<string> {
     const name = "staticcheck";
     const sourceVersion = "2026.1";
-    const sourcePath = `https://github.com/dominikh/go-tools/archive/refs/tags/${sourceVersion}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/staticcheck-${sourceVersion}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

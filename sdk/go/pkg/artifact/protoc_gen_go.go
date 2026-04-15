@@ -27,7 +27,7 @@ func ProtocGenGo(context *config.ConfigContext) (*string, error) {
 	}
 
 	sourceVersion := "1.36.11"
-	sourcePath := fmt.Sprintf("https://github.com/protocolbuffers/protobuf-go/releases/download/v%s/protoc-gen-go.v%s.%s.tar.gz", sourceVersion, sourceVersion, sourceTarget)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/protoc-gen-go.v%s.%s.tar.gz", sourceVersion, sourceTarget)
 
 	source := NewArtifactSource(name, sourcePath).Build()
 

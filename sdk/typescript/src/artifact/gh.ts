@@ -41,7 +41,7 @@ export class Gh {
     }
 
     const sourceVersion = DEFAULT_GH_VERSION;
-    const sourcePath = `https://github.com/cli/cli/releases/download/v${sourceVersion}/gh_${sourceVersion}_${sourceTarget}.${sourceExtension}`;
+    const sourcePath = `https://sdk.vorpal.build/source/gh_${sourceVersion}_${sourceTarget}.${sourceExtension}`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 
@@ -49,8 +49,7 @@ export class Gh {
 
 cp -pr "source/${name}/gh_${sourceVersion}_${sourceTarget}/bin/gh" "$VORPAL_OUTPUT/bin/gh"
 
-chmod +x "$VORPAL_OUTPUT/bin/gh"
-`;
+chmod +x "$VORPAL_OUTPUT/bin/gh"`;
     const steps = [await shell(context, [], [], stepScript, [])];
     const systems = [
       ArtifactSystem.AARCH64_DARWIN,

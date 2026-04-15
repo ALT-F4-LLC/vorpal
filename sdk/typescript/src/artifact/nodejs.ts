@@ -34,7 +34,7 @@ export class NodeJS {
     }
 
     const sourceVersion = "22.22.0";
-    const sourcePath = `https://nodejs.org/dist/v${sourceVersion}/node-v${sourceVersion}-${sourceTarget}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/node-v${sourceVersion}-${sourceTarget}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

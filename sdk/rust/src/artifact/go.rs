@@ -9,7 +9,7 @@ use anyhow::{bail, Result};
 pub fn source_tools(name: &str) -> api::artifact::ArtifactSource {
     let version = "0.42.0";
 
-    let path = format!("https://go.googlesource.com/tools/+archive/refs/tags/v{version}.tar.gz");
+    let path = format!("https://sdk.vorpal.build/source/go-tools-v{version}.tar.gz");
 
     ArtifactSource::new(name, path.as_str()).build()
 }
@@ -36,7 +36,8 @@ impl Go {
         };
 
         let source_version = "1.26.0";
-        let source_path = format!("https://go.dev/dl/go{source_version}.{source_target}.tar.gz");
+        let source_path =
+            format!("https://sdk.vorpal.build/source/go{source_version}.{source_target}.tar.gz");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 

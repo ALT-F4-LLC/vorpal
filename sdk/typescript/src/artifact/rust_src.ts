@@ -15,7 +15,7 @@ export class RustSrc {
   async build(context: ConfigContext): Promise<string> {
     const name = "rust-src";
     const sourceVersion = RUST_TOOLCHAIN_VERSION;
-    const sourcePath = `https://static.rust-lang.org/dist/rust-src-${sourceVersion}.tar.gz`;
+    const sourcePath = `https://sdk.vorpal.build/source/rust-src-${sourceVersion}.tar.gz`;
 
     const source = new ArtifactSource(name, sourcePath).build();
 

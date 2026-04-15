@@ -36,7 +36,9 @@ impl LinuxVorpal {
 
         let curl_version = "8.15.0";
         let curl = source::curl(curl_version);
-        let curl_cacert = source::curl_cacert();
+
+        let curl_cacert_version = "1776122862";
+        let curl_cacert = source::curl_cacert(curl_cacert_version);
 
         let diffutils_version = "3.12";
         let diffutils = source::gnu_xz("diffutils", diffutils_version);

@@ -20,7 +20,7 @@ impl RustAnalyzer {
         let source_target = rust_toolchain::target(system)?;
         let source_version = rust_toolchain::version();
         let source_path = format!(
-            "https://static.rust-lang.org/dist/{name}-{source_version}-{source_target}.tar.gz"
+            "https://sdk.vorpal.build/source/{name}-{source_version}-{source_target}.tar.gz"
         );
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();

@@ -11,7 +11,7 @@ func Rsync(context *config.ConfigContext) (*string, error) {
 	name := "rsync"
 	version := "3.4.1"
 
-	sourcePath := fmt.Sprintf("https://download.samba.org/pub/rsync/src/rsync-%s.tar.gz", version)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/rsync-%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT"

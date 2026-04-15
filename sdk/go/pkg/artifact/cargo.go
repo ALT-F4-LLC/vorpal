@@ -18,7 +18,7 @@ func Cargo(context *config.ConfigContext) (*string, error) {
 	}
 
 	sourceVersion := RustToolchainVersion()
-	sourcePath := fmt.Sprintf("https://static.rust-lang.org/dist/%s-%s-%s.tar.gz", name, sourceVersion, *sourceTarget)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/%s-%s-%s.tar.gz", name, sourceVersion, *sourceTarget)
 
 	source := NewArtifactSource(name, sourcePath).Build()
 

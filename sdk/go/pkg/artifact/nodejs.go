@@ -28,8 +28,8 @@ func NodeJS(context *config.ConfigContext) (*string, error) {
 
 	sourceVersion := "22.22.0"
 	sourcePath := fmt.Sprintf(
-		"https://nodejs.org/dist/v%s/node-v%s-%s.tar.gz",
-		sourceVersion, sourceVersion, sourceTarget,
+		"https://sdk.vorpal.build/source/node-v%s-%s.tar.gz",
+		sourceVersion, sourceTarget,
 	)
 
 	source := NewArtifactSource(name, sourcePath).Build()

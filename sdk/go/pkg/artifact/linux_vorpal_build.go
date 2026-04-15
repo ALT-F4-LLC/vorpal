@@ -13,6 +13,7 @@ func linuxVorpalBuild(ctx *config.ConfigContext) (*string, error) {
 	bisonVersion := "3.8.2"
 	coreutilsVersion := "9.7"
 	curlVersion := "8.15.0"
+	curlCacertVersion := "1776122862"
 	diffutilsVersion := "3.12"
 	fileVersion := "5.46"
 	findutilsVersion := "4.10.0"
@@ -49,7 +50,7 @@ func linuxVorpalBuild(ctx *config.ConfigContext) (*string, error) {
 	bison := linuxVorpalSourceGnu("bison", bisonVersion)
 	coreutils := linuxVorpalSourceGnu("coreutils", coreutilsVersion)
 	curl := linuxVorpalSourceCurl(curlVersion)
-	curlCacert := linuxVorpalSourceCurlCacert()
+	curlCacert := linuxVorpalSourceCurlCacert(curlCacertVersion)
 	diffutils := linuxVorpalSourceGnuXz("diffutils", diffutilsVersion)
 	file := linuxVorpalSourceFile(fileVersion)
 	findutils := linuxVorpalSourceGnuXz("findutils", findutilsVersion)

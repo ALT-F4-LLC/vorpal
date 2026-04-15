@@ -11,7 +11,7 @@ func Grpcurl(context *config.ConfigContext) (*string, error) {
 	name := "grpcurl"
 	version := "1.9.3"
 
-	sourcePath := fmt.Sprintf("https://github.com/fullstorydev/grpcurl/archive/refs/tags/v%s.tar.gz", version)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/grpcurl-v%s.tar.gz", version)
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	buildDirectory := fmt.Sprintf("%s-%s", name, version)

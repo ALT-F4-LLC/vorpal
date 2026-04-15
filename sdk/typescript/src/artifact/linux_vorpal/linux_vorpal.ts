@@ -42,6 +42,7 @@ export async function linuxVorpal(ctx: ConfigContext): Promise<string> {
   const bisonVersion = "3.8.2";
   const coreutilsVersion = "9.7";
   const curlVersion = "8.15.0";
+  const curlCacertVersion = "1776122862";
   const diffutilsVersion = "3.12";
   const fileVersion = "5.46";
   const findutilsVersion = "4.10.0";
@@ -78,7 +79,7 @@ export async function linuxVorpal(ctx: ConfigContext): Promise<string> {
   const bison = sourceGnu("bison", bisonVersion);
   const coreutils = sourceGnu("coreutils", coreutilsVersion);
   const curl = sourceCurl(curlVersion);
-  const curlCacert = sourceCurlCacert();
+  const curlCacert = sourceCurlCacert(curlCacertVersion);
   const diffutils = sourceGnuXz("diffutils", diffutilsVersion);
   const file = sourceFile(fileVersion);
   const findutils = sourceGnuXz("findutils", findutilsVersion);

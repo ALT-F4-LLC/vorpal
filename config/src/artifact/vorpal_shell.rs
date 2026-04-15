@@ -3,6 +3,7 @@ use anyhow::Result;
 use vorpal_sdk::artifact::{
     bun::Bun,
     crane::Crane,
+    gh::Gh,
     go::Go,
     goimports::Goimports,
     gopls::Gopls,
@@ -13,6 +14,7 @@ use vorpal_sdk::artifact::{
     protoc::Protoc,
     protoc_gen_go::ProtocGenGo,
     protoc_gen_go_grpc::ProtocGenGoGrpc,
+    rsync::Rsync,
     staticcheck::Staticcheck,
 };
 use vorpal_sdk::{artifact, context::ConfigContext};
@@ -28,6 +30,7 @@ impl VorpalShell {
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let bun = Bun::new().build(context).await?;
         let crane = Crane::new().build(context).await?;
+        let gh = Gh::new().build(context).await?;
         let go = Go::new().build(context).await?;
         let goimports = Goimports::new().build(context).await?;
         let gopls = Gopls::new().build(context).await?;
@@ -37,12 +40,14 @@ impl VorpalShell {
         let protoc = Protoc::new().build(context).await?;
         let protoc_gen_go = ProtocGenGo::new().build(context).await?;
         let protoc_gen_go_grpc = ProtocGenGoGrpc::new().build(context).await?;
+        let rsync = Rsync::new().build(context).await?;
         let staticcheck = Staticcheck::new().build(context).await?;
 
         artifact::DevelopmentEnvironment::new("vorpal-shell", SYSTEMS.to_vec())
             .with_artifacts(vec![
                 bun,
                 crane,
+                gh,
                 go,
                 goimports,
                 gopls,
@@ -52,6 +57,7 @@ impl VorpalShell {
                 protoc,
                 protoc_gen_go,
                 protoc_gen_go_grpc,
+                rsync,
                 staticcheck,
             ])
             .with_environments(vec![

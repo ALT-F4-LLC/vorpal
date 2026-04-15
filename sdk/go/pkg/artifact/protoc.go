@@ -27,7 +27,7 @@ func Protoc(context *config.ConfigContext) (*string, error) {
 	}
 
 	sourceVersion := "34.0"
-	sourcePath := fmt.Sprintf("https://github.com/protocolbuffers/protobuf/releases/download/v%s/protoc-%s-%s.zip", sourceVersion, sourceVersion, sourceTarget)
+	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/protoc-%s-%s.zip", sourceVersion, sourceTarget)
 
 	source := NewArtifactSource(name, sourcePath).Build()
 

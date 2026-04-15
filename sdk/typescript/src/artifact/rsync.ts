@@ -15,7 +15,7 @@ export class Rsync {
 
     const version = "3.4.1";
 
-    const path = `https://download.samba.org/pub/rsync/src/rsync-${version}.tar.gz`;
+    const path = `https://sdk.vorpal.build/source/rsync-${version}.tar.gz`;
 
     const source = new ArtifactSource(name, path).build();
 

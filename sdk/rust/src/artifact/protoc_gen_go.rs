@@ -27,7 +27,7 @@ impl ProtocGenGo {
         };
 
         let source_version = "1.36.11";
-        let source_path = format!("https://github.com/protocolbuffers/protobuf-go/releases/download/v{source_version}/protoc-gen-go.v{source_version}.{source_target}.tar.gz");
+        let source_path = format!("https://sdk.vorpal.build/source/protoc-gen-go.v{source_version}.{source_target}.tar.gz");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
