@@ -1,7 +1,7 @@
 {
   "name": "website",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "scripts": {
     "dev": "bun x astro dev",
     "start": "bun x astro dev",
