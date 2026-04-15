@@ -9,7 +9,7 @@ set -euo pipefail
 # Environment variables:
 #   VORPAL_NONINTERACTIVE=1    Enable non-interactive mode
 #   CI=true                    Enable non-interactive mode
-#   VORPAL_VERSION=<ver>       Version to install (default: 0.1.0)
+#   VORPAL_VERSION=<ver>       Version to install (default: 0.1.1)
 #   VORPAL_NO_SERVICE=1        Skip service installation
 #   VORPAL_SERVICES=<list>     Comma-separated services to install (default: agent,registry,worker)
 #   VORPAL_NO_PATH=1           Skip PATH configuration
@@ -23,7 +23,7 @@ set -euo pipefail
 
 # -- Constants ----------------------------------------------------------------
 
-VORPAL_VERSION="${VORPAL_VERSION:-0.1.0}"
+VORPAL_VERSION="${VORPAL_VERSION:-0.1.1}"
 VORPAL_INSTALL_DIR="$HOME/.vorpal"
 VORPAL_SYSTEM_DIR="/var/lib/vorpal"
 VORPAL_REPO="ALT-F4-LLC/vorpal"
@@ -361,7 +361,7 @@ Install Vorpal to ~/.vorpal and configure system services.
 
 Options:
   -y, --yes              Run in non-interactive mode (skip prompts)
-  -v, --version <ver>    Version to install (default: 0.1.0)
+  -v, --version <ver>    Version to install (default: 0.1.1)
       --services <list>  Comma-separated services to install (default: agent,registry,worker)
       --no-service       Skip service installation
       --no-path          Skip PATH configuration
@@ -376,7 +376,7 @@ Options:
 Environment variables:
   VORPAL_NONINTERACTIVE=1    Enable non-interactive mode
   CI=true                    Enable non-interactive mode
-  VORPAL_VERSION=<ver>       Version to install (default: 0.1.0)
+  VORPAL_VERSION=<ver>       Version to install (default: 0.1.1)
   VORPAL_NO_SERVICE=1        Skip service installation
   VORPAL_SERVICES=<list>     Comma-separated services (default: agent,registry,worker)
   VORPAL_NO_PATH=1           Skip PATH configuration
@@ -400,7 +400,7 @@ parse_args() {
                 if [[ $# -lt 2 ]]; then
                     print_error "Missing value for $1" \
                         "The $1 flag requires a version argument." \
-                        "Example: install.sh $1 0.1.0"
+                        "Example: install.sh $1 0.1.1"
                     exit 1
                 fi
                 VORPAL_VERSION="$2"
@@ -725,8 +725,8 @@ resolve_version() {
         http_code="$(curl -sS -o /dev/null -w "%{http_code}" "$api_url" 2>/dev/null)" || true
 
         if [[ "$http_code" = "403" ]]; then
-            print_warning "GitHub API rate limit reached. Falling back to 0.1.0."
-            version="0.1.0"
+            print_warning "GitHub API rate limit reached. Falling back to 0.1.1."
+            version="0.1.1"
         elif [[ "$http_code" = "200" ]]; then
             api_response="$(curl -fsSL "$api_url" 2>/dev/null)" || true
             if [[ -n "$api_response" ]]; then
@@ -736,16 +736,16 @@ resolve_version() {
                 if [[ -n "$tag" ]]; then
                     version="$tag"
                 else
-                    print_warning "Could not parse latest version from GitHub API. Falling back to 0.1.0."
-                    version="0.1.0"
+                    print_warning "Could not parse latest version from GitHub API. Falling back to 0.1.1."
+                    version="0.1.1"
                 fi
             else
-                print_warning "Could not fetch latest version from GitHub API. Falling back to 0.1.0."
-                version="0.1.0"
+                print_warning "Could not fetch latest version from GitHub API. Falling back to 0.1.1."
+                version="0.1.1"
             fi
         else
-            print_warning "GitHub API returned HTTP ${http_code}. Falling back to 0.1.0."
-            version="0.1.0"
+            print_warning "GitHub API returned HTTP ${http_code}. Falling back to 0.1.1."
+            version="0.1.1"
         fi
     fi
 
@@ -762,7 +762,7 @@ resolve_version() {
             "Available channels:
     ${_sym_bullet} nightly -- latest development build (updated daily)
     ${_sym_bullet} latest  -- most recent stable release" \
-            "Or specify an exact tag: --version v0.1.0
+            "Or specify an exact tag: --version v0.1.1
   See all releases: ${VORPAL_GITHUB_URL}/releases"
         exit 1
     fi
