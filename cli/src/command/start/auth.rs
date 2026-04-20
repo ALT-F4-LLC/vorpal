@@ -301,6 +301,21 @@ struct ClientCredentialsResponse {
     token_type: String,
 }
 
+/// Compose the OAuth2 scope string for a client_credentials request.
+///
+/// When `issuer_audience` is provided, appends Zitadel's project-audience-injection
+/// scope (`urn:zitadel:iam:org:project:id:{aud}:aud`). Zitadel v4 silently ignores
+/// the `audience` form-body parameter for the client-credentials grant — the URN
+/// scope is the only way to force the project ID into the minted token's `aud`.
+/// Keycloak and Auth0 ignore unrecognized scope strings, so the appended URN is
+/// harmless against them.
+fn compose_client_credentials_scope(scope: &str, issuer_audience: Option<&str>) -> String {
+    match issuer_audience {
+        Some(aud) => format!("{} urn:zitadel:iam:org:project:id:{}:aud", scope, aud),
+        None => scope.to_string(),
+    }
+}
+
 /// Performs OAuth2 Client Credentials Flow token exchange for service-to-service authentication
 ///
 /// Args:
@@ -351,7 +366,7 @@ pub async fn exchange_client_credentials(
         client_id: issuer_client_id.to_string(),
         client_secret: issuer_client_secret.to_string(),
         grant_type: "client_credentials".to_string(),
-        scope: scope.to_string(),
+        scope: compose_client_credentials_scope(scope, issuer_audience),
     };
 
     let token_response = reqwest::Client::new()
@@ -428,4 +443,42 @@ pub fn get_user_context<T>(request: &Request<T>) -> Option<String> {
         .extensions()
         .get::<Claims>()
         .and_then(|claims| claims.subject().map(String::from))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compose_scope_without_audience_is_unchanged() {
+        let result = compose_client_credentials_scope("read:archive write:archive", None);
+        assert_eq!(result, "read:archive write:archive");
+    }
+
+    #[test]
+    fn compose_scope_with_numeric_zitadel_audience_appends_urn() {
+        let result = compose_client_credentials_scope(
+            "read:archive write:archive",
+            Some("368890692711219611"),
+        );
+        assert_eq!(
+            result,
+            "read:archive write:archive urn:zitadel:iam:org:project:id:368890692711219611:aud"
+        );
+    }
+
+    #[test]
+    fn compose_scope_with_non_numeric_audience_still_appends_urn() {
+        // Unconditional append: Keycloak/Auth0 ignore unrecognized scope strings,
+        // so even a slug or URL audience is passed through without harm.
+        let result = compose_client_credentials_scope("openid", Some("vorpal"));
+        assert_eq!(result, "openid urn:zitadel:iam:org:project:id:vorpal:aud");
+    }
+
+    #[test]
+    fn compose_scope_preserves_base_scope_order() {
+        let result = compose_client_credentials_scope("a b c", Some("42"));
+        assert!(result.starts_with("a b c "));
+        assert!(result.ends_with(" urn:zitadel:iam:org:project:id:42:aud"));
+    }
 }
