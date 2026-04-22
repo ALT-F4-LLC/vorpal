@@ -584,8 +584,7 @@ mod tests {
     #[test]
     fn principal_classification_case_sensitive() {
         // Providers emit client IDs verbatim — do not lower-case either side.
-        let result =
-            classify_principal(Some("Worker-Client"), &["worker-client".to_string()]);
+        let result = classify_principal(Some("Worker-Client"), &["worker-client".to_string()]);
         assert_eq!(result, PrincipalKind::Human);
     }
 
@@ -736,10 +735,8 @@ mod tests {
         // worker-client IS in the trusted allow-list. Worker `build_artifact`
         // call must succeed without RBAC.
         let claims = mk_claims_with_azp(Some("worker-client"), None);
-        let req = build_request_with_claims_and_classification(
-            claims,
-            &["worker-client".to_string()],
-        );
+        let req =
+            build_request_with_claims_and_classification(claims, &["worker-client".to_string()]);
 
         let result = require_namespace_or_service_trust(&req, "library", "write");
         assert!(result.is_ok(), "trusted service must bypass: {:?}", result);
@@ -787,10 +784,8 @@ mod tests {
         // `azp` is `attacker-client`, which falls back to the Human path.
         // Without `namespaces`, the gate denies with the EXACT TDD §6 string.
         let claims = mk_claims_with_azp(Some("attacker-client"), None);
-        let req = build_request_with_claims_and_classification(
-            claims,
-            &["worker-client".to_string()],
-        );
+        let req =
+            build_request_with_claims_and_classification(claims, &["worker-client".to_string()]);
 
         let err = require_namespace_or_service_trust(&req, "library", "read")
             .expect_err("unknown azp must be denied");
@@ -810,10 +805,8 @@ mod tests {
         let mut ns = HashMap::new();
         ns.insert("library".to_string(), vec!["read".to_string()]);
         let claims = mk_claims_with_azp(Some("attacker-client"), Some(ns));
-        let req = build_request_with_claims_and_classification(
-            claims,
-            &["worker-client".to_string()],
-        );
+        let req =
+            build_request_with_claims_and_classification(claims, &["worker-client".to_string()]);
 
         let err = require_namespace_or_service_trust(&req, "library", "write")
             .expect_err("unknown azp without `library:write` must be denied");
@@ -830,10 +823,8 @@ mod tests {
         // claim must still bypass — covering the worker-on-Zitadel case
         // (TDD §1.1, the operational break this whole TDD fixes).
         let claims = mk_claims_with_azp(Some("worker-client"), None);
-        let req = build_request_with_claims_and_classification(
-            claims,
-            &["worker-client".to_string()],
-        );
+        let req =
+            build_request_with_claims_and_classification(claims, &["worker-client".to_string()]);
 
         let result = require_namespace_or_service_trust(&req, "any-ns", "write");
         assert!(

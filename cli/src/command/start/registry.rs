@@ -464,11 +464,7 @@ impl ArtifactService for ArtifactServer {
             .is_some()
         {
             let req_inner = request.get_ref();
-            require_namespace_or_service_trust(
-                &request,
-                &req_inner.artifact_namespace,
-                "write",
-            )?;
+            require_namespace_or_service_trust(&request, &req_inner.artifact_namespace, "write")?;
 
             info!(
                 "artifact |> store_artifact by {} in namespace {}",
