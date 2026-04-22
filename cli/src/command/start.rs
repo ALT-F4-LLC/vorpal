@@ -40,6 +40,12 @@ pub struct RunArgs {
     pub issuer_audience: Option<String>,
     pub issuer_client_id: Option<String>,
     pub issuer_client_secret: Option<String>,
+    /// OAuth client IDs whose tokens classify as `PrincipalKind::TrustedService`
+    /// and bypass namespace RBAC. Populated from `--issuer-service-client-ids`
+    /// (or `VORPAL_ISSUER_SERVICE_CLIENT_IDS`) in `cli/src/command.rs`. Empty
+    /// by default — every token then follows the `Human` path (current
+    /// behavior, TDD §6 "Backward compatibility").
+    pub issuer_service_client_ids: Vec<String>,
     pub port: Option<u16>,
     pub registry_backend: String,
     pub registry_backend_s3_bucket: Option<String>,
@@ -104,6 +110,21 @@ async fn serve_with_shutdown(
 }
 
 pub async fn run(args: RunArgs) -> Result<()> {
+    // Emit the trusted-service allow-list at startup so operators (and
+    // on-call) can confirm which OAuth client IDs bypass namespace RBAC.
+    // Mis-wiring at construction time (forgetting to thread the list into
+    // one of the validators) would otherwise fail silently — this log is
+    // the TDD §11 "startup log line" signal that catches it.
+    if args.issuer_service_client_ids.is_empty() {
+        info!("no trusted service clients configured");
+    } else {
+        info!(
+            "trusted service clients configured ({}): {}",
+            args.issuer_service_client_ids.len(),
+            args.issuer_service_client_ids.join(", ")
+        );
+    }
+
     // Determine the effective port: TLS implies TCP (default 23151), explicit --port uses TCP
     let effective_port = match (args.port, args.tls) {
         (Some(port), _) => Some(port),
@@ -216,8 +237,11 @@ pub async fn run(args: RunArgs) -> Result<()> {
                 validator_audiences.push(audience.clone());
             }
 
-            let validator =
-                Arc::new(auth::OidcValidator::new(issuer.clone(), validator_audiences).await?);
+            let validator = Arc::new(
+                auth::OidcValidator::new(issuer.clone(), validator_audiences)
+                    .await?
+                    .with_trusted_service_client_ids(args.issuer_service_client_ids.clone()),
+            );
             let validator_intercepter = auth::new_interceptor(validator);
 
             router = router.add_service(ArchiveServiceServer::with_interceptor(
@@ -255,8 +279,11 @@ pub async fn run(args: RunArgs) -> Result<()> {
                 validator_audiences.push(audience.clone());
             }
 
-            let validator =
-                Arc::new(auth::OidcValidator::new(issuer.clone(), validator_audiences).await?);
+            let validator = Arc::new(
+                auth::OidcValidator::new(issuer.clone(), validator_audiences)
+                    .await?
+                    .with_trusted_service_client_ids(args.issuer_service_client_ids.clone()),
+            );
             let validator_intercepter = auth::new_interceptor(validator);
 
             router = router.add_service(WorkerServiceServer::with_interceptor(

@@ -971,16 +971,36 @@ impl WorkerService for WorkerServer {
         &self,
         request: Request<BuildArtifactRequest>,
     ) -> Result<Response<Self::BuildArtifactStream>, Status> {
-        // Check namespace authorization if auth is enabled
+        // Check namespace authorization if auth is enabled. Service-user
+        // tokens whose `azp` is in the trusted allow-list bypass namespace RBAC
+        // per TDD §4.3 (m2m-authz-decoupling); human tokens still route through
+        // `require_namespace_permission` unchanged.
         if request.extensions().get::<auth::Claims>().is_some() {
             let req_inner = request.get_ref();
-            auth::require_namespace_permission(&request, &req_inner.artifact_namespace, "write")?;
+            auth::require_namespace_or_service_trust(
+                &request,
+                &req_inner.artifact_namespace,
+                "write",
+            )?;
 
-            if let Some(user) = auth::get_user_context(&request) {
-                info!(
-                    "worker |> build requested by user: {} in namespace: {}",
-                    user, req_inner.artifact_namespace
-                );
+            // TDD §4.5 + AC §1.3 #5: every authenticated call records the
+            // principal classification (Human with `sub`, TrustedService with
+            // `azp`) and the namespace it touched.
+            match request.extensions().get::<auth::PrincipalKind>() {
+                Some(auth::PrincipalKind::TrustedService { azp }) => {
+                    info!(
+                        "worker |> build_artifact by service={} in namespace {}",
+                        azp, req_inner.artifact_namespace
+                    );
+                }
+                _ => {
+                    let user =
+                        auth::get_user_context(&request).unwrap_or_else(|| "<unknown>".to_string());
+                    info!(
+                        "worker |> build_artifact by user={} in namespace {}",
+                        user, req_inner.artifact_namespace
+                    );
+                }
             }
         }
 

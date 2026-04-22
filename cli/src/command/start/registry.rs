@@ -1,4 +1,6 @@
-use crate::command::start::auth::{get_user_context, require_namespace_permission};
+use crate::command::start::auth::{
+    get_user_context, require_namespace_or_service_trust, PrincipalKind,
+};
 use anyhow::{bail, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
@@ -43,6 +45,31 @@ pub enum ServerBackend {
 pub struct LocalBackend;
 
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
+
+/// Authz + observability label for a request's classified principal.
+///
+/// Produces a consistent, grep-able tag at every enforcement site so operators
+/// can see *who* passed the authz gate — Human users by `sub`, TrustedService
+/// workers by `azp`. The format is shared verbatim with `worker.rs` (DKT-65)
+/// so a single `service=` / `user=` query surfaces every authz decision
+/// across registry and worker:
+///
+///   - `service=<azp>` for [`PrincipalKind::TrustedService`]
+///   - `user=<sub>`    for [`PrincipalKind::Human`]
+///   - `user=<unknown>` for Human without a `sub`, or when the interceptor
+///     did not insert a principal (should not happen when auth is enabled)
+///
+/// Required by TDD §4.5 (observability) and AC §1.3 #5 (every authz decision
+/// records principal classification + identifier).
+fn principal_label<T>(request: &Request<T>) -> String {
+    match request.extensions().get::<PrincipalKind>() {
+        Some(PrincipalKind::TrustedService { azp }) => format!("service={azp}"),
+        _ => {
+            let user = get_user_context(request).unwrap_or_else(|| "<unknown>".to_string());
+            format!("user={user}")
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct S3Backend {
@@ -195,21 +222,25 @@ impl ArchiveService for ArchiveServer {
         &self,
         request: Request<ArchivePullRequest>,
     ) -> Result<Response<Self::PullStream>, Status> {
-        // Authorization check before spawning task
+        // Authorization check before spawning task.
+        //
+        // DKT-64: swapped from `require_namespace_permission` to
+        // `require_namespace_or_service_trust` so service-user tokens with an
+        // `azp` in `--issuer-service-client-ids` bypass namespace RBAC while
+        // human tokens still go through the unchanged permission check.
         if request
             .extensions()
             .get::<crate::command::start::auth::Claims>()
             .is_some()
         {
             let req_inner = request.get_ref();
-            require_namespace_permission(&request, &req_inner.namespace, "read")?;
+            require_namespace_or_service_trust(&request, &req_inner.namespace, "read")?;
 
-            if let Some(user) = get_user_context(&request) {
-                info!(
-                    "archive |> pull requested by {} in namespace {}",
-                    user, req_inner.namespace
-                );
-            }
+            info!(
+                "archive |> pull by {} in namespace {}",
+                principal_label(&request),
+                req_inner.namespace
+            );
         }
 
         let (tx, rx) = mpsc::channel(100);
@@ -333,21 +364,20 @@ impl ArtifactService for ArtifactServer {
         &self,
         request: Request<ArtifactRequest>,
     ) -> Result<Response<Artifact>, Status> {
-        // Authorization check
+        // Authorization check — see DKT-64 note in `ArchiveService::pull`.
         if request
             .extensions()
             .get::<crate::command::start::auth::Claims>()
             .is_some()
         {
             let req_inner = request.get_ref();
-            require_namespace_permission(&request, &req_inner.namespace, "read")?;
+            require_namespace_or_service_trust(&request, &req_inner.namespace, "read")?;
 
-            if let Some(user) = get_user_context(&request) {
-                info!(
-                    "artifact |> get_artifact by {} in namespace {}",
-                    user, req_inner.namespace
-                );
-            }
+            info!(
+                "artifact |> get_artifact by {} in namespace {}",
+                principal_label(&request),
+                req_inner.namespace
+            );
         }
 
         let request = request.into_inner();
@@ -370,14 +400,22 @@ impl ArtifactService for ArtifactServer {
         &self,
         request: Request<GetArtifactAliasRequest>,
     ) -> Result<Response<GetArtifactAliasResponse>, Status> {
-        // Authorization check
+        // Authorization check — see DKT-64 note in `ArchiveService::pull`.
+        // This site previously had no observability log line; DKT-64 adds one
+        // so every authz decision (AC §1.3 #5) is logged uniformly.
         if request
             .extensions()
             .get::<crate::command::start::auth::Claims>()
             .is_some()
         {
             let req_inner = request.get_ref();
-            require_namespace_permission(&request, &req_inner.namespace, "read")?;
+            require_namespace_or_service_trust(&request, &req_inner.namespace, "read")?;
+
+            info!(
+                "artifact |> get_artifact_alias by {} in namespace {}",
+                principal_label(&request),
+                req_inner.namespace
+            );
         }
 
         let request = request.into_inner();
@@ -419,21 +457,24 @@ impl ArtifactService for ArtifactServer {
         &self,
         request: Request<StoreArtifactRequest>,
     ) -> Result<Response<ArtifactResponse>, Status> {
-        // Authorization check
+        // Authorization check — see DKT-64 note in `ArchiveService::pull`.
         if request
             .extensions()
             .get::<crate::command::start::auth::Claims>()
             .is_some()
         {
             let req_inner = request.get_ref();
-            require_namespace_permission(&request, &req_inner.artifact_namespace, "write")?;
+            require_namespace_or_service_trust(
+                &request,
+                &req_inner.artifact_namespace,
+                "write",
+            )?;
 
-            if let Some(user) = get_user_context(&request) {
-                info!(
-                    "artifact |> store_artifact by {} in namespace {}",
-                    user, req_inner.artifact_namespace
-                );
-            }
+            info!(
+                "artifact |> store_artifact by {} in namespace {}",
+                principal_label(&request),
+                req_inner.artifact_namespace
+            );
         }
 
         let request = request.into_inner();
