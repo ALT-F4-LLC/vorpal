@@ -54,24 +54,54 @@ The auth interceptor (`cli/src/command/start/auth.rs`, `new_interceptor`) is syn
 
 ## 3. Authorization
 
-### 3.1 Namespace-Based Permissions
+### 3.1 Namespace-Based Permissions and Principal Classification
 
-Authorization is namespace-scoped. Claims include a `namespaces` field mapping namespace names to permission arrays.
+Authorization splits on **principal kind**: human user tokens are subject to namespace-scoped RBAC, while tokens issued to a declared trusted service client bypass RBAC entirely on the trust of the OAuth client ID. See TDD `docs/tdd/m2m-authz-decoupling.md` for the full rationale.
 
-**`Claims::has_namespace_permission`** (`cli/src/command/start/auth.rs:55-69`):
+#### Principal kinds
+
+**`PrincipalKind`** (`cli/src/command/start/auth.rs`):
+- `Human` — default classification for any validated token whose `azp` (OAuth2 "authorized party") claim does NOT appear in the trusted-service allow-list (includes tokens with no `azp`).
+- `TrustedService { azp }` — classification when the token's `azp` matches an entry in the allow-list configured via `--issuer-service-client-ids` (see `command.rs`, clap env `VORPAL_ISSUER_SERVICE_CLIENT_IDS`).
+
+Classification is performed by the OIDC interceptor after successful JWKS token validation and stashed in gRPC request extensions alongside `Claims` for downstream handlers. `azp` is used rather than `sub` because OAuth client registrations are long-lived operator-managed entities, whereas `sub` can rotate when a service user is recreated.
+
+#### Human principals: namespace-scoped RBAC
+
+Claims include a `namespaces` field mapping namespace names to permission arrays.
+
+**`Claims::has_namespace_permission`** (`cli/src/command/start/auth.rs`):
 - Checks exact namespace match first
 - Falls back to wildcard (`*`) namespace for admin access
 - Permissions are string-based (e.g., `"write"`, `"read"`)
 
-**`require_namespace_permission`** (`cli/src/command/start/auth.rs:405-423`):
+**`require_namespace_permission`** (`cli/src/command/start/auth.rs`):
 - Extracts claims from gRPC request extensions
 - Returns `UNAUTHENTICATED` if no claims found
 - Returns `PERMISSION_DENIED` if namespace permission is missing
 
-**Current enforcement points**:
-- Worker `build_artifact`: requires `write` permission on the artifact namespace (`cli/src/command/start/worker.rs:966`)
+#### TrustedService principals: `azp` allow-list bypass
 
-**Gap**: The registry services (archive push/pull, artifact get/store) apply the OIDC interceptor at the service level when `--issuer` is configured (`cli/src/command/start.rs:212-235`), but individual RPC handlers do not perform namespace-level permission checks. The interceptor validates the token is valid but does not enforce what the caller is allowed to do within specific namespaces for registry operations.
+**`require_namespace_or_service_trust`** (`cli/src/command/start/auth.rs`) is the unified authorization gate used by every enforcement site. It reads `PrincipalKind` from request extensions:
+- `TrustedService { .. }` → returns `Ok(())` (bypass).
+- `Human` → delegates to `require_namespace_permission`, preserving today's behavior verbatim.
+
+Missing `PrincipalKind` is treated as `UNAUTHENTICATED` rather than silently falling back — the interceptor must have classified every authenticated request.
+
+**Current enforcement points** (all via `require_namespace_or_service_trust`):
+- Archive `pull`: `read` on `req_inner.namespace` (`cli/src/command/start/registry.rs`)
+- Artifact `get_artifact`: `read` on `req_inner.namespace` (`cli/src/command/start/registry.rs`)
+- Artifact `get_artifact_alias`: `read` on `req_inner.namespace` (`cli/src/command/start/registry.rs`)
+- Artifact `store_artifact`: `write` on `req_inner.artifact_namespace` (`cli/src/command/start/registry.rs`)
+- Worker `build_artifact`: `write` on `req_inner.artifact_namespace` (`cli/src/command/start/worker.rs`)
+
+#### Operator guidance: `--issuer-service-client-ids` allow-list
+
+> **MACHINE clients only.** The allow-list MUST contain ONLY OAuth client IDs that represent trusted machine-to-machine services (e.g., the `vorpal-worker` service user). **Never add the CLI public client ID or any other client used by a device-code / authorization-code flow** — doing so grants every human user of that client a bypass on namespace RBAC for every namespace the registry and worker serve. This is the largest operational footgun in the design; review it before every allow-list change.
+>
+> **Quarterly review recommended.** The allow-list is small (typically one or two entries). Review it quarterly to catch drift: decommissioned service users that are still listed, or clients added in anger for debugging and never removed. A startup log line enumerates the current contents for visibility.
+
+The bypass is a zero-configuration alternative to emitting a wildcard `namespaces` claim on machine tokens via provider-side claim injection. It is equivalent in blast radius to the wildcard-namespace workaround (a stolen service credential grants full registry access in both models) but removes the dependency on brittle provider-side scripting (Zitadel Actions v1, Keycloak protocol mappers). See `docs/tdd/m2m-authz-decoupling.md` §8 for the detailed risk analysis, including the cross-namespace privilege-escalation invariant for user-driven worker builds.
 
 ### 3.2 Audit Logging
 
@@ -253,7 +283,7 @@ No branch protection rules are visible in the repository files. This would need 
 | # | Gap | Severity | Area |
 |---|-----|----------|------|
 | 1 | No warning when services start without authentication | Medium | Authentication |
-| 2 | Registry RPC handlers lack namespace-level permission checks | High | Authorization |
+| 2 | ~~Registry RPC handlers lack namespace-level permission checks~~ — **Resolved** (see §3.1): archive `pull`, artifact `get_artifact`, `get_artifact_alias`, and `store_artifact` now enforce via `require_namespace_or_service_trust` | Resolved | Authorization |
 | 3 | macOS builds have no sandboxing | Medium | Build Isolation |
 | 4 | Credential file permissions not explicitly set | Medium | Credential Storage |
 | 5 | Service certificate SAN hardcoded to `localhost` | Medium | TLS |

@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/insta
 To install a specific version without starting any services:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash -s -- --version v0.1.1 --no-service
+curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/install.sh | bash -s -- --version v0.2.0 --no-service
 ```
 
 #### Environment variables
@@ -69,7 +69,7 @@ As an alternative, the installer also accepts environment variables. These are u
 |----------|--------|
 | `VORPAL_NONINTERACTIVE=1` | Enable non-interactive mode |
 | `CI=true` | Enable non-interactive mode |
-| `VORPAL_VERSION=<ver>` | Version to install (default: `0.1.1`) |
+| `VORPAL_VERSION=<ver>` | Version to install (default: `0.2.0`) |
 | `VORPAL_SERVICES=<list>` | Comma-separated services to install (default: `agent,registry,worker`) |
 | `VORPAL_NO_SERVICE=1` | Skip service installation |
 | `VORPAL_NO_PATH=1` | Skip PATH configuration |

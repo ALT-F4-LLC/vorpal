@@ -69,6 +69,13 @@ pub enum CommandSystemServices {
         #[arg(long)]
         issuer_client_secret: Option<String>,
 
+        /// Comma-separated OAuth client IDs whose tokens are classified as
+        /// trusted service principals. Tokens whose `azp` claim matches a
+        /// list entry bypass namespace RBAC. Leave unset (default) to
+        /// preserve current behavior (all tokens go through namespace RBAC).
+        #[arg(env = "VORPAL_ISSUER_SERVICE_CLIENT_IDS", long)]
+        issuer_service_client_ids: Option<String>,
+
         /// TCP port to listen on. If omitted, listens on a Unix domain socket
         /// (default: /var/lib/vorpal/vorpal.sock, override: VORPAL_SOCKET_PATH env var)
         #[arg(long)]
@@ -92,6 +99,14 @@ pub enum CommandSystemServices {
     },
 }
 
+// `Services(CommandSystemServices)` carries the full set of flags for
+// `vorpal system services start` (including `issuer_service_client_ids` added
+// in DKT-63), pushing this enum past clippy's default 200-byte
+// `large_enum_variant` threshold. Boxing the variant would churn every
+// destructure site for zero runtime win: this is a top-level CLI subcommand
+// type parsed once per process invocation, so the size differential is
+// meaningless at the scale of a single clap parse.
+#[allow(clippy::large_enum_variant)] // top-level CLI subcommand type; single instance per process
 #[derive(Subcommand)]
 pub enum CommandSystem {
     #[clap(subcommand)]
@@ -697,6 +712,7 @@ pub async fn run() -> Result<()> {
                     issuer_audience,
                     issuer_client_id,
                     issuer_client_secret,
+                    issuer_service_client_ids,
                     port,
                     registry_backend,
                     registry_backend_s3_bucket,
@@ -704,6 +720,22 @@ pub async fn run() -> Result<()> {
                     services,
                     tls,
                 } => {
+                    // Parse the comma-separated list. Trim whitespace per entry and
+                    // silently drop empty segments, so inputs like "worker-id,"
+                    // or " a , , b " never produce `""` entries in the allow-list.
+                    // Silent-filter matches clap's ergonomic expectation for
+                    // comma-delimited values and keeps config-by-env forgiving.
+                    let issuer_service_client_ids = issuer_service_client_ids
+                        .as_deref()
+                        .map(|raw| {
+                            raw.split(',')
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_string)
+                                .collect::<Vec<String>>()
+                        })
+                        .unwrap_or_default();
+
                     let run_args = start::RunArgs {
                         archive_cache_ttl: *archive_cache_ttl,
                         health_check: *health_check,
@@ -712,6 +744,7 @@ pub async fn run() -> Result<()> {
                         issuer_audience: issuer_audience.clone(),
                         issuer_client_id: issuer_client_id.clone(),
                         issuer_client_secret: issuer_client_secret.clone(),
+                        issuer_service_client_ids,
                         port: *port,
                         registry_backend: registry_backend.clone(),
                         registry_backend_s3_bucket: registry_backend_s3_bucket.clone(),
