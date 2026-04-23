@@ -42,7 +42,7 @@
     "validate:proto": "npx tsx scripts/validate-serialization.ts"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "2.11.0",
+    "@bufbuild/protobuf": "2.12.0",
     "@grpc/grpc-js": "1.14.3",
     "smol-toml": "1.6.1"
   },
