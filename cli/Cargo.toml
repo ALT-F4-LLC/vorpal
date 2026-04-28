@@ -19,7 +19,7 @@ base64 = { version = "0.22.1" }
 bytes = { version = "1.11.1" }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 filetime = { version = "0.2.27" }
-fs4 = { version = "0.13.1" }
+fs4 = { version = "1.0.0" }
 futures-lite = { version = "2.6.1" }
 infer = { version = "0.19.0" }
 inquire = { version = "0.9.2" }
