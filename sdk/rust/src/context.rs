@@ -20,7 +20,10 @@ use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
 };
-use tokio::fs::{read, write};
+use tokio::{
+    fs::{read, OpenOptions},
+    io::AsyncWriteExt,
+};
 use tonic::{
     metadata::{Ascii, MetadataValue},
     transport::{Certificate, Channel, ClientTlsConfig, Server},
@@ -635,13 +638,18 @@ pub async fn build_channel(uri: &str) -> Result<Channel> {
         .with_context(|| format!("failed to connect to {}", uri))
 }
 
-/// Refreshes an expired access token using the refresh token
+/// Refreshes an expired access token using the refresh token.
+///
+/// Returns `(access_token, expires_in, issued_at, rotated_refresh_token)`.
+/// `rotated_refresh_token` is `Some(new)` when the IdP rotated the refresh
+/// token (Zitadel default), `None` when it did not (caller should keep the
+/// existing refresh token).
 async fn refresh_access_token(
     audience: Option<&str>,
     client_id: &str,
     issuer: &str,
     refresh_token: &str,
-) -> Result<(String, u64, u64)> {
+) -> Result<(String, u64, u64, Option<String>)> {
     // Discover token endpoint
     let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
     let doc: serde_json::Value = reqwest::get(&discovery_url).await?.json().await?;
@@ -673,12 +681,68 @@ async fn refresh_access_token(
         .expires_in()
         .map(|d| d.as_secs())
         .unwrap_or(3600);
+    let new_refresh_token = normalize_rotated_refresh_token(
+        token_result.refresh_token().map(|t| t.secret().to_string()),
+    );
 
     let issued_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
 
-    Ok((new_access_token, new_expires_in, issued_at))
+    Ok((
+        new_access_token,
+        new_expires_in,
+        issued_at,
+        new_refresh_token,
+    ))
+}
+
+/// Normalizes the `refresh_token` field from an OIDC token-refresh response.
+///
+/// Some IdPs send `"refresh_token": ""` in the response body, which the
+/// `oauth2` crate may surface as `Some(RefreshToken(""))`. Treat that as
+/// "not rotated" so callers do not overwrite the stored refresh token with
+/// an empty string. Mirrors the Go and TypeScript SDK behavior.
+fn normalize_rotated_refresh_token(raw: Option<String>) -> Option<String> {
+    raw.filter(|s| !s.is_empty())
+}
+
+/// Applies the result of a token-refresh response to an existing credentials
+/// record. The rotated refresh token, when present, replaces the stored one;
+/// when absent the existing refresh token is left untouched. Other fields
+/// (`audience`, `client_id`, `scopes`) are never modified here.
+fn apply_token_refresh(
+    creds: &mut VorpalCredentialsContent,
+    access_token: String,
+    expires_in: u64,
+    issued_at: u64,
+    rotated_refresh_token: Option<String>,
+) {
+    creds.access_token = access_token;
+    creds.expires_in = expires_in;
+    creds.issued_at = issued_at;
+    if let Some(new) = rotated_refresh_token {
+        creds.refresh_token = new;
+    }
+}
+
+/// Writes credential bytes to `path` enforcing mode 0o600 on file create.
+///
+/// `OpenOptions::mode()` only takes effect when the file is created — if the
+/// file already exists, the existing mode is preserved. Both Rust call sites
+/// for `credentials.json` (login at `cli/src/command.rs` and refresh here)
+/// must use this pattern so the file is born 0o600 and not 0o644 (umask 022).
+async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .await?;
+    file.write_all(bytes).await?;
+    file.flush().await?;
+    Ok(())
 }
 
 pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
@@ -736,7 +800,7 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
             ));
         }
 
-        let (new_token, new_expires, new_issued_at) = refresh_access_token(
+        let (new_token, new_expires, new_issued_at, rotated_refresh) = refresh_access_token(
             audience.as_deref(),
             &client_id,
             &registry_issuer,
@@ -750,13 +814,17 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
             .get_mut(&registry_issuer)
             .ok_or_else(|| anyhow!("no credentials for issuer: {}", registry_issuer))?;
 
-        issuer_creds.access_token = new_token;
-        issuer_creds.expires_in = new_expires;
-        issuer_creds.issued_at = new_issued_at;
+        apply_token_refresh(
+            issuer_creds,
+            new_token,
+            new_expires,
+            new_issued_at,
+            rotated_refresh,
+        );
 
-        // Save updated credentials
+        // Save updated credentials with mode 0o600 enforced on create.
         let credentials_json = serde_json::to_string_pretty(&credentials)?;
-        write(&credentials_path, credentials_json.as_bytes()).await?;
+        write_credentials_secure(&credentials_path, credentials_json.as_bytes()).await?;
     }
 
     // Get the access token
@@ -772,4 +840,150 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
         .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
 
     Ok(Some(header))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_creds() -> VorpalCredentialsContent {
+        VorpalCredentialsContent {
+            access_token: "old-access".to_string(),
+            audience: Some("aud-1".to_string()),
+            client_id: "client-1".to_string(),
+            expires_in: 3600,
+            issued_at: 1_700_000_000,
+            refresh_token: "old-refresh".to_string(),
+            scopes: vec!["openid".to_string(), "offline_access".to_string()],
+        }
+    }
+
+    #[test]
+    fn apply_token_refresh_replaces_refresh_when_rotated() {
+        let mut creds = sample_creds();
+
+        apply_token_refresh(
+            &mut creds,
+            "new-access".to_string(),
+            7200,
+            1_700_000_500,
+            Some("rotated-refresh".to_string()),
+        );
+
+        assert_eq!(creds.access_token, "new-access");
+        assert_eq!(creds.expires_in, 7200);
+        assert_eq!(creds.issued_at, 1_700_000_500);
+        assert_eq!(creds.refresh_token, "rotated-refresh");
+        assert_eq!(creds.audience.as_deref(), Some("aud-1"));
+        assert_eq!(creds.client_id, "client-1");
+        assert_eq!(creds.scopes, vec!["openid", "offline_access"]);
+    }
+
+    #[test]
+    fn apply_token_refresh_keeps_refresh_when_not_rotated() {
+        let mut creds = sample_creds();
+
+        apply_token_refresh(
+            &mut creds,
+            "new-access".to_string(),
+            7200,
+            1_700_000_500,
+            None,
+        );
+
+        assert_eq!(creds.access_token, "new-access");
+        assert_eq!(creds.expires_in, 7200);
+        assert_eq!(creds.issued_at, 1_700_000_500);
+        assert_eq!(creds.refresh_token, "old-refresh");
+        assert_eq!(creds.audience.as_deref(), Some("aud-1"));
+        assert_eq!(creds.client_id, "client-1");
+        assert_eq!(creds.scopes, vec!["openid", "offline_access"]);
+    }
+
+    #[test]
+    fn normalize_rotated_refresh_token_some_nonempty_passes_through() {
+        assert_eq!(
+            normalize_rotated_refresh_token(Some("rotated-refresh".to_string())),
+            Some("rotated-refresh".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_rotated_refresh_token_some_empty_becomes_none() {
+        assert_eq!(
+            normalize_rotated_refresh_token(Some(String::new())),
+            None,
+            "empty-string refresh_token must be treated as not-rotated for parity with Go/TS"
+        );
+    }
+
+    #[test]
+    fn normalize_rotated_refresh_token_none_passes_through() {
+        assert_eq!(normalize_rotated_refresh_token(None), None);
+    }
+
+    #[test]
+    fn write_credentials_secure_creates_file_with_mode_0o600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-mode-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("credentials.json");
+        // Sanity: the path must not pre-exist — we are testing file birth, not
+        // an inherited mode from a pre-created 0o600 file.
+        assert!(!path.exists(), "test path must be previously-nonexistent");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build runtime");
+        runtime
+            .block_on(write_credentials_secure(&path, b"{\"hello\":\"world\"}"))
+            .expect("write credentials");
+
+        let mode = std::fs::metadata(&path)
+            .expect("stat credentials")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "credentials file must be born 0o600, got {:o}",
+            mode & 0o777
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn apply_token_refresh_persists_through_serde_roundtrip() {
+        let mut creds = sample_creds();
+
+        apply_token_refresh(
+            &mut creds,
+            "new-access".to_string(),
+            7200,
+            1_700_000_500,
+            Some("rotated-refresh".to_string()),
+        );
+
+        let json = serde_json::to_string(&creds).expect("serialize");
+        let parsed: VorpalCredentialsContent = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(parsed.access_token, "new-access");
+        assert_eq!(parsed.refresh_token, "rotated-refresh");
+        assert_eq!(parsed.expires_in, 7200);
+        assert_eq!(parsed.issued_at, 1_700_000_500);
+        assert_eq!(parsed.audience.as_deref(), Some("aud-1"));
+        assert_eq!(parsed.client_id, "client-1");
+        assert_eq!(parsed.scopes, vec!["openid", "offline_access"]);
+    }
 }
