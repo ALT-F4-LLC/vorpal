@@ -107,14 +107,22 @@ interface OIDCDiscovery {
  * Mirrors `refreshAccessToken` in Go and `refresh_access_token` in Rust:
  * 1. Discover the token endpoint via `<issuer>/.well-known/openid-configuration`
  * 2. POST a `grant_type=refresh_token` form to the token endpoint
- * 3. Return the new access token, expiry, and issued-at timestamp
+ * 3. Return the new access token, expiry, issued-at timestamp, and any
+ *    rotated refresh token (some IdPs, e.g. Zitadel, rotate by default)
+ *
+ * @internal Exported for unit tests only; not part of the public SDK surface.
  */
-async function refreshAccessToken(
+export async function refreshAccessToken(
   audience: string | undefined,
   clientId: string,
   issuer: string,
   refreshToken: string,
-): Promise<{ accessToken: string; expiresIn: number; issuedAt: number }> {
+): Promise<{
+  accessToken: string;
+  expiresIn: number;
+  issuedAt: number;
+  refreshToken?: string;
+}> {
   // Discover token endpoint
   const discoveryUrl = `${issuer}/.well-known/openid-configuration`;
   const discoveryResp = await fetch(discoveryUrl);
@@ -152,15 +160,24 @@ async function refreshAccessToken(
   const tokenResult = (await tokenResp.json()) as {
     access_token: string;
     expires_in?: number;
+    refresh_token?: string;
   };
 
   const expiresIn = tokenResult.expires_in ?? 3600; // default 1 hour
   const issuedAt = Math.floor(Date.now() / 1000);
 
+  // IdPs that rotate refresh tokens (e.g., Zitadel) return a new one here.
+  // Pass it back to the caller so the on-disk credential can be updated.
+  const rotatedRefreshToken =
+    typeof tokenResult.refresh_token === "string" && tokenResult.refresh_token.length > 0
+      ? tokenResult.refresh_token
+      : undefined;
+
   return {
     accessToken: tokenResult.access_token,
     expiresIn,
     issuedAt,
+    refreshToken: rotatedRefreshToken,
   };
 }
 
@@ -172,15 +189,20 @@ async function refreshAccessToken(
  * unauthenticated requests), or throws on unrecoverable errors.
  *
  * Matches Rust `client_auth_header()` and Go `ClientAuthHeader()`.
+ *
+ * @internal Exported for unit tests only; not part of the public SDK surface.
  */
-async function clientAuthHeader(registry: string): Promise<string | null> {
+export async function clientAuthHeader(
+  registry: string,
+  credentialsPath: string = VORPAL_CREDENTIALS_PATH,
+): Promise<string | null> {
   // Check if credentials file exists
-  if (!existsSync(VORPAL_CREDENTIALS_PATH)) {
+  if (!existsSync(credentialsPath)) {
     return null;
   }
 
   // Read and parse credentials
-  const credentialsData = readFileSync(VORPAL_CREDENTIALS_PATH, "utf-8");
+  const credentialsData = readFileSync(credentialsPath, "utf-8");
   const credentials: VorpalCredentials = JSON.parse(credentialsData);
 
   // Lookup registry -> issuer mapping
@@ -219,10 +241,13 @@ async function clientAuthHeader(registry: string): Promise<string | null> {
     issuerCreds.access_token = refreshed.accessToken;
     issuerCreds.expires_in = refreshed.expiresIn;
     issuerCreds.issued_at = refreshed.issuedAt;
+    if (refreshed.refreshToken) {
+      issuerCreds.refresh_token = refreshed.refreshToken;
+    }
 
     // Save updated credentials to disk (matching Go/Rust behavior)
     writeFileSync(
-      VORPAL_CREDENTIALS_PATH,
+      credentialsPath,
       JSON.stringify(credentials, null, 2),
       { mode: 0o600 },
     );

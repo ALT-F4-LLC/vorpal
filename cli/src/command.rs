@@ -13,8 +13,11 @@ use oauth2::{
 };
 use path_clean::PathClean;
 use rustls::crypto::ring;
-use std::{collections::BTreeMap, env::current_dir, path::PathBuf, process::exit};
-use tokio::{fs::write, time::sleep};
+use std::{
+    collections::BTreeMap, env::current_dir, os::unix::fs::OpenOptionsExt, path::PathBuf,
+    process::exit,
+};
+use tokio::{fs::OpenOptions, io::AsyncWriteExt, time::sleep};
 use tracing::{error, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
 use vorpal_sdk::{
@@ -671,7 +674,21 @@ pub async fn run() -> Result<()> {
             let credentials_json = serde_json::to_string_pretty(&credentials)?;
             let credentials_path = get_key_credentials_path();
 
-            write(&credentials_path, credentials_json.as_bytes()).await?;
+            // Enforce mode 0o600 on file create so the credentials are not
+            // born world-readable on a default-umask (022) system. This is
+            // the file-birth point — `OpenOptions::mode()` only applies when
+            // the file is created, so getting it right here is load-bearing.
+            let mut credentials_file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&credentials_path)
+                .await?;
+            credentials_file
+                .write_all(credentials_json.as_bytes())
+                .await?;
+            credentials_file.flush().await?;
 
             Ok(())
         }

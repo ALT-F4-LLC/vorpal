@@ -114,19 +114,21 @@ func (s *ConfigServer) GetArtifacts(ctx context.Context, request *artifact.Artif
 	return response, nil
 }
 
-// refreshAccessToken refreshes an expired access token using the refresh token
-func refreshAccessToken(audience *string, clientId, issuer, refreshToken string) (string, int64, int64, error) {
+// refreshAccessToken refreshes an expired access token using the refresh token.
+// Returns the new access token, its expires_in (seconds), its issued-at timestamp,
+// and an optional rotated refresh token (empty string when the IdP did not rotate).
+func refreshAccessToken(audience *string, clientId, issuer, refreshToken string) (string, int64, int64, string, error) {
 	// Discover token endpoint
 	discoveryURL := fmt.Sprintf("%s/.well-known/openid-configuration", issuer)
 	resp, err := http.Get(discoveryURL)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("failed to fetch OIDC discovery: %w", err)
+		return "", 0, 0, "", fmt.Errorf("failed to fetch OIDC discovery: %w", err)
 	}
 	defer resp.Body.Close()
 
 	var discovery OIDCDiscovery
 	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil {
-		return "", 0, 0, fmt.Errorf("failed to parse OIDC discovery: %w", err)
+		return "", 0, 0, "", fmt.Errorf("failed to parse OIDC discovery: %w", err)
 	}
 
 	// Build refresh token request
@@ -140,20 +142,21 @@ func refreshAccessToken(audience *string, clientId, issuer, refreshToken string)
 
 	tokenResp, err := http.PostForm(discovery.TokenEndpoint, data)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("failed to refresh token: %w", err)
+		return "", 0, 0, "", fmt.Errorf("failed to refresh token: %w", err)
 	}
 	defer tokenResp.Body.Close()
 
 	if tokenResp.StatusCode != http.StatusOK {
-		return "", 0, 0, fmt.Errorf("token refresh failed with status: %d", tokenResp.StatusCode)
+		return "", 0, 0, "", fmt.Errorf("token refresh failed with status: %d", tokenResp.StatusCode)
 	}
 
 	var tokenResult struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int64  `json:"expires_in"`
+		AccessToken  string `json:"access_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
-		return "", 0, 0, fmt.Errorf("failed to parse token response: %w", err)
+		return "", 0, 0, "", fmt.Errorf("failed to parse token response: %w", err)
 	}
 
 	expiresIn := tokenResult.ExpiresIn
@@ -163,7 +166,7 @@ func refreshAccessToken(audience *string, clientId, issuer, refreshToken string)
 
 	issuedAt := time.Now().Unix()
 
-	return tokenResult.AccessToken, expiresIn, issuedAt, nil
+	return tokenResult.AccessToken, expiresIn, issuedAt, tokenResult.RefreshToken, nil
 }
 
 // ClientAuthHeader retrieves the authorization header for a given registry.
@@ -213,7 +216,7 @@ func ClientAuthHeader(registry string) (string, error) {
 			return "", fmt.Errorf("access token expired and no refresh token available. Please run: vorpal login --issuer %s", registryIssuer)
 		}
 
-		newToken, newExpires, newIssuedAt, err := refreshAccessToken(
+		newToken, newExpires, newIssuedAt, newRefreshToken, err := refreshAccessToken(
 			issuerCredentials.Audience,
 			issuerCredentials.ClientId,
 			registryIssuer,
@@ -227,6 +230,12 @@ func ClientAuthHeader(registry string) (string, error) {
 		issuerCredentials.AccessToken = newToken
 		issuerCredentials.ExpiresIn = newExpires
 		issuerCredentials.IssuedAt = newIssuedAt
+		// Persist rotated refresh token when the IdP returned one;
+		// leave the existing value untouched when omitted (some IdPs
+		// do not rotate and reuse the original refresh token).
+		if newRefreshToken != "" {
+			issuerCredentials.RefreshToken = newRefreshToken
+		}
 		credentials.Issuer[registryIssuer] = issuerCredentials
 
 		// Save updated credentials

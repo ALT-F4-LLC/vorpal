@@ -2,6 +2,9 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -264,6 +267,178 @@ func TestClientAuthHeaderMultipleRegistries(t *testing.T) {
 	}
 	if header2 != "Bearer token-two" {
 		t.Fatalf("expected 'Bearer token-two', got %q", header2)
+	}
+}
+
+// newOIDCRefreshTestServer returns an httptest server that serves an OIDC
+// discovery document at /.well-known/openid-configuration and a token endpoint
+// at /token returning the supplied JSON body. The server's URL is suitable to
+// pass as the issuer argument to refreshAccessToken.
+func newOIDCRefreshTestServer(t *testing.T, tokenResponseBody string) *httptest.Server {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	var server *httptest.Server
+
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"token_endpoint": %q}`, server.URL+"/token")
+	})
+
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if got := r.Form.Get("grant_type"); got != "refresh_token" {
+			http.Error(w, fmt.Sprintf("unexpected grant_type %q", got), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, tokenResponseBody)
+	})
+
+	server = httptest.NewServer(mux)
+	return server
+}
+
+func TestClientAuthHeaderRefreshPersistsRotatedToken(t *testing.T) {
+	// Token endpoint returns a NEW refresh_token alongside the access token.
+	tokenBody := `{
+		"access_token": "new-access-token",
+		"expires_in": 3600,
+		"refresh_token": "new-refresh-token-rotated"
+	}`
+	server := newOIDCRefreshTestServer(t, tokenBody)
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	credPath := filepath.Join(tempDir, "credentials.json")
+
+	// IssuedAt set far enough in the past that the 5-minute refresh buffer triggers.
+	expiredAt := time.Now().Unix() - 7200
+	credentials := VorpalCredentials{
+		Issuer: map[string]VorpalCredentialsContent{
+			server.URL: {
+				AccessToken:  "old-access-token",
+				ClientId:     "test-client-id",
+				ExpiresIn:    3600,
+				IssuedAt:     expiredAt,
+				RefreshToken: "old-refresh-token",
+				Scopes:       []string{"read", "write"},
+			},
+		},
+		Registry: map[string]string{
+			"https://registry.example.com": server.URL,
+		},
+	}
+
+	credData, err := json.Marshal(credentials)
+	if err != nil {
+		t.Fatalf("failed to marshal credentials: %v", err)
+	}
+	if err := os.WriteFile(credPath, credData, 0644); err != nil {
+		t.Fatalf("failed to write credentials file: %v", err)
+	}
+
+	getKeyCredentialsPathFunc = mockGetKeyCredentialsPath(credPath)
+	defer func() { getKeyCredentialsPathFunc = originalGetKeyCredentialsPathFunc }()
+
+	header, err := ClientAuthHeader("https://registry.example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if expected := "Bearer new-access-token"; header != expected {
+		t.Fatalf("expected header %q, got %q", expected, header)
+	}
+
+	// Read back the persisted credentials and verify rotation took effect.
+	persistedData, err := os.ReadFile(credPath)
+	if err != nil {
+		t.Fatalf("failed to read persisted credentials: %v", err)
+	}
+	var persisted VorpalCredentials
+	if err := json.Unmarshal(persistedData, &persisted); err != nil {
+		t.Fatalf("failed to parse persisted credentials: %v", err)
+	}
+
+	got, ok := persisted.Issuer[server.URL]
+	if !ok {
+		t.Fatalf("issuer %q missing from persisted credentials", server.URL)
+	}
+	if got.AccessToken != "new-access-token" {
+		t.Errorf("expected access_token rewritten, got %q", got.AccessToken)
+	}
+	if got.RefreshToken != "new-refresh-token-rotated" {
+		t.Errorf("expected refresh_token rotated to 'new-refresh-token-rotated', got %q", got.RefreshToken)
+	}
+	if got.ClientId != "test-client-id" {
+		t.Errorf("client_id should be preserved, got %q", got.ClientId)
+	}
+	if len(got.Scopes) != 2 || got.Scopes[0] != "read" || got.Scopes[1] != "write" {
+		t.Errorf("scopes should be preserved, got %v", got.Scopes)
+	}
+}
+
+func TestClientAuthHeaderRefreshPreservesRefreshTokenWhenOmitted(t *testing.T) {
+	// Token endpoint returns NO refresh_token (IdP did not rotate).
+	tokenBody := `{
+		"access_token": "new-access-token",
+		"expires_in": 3600
+	}`
+	server := newOIDCRefreshTestServer(t, tokenBody)
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	credPath := filepath.Join(tempDir, "credentials.json")
+
+	expiredAt := time.Now().Unix() - 7200
+	credentials := VorpalCredentials{
+		Issuer: map[string]VorpalCredentialsContent{
+			server.URL: {
+				AccessToken:  "old-access-token",
+				ClientId:     "test-client-id",
+				ExpiresIn:    3600,
+				IssuedAt:     expiredAt,
+				RefreshToken: "original-refresh-token",
+				Scopes:       []string{"read"},
+			},
+		},
+		Registry: map[string]string{
+			"https://registry.example.com": server.URL,
+		},
+	}
+
+	credData, err := json.Marshal(credentials)
+	if err != nil {
+		t.Fatalf("failed to marshal credentials: %v", err)
+	}
+	if err := os.WriteFile(credPath, credData, 0644); err != nil {
+		t.Fatalf("failed to write credentials file: %v", err)
+	}
+
+	getKeyCredentialsPathFunc = mockGetKeyCredentialsPath(credPath)
+	defer func() { getKeyCredentialsPathFunc = originalGetKeyCredentialsPathFunc }()
+
+	if _, err := ClientAuthHeader("https://registry.example.com"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	persistedData, err := os.ReadFile(credPath)
+	if err != nil {
+		t.Fatalf("failed to read persisted credentials: %v", err)
+	}
+	var persisted VorpalCredentials
+	if err := json.Unmarshal(persistedData, &persisted); err != nil {
+		t.Fatalf("failed to parse persisted credentials: %v", err)
+	}
+
+	got := persisted.Issuer[server.URL]
+	if got.RefreshToken != "original-refresh-token" {
+		t.Fatalf("expected refresh_token preserved when IdP omits rotation, got %q", got.RefreshToken)
+	}
+	if got.AccessToken != "new-access-token" {
+		t.Errorf("expected access_token rewritten, got %q", got.AccessToken)
 	}
 }
 
