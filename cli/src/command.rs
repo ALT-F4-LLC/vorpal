@@ -13,10 +13,7 @@ use oauth2::{
 };
 use path_clean::PathClean;
 use rustls::crypto::ring;
-use std::{
-    collections::BTreeMap, env::current_dir, os::unix::fs::OpenOptionsExt, path::PathBuf,
-    process::exit,
-};
+use std::{collections::BTreeMap, env::current_dir, path::PathBuf, process::exit};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt, time::sleep};
 use tracing::{error, subscriber, Level};
 use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};

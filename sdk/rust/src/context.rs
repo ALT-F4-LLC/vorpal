@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
     collections::{BTreeMap, HashMap},
-    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 use tokio::{
@@ -977,8 +976,7 @@ mod tests {
         );
 
         let json = serde_json::to_string(&creds).expect("serialize");
-        let parsed: VorpalCredentialsContent =
-            serde_json::from_str(&json).expect("deserialize");
+        let parsed: VorpalCredentialsContent = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(parsed.access_token, "new-access");
         assert_eq!(parsed.refresh_token, "rotated-refresh");
