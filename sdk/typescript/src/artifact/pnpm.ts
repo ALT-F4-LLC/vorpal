@@ -51,7 +51,7 @@ export class Pnpm {
 
     const source = new ArtifactSource(name, sourcePath).build();
 
-    const sourceFile = sourceTarget.startsWith("macos")
+    const sourceFile = sourceTarget === "macos-x64"
       ? `pnpm-${sourceVersion}-${sourceTarget}`
       : `pnpm-${sourceTarget}`;
 

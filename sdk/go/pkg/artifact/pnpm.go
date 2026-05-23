@@ -2,7 +2,6 @@ package artifact
 
 import (
 	"fmt"
-	"strings"
 
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
@@ -31,7 +30,7 @@ func Pnpm(context *config.ConfigContext) (*string, error) {
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	var sourceFile string
-	if strings.HasPrefix(sourceTarget, "macos") {
+	if sourceTarget == "macos-x64" {
 		sourceFile = fmt.Sprintf("pnpm-%s-%s", sourceVersion, sourceTarget)
 	} else {
 		sourceFile = fmt.Sprintf("pnpm-%s", sourceTarget)
