@@ -35,7 +35,7 @@ impl Pnpm {
 
         let step_script = formatdoc! {"
             mkdir -p \"$VORPAL_OUTPUT/bin\"
-            cp -p \"./source/{name}/pnpm-{source_target}\" \"$VORPAL_OUTPUT/bin/pnpm\"
+            cp -p \"./source/{name}/pnpm-{source_version}-{source_target}\" \"$VORPAL_OUTPUT/bin/pnpm\"
             chmod +x \"$VORPAL_OUTPUT/bin/pnpm\""
         };
 

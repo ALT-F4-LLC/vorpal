@@ -30,8 +30,8 @@ func Pnpm(context *config.ConfigContext) (*string, error) {
 	source := NewArtifactSource(name, sourcePath).Build()
 
 	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT/bin"
-cp -p "./source/%s/pnpm-%s" "$VORPAL_OUTPUT/bin/pnpm"
-chmod +x "$VORPAL_OUTPUT/bin/pnpm"`, name, sourceTarget)
+cp -p "./source/%s/pnpm-%s-%s" "$VORPAL_OUTPUT/bin/pnpm"
+chmod +x "$VORPAL_OUTPUT/bin/pnpm"`, name, sourceVersion, sourceTarget)
 
 	step, err := Shell(context, []*string{}, []string{}, stepScript, nil)
 	if err != nil {
