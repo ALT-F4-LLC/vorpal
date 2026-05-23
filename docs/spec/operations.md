@@ -203,7 +203,7 @@ curl -fsSL https://raw.githubusercontent.com/ALT-F4-LLC/vorpal/main/script/insta
 
 **Features:**
 - Platform detection (macOS/Linux, x86_64/aarch64)
-- Version selection via `VORPAL_VERSION` env var (default: `nightly`)
+- Version selection via `VORPAL_VERSION` env var (default: `0.2.2`)
 - Downloads pre-built binaries from GitHub Releases
 - Upgrade detection (preserves existing installation data)
 - Interactive/non-interactive modes (`VORPAL_NONINTERACTIVE=1`, `CI=true`, `-y` flag)

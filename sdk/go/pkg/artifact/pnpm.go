@@ -2,6 +2,7 @@ package artifact
 
 import (
 	"fmt"
+	"strings"
 
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
@@ -29,9 +30,16 @@ func Pnpm(context *config.ConfigContext) (*string, error) {
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/pnpm-%s-%s", sourceVersion, sourceTarget)
 	source := NewArtifactSource(name, sourcePath).Build()
 
+	var sourceFile string
+	if strings.HasPrefix(sourceTarget, "macos") {
+		sourceFile = fmt.Sprintf("pnpm-%s-%s", sourceVersion, sourceTarget)
+	} else {
+		sourceFile = fmt.Sprintf("pnpm-%s", sourceTarget)
+	}
+
 	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT/bin"
-cp -p "./source/%s/pnpm-%s-%s" "$VORPAL_OUTPUT/bin/pnpm"
-chmod +x "$VORPAL_OUTPUT/bin/pnpm"`, name, sourceVersion, sourceTarget)
+cp -p "./source/%s/%s" "$VORPAL_OUTPUT/bin/pnpm"
+chmod +x "$VORPAL_OUTPUT/bin/pnpm"`, name, sourceFile)
 
 	step, err := Shell(context, []*string{}, []string{}, stepScript, nil)
 	if err != nil {

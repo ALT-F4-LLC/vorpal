@@ -33,9 +33,15 @@ impl Pnpm {
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 
+        let source_file = if source_target.starts_with("macos") {
+            format!("pnpm-{source_version}-{source_target}")
+        } else {
+            format!("pnpm-{source_target}")
+        };
+
         let step_script = formatdoc! {"
             mkdir -p \"$VORPAL_OUTPUT/bin\"
-            cp -p \"./source/{name}/pnpm-{source_version}-{source_target}\" \"$VORPAL_OUTPUT/bin/pnpm\"
+            cp -p \"./source/{name}/{source_file}\" \"$VORPAL_OUTPUT/bin/pnpm\"
             chmod +x \"$VORPAL_OUTPUT/bin/pnpm\""
         };
 
