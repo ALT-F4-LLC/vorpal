@@ -52,6 +52,8 @@ export class Pnpm {
     const source = new ArtifactSource(name, sourcePath).build();
 
     const stepScript = `mkdir -p "$VORPAL_OUTPUT/bin"
+echo "[pnpm-debug] target=${sourceTarget} expected=./source/${name}/pnpm-${sourceTarget}"
+ls -la "./source/${name}/" || true
 cp -p "./source/${name}/pnpm-${sourceTarget}" "$VORPAL_OUTPUT/bin/pnpm"
 chmod +x "$VORPAL_OUTPUT/bin/pnpm"`;
 
