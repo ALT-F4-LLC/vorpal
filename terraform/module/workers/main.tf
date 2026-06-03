@@ -103,7 +103,7 @@ module "vpc" {
 
 module "sg_ssh" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "5.3.1"
+  version = "6.0.0"
 
   description         = "Allow SSH"
   egress_rules        = ["all-all"]
