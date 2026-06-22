@@ -31,11 +31,7 @@ impl Pnpm {
         let source_path =
             format!("https://sdk.vorpal.build/source/pnpm-{source_version}-{source_target}");
 
-        // macos-arm64 ships with the version in the filename; all other targets do not.
-        let source_filename = match system {
-            Aarch64Darwin => format!("pnpm-{source_version}-{source_target}"),
-            _ => format!("pnpm-{source_target}"),
-        };
+        let source_filename = format!("pnpm-{source_version}-{source_target}");
 
         let source = ArtifactSource::new(name, source_path.as_str()).build();
 

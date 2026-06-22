@@ -29,11 +29,7 @@ func Pnpm(context *config.ConfigContext) (*string, error) {
 	sourcePath := fmt.Sprintf("https://sdk.vorpal.build/source/pnpm-%s-%s", sourceVersion, sourceTarget)
 	source := NewArtifactSource(name, sourcePath).Build()
 
-	// macos-arm64 ships with the version in the filename; all other targets do not.
-	sourceFilename := fmt.Sprintf("pnpm-%s", sourceTarget)
-	if system == api.ArtifactSystem_AARCH64_DARWIN {
-		sourceFilename = fmt.Sprintf("pnpm-%s-%s", sourceVersion, sourceTarget)
-	}
+	sourceFilename := fmt.Sprintf("pnpm-%s-%s", sourceVersion, sourceTarget)
 
 	stepScript := fmt.Sprintf(`mkdir -p "$VORPAL_OUTPUT/bin"
 cp -p "./source/%s/%s" "$VORPAL_OUTPUT/bin/pnpm"
