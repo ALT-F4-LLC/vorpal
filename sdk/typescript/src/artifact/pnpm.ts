@@ -51,8 +51,14 @@ export class Pnpm {
 
     const source = new ArtifactSource(name, sourcePath).build();
 
+    // macos-arm64 ships with the version in the filename; all other targets do not.
+    const sourceFilename =
+      system === ArtifactSystem.AARCH64_DARWIN
+        ? `pnpm-${sourceVersion}-${sourceTarget}`
+        : `pnpm-${sourceTarget}`;
+
     const stepScript = `mkdir -p "$VORPAL_OUTPUT/bin"
-cp -p "./source/${name}/pnpm-${sourceTarget}" "$VORPAL_OUTPUT/bin/pnpm"
+cp -p "./source/${name}/${sourceFilename}" "$VORPAL_OUTPUT/bin/pnpm"
 chmod +x "$VORPAL_OUTPUT/bin/pnpm"`;
 
     const steps = [await shell(context, [], [], stepScript, [])];
