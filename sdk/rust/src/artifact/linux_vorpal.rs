@@ -229,6 +229,7 @@ impl LinuxVorpal {
         );
 
         let step_stage_05_script = stage_05::script(
+            curl_cacert_version,
             curl_version,
             libidn2_version,
             libpsl_version,

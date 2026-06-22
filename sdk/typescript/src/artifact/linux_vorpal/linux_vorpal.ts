@@ -174,6 +174,7 @@ export async function linuxVorpal(ctx: ConfigContext): Promise<string> {
   );
 
   const stepStage05Script = stage05(
+    curlCacertVersion,
     curlVersion,
     libidn2Version,
     libpslVersion,

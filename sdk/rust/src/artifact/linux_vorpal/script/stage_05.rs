@@ -1,6 +1,7 @@
 use indoc::formatdoc;
 
 pub fn script(
+    curl_cacert_version: &str,
     curl_version: &str,
     libidn2_version: &str,
     libpsl_version: &str,
@@ -63,7 +64,7 @@ pub fn script(
 
         ## Build CA certificates
 
-        cp -p $VORPAL_SOURCE/curl-cacert/cacert.pem /etc/ssl/certs/ca-certificates.crt
+        cp -p $VORPAL_SOURCE/curl-cacert/cacert-{curl_cacert_version}.pem /etc/ssl/certs/ca-certificates.crt
 
         ## Build curl
 

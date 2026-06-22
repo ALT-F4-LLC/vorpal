@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func linuxVorpalStage05(curlVersion string, libidn2Version string, libpslVersion string, libunistringVersion string, unzipVersion string) string {
+func linuxVorpalStage05(curlCacertVersion string, curlVersion string, libidn2Version string, libpslVersion string, libunistringVersion string, unzipVersion string) string {
 	return fmt.Sprintf(`## Setup environment
 
 export MAKEFLAGS="-j$(nproc)"
@@ -58,7 +58,7 @@ rm -rf $VORPAL_SOURCE/libpsl
 
 ## Build CA certificates
 
-cp -p $VORPAL_SOURCE/curl-cacert/cacert.pem /etc/ssl/certs/ca-certificates.crt
+cp -p $VORPAL_SOURCE/curl-cacert/cacert-%s.pem /etc/ssl/certs/ca-certificates.crt
 
 ## Build curl
 
@@ -115,5 +115,5 @@ rm -rf $VORPAL_SOURCE/unzip
 
 find /usr/lib /usr/libexec -name \*.la -delete
 
-find /usr -depth -name $VORPAL_TARGET\* | xargs rm -rf`, libunistringVersion, libunistringVersion, libidn2Version, libidn2Version, libpslVersion, libpslVersion, curlVersion, curlVersion, strings.ReplaceAll(unzipVersion, ".", ""))
+find /usr -depth -name $VORPAL_TARGET\* | xargs rm -rf`, libunistringVersion, libunistringVersion, libidn2Version, libidn2Version, libpslVersion, libpslVersion, curlCacertVersion, curlVersion, curlVersion, strings.ReplaceAll(unzipVersion, ".", ""))
 }

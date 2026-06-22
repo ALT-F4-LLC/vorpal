@@ -1136,6 +1136,7 @@ fn generate_go_script_calls(versions: &[VersionConst]) -> String {
     // Stage 05 script
     out.push_str("\tstepStage05Script := linuxVorpalStage05(\n");
     for param in &[
+        "curl_cacert_version",
         "curl_version",
         "libidn2_version",
         "libpsl_version",
@@ -1431,6 +1432,7 @@ fn generate_ts_script_calls(_versions: &[VersionConst]) -> String {
 
     out.push_str("  const stepStage05Script = stage05(\n");
     for param in &[
+        "curl_cacert_version",
         "curl_version",
         "libidn2_version",
         "libpsl_version",

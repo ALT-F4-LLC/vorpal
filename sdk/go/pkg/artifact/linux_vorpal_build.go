@@ -148,6 +148,7 @@ func linuxVorpalBuild(ctx *config.ConfigContext) (*string, error) {
 	)
 
 	stepStage05Script := linuxVorpalStage05(
+		curlCacertVersion,
 		curlVersion,
 		libidn2Version,
 		libpslVersion,
