@@ -23,11 +23,11 @@ const systems: ArtifactSystem[] = [
 await new TypeScriptDevelopmentEnvironment("example-shell", systems)
     .build(ctx);
 
-// Define application artifact 
+// Define application artifact
 
 await new TypeScript("example", systems)
     .withEntrypoint("src/main.ts")
-    .withIncludes(["src", "package.json", "tsconfig.json", "bun.lock"])
+    .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
     .build(ctx);
 
 // Run context to build

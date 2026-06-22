@@ -30,7 +30,7 @@ func main() {
 		log.Fatalf("error building development environment: %v", err)
 	}
 
-	// Define application artifact 
+	// Define application artifact
 
 	_, err = language.NewGo("example", systems).
 		WithBuildDirectory("cmd/example").
