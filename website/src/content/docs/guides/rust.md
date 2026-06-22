@@ -24,7 +24,7 @@ name = "vorpal"
 path = "src/vorpal.rs"
 
 [dependencies]
-vorpal-sdk = { version = "0.2.1" }
+vorpal-sdk = { version = "0.2.2" }
 anyhow = "1"
 tokio = { features = ["rt-multi-thread"], version = "1" }
 ```

@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-06-22
+
+### Fixed
+
+- **linux-vorpal**: stage_05 hardcoded `cacert.pem` but the curl-cacert source
+  downloads `cacert-{version}.pem`, causing a "No such file or directory" error
+  at build time. Thread `curl_cacert_version` into stage_05 and reference the
+  versioned filename across the Rust source and Go/TS SDK codegen arrays.
+
+- **pnpm artifact**: correct source target paths in the pnpm artifact builder
+  across all three SDKs (Rust, Go, TypeScript).
+
+### Dependencies
+
+- Bump `jsonwebtoken` to v10.4.0 (#476)
+- Update `aws-sdk-rust` monorepo (#490)
+- Update `google.golang.org/grpc` to v1.81.1 (#481)
+- Update `rcgen` to v0.14.8 (#475)
+- Routine Cargo lockfile maintenance and minor Rust crate updates (`uuid`
+  v1.23.2 #495, `serde_json` v1.0.150 #494, `http` v1.4.1 #493, `filetime`
+  v0.2.29 #480)
+- Routine wrangler updates (v4.90.1 → v4.97.0, #471 #478 #479 #485 #487 #488 #496)
+- Routine tsx updates (v4.22.0 → v4.22.4, #477 #482 #483 #484 #492)
+- Update `@types/bun` to v1.3.14 (#473)
+
 ## [0.2.1] - 2026-05-10
 
 ### Fixed
