@@ -161,6 +161,14 @@ digest = "a7abdad032ae6c318dbb4c9b444d9031ab34d1308700005c4bd5eb5156cad523"
 platform = "x86_64-linux"
 
 [[sources]]
+name = "cpython"
+path = "https://sdk.vorpal.build/source/cpython-3.13.14-aarch64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "7193a82cc223204f5d520df8577737851d51eff07763a416e579c5253985362f"
+platform = "aarch64-darwin"
+
+[[sources]]
 name = "crane"
 path = "https://sdk.vorpal.build/source/crane-v0.21.1.tar.gz"
 includes = []
@@ -1295,6 +1303,14 @@ includes = []
 excludes = []
 digest = "1f10bfbd4ac7b3e8058fe837b0ed9274d2b3f603dc2d7cbc3d325dc612b06aaa"
 platform = "x86_64-linux"
+
+[[sources]]
+name = "uv"
+path = "https://sdk.vorpal.build/source/uv-0.10.11-aarch64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "4424c54e6a6c23457dfc8121089748d0572c7a7aaded6feb415309bfc39ef840"
+platform = "aarch64-darwin"
 
 [[sources]]
 name = "xz"

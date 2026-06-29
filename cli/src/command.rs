@@ -1,6 +1,6 @@
 use crate::command::{
     config::{
-        VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourceRust,
+        VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourcePython, VorpalConfigSourceRust,
         VorpalConfigSourceTypeScript,
     },
     store::paths::get_key_credentials_path,
@@ -401,6 +401,8 @@ pub async fn run() -> Result<()> {
             let mut config_environments = Vec::new();
             let mut config_source_go_directory = None;
             let mut config_source_includes = Vec::new();
+            let mut config_source_python_directory = None;
+            let mut config_source_python_entrypoint = None;
             let mut config_source_rust_bin = None;
             let mut config_source_rust_packages = None;
             let mut config_source_script = None;
@@ -425,6 +427,20 @@ pub async fn run() -> Result<()> {
                 if let Some(includes) = &config_source.includes {
                     if !includes.is_empty() {
                         config_source_includes = includes.clone();
+                    }
+                }
+
+                if let Some(config_source_python) = &config_source.python {
+                    if let Some(directory) = &config_source_python.directory {
+                        if !directory.is_empty() {
+                            config_source_python_directory = Some(directory.clone());
+                        }
+                    }
+
+                    if let Some(entrypoint) = &config_source_python.entrypoint {
+                        if !entrypoint.is_empty() {
+                            config_source_python_entrypoint = Some(entrypoint.clone());
+                        }
                     }
                 }
 
@@ -501,6 +517,10 @@ pub async fn run() -> Result<()> {
                         directory: config_source_go_directory,
                     }),
                     includes: Some(config_source_includes),
+                    python: Some(VorpalConfigSourcePython {
+                        directory: config_source_python_directory,
+                        entrypoint: config_source_python_entrypoint,
+                    }),
                     rust: Some(VorpalConfigSourceRust {
                         bin: config_source_rust_bin,
                         packages: config_source_rust_packages,

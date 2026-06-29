@@ -5,7 +5,7 @@ use tokio::fs::{create_dir_all, write};
 use tracing::{info, warn};
 
 pub async fn run(name: &str, path: &Path) -> Result<()> {
-    let options: Vec<&str> = vec!["Go", "Rust", "TypeScript"];
+    let options: Vec<&str> = vec!["Go", "Python", "Rust", "TypeScript"];
 
     let answer: Result<&str, InquireError> =
         Select::new("Which language would you like to use?", options).prompt();
@@ -26,6 +26,21 @@ pub async fn run(name: &str, path: &Path) -> Result<()> {
                 template.insert("go.mod", include_str!("template/go/go.mod"));
                 template.insert("go.sum", include_str!("template/go/go.sum"));
                 template.insert("Vorpal.toml", include_str!("template/go/Vorpal.toml"));
+            }
+
+            "Python" => {
+                template.insert(
+                    "pyproject.toml",
+                    include_str!("template/python/pyproject.toml"),
+                );
+                template.insert("uv.lock", include_str!("template/python/uv.lock"));
+                template.insert("Vorpal.toml", include_str!("template/python/Vorpal.toml"));
+                template.insert("src/main.py", include_str!("template/python/src/main.py"));
+                template.insert(
+                    "src/vorpal.py",
+                    include_str!("template/python/src/vorpal.py"),
+                );
+                template.insert(".gitignore", include_str!("template/python/.gitignore"));
             }
 
             "Rust" => {

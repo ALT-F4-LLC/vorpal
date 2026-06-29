@@ -1,0 +1,12 @@
+language = "python"
+
+[source]
+includes = [
+    "pyproject.toml",
+    "uv.lock",
+    "src",
+]
+
+[source.python]
+directory = "."
+entrypoint = "src/vorpal.py"

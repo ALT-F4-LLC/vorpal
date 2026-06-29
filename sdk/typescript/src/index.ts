@@ -22,6 +22,12 @@ export {
 // Go artifact helpers (distribution + shared source helpers)
 export { GoBin, sourceTools as goSourceTools } from "./artifact/go.js";
 
+// CPython interpreter artifact
+export { Cpython, DEFAULT_PYTHON_VERSION, cpythonTarget } from "./artifact/cpython.js";
+
+// uv toolchain artifact
+export { Uv, DEFAULT_UV_VERSION } from "./artifact/uv.js";
+
 // Node.js artifact
 export { NodeJS } from "./artifact/nodejs.js";
 
@@ -36,11 +42,13 @@ export { bash, bwrap, shell, docker } from "./artifact/step.js";
 
 // Language builders
 export { Go } from "./artifact/language/go.js";
+export { Python } from "./artifact/language/python.js";
 export { Rust } from "./artifact/language/rust.js";
 export { TypeScript } from "./artifact/language/typescript.js";
 
 // Development environment builders
 export { GoDevelopmentEnvironment } from "./artifact/language/go.js";
+export { PythonDevelopmentEnvironment } from "./artifact/language/python.js";
 export { RustDevelopmentEnvironment } from "./artifact/language/rust.js";
 export { TypeScriptDevelopmentEnvironment } from "./artifact/language/typescript.js";
 

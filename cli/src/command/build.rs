@@ -29,7 +29,7 @@ use vorpal_sdk::{
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
-        language::{go::Go, rust::Rust, typescript::TypeScript},
+        language::{go::Go, python::Python, rust::Rust, typescript::TypeScript},
         protoc::Protoc,
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
@@ -471,6 +471,47 @@ pub async fn run(
             builder.build(&mut config_context).await?
         }
 
+        "python" => {
+            let entrypoint = config
+                .source
+                .as_ref()
+                .and_then(|s| s.python.as_ref())
+                .and_then(|p| p.entrypoint.as_ref())
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| format!("src/{}.py", config.name));
+
+            // Python projects are multi-file: include the package source tree, not just
+            // the single entrypoint (the one deliberate divergence from the TypeScript arm).
+            let mut includes = vec!["pyproject.toml", "uv.lock", "src"];
+
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                if !i.is_empty() {
+                    includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+                }
+            }
+
+            let mut builder = Python::new(&config.name, vec![config_system])
+                .with_entrypoint(&entrypoint)
+                .with_includes(includes);
+
+            if !config.environments.is_empty() {
+                builder = builder
+                    .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
+            }
+
+            let working_dir = config
+                .source
+                .as_ref()
+                .and_then(|s| s.python.as_ref())
+                .and_then(|p| p.directory.as_ref());
+
+            if let Some(directory) = working_dir {
+                builder = builder.with_working_dir(directory);
+            }
+
+            builder.build(&mut config_context).await?
+        }
+
         "typescript" => {
             let entrypoint = config
                 .source
@@ -519,9 +560,9 @@ pub async fn run(
         other => {
             bail!(
                 "Unsupported language '{}' in Vorpal.toml\n\n  \
-                 Supported languages are: go, rust, typescript\n\n  \
+                 Supported languages are: go, python, rust, typescript\n\n  \
                  To fix this, update the 'language' field in your Vorpal.toml:\n    \
-                 language = \"typescript\"  # or \"rust\" or \"go\"",
+                 language = \"typescript\"  # or \"python\", \"rust\", or \"go\"",
                 other
             );
         }
@@ -576,6 +617,11 @@ pub async fn run(
                 "\n\n  For TypeScript configs, this means the bun build --compile step\n  \
                              may have failed silently, or the binary was not placed in the\n  \
                              expected output location.\n\n  \
+                             Try rebuilding with --level debug to see the full build output."
+            }
+            "python" => {
+                "\n\n  For Python configs, this means the app-mode launcher was not\n  \
+                             written to the expected bin/ path during the build step.\n\n  \
                              Try rebuilding with --level debug to see the full build output."
             }
             _ => "",

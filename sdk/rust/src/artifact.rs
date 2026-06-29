@@ -5,6 +5,7 @@ use indoc::formatdoc;
 pub mod bun;
 pub mod cargo;
 pub mod clippy;
+pub mod cpython;
 pub mod crane;
 pub mod gh;
 pub mod git;
@@ -32,6 +33,7 @@ pub mod rustfmt;
 pub mod staticcheck;
 pub mod step;
 pub mod system;
+pub mod uv;
 
 pub struct Argument<'a> {
     pub name: &'a str,
