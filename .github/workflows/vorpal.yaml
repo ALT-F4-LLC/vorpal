@@ -301,6 +301,56 @@ jobs:
             exit 1
           fi
 
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal")
+          if [ "$ARTIFACT" != "$VORPAL_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_ARTIFACT"
+            exit 1
+          fi
+
+      - if: contains(matrix.runner, 'ubuntu')
+        run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-container-image")
+          if [ "$ARTIFACT" != "$VORPAL_CONTAINER_IMAGE_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_CONTAINER_IMAGE_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-job")
+          if [ "$ARTIFACT" != "$VORPAL_JOB_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_JOB_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-process")
+          if [ "$ARTIFACT" != "$VORPAL_PROCESS_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_PROCESS_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-shell")
+          if [ "$ARTIFACT" != "$VORPAL_SHELL_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_SHELL_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-user")
+          if [ "$ARTIFACT" != "$VORPAL_USER_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_USER_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-website")
+          if [ "$ARTIFACT" != "$VORPAL_WEBSITE_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_WEBSITE_ARTIFACT"
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v7
         with:
           name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
