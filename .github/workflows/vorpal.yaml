@@ -414,7 +414,6 @@ jobs:
     permissions:
       actions: read
       issues: write
-      pull-requests: read
     runs-on: ubuntu-latest
     steps:
       - name: Comment on PR lockfile drift
@@ -450,7 +449,11 @@ jobs:
               echo "Replace \`Vorpal.lock\` with that artifact, commit it, and re-push."
             } > "$body_file"
 
-            gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body-file "$body_file" \
+            gh api \
+              --method POST \
+              --silent \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -F "body=@${body_file}" \
               || echo "::warning::Unable to comment on the pull request; lockfile drift artifact ${artifact_name} was uploaded."
           done <<EOF
           $artifact_rows
