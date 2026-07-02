@@ -219,13 +219,13 @@ jobs:
         if: ${{ steps.prepare_lock.outputs.changed == 'true' }}
         uses: actions/upload-artifact@v7
         with:
-          name: vorpal-prepare-lock-${{ env.ARCH }}-${{ env.OS }}
+          name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
           path: Vorpal.lock
 
       - name: Fail on lockfile drift
         if: ${{ steps.prepare_lock.outputs.changed == 'true' }}
         run: |
-          echo "::error file=Vorpal.lock::vorpal prepare changed Vorpal.lock. Download the vorpal-prepare-lock-${ARCH}-${OS} artifact, replace Vorpal.lock, commit it, and re-push."
+          echo "::error file=Vorpal.lock::vorpal prepare changed Vorpal.lock. Download the vorpal-lock-${ARCH}-${OS} artifact, replace Vorpal.lock, commit it, and re-push."
           exit 1
 
       - run: |
@@ -407,11 +407,6 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
-          path: Vorpal.lock
-
   notify-lockfile-drift:
     needs:
       - test
@@ -432,7 +427,7 @@ jobs:
           if ! artifact_rows=$(gh api \
             "repos/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
             --paginate \
-            --jq '.artifacts[] | select(.name | startswith("vorpal-prepare-lock-")) | [.name, (.id | tostring)] | @tsv'); then
+            --jq '.artifacts[] | select(.name | startswith("vorpal-lock-")) | [.name, (.id | tostring)] | @tsv'); then
             echo "::warning::Unable to list lockfile drift artifacts."
             exit 0
           fi
@@ -446,7 +441,7 @@ jobs:
           while IFS=$'\t' read -r artifact_name artifact_id; do
             [ -n "$artifact_name" ] || continue
             artifact_url="https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts/${artifact_id}"
-            runner_name="${artifact_name#vorpal-prepare-lock-}"
+            runner_name="${artifact_name#vorpal-lock-}"
             {
               echo "Vorpal.lock changed during \`vorpal prepare\` on ${runner_name}."
               echo
