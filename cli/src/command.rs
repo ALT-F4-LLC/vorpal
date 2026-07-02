@@ -759,7 +759,9 @@ pub async fn run() -> Result<()> {
     // visible by default without lowering the general level.
     let subscriber = Registry::default()
         .with(fmt_layer.with_filter(LevelFilter::from_level(level)))
-        .with(H2ProtocolErrorRelay.with_filter(Targets::new().with_target("h2", LevelFilter::DEBUG)));
+        .with(
+            H2ProtocolErrorRelay.with_filter(Targets::new().with_target("h2", LevelFilter::DEBUG)),
+        );
 
     subscriber::set_global_default(subscriber).expect("setting default subscriber");
 

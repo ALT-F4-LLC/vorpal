@@ -304,12 +304,7 @@ mod tests {
         paths
             .iter()
             .filter(|p| p.is_file())
-            .map(|p| {
-                p.strip_prefix(root)
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned()
-            })
+            .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
             .collect()
     }
 
@@ -345,7 +340,8 @@ mod tests {
         let reversed = make_dir_with_files(&["charlie", "bravo", "alpha"]);
 
         let forward_paths = get_file_paths(&forward.path().to_path_buf(), vec![], vec![]).unwrap();
-        let reversed_paths = get_file_paths(&reversed.path().to_path_buf(), vec![], vec![]).unwrap();
+        let reversed_paths =
+            get_file_paths(&reversed.path().to_path_buf(), vec![], vec![]).unwrap();
 
         assert_eq!(
             file_basenames(forward.path(), &forward_paths),
