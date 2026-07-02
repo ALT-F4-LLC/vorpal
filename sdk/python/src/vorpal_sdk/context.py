@@ -167,15 +167,25 @@ def to_grpc_target(uri: str) -> str:
     return uri
 
 
-def _channel_options(target: str) -> list[tuple[str, str]]:
+def _channel_options(
+    target: str, credentials: grpc.ChannelCredentials | None
+) -> list[tuple[str, str]]:
     """grpcio channel options for ``target``.
 
-    For ``unix:`` targets grpcio derives the HTTP/2 ``:authority`` from the socket
-    path, percent-encoded (e.g. ``tmp%2Fvorpal.sock``), which a strict h2 server
-    (tonic) rejects as a malformed authority. Pin a valid authority so the request
-    is accepted; TLS/TCP targets keep their host-derived authority (needed for SNI).
+    For an insecure unix-socket channel grpcio derives the HTTP/2 ``:authority``
+    from the socket path, percent-encoded (e.g. ``tmp%2Fvorpal.sock``), which a
+    strict h2 server (tonic) rejects as a malformed authority. Pin a valid
+    authority so the request is accepted; TLS/TCP targets keep their host-derived
+    authority (needed for SNI).
+
+    The override is gated on ``credentials is None`` (an insecure channel), so a
+    TLS/secure channel can NEVER receive the localhost authority override — even
+    for a non-canonical ``unix:relative`` target that matches the loose ``unix:``
+    prefix but selects TLS credentials (via ``get_client_credentials``, which
+    keys on ``unix://``). Keying on the credential scheme rather than the target
+    prefix alone eliminates the string-matching ambiguity between the two checks.
     """
-    if target.startswith("unix:"):
+    if credentials is None and target.startswith("unix:"):
         return [("grpc.default_authority", "localhost")]
     return []
 
@@ -183,7 +193,7 @@ def _channel_options(target: str) -> list[tuple[str, str]]:
 def _create_channel(uri: str) -> grpc.Channel:
     target = to_grpc_target(uri)
     credentials = get_client_credentials(uri)
-    options = _channel_options(target)
+    options = _channel_options(target, credentials)
     if credentials is None:
         return grpc.insecure_channel(target, options=options)
     return grpc.secure_channel(target, credentials, options=options)

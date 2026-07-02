@@ -16,7 +16,12 @@ use rustls::crypto::ring;
 use std::{collections::BTreeMap, env::current_dir, path::PathBuf, process::exit};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt, time::sleep};
 use tracing::{error, subscriber, Level};
-use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
+use tracing_subscriber::{
+    filter::{LevelFilter, Targets},
+    fmt::writer::MakeWriterExt,
+    layer::{Context, SubscriberExt},
+    Layer, Registry,
+};
 use vorpal_sdk::{
     artifact::{get_default_address, system::get_system_default_str},
     context::{VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE},
@@ -278,6 +283,101 @@ pub enum Command {
     System(CommandSystem),
 }
 
+/// h2 resolves a malformed request (e.g. an invalid client `:authority`) by
+/// resetting just that stream with PROTOCOL_ERROR entirely inside the h2
+/// crate: `Streams::reset_on_recv_stream_err` swallows the reset into
+/// `Ok(())` before it ever reaches tonic/tower, so no service, interceptor,
+/// or layer in the request-handling stack observes it. The only trace is
+/// h2's own `tracing::debug!` ("malformed headers: ..." / "... PROTOCOL_ERROR
+/// -- ..."), invisible under the default `--level info`. This layer relays
+/// that debug event as a WARN so it's visible without `--level debug`,
+/// without touching h2's rejection behavior (DKT-32, diagnosed in DKT-28).
+struct H2ProtocolErrorRelay;
+
+struct H2MessageVisitor(String);
+
+impl tracing::field::Visit for H2MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = format!("{value:?}");
+        }
+    }
+}
+
+/// True when a `target`/`level`/`message` triple is h2's own signal for a
+/// stream it rejected with PROTOCOL_ERROR (malformed headers, or the
+/// `proto_err!`-shaped "stream/connection error PROTOCOL_ERROR -- ..." family).
+fn is_h2_protocol_error(target: &str, level: Level, message: &str) -> bool {
+    level == Level::DEBUG
+        && target.starts_with("h2")
+        && (message.contains("malformed headers") || message.contains("PROTOCOL_ERROR"))
+}
+
+impl<S: tracing::Subscriber> Layer<S> for H2ProtocolErrorRelay {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        let metadata = event.metadata();
+
+        let mut message = H2MessageVisitor(String::new());
+        event.record(&mut message);
+
+        if is_h2_protocol_error(metadata.target(), *metadata.level(), &message.0) {
+            tracing::warn!(target: "vorpal_cli::agent", "h2 rejected stream: {}", message.0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod h2_protocol_error_relay_tests {
+    use super::*;
+
+    #[test]
+    fn matches_malformed_authority_debug_event() {
+        assert!(is_h2_protocol_error(
+            "h2::server",
+            Level::DEBUG,
+            "malformed headers: malformed authority (\"bad::authority\"): invalid uri character",
+        ));
+    }
+
+    #[test]
+    fn matches_proto_err_shaped_debug_event() {
+        assert!(is_h2_protocol_error(
+            "h2::proto::streams::recv",
+            Level::DEBUG,
+            "stream error PROTOCOL_ERROR -- recv_headers: trailers frame was not EOS; stream=StreamId(1);",
+        ));
+    }
+
+    #[test]
+    fn ignores_non_h2_target() {
+        assert!(!is_h2_protocol_error(
+            "vorpal_cli::agent",
+            Level::DEBUG,
+            "malformed headers: malformed authority (...): invalid uri character",
+        ));
+    }
+
+    #[test]
+    fn ignores_non_debug_level() {
+        assert!(!is_h2_protocol_error(
+            "h2::server",
+            Level::TRACE,
+            "malformed headers: malformed authority (...): invalid uri character",
+        ));
+    }
+
+    #[test]
+    fn ignores_unrelated_h2_debug_event() {
+        // h2's server-push validation logs (convert_push_message) share the
+        // crate but are a different rejection class - not in scope for DKT-32.
+        assert!(!is_h2_protocol_error(
+            "h2::server",
+            Level::DEBUG,
+            "convert_push_message: method POST is not safe and cacheable",
+        ));
+    }
+}
+
 const VERSION_INFO: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (commit:",
@@ -310,17 +410,25 @@ pub async fn run() -> Result<()> {
     let Cli { command, level } = cli;
 
     let subscriber_writer = std::io::stderr.with_max_level(level);
-    let mut subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
+    let mut fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
         .with_writer(subscriber_writer)
         .without_time();
 
     if [Level::DEBUG, Level::TRACE].contains(&level) {
-        subscriber = subscriber.with_file(true).with_line_number(true);
+        fmt_layer = fmt_layer.with_file(true).with_line_number(true);
     }
 
-    let subscriber = subscriber.finish();
+    // Per-layer filtering: the main fmt layer stays at the user-selected
+    // `--level` (default info), while the h2 relay layer is scoped to the
+    // `h2` target at debug so only h2's own debug-level events are enabled -
+    // this keeps the process-global max level at `level` instead of raising
+    // it to DEBUG for every target. The relayed WARN it emits then flows back
+    // through fmt_layer's info-level filter like any other event, so it's
+    // visible by default without lowering the general level.
+    let subscriber = Registry::default()
+        .with(fmt_layer.with_filter(LevelFilter::from_level(level)))
+        .with(H2ProtocolErrorRelay.with_filter(Targets::new().with_target("h2", LevelFilter::DEBUG)));
 
     subscriber::set_global_default(subscriber).expect("setting default subscriber");
 

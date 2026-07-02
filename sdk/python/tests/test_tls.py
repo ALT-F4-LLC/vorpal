@@ -77,11 +77,59 @@ def test_to_grpc_target_conversions() -> None:
 
 def test_unix_target_pins_valid_authority() -> None:
     # grpcio would otherwise send a percent-encoded socket path as :authority,
-    # which strict h2 servers reject. Pin a valid authority for unix targets only.
-    assert ctx._channel_options("unix:///tmp/vorpal.sock") == [
+    # which strict h2 servers reject. Pin a valid authority for an insecure
+    # (credentials is None) unix target only.
+    assert ctx._channel_options("unix:///tmp/vorpal.sock", None) == [
         ("grpc.default_authority", "localhost")
     ]
-    assert ctx._channel_options("host:443") == []
+    assert ctx._channel_options("host:443", None) == []
+
+
+def test_unix_scheme_is_insecure_and_pins_authority() -> None:
+    # AC #2: the canonical unix scheme selects insecure (non-TLS) credentials
+    # AND its target receives the localhost authority override.
+    uri = "unix:///var/lib/vorpal/vorpal.sock"
+    credentials = ctx.get_client_credentials(uri)
+    target = ctx.to_grpc_target(uri)
+    assert credentials is None  # insecure, not TLS
+    assert target.startswith("unix:")
+    assert ctx._channel_options(target, credentials) == [
+        ("grpc.default_authority", "localhost")
+    ]
+
+
+def test_non_unix_target_gets_no_authority_override() -> None:
+    # AC #3: a non-unix (TLS) target never receives the authority override.
+    original = ctx.VORPAL_CA_PATH
+    ctx.VORPAL_CA_PATH = _tmp_path("definitely-absent-ca.pem")
+    try:
+        uri = "https://registry:50051"
+        credentials = ctx.get_client_credentials(uri)
+        target = ctx.to_grpc_target(uri)
+        assert credentials is not None  # TLS
+        assert ctx._channel_options(target, credentials) == []
+    finally:
+        ctx.VORPAL_CA_PATH = original
+
+
+def test_tls_channel_never_gets_authority_override_for_ambiguous_unix_target() -> None:
+    # AC #1: the non-canonical `unix:relative/path` target matches the loose
+    # `unix:` prefix but NOT the `unix://` scheme, so get_client_credentials
+    # selects TLS. Gating the override on `credentials is None` guarantees a
+    # TLS channel can never also receive the localhost authority override — the
+    # insecure combination the DKT-28 reviewers flagged.
+    original = ctx.VORPAL_CA_PATH
+    ctx.VORPAL_CA_PATH = _tmp_path("definitely-absent-ca.pem")
+    try:
+        for uri in ("unix:relative/path", "unix:/absolute/path"):
+            credentials = ctx.get_client_credentials(uri)
+            target = ctx.to_grpc_target(uri)
+            assert credentials is not None  # TLS creds selected for this form
+            assert target.startswith("unix:")  # matches the loose unix: prefix
+            # Despite the unix: prefix, no override because credentials are TLS.
+            assert ctx._channel_options(target, credentials) == []
+    finally:
+        ctx.VORPAL_CA_PATH = original
 
 
 def _run() -> int:

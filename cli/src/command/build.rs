@@ -482,7 +482,10 @@ pub async fn run(
 
             // Python projects are multi-file: include the package source tree, not just
             // the single entrypoint (the one deliberate divergence from the TypeScript arm).
-            let mut includes = vec!["pyproject.toml", "uv.lock", "src"];
+            // README.md is required here (not in the other language arms) because hatchling
+            // reads `[project].readme` at build time; omitting it fails `uv sync` for any
+            // config relying on this default (DKT-30, following the DKT-28 workaround).
+            let mut includes = vec!["pyproject.toml", "uv.lock", "src", "README.md"];
 
             if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
                 if !i.is_empty() {
