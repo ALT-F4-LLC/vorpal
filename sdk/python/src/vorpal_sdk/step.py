@@ -4,9 +4,8 @@ Mirrors ``sdk/typescript/src/artifact/step.ts`` (the canonical reference) and
 ``sdk/go/pkg/artifact/step.go``. Sync model — no async, unlike the TS SDK.
 
 These are pure functions of their inputs except ``shell``, which dispatches on
-the target system via ``BuildContext.get_system``. The Linux branch needs the
-``linux-vorpal`` rootfs builder (a later phase); until it lands, ``shell``
-raises on Linux targets. The Darwin branch (``bash``) is fully implemented.
+the target system via ``BuildContext.get_system``. The Darwin branch uses
+``bash``; the Linux branch uses ``bwrap`` with the ``linux-vorpal`` rootfs.
 """
 
 from __future__ import annotations
@@ -213,11 +212,7 @@ def shell(
     script: str,
     secrets: list[artifact_pb2.ArtifactStepSecret],
 ) -> artifact_pb2.ArtifactStep:
-    """Dispatch to ``bash`` on Darwin, ``bwrap`` on Linux.
-
-    Matches Rust/Go/TS ``shell``. The Linux branch requires the
-    ``linux-vorpal`` rootfs builder, deferred to a later phase.
-    """
+    """Dispatch to ``bash`` on Darwin, ``bwrap`` on Linux."""
     step_system = context.get_system()
 
     if step_system in (
@@ -230,10 +225,10 @@ def shell(
         artifact_pb2.AARCH64_LINUX,
         artifact_pb2.X8664_LINUX,
     ):
-        raise NotImplementedError(
-            "shell() on Linux targets requires the linux-vorpal rootfs builder, "
-            "which lands in a later phase"
-        )
+        from vorpal_sdk.artifact.linux_vorpal import linux_vorpal
+
+        linux_vorpal_digest = linux_vorpal(context)
+        return bwrap([], artifacts, environments, linux_vorpal_digest, secrets, script)
 
     raise ValueError(f"unsupported system: {step_system}")
 

@@ -12,6 +12,7 @@ Runnable two ways:
 
 from __future__ import annotations
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -172,17 +173,125 @@ def test_docker_step_has_no_script() -> None:
     ]
 
 
-def test_shell_linux_target_not_implemented() -> None:
+def test_shell_linux_target_uses_linux_vorpal_rootfs() -> None:
     class LinuxCtx(_StubContext):
+        def __init__(self) -> None:
+            super().__init__()
+            self.artifacts: list[artifact_pb2.Artifact] = []
+
         def get_system(self) -> artifact_pb2.ArtifactSystem:
             return artifact_pb2.AARCH64_LINUX
 
-    raised = False
-    try:
-        shell(LinuxCtx(), [], [], "x", [])
-    except NotImplementedError:
-        raised = True
-    assert raised
+        def add_artifact(self, artifact: artifact_pb2.Artifact) -> str:
+            self.artifacts.append(artifact)
+            return f"{artifact.name}-digest"
+
+    ctx = LinuxCtx()
+    secret = artifact_pb2.ArtifactStepSecret(name="TOKEN", value="secret")
+
+    step = shell(
+        ctx,
+        ["caller-digest"],
+        ["PATH=/custom/bin", "FOO=bar"],
+        "echo linux",
+        [secret],
+    )
+
+    assert [artifact.name for artifact in ctx.artifacts] == [
+        "linux-debian-dockerfile",
+        "linux-debian",
+        "linux-vorpal",
+    ]
+    dockerfile_artifact = ctx.artifacts[0]
+    assert (
+        "docker.io/library/debian:sid-slim@sha256:"
+        "c0f1b3716686ee452f7c62c82d8aee5f79feccba7402e967b79658100d5bd6cf"
+        in dockerfile_artifact.steps[0].script
+    )
+    linux_debian_artifact = ctx.artifacts[1]
+    assert list(linux_debian_artifact.aliases) == ["linux-debian:latest"]
+    assert [step.entrypoint for step in linux_debian_artifact.steps] == [
+        "docker",
+        "docker",
+        "docker",
+        "bash",
+        "docker",
+        "docker",
+    ]
+    assert list(linux_debian_artifact.steps[0].arguments[:3]) == [
+        "buildx",
+        "build",
+        "--progress=plain",
+    ]
+    linux_vorpal_artifact = ctx.artifacts[-1]
+    assert list(linux_vorpal_artifact.systems) == [
+        artifact_pb2.AARCH64_LINUX,
+        artifact_pb2.X8664_LINUX,
+    ]
+    assert list(linux_vorpal_artifact.aliases) == ["linux-vorpal:latest"]
+    assert len(linux_vorpal_artifact.steps) == 7
+    assert [source.name for source in linux_vorpal_artifact.sources] == [
+        "bash",
+        "binutils",
+        "bison",
+        "coreutils",
+        "curl",
+        "curl-cacert",
+        "diffutils",
+        "file",
+        "findutils",
+        "gawk",
+        "gcc",
+        "gettext",
+        "glibc",
+        "glibc-patch",
+        "gmp",
+        "grep",
+        "gzip",
+        "libidn2",
+        "libpsl",
+        "libunistring",
+        "linux",
+        "m4",
+        "make",
+        "mpc",
+        "mpfr",
+        "ncurses",
+        "openssl",
+        "patch",
+        "perl",
+        "python",
+        "sed",
+        "tar",
+        "texinfo",
+        "unzip",
+        "unzip-patch-fixes",
+        "unzip-patch-gcc14",
+        "util-linux",
+        "xz",
+        "zlib",
+    ]
+
+    assert step.entrypoint == "bwrap"
+    assert list(step.artifacts) == ["linux-vorpal-digest", "caller-digest"]
+    assert [s.name for s in step.secrets] == ["TOKEN"]
+
+    args = list(step.arguments)
+    rootfs_bin = "$VORPAL_ARTIFACT_linux-vorpal-digest/bin"
+    caller_env = "$VORPAL_ARTIFACT_caller-digest"
+    rootfs_bind_idx = args.index(rootfs_bin)
+    caller_bind_idx = args.index(caller_env)
+    path_idx = args.index("PATH")
+    foo_idx = args.index("FOO")
+    assert rootfs_bind_idx < caller_bind_idx < path_idx < foo_idx
+    assert args[path_idx + 1].startswith(
+        "/custom/bin:"
+        "$VORPAL_ARTIFACT_linux-vorpal-digest/bin:"
+        "$VORPAL_ARTIFACT_caller-digest/bin"
+    )
+
+    deferred = "shell() on Linux targets requires " + "the linux-vorpal rootfs builder"
+    assert deferred not in inspect.getsource(shell)
 
 
 # --- Job / Process / DevelopmentEnvironment / UserEnvironment --------------

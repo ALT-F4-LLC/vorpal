@@ -14,7 +14,7 @@ mismatch means either a real builder divergence or input drift (both fail
 loudly, which is the point).
 
 Targets the AARCH64_DARWIN system so ``shell`` dispatches to ``bash`` (pure);
-the Linux ``bwrap`` path needs the linux-vorpal rootfs builder (a later phase).
+the Linux ``bwrap`` path is covered by the focused step tests.
 
 Runnable two ways:
   * ``pytest`` (collects the ``test_*`` functions), or
