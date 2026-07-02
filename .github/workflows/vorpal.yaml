@@ -135,8 +135,11 @@ jobs:
   test:
     needs:
       - build
+    permissions:
+      contents: read
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         runner:
           - macos-latest
@@ -171,6 +174,59 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Prepare lockfile
+        id: prepare_lock
+        run: |
+          artifacts=(
+            "vorpal"
+            "vorpal-job"
+            "vorpal-process"
+            "vorpal-shell"
+            "vorpal-user"
+            "vorpal-website"
+          )
+          if [ "${{ contains(matrix.runner, 'ubuntu') }}" = "true" ]; then
+            artifacts=(
+              "vorpal"
+              "vorpal-container-image"
+              "vorpal-job"
+              "vorpal-process"
+              "vorpal-shell"
+              "vorpal-user"
+              "vorpal-website"
+            )
+          fi
+
+          configs=("" "Vorpal.go.toml" "Vorpal.ts.toml" "Vorpal.py.toml")
+          for config in "${configs[@]}"; do
+            for artifact in "${artifacts[@]}"; do
+              if [ -n "$config" ]; then
+                vorpal prepare --config "$config" "$artifact"
+              else
+                vorpal prepare "$artifact"
+              fi
+            done
+          done
+
+          if git diff --quiet -- Vorpal.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload prepared lockfile
+        if: ${{ steps.prepare_lock.outputs.changed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vorpal-prepare-lock-${{ env.ARCH }}-${{ env.OS }}
+          path: Vorpal.lock
+
+      - name: Fail on lockfile drift
+        if: ${{ steps.prepare_lock.outputs.changed == 'true' }}
+        run: |
+          echo "::error file=Vorpal.lock::vorpal prepare changed Vorpal.lock. Download the vorpal-prepare-lock-${ARCH}-${OS} artifact, replace Vorpal.lock, commit it, and re-push."
+          exit 1
 
       - run: |
           VORPAL_ARTIFACT=$(vorpal build "vorpal")
@@ -355,6 +411,55 @@ jobs:
         with:
           name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
           path: Vorpal.lock
+
+  notify-lockfile-drift:
+    needs:
+      - test
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment on PR lockfile drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          if ! artifact_rows=$(gh api \
+            "repos/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+            --paginate \
+            --jq '.artifacts[] | select(.name | startswith("vorpal-prepare-lock-")) | [.name, (.id | tostring)] | @tsv'); then
+            echo "::warning::Unable to list lockfile drift artifacts."
+            exit 0
+          fi
+
+          if [ -z "$artifact_rows" ]; then
+            echo "No lockfile drift artifacts found."
+            exit 0
+          fi
+
+          body_file=$(mktemp)
+          while IFS=$'\t' read -r artifact_name artifact_id; do
+            [ -n "$artifact_name" ] || continue
+            artifact_url="https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts/${artifact_id}"
+            runner_name="${artifact_name#vorpal-prepare-lock-}"
+            {
+              echo "Vorpal.lock changed during \`vorpal prepare\` on ${runner_name}."
+              echo
+              echo "Download the updated lockfile artifact: ${artifact_url}"
+              echo
+              echo "Replace \`Vorpal.lock\` with that artifact, commit it, and re-push."
+            } > "$body_file"
+
+            gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body-file "$body_file" \
+              || echo "::warning::Unable to comment on the pull request; lockfile drift artifact ${artifact_name} was uploaded."
+          done <<EOF
+          $artifact_rows
+          EOF
 
   release:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}

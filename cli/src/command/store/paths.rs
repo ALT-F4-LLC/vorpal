@@ -293,3 +293,78 @@ pub async fn copy_files(
 
     Ok(target_path_files)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use tempfile::TempDir;
+
+    fn file_basenames(root: &Path, paths: &[PathBuf]) -> Vec<String> {
+        paths
+            .iter()
+            .filter(|p| p.is_file())
+            .map(|p| {
+                p.strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect()
+    }
+
+    fn make_dir_with_files(names: &[&str]) -> TempDir {
+        let dir = TempDir::new().unwrap();
+        for name in names {
+            File::create(dir.path().join(name)).unwrap();
+        }
+        dir
+    }
+
+    // A case-insensitive or locale-aware sort would order these ["a", "B", "Z"];
+    // cross-host digest stability requires the raw byte order 'B'(0x42) < 'Z'(0x5A)
+    // < 'a'(0x61), independent of the host's collation.
+    #[test]
+    fn get_file_paths_sorts_bytewise_not_case_folded() {
+        let dir = make_dir_with_files(&["a.txt", "B.txt", "Z.txt"]);
+
+        let paths = get_file_paths(&dir.path().to_path_buf(), vec![], vec![]).unwrap();
+
+        assert_eq!(
+            file_basenames(dir.path(), &paths),
+            vec!["B.txt", "Z.txt", "a.txt"]
+        );
+    }
+
+    // Simulates two host filesystems enumerating the identical file set in different
+    // orders (APFS vs ext4 dirent order): the final sort must normalize both to the
+    // same sequence, otherwise the combined source digest diverges across producers.
+    #[test]
+    fn get_file_paths_order_independent_of_creation_order() {
+        let forward = make_dir_with_files(&["alpha", "bravo", "charlie"]);
+        let reversed = make_dir_with_files(&["charlie", "bravo", "alpha"]);
+
+        let forward_paths = get_file_paths(&forward.path().to_path_buf(), vec![], vec![]).unwrap();
+        let reversed_paths = get_file_paths(&reversed.path().to_path_buf(), vec![], vec![]).unwrap();
+
+        assert_eq!(
+            file_basenames(forward.path(), &forward_paths),
+            file_basenames(reversed.path(), &reversed_paths)
+        );
+    }
+
+    // Non-decomposable codepoints (Greek alpha U+03B1, Euro U+20AC) avoid APFS
+    // NFC/NFD rewriting; their UTF-8 encodings sort by raw byte value
+    // 'z'(0x7A) < α(0xCE..) < €(0xE2..) on any host.
+    #[test]
+    fn get_file_paths_orders_unicode_bytewise() {
+        let dir = make_dir_with_files(&["z_ascii", "\u{03b1}_alpha", "\u{20ac}_euro"]);
+
+        let paths = get_file_paths(&dir.path().to_path_buf(), vec![], vec![]).unwrap();
+
+        assert_eq!(
+            file_basenames(dir.path(), &paths),
+            vec!["z_ascii", "\u{03b1}_alpha", "\u{20ac}_euro"]
+        );
+    }
+}
