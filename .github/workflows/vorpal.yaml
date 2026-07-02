@@ -413,7 +413,7 @@ jobs:
     if: ${{ always() && github.event_name == 'pull_request' }}
     permissions:
       actions: read
-      issues: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - name: Comment on PR lockfile drift
@@ -437,6 +437,7 @@ jobs:
           fi
 
           body_file=$(mktemp)
+          comment_failed=0
           while IFS=$'\t' read -r artifact_name artifact_id; do
             [ -n "$artifact_name" ] || continue
             artifact_url="https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts/${artifact_id}"
@@ -449,15 +450,21 @@ jobs:
               echo "Replace \`Vorpal.lock\` with that artifact, commit it, and re-push."
             } > "$body_file"
 
-            gh api \
+            if ! gh api \
               --method POST \
               --silent \
               "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
-              -F "body=@${body_file}" \
-              || echo "::warning::Unable to comment on the pull request; lockfile drift artifact ${artifact_name} was uploaded."
+              -F "body=@${body_file}"; then
+              echo "::warning::Unable to comment on the pull request; lockfile drift artifact ${artifact_name} was uploaded."
+              comment_failed=1
+            fi
           done <<EOF
           $artifact_rows
           EOF
+
+          if [ "$comment_failed" -eq 1 ]; then
+            exit 1
+          fi
 
   release:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
