@@ -162,6 +162,14 @@ platform = "x86_64-linux"
 
 [[sources]]
 name = "cpython"
+path = "https://sdk.vorpal.build/source/cpython-3.13.14-x86_64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "14dc93eba6cf48a241ff47079b1a34de2652860c80cd3e2941374def6ff2b57d"
+platform = "x86_64-darwin"
+
+[[sources]]
+name = "cpython"
 path = "https://sdk.vorpal.build/source/cpython-3.13.14-aarch64-apple-darwin.tar.gz"
 includes = []
 excludes = []
@@ -1311,6 +1319,14 @@ includes = []
 excludes = []
 digest = "4424c54e6a6c23457dfc8121089748d0572c7a7aaded6feb415309bfc39ef840"
 platform = "aarch64-darwin"
+
+[[sources]]
+name = "uv"
+path = "https://sdk.vorpal.build/source/uv-0.10.11-x86_64-apple-darwin.tar.gz"
+includes = []
+excludes = []
+digest = "d9c7000b2fbd546120d0b6420715414390084491df5c471938b0cbdca7d039f7"
+platform = "x86_64-darwin"
 
 [[sources]]
 name = "xz"
