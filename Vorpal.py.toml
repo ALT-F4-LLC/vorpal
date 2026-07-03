@@ -1,0 +1,8 @@
+language = "python"
+
+[source]
+includes = ["sdk/python/src", "sdk/python/pyproject.toml", "sdk/python/uv.lock", "sdk/python/README.md"]
+
+[source.python]
+directory = "sdk/python"
+entrypoint = "src/vorpal_sdk/vorpal.py"

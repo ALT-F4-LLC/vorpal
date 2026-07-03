@@ -1,22 +1,32 @@
 use crate::command::{
     config::{
-        VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourceRust,
+        VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourcePython, VorpalConfigSourceRust,
         VorpalConfigSourceTypeScript,
     },
     store::paths::get_key_credentials_path,
 };
 use anyhow::{anyhow, Result};
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use oauth2::{
     basic::BasicClient, AuthUrl, ClientId, DeviceAuthorizationUrl, Scope,
     StandardDeviceAuthorizationResponse, TokenResponse, TokenUrl,
 };
 use path_clean::PathClean;
 use rustls::crypto::ring;
-use std::{collections::BTreeMap, env::current_dir, path::PathBuf, process::exit};
+use std::{
+    collections::BTreeMap,
+    env::current_dir,
+    path::{Path, PathBuf},
+    process::exit,
+};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt, time::sleep};
 use tracing::{error, subscriber, Level};
-use tracing_subscriber::{fmt::writer::MakeWriterExt, FmtSubscriber};
+use tracing_subscriber::{
+    filter::{LevelFilter, Targets},
+    fmt::writer::MakeWriterExt,
+    layer::{Context, SubscriberExt},
+    Layer, Registry,
+};
 use vorpal_sdk::{
     artifact::{get_default_address, system::get_system_default_str},
     context::{VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE},
@@ -197,6 +207,63 @@ pub enum Command {
         worker: String,
     },
 
+    /// Prepare an artifact: download and pin its sources into Vorpal.lock without
+    /// building the target artifact. Unlike `build`, `--unlock` defaults to true.
+    ///
+    /// Config-language toolchain prerequisites (e.g. protoc for Go configs) still
+    /// build via the worker as needed to execute the config binary and enumerate
+    /// the artifact graph - this always runs host-natively, so it works from any
+    /// host for any `--system` target.
+    Prepare {
+        /// Artifact name
+        name: String,
+
+        /// Artifact agent address (VORPAL_SOCKET_PATH env var overrides default socket path)
+        #[arg(default_value_t = get_default_address(), long)]
+        agent: String,
+
+        /// Artifact configuration file
+        #[arg(default_value = "Vorpal.toml", long)]
+        config: PathBuf,
+
+        /// Artifact context
+        #[arg(default_value = ".", long)]
+        context: PathBuf,
+
+        /// Artifact namespace
+        #[arg(default_value_t = get_default_namespace(), long)]
+        namespace: String,
+
+        /// Registry address (VORPAL_SOCKET_PATH env var overrides default socket path)
+        #[arg(default_value_t = get_default_address(), global = true, long)]
+        registry: String,
+
+        /// Artifact system (default: host system)
+        #[arg(default_value_t = get_system_default_str(), long)]
+        system: String,
+
+        /// Artifact lock unlock (defaults to true, unlike `build`: minting and
+        /// updating pins is this command's entire purpose). Pass `--unlock=false`
+        /// to enforce the fail-closed gates as if `--unlock` were never passed to `build`.
+        #[arg(
+            long,
+            default_value_t = true,
+            default_missing_value = "true",
+            num_args = 0..=1,
+            require_equals = true,
+            action = ArgAction::Set
+        )]
+        unlock: bool,
+
+        /// Artifact variables (key=value)
+        #[arg(long)]
+        variable: Vec<String>,
+
+        /// Artifact worker address (VORPAL_SOCKET_PATH env var overrides default socket path)
+        #[arg(default_value_t = get_default_address(), long)]
+        worker: String,
+    },
+
     /// Manage configuration settings
     Config {
         /// Apply to user-level config (~/.vorpal/settings.json) instead of project-level
@@ -278,6 +345,101 @@ pub enum Command {
     System(CommandSystem),
 }
 
+/// h2 resolves a malformed request (e.g. an invalid client `:authority`) by
+/// resetting just that stream with PROTOCOL_ERROR entirely inside the h2
+/// crate: `Streams::reset_on_recv_stream_err` swallows the reset into
+/// `Ok(())` before it ever reaches tonic/tower, so no service, interceptor,
+/// or layer in the request-handling stack observes it. The only trace is
+/// h2's own `tracing::debug!` ("malformed headers: ..." / "... PROTOCOL_ERROR
+/// -- ..."), invisible under the default `--level info`. This layer relays
+/// that debug event as a WARN so it's visible without `--level debug`,
+/// without touching h2's rejection behavior (DKT-32, diagnosed in DKT-28).
+struct H2ProtocolErrorRelay;
+
+struct H2MessageVisitor(String);
+
+impl tracing::field::Visit for H2MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = format!("{value:?}");
+        }
+    }
+}
+
+/// True when a `target`/`level`/`message` triple is h2's own signal for a
+/// stream it rejected with PROTOCOL_ERROR (malformed headers, or the
+/// `proto_err!`-shaped "stream/connection error PROTOCOL_ERROR -- ..." family).
+fn is_h2_protocol_error(target: &str, level: Level, message: &str) -> bool {
+    level == Level::DEBUG
+        && target.starts_with("h2")
+        && (message.contains("malformed headers") || message.contains("PROTOCOL_ERROR"))
+}
+
+impl<S: tracing::Subscriber> Layer<S> for H2ProtocolErrorRelay {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        let metadata = event.metadata();
+
+        let mut message = H2MessageVisitor(String::new());
+        event.record(&mut message);
+
+        if is_h2_protocol_error(metadata.target(), *metadata.level(), &message.0) {
+            tracing::warn!(target: "vorpal_cli::agent", "h2 rejected stream: {}", message.0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod h2_protocol_error_relay_tests {
+    use super::*;
+
+    #[test]
+    fn matches_malformed_authority_debug_event() {
+        assert!(is_h2_protocol_error(
+            "h2::server",
+            Level::DEBUG,
+            "malformed headers: malformed authority (\"bad::authority\"): invalid uri character",
+        ));
+    }
+
+    #[test]
+    fn matches_proto_err_shaped_debug_event() {
+        assert!(is_h2_protocol_error(
+            "h2::proto::streams::recv",
+            Level::DEBUG,
+            "stream error PROTOCOL_ERROR -- recv_headers: trailers frame was not EOS; stream=StreamId(1);",
+        ));
+    }
+
+    #[test]
+    fn ignores_non_h2_target() {
+        assert!(!is_h2_protocol_error(
+            "vorpal_cli::agent",
+            Level::DEBUG,
+            "malformed headers: malformed authority (...): invalid uri character",
+        ));
+    }
+
+    #[test]
+    fn ignores_non_debug_level() {
+        assert!(!is_h2_protocol_error(
+            "h2::server",
+            Level::TRACE,
+            "malformed headers: malformed authority (...): invalid uri character",
+        ));
+    }
+
+    #[test]
+    fn ignores_unrelated_h2_debug_event() {
+        // h2's server-push validation logs (convert_push_message) share the
+        // crate but are a different rejection class - not in scope for DKT-32.
+        assert!(!is_h2_protocol_error(
+            "h2::server",
+            Level::DEBUG,
+            "convert_push_message: method POST is not safe and cacheable",
+        ));
+    }
+}
+
 const VERSION_INFO: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (commit:",
@@ -300,6 +462,275 @@ struct Cli {
     level: Level,
 }
 
+#[cfg(test)]
+mod unlock_parse_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        let mut full = vec!["vorpal"];
+        full.extend_from_slice(args);
+        Cli::try_parse_from(full)
+    }
+
+    #[test]
+    fn prepare_unlock_omitted_defaults_true() {
+        let cli = parse(&["prepare", "foo"]).expect("should parse");
+        match cli.command {
+            Command::Prepare { unlock, .. } => assert!(unlock),
+            _ => panic!("expected Prepare command"),
+        }
+    }
+
+    #[test]
+    fn prepare_unlock_bare_flag_is_true() {
+        let cli = parse(&["prepare", "foo", "--unlock"]).expect("should parse");
+        match cli.command {
+            Command::Prepare { unlock, .. } => assert!(unlock),
+            _ => panic!("expected Prepare command"),
+        }
+    }
+
+    #[test]
+    fn prepare_unlock_equals_false_is_false() {
+        let cli = parse(&["prepare", "foo", "--unlock=false"]).expect("should parse");
+        match cli.command {
+            Command::Prepare { unlock, .. } => assert!(!unlock),
+            _ => panic!("expected Prepare command"),
+        }
+    }
+
+    #[test]
+    fn prepare_unlock_equals_true_is_true() {
+        let cli = parse(&["prepare", "foo", "--unlock=true"]).expect("should parse");
+        match cli.command {
+            Command::Prepare { unlock, .. } => assert!(unlock),
+            _ => panic!("expected Prepare command"),
+        }
+    }
+
+    #[test]
+    fn prepare_unlock_space_separated_value_is_rejected() {
+        // require_equals = true means a space-separated value is not swallowed
+        // into --unlock; clap instead treats "false" as an unexpected extra
+        // positional argument and errors.
+        let result = parse(&["prepare", "foo", "--unlock", "false"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_unlock_omitted_defaults_false() {
+        let cli = parse(&["build", "foo"]).expect("should parse");
+        match cli.command {
+            Command::Build { unlock, .. } => assert!(!unlock),
+            _ => panic!("expected Build command"),
+        }
+    }
+}
+
+/// If the parsed value matches the hardcoded clap default, substitute the
+/// resolved settings value. This ensures explicit CLI flags always win, while
+/// config-file values override built-in defaults.
+fn apply_default(parsed: &str, clap_default: &str, resolved_value: &str) -> String {
+    if parsed == clap_default {
+        resolved_value.to_string()
+    } else {
+        parsed.to_string()
+    }
+}
+
+/// Shared by `build` and `prepare`: resolves settings/Vorpal.toml fallbacks,
+/// then runs the artifact graph through `build::run()`. `prepare_only` gates
+/// the early-return (before worker dispatch) added in build.rs; `export`,
+/// `list`, `path`, and `rebuild` are always `false` for `prepare` (that flag
+/// surface is build-output-specific and not exposed on the `prepare` subcommand).
+#[allow(clippy::too_many_arguments)]
+async fn run_build_or_prepare(
+    resolved: &config::ResolvedSettings,
+    project_config: &config::VorpalConfig,
+    name: &str,
+    agent: &str,
+    context: &Path,
+    export: bool,
+    list: bool,
+    namespace: &str,
+    path: bool,
+    prepare_only: bool,
+    rebuild: bool,
+    registry: &str,
+    system: &str,
+    unlock: bool,
+    variable: &[String],
+    worker: &str,
+) -> Result<()> {
+    // Apply resolved settings as fallbacks for hardcoded clap defaults
+    let default_addr = get_default_address();
+    let default_ns = get_default_namespace();
+
+    // Agent is a local service — it should NOT inherit the `registry`
+    // setting. Only override it when the user passes an explicit --agent flag.
+    let effective_agent = agent.to_string();
+    let effective_registry = apply_default(registry, &default_addr, &resolved.registry.value);
+    let effective_worker = apply_default(worker, &default_addr, &resolved.worker.value);
+    let effective_namespace = apply_default(namespace, &default_ns, &resolved.namespace.value);
+    let default_system = get_system_default_str();
+    let effective_system = apply_default(system, &default_system, &resolved.system.value);
+
+    if name.is_empty() {
+        error!("no name specified");
+
+        exit(1);
+    }
+
+    // Use the project config already loaded during resolution
+
+    let config_language = resolved.language.value.clone();
+    let config_name = resolved.name.value.clone();
+
+    let mut config_environments = Vec::new();
+    let mut config_source_go_directory = None;
+    let mut config_source_includes = Vec::new();
+    let mut config_source_python_directory = None;
+    let mut config_source_python_entrypoint = None;
+    let mut config_source_rust_bin = None;
+    let mut config_source_rust_packages = None;
+    let mut config_source_script = None;
+    let mut config_source_typescript_directory = None;
+    let mut config_source_typescript_entrypoint = None;
+
+    if let Some(environments) = &project_config.environments {
+        if !environments.is_empty() {
+            config_environments = environments.clone();
+        }
+    }
+
+    if let Some(config_source) = &project_config.source {
+        if let Some(config_source_go) = &config_source.go {
+            if let Some(directory) = &config_source_go.directory {
+                if !directory.is_empty() {
+                    config_source_go_directory = Some(directory.clone());
+                }
+            }
+        }
+
+        if let Some(includes) = &config_source.includes {
+            if !includes.is_empty() {
+                config_source_includes = includes.clone();
+            }
+        }
+
+        if let Some(config_source_python) = &config_source.python {
+            if let Some(directory) = &config_source_python.directory {
+                if !directory.is_empty() {
+                    config_source_python_directory = Some(directory.clone());
+                }
+            }
+
+            if let Some(entrypoint) = &config_source_python.entrypoint {
+                if !entrypoint.is_empty() {
+                    config_source_python_entrypoint = Some(entrypoint.clone());
+                }
+            }
+        }
+
+        if let Some(config_source_rust) = &config_source.rust {
+            if let Some(ca_source_rust_bin) = &config_source_rust.bin {
+                if !ca_source_rust_bin.is_empty() {
+                    config_source_rust_bin = Some(ca_source_rust_bin.clone());
+                }
+            }
+
+            if let Some(packages) = &config_source_rust.packages {
+                if !packages.is_empty() {
+                    config_source_rust_packages = Some(packages.clone());
+                }
+            }
+        }
+
+        if let Some(script) = &config_source.script {
+            if !script.is_empty() {
+                config_source_script = Some(script.clone());
+            }
+        }
+
+        if let Some(config_source_typescript) = &config_source.typescript {
+            if let Some(directory) = &config_source_typescript.directory {
+                if !directory.is_empty() {
+                    config_source_typescript_directory = Some(directory.clone());
+                }
+            }
+
+            if let Some(entrypoint) = &config_source_typescript.entrypoint {
+                if !entrypoint.is_empty() {
+                    config_source_typescript_entrypoint = Some(entrypoint.clone());
+                }
+            }
+        }
+    };
+
+    // Load project context
+
+    let mut context = context.to_path_buf();
+
+    if !context.is_absolute() {
+        let current_dir = current_dir().expect("failed to get current directory");
+
+        context = current_dir.join(context).clean().to_path_buf();
+    }
+
+    context = context.clean();
+
+    // Build artifact
+
+    let run_artifact = build::RunArgsArtifact {
+        aliases: vec![],
+        context: context.clone(),
+        export,
+        list,
+        name: name.to_string(),
+        namespace: effective_namespace.clone(),
+        path,
+        prepare_only,
+        rebuild,
+        system: effective_system.clone(),
+        unlock,
+        variable: variable.to_vec(),
+    };
+
+    let run_config = build::RunArgsConfig {
+        context,
+        environments: config_environments,
+        language: config_language,
+        name: config_name,
+        source: Some(VorpalConfigSource {
+            go: Some(VorpalConfigSourceGo {
+                directory: config_source_go_directory,
+            }),
+            includes: Some(config_source_includes),
+            python: Some(VorpalConfigSourcePython {
+                directory: config_source_python_directory,
+                entrypoint: config_source_python_entrypoint,
+            }),
+            rust: Some(VorpalConfigSourceRust {
+                bin: config_source_rust_bin,
+                packages: config_source_rust_packages,
+            }),
+            script: config_source_script,
+            typescript: Some(VorpalConfigSourceTypeScript {
+                directory: config_source_typescript_directory,
+                entrypoint: config_source_typescript_entrypoint,
+            }),
+        }),
+    };
+
+    let run_service = build::RunArgsService {
+        agent: effective_agent,
+        registry: effective_registry,
+        worker: effective_worker,
+    };
+
+    build::run(run_artifact, run_config, run_service).await
+}
+
 pub async fn run() -> Result<()> {
     ring::default_provider()
         .install_default()
@@ -310,23 +741,35 @@ pub async fn run() -> Result<()> {
     let Cli { command, level } = cli;
 
     let subscriber_writer = std::io::stderr.with_max_level(level);
-    let mut subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
+    let mut fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
         .with_writer(subscriber_writer)
         .without_time();
 
     if [Level::DEBUG, Level::TRACE].contains(&level) {
-        subscriber = subscriber.with_file(true).with_line_number(true);
+        fmt_layer = fmt_layer.with_file(true).with_line_number(true);
     }
 
-    let subscriber = subscriber.finish();
+    // Per-layer filtering: the main fmt layer stays at the user-selected
+    // `--level` (default info), while the h2 relay layer is scoped to the
+    // `h2` target at debug so only h2's own debug-level events are enabled -
+    // this keeps the process-global max level at `level` instead of raising
+    // it to DEBUG for every target. The relayed WARN it emits then flows back
+    // through fmt_layer's info-level filter like any other event, so it's
+    // visible by default without lowering the general level.
+    let subscriber = Registry::default()
+        .with(fmt_layer.with_filter(LevelFilter::from_level(level)))
+        .with(
+            H2ProtocolErrorRelay.with_filter(Targets::new().with_target("h2", LevelFilter::DEBUG)),
+        );
 
     subscriber::set_global_default(subscriber).expect("setting default subscriber");
 
     // Extract the config path from commands that have one, before resolving settings
     let config_for_settings = match &command {
-        Command::Build { config, .. } | Command::Config { config, .. } => config.clone(),
+        Command::Build { config, .. }
+        | Command::Config { config, .. }
+        | Command::Prepare { config, .. } => config.clone(),
         _ => PathBuf::from("Vorpal.toml"),
     };
 
@@ -343,17 +786,6 @@ pub async fn run() -> Result<()> {
             );
             (resolved, config::VorpalConfig::default())
         });
-
-    // Helper: if the parsed value matches the hardcoded clap default, substitute the
-    // resolved settings value. This ensures explicit CLI flags always win, while
-    // config-file values override built-in defaults.
-    let apply_default = |parsed: &str, clap_default: &str, resolved_value: &str| -> String {
-        if parsed == clap_default {
-            resolved_value.to_string()
-        } else {
-            parsed.to_string()
-        }
-    };
 
     match &command {
         Command::Build {
@@ -372,154 +804,58 @@ pub async fn run() -> Result<()> {
             worker,
             ..
         } => {
-            // Apply resolved settings as fallbacks for hardcoded clap defaults
-            let default_addr = get_default_address();
-            let default_ns = get_default_namespace();
-
-            // Agent is a local service — it should NOT inherit the `registry`
-            // setting. Only override it when the user passes an explicit --agent flag.
-            let effective_agent = agent.to_string();
-            let effective_registry =
-                apply_default(registry, &default_addr, &resolved.registry.value);
-            let effective_worker = apply_default(worker, &default_addr, &resolved.worker.value);
-            let effective_namespace =
-                apply_default(namespace, &default_ns, &resolved.namespace.value);
-            let default_system = get_system_default_str();
-            let effective_system = apply_default(system, &default_system, &resolved.system.value);
-
-            if name.is_empty() {
-                error!("no name specified");
-
-                exit(1);
-            }
-
-            // Use the project config already loaded during resolution
-
-            let config_language = resolved.language.value.clone();
-            let config_name = resolved.name.value.clone();
-
-            let mut config_environments = Vec::new();
-            let mut config_source_go_directory = None;
-            let mut config_source_includes = Vec::new();
-            let mut config_source_rust_bin = None;
-            let mut config_source_rust_packages = None;
-            let mut config_source_script = None;
-            let mut config_source_typescript_directory = None;
-            let mut config_source_typescript_entrypoint = None;
-
-            if let Some(environments) = &project_config.environments {
-                if !environments.is_empty() {
-                    config_environments = environments.clone();
-                }
-            }
-
-            if let Some(config_source) = &project_config.source {
-                if let Some(config_source_go) = &config_source.go {
-                    if let Some(directory) = &config_source_go.directory {
-                        if !directory.is_empty() {
-                            config_source_go_directory = Some(directory.clone());
-                        }
-                    }
-                }
-
-                if let Some(includes) = &config_source.includes {
-                    if !includes.is_empty() {
-                        config_source_includes = includes.clone();
-                    }
-                }
-
-                if let Some(config_source_rust) = &config_source.rust {
-                    if let Some(ca_source_rust_bin) = &config_source_rust.bin {
-                        if !ca_source_rust_bin.is_empty() {
-                            config_source_rust_bin = Some(ca_source_rust_bin.clone());
-                        }
-                    }
-
-                    if let Some(packages) = &config_source_rust.packages {
-                        if !packages.is_empty() {
-                            config_source_rust_packages = Some(packages.clone());
-                        }
-                    }
-                }
-
-                if let Some(script) = &config_source.script {
-                    if !script.is_empty() {
-                        config_source_script = Some(script.clone());
-                    }
-                }
-
-                if let Some(config_source_typescript) = &config_source.typescript {
-                    if let Some(directory) = &config_source_typescript.directory {
-                        if !directory.is_empty() {
-                            config_source_typescript_directory = Some(directory.clone());
-                        }
-                    }
-
-                    if let Some(entrypoint) = &config_source_typescript.entrypoint {
-                        if !entrypoint.is_empty() {
-                            config_source_typescript_entrypoint = Some(entrypoint.clone());
-                        }
-                    }
-                }
-            };
-
-            // Load project context
-
-            let mut context = context.to_path_buf();
-
-            if !context.is_absolute() {
-                let current_dir = current_dir().expect("failed to get current directory");
-
-                context = current_dir.join(context).clean().to_path_buf();
-            }
-
-            context = context.clean();
-
-            // Build artifact
-
-            let run_artifact = build::RunArgsArtifact {
-                aliases: vec![],
-                context: context.clone(),
-                export: *export,
-                list: *list,
-                name: name.clone(),
-                namespace: effective_namespace.clone(),
-                path: *path,
-                rebuild: *rebuild,
-                system: effective_system.clone(),
-                unlock: *unlock,
-                variable: variable.clone(),
-            };
-
-            let run_config = build::RunArgsConfig {
+            run_build_or_prepare(
+                &resolved,
+                &project_config,
+                name,
+                agent,
                 context,
-                environments: config_environments,
-                language: config_language,
-                name: config_name,
-                source: Some(VorpalConfigSource {
-                    go: Some(VorpalConfigSourceGo {
-                        directory: config_source_go_directory,
-                    }),
-                    includes: Some(config_source_includes),
-                    rust: Some(VorpalConfigSourceRust {
-                        bin: config_source_rust_bin,
-                        packages: config_source_rust_packages,
-                    }),
-                    script: config_source_script,
-                    typescript: Some(VorpalConfigSourceTypeScript {
-                        directory: config_source_typescript_directory,
-                        entrypoint: config_source_typescript_entrypoint,
-                    }),
-                }),
-            };
+                *export,
+                *list,
+                namespace,
+                *path,
+                false,
+                *rebuild,
+                registry,
+                system,
+                *unlock,
+                variable,
+                worker,
+            )
+            .await
+        }
 
-            let run_service = build::RunArgsService {
-                agent: effective_agent,
-                registry: effective_registry,
-                worker: effective_worker,
-            };
-
-            build::run(run_artifact, run_config, run_service).await
+        Command::Prepare {
+            agent,
+            context,
+            name,
+            namespace,
+            registry,
+            system,
+            unlock,
+            variable,
+            worker,
+            ..
+        } => {
+            run_build_or_prepare(
+                &resolved,
+                &project_config,
+                name,
+                agent,
+                context,
+                false,
+                false,
+                namespace,
+                false,
+                true,
+                false,
+                registry,
+                system,
+                *unlock,
+                variable,
+                worker,
+            )
+            .await
         }
 
         Command::Config {

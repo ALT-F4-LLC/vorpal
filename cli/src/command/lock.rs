@@ -55,3 +55,40 @@ pub fn artifact_system_to_platform(system: i32) -> String {
         ArtifactSystem::UnknownSystem => "unknown".to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vorpal_sdk::api::artifact::ArtifactSystem;
+
+    // The (name, platform) lock key must be derived from the artifact's target
+    // system, so the same target pins under the same key on any producing host.
+    #[test]
+    fn artifact_system_to_platform_maps_each_target() {
+        assert_eq!(
+            artifact_system_to_platform(ArtifactSystem::Aarch64Darwin as i32),
+            "aarch64-darwin"
+        );
+        assert_eq!(
+            artifact_system_to_platform(ArtifactSystem::Aarch64Linux as i32),
+            "aarch64-linux"
+        );
+        assert_eq!(
+            artifact_system_to_platform(ArtifactSystem::X8664Darwin as i32),
+            "x86_64-darwin"
+        );
+        assert_eq!(
+            artifact_system_to_platform(ArtifactSystem::X8664Linux as i32),
+            "x86_64-linux"
+        );
+    }
+
+    #[test]
+    fn artifact_system_to_platform_unknown_is_unknown() {
+        assert_eq!(
+            artifact_system_to_platform(ArtifactSystem::UnknownSystem as i32),
+            "unknown"
+        );
+        assert_eq!(artifact_system_to_platform(9999), "unknown");
+    }
+}

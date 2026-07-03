@@ -135,8 +135,11 @@ jobs:
   test:
     needs:
       - build
+    permissions:
+      contents: read
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         runner:
           - macos-latest
@@ -171,6 +174,59 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Prepare lockfile
+        id: prepare_lock
+        run: |
+          artifacts=(
+            "vorpal"
+            "vorpal-job"
+            "vorpal-process"
+            "vorpal-shell"
+            "vorpal-user"
+            "vorpal-website"
+          )
+          if [ "${{ contains(matrix.runner, 'ubuntu') }}" = "true" ]; then
+            artifacts=(
+              "vorpal"
+              "vorpal-container-image"
+              "vorpal-job"
+              "vorpal-process"
+              "vorpal-shell"
+              "vorpal-user"
+              "vorpal-website"
+            )
+          fi
+
+          configs=("" "Vorpal.go.toml" "Vorpal.ts.toml" "Vorpal.py.toml")
+          for config in "${configs[@]}"; do
+            for artifact in "${artifacts[@]}"; do
+              if [ -n "$config" ]; then
+                vorpal prepare --config "$config" "$artifact"
+              else
+                vorpal prepare "$artifact"
+              fi
+            done
+          done
+
+          if git diff --quiet -- Vorpal.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload prepared lockfile
+        if: ${{ steps.prepare_lock.outputs.changed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
+          path: Vorpal.lock
+
+      - name: Fail on lockfile drift
+        if: ${{ steps.prepare_lock.outputs.changed == 'true' }}
+        run: |
+          echo "::error file=Vorpal.lock::vorpal prepare changed Vorpal.lock. Download the vorpal-lock-${ARCH}-${OS} artifact, replace Vorpal.lock, commit it, and re-push."
+          exit 1
 
       - run: |
           VORPAL_ARTIFACT=$(vorpal build "vorpal")
@@ -301,10 +357,114 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: vorpal-lock-${{ env.ARCH }}-${{ env.OS }}
-          path: Vorpal.lock
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal")
+          if [ "$ARTIFACT" != "$VORPAL_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_ARTIFACT"
+            exit 1
+          fi
+
+      - if: contains(matrix.runner, 'ubuntu')
+        run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-container-image")
+          if [ "$ARTIFACT" != "$VORPAL_CONTAINER_IMAGE_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_CONTAINER_IMAGE_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-job")
+          if [ "$ARTIFACT" != "$VORPAL_JOB_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_JOB_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-process")
+          if [ "$ARTIFACT" != "$VORPAL_PROCESS_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_PROCESS_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-shell")
+          if [ "$ARTIFACT" != "$VORPAL_SHELL_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_SHELL_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-user")
+          if [ "$ARTIFACT" != "$VORPAL_USER_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_USER_ARTIFACT"
+            exit 1
+          fi
+
+      - run: |
+          ARTIFACT=$(vorpal build --config "Vorpal.py.toml" "vorpal-website")
+          if [ "$ARTIFACT" != "$VORPAL_WEBSITE_ARTIFACT" ]; then
+            echo "Python SDK invalid match to Rust: $ARTIFACT != $VORPAL_WEBSITE_ARTIFACT"
+            exit 1
+          fi
+
+  notify-lockfile-drift:
+    needs:
+      - test
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    permissions:
+      actions: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment on PR lockfile drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          if ! artifact_rows=$(gh api \
+            "repos/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+            --paginate \
+            --jq '.artifacts[] | select(.name | startswith("vorpal-lock-")) | [.name, (.id | tostring)] | @tsv'); then
+            echo "::warning::Unable to list lockfile drift artifacts."
+            exit 0
+          fi
+
+          if [ -z "$artifact_rows" ]; then
+            echo "No lockfile drift artifacts found."
+            exit 0
+          fi
+
+          body_file=$(mktemp)
+          comment_failed=0
+          while IFS=$'\t' read -r artifact_name artifact_id; do
+            [ -n "$artifact_name" ] || continue
+            artifact_url="https://github.com/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts/${artifact_id}"
+            runner_name="${artifact_name#vorpal-lock-}"
+            {
+              echo "Vorpal.lock changed during \`vorpal prepare\` on ${runner_name}."
+              echo
+              echo "Download the updated lockfile artifact: ${artifact_url}"
+              echo
+              echo "Replace \`Vorpal.lock\` with that artifact, commit it, and re-push."
+            } > "$body_file"
+
+            if ! gh api \
+              --method POST \
+              --silent \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -F "body=@${body_file}"; then
+              echo "::warning::Unable to comment on the pull request; lockfile drift artifact ${artifact_name} was uploaded."
+              comment_failed=1
+            fi
+          done <<EOF
+          $artifact_rows
+          EOF
+
+          if [ "$comment_failed" -eq 1 ]; then
+            exit 1
+          fi
 
   release:
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}

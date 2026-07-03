@@ -1,5 +1,6 @@
 use crate::command::{
     config::{get_artifacts, get_order, start},
+    lock::{artifact_system_to_platform, load_lock},
     store::{
         archives::unpack_zstd,
         paths::{
@@ -29,10 +30,11 @@ use vorpal_sdk::{
         worker::{worker_service_client::WorkerServiceClient, BuildArtifactRequest},
     },
     artifact::{
-        language::{go::Go, rust::Rust, typescript::TypeScript},
+        language::{go::Go, python::Python, rust::Rust, typescript::TypeScript},
         protoc::Protoc,
         protoc_gen_go::ProtocGenGo,
         protoc_gen_go_grpc::ProtocGenGoGrpc,
+        system::get_system_default_str,
     },
     context::{build_channel, client_auth_header, ConfigContext},
 };
@@ -45,10 +47,39 @@ pub struct RunArgsArtifact {
     pub name: String,
     pub namespace: String,
     pub path: bool,
+    pub prepare_only: bool,
     pub rebuild: bool,
     pub system: String,
     pub unlock: bool,
     pub variable: Vec<String>,
+}
+
+/// Role A (config-binary compile target, fed to `ConfigContext::new`) vs Role B
+/// (artifact target, fed unchanged to `start()`'s `--artifact-system` arg) are
+/// conflated under one `--system` value for `build`. `prepare` must always
+/// compile+run the config binary host-natively (it executes locally to
+/// enumerate the graph), while the artifact graph and pinned sources still
+/// target whatever `--system` was requested - so Role A is host-native only
+/// when `prepare_only`, and Role B is untouched everywhere.
+fn resolve_config_system(prepare_only: bool, requested_system: &str) -> String {
+    if prepare_only {
+        get_system_default_str()
+    } else {
+        requested_system.to_string()
+    }
+}
+
+/// Classifies a source's pin relative to its prior `Vorpal.lock` state:
+/// no prior entry -> first-use trust decision (`mint`); prior entry with a
+/// different digest -> trust rotation (`update`); prior entry with the same
+/// digest -> unchanged, merely re-verified (`verify`). This is the audit
+/// trail that justifies defaulting `prepare`'s `--unlock` to `true`.
+fn classify_pin(prior_digest: Option<&str>, current_digest: &str) -> &'static str {
+    match prior_digest {
+        None => "mint",
+        Some(digest) if digest != current_digest => "update",
+        Some(_) => "verify",
+    }
 }
 
 pub struct RunArgsConfig {
@@ -388,7 +419,7 @@ pub async fn run(
         config.name.to_string(),
         config.context.to_path_buf(),
         artifact.namespace.to_string(),
-        artifact.system.to_string(),
+        resolve_config_system(artifact.prepare_only, &artifact.system),
         artifact.unlock,
         artifact.variable.clone(),
         client_agent,
@@ -471,6 +502,50 @@ pub async fn run(
             builder.build(&mut config_context).await?
         }
 
+        "python" => {
+            let entrypoint = config
+                .source
+                .as_ref()
+                .and_then(|s| s.python.as_ref())
+                .and_then(|p| p.entrypoint.as_ref())
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| format!("src/{}.py", config.name));
+
+            // Python projects are multi-file: include the package source tree, not just
+            // the single entrypoint (the one deliberate divergence from the TypeScript arm).
+            // README.md is required here (not in the other language arms) because hatchling
+            // reads `[project].readme` at build time; omitting it fails `uv sync` for any
+            // config relying on this default (DKT-30, following the DKT-28 workaround).
+            let mut includes = vec!["pyproject.toml", "uv.lock", "src", "README.md"];
+
+            if let Some(i) = config.source.as_ref().and_then(|s| s.includes.as_ref()) {
+                if !i.is_empty() {
+                    includes = i.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+                }
+            }
+
+            let mut builder = Python::new(&config.name, vec![config_system])
+                .with_entrypoint(&entrypoint)
+                .with_includes(includes);
+
+            if !config.environments.is_empty() {
+                builder = builder
+                    .with_environments(config.environments.iter().map(|s| s.as_str()).collect());
+            }
+
+            let working_dir = config
+                .source
+                .as_ref()
+                .and_then(|s| s.python.as_ref())
+                .and_then(|p| p.directory.as_ref());
+
+            if let Some(directory) = working_dir {
+                builder = builder.with_working_dir(directory);
+            }
+
+            builder.build(&mut config_context).await?
+        }
+
         "typescript" => {
             let entrypoint = config
                 .source
@@ -519,9 +594,9 @@ pub async fn run(
         other => {
             bail!(
                 "Unsupported language '{}' in Vorpal.toml\n\n  \
-                 Supported languages are: go, rust, typescript\n\n  \
+                 Supported languages are: go, python, rust, typescript\n\n  \
                  To fix this, update the 'language' field in your Vorpal.toml:\n    \
-                 language = \"typescript\"  # or \"rust\" or \"go\"",
+                 language = \"typescript\"  # or \"python\", \"rust\", or \"go\"",
                 other
             );
         }
@@ -578,6 +653,11 @@ pub async fn run(
                              expected output location.\n\n  \
                              Try rebuilding with --level debug to see the full build output."
             }
+            "python" => {
+                "\n\n  For Python configs, this means the app-mode launcher was not\n  \
+                             written to the expected bin/ path during the build step.\n\n  \
+                             Try rebuilding with --level debug to see the full build output."
+            }
             _ => "",
         };
         error!(
@@ -587,6 +667,26 @@ pub async fn run(
         );
         exit(1);
     }
+
+    // Snapshot Vorpal.lock before config evaluation runs (and pins/updates
+    // sources via the agent's prepare_artifact RPC), so the prepare-only
+    // summary below can distinguish newly-minted pins from re-verified ones.
+    let lock_path = artifact.context.join("Vorpal.lock");
+
+    let pre_lock_digests: HashMap<(String, String), String> = if artifact.prepare_only {
+        load_lock(&lock_path)
+            .await
+            .unwrap_or(None)
+            .map(|lock| {
+                lock.sources
+                    .into_iter()
+                    .map(|s| ((s.name, s.platform), s.digest))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
 
     let (mut config_process, mut config_client) = match start(
         service.agent.to_string(),
@@ -706,6 +806,42 @@ pub async fn run(
     )
     .await?;
 
+    if artifact.prepare_only {
+        let mut summary_lines: Vec<String> = build_store
+            .values()
+            .flat_map(|build_artifact| {
+                let platform = artifact_system_to_platform(build_artifact.target);
+
+                build_artifact
+                    .sources
+                    .iter()
+                    .filter(|source| {
+                        source.path.starts_with("http://") || source.path.starts_with("https://")
+                    })
+                    .map(|source| {
+                        let key = (source.name.clone(), platform.clone());
+                        let digest = source.digest.clone().unwrap_or_default();
+                        let status =
+                            classify_pin(pre_lock_digests.get(&key).map(String::as_str), &digest);
+
+                        format!("{status}: {} ({}) -> {}", source.name, platform, digest)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        summary_lines.sort();
+        summary_lines.dedup();
+
+        for line in &summary_lines {
+            println!("{line}");
+        }
+
+        println!("{selected_artifact_digest}");
+
+        return Ok(());
+    }
+
     if artifact.list {
         let order = get_order(&build_store).await?;
 
@@ -758,4 +894,71 @@ pub async fn run(
     println!("{output}");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_config_system_forces_host_native_for_prepare_only() {
+        let host = get_system_default_str();
+
+        assert_eq!(resolve_config_system(true, "x86_64-darwin"), host);
+        assert_eq!(resolve_config_system(true, &host), host);
+    }
+
+    #[test]
+    fn resolve_config_system_passes_through_requested_system_for_build() {
+        assert_eq!(
+            resolve_config_system(false, "x86_64-darwin"),
+            "x86_64-darwin"
+        );
+    }
+
+    // Role A across the full target matrix: for prepare, the config binary always
+    // compiles host-native, so the requested target (incl. the CI Linux-host ->
+    // darwin-target case) is ignored for the config-binary compile target.
+    #[test]
+    fn resolve_config_system_ignores_every_requested_target_for_prepare() {
+        let host = get_system_default_str();
+
+        for requested in [
+            "aarch64-darwin",
+            "x86_64-darwin",
+            "aarch64-linux",
+            "x86_64-linux",
+        ] {
+            assert_eq!(resolve_config_system(true, requested), host);
+        }
+    }
+
+    // Role B is untouched: for build every requested target flows through
+    // unchanged, so today's behavior is byte-identical across the matrix.
+    #[test]
+    fn resolve_config_system_preserves_every_requested_target_for_build() {
+        for requested in [
+            "aarch64-darwin",
+            "x86_64-darwin",
+            "aarch64-linux",
+            "x86_64-linux",
+        ] {
+            assert_eq!(resolve_config_system(false, requested), requested);
+        }
+    }
+
+    #[test]
+    fn classify_pin_no_prior_entry_is_mint() {
+        assert_eq!(classify_pin(None, "abc123"), "mint");
+    }
+
+    #[test]
+    fn classify_pin_matching_prior_entry_is_verify() {
+        assert_eq!(classify_pin(Some("abc123"), "abc123"), "verify");
+    }
+
+    #[test]
+    fn classify_pin_changed_prior_entry_is_update() {
+        assert_eq!(classify_pin(Some("abc123"), "def456"), "update");
+    }
 }

@@ -45,12 +45,43 @@ use vorpal_sdk::{
     context::{build_channel, client_auth_header},
 };
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum ArtifactSourceType {
     Unknown,
     Local,
     Git,
     Http,
+}
+
+/// Classify a source path: local if it exists on disk (workspace-trust domain,
+/// re-read each build), otherwise git/http by scheme, else unknown.
+fn classify_source_type(path: &str) -> ArtifactSourceType {
+    if Path::new(path).exists() {
+        ArtifactSourceType::Local
+    } else if path.starts_with("git") {
+        ArtifactSourceType::Git
+    } else if path.starts_with("http://") || path.starts_with("https://") {
+        ArtifactSourceType::Http
+    } else {
+        ArtifactSourceType::Unknown
+    }
+}
+
+/// A remote (git/http) source with neither an inline digest nor a matching
+/// (name, platform) lock entry is unpinned (TOFU). Minting that first pin
+/// requires an explicit `--unlock`, symmetric with the change-guard that
+/// already gates CHANGING an existing pin. Local sources are exempt.
+fn requires_unlock_to_pin(
+    source_type: &ArtifactSourceType,
+    has_inline_digest: bool,
+    has_lock_entry: bool,
+) -> bool {
+    let is_remote = matches!(
+        source_type,
+        ArtifactSourceType::Git | ArtifactSourceType::Http
+    );
+
+    is_remote && !has_inline_digest && !has_lock_entry
 }
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // streaming chunk size
@@ -79,12 +110,7 @@ pub async fn build_source(
             Ok(req)
         });
 
-    let source_type = match &artifact_source.path {
-        s if Path::new(s).exists() => ArtifactSourceType::Local,
-        s if s.starts_with("git") => ArtifactSourceType::Git,
-        s if s.starts_with("http://") || s.starts_with("https://") => ArtifactSourceType::Http,
-        _ => ArtifactSourceType::Unknown,
-    };
+    let source_type = classify_source_type(&artifact_source.path);
 
     if source_type == ArtifactSourceType::Unknown {
         bail!(
@@ -512,40 +538,54 @@ async fn prepare_artifact(
     let target_platform = artifact_system_to_platform(artifact.target);
 
     for mut artifact_source in artifact.sources.into_iter() {
-        if let Some(ref lock) = lock_file {
-            if let Some(lock_source) = lock
-                .sources
+        let lock_source = lock_file.as_ref().and_then(|lock| {
+            lock.sources
                 .iter()
                 .find(|s| s.name == artifact_source.name && s.platform == target_platform)
-            {
-                let changed_digest = artifact_source.digest.is_some()
-                    && artifact_source.digest.clone().unwrap() != lock_source.digest;
+        });
 
-                let changed_includes = artifact_source.includes != lock_source.includes;
+        if let Some(lock_source) = lock_source {
+            let changed_digest = artifact_source.digest.is_some()
+                && artifact_source.digest.clone().unwrap() != lock_source.digest;
 
-                let changed_excludes = artifact_source.excludes != lock_source.excludes;
+            let changed_includes = artifact_source.includes != lock_source.includes;
 
-                let changed_path = artifact_source.path != lock_source.path;
+            let changed_excludes = artifact_source.excludes != lock_source.excludes;
 
-                let changed_source =
-                    changed_digest || changed_includes || changed_excludes || changed_path;
+            let changed_path = artifact_source.path != lock_source.path;
 
-                if changed_source && !request.artifact_unlock {
-                    return Err(Status::failed_precondition(format!(
-                        "source '{}' changed - use '--unlock' to update",
-                        artifact_source.name
-                    )));
-                }
+            let changed_source =
+                changed_digest || changed_includes || changed_excludes || changed_path;
 
-                if !changed_source && !lock_source.digest.is_empty() {
-                    artifact_source.digest = Some(lock_source.digest.clone());
-
-                    info!(
-                        "agent |> hydrated source: {} ({}) -> {}",
-                        artifact_source.name, target_platform, lock_source.digest
-                    );
-                }
+            if changed_source && !request.artifact_unlock {
+                return Err(Status::failed_precondition(format!(
+                    "source '{}' changed - use '--unlock' to update",
+                    artifact_source.name
+                )));
             }
+
+            if !changed_source && !lock_source.digest.is_empty() {
+                artifact_source.digest = Some(lock_source.digest.clone());
+
+                info!(
+                    "agent |> hydrated source: {} ({}) -> {}",
+                    artifact_source.name, target_platform, lock_source.digest
+                );
+            }
+        }
+
+        // Fail-closed: reject an unpinned remote source (no inline digest, no
+        // lock entry) unless --unlock is passed to mint the first pin.
+        if requires_unlock_to_pin(
+            &classify_source_type(&artifact_source.path),
+            artifact_source.digest.is_some(),
+            lock_source.is_some_and(|s| !s.digest.is_empty()),
+        ) && !request.artifact_unlock
+        {
+            return Err(Status::failed_precondition(format!(
+                "source '{}' is unpinned - use '--unlock' to pin",
+                artifact_source.name
+            )));
         }
 
         let cache_key = SourceCacheKey {
@@ -764,5 +804,99 @@ impl AgentService for AgentServer {
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_local_when_path_exists() {
+        // "." always exists on disk -> workspace-trust (local) domain.
+        assert_eq!(classify_source_type("."), ArtifactSourceType::Local);
+    }
+
+    #[test]
+    fn classify_remote_and_unknown_schemes() {
+        assert_eq!(
+            classify_source_type("https://example.com/x.tar.gz"),
+            ArtifactSourceType::Http
+        );
+        assert_eq!(
+            classify_source_type("http://example.com/x.tar.gz"),
+            ArtifactSourceType::Http
+        );
+        assert_eq!(
+            classify_source_type("git+https://example.com/r.git"),
+            ArtifactSourceType::Git
+        );
+        assert_eq!(
+            classify_source_type("ftp://example.com/x"),
+            ArtifactSourceType::Unknown
+        );
+    }
+
+    // AC (a): new remote source, no inline digest, no lock entry -> needs --unlock.
+    #[test]
+    fn remote_unpinned_requires_unlock() {
+        assert!(requires_unlock_to_pin(
+            &ArtifactSourceType::Http,
+            false,
+            false
+        ));
+        assert!(requires_unlock_to_pin(
+            &ArtifactSourceType::Git,
+            false,
+            false
+        ));
+    }
+
+    // An inline digest pins a remote source (verified downstream at the digest check).
+    #[test]
+    fn remote_with_inline_digest_allowed() {
+        assert!(!requires_unlock_to_pin(
+            &ArtifactSourceType::Http,
+            true,
+            false
+        ));
+    }
+
+    // AC (c): a minted lock entry exempts subsequent builds from the mint gate.
+    #[test]
+    fn remote_with_lock_entry_allowed() {
+        assert!(!requires_unlock_to_pin(
+            &ArtifactSourceType::Http,
+            false,
+            true
+        ));
+    }
+
+    // A (name,platform) lock entry whose digest is "" is not a usable pin: the
+    // call site computes has_lock_entry via is_some_and(|s| !s.digest.is_empty()),
+    // which is false for an empty digest, so the gate still requires --unlock.
+    #[test]
+    fn remote_with_empty_digest_lock_entry_still_requires_unlock() {
+        // has_lock_entry=false mirrors what the call site computes for digest=""
+        assert!(requires_unlock_to_pin(
+            &ArtifactSourceType::Http,
+            false,
+            false
+        ));
+    }
+
+    // AC (d) regression: a local source with no lock entry never needs --unlock.
+    #[test]
+    fn local_source_never_requires_unlock() {
+        assert!(!requires_unlock_to_pin(
+            &ArtifactSourceType::Local,
+            false,
+            false
+        ));
+        assert!(!requires_unlock_to_pin(
+            &ArtifactSourceType::Unknown,
+            false,
+            false
+        ));
     }
 }
