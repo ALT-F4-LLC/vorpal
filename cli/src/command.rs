@@ -18,12 +18,13 @@ use std::{
     env::current_dir,
     path::{Path, PathBuf},
     process::exit,
+    sync::Mutex,
+    time::{Duration, Instant},
 };
 use tokio::{fs::OpenOptions, io::AsyncWriteExt, time::sleep};
 use tracing::{error, subscriber, Level};
 use tracing_subscriber::{
     filter::{LevelFilter, Targets},
-    fmt::writer::MakeWriterExt,
     layer::{Context, SubscriberExt},
     Layer, Registry,
 };
@@ -354,8 +355,24 @@ pub enum Command {
 /// -- ..."), invisible under the default `--level info`. This layer relays
 /// that debug event as a WARN so it's visible without `--level debug`,
 /// without touching h2's rejection behavior (DKT-32, diagnosed in DKT-28).
-struct H2ProtocolErrorRelay;
+struct H2ProtocolErrorRelay {
+    last_warn: Mutex<Option<Instant>>,
+}
 
+/// Minimum spacing between relayed h2-protocol-error WARNs. An unauthenticated
+/// peer can stream malformed frames (invalid `:authority`, PROTOCOL_ERROR
+/// resets) one after another; without throttling each produces a separate h2
+/// debug event and thus a relayed WARN. This window caps the relay to one WARN
+/// per interval so a frame flood cannot generate an unbounded stream of WARN
+/// lines at the default log level.
+const H2_RELAY_THROTTLE_WINDOW: Duration = Duration::from_secs(5);
+
+/// Visits a `tracing::Event`'s fields to extract the `message` field. Only
+/// `record_debug` is implemented (not `record_str`/`record_i64`/etc.) — this is
+/// correct today because h2 emits its diagnostic `message` as a Debug-formatted
+/// field, but a future h2 version emitting the field under a different visitor
+/// method would silently produce an empty-message WARN rather than a compile
+/// error. The integration tests below guard against that regression.
 struct H2MessageVisitor(String);
 
 impl tracing::field::Visit for H2MessageVisitor {
@@ -369,6 +386,14 @@ impl tracing::field::Visit for H2MessageVisitor {
 /// True when a `target`/`level`/`message` triple is h2's own signal for a
 /// stream it rejected with PROTOCOL_ERROR (malformed headers, or the
 /// `proto_err!`-shaped "stream/connection error PROTOCOL_ERROR -- ..." family).
+///
+/// COUPLING NOTE: this predicate matches h2 **0.4.15**'s internal debug
+/// messages by substring ("malformed headers" / "PROTOCOL_ERROR"). These
+/// strings are NOT part of h2's semver-guaranteed public API — an h2 upgrade
+/// can silently widen, narrow, or reword them and break the match (or match
+/// unintended events). The unit tests in `h2_protocol_error_relay_tests`
+/// (`matches_*` / `ignores_*`) are the regression guard: bumping h2 must keep
+/// them green, or this predicate must be re-derived against the new wording.
 fn is_h2_protocol_error(target: &str, level: Level, message: &str) -> bool {
     level == Level::DEBUG
         && target.starts_with("h2")
@@ -382,8 +407,41 @@ impl<S: tracing::Subscriber> Layer<S> for H2ProtocolErrorRelay {
         let mut message = H2MessageVisitor(String::new());
         event.record(&mut message);
 
-        if is_h2_protocol_error(metadata.target(), *metadata.level(), &message.0) {
-            tracing::warn!(target: "vorpal_cli::agent", "h2 rejected stream: {}", message.0);
+        if !is_h2_protocol_error(metadata.target(), *metadata.level(), &message.0) {
+            return;
+        }
+
+        // Rate-limit: suppress repeats of the same rejection class within a
+        // short window so an unauthenticated malformed-frame flood cannot emit
+        // one WARN per frame. The first occurrence in each window still emits.
+        let now = Instant::now();
+        let mut last = self.last_warn.lock().unwrap();
+        if let Some(prev) = *last {
+            if now.duration_since(prev) < H2_RELAY_THROTTLE_WINDOW {
+                return;
+            }
+        }
+        *last = Some(now);
+        drop(last);
+
+        // Branch the relay target by the originating h2 side so client-driven
+        // gRPC errors (outbound calls on `h2::client`) are not mislabeled as
+        // agent-side stream rejections. `h2::server` is inbound agent traffic;
+        // anything else is treated as an outbound client call. (The `target:`
+        // argument is a static callsite key, so the branch is expressed as two
+        // literal-target calls rather than a runtime variable.)
+        if metadata.target().starts_with("h2::client") {
+            tracing::warn!(
+                target: "vorpal_cli::client",
+                "h2 rejected stream: {}",
+                message.0
+            );
+        } else {
+            tracing::warn!(
+                target: "vorpal_cli::agent",
+                "h2 rejected stream: {}",
+                message.0
+            );
         }
     }
 }
@@ -391,6 +449,7 @@ impl<S: tracing::Subscriber> Layer<S> for H2ProtocolErrorRelay {
 #[cfg(test)]
 mod h2_protocol_error_relay_tests {
     use super::*;
+    use std::sync::Mutex;
 
     #[test]
     fn matches_malformed_authority_debug_event() {
@@ -437,6 +496,116 @@ mod h2_protocol_error_relay_tests {
             Level::DEBUG,
             "convert_push_message: method POST is not safe and cacheable",
         ));
+    }
+
+    // End-to-end relay coverage. A layer that emits a re-entrant `tracing::warn!`
+    // from inside `on_event` CANNOT be exercised via `tracing::subscriber::
+    // with_default`: the scoped-dispatch path in tracing-core guards against
+    // re-entrant dispatch (`dispatcher::get_default` returns `Dispatch::none()`
+    // when re-entered under a non-zero `SCOPED_COUNT`). The production path
+    // (`set_global_default`) takes the global fast path which has NO such guard,
+    // so the relay genuinely works in production. The faithful harness is
+    // therefore a process-global capturing subscriber installed once.
+
+    use std::sync::OnceLock;
+
+    struct CapturingWriter(&'static Mutex<Vec<u8>>);
+
+    impl std::io::Write for CapturingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct CapturingMakeWriter(&'static Mutex<Vec<u8>>);
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturingMakeWriter {
+        type Writer = CapturingWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            CapturingWriter(self.0)
+        }
+    }
+
+    // Shared capture buffer + process-global subscriber, installed once.
+    static CAPTURE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+    static GLOBAL: OnceLock<()> = OnceLock::new();
+
+    fn ensure_global_subscriber() {
+        GLOBAL.get_or_init(|| {
+            let fmt_layer = tracing_subscriber::fmt::layer()
+                .with_target(true)
+                .with_writer(CapturingMakeWriter(&CAPTURE))
+                .without_time();
+
+            let subscriber = Registry::default()
+                .with(fmt_layer.with_filter(LevelFilter::from_level(Level::INFO)))
+                .with(
+                    H2ProtocolErrorRelay {
+                        last_warn: Mutex::new(None),
+                    }
+                    .with_filter(Targets::new().with_target("h2", LevelFilter::DEBUG)),
+                );
+
+            // Best-effort; a global default may already be set in which case the
+            // capture path is whatever was installed (test would then fail loudly).
+            let _ = tracing::subscriber::set_global_default(subscriber);
+        });
+    }
+
+    fn captured() -> String {
+        String::from_utf8(CAPTURE.lock().unwrap().clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn relay_end_to_end_observe_rate_limit_and_client_target() {
+        // AC (Concern, closes the isolated-predicate gap): the relayed WARN must
+        // be observed end-to-end through the real layered subscriber, not just
+        // via the predicate. AC (Medium, secB): a malformed-frame flood must not
+        // emit one WARN per frame. AC (Concern): client-side events are routed to
+        // the client target, not mislabeled as agent-side.
+        //
+        // We emit a burst of 50 client-side h2 debug events against the
+        // process-global subscriber: the throttle collapses the flood to exactly
+        // one WARN, and that single WARN proves both end-to-end visibility and
+        // the client-target routing. (Server routing is the literal else-branch
+        // mirror of the client branch asserted here.)
+        ensure_global_subscriber();
+        CAPTURE.lock().unwrap().clear();
+
+        tracing::debug!(
+            target: "h2::client",
+            message = "malformed headers: malformed authority (\"bad::authority\"): invalid uri character",
+            "h2 client rejection"
+        );
+        // A second distinct rejection class to demonstrate flood suppression.
+        for _ in 0..49 {
+            tracing::debug!(
+                target: "h2::client",
+                message = "stream error PROTOCOL_ERROR -- remote peer sent an invalid frame",
+                "h2 client rejection"
+            );
+        }
+
+        let captured = captured();
+        let warn_count = captured.matches("h2 rejected stream").count();
+        assert_eq!(
+            warn_count, 1,
+            "expected exactly one relayed WARN (flood suppressed), got {warn_count}: {captured}"
+        );
+        assert!(
+            captured.contains("vorpal_cli::client"),
+            "expected the client-side relay target, got: {captured}"
+        );
+        assert!(
+            !captured.contains("vorpal_cli::agent"),
+            "client-side event must not be mislabeled as agent-side: {captured}"
+        );
     }
 }
 
@@ -740,16 +909,6 @@ pub async fn run() -> Result<()> {
 
     let Cli { command, level } = cli;
 
-    let subscriber_writer = std::io::stderr.with_max_level(level);
-    let mut fmt_layer = tracing_subscriber::fmt::layer()
-        .with_target(false)
-        .with_writer(subscriber_writer)
-        .without_time();
-
-    if [Level::DEBUG, Level::TRACE].contains(&level) {
-        fmt_layer = fmt_layer.with_file(true).with_line_number(true);
-    }
-
     // Per-layer filtering: the main fmt layer stays at the user-selected
     // `--level` (default info), while the h2 relay layer is scoped to the
     // `h2` target at debug so only h2's own debug-level events are enabled -
@@ -757,10 +916,26 @@ pub async fn run() -> Result<()> {
     // it to DEBUG for every target. The relayed WARN it emits then flows back
     // through fmt_layer's info-level filter like any other event, so it's
     // visible by default without lowering the general level.
+    //
+    // The fmt layer is gated once by `LevelFilter::from_level(level)`; there is
+    // no second writer-level gate (the prior `stderr.with_max_level(level)`
+    // duplicated the same filtering the layer already performs).
+    let mut fmt_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_writer(std::io::stderr)
+        .without_time();
+
+    if [Level::DEBUG, Level::TRACE].contains(&level) {
+        fmt_layer = fmt_layer.with_file(true).with_line_number(true);
+    }
+
     let subscriber = Registry::default()
         .with(fmt_layer.with_filter(LevelFilter::from_level(level)))
         .with(
-            H2ProtocolErrorRelay.with_filter(Targets::new().with_target("h2", LevelFilter::DEBUG)),
+            H2ProtocolErrorRelay {
+                last_warn: Mutex::new(None),
+            }
+            .with_filter(Targets::new().with_target("h2", LevelFilter::DEBUG)),
         );
 
     subscriber::set_global_default(subscriber).expect("setting default subscriber");
