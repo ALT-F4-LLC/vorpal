@@ -141,10 +141,10 @@ class LinuxDebian:
 
         script = (
             "cat > $VORPAL_OUTPUT/version_check.sh << \"EOF\"\n"
-            f"{_generate_version_script()}"
+            f"{_generate_version_script()}\n"
             "EOF\n\n"
             "cat > $VORPAL_OUTPUT/Dockerfile << \"EOF\"\n"
-            f"{_generate_dockerfile()}"
+            f"{_generate_dockerfile()}\n"
             "EOF"
         )
 
