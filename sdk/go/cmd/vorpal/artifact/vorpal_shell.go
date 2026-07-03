@@ -21,6 +21,11 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("failed to get crane: %w", err)
 	}
 
+	cpython, err := artifact.Cpython(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cpython: %w", err)
+	}
+
 	gh, err := artifact.Gh(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gh: %w", err)
@@ -81,6 +86,11 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 		return nil, fmt.Errorf("failed to get staticcheck: %w", err)
 	}
 
+	uv, err := artifact.Uv(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get uv: %w", err)
+	}
+
 	goarch, err := language.GetGOARCH(contextTarget)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get GOARCH for target %s: %w", contextTarget, err)
@@ -95,6 +105,7 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 		NewDevelopmentEnvironment("vorpal-shell", SYSTEMS).
 		WithArtifacts([]*string{
 			bun,
+			cpython,
 			crane,
 			gh,
 			gobin,
@@ -108,6 +119,7 @@ func BuildVorpalShell(context *config.ConfigContext) (*string, error) {
 			protocGenGoGRPC,
 			rsync,
 			staticcheck,
+			uv,
 		}).
 		WithEnvironments([]string{
 			"CGO_ENABLED=0",

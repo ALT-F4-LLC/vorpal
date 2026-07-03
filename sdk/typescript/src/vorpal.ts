@@ -11,6 +11,7 @@ import {
 } from "./artifact.js";
 import { shell } from "./artifact/step.js";
 import { Bun } from "./artifact/bun.js";
+import { Cpython } from "./artifact/cpython.js";
 import { Crane } from "./artifact/crane.js";
 import { Gh } from "./artifact/gh.js";
 import { GoBin } from "./artifact/go.js";
@@ -25,6 +26,7 @@ import { ProtocGenGo } from "./artifact/protoc_gen_go.js";
 import { ProtocGenGoGrpc } from "./artifact/protoc_gen_go_grpc.js";
 import { Rsync } from "./artifact/rsync.js";
 import { Staticcheck } from "./artifact/staticcheck.js";
+import { Uv } from "./artifact/uv.js";
 import { ConfigContext } from "./context.js";
 
 const SYSTEMS: ArtifactSystem[] = [
@@ -115,6 +117,7 @@ async function buildVorpalProcess(context: ConfigContext): Promise<string> {
 
 async function buildVorpalShell(context: ConfigContext): Promise<string> {
   const bun = await new Bun().build(context);
+  const cpython = await new Cpython().build(context);
   const crane = await new Crane().build(context);
   const gh = await new Gh().build(context);
   const go = await new GoBin().build(context);
@@ -128,6 +131,7 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
   const protocGenGoGrpc = await new ProtocGenGoGrpc().build(context);
   const rsync = await new Rsync().build(context);
   const staticcheck = await new Staticcheck().build(context);
+  const uv = await new Uv().build(context);
 
   const goarch = getGoarch(context.getSystem());
   const goos = getGoos(context.getSystem());
@@ -135,6 +139,7 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
   return new DevelopmentEnvironment("vorpal-shell", SYSTEMS)
     .withArtifacts([
       bun,
+      cpython,
       crane,
       gh,
       go,
@@ -148,6 +153,7 @@ async function buildVorpalShell(context: ConfigContext): Promise<string> {
       protocGenGoGrpc,
       rsync,
       staticcheck,
+      uv,
     ])
     .withEnvironments([
       "CGO_ENABLED=0",

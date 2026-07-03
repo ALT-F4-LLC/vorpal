@@ -2,6 +2,7 @@ use crate::artifact::SYSTEMS;
 use anyhow::Result;
 use vorpal_sdk::artifact::{
     bun::Bun,
+    cpython::Cpython,
     crane::Crane,
     gh::Gh,
     go::Go,
@@ -16,6 +17,7 @@ use vorpal_sdk::artifact::{
     protoc_gen_go_grpc::ProtocGenGoGrpc,
     rsync::Rsync,
     staticcheck::Staticcheck,
+    uv::Uv,
 };
 use vorpal_sdk::{artifact, context::ConfigContext};
 
@@ -29,6 +31,7 @@ impl VorpalShell {
 
     pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
         let bun = Bun::new().build(context).await?;
+        let cpython = Cpython::new().build(context).await?;
         let crane = Crane::new().build(context).await?;
         let gh = Gh::new().build(context).await?;
         let go = Go::new().build(context).await?;
@@ -42,10 +45,12 @@ impl VorpalShell {
         let protoc_gen_go_grpc = ProtocGenGoGrpc::new().build(context).await?;
         let rsync = Rsync::new().build(context).await?;
         let staticcheck = Staticcheck::new().build(context).await?;
+        let uv = Uv::new().build(context).await?;
 
         artifact::DevelopmentEnvironment::new("vorpal-shell", SYSTEMS.to_vec())
             .with_artifacts(vec![
                 bun,
+                cpython,
                 crane,
                 gh,
                 go,
@@ -59,6 +64,7 @@ impl VorpalShell {
                 protoc_gen_go_grpc,
                 rsync,
                 staticcheck,
+                uv,
             ])
             .with_environments(vec![
                 "CGO_ENABLED=0".to_string(),

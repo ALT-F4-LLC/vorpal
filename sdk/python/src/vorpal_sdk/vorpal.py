@@ -24,6 +24,7 @@ from vorpal_sdk.artifact import (
 )
 from vorpal_sdk.artifact.bun import Bun
 from vorpal_sdk.artifact.crane import Crane
+from vorpal_sdk.artifact.cpython import Cpython
 from vorpal_sdk.artifact.gh import Gh
 from vorpal_sdk.artifact.go import GoBin
 from vorpal_sdk.artifact.goimports import Goimports
@@ -38,6 +39,7 @@ from vorpal_sdk.artifact.protoc_gen_go import ProtocGenGo
 from vorpal_sdk.artifact.protoc_gen_go_grpc import ProtocGenGoGrpc
 from vorpal_sdk.artifact.rsync import Rsync
 from vorpal_sdk.artifact.staticcheck import Staticcheck
+from vorpal_sdk.artifact.uv import Uv
 from vorpal_sdk.context import ConfigContext
 from vorpal_sdk.step import shell
 
@@ -163,6 +165,7 @@ def build_vorpal_release(context: ConfigContext) -> str:
 
 def build_vorpal_shell(context: ConfigContext) -> str:
     bun = Bun().build(context)
+    cpython = Cpython().build(context)
     crane = Crane().build(context)
     gh = Gh().build(context)
     go = GoBin().build(context)
@@ -176,6 +179,7 @@ def build_vorpal_shell(context: ConfigContext) -> str:
     protoc_gen_go_grpc = ProtocGenGoGrpc().build(context)
     rsync = Rsync().build(context)
     staticcheck = Staticcheck().build(context)
+    uv = Uv().build(context)
 
     goarch = get_goarch(context.get_system())
     goos = get_goos(context.get_system())
@@ -185,6 +189,7 @@ def build_vorpal_shell(context: ConfigContext) -> str:
         .with_artifacts(
             [
                 bun,
+                cpython,
                 crane,
                 gh,
                 go,
@@ -198,6 +203,7 @@ def build_vorpal_shell(context: ConfigContext) -> str:
                 protoc_gen_go_grpc,
                 rsync,
                 staticcheck,
+                uv,
             ]
         )
         .with_environments(
