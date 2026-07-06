@@ -14,7 +14,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "protobuf", specifier = ">=6.33.5,<7.0.0" },
-    { name = "vorpal-sdk", specifier = ">=0.2.2" },
+    { name = "vorpal-sdk", specifier = ">=0.3.0" },
 ]
 
 [[package]]
@@ -64,13 +64,13 @@ wheels = [
 
 [[package]]
 name = "vorpal-sdk"
-version = "0.2.2"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "grpcio" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/93/a15f5348ffdfca7d7171986983f1e4f34e89bbc658c3dd89935391a7e15a/vorpal_sdk-0.2.2.tar.gz", hash = "sha256:453b58a25913c252795c49d8457217cec3f1c181a9d7bca634848715a59fce18", size = 52023, upload-time = "2026-07-05T00:38:04.964Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/b8/711b22e7c35461a84539402b40f5c8df1f98e4c76d18017b1c4f9fc44bc9/vorpal_sdk-0.3.0.tar.gz", hash = "sha256:6078f6314d75e634f5311292d88e63e34a88a98d61a15265d22af3e4a74c17ef", size = 52164, upload-time = "2026-07-06T07:01:34.362Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/d6/55f88ef7d820e9037d5e07bebd99cc7e5a0b7ec33fe2bdd32da1f0a16146/vorpal_sdk-0.2.2-py3-none-any.whl", hash = "sha256:2213657ec62a1cc303ee511acc9c5fe62cab3e87385636b59668dc0194774b2e", size = 91318, upload-time = "2026-07-05T00:38:03.618Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/28/b9edbe46f919ea3de6c946d8ecb82ab32e858b89d2641b0268f78dd009ac/vorpal_sdk-0.3.0-py3-none-any.whl", hash = "sha256:94fa35da5be2a87b5a73ccccbe7e431bc7ea92538fe5ef73d2437717be512b8e", size = 91463, upload-time = "2026-07-06T07:01:35.201Z" },
 ]

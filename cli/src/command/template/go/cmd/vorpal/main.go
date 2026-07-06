@@ -9,11 +9,7 @@ import (
 )
 
 func main() {
-	// Define build context
-
 	ctx := config.GetContext()
-
-	// Define supported artifact systems
 
 	systems := []api.ArtifactSystem{
 		api.ArtifactSystem_AARCH64_DARWIN,
@@ -22,15 +18,11 @@ func main() {
 		api.ArtifactSystem_X8664_LINUX,
 	}
 
-	// Define language-specific development environment artifact
-
 	_, err := language.NewGoDevelopmentEnvironment("example-shell", systems).
 		Build(ctx)
 	if err != nil {
 		log.Fatalf("error building development environment: %v", err)
 	}
-
-	// Define application artifact
 
 	_, err = language.NewGo("example", systems).
 		WithBuildDirectory("cmd/example").
@@ -39,8 +31,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("error building: %v", err)
 	}
-
-	// Run context to build
 
 	ctx.Run()
 }
