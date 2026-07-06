@@ -237,3 +237,75 @@ If an SDK was skipped (e.g., TypeScript for `vorpal-shell`), note it in the tabl
 - If any build fails, stop services, report the failure, and do not attempt comparison
 - Extract the full digest hash from each build output for accurate comparison
 - Lima VM commands use `vorpal-aarch64` which assumes Apple Silicon (aarch64). On x86_64 hosts, the VM name would be `vorpal-x86_64` — adjust commands accordingly.
+
+## Serializer fixture parity (offline, no services)
+
+The build-based flow above exercises the full pipeline end-to-end. A second,
+lightweight arm validates only the digest-parity SERIALIZER against shared
+fixtures with NO running services. This is the load-bearing cross-SDK invariant:
+every SDK hand-writes a serializer and must produce byte-identical SHA-256
+artifact digests for the same artifact definition.
+
+**Shared assets** (additive home; new SDK arms extend, never rewrite):
+
+- `sdk/python/tests/fixtures/digest-parity/artifacts.json` — language-neutral
+  artifact fixtures. Optional fields (`digest`, `entrypoint`, `script`) are
+  presence-encoded: a key PRESENT (even `""`) means proto-present; a key ABSENT
+  means proto-absent (serializes to `null`).
+- `sdk/python/tests/fixtures/digest-parity/digests.json` — golden digests
+  produced by the canonical TypeScript reference serializer
+  (`serializeArtifact`/`computeArtifactDigest` in
+  `sdk/typescript/src/context.ts`) over those fixtures.
+
+**Python arm:** `python sdk/python/tests/test_parity.py` builds each fixture as
+a proto `Artifact`, serializes via `vorpal_sdk.context`, and asserts the digest
+equals the golden. Exits 0 on parity, non-zero (with the produced JSON) on any
+mismatch. Also runnable under `pytest`.
+
+**Regenerating goldens** (only after a deliberate, cross-SDK-coordinated format
+change): run the TS reference serializer over `artifacts.json` and overwrite the
+digest values in `digests.json`. Never edit a golden to match a single SDK in
+isolation — that hides a real cross-SDK divergence.
+
+**Coordination:** the builder-output parity arm (DKT-19) extends this section
+additively with its own builder-input fixtures; it does not modify the
+serializer fixtures or goldens above.
+
+## Cross-SDK BUILDER parity (build-target Python — DKT-19)
+
+The serializer arm above proves the digest *serializer* agrees across SDKs. This
+arm proves the *builders* agree: the same minimal Python build-target project,
+built through each SDK's Python language builder (`python.rs` / `python.go` /
+`python.ts`), produces byte-identical artifact digests **per system**. It is the
+build-target analogue of the build-based `vorpal` flow (steps 6-12 above) — same
+machinery, a Python artifact instead of `vorpal`. Distinct from:
+- the *serializer-fixture* parity arm above (offline, no builders), and
+- DKT-16's *sdk/python builder-output* arm (the Python SDK's own builder output),
+  and DKT-20's cross-LANGUAGE config parity. This arm is cross-SDK BUILDER parity.
+
+**Fixture project:** the `vorpal init` Python template (`cli/src/command/template/python/`)
+is the minimal build-target project — reuse it; do not author a parallel fixture.
+Build it once per SDK via the build flow above (steps 6-12), substituting the
+Python artifact name for `vorpal`, with `Vorpal.toml` / `Vorpal.go.toml` /
+`Vorpal.ts.toml` selecting the Rust/Go/TS builder.
+
+**Invariant:** within one system, Rust == Go == TS digest (PASS). Cross-system
+divergence is EXPECTED and NOT a failure (native/compiled-extension deps differ
+per platform; TDD §Testing Strategy untested-claims) — assert same-system only.
+
+**The one adaptation beyond fixture + artifact name:** steps 6-12 compare a
+single cross-SDK digest per run. Here, run the build/compare PER SYSTEM and group
+the comparison by `ArtifactSystem` — for each system, assert the Rust/Go/TS
+builder digests are identical; never compare digests across systems. Everything
+else (start services, build per-SDK, extract digest) is reused unchanged.
+
+**RUNTIME-GATED.** This arm cannot run until both land:
+- the `cpython` / `uv` toolchain is published on `sdk.vorpal.build` (DKT-25 — the
+  mirror returns 403 today), and
+- the pinned 3.13.14 interpreter + uv 0.10.11 are provisioned in the build env
+  (DKT-21; `cpython.rs` / `uv.rs` are intentionally unpinned until capture).
+Until then the build fails closed at the C1 mint gate (`unpinned - use --unlock`),
+so a build-and-compare run is not yet meaningful. Run this arm as part of the
+`vorpal` build-flow validation once DKT-21/DKT-25 close; the version-equality
+invariant it depends on is enforced now by
+`sdk/python/tests/test_version_equality.py`.

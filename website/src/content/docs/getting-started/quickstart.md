@@ -14,7 +14,7 @@ mkdir hello-world && cd hello-world
 vorpal init hello-world
 ```
 
-The `init` command prompts you to choose a language for your build configuration -- Go, Rust, or TypeScript. Vorpal scaffolds a working project with a `Vorpal.toml` manifest and a sample build configuration in your chosen language.
+The `init` command prompts you to choose a language for your build configuration -- Go, Rust, TypeScript, or Python. Vorpal scaffolds a working project with a `Vorpal.toml` manifest and a sample build configuration in your chosen language.
 
 ## 2. Develop your project
 
@@ -71,6 +71,7 @@ This is useful for inspecting build output, copying files into a deployment pipe
 Now that you have a working project, explore the SDK guide for your language:
 
 - [Go guide](/guides/go/)
+- [Python guide](/guides/python/)
 - [Rust guide](/guides/rust/)
 - [TypeScript guide](/guides/typescript/)
 

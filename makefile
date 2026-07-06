@@ -116,12 +116,29 @@ generate:
 		--ts_proto_opt=importSuffix=.js \
 		--proto_path=sdk/rust/api \
 		agent/agent.proto artifact/artifact.proto archive/archive.proto context/context.proto worker/worker.proto
+	rm -rf sdk/python/src/vorpal_sdk/api
+	mkdir -p sdk/python/src/vorpal_sdk/api
+	uv run --project sdk/python --frozen --group dev python -m grpc_tools.protoc \
+		--grpc_python_out=sdk/python/src/vorpal_sdk/api \
+		--proto_path=sdk/rust/api \
+		--pyi_out=sdk/python/src/vorpal_sdk/api \
+		--python_out=sdk/python/src/vorpal_sdk/api \
+		agent/agent.proto \
+		artifact/artifact.proto \
+		archive/archive.proto \
+		context/context.proto \
+		worker/worker.proto
+	uv run --project sdk/python --frozen --group dev \
+		python sdk/python/script/fix_proto_imports.py sdk/python/src/vorpal_sdk/api
 	cargo run -p vorpal-sdk-codegen
 
 # Development (with Vorpal)
 
-vorpal:
+vorpal-build:
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- build $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
+
+vorpal-prepare:
+	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- prepare $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start $(VORPAL_FLAGS)

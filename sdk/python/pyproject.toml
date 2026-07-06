@@ -1,0 +1,67 @@
+[project]
+name = "vorpal-sdk"
+version = "0.3.0"
+description = "Python SDK for building Vorpal artifacts."
+license = { text = "Apache-2.0" }
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+keywords = ["vorpal", "sdk"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+]
+dependencies = [
+    "grpcio>=1.73.0",
+    # Bound to protobuf major 6: grpcio-tools (the pinned codegen toolchain) emits
+    # major-6 gencode whose embedded runtime check rejects a major-7 runtime. Floor is
+    # the gencode version the pinned grpcio-tools protoc produces (6.33.5).
+    # Maintenance: bump this protobuf bound in lockstep with the grpcio-tools gencode major.
+    "protobuf>=6.33.5,<7.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ALT-F4-LLC/vorpal/tree/main/sdk/python"
+Repository = "https://github.com/ALT-F4-LLC/vorpal"
+"Bug Tracker" = "https://github.com/ALT-F4-LLC/vorpal/issues"
+
+# Codegen toolchain (C5): pinned exact so the protoc bundled by grpcio-tools — and thus
+# the generated api/ bindings — is reproducible. Dev-only; never a runtime dependency.
+[dependency-groups]
+dev = ["grpcio-tools==1.81.1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vorpal_sdk"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "README.md", "pyproject.toml"]
+
+[tool.uv]
+index-url = "https://pypi.org/simple"
+
+[tool.ruff]
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# These modules embed byte-exact bash script templates (Process/UserEnvironment/
+# OciImage in the core package; the launcher/vendor/build scripts in the language
+# builders) whose lines cannot be reflowed without changing the cross-SDK artifact
+# digest, so line-length (E501) is not enforced for them.
+"src/vorpal_sdk/artifact/__init__.py" = ["E501"]
+"src/vorpal_sdk/artifact/language/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"

@@ -45,11 +45,21 @@ pub struct VorpalConfigSourceTypeScript {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct VorpalConfigSourcePython {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct VorpalConfigSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub go: Option<VorpalConfigSourceGo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub includes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub python: Option<VorpalConfigSourcePython>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rust: Option<VorpalConfigSourceRust>,
     #[serde(skip_serializing_if = "Option::is_none")]

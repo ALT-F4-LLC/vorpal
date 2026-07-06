@@ -226,6 +226,66 @@ vorpal login
 vorpal login --issuer https://id.example.com/realms/vorpal --registry https://registry.example.com:23151
 ```
 
+## `vorpal prepare`
+
+Prepare an artifact: download and pin its sources into `Vorpal.lock` without building the target artifact. Config-language toolchain prerequisites (e.g. protoc for Go configs) still build via the worker as needed to execute the config binary and enumerate the artifact graph — this always runs host-natively, so it works from any host for any `--system` target.
+
+```bash
+vorpal prepare <NAME> [OPTIONS]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<NAME>` | Name of the artifact to prepare (required) |
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--agent <ADDRESS>` | `unix:///var/lib/vorpal/vorpal.sock` | Agent service address |
+| `--config <PATH>` | `Vorpal.toml` | Path to configuration file |
+| `--context <PATH>` | `.` | Build context directory |
+| `--namespace <NAME>` | `library` | Artifact namespace |
+| `--registry <ADDRESS>` | `unix:///var/lib/vorpal/vorpal.sock` | Registry service address |
+| `--system <SYSTEM>` | Host system | Target system for the artifact (e.g., `aarch64-darwin`, `x86_64-linux`) |
+| `--unlock` | `true` | Pin/update source digests in `Vorpal.lock`. Unlike `build` (where this defaults to `false`), `prepare` defaults to `true`, since minting and updating pins is its entire purpose |
+| `--variable <KEY=VALUE>` | | Set build variables (can be repeated) |
+| `--worker <ADDRESS>` | `unix:///var/lib/vorpal/vorpal.sock` | Worker service address |
+
+`--unlock` accepts three forms: bare `--unlock` (equivalent to `--unlock=true`), `--unlock=false` to opt out and enforce the fail-closed pin gates, or omitting the flag entirely (defaults to `true`). The space-separated form `--unlock false` is rejected as an unexpected argument — use `--unlock=false`.
+
+### Examples
+
+```bash
+# Prepare an artifact, minting or updating its source pins by default
+vorpal prepare my-app
+
+# Prepare non-interactively in CI without minting/updating pins (fails
+# closed on any unpinned or changed source, same gates as `build`)
+vorpal prepare my-app --unlock=false
+
+# Prepare sources for a foreign target system from any host — e.g. a Linux
+# CI runner preparing a darwin target, or an aarch64-darwin host preparing
+# x86_64-darwin. This works because the config binary that enumerates the
+# artifact graph always compiles and runs host-native regardless of the
+# requested --system; only the artifact target and its downloaded/pinned
+# sources vary by --system. No OS/arch matching or binary-translation layer
+# is involved.
+vorpal prepare my-app --system x86_64-darwin
+```
+
+### Output
+
+Prints one sorted, deduplicated audit line per remote (HTTP/HTTPS) source across the artifact and its dependency closure, classifying each pin against its prior `Vorpal.lock` entry:
+
+- `mint: <name> (<platform>) -> <digest>` — no prior lock entry (first-use trust decision)
+- `update: <name> (<platform>) -> <digest>` — prior entry with a different digest (trust rotation)
+- `verify: <name> (<platform>) -> <digest>` — prior entry with the same digest (unchanged)
+
+After the audit lines, prints the selected artifact's SHA-256 content digest, matching `build`'s default output. `prepare` never dispatches a worker build for the target artifact or its dependencies — only `Vorpal.lock` is updated. Building the config binary itself (and its language toolchain, e.g. protoc for Go configs) still happens as usual, since the config binary must run to enumerate the artifact graph.
+
 ## `vorpal run`
 
 Execute a previously built artifact by alias. The alias format is `[<namespace>/]<name>[:<tag>]`.

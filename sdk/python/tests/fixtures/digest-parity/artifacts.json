@@ -1,0 +1,157 @@
+[
+  {
+    "name": "full",
+    "comment": "Fully populated artifact; mirrors the Go FullArtifact test. digest/entrypoint/script all PRESENT.",
+    "artifact": {
+      "target": 1,
+      "sources": [
+        {
+          "digest": "abc123",
+          "excludes": ["*.tmp"],
+          "includes": ["src/**"],
+          "name": "main",
+          "path": "https://example.com/source.tar.gz"
+        }
+      ],
+      "steps": [
+        {
+          "entrypoint": "/bin/sh",
+          "script": "make install",
+          "secrets": [{ "name": "API_KEY", "value": "secret123" }],
+          "arguments": ["--verbose"],
+          "artifacts": ["dep1", "dep2"],
+          "environments": ["PATH=/usr/bin"]
+        }
+      ],
+      "systems": [1, 4],
+      "aliases": ["myapp:1.0.0"],
+      "name": "myapp"
+    }
+  },
+  {
+    "name": "empty-repeated",
+    "comment": "All repeated fields empty -> [] (never null). One step with script present; optional digest absent.",
+    "artifact": {
+      "target": 1,
+      "sources": [],
+      "steps": [
+        {
+          "script": "echo hello",
+          "secrets": [],
+          "arguments": [],
+          "artifacts": [],
+          "environments": []
+        }
+      ],
+      "systems": [1],
+      "aliases": [],
+      "name": "test"
+    }
+  },
+  {
+    "name": "optional-absent",
+    "comment": "Optional digest/entrypoint/script ABSENT -> null via HasField.",
+    "artifact": {
+      "target": 2,
+      "sources": [
+        { "excludes": [], "includes": [], "name": "src", "path": "/some/path" }
+      ],
+      "steps": [
+        { "secrets": [], "arguments": [], "artifacts": [], "environments": [] }
+      ],
+      "systems": [2],
+      "aliases": [],
+      "name": "test-optional"
+    }
+  },
+  {
+    "name": "optional-present-empty",
+    "comment": "Optional digest/entrypoint/script PRESENT but EMPTY STRING -> \"\" (NOT null). The HasField-not-truthiness case.",
+    "artifact": {
+      "target": 2,
+      "sources": [
+        { "digest": "", "excludes": [], "includes": [], "name": "src", "path": "/some/path" }
+      ],
+      "steps": [
+        { "entrypoint": "", "script": "", "secrets": [], "arguments": [], "artifacts": [], "environments": [] }
+      ],
+      "systems": [2],
+      "aliases": [],
+      "name": "test-present-empty"
+    }
+  },
+  {
+    "name": "enum-zero",
+    "comment": "Zero-value enum (UNKNOWN_SYSTEM=0) must serialize as 0, not be omitted.",
+    "artifact": {
+      "target": 0,
+      "sources": [],
+      "steps": [
+        { "script": "true", "secrets": [], "arguments": [], "artifacts": [], "environments": [] }
+      ],
+      "systems": [0],
+      "aliases": [],
+      "name": "test-zero"
+    }
+  },
+  {
+    "name": "enum-mixed",
+    "comment": "Enums as integers: target=4 (X8664_LINUX), systems=[1,4].",
+    "artifact": {
+      "target": 4,
+      "sources": [],
+      "steps": [
+        { "script": "true", "secrets": [], "arguments": [], "artifacts": [], "environments": [] }
+      ],
+      "systems": [1, 4],
+      "aliases": [],
+      "name": "test-enums"
+    }
+  },
+  {
+    "name": "non-ascii",
+    "comment": "Non-ASCII field values must serialize byte-identical via ensure_ascii=False (A1).",
+    "artifact": {
+      "target": 1,
+      "sources": [
+        { "digest": "café-日本語", "excludes": ["螺旋"], "includes": ["naïve"], "name": "café", "path": "/tmp/🚀/path" }
+      ],
+      "steps": [
+        {
+          "entrypoint": "/bin/sh",
+          "script": "echo 'Grüße 世界 🚀'",
+          "secrets": [{ "name": "Ключ", "value": "значение" }],
+          "arguments": ["--möde=naïve"],
+          "artifacts": [],
+          "environments": ["LANG=ja_JP.UTF-8"]
+        }
+      ],
+      "systems": [1],
+      "aliases": ["café/naïve:latëst"],
+      "name": "café-app"
+    }
+  },
+  {
+    "name": "json-metachars",
+    "comment": "JSON metacharacters in values must not break object structure or alter other fields' digest (A1).",
+    "artifact": {
+      "target": 1,
+      "sources": [
+        { "digest": "a\"b,c}d{e", "excludes": ["x\\y"], "includes": ["tab\there"], "name": "q\"uote", "path": "back\\slash" }
+      ],
+      "steps": [
+        {
+          "entrypoint": "}],[{",
+          "script": "line1\nline2",
+          "secrets": [{ "name": "K\"EY", "value": "v}a,l\"u\\e" }],
+          "arguments": ["--x=\",}"],
+          "artifacts": [],
+          "environments": ["A=\"; rm -rf /\""]
+        }
+      ],
+      "systems": [1],
+      "aliases": [],
+      "name": "meta\"chars"
+    }
+  }
+]

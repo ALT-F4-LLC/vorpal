@@ -1,0 +1,14 @@
+{
+  "_comment": "Golden SHA-256 artifact digests, produced by the canonical TypeScript reference serializer (sdk/typescript/src/context.ts: serializeArtifact + computeArtifactDigest) over artifacts.json. These are the cross-SDK parity anchor: the Python serializer MUST reproduce them byte-for-byte. Regeneration recipe is documented in test_parity.py and the sdk-parity skill. Go/Rust serializer arms can additively assert against these same digests.",
+  "_source": "sdk/typescript/src/context.ts",
+  "digests": {
+    "full": "d795b4da379844abbef073162dd086c7400f21d3c39d105bcd88e691c0de92f2",
+    "empty-repeated": "7d1bb197683342ca0f7efbdda0cd9602197b4aa0726cf90a589217b29a54be44",
+    "optional-absent": "2efa6c4ba9d342a6c85f8eea9fd53794b35afd174f6b065082d68855e6e8cb66",
+    "optional-present-empty": "4dfdc4628d046b9357f78d3585f6c2198629173dee4df6872a145686e7fc8f82",
+    "enum-zero": "b9fa53173ce017ff8d5bfa1aa4e20a1f5054d0820845e000ed5247410adeb557",
+    "enum-mixed": "90d5c0f50608dcadc01b12b846269911317c6f378c0e7259aac6cbffebf60954",
+    "non-ascii": "64ec7fdc187a6209b1a07bdf39e59cbfc0ce77e6220f349aa87fde04dd5a564e",
+    "json-metachars": "62ac10ac67ca73aa056ba7c4a040a23970878a2593fd5f6894524bccb17df015"
+  }
+}

@@ -42,13 +42,13 @@ for i in {1..60}; do nc -z localhost 23153 2>/dev/null && echo "Services ready a
 Build the artifact against the running services. Default artifact is `vorpal-shell`:
 
 ```bash
-make VORPAL_ARTIFACT="vorpal-shell" vorpal
+make VORPAL_ARTIFACT="vorpal-shell" vorpal-build
 ```
 
 To test with a different artifact:
 
 ```bash
-make VORPAL_ARTIFACT="<artifact-name>" vorpal
+make VORPAL_ARTIFACT="<artifact-name>" vorpal-build
 ```
 
 ### Step 4: Stop services
@@ -71,6 +71,85 @@ The skill accepts an optional artifact name. Default is `vorpal`:
 - `/e2e-test` - Test with vorpal-shell artifact
 - `/e2e-test vorpal` - Test with vorpal artifact
 - `/e2e-test <name>` - Test with specified artifact
+
+## `vorpal prepare` integration ACs (DKT-71)
+
+These cover the integration-level `vorpal prepare` acceptance criteria that
+cannot be unit-tested in isolation because they require a live
+agent/worker/registry (real gRPC round-trip), not a Rust integration harness.
+They extend — do not replace — the build flow above. Run each against live
+services started via `make vorpal-start` (Step 1) and stop them after (Step 4).
+
+> Makefile targets were split: `vorpal-build` (was `vorpal`) runs `vorpal build`,
+> `vorpal-prepare` runs `vorpal prepare`.
+
+### AC (a): `prepare` never invokes the worker build for the target graph
+
+**Runnable locally** (single host + services).
+
+```bash
+make vorpal-start &
+# wait for port 23153 (see Step 2)
+make VORPAL_ARTIFACT="<artifact-name>" vorpal-prepare
+```
+
+Expected: the command resolves/pins sources and prints the mint/update/verify
+summary plus the resolved digest, and the output contains **no** build-artifact
+RPC or worker build invocation (no `building artifact ...` / no worker step
+output). `prepare` mints and verifies; it does not build.
+
+### AC (b): two-host remote-tarball fetch produces a byte-identical lock entry
+
+**CI / manual only** — requires two host arch/OS combinations (e.g. an
+aarch64-darwin host and an x86_64-linux runner) preparing the same source.
+
+On each host (against that host's services):
+
+```bash
+make VORPAL_ARTIFACT="<artifact-name>" vorpal-prepare
+```
+
+Then diff the resulting `Vorpal.lock` source entry across the two hosts. The
+pin (digest) MUST be byte-identical. (Cross-host determinism assumption:
+ADR 0002 — normalization-stable filenames within a source.)
+
+### AC (c): `--unlock=false` enforces fail-closed end-to-end
+
+**Runnable locally** if an unpinned remote source is present; otherwise CI.
+
+```bash
+make vorpal-start &
+# wait for port 23153
+VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo run --bin vorpal -- prepare \
+    --config <config> --unlock=false <artifact>
+```
+
+Expected against an **unpinned** remote source: the command fails closed with
+`source '...' is unpinned - use --unlock to pin` (the agent gate fires through
+the full prepare path, not just the isolated clap parse).
+
+### AC (d): `prepare` (default unlock) and `build --unlock` produce identical lock entries
+
+**Runnable locally** (single host + services).
+
+```bash
+make vorpal-start &
+# wait for port 23153
+# snapshot the lock after prepare (default --unlock=true)
+cp Vorpal.lock /tmp/lock.prepare
+make VORPAL_ARTIFACT="<artifact-name>" vorpal-prepare
+cp Vorpal.lock /tmp/lock.prepare
+
+# then build with explicit --unlock and snapshot again
+VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo run --bin vorpal -- build \
+    --config <config> --unlock <artifact>
+cp Vorpal.lock /tmp/lock.build
+
+diff /tmp/lock.prepare /tmp/lock.build
+```
+
+Expected: the diff is empty — `prepare` (default `--unlock true`) and
+`build --unlock` write byte-identical `Vorpal.lock` entries for the same target.
 
 ## Troubleshooting
 
