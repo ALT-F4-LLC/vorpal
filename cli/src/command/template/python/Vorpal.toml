@@ -4,7 +4,6 @@ language = "python"
 includes = [
     "pyproject.toml",
     "uv.lock",
-    "README.md",
     "src",
 ]
 
