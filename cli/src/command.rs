@@ -707,27 +707,34 @@ fn apply_default(parsed: &str, clap_default: &str, resolved_value: &str) -> Stri
     }
 }
 
+struct BuildFlags {
+    export: bool,
+    list: bool,
+    path: bool,
+    prepare_only: bool,
+    rebuild: bool,
+    unlock: bool,
+}
+
 /// Shared by `build` and `prepare`: resolves settings/Vorpal.toml fallbacks,
 /// then runs the artifact graph through `build::run()`. `prepare_only` gates
 /// the early-return (before worker dispatch) added in build.rs; `export`,
 /// `list`, `path`, and `rebuild` are always `false` for `prepare` (that flag
 /// surface is build-output-specific and not exposed on the `prepare` subcommand).
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "11 params after grouping the 6 bools; non-bool params kept as distinct typed args"
+)]
 async fn run_build_or_prepare(
     resolved: &config::ResolvedSettings,
     project_config: &config::VorpalConfig,
     name: &str,
     agent: &str,
     context: &Path,
-    export: bool,
-    list: bool,
+    flags: BuildFlags,
     namespace: &str,
-    path: bool,
-    prepare_only: bool,
-    rebuild: bool,
     registry: &str,
     system: &str,
-    unlock: bool,
     variable: &[String],
     worker: &str,
 ) -> Result<()> {
@@ -853,15 +860,15 @@ async fn run_build_or_prepare(
     let run_artifact = build::RunArgsArtifact {
         aliases: vec![],
         context: context.clone(),
-        export,
-        list,
+        export: flags.export,
+        list: flags.list,
         name: name.to_string(),
         namespace: effective_namespace.clone(),
-        path,
-        prepare_only,
-        rebuild,
+        path: flags.path,
+        prepare_only: flags.prepare_only,
+        rebuild: flags.rebuild,
         system: effective_system.clone(),
-        unlock,
+        unlock: flags.unlock,
         variable: variable.to_vec(),
     };
 
@@ -985,15 +992,17 @@ pub async fn run() -> Result<()> {
                 name,
                 agent,
                 context,
-                *export,
-                *list,
+                BuildFlags {
+                    export: *export,
+                    list: *list,
+                    path: *path,
+                    prepare_only: false,
+                    rebuild: *rebuild,
+                    unlock: *unlock,
+                },
                 namespace,
-                *path,
-                false,
-                *rebuild,
                 registry,
                 system,
-                *unlock,
                 variable,
                 worker,
             )
@@ -1018,15 +1027,17 @@ pub async fn run() -> Result<()> {
                 name,
                 agent,
                 context,
-                false,
-                false,
+                BuildFlags {
+                    export: false,
+                    list: false,
+                    path: false,
+                    prepare_only: true,
+                    rebuild: false,
+                    unlock: *unlock,
+                },
                 namespace,
-                false,
-                true,
-                false,
                 registry,
                 system,
-                *unlock,
                 variable,
                 worker,
             )

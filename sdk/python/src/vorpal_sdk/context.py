@@ -323,14 +323,39 @@ def client_auth_header(
             f"failed to parse credentials file {credentials_path}: invalid JSON"
         ) from None
 
-    registry_issuer = credentials.get("registry", {}).get(registry)
-    if not registry_issuer:
+    def invalid_credentials() -> None:
+        raise RuntimeError(
+            f"failed to parse credentials file {credentials_path}: invalid credentials"
+        ) from None
+
+    if not isinstance(credentials, dict):
+        invalid_credentials()
+
+    registry_entries = credentials.get("registry", {})
+    if not isinstance(registry_entries, dict):
+        invalid_credentials()
+
+    issuer_entries = credentials.get("issuer", {})
+    if not isinstance(issuer_entries, dict):
+        invalid_credentials()
+
+    missing_registry_mapping = object()
+    registry_issuer = registry_entries.get(registry, missing_registry_mapping)
+    if registry_issuer is missing_registry_mapping:
         # No registry mapping — allow unauthenticated requests.
         return None
+    if not isinstance(registry_issuer, str) or not registry_issuer:
+        invalid_credentials()
 
-    issuer_creds = credentials.get("issuer", {}).get(registry_issuer)
-    if not issuer_creds:
-        raise RuntimeError(f"no credentials for issuer: {registry_issuer}")
+    issuer_creds = issuer_entries.get(registry_issuer)
+    if not isinstance(issuer_creds, dict):
+        invalid_credentials()
+    if not isinstance(issuer_creds.get("access_token"), str):
+        invalid_credentials()
+    if type(issuer_creds.get("issued_at")) is not int:
+        invalid_credentials()
+    if type(issuer_creds.get("expires_in")) is not int:
+        invalid_credentials()
 
     now = int(time.time())
     token_age = now - issuer_creds["issued_at"]
@@ -342,6 +367,8 @@ def client_auth_header(
                 "Access token expired and no refresh token available. "
                 f"Please run: vorpal login --issuer {registry_issuer}"
             )
+        if not isinstance(issuer_creds.get("client_id"), str):
+            invalid_credentials()
 
         refreshed = refresh_access_token(
             issuer_creds.get("audience"),

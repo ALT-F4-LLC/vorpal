@@ -179,7 +179,7 @@ func (b *Python) Build(context *config.ConfigContext) (*string, error) {
 
 	sourceScripts := strings.Join(b.sourceScripts, "\n")
 
-	stepScript := fmt.Sprintf("pushd %s\n\n%s\n\nuv sync --frozen --no-dev\n\n%s",
+	stepScript := fmt.Sprintf("pushd %s\n\n%s\n\nuv sync --frozen --no-dev --no-editable\n\n%s",
 		stepSourceDir, sourceScripts, buildCmd)
 
 	// Build environments

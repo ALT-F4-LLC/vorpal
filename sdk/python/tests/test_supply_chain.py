@@ -1,15 +1,29 @@
 """Supply-chain tests for the build-target Python toolchain (DKT-19, ADR 0001).
 
 These encode the REAL provenance / hash-enforcement assertions from ADR 0001
-Part A and ``python-language-target.md`` §4/§9. They are RUNTIME-GATED: the
-pinned ``cpython`` / ``uv`` sources are intentionally unpinned today (no
-``Vorpal.lock`` entries, no provenance manifest — capture is the blocking
-Phase-1 AC, gated on DKT-21/DKT-25). Each test detects its prerequisites and
-SKIPS with an explicit reason + the unblocking ticket when they are absent;
-when the prereqs land, the same test asserts the real behavior with no edit.
+Part A and ``python-language-target.md`` §4/§9. They are RUNTIME-GATED: each
+test detects its prerequisites and SKIPS with an explicit reason + the
+unblocking ticket when they are absent; when the prereqs land, the same test
+asserts the real behavior with no edit.
 
 A skip is NOT a pass: the standalone runner prints SKIP distinctly and the
 parity gate must treat "all skipped" as "not yet verified", never as green.
+
+Current gate breakdown:
+  * 4 manifest-gated tests need the provenance manifest:
+    ``test_provenance_manifest_complete``,
+    ``test_provenance_a1_origin_is_canonical_upstream_not_mirror``,
+    ``test_provenance_two_hashes_never_conflated``, and
+    ``test_provenance_link_a_mirror_equals_upstream``. The mirror test also
+    needs a reachable mirror.
+  * 3 fixture-gated tests need ``$VORPAL_UV_FIXTURE`` plus ``uv``:
+    ``test_tampered_package_c3a_uv_sync_fails``,
+    ``test_uv_sync_locked_catches_drift``, and
+    ``test_frozen_lock_required_for_build``.
+  * 1 CLI+e2e-gated test needs ``$VORPAL_BIN`` plus the provenance manifest:
+    ``test_tampered_source_archive_fails_closed``. It stays skipped as
+    author-complete/e2e-gated per DKT-21 regardless of manifest/fixture
+    presence.
 
 Prerequisites and how to satisfy them:
   * Provenance manifest (link a + b records). JSON, one object per shipped
@@ -25,6 +39,7 @@ Prerequisites and how to satisfy them:
   * ``uv`` binary: ``$VORPAL_UV_BIN`` or ``uv`` on PATH (the pinned 0.10.11).
   * A hashed fixture project (``pyproject.toml`` + ``uv.lock`` with per-package
     hashes): ``$VORPAL_UV_FIXTURE`` pointing at the project dir.
+  * Vorpal CLI binary: ``$VORPAL_BIN``.
 
 Runnable two ways, matching ``test_parity.py``:
   * ``pytest``, or

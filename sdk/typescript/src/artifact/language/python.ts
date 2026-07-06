@@ -198,7 +198,7 @@ export class Python {
 
 ${this._sourceScripts.join("\n")}
 
-uv sync --frozen --no-dev
+uv sync --frozen --no-dev --no-editable
 
 ${stepBuildCmd}`;
 

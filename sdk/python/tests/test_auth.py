@@ -44,8 +44,8 @@ def _tmp_path(name: str) -> str:
     return os.path.join(base, f"vorpal_test_{os.getpid()}_{_TMP_COUNTER[0]}_{name}")
 
 
-def _write_creds(path: str, *, issued_at: int, expires_in: int, refresh: bool) -> None:
-    creds: dict[str, Any] = {
+def _creds(*, issued_at: int, expires_in: int, refresh: bool) -> dict[str, Any]:
+    return {
         "registry": {"https://registry:50051": "https://issuer.example"},
         "issuer": {
             "https://issuer.example": {
@@ -58,8 +58,18 @@ def _write_creds(path: str, *, issued_at: int, expires_in: int, refresh: bool) -
             }
         },
     }
+
+
+def _write_json(path: str, payload: Any) -> None:
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(creds, f)
+        json.dump(payload, f)
+
+
+def _write_creds(path: str, *, issued_at: int, expires_in: int, refresh: bool) -> None:
+    _write_json(
+        path,
+        _creds(issued_at=issued_at, expires_in=expires_in, refresh=refresh),
+    )
 
 
 class _FakeResp:
@@ -100,6 +110,27 @@ def _mock_oidc(rotate: bool) -> Any:
 def _assert_no_secrets(text: str) -> None:
     for secret in (ACCESS_TOKEN, REFRESH_TOKEN, ROTATED_REFRESH, NEW_ACCESS, "Bearer "):
         assert secret not in text, f"secret leaked: {secret!r} in {text!r}"
+
+
+def _assert_invalid_credentials(payload: Any) -> None:
+    path = _tmp_path("creds.json")
+    _write_json(path, payload)
+    try:
+        ctx.client_auth_header("https://registry:50051", path)
+    except RuntimeError as e:
+        msg = str(e)
+        assert path in msg
+        assert "invalid credentials" in msg
+        _assert_no_secrets(msg)
+    except (AttributeError, KeyError, TypeError) as e:
+        raise AssertionError(
+            f"expected curated RuntimeError, got {type(e).__name__}"
+        ) from e
+    else:
+        raise AssertionError("expected RuntimeError on invalid credentials")
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +289,60 @@ def test_c6_refresh_http_error_surfaces_status_not_body() -> None:
         raise AssertionError("expected RuntimeError")
     finally:
         urllib.request.urlopen = original  # type: ignore[assignment]
+        os.unlink(path)
+
+
+def test_dkt82_missing_issued_at_fails_closed_without_echo() -> None:
+    creds = _creds(issued_at=int(time.time()), expires_in=10000, refresh=True)
+    del creds["issuer"]["https://issuer.example"]["issued_at"]
+
+    _assert_invalid_credentials(creds)
+
+
+def test_dkt82_string_issued_at_fails_closed_without_type_error() -> None:
+    creds = _creds(issued_at=int(time.time()), expires_in=10000, refresh=True)
+    creds["issuer"]["https://issuer.example"]["issued_at"] = "now"
+
+    _assert_invalid_credentials(creds)
+
+
+def test_dkt82_missing_access_token_non_expired_fails_closed() -> None:
+    creds = _creds(issued_at=int(time.time()), expires_in=10000, refresh=True)
+    del creds["issuer"]["https://issuer.example"]["access_token"]
+
+    _assert_invalid_credentials(creds)
+
+
+def test_dkt82_top_level_wrong_shape_fails_closed() -> None:
+    for payload in ([], "x", 42):
+        _assert_invalid_credentials(payload)
+
+
+def test_dkt82_malformed_registry_mapping_value_fails_closed() -> None:
+    for mapped_issuer in ("", [], ["https://issuer.example"], {}, {"issuer": "x"}, 0):
+        creds = _creds(issued_at=int(time.time()), expires_in=10000, refresh=True)
+        creds["registry"]["https://registry:50051"] = mapped_issuer
+
+        _assert_invalid_credentials(creds)
+
+
+def test_dkt82_missing_client_id_on_refresh_path_fails_closed() -> None:
+    creds = _creds(issued_at=int(time.time()), expires_in=200, refresh=True)
+    del creds["issuer"]["https://issuer.example"]["client_id"]
+
+    _assert_invalid_credentials(creds)
+
+
+def test_dkt82_non_expired_token_without_refresh_token_succeeds() -> None:
+    path = _tmp_path("creds.json")
+    creds = _creds(issued_at=int(time.time()), expires_in=10000, refresh=True)
+    del creds["issuer"]["https://issuer.example"]["refresh_token"]
+    _write_json(path, creds)
+    try:
+        assert ctx.client_auth_header("https://registry:50051", path) == (
+            f"Bearer {ACCESS_TOKEN}"
+        )
+    finally:
         os.unlink(path)
 
 

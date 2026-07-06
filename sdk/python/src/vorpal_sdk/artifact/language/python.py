@@ -159,7 +159,7 @@ class Python:
         step_script = (
             f"pushd {step_source_dir}\n\n"
             f"{source_scripts}\n\n"
-            f"uv sync --frozen --no-dev\n\n"
+            f"uv sync --frozen --no-dev --no-editable\n\n"
             f"{step_build_cmd}"
         )
 
