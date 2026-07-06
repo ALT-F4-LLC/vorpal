@@ -5,11 +5,7 @@ import {
     TypeScriptDevelopmentEnvironment,
 } from "@altf4llc/vorpal-sdk";
 
-// Define build context
-
 const ctx = ConfigContext.create();
-
-// Define supported artifact systems
 
 const systems: ArtifactSystem[] = [
     ArtifactSystem.AARCH64_DARWIN,
@@ -18,18 +14,12 @@ const systems: ArtifactSystem[] = [
     ArtifactSystem.X8664_LINUX,
 ];
 
-// Define language-specific development environment artifact
-
 await new TypeScriptDevelopmentEnvironment("example-shell", systems)
     .build(ctx);
-
-// Define application artifact
 
 await new TypeScript("example", systems)
     .withEntrypoint("src/main.ts")
     .withIncludes(["src", "bun.lock", "package.json", "tsconfig.json"])
     .build(ctx);
-
-// Run context to build
 
 await ctx.run();

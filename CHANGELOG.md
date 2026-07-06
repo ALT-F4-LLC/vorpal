@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-07-06
+
+### Added
+
+- **Python SDK**: add a first-class Python SDK package with generated API
+  bindings, artifact builders, context helpers, CLI helpers, and parity coverage
+  alongside the Rust, Go, and TypeScript SDKs.
+
+- **Python builds**: add `cpython`, `uv`, and Python language builders across
+  SDKs so Python projects can use Vorpal's artifact workflow.
+
+- **Python template**: add a `vorpal init` project template for Python with
+  `pyproject.toml`, `uv.lock`, and starter source files.
+
+- **Python documentation**: add a Python guide and SDK README covering
+  installation, project setup, artifact definitions, and builder usage.
+
+### Changed
+
+- **CLI/build commands**: expand command handling, build configuration, lock
+  handling, and start-agent plumbing for Python workflows.
+
+- **SDK codegen**: update generation so Rust, Go, TypeScript, and Python
+  artifact surfaces stay aligned from the same definitions.
+
+- **Release metadata**: bump templates, SDK packages, website, CLI/config
+  crates, and package metadata to `0.3.0`.
+
+### Build
+
+- **Vorpal workflows**: update lockfile and workflow plumbing for the `0.3.0`
+  release path.
+
+- **Install/docs**: refresh install script behavior and reference documentation
+  for the expanded language support.
+
 ## [0.2.2] - 2026-06-22
 
 ### Fixed
