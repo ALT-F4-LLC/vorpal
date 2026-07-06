@@ -39,8 +39,9 @@ src/content/docs/
     installation.md                 # Install guide
     quickstart.md                   # First project walkthrough
   guides/
-    rust.md                         # Rust SDK guide
     go.md                           # Go SDK guide
+    python.md                       # Python SDK guide
+    rust.md                         # Rust SDK guide
     typescript.mdx                  # TypeScript SDK guide
   concepts/
     architecture.md                 # System design

@@ -55,6 +55,7 @@ await mermaid.run({ querySelector: '.mermaid' });`,
 					label: 'Guides',
 					items: [
 						{ label: 'Go', slug: 'guides/go' },
+						{ label: 'Python', slug: 'guides/python' },
 						{ label: 'Rust', slug: 'guides/rust' },
 						{ label: 'TypeScript', slug: 'guides/typescript' },
 					],

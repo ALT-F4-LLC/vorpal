@@ -1,9 +1,9 @@
 ---
 title: Vorpal
-description: A build system that works as code. Define builds, environments, CI, and services as real programs in Go, Rust, or TypeScript.
+description: A build system that works as code. Define builds, environments, CI, and services as real programs in Go, Python, Rust, or TypeScript.
 template: splash
 hero:
-  tagline: Define your builds, environments, CI, and services as real programs — not JSON, not YAML — using SDKs in Go, Rust, or TypeScript.
+  tagline: Define your builds, environments, CI, and services as real programs — not JSON, not YAML — using SDKs in Go, Python, Rust, or TypeScript.
   actions:
     - text: Get Started
       link: /getting-started/installation/
@@ -45,6 +45,7 @@ import CarouselScript from '../../components/CarouselScript.astro';
 <div class="sdk-carousel" data-carousel>
   <div class="sdk-carousel-tabs" role="tablist" aria-label="SDK language selector">
     <button role="tab" id="tab-go" aria-selected="true" aria-controls="panel-go" tabindex="0">Go</button>
+    <button role="tab" id="tab-python" aria-selected="false" aria-controls="panel-python" tabindex="-1">Python</button>
     <button role="tab" id="tab-rust" aria-selected="false" aria-controls="panel-rust" tabindex="-1">Rust</button>
     <button role="tab" id="tab-ts" aria-selected="false" aria-controls="panel-ts" tabindex="-1">TypeScript</button>
   </div>
@@ -86,6 +87,40 @@ func main() {
 
     ctx.Run()
 }
+```
+
+    </div>
+
+    <div role="tabpanel" id="panel-python" aria-labelledby="tab-python" class="sdk-carousel-panel">
+
+<Card title="Python SDK" icon="seti:python">
+  For platform and automation engineers who want builds as approachable as any other Python script.
+
+  ```bash title="Install"
+  pip install vorpal-sdk
+  ```
+</Card>
+
+```python title="vorpal.py"
+from vorpal_sdk import ConfigContext, Python, get_system
+
+ctx = ConfigContext.create()
+
+systems = [
+    get_system("aarch64-darwin"),
+    get_system("aarch64-linux"),
+    get_system("x86_64-darwin"),
+    get_system("x86_64-linux"),
+]
+
+(
+    Python("my-app", systems)
+    .with_entrypoint("src/main.py")
+    .with_includes(["pyproject.toml", "uv.lock", "src"])
+    .build(ctx)
+)
+
+ctx.run()
 ```
 
     </div>
@@ -160,6 +195,7 @@ await ctx.run();
 
   <div class="sdk-carousel-dots" aria-hidden="true">
     <span class="sdk-carousel-dot active"></span>
+    <span class="sdk-carousel-dot"></span>
     <span class="sdk-carousel-dot"></span>
     <span class="sdk-carousel-dot"></span>
   </div>
