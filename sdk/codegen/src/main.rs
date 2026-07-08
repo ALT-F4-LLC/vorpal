@@ -1585,9 +1585,7 @@ fn generate_py_orchestration(
     out.push('\n');
     out.push_str(&generate_py_bwrap_arguments());
     out.push('\n');
-    out.push_str(concat!(
-        "    systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\n",
-    ));
+    out.push_str("    systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\n");
 
     out.push_str("    steps = [\n");
     for step in steps {
