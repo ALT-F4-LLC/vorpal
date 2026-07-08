@@ -12,9 +12,9 @@ pub trait ArtifactSystemInput {
 impl ArtifactSystemInput for ArtifactSystem {
     fn into_artifact_system(self) -> Result<ArtifactSystem> {
         match self {
-            ArtifactSystem::UnknownSystem => Err(anyhow::anyhow!(
-                "unsupported system: UNKNOWN_SYSTEM"
-            )),
+            ArtifactSystem::UnknownSystem => {
+                Err(anyhow::anyhow!("unsupported system: UNKNOWN_SYSTEM"))
+            }
             _ => Ok(self),
         }
     }

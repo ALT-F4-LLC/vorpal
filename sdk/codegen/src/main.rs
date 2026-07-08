@@ -1159,9 +1159,7 @@ fn generate_go_orchestration(
     out.push('\n');
 
     // Systems
-    out.push_str(
-        "\tsystems := []string{\"aarch64-linux\", \"x86_64-linux\"}\n\n",
-    );
+    out.push_str("\tsystems := []string{\"aarch64-linux\", \"x86_64-linux\"}\n\n");
 
     // Steps
     out.push_str("\tsteps := make([]*api.ArtifactStep, 0)\n\n");
