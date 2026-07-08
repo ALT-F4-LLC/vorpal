@@ -1,4 +1,4 @@
-from vorpal_sdk import ConfigContext, Python
+from vorpal_sdk import ConfigContext, Python, PythonDevelopmentEnvironment
 
 ctx = ConfigContext.create()
 
@@ -8,6 +8,11 @@ systems = [
     "x86_64-darwin",
     "x86_64-linux",
 ]
+
+(
+    PythonDevelopmentEnvironment("example-shell", systems)
+    .build(ctx)
+)
 
 (
     Python("example", systems)
