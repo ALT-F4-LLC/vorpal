@@ -62,7 +62,8 @@ pub struct Artifact<'a> {
     pub name: &'a str,
     pub sources: Vec<api::artifact::ArtifactSource>,
     pub steps: Vec<api::artifact::ArtifactStep>,
-    pub systems: Vec<api::artifact::ArtifactSystem>,
+    systems: Vec<api::artifact::ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 pub struct Job<'a> {
@@ -70,7 +71,8 @@ pub struct Job<'a> {
     pub name: &'a str,
     pub secrets: Vec<api::artifact::ArtifactStepSecret>,
     pub script: String,
-    pub systems: Vec<api::artifact::ArtifactSystem>,
+    systems: Vec<api::artifact::ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 pub struct Process<'a> {
@@ -79,7 +81,8 @@ pub struct Process<'a> {
     pub entrypoint: &'a str,
     pub name: &'a str,
     pub secrets: Vec<api::artifact::ArtifactStepSecret>,
-    pub systems: Vec<api::artifact::ArtifactSystem>,
+    systems: Vec<api::artifact::ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 pub struct DevelopmentEnvironment<'a> {
@@ -87,7 +90,8 @@ pub struct DevelopmentEnvironment<'a> {
     pub environments: Vec<String>,
     pub name: &'a str,
     pub secrets: Vec<api::artifact::ArtifactStepSecret>,
-    pub systems: Vec<api::artifact::ArtifactSystem>,
+    systems: Vec<api::artifact::ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 pub struct UserEnvironment<'a> {
@@ -95,7 +99,8 @@ pub struct UserEnvironment<'a> {
     pub environments: Vec<String>,
     pub name: &'a str,
     pub symlinks: Vec<(String, String)>,
-    pub systems: Vec<api::artifact::ArtifactSystem>,
+    systems: Vec<api::artifact::ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 impl<'a> Argument<'a> {
@@ -213,17 +218,20 @@ impl<'a> ArtifactStep<'a> {
 }
 
 impl<'a> Artifact<'a> {
-    pub fn new(
-        name: &'a str,
-        steps: Vec<api::artifact::ArtifactStep>,
-        systems: Vec<api::artifact::ArtifactSystem>,
-    ) -> Self {
+    pub fn new<I, S>(name: &'a str, steps: Vec<api::artifact::ArtifactStep>, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             aliases: vec![],
             name,
             sources: vec![],
             steps,
             systems,
+            system_error,
         }
     }
 
@@ -246,7 +254,9 @@ impl<'a> Artifact<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         let artifact = api::artifact::Artifact {
             aliases: self.aliases,
             name: self.name.to_string(),
@@ -261,13 +271,20 @@ impl<'a> Artifact<'a> {
 }
 
 impl<'a> Job<'a> {
-    pub fn new(name: &'a str, script: String, systems: Vec<api::artifact::ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, script: String, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             artifacts: vec![],
             name,
             secrets: vec![],
             script,
             systems,
+            system_error,
         }
     }
 
@@ -290,6 +307,8 @@ impl<'a> Job<'a> {
     }
 
     pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         // Sort for deterministic output
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -302,13 +321,20 @@ impl<'a> Job<'a> {
 }
 
 impl<'a> DevelopmentEnvironment<'a> {
-    pub fn new(name: &'a str, systems: Vec<api::artifact::ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             artifacts: vec![],
             environments: vec![],
             name,
             secrets: vec![],
             systems,
+            system_error,
         }
     }
 
@@ -336,6 +362,8 @@ impl<'a> DevelopmentEnvironment<'a> {
     }
 
     pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         // Sort for deterministic output
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -434,11 +462,13 @@ impl<'a> DevelopmentEnvironment<'a> {
 }
 
 impl<'a> Process<'a> {
-    pub fn new(
-        name: &'a str,
-        entrypoint: &'a str,
-        systems: Vec<api::artifact::ArtifactSystem>,
-    ) -> Self {
+    pub fn new<I, S>(name: &'a str, entrypoint: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             arguments: vec![],
             artifacts: vec![],
@@ -446,6 +476,7 @@ impl<'a> Process<'a> {
             name,
             secrets: vec![],
             systems,
+            system_error,
         }
     }
 
@@ -477,6 +508,8 @@ impl<'a> Process<'a> {
     }
 
     pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         // Sort for deterministic output
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -558,13 +591,20 @@ impl<'a> Process<'a> {
 }
 
 impl<'a> UserEnvironment<'a> {
-    pub fn new(name: &'a str, systems: Vec<api::artifact::ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             artifacts: vec![],
             environments: vec![],
             name,
             symlinks: vec![],
             systems,
+            system_error,
         }
     }
 
@@ -586,6 +626,8 @@ impl<'a> UserEnvironment<'a> {
     }
 
     pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         // Sort for deterministic output
         self.symlinks.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -697,4 +739,67 @@ pub fn get_default_address() -> String {
 
 pub fn get_env_key(digest: &String) -> String {
     format!("$VORPAL_ARTIFACT_{digest}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{
+        agent::agent_service_client::AgentServiceClient,
+        artifact::{
+            artifact_service_client::ArtifactServiceClient,
+            ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Linux},
+        },
+    };
+    use std::path::PathBuf;
+    use tonic::transport::Endpoint;
+
+    fn test_context() -> Result<context::ConfigContext> {
+        let channel = Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+
+        context::ConfigContext::new(
+            "test".to_string(),
+            PathBuf::from("."),
+            "library".to_string(),
+            "aarch64-darwin".to_string(),
+            false,
+            vec![],
+            AgentServiceClient::new(channel.clone()),
+            ArtifactServiceClient::new(channel),
+            0,
+            "http://127.0.0.1:1".to_string(),
+        )
+    }
+
+    #[test]
+    fn artifact_new_accepts_raw_string_arrays_and_enum_vectors() {
+        let from_strings = Artifact::new("example", vec![], ["aarch64-darwin", "x86_64-linux"]);
+
+        assert_eq!(from_strings.systems, vec![Aarch64Darwin, X8664Linux]);
+        assert!(from_strings.system_error.is_none());
+
+        let from_enums = Artifact::new("example", vec![], vec![Aarch64Linux, X8664Linux]);
+
+        assert_eq!(from_enums.systems, vec![Aarch64Linux, X8664Linux]);
+        assert!(from_enums.system_error.is_none());
+    }
+
+    #[test]
+    fn artifact_build_returns_stored_system_error() -> Result<()> {
+        let runtime = tokio::runtime::Runtime::new()?;
+
+        let err = runtime
+            .block_on(async {
+                let mut context = test_context()?;
+
+                Artifact::new("example", vec![], ["loongarch64-linux"])
+                    .build(&mut context)
+                    .await
+            })
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "unsupported system: loongarch64-linux");
+
+        Ok(())
+    }
 }

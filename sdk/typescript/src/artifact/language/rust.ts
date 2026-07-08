@@ -13,6 +13,7 @@ import {
 import { Protoc } from "../protoc.js";
 import { RustToolchain } from "../rust_toolchain.js";
 import { shell } from "../step.js";
+import { type ArtifactSystemInput, tryNormalizeSystems } from "../../system.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -324,11 +325,14 @@ export class Rust {
   private _secrets: Map<string, string> = new Map();
   private _source: string | undefined = undefined;
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
   private _tests: boolean = false;
 
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /** Sets aliases for the artifact. */
@@ -423,6 +427,10 @@ export class Rust {
    * @returns The artifact digest string
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     // Fetch protoc artifact
     const protoc = await new Protoc().build(context);
 
@@ -688,11 +696,14 @@ export class RustDevelopmentEnvironment {
   private _name: string;
   private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
   private _includeProtoc: boolean = true;
 
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -743,6 +754,10 @@ export class RustDevelopmentEnvironment {
    * - RUSTUP_TOOLCHAIN={version}-{target}
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     const rustToolchain = await new RustToolchain().build(context);
 
     const artifacts: string[] = [];

@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -10,6 +11,155 @@ import (
 
 func strPtr(s string) *string {
 	return &s
+}
+
+func TestGetSystemCanonicalStrings(t *testing.T) {
+	tests := []struct {
+		system string
+		want   artifact.ArtifactSystem
+	}{
+		{"aarch64-darwin", artifact.ArtifactSystem_AARCH64_DARWIN},
+		{"aarch64-linux", artifact.ArtifactSystem_AARCH64_LINUX},
+		{"x86_64-darwin", artifact.ArtifactSystem_X8664_DARWIN},
+		{"x86_64-linux", artifact.ArtifactSystem_X8664_LINUX},
+	}
+
+	for _, tt := range tests {
+		got, err := GetSystem(tt.system)
+		if err != nil {
+			t.Fatalf("GetSystem(%q) returned error: %v", tt.system, err)
+		}
+		if *got != tt.want {
+			t.Fatalf("GetSystem(%q) = %v, want %v", tt.system, *got, tt.want)
+		}
+	}
+}
+
+func TestGetSystemEnumLabels(t *testing.T) {
+	for _, system := range []string{
+		"AARCH64_DARWIN",
+		"AARCH64_LINUX",
+		"X8664_DARWIN",
+		"X8664_LINUX",
+	} {
+		_, err := GetSystem(system)
+		if err == nil {
+			t.Fatalf("GetSystem(%q) returned nil error", system)
+		}
+		if err.Error() != "unsupported system: "+system {
+			t.Fatalf("GetSystem(%q) error = %q", system, err.Error())
+		}
+	}
+}
+
+func TestGetSystemUnsupportedString(t *testing.T) {
+	_, err := GetSystem("freebsd-riscv64")
+	if err == nil {
+		t.Fatal("GetSystem returned nil error")
+	}
+	if err.Error() != "unsupported system: freebsd-riscv64" {
+		t.Fatalf("GetSystem error = %q", err.Error())
+	}
+}
+
+func TestGetSystemSentinelLabel(t *testing.T) {
+	_, err := GetSystem("UNKNOWN_SYSTEM")
+	if err == nil {
+		t.Fatal("GetSystem returned nil error")
+	}
+	if err.Error() != "unsupported system: UNKNOWN_SYSTEM" {
+		t.Fatalf("GetSystem error = %q", err.Error())
+	}
+}
+
+func TestGetSystemsPreservesOrder(t *testing.T) {
+	got, err := GetSystems("x86_64-linux", "aarch64-darwin", "aarch64-linux")
+	if err != nil {
+		t.Fatalf("GetSystems returned error: %v", err)
+	}
+
+	want := []artifact.ArtifactSystem{
+		artifact.ArtifactSystem_X8664_LINUX,
+		artifact.ArtifactSystem_AARCH64_DARWIN,
+		artifact.ArtifactSystem_AARCH64_LINUX,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetSystems = %v, want %v", got, want)
+	}
+}
+
+func TestGetSystemsUnsupportedString(t *testing.T) {
+	_, err := GetSystems("aarch64-darwin", "unsupported")
+	if err == nil {
+		t.Fatal("GetSystems returned nil error")
+	}
+	if err.Error() != "unsupported system: unsupported" {
+		t.Fatalf("GetSystems error = %q", err.Error())
+	}
+}
+
+func TestNormalizeSystemsStrings(t *testing.T) {
+	got, err := NormalizeSystems([]string{"x86_64-linux", "aarch64-darwin", "aarch64-linux"})
+	if err != nil {
+		t.Fatalf("NormalizeSystems returned error: %v", err)
+	}
+
+	want := []artifact.ArtifactSystem{
+		artifact.ArtifactSystem_X8664_LINUX,
+		artifact.ArtifactSystem_AARCH64_DARWIN,
+		artifact.ArtifactSystem_AARCH64_LINUX,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeSystems = %v, want %v", got, want)
+	}
+}
+
+func TestNormalizeSystemsEnums(t *testing.T) {
+	want := []artifact.ArtifactSystem{
+		artifact.ArtifactSystem_AARCH64_LINUX,
+		artifact.ArtifactSystem_X8664_DARWIN,
+		artifact.ArtifactSystem_AARCH64_DARWIN,
+	}
+
+	got, err := NormalizeSystems(want)
+	if err != nil {
+		t.Fatalf("NormalizeSystems returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeSystems = %v, want %v", got, want)
+	}
+}
+
+func TestNormalizeSystemsUnsupportedEnums(t *testing.T) {
+	for _, system := range []artifact.ArtifactSystem{
+		artifact.ArtifactSystem_UNKNOWN_SYSTEM,
+		artifact.ArtifactSystem(99),
+	} {
+		_, err := NormalizeSystems([]artifact.ArtifactSystem{system})
+		if err == nil {
+			t.Fatalf("NormalizeSystems(%v) returned nil error", system)
+		}
+	}
+}
+
+func TestNormalizeSystemsUnsupportedString(t *testing.T) {
+	_, err := NormalizeSystems([]string{"aarch64-darwin", "unsupported"})
+	if err == nil {
+		t.Fatal("NormalizeSystems returned nil error")
+	}
+	if err.Error() != "unsupported system: unsupported" {
+		t.Fatalf("NormalizeSystems error = %q", err.Error())
+	}
+}
+
+func TestNormalizeSystemsSentinelString(t *testing.T) {
+	_, err := NormalizeSystems([]string{"UNKNOWN_SYSTEM"})
+	if err == nil {
+		t.Fatal("NormalizeSystems returned nil error")
+	}
+	if err.Error() != "unsupported system: UNKNOWN_SYSTEM" {
+		t.Fatalf("NormalizeSystems error = %q", err.Error())
+	}
 }
 
 func TestSerializeArtifactJSON_EmptySlicesNotNull(t *testing.T) {

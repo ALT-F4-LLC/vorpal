@@ -7,6 +7,10 @@ import (
 	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 )
 
+type ArtifactSystemInput interface {
+	string | api.ArtifactSystem
+}
+
 func GetSystemDefaultStr() string {
 	goarch := runtime.GOARCH
 	goos := runtime.GOOS
@@ -29,21 +33,51 @@ func GetSystemDefault() (*api.ArtifactSystem, error) {
 }
 
 func GetSystem(system string) (*api.ArtifactSystem, error) {
-	aarch64Darwin := api.ArtifactSystem_AARCH64_DARWIN
-	aarch64Linux := api.ArtifactSystem_AARCH64_LINUX
-	x8664Darwin := api.ArtifactSystem_X8664_DARWIN
-	x8664Linux := api.ArtifactSystem_X8664_LINUX
-
 	switch system {
 	case "aarch64-darwin":
-		return &aarch64Darwin, nil
+		system := api.ArtifactSystem_AARCH64_DARWIN
+		return &system, nil
 	case "aarch64-linux":
-		return &aarch64Linux, nil
+		system := api.ArtifactSystem_AARCH64_LINUX
+		return &system, nil
 	case "x86_64-darwin":
-		return &x8664Darwin, nil
+		system := api.ArtifactSystem_X8664_DARWIN
+		return &system, nil
 	case "x86_64-linux":
-		return &x8664Linux, nil
-	default:
-		return nil, fmt.Errorf("unknown system: %s", system)
+		system := api.ArtifactSystem_X8664_LINUX
+		return &system, nil
 	}
+
+	return nil, fmt.Errorf("unsupported system: %s", system)
+}
+
+func NormalizeSystems[T ArtifactSystemInput](systems []T) ([]api.ArtifactSystem, error) {
+	artifactSystems := make([]api.ArtifactSystem, len(systems))
+
+	for i, system := range systems {
+		switch value := any(system).(type) {
+		case string:
+			artifactSystem, err := GetSystem(value)
+			if err != nil {
+				return nil, err
+			}
+			artifactSystems[i] = *artifactSystem
+		case api.ArtifactSystem:
+			switch value {
+			case api.ArtifactSystem_AARCH64_DARWIN,
+				api.ArtifactSystem_AARCH64_LINUX,
+				api.ArtifactSystem_X8664_DARWIN,
+				api.ArtifactSystem_X8664_LINUX:
+				artifactSystems[i] = value
+			default:
+				return nil, fmt.Errorf("unsupported system: %s", value)
+			}
+		}
+	}
+
+	return artifactSystems, nil
+}
+
+func GetSystems(systems ...string) ([]api.ArtifactSystem, error) {
+	return NormalizeSystems(systems)
 }

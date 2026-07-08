@@ -24,13 +24,12 @@ You define a development environment in your build configuration:
 ```typescript
 import {
   ConfigContext,
-  ArtifactSystem,
   DevelopmentEnvironment,
 } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "x86_64-linux",
 ];
 
 const context = ConfigContext.create();
@@ -63,13 +62,12 @@ While development environments are project-scoped (activated per shell session),
 ```typescript
 import {
   ConfigContext,
-  ArtifactSystem,
   UserEnvironment,
 } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "x86_64-linux",
 ];
 
 const context = ConfigContext.create();

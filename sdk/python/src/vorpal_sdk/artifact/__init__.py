@@ -13,8 +13,11 @@ for the within-SDK-family builder-output parity gate.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.step import BuildContext, shell
+from vorpal_sdk.system import ArtifactSystemInput, normalize_systems
 
 __all__ = [
     "Argument",
@@ -51,6 +54,20 @@ def secrets_to_proto(
         artifact_pb2.ArtifactStepSecret(name=name, value=secrets[name])
         for name in sorted(secrets)
     ]
+
+
+def _normalize_systems_for_build(
+    systems: Sequence[ArtifactSystemInput],
+) -> tuple[list[artifact_pb2.ArtifactSystem], ValueError | None]:
+    try:
+        return normalize_systems(systems), None
+    except ValueError as error:
+        return [], error
+
+
+def _raise_systems_error(error: ValueError | None) -> None:
+    if error is not None:
+        raise error
 
 
 # ---------------------------------------------------------------------------
@@ -161,13 +178,15 @@ class Artifact:
         self,
         name: str,
         steps: list[artifact_pb2.ArtifactStep],
-        systems: list[artifact_pb2.ArtifactSystem],
+        systems: Sequence[ArtifactSystemInput],
     ) -> None:
         self._aliases: list[str] = []
         self._name = name
         self._sources: list[artifact_pb2.ArtifactSource] = []
         self._steps = steps
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
 
     def with_aliases(self, aliases: list[str]) -> Artifact:
         for alias in aliases:
@@ -186,6 +205,7 @@ class Artifact:
         return self
 
     def build(self, context: BuildContext) -> str:
+        _raise_systems_error(self._systems_error)
         artifact = artifact_pb2.Artifact(
             target=context.get_system(),
             sources=self._sources,
@@ -209,13 +229,15 @@ class Job:
         self,
         name: str,
         script: str,
-        systems: list[artifact_pb2.ArtifactSystem],
+        systems: Sequence[ArtifactSystemInput],
     ) -> None:
         self._artifacts: list[str] = []
         self._name = name
         self._secrets: dict[str, str] = {}
         self._script = script
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
 
     def with_artifacts(self, artifacts: list[str]) -> Job:
         self._artifacts = artifacts
@@ -228,6 +250,7 @@ class Job:
         return self
 
     def build(self, context: BuildContext) -> str:
+        _raise_systems_error(self._systems_error)
         step = shell(
             context,
             self._artifacts,
@@ -250,14 +273,16 @@ class Process:
         self,
         name: str,
         entrypoint: str,
-        systems: list[artifact_pb2.ArtifactSystem],
+        systems: Sequence[ArtifactSystemInput],
     ) -> None:
         self._arguments: list[str] = []
         self._artifacts: list[str] = []
         self._entrypoint = entrypoint
         self._name = name
         self._secrets: dict[str, str] = {}
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
 
     def with_arguments(self, arguments: list[str]) -> Process:
         self._arguments = arguments
@@ -276,6 +301,7 @@ class Process:
         return self
 
     def build(self, context: BuildContext) -> str:
+        _raise_systems_error(self._systems_error)
         arguments_str = " ".join(self._arguments)
         artifacts_str = ":".join(
             f"$VORPAL_ARTIFACT_{v}/bin" for v in self._artifacts
@@ -358,13 +384,15 @@ class DevelopmentEnvironment:
     def __init__(
         self,
         name: str,
-        systems: list[artifact_pb2.ArtifactSystem],
+        systems: Sequence[ArtifactSystemInput],
     ) -> None:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
         self._secrets: dict[str, str] = {}
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
 
     def with_artifacts(self, artifacts: list[str]) -> DevelopmentEnvironment:
         self._artifacts = artifacts
@@ -383,6 +411,7 @@ class DevelopmentEnvironment:
         return self
 
     def build(self, context: BuildContext) -> str:
+        _raise_systems_error(self._systems_error)
         envs_backup = [
             'export VORPAL_SHELL_BACKUP_PATH="$PATH"',
             'export VORPAL_SHELL_BACKUP_PS1="$PS1"',
@@ -473,13 +502,15 @@ class UserEnvironment:
     def __init__(
         self,
         name: str,
-        systems: list[artifact_pb2.ArtifactSystem],
+        systems: Sequence[ArtifactSystemInput],
     ) -> None:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
         self._symlinks: list[tuple[str, str]] = []
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
 
     def with_artifacts(self, artifacts: list[str]) -> UserEnvironment:
         self._artifacts = artifacts
@@ -496,6 +527,7 @@ class UserEnvironment:
         return self
 
     def build(self, context: BuildContext) -> str:
+        _raise_systems_error(self._systems_error)
         # Sort by source path (index 0) for deterministic output.
         symlinks = sorted(self._symlinks, key=lambda pair: pair[0])
 

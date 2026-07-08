@@ -59,7 +59,8 @@ type Artifact struct {
 	Name    string
 	Sources []*api.ArtifactSource
 	Steps   []*api.ArtifactStep
-	Systems []api.ArtifactSystem
+	systems []api.ArtifactSystem
+	err     error
 }
 
 type Job struct {
@@ -67,7 +68,8 @@ type Job struct {
 	Name      string
 	Script    string
 	Secrets   map[string]string
-	Systems   []api.ArtifactSystem
+	systems   []api.ArtifactSystem
+	err       error
 }
 
 type Process struct {
@@ -76,7 +78,8 @@ type Process struct {
 	Entrypoint string
 	Name       string
 	Secrets    map[string]string
-	Systems    []api.ArtifactSystem
+	systems    []api.ArtifactSystem
+	err        error
 }
 
 type ProcessScriptTemplateVars struct {
@@ -91,7 +94,8 @@ type DevelopmentEnvironment struct {
 	Environments []string
 	Name         string
 	Secrets      map[string]string
-	Systems      []api.ArtifactSystem
+	systems      []api.ArtifactSystem
+	err          error
 }
 
 type DevelopmentEnvironmentTemplateArgs struct {
@@ -106,7 +110,8 @@ type UserEnvironment struct {
 	Environments []string
 	Name         string
 	Symlinks     map[string]string
-	Systems      []api.ArtifactSystem
+	systems      []api.ArtifactSystem
+	err          error
 }
 
 type UserEnvironmentTemplateArgs struct {
@@ -265,14 +270,17 @@ func (v *Argument) Build(ctx *config.ConfigContext) (*string, error) {
 	return variable, nil
 }
 
-func NewProcess(name string, entrypoint string, systems []api.ArtifactSystem) *Process {
+func NewProcess[T config.ArtifactSystemInput](name string, entrypoint string, systems []T) *Process {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &Process{
 		Arguments:  []string{},
 		Artifacts:  []*string{},
 		Entrypoint: entrypoint,
 		Name:       name,
 		Secrets:    map[string]string{},
-		Systems:    systems,
+		systems:    artifactSystems,
+		err:        err,
 	}
 }
 
@@ -300,6 +308,10 @@ func (a *Process) WithSecrets(secrets map[string]string) *Process {
 }
 
 func (a *Process) Build(ctx *config.ConfigContext) (*string, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+
 	secrets := SecretsToProto(a.Secrets)
 
 	arguments := strings.Join(a.Arguments, " ")
@@ -337,7 +349,7 @@ func (a *Process) Build(ctx *config.ConfigContext) (*string, error) {
 
 	steps := []*api.ArtifactStep{step}
 
-	return NewArtifact(a.Name, steps, a.Systems).
+	return NewArtifact(a.Name, steps, a.systems).
 		Build(ctx)
 }
 
@@ -444,13 +456,16 @@ func (a *ArtifactStep) Build() *api.ArtifactStep {
 	return step
 }
 
-func NewJob(name string, script string, systems []api.ArtifactSystem) *Job {
+func NewJob[T config.ArtifactSystemInput](name string, script string, systems []T) *Job {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &Job{
 		Artifacts: []*string{},
 		Name:      name,
 		Secrets:   map[string]string{},
 		Script:    script,
-		Systems:   systems,
+		systems:   artifactSystems,
+		err:       err,
 	}
 }
 
@@ -469,6 +484,10 @@ func (a *Job) WithSecrets(secrets map[string]string) *Job {
 }
 
 func (a *Job) Build(ctx *config.ConfigContext) (*string, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+
 	secrets := SecretsToProto(a.Secrets)
 
 	step, err := Shell(ctx, a.Artifacts, []string{}, a.Script, secrets)
@@ -478,17 +497,20 @@ func (a *Job) Build(ctx *config.ConfigContext) (*string, error) {
 
 	steps := []*api.ArtifactStep{step}
 
-	return NewArtifact(a.Name, steps, a.Systems).
+	return NewArtifact(a.Name, steps, a.systems).
 		Build(ctx)
 }
 
-func NewArtifact(name string, steps []*api.ArtifactStep, systems []api.ArtifactSystem) *Artifact {
+func NewArtifact[T config.ArtifactSystemInput](name string, steps []*api.ArtifactStep, systems []T) *Artifact {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &Artifact{
 		Aliases: []string{},
 		Name:    name,
 		Sources: []*api.ArtifactSource{},
 		Steps:   steps,
-		Systems: systems,
+		systems: artifactSystems,
+		err:     err,
 	}
 }
 
@@ -513,12 +535,16 @@ func (a *Artifact) WithSources(source []*api.ArtifactSource) *Artifact {
 }
 
 func (a *Artifact) Build(ctx *config.ConfigContext) (*string, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+
 	artifact := api.Artifact{
 		Aliases: a.Aliases,
 		Name:    a.Name,
 		Sources: a.Sources,
 		Steps:   a.Steps,
-		Systems: a.Systems,
+		Systems: a.systems,
 		Target:  ctx.GetTarget(),
 	}
 
@@ -529,13 +555,16 @@ func (a *Artifact) Build(ctx *config.ConfigContext) (*string, error) {
 	return ctx.AddArtifact(&artifact)
 }
 
-func NewDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *DevelopmentEnvironment {
+func NewDevelopmentEnvironment[T config.ArtifactSystemInput](name string, systems []T) *DevelopmentEnvironment {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &DevelopmentEnvironment{
 		Artifacts:    []*string{},
 		Environments: []string{},
 		Name:         name,
 		Secrets:      map[string]string{},
-		Systems:      systems,
+		systems:      artifactSystems,
+		err:          err,
 	}
 }
 
@@ -559,6 +588,10 @@ func (b *DevelopmentEnvironment) WithSecrets(secrets map[string]string) *Develop
 }
 
 func (b *DevelopmentEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	backups := []string{
 		"export VORPAL_SHELL_BACKUP_PATH=\"$PATH\"",
 		"export VORPAL_SHELL_BACKUP_PS1=\"$PS1\"",
@@ -651,18 +684,21 @@ func (b *DevelopmentEnvironment) Build(ctx *config.ConfigContext) (*string, erro
 
 	steps := []*api.ArtifactStep{step}
 
-	artifact := NewArtifact(b.Name, steps, b.Systems)
+	artifact := NewArtifact(b.Name, steps, b.systems)
 
 	return artifact.Build(ctx)
 }
 
-func NewUserEnvironment(name string, systems []api.ArtifactSystem) *UserEnvironment {
+func NewUserEnvironment[T config.ArtifactSystemInput](name string, systems []T) *UserEnvironment {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &UserEnvironment{
 		Artifacts:    []*string{},
 		Environments: []string{},
 		Name:         name,
 		Symlinks:     map[string]string{},
-		Systems:      systems,
+		systems:      artifactSystems,
+		err:          err,
 	}
 }
 
@@ -689,6 +725,10 @@ func (b *UserEnvironment) WithSymlinks(links map[string]string) *UserEnvironment
 }
 
 func (b *UserEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	// Setup path
 
 	stepPathArtifacts := make([]string, 0)
@@ -758,7 +798,7 @@ func (b *UserEnvironment) Build(ctx *config.ConfigContext) (*string, error) {
 
 	steps := []*api.ArtifactStep{step}
 
-	artifact := NewArtifact(b.Name, steps, b.Systems)
+	artifact := NewArtifact(b.Name, steps, b.systems)
 
 	return artifact.Build(ctx)
 }

@@ -33,13 +33,17 @@ If your task needs to run continuously (a server, a watcher, a daemon), use a [P
 use vorpal_sdk::{
     artifact::{get_env_key, Job},
     context::get_context,
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let ctx = &mut get_context().await?;
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     let tool = build_my_tool(ctx).await?;
     let script = format!("{}/bin/my-tool --version", get_env_key(&tool));
@@ -68,16 +72,15 @@ artifact.NewJob("my-job", script, systems).
 ```typescript
 import {
   ConfigContext,
-  ArtifactSystem,
   Job,
   getEnvKey,
 } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const context = ConfigContext.create();

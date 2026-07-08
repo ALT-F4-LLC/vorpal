@@ -45,6 +45,7 @@ type Rust struct {
 	includes     []string
 	lint         bool
 	name         string
+	err          error
 	packages     []string
 	secrets      map[string]string
 	source       *string
@@ -154,7 +155,9 @@ func stripPrefix(path, prefix string) string {
 	return path
 }
 
-func NewRust(name string, systems []api.ArtifactSystem) *Rust {
+func NewRust[T config.ArtifactSystemInput](name string, systems []T) *Rust {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &Rust{
 		aliases:      make([]string, 0),
 		artifacts:    make([]*string, 0),
@@ -167,11 +170,12 @@ func NewRust(name string, systems []api.ArtifactSystem) *Rust {
 		includes:     make([]string, 0),
 		lint:         false,
 		name:         name,
+		err:          err,
 		packages:     make([]string, 0),
 		secrets:      map[string]string{},
 		source:       nil,
 		tests:        false,
-		systems:      systems,
+		systems:      artifactSystems,
 	}
 }
 
@@ -245,6 +249,10 @@ func (a *Rust) WithTests(tests bool) *Rust {
 }
 
 func (builder *Rust) Build(context *config.ConfigContext) (*string, error) {
+	if builder.err != nil {
+		return nil, builder.err
+	}
+
 	protoc, err := artifact.Protoc(context)
 	if err != nil {
 		return nil, err
@@ -554,19 +562,23 @@ type RustDevelopmentEnvironment struct {
 	artifacts    []*string
 	environments []string
 	name         string
+	err          error
 	secrets      map[string]string
 	systems      []api.ArtifactSystem
 
 	includeProtoc bool
 }
 
-func NewRustDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *RustDevelopmentEnvironment {
+func NewRustDevelopmentEnvironment[T config.ArtifactSystemInput](name string, systems []T) *RustDevelopmentEnvironment {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &RustDevelopmentEnvironment{
 		artifacts:     []*string{},
 		environments:  []string{},
 		name:          name,
+		err:           err,
 		secrets:       map[string]string{},
-		systems:       systems,
+		systems:       artifactSystems,
 		includeProtoc: true,
 	}
 }
@@ -596,6 +608,10 @@ func (b *RustDevelopmentEnvironment) WithSecrets(secrets map[string]string) *Rus
 }
 
 func (b *RustDevelopmentEnvironment) Build(context *config.ConfigContext) (*string, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	rustToolchain, err := artifact.RustToolchain(context)
 	if err != nil {
 		return nil, err

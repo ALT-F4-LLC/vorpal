@@ -10,6 +10,7 @@ import {
 import { Cpython } from "../cpython.js";
 import { Uv } from "../uv.js";
 import { shell } from "../step.js";
+import { type ArtifactSystemInput, tryNormalizeSystems } from "../../system.js";
 
 /// Reproducible-build timestamp for `uv build` wheels. Wheels are zip archives, and the
 /// zip format cannot represent dates before 1980 — so `SOURCE_DATE_EPOCH=0` would yield an
@@ -77,11 +78,14 @@ export class Python {
   private _secrets: Map<string, string> = new Map();
   private _sourceScripts: string[] = [];
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
   private _workingDir: string | undefined = undefined;
 
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   withAliases(aliases: string[]): this {
@@ -161,6 +165,10 @@ export class Python {
    * @returns The artifact digest string
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     // Setup toolchain artifacts
     const cpythonDigest = await new Cpython().build(context);
     const cpythonBin = `${getEnvKey(cpythonDigest)}/bin`;
@@ -254,10 +262,13 @@ export class PythonDevelopmentEnvironment {
   private _name: string;
   private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -300,6 +311,10 @@ export class PythonDevelopmentEnvironment {
    * - UV_PYTHON_DOWNLOADS=never: prevents uv from fetching interpreters at dev-shell entry
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     const cpython = await new Cpython().build(context);
     const cpythonBin = `${getEnvKey(cpython)}/bin`;
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vorpal_sdk.api.artifact import artifact_pb2
 from vorpal_sdk.artifact import Artifact
 from vorpal_sdk.artifact.linux_debian import LinuxDebian
 from vorpal_sdk.step import bwrap
@@ -219,10 +218,7 @@ def linux_vorpal(context: ConfigContext) -> str:
         "0",
     ]
 
-    systems = [
-        artifact_pb2.AARCH64_LINUX,
-        artifact_pb2.X8664_LINUX,
-    ]
+    systems = ["aarch64-linux", "x86_64-linux"]
 
     steps = [
         bwrap(

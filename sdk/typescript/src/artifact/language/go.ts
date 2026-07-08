@@ -19,6 +19,7 @@ import { ProtocGenGo } from "../protoc_gen_go.js";
 import { ProtocGenGoGrpc } from "../protoc_gen_go_grpc.js";
 import { Staticcheck } from "../staticcheck.js";
 import { shell } from "../step.js";
+import { type ArtifactSystemInput, tryNormalizeSystems } from "../../system.js";
 
 // ---------------------------------------------------------------------------
 // System mapping helpers
@@ -99,10 +100,13 @@ export class Go {
   private _source: ArtifactSourceMsg | undefined = undefined;
   private _sourceScripts: string[] = [];
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /** Adds human-readable aliases for this artifact. */
@@ -205,6 +209,10 @@ export class Go {
    * @returns The artifact digest string
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     // Build source
     const sourcePath = ".";
     let source: ArtifactSourceMsg;
@@ -306,15 +314,18 @@ export class GoDevelopmentEnvironment {
   private _name: string;
   private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
   // Flags to include/exclude optional default tools
   private _includeProtoc: boolean = true;
   private _includeProtocGenGo: boolean = true;
   private _includeProtocGenGoGrpc: boolean = true;
 
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -373,6 +384,10 @@ export class GoDevelopmentEnvironment {
    * - GOOS={platform-specific}
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     // Build default tool artifacts
     const go = await new GoBin().build(context);
     const git = await new Git().build(context);

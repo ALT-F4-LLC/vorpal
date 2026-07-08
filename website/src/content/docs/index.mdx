@@ -65,7 +65,6 @@ import CarouselScript from '../../components/CarouselScript.astro';
 package main
 
 import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
@@ -73,11 +72,11 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     language.NewGo("my-app", systems).
@@ -102,15 +101,15 @@ func main() {
 </Card>
 
 ```python title="vorpal.py"
-from vorpal_sdk import ConfigContext, Python, get_system
+from vorpal_sdk import ConfigContext, Python
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 (
@@ -137,7 +136,6 @@ ctx.run()
 
 ```rust title="vorpal.rs"
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::*,
     artifact::language::rust::Rust,
     context::get_context,
 };
@@ -146,7 +144,12 @@ use vorpal_sdk::{
 async fn main() -> anyhow::Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     Rust::new("my-app", systems)
         .with_bins(vec!["my-app"])
@@ -171,15 +174,15 @@ async fn main() -> anyhow::Result<()> {
 </Card>
 
 ```typescript title="vorpal.ts"
-import { ArtifactSystem, ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
+import { ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 await new TypeScript("my-app", systems)

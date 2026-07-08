@@ -53,10 +53,12 @@ from vorpal_sdk.context import (
 )
 from vorpal_sdk.step import bash, bwrap, docker, shell
 from vorpal_sdk.system import (
+    ArtifactSystemInput,
     get_system,
     get_system_default,
     get_system_default_str,
     get_system_str,
+    normalize_systems,
 )
 
 __version__ = version("vorpal-sdk")
@@ -107,10 +109,12 @@ __all__: list[str] = [
     "RustDevelopmentEnvironment",
     "TypeScriptDevelopmentEnvironment",
     # System utilities
+    "ArtifactSystemInput",
     "get_system",
     "get_system_default",
     "get_system_default_str",
     "get_system_str",
+    "normalize_systems",
     # Context
     "ConfigContext",
     "ArtifactAlias",

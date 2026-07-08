@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 
-	api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
@@ -11,11 +10,11 @@ import (
 func main() {
 	ctx := config.GetContext()
 
-	systems := []api.ArtifactSystem{
-		api.ArtifactSystem_AARCH64_DARWIN,
-		api.ArtifactSystem_AARCH64_LINUX,
-		api.ArtifactSystem_X8664_DARWIN,
-		api.ArtifactSystem_X8664_LINUX,
+	systems := []string{
+		"aarch64-darwin",
+		"aarch64-linux",
+		"x86_64-darwin",
+		"x86_64-linux",
 	}
 
 	_, err := language.NewGoDevelopmentEnvironment("example-shell", systems).

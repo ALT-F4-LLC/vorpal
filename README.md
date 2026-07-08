@@ -66,13 +66,13 @@ Define a build artifact targeting multiple platforms with a single config file.
 <summary><strong>TypeScript</strong></summary>
 
 ```typescript
-import { ArtifactSystem, ConfigContext, TypeScript, TypeScriptDevelopmentEnvironment } from "@altf4llc/vorpal-sdk";
+import { ConfigContext, TypeScript, TypeScriptDevelopmentEnvironment } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const context = ConfigContext.create();
@@ -98,7 +98,6 @@ await context.run();
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::language::rust::{Rust, RustDevelopmentEnvironment},
     context::get_context,
 };
@@ -106,11 +105,16 @@ use vorpal_sdk::{
 #[tokio::main]
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     // Artifacts
 
-    RustDevelopmentEnvironment::new("example-shell", systems.clone())
+    RustDevelopmentEnvironment::new("example-shell", systems)
         .build(ctx)
         .await?;
 
@@ -135,16 +139,15 @@ package main
 import (
     "log"
 
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-var systems = []api.ArtifactSystem{
-    api.ArtifactSystem_AARCH64_DARWIN,
-    api.ArtifactSystem_AARCH64_LINUX,
-    api.ArtifactSystem_X8664_DARWIN,
-    api.ArtifactSystem_X8664_LINUX,
+var systems = []string{
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 }
 
 func main() {
@@ -181,16 +184,15 @@ Create portable development shells and user-wide tool installations with pinned 
 ```typescript
 import {
   ConfigContext,
-  ArtifactSystem,
   DevelopmentEnvironment,
   UserEnvironment,
 } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 async function main() {
@@ -218,7 +220,6 @@ main().catch((e) => { console.error(e); process.exit(1); });
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
-  api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
   artifact::{DevelopmentEnvironment, UserEnvironment},
   context::get_context,
 };
@@ -226,9 +227,14 @@ use vorpal_sdk::{
 #[tokio::main]
 async fn main() -> Result<()> {
   let ctx = &mut get_context().await?;
-  let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+  let systems = [
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
+  ];
 
-  DevelopmentEnvironment::new("my-project", systems.clone())
+  DevelopmentEnvironment::new("my-project", systems)
     .with_environments(vec!["FOO=bar".into()])
     .build(ctx).await?;
 
@@ -249,16 +255,15 @@ async fn main() -> Result<()> {
 package main
 
 import (
-  api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
   "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
   "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-var systems = []api.ArtifactSystem{
-  api.ArtifactSystem_AARCH64_DARWIN,
-  api.ArtifactSystem_AARCH64_LINUX,
-  api.ArtifactSystem_X8664_DARWIN,
-  api.ArtifactSystem_X8664_LINUX,
+var systems = []string{
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 }
 
 func main() {
@@ -292,16 +297,15 @@ Swap the default Bash executor for Docker, Bubblewrap, or any custom binary.
 ```typescript
 import {
   ConfigContext,
-  ArtifactSystem,
   Artifact,
   ArtifactStep,
 } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 async function main() {
@@ -331,7 +335,6 @@ main().catch((e) => { console.error(e); process.exit(1); });
 ```rust
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{Artifact, ArtifactStep},
     context::get_context,
 };
@@ -339,7 +342,12 @@ use vorpal_sdk::{
 #[tokio::main]
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     let step = ArtifactStep::new("docker")
         .with_arguments(vec![
@@ -370,11 +378,11 @@ import (
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
-var systems = []api.ArtifactSystem{
-    api.ArtifactSystem_AARCH64_DARWIN,
-    api.ArtifactSystem_AARCH64_LINUX,
-    api.ArtifactSystem_X8664_DARWIN,
-    api.ArtifactSystem_X8664_LINUX,
+var systems = []string{
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 }
 
 func main() {

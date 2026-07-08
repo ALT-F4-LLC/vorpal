@@ -6,6 +6,7 @@ character-for-character identical to the Rust and Go SDKs for the same inputs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from vorpal_sdk.api.artifact import artifact_pb2
@@ -13,6 +14,8 @@ from vorpal_sdk.artifact import (
     Artifact,
     ArtifactSource,
     DevelopmentEnvironment,
+    _normalize_systems_for_build,
+    _raise_systems_error,
     get_env_key,
     secrets_to_proto,
 )
@@ -25,6 +28,7 @@ from vorpal_sdk.artifact.protoc_gen_go import ProtocGenGo
 from vorpal_sdk.artifact.protoc_gen_go_grpc import ProtocGenGoGrpc
 from vorpal_sdk.artifact.staticcheck import Staticcheck
 from vorpal_sdk.step import shell
+from vorpal_sdk.system import ArtifactSystemInput
 
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
@@ -52,7 +56,7 @@ class Go:
     """Builder for Go project artifacts."""
 
     def __init__(
-        self, name: str, systems: list[artifact_pb2.ArtifactSystem]
+        self, name: str, systems: Sequence[ArtifactSystemInput]
     ) -> None:
         self._aliases: list[str] = []
         self._artifacts: list[str] = []
@@ -65,7 +69,9 @@ class Go:
         self._secrets: dict[str, str] = {}
         self._source: artifact_pb2.ArtifactSource | None = None
         self._source_scripts: list[str] = []
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
 
     def with_aliases(self, aliases: list[str]) -> Go:
         self._aliases = aliases
@@ -111,6 +117,7 @@ class Go:
         return self
 
     def build(self, context: ConfigContext) -> str:
+        _raise_systems_error(self._systems_error)
         source_path = "."
         if self._source is not None:
             source = self._source
@@ -175,13 +182,15 @@ class GoDevelopmentEnvironment:
     """Builder for Go development-environment artifacts."""
 
     def __init__(
-        self, name: str, systems: list[artifact_pb2.ArtifactSystem]
+        self, name: str, systems: Sequence[ArtifactSystemInput]
     ) -> None:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
         self._secrets: dict[str, str] = {}
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
         self._include_protoc = True
         self._include_protoc_gen_go = True
         self._include_protoc_gen_go_grpc = True
@@ -211,6 +220,7 @@ class GoDevelopmentEnvironment:
         return self
 
     def build(self, context: ConfigContext) -> str:
+        _raise_systems_error(self._systems_error)
         go = GoBin().build(context)
         git = Git().build(context)
         goimports = Goimports().build(context)
