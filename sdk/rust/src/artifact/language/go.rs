@@ -7,7 +7,7 @@ use crate::{
     artifact::{
         get_env_key, git::Git, go::Go as GoDist, goimports::Goimports, gopls::Gopls,
         protoc::Protoc, protoc_gen_go::ProtocGenGo, protoc_gen_go_grpc::ProtocGenGoGrpc,
-        staticcheck::Staticcheck, step, Artifact, ArtifactSource, DevelopmentEnvironment,
+        staticcheck::Staticcheck, step, system, Artifact, ArtifactSource, DevelopmentEnvironment,
     },
     context,
 };
@@ -27,6 +27,7 @@ pub struct Go<'a> {
     source: Option<api::artifact::ArtifactSource>,
     source_scripts: Vec<String>,
     systems: Vec<ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 pub fn get_goos(target: ArtifactSystem) -> Result<String> {
@@ -50,7 +51,13 @@ pub fn get_goarch(target: ArtifactSystem) -> Result<String> {
 }
 
 impl<'a> Go<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             aliases: vec![],
             artifacts: vec![],
@@ -64,6 +71,7 @@ impl<'a> Go<'a> {
             source: None,
             source_scripts: vec![],
             systems,
+            system_error,
         }
     }
 
@@ -128,6 +136,8 @@ impl<'a> Go<'a> {
     }
 
     pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         // Sort for deterministic output
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -226,10 +236,17 @@ pub struct GoDevelopmentEnvironment<'a> {
     name: &'a str,
     secrets: Vec<(&'a str, &'a str)>,
     systems: Vec<ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 impl<'a> GoDevelopmentEnvironment<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             artifacts: vec![],
             environments: vec![],
@@ -239,6 +256,7 @@ impl<'a> GoDevelopmentEnvironment<'a> {
             name,
             secrets: vec![],
             systems,
+            system_error,
         }
     }
 
@@ -268,7 +286,9 @@ impl<'a> GoDevelopmentEnvironment<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut context::ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut context::ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         let git = Git::new().build(context).await?;
         let go = GoDist::new().build(context).await?;
         let goimports = Goimports::new().build(context).await?;

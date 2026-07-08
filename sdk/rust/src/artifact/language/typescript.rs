@@ -1,7 +1,9 @@
 use crate::{
     api,
     api::artifact::ArtifactSystem,
-    artifact::{bun::Bun, get_env_key, step, Artifact, ArtifactSource, DevelopmentEnvironment},
+    artifact::{
+        bun::Bun, get_env_key, step, system, Artifact, ArtifactSource, DevelopmentEnvironment,
+    },
     context::ConfigContext,
 };
 use anyhow::Result;
@@ -17,11 +19,18 @@ pub struct TypeScript<'a> {
     source_includes: Vec<&'a str>,
     source_scripts: Vec<String>,
     systems: Vec<ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
     working_dir: Option<String>,
 }
 
 impl<'a> TypeScript<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             aliases: vec![],
             artifacts: vec![],
@@ -32,6 +41,7 @@ impl<'a> TypeScript<'a> {
             source_includes: vec![],
             source_scripts: vec![],
             systems,
+            system_error,
             working_dir: None,
         }
     }
@@ -91,6 +101,8 @@ impl<'a> TypeScript<'a> {
     }
 
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         // Setup artifacts
 
         let bun = Bun::new().build(context).await?;
@@ -192,16 +204,24 @@ pub struct TypeScriptDevelopmentEnvironment<'a> {
     name: &'a str,
     secrets: Vec<(&'a str, &'a str)>,
     systems: Vec<ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 impl<'a> TypeScriptDevelopmentEnvironment<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             artifacts: vec![],
             environments: vec![],
             name,
             secrets: vec![],
             systems,
+            system_error,
         }
     }
 
@@ -224,7 +244,9 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         let bun = Bun::new().build(context).await?;
 
         let mut artifacts = vec![bun];
@@ -239,5 +261,29 @@ impl<'a> TypeScriptDevelopmentEnvironment<'a> {
         }
 
         devenv.build(context).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Linux};
+
+    #[test]
+    fn constructors_accept_raw_string_arrays_and_enum_vectors() {
+        let artifact = TypeScript::new("example", ["aarch64-darwin", "x86_64-linux"]);
+
+        assert_eq!(artifact.systems, vec![Aarch64Darwin, X8664Linux]);
+        assert!(artifact.system_error.is_none());
+
+        let artifact = TypeScript::new("example", vec![Aarch64Linux, X8664Linux]);
+
+        assert_eq!(artifact.systems, vec![Aarch64Linux, X8664Linux]);
+        assert!(artifact.system_error.is_none());
+
+        let devenv = TypeScriptDevelopmentEnvironment::new("example-dev", ["aarch64-darwin"]);
+
+        assert_eq!(devenv.systems, vec![Aarch64Darwin]);
+        assert!(devenv.system_error.is_none());
     }
 }

@@ -2,7 +2,7 @@ use crate::{
     api,
     api::artifact::ArtifactSystem,
     artifact::{
-        cpython::Cpython, get_env_key, step, uv::Uv, Artifact, ArtifactSource,
+        cpython::Cpython, get_env_key, step, system, uv::Uv, Artifact, ArtifactSource,
         DevelopmentEnvironment,
     },
     context::ConfigContext,
@@ -25,6 +25,7 @@ pub struct Python<'a> {
     source_includes: Vec<&'a str>,
     source_scripts: Vec<String>,
     systems: Vec<ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
     working_dir: Option<String>,
 }
 
@@ -82,7 +83,13 @@ fn step_build_command(name: &str, entrypoint: Option<&str>, python_bin: &str) ->
 }
 
 impl<'a> Python<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             aliases: vec![],
             artifacts: vec![],
@@ -93,6 +100,7 @@ impl<'a> Python<'a> {
             source_includes: vec![],
             source_scripts: vec![],
             systems,
+            system_error,
             working_dir: None,
         }
     }
@@ -152,6 +160,8 @@ impl<'a> Python<'a> {
     }
 
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         // Setup toolchain artifacts
 
         let cpython = Cpython::new().build(context).await?;
@@ -252,16 +262,24 @@ pub struct PythonDevelopmentEnvironment<'a> {
     name: &'a str,
     secrets: Vec<(&'a str, &'a str)>,
     systems: Vec<ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 impl<'a> PythonDevelopmentEnvironment<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             artifacts: vec![],
             environments: vec![],
             name,
             secrets: vec![],
             systems,
+            system_error,
         }
     }
 
@@ -284,7 +302,9 @@ impl<'a> PythonDevelopmentEnvironment<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         let cpython = Cpython::new().build(context).await?;
         let cpython_bin = format!("{}/bin", get_env_key(&cpython));
 

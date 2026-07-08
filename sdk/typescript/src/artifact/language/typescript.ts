@@ -11,6 +11,7 @@ import {
 } from "../../artifact.js";
 import { Bun } from "../bun.js";
 import { shell } from "../step.js";
+import { type ArtifactSystemInput, tryNormalizeSystems } from "../../system.js";
 
 export class TypeScript {
   private _aliases: string[] = [];
@@ -22,11 +23,14 @@ export class TypeScript {
   private _secrets: Map<string, string> = new Map();
   private _sourceScripts: string[] = [];
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
   private _workingDir: string | undefined = undefined;
 
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   withAliases(aliases: string[]): this {
@@ -120,6 +124,10 @@ export class TypeScript {
    * @returns The artifact digest string
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     // Setup artifacts -- resolve Bun
     const bunDigest = await new Bun().build(context);
     const bunBin = `${getEnvKey(bunDigest)}/bin`;
@@ -219,10 +227,13 @@ export class TypeScriptDevelopmentEnvironment {
   private _name: string;
   private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -263,6 +274,10 @@ export class TypeScriptDevelopmentEnvironment {
    * Bun does not require special env vars like Go or Rust do.
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     const bun = await new Bun().build(context);
 
     const artifacts: string[] = [bun, ...this._artifacts];
@@ -278,4 +293,3 @@ export class TypeScriptDevelopmentEnvironment {
     return devenv.build(context);
   }
 }
-

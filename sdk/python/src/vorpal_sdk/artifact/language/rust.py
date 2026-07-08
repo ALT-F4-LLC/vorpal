@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,8 @@ from vorpal_sdk.artifact import (
     Artifact,
     ArtifactSource,
     DevelopmentEnvironment,
+    _normalize_systems_for_build,
+    _raise_systems_error,
     get_env_key,
     secrets_to_proto,
 )
@@ -28,6 +31,7 @@ from vorpal_sdk.artifact.rust_toolchain import (
     rust_toolchain_target,
 )
 from vorpal_sdk.step import shell
+from vorpal_sdk.system import ArtifactSystemInput
 
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
@@ -229,7 +233,7 @@ class Rust:
     """Builder for Rust/Cargo project artifacts."""
 
     def __init__(
-        self, name: str, systems: list[artifact_pb2.ArtifactSystem]
+        self, name: str, systems: Sequence[ArtifactSystemInput]
     ) -> None:
         self._aliases: list[str] = []
         self._artifacts: list[str] = []
@@ -245,7 +249,9 @@ class Rust:
         self._packages: list[str] = []
         self._secrets: dict[str, str] = {}
         self._source: str | None = None
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
         self._tests = False
 
     def with_aliases(self, aliases: list[str]) -> Rust:
@@ -303,6 +309,7 @@ class Rust:
         return self
 
     def build(self, context: ConfigContext) -> str:
+        _raise_systems_error(self._systems_error)
         protoc = Protoc().build(context)
 
         # Raw paths use string concatenation (not os.path.join) to preserve a
@@ -507,13 +514,15 @@ class RustDevelopmentEnvironment:
     """Builder for Rust development-environment artifacts."""
 
     def __init__(
-        self, name: str, systems: list[artifact_pb2.ArtifactSystem]
+        self, name: str, systems: Sequence[ArtifactSystemInput]
     ) -> None:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
         self._secrets: dict[str, str] = {}
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
         self._include_protoc = True
 
     def with_artifacts(
@@ -541,6 +550,7 @@ class RustDevelopmentEnvironment:
         return self
 
     def build(self, context: ConfigContext) -> str:
+        _raise_systems_error(self._systems_error)
         rust_toolchain = RustToolchain().build(context)
 
         artifacts: list[str] = []

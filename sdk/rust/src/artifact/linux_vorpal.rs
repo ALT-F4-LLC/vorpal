@@ -1,5 +1,4 @@
 use crate::{
-    api::artifact::ArtifactSystem::{Aarch64Linux, X8664Linux},
     artifact::{
         linux_debian::LinuxDebian,
         linux_vorpal::script::{setup, stage_01, stage_02, stage_03, stage_04, stage_05},
@@ -237,7 +236,7 @@ impl LinuxVorpal {
             unzip_version,
         );
 
-        let systems = vec![Aarch64Linux, X8664Linux];
+        let systems = ["aarch64-linux", "x86_64-linux"];
 
         // TODO: impove readability with list in list
 

@@ -58,7 +58,9 @@ export {
   getSystemDefault,
   getSystemDefaultStr,
   getSystemStr,
+  normalizeSystems,
 } from "./system.js";
+export type { ArtifactSystemInput } from "./system.js";
 
 // CLI
 export { parseCliArgs } from "./cli.js";

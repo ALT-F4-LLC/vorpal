@@ -48,15 +48,15 @@ The `language` field tells Vorpal which SDK to use. The `[source]` section defin
 Then create a build configuration in `vorpal.ts`:
 
 ```typescript title="vorpal.ts"
-import { ArtifactSystem, ConfigContext } from "@altf4llc/vorpal-sdk";
+import { ConfigContext } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 // Define your artifacts here
@@ -64,7 +64,7 @@ const systems = [
 await ctx.run();
 ```
 
-Every Vorpal config starts by creating a context and defining target systems. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+Every Vorpal config starts by creating a context and defining target systems as canonical system strings. The context manages the connection to the Vorpal daemon and tracks all artifacts.
 
 ## Defining artifacts
 
@@ -79,15 +79,15 @@ Use the `TypeScript` builder to compile a TypeScript project into a cross-platfo
 :::
 
 ```typescript title="vorpal.ts" {1,12-15}
-import { ArtifactSystem, ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
+import { ConfigContext, TypeScript } from "@altf4llc/vorpal-sdk";
 
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 await new TypeScript("my-app", systems)
@@ -125,9 +125,8 @@ Build artifacts like `Protoc` and pass them as dependencies to your language art
 `Protoc` is a built-in artifact provided by the Vorpal SDK. See [Built-in artifacts](/concepts/artifacts/#built-in-artifacts) for the full list.
 :::
 
-```typescript title="vorpal.ts" {4,17,20}
+```typescript title="vorpal.ts"
 import {
-  ArtifactSystem,
   ConfigContext,
   Protoc,
   TypeScript,
@@ -136,10 +135,10 @@ import {
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const protoc = await new Protoc().build(ctx);
@@ -161,9 +160,8 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 
 Create a portable development shell with pinned tools, environment variables, and more:
 
-```typescript title="vorpal.ts" {5,19-22}
+```typescript title="vorpal.ts"
 import {
-  ArtifactSystem,
   ConfigContext,
   Protoc,
   TypeScriptDevelopmentEnvironment,
@@ -172,10 +170,10 @@ import {
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const protoc = await new Protoc().build(ctx);
@@ -217,9 +215,8 @@ See [Environments](/concepts/environments/) to learn more.
 
 Jobs run scripts that never cache by default — ideal for CI tasks, tests, and automation.
 
-```typescript title="vorpal.ts" {4,7,27,29-31}
+```typescript title="vorpal.ts"
 import {
-  ArtifactSystem,
   ConfigContext,
   Job,
   Protoc,
@@ -230,10 +227,10 @@ import {
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const protoc = await new Protoc().build(ctx);
@@ -266,9 +263,8 @@ See [Jobs](/concepts/jobs/) to learn more.
 
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
-```typescript title="vorpal.ts" {4,7,27-34}
+```typescript title="vorpal.ts"
 import {
-  ArtifactSystem,
   ConfigContext,
   Process,
   Protoc,
@@ -279,10 +275,10 @@ import {
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const protoc = await new Protoc().build(ctx);
@@ -319,9 +315,8 @@ See [Processes](/concepts/processes/) to learn more.
 
 Install tools into your user-wide environment with symlinks:
 
-```typescript title="vorpal.ts" {5-6,23-26}
+```typescript title="vorpal.ts"
 import {
-  ArtifactSystem,
   ConfigContext,
   TypeScript,
   UserEnvironment,
@@ -331,10 +326,10 @@ import {
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const myApp = await new TypeScript("my-app", systems)
@@ -366,9 +361,8 @@ See [Environments](/concepts/environments/) to learn more.
 
 Replace the default Bash executor with Docker or any custom binary:
 
-```typescript title="vorpal.ts" {4-5,17-22,24-25}
+```typescript title="vorpal.ts"
 import {
-  ArtifactSystem,
   ConfigContext,
   Artifact,
   ArtifactStep,
@@ -377,10 +371,10 @@ import {
 const ctx = ConfigContext.create();
 
 const systems = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const step = new ArtifactStep("docker")

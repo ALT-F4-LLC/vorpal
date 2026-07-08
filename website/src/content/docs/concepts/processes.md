@@ -43,13 +43,17 @@ If your task runs to completion and exits, use a [Job](/concepts/jobs/) instead.
 use vorpal_sdk::{
     artifact::{get_env_key, Process},
     context::get_context,
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let ctx = &mut get_context().await?;
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     let server = build_my_server(ctx).await?;
 
@@ -85,16 +89,15 @@ process, _ := artifact.NewProcess(
 ```typescript
 import {
   ConfigContext,
-  ArtifactSystem,
   Process,
   getEnvKey,
 } from "@altf4llc/vorpal-sdk";
 
 const SYSTEMS = [
-  ArtifactSystem.AARCH64_DARWIN,
-  ArtifactSystem.AARCH64_LINUX,
-  ArtifactSystem.X8664_DARWIN,
-  ArtifactSystem.X8664_LINUX,
+  "aarch64-darwin",
+  "aarch64-linux",
+  "x86_64-darwin",
+  "x86_64-linux",
 ];
 
 const context = ConfigContext.create();

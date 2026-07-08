@@ -1,8 +1,8 @@
 use crate::{
     api::artifact::{ArtifactStepSecret, ArtifactSystem},
     artifact::{
-        get_env_key, protoc::Protoc, rust_toolchain, rust_toolchain::RustToolchain, step, Artifact,
-        ArtifactSource, DevelopmentEnvironment,
+        get_env_key, protoc::Protoc, rust_toolchain, rust_toolchain::RustToolchain, step, system,
+        Artifact, ArtifactSource, DevelopmentEnvironment,
     },
     context::ConfigContext,
 };
@@ -52,6 +52,7 @@ pub struct Rust<'a> {
     source: Option<String>,
     tests: bool,
     systems: Vec<ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 fn parse_cargo(path: &str) -> Result<RustCargoToml> {
@@ -61,7 +62,13 @@ fn parse_cargo(path: &str) -> Result<RustCargoToml> {
 }
 
 impl<'a> Rust<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             artifacts: vec![],
             bins: vec![],
@@ -78,6 +85,7 @@ impl<'a> Rust<'a> {
             source: None,
             tests: false,
             systems,
+            system_error,
         }
     }
 
@@ -150,6 +158,8 @@ impl<'a> Rust<'a> {
     }
 
     pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         // Sort for deterministic output
         self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -482,10 +492,17 @@ pub struct RustDevelopmentEnvironment<'a> {
     name: &'a str,
     secrets: Vec<(&'a str, &'a str)>,
     systems: Vec<ArtifactSystem>,
+    system_error: Option<anyhow::Error>,
 }
 
 impl<'a> RustDevelopmentEnvironment<'a> {
-    pub fn new(name: &'a str, systems: Vec<ArtifactSystem>) -> Self {
+    pub fn new<I, S>(name: &'a str, systems: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: system::ArtifactSystemInput,
+    {
+        let (systems, system_error) = system::normalize_systems_for_builder(systems);
+
         Self {
             artifacts: vec![],
             environments: vec![],
@@ -493,6 +510,7 @@ impl<'a> RustDevelopmentEnvironment<'a> {
             name,
             secrets: vec![],
             systems,
+            system_error,
         }
     }
 
@@ -520,7 +538,9 @@ impl<'a> RustDevelopmentEnvironment<'a> {
         self
     }
 
-    pub async fn build(self, context: &mut ConfigContext) -> Result<String> {
+    pub async fn build(mut self, context: &mut ConfigContext) -> Result<String> {
+        system::check_system_error(&mut self.system_error)?;
+
         let rust_toolchain_digest = RustToolchain::new().build(context).await?;
 
         let mut artifacts = vec![];

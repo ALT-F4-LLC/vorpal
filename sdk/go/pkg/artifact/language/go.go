@@ -30,6 +30,7 @@ type Go struct {
 	environments   []string
 	includes       []string
 	name           string
+	err            error
 	secrets        map[string]string
 	source         *api.ArtifactSource
 	sourceScripts  []string
@@ -79,7 +80,9 @@ func GetGOARCH(target api.ArtifactSystem) (*string, error) {
 	return &goarch, nil
 }
 
-func NewGo(name string, systems []api.ArtifactSystem) *Go {
+func NewGo[T config.ArtifactSystemInput](name string, systems []T) *Go {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &Go{
 		aliases:        []string{},
 		artifacts:      []*string{},
@@ -89,10 +92,11 @@ func NewGo(name string, systems []api.ArtifactSystem) *Go {
 		environments:   []string{},
 		includes:       []string{},
 		name:           name,
+		err:            err,
 		secrets:        map[string]string{},
 		source:         nil,
 		sourceScripts:  []string{},
-		systems:        systems,
+		systems:        artifactSystems,
 	}
 }
 
@@ -154,6 +158,10 @@ func (b *Go) WithSourceScript(script string) *Go {
 }
 
 func (builder *Go) Build(context *config.ConfigContext) (*string, error) {
+	if builder.err != nil {
+		return nil, builder.err
+	}
+
 	git, err := artifact.Git(context)
 	if err != nil {
 		return nil, err
@@ -276,6 +284,7 @@ type GoDevelopmentEnvironment struct {
 	artifacts    []*string
 	environments []string
 	name         string
+	err          error
 	secrets      map[string]string
 	systems      []api.ArtifactSystem
 
@@ -284,13 +293,16 @@ type GoDevelopmentEnvironment struct {
 	includeProtocGenGoGRPC bool
 }
 
-func NewGoDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *GoDevelopmentEnvironment {
+func NewGoDevelopmentEnvironment[T config.ArtifactSystemInput](name string, systems []T) *GoDevelopmentEnvironment {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &GoDevelopmentEnvironment{
 		artifacts:              []*string{},
 		environments:           []string{},
 		name:                   name,
+		err:                    err,
 		secrets:                map[string]string{},
-		systems:                systems,
+		systems:                artifactSystems,
 		includeProtoc:          true,
 		includeProtocGenGo:     true,
 		includeProtocGenGoGRPC: true,
@@ -324,6 +336,10 @@ func (b *GoDevelopmentEnvironment) WithSecrets(secrets map[string]string) *GoDev
 }
 
 func (b *GoDevelopmentEnvironment) Build(context *config.ConfigContext) (*string, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	git, err := artifact.Git(context)
 	if err != nil {
 		return nil, err

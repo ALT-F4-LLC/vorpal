@@ -1,6 +1,8 @@
 import { ArtifactSystem } from "./api/artifact/artifact.js";
 import { arch, platform } from "node:os";
 
+export type ArtifactSystemInput = string | ArtifactSystem;
+
 /**
  * Returns the default system string for the current platform.
  * Format: "{arch}-{os}" (e.g., "aarch64-darwin", "x86_64-linux")
@@ -60,6 +62,57 @@ export function getSystem(system: string): ArtifactSystem {
       return ArtifactSystem.X8664_LINUX;
     default:
       throw new Error(`unsupported system: ${system}`);
+  }
+}
+
+function getUnsupportedSystemValue(system: ArtifactSystem): string {
+  switch (system) {
+    case ArtifactSystem.UNKNOWN_SYSTEM:
+      return "UNKNOWN_SYSTEM";
+    case ArtifactSystem.UNRECOGNIZED:
+      return "UNRECOGNIZED";
+    default:
+      return `${system}`;
+  }
+}
+
+function normalizeSystem(system: ArtifactSystemInput): ArtifactSystem {
+  if (typeof system === "string") {
+    return getSystem(system);
+  }
+
+  switch (system) {
+    case ArtifactSystem.AARCH64_DARWIN:
+    case ArtifactSystem.AARCH64_LINUX:
+    case ArtifactSystem.X8664_DARWIN:
+    case ArtifactSystem.X8664_LINUX:
+      return system;
+    default:
+      throw new Error(
+        `unsupported system: ${getUnsupportedSystemValue(system)}`,
+      );
+  }
+}
+
+/**
+ * Normalizes canonical system strings and ArtifactSystem enum values.
+ */
+export function normalizeSystems(
+  systems: ArtifactSystemInput[],
+): ArtifactSystem[] {
+  return systems.map(normalizeSystem);
+}
+
+export function tryNormalizeSystems(
+  systems: ArtifactSystemInput[],
+): { systems: ArtifactSystem[]; error: Error | undefined } {
+  try {
+    return { systems: normalizeSystems(systems), error: undefined };
+  } catch (error) {
+    return {
+      systems: [],
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
   }
 }
 

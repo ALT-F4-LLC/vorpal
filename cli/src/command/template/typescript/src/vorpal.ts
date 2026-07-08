@@ -1,5 +1,4 @@
 import {
-    ArtifactSystem,
     ConfigContext,
     TypeScript,
     TypeScriptDevelopmentEnvironment,
@@ -7,11 +6,11 @@ import {
 
 const ctx = ConfigContext.create();
 
-const systems: ArtifactSystem[] = [
-    ArtifactSystem.AARCH64_DARWIN,
-    ArtifactSystem.AARCH64_LINUX,
-    ArtifactSystem.X8664_DARWIN,
-    ArtifactSystem.X8664_LINUX,
+const systems = [
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ];
 
 await new TypeScriptDevelopmentEnvironment("example-shell", systems)

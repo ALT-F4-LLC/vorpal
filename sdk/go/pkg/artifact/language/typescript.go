@@ -17,13 +17,16 @@ type TypeScript struct {
 	environments  []string
 	includes      []string
 	name          string
+	err           error
 	secrets       map[string]string
 	sourceScripts []string
 	systems       []api.ArtifactSystem
 	workingDir    *string
 }
 
-func NewTypeScript(name string, systems []api.ArtifactSystem) *TypeScript {
+func NewTypeScript[T config.ArtifactSystemInput](name string, systems []T) *TypeScript {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &TypeScript{
 		aliases:       []string{},
 		artifacts:     []*string{},
@@ -31,9 +34,10 @@ func NewTypeScript(name string, systems []api.ArtifactSystem) *TypeScript {
 		environments:  []string{},
 		includes:      []string{},
 		name:          name,
+		err:           err,
 		secrets:       map[string]string{},
 		sourceScripts: []string{},
-		systems:       systems,
+		systems:       artifactSystems,
 		workingDir:    nil,
 	}
 }
@@ -87,6 +91,10 @@ func (b *TypeScript) WithWorkingDir(dir string) *TypeScript {
 }
 
 func (builder *TypeScript) Build(context *config.ConfigContext) (*string, error) {
+	if builder.err != nil {
+		return nil, builder.err
+	}
+
 	// Resolve Bun artifact
 	bunDigest, err := artifact.Bun(context)
 	if err != nil {
@@ -169,17 +177,21 @@ type TypeScriptDevelopmentEnvironment struct {
 	artifacts    []*string
 	environments []string
 	name         string
+	err          error
 	secrets      map[string]string
 	systems      []api.ArtifactSystem
 }
 
-func NewTypeScriptDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *TypeScriptDevelopmentEnvironment {
+func NewTypeScriptDevelopmentEnvironment[T config.ArtifactSystemInput](name string, systems []T) *TypeScriptDevelopmentEnvironment {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &TypeScriptDevelopmentEnvironment{
 		artifacts:    []*string{},
 		environments: []string{},
 		name:         name,
+		err:          err,
 		secrets:      map[string]string{},
-		systems:      systems,
+		systems:      artifactSystems,
 	}
 }
 
@@ -203,6 +215,10 @@ func (b *TypeScriptDevelopmentEnvironment) WithSecrets(secrets map[string]string
 }
 
 func (b *TypeScriptDevelopmentEnvironment) Build(context *config.ConfigContext) (*string, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	bun, err := artifact.Bun(context)
 	if err != nil {
 		return nil, err

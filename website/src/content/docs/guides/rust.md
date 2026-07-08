@@ -50,16 +50,18 @@ Then create a build configuration in `src/vorpal.rs`:
 
 ```rust title="src/vorpal.rs"
 use anyhow::Result;
-use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    context::get_context,
-};
+use vorpal_sdk::context::get_context;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     // Define your artifacts here
 
@@ -67,7 +69,7 @@ async fn main() -> Result<()> {
 }
 ```
 
-Every Vorpal config starts by creating a context and defining target systems. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+Every Vorpal config starts by creating a context and defining target systems as canonical system strings. The context manages the connection to the Vorpal daemon and tracks all artifacts.
 
 ## Defining artifacts
 
@@ -84,7 +86,6 @@ Use the `Rust` builder to compile a Rust project into a cross-platform artifact:
 ```rust title="src/vorpal.rs" {4,14-18}
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::language::rust::Rust,
     context::get_context,
 };
@@ -93,7 +94,12 @@ use vorpal_sdk::{
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     Rust::new("my-app", systems)
         .with_bins(vec!["my-app"])
@@ -139,7 +145,6 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 ```rust title="src/vorpal.rs" {4,14,17}
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{language::rust::Rust, protoc::Protoc},
     context::get_context,
 };
@@ -148,7 +153,12 @@ use vorpal_sdk::{
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     let protoc = Protoc::new().build(ctx).await?;
 
@@ -173,7 +183,6 @@ Create a portable development shell with pinned tools, environment variables, an
 ```rust title="src/vorpal.rs" {4,16-19}
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc},
     context::get_context,
 };
@@ -182,7 +191,12 @@ use vorpal_sdk::{
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     let protoc = Protoc::new().build(ctx).await?;
 
@@ -228,8 +242,7 @@ Jobs run scripts that never cache by default — ideal for CI tasks, tests, and 
 ```rust title="src/vorpal.rs" {4,22,24-26}
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{get_env_key, language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc, Job},
+    artifact::{get_env_key, language::rust::Rust, protoc::Protoc, Job},
     context::get_context,
 };
 
@@ -237,11 +250,16 @@ use vorpal_sdk::{
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     let protoc = Protoc::new().build(ctx).await?;
 
-    let my_app = Rust::new("my-app", systems.clone())
+    let my_app = Rust::new("my-app", systems)
         .with_artifacts(vec![protoc.clone()])
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
@@ -273,8 +291,7 @@ Processes wrap long-running binaries with start, stop, and logs lifecycle script
 ```rust title="src/vorpal.rs" {4,22-29}
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
-    artifact::{get_env_key, language::rust::{Rust, RustDevelopmentEnvironment}, protoc::Protoc, Job, Process},
+    artifact::{get_env_key, language::rust::Rust, protoc::Protoc, Process},
     context::get_context,
 };
 
@@ -282,11 +299,16 @@ use vorpal_sdk::{
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     let protoc = Protoc::new().build(ctx).await?;
 
-    let my_app = Rust::new("my-app", systems.clone())
+    let my_app = Rust::new("my-app", systems)
         .with_artifacts(vec![protoc.clone()])
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
@@ -322,7 +344,6 @@ Install tools into your user-wide environment with symlinks:
 ```rust title="src/vorpal.rs" {4,19-22}
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{get_env_key, language::rust::Rust, UserEnvironment},
     context::get_context,
 };
@@ -331,9 +352,14 @@ use vorpal_sdk::{
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
-    let my_app = Rust::new("my-app", systems.clone())
+    let my_app = Rust::new("my-app", systems)
         .with_bins(vec!["my-app"])
         .with_includes(vec!["src", "Cargo.lock", "Cargo.toml"])
         .build(ctx).await?;
@@ -366,7 +392,6 @@ Replace the default Bash executor with Docker or any custom binary:
 ```rust title="src/vorpal.rs" {4,14-19,21-22}
 use anyhow::Result;
 use vorpal_sdk::{
-    api::artifact::ArtifactSystem::{Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux},
     artifact::{Artifact, ArtifactStep},
     context::get_context,
 };
@@ -375,7 +400,12 @@ use vorpal_sdk::{
 async fn main() -> Result<()> {
     let ctx = &mut get_context().await?;
 
-    let systems = vec![Aarch64Darwin, Aarch64Linux, X8664Darwin, X8664Linux];
+    let systems = [
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
+    ];
 
     let step = ArtifactStep::new("docker")
         .with_arguments(vec![

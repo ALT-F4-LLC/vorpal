@@ -39,18 +39,17 @@ Then create a build configuration in `cmd/vorpal/main.go`:
 package main
 
 import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
 )
 
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     // Define your artifacts here
@@ -59,7 +58,7 @@ func main() {
 }
 ```
 
-Every Vorpal config starts by creating a context and defining target systems. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+Every Vorpal config starts by creating a context and defining target systems as canonical system strings. The context manages the connection to the Vorpal daemon and tracks all artifacts.
 
 ## Defining artifacts
 
@@ -77,7 +76,6 @@ Use the `Go` builder from `language` package to compile a Go project into a cros
 package main
 
 import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
     "log"
@@ -86,11 +84,11 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     _, err := language.NewGo("my-app", systems).
@@ -138,7 +136,6 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 package main
 
 import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
@@ -148,11 +145,11 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     protoc, err := artifact.Protoc(ctx)
@@ -185,7 +182,6 @@ Create a portable development shell with pinned tools, environment variables, an
 package main
 
 import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/config"
@@ -195,11 +191,11 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     protoc, err := artifact.Protoc(ctx)
@@ -250,7 +246,6 @@ Jobs run scripts that never cache by default — ideal for CI tasks, tests, and 
 package main
 
 import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
     "fmt"
@@ -261,11 +256,11 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     protoc, err := artifact.Protoc(ctx)
@@ -311,7 +306,6 @@ Processes wrap long-running binaries with start, stop, and logs lifecycle script
 package main
 
 import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
     "fmt"
@@ -322,11 +316,11 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     protoc, err := artifact.Protoc(ctx)
@@ -374,7 +368,6 @@ Install tools into your user-wide environment with symlinks:
 package main
 
 import (
-    api "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact"
     "github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/artifact/language"
     "fmt"
@@ -385,11 +378,11 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     myApp, err := language.NewGo("my-app", systems).
@@ -437,11 +430,11 @@ import (
 func main() {
     ctx := config.GetContext()
 
-    systems := []api.ArtifactSystem{
-        api.ArtifactSystem_AARCH64_DARWIN,
-        api.ArtifactSystem_AARCH64_LINUX,
-        api.ArtifactSystem_X8664_DARWIN,
-        api.ArtifactSystem_X8664_LINUX,
+    systems := []string{
+        "aarch64-darwin",
+        "aarch64-linux",
+        "x86_64-darwin",
+        "x86_64-linux",
     }
 
     step := artifact.NewArtifactStep("docker").

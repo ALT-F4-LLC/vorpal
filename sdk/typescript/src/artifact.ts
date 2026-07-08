@@ -9,6 +9,7 @@ import { Crane } from "./artifact/crane.js";
 import { Rsync } from "./artifact/rsync.js";
 import { shell } from "./artifact/step.js";
 import type { ConfigContext } from "./context.js";
+import { type ArtifactSystemInput, tryNormalizeSystems } from "./system.js";
 
 /**
  * Returns the environment variable key for an artifact digest.
@@ -200,20 +201,23 @@ export class Artifact {
   private _sources: ArtifactSourceMsg[] = [];
   private _steps: ArtifactStepMsg[];
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
   /**
    * @param name - Artifact name (must be unique within a namespace)
    * @param steps - Build steps that produce the artifact output
-   * @param systems - Target systems this artifact supports (e.g., `[ArtifactSystem.AARCH64_DARWIN]`)
+   * @param systems - Target systems this artifact supports
    */
   constructor(
     name: string,
     steps: ArtifactStepMsg[],
-    systems: ArtifactSystem[],
+    systems: ArtifactSystemInput[],
   ) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
     this._steps = steps;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -252,6 +256,10 @@ export class Artifact {
    * @returns The hex-encoded SHA-256 digest of the artifact
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     const artifact: ArtifactMsg = {
       target: context.getSystem(),
       sources: this._sources,
@@ -281,16 +289,19 @@ export class Job {
   private _secrets: Map<string, string> = new Map();
   private _script: string;
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
   /**
    * @param name - Job artifact name
    * @param script - Shell script to execute
    * @param systems - Target systems this job supports
    */
-  constructor(name: string, script: string, systems: ArtifactSystem[]) {
+  constructor(name: string, script: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
     this._script = script;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -323,6 +334,10 @@ export class Job {
    * @returns The hex-encoded SHA-256 digest of the artifact
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     const step = await shell(
       context,
       this._artifacts,
@@ -355,6 +370,7 @@ export class Process {
   private _name: string;
   private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
   /**
    * @param name - Process artifact name (used for start/stop/logs scripts)
@@ -364,11 +380,13 @@ export class Process {
   constructor(
     name: string,
     entrypoint: string,
-    systems: ArtifactSystem[],
+    systems: ArtifactSystemInput[],
   ) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
     this._entrypoint = entrypoint;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -416,6 +434,10 @@ export class Process {
    * @returns The hex-encoded SHA-256 digest of the artifact
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     const argumentsStr = this._arguments.join(" ");
 
     const artifactsStr = this._artifacts
@@ -506,14 +528,17 @@ export class DevelopmentEnvironment {
   private _name: string;
   private _secrets: Map<string, string> = new Map();
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
   /**
    * @param name - Environment name (shown in shell prompt as `(name)`)
    * @param systems - Target systems this environment supports
    */
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -559,6 +584,9 @@ export class DevelopmentEnvironment {
    * @returns The hex-encoded SHA-256 digest of the artifact
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
 
     const envsBackup = [
       'export VORPAL_SHELL_BACKUP_PATH="$PATH"',
@@ -672,14 +700,17 @@ export class UserEnvironment {
   private _name: string;
   private _symlinks: Array<[string, string]> = [];
   private _systems: ArtifactSystem[];
+  private _systemsError: Error | undefined = undefined;
 
   /**
    * @param name - User environment name
    * @param systems - Target systems this environment supports
    */
-  constructor(name: string, systems: ArtifactSystem[]) {
+  constructor(name: string, systems: ArtifactSystemInput[]) {
+    const normalized = tryNormalizeSystems(systems);
     this._name = name;
-    this._systems = systems;
+    this._systems = normalized.systems;
+    this._systemsError = normalized.error;
   }
 
   /**
@@ -724,6 +755,10 @@ export class UserEnvironment {
    * @returns The hex-encoded SHA-256 digest of the artifact
    */
   async build(context: ConfigContext): Promise<string> {
+    if (this._systemsError !== undefined) {
+      throw this._systemsError;
+    }
+
     // Sort for deterministic output -- sorted by source path (index 0)
     this._symlinks.sort((a, b) => a[0].localeCompare(b[0]));
 

@@ -22,6 +22,7 @@ type Python struct {
 	environments  []string
 	includes      []string
 	name          string
+	err           error
 	secrets       map[string]string
 	sourceScripts []string
 	systems       []api.ArtifactSystem
@@ -70,7 +71,9 @@ cp pyproject.toml "$VORPAL_OUTPUT/"
 cp uv.lock "$VORPAL_OUTPUT/"`
 }
 
-func NewPython(name string, systems []api.ArtifactSystem) *Python {
+func NewPython[T config.ArtifactSystemInput](name string, systems []T) *Python {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &Python{
 		aliases:       []string{},
 		artifacts:     []*string{},
@@ -78,9 +81,10 @@ func NewPython(name string, systems []api.ArtifactSystem) *Python {
 		environments:  []string{},
 		includes:      []string{},
 		name:          name,
+		err:           err,
 		secrets:       map[string]string{},
 		sourceScripts: []string{},
-		systems:       systems,
+		systems:       artifactSystems,
 		workingDir:    nil,
 	}
 }
@@ -134,6 +138,10 @@ func (b *Python) WithWorkingDir(dir string) *Python {
 }
 
 func (b *Python) Build(context *config.ConfigContext) (*string, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	// Resolve toolchain artifacts
 	cpythonDigest, err := artifact.Cpython(context)
 	if err != nil {
@@ -219,17 +227,21 @@ type PythonDevelopmentEnvironment struct {
 	artifacts    []*string
 	environments []string
 	name         string
+	err          error
 	secrets      map[string]string
 	systems      []api.ArtifactSystem
 }
 
-func NewPythonDevelopmentEnvironment(name string, systems []api.ArtifactSystem) *PythonDevelopmentEnvironment {
+func NewPythonDevelopmentEnvironment[T config.ArtifactSystemInput](name string, systems []T) *PythonDevelopmentEnvironment {
+	artifactSystems, err := config.NormalizeSystems(systems)
+
 	return &PythonDevelopmentEnvironment{
 		artifacts:    []*string{},
 		environments: []string{},
 		name:         name,
+		err:          err,
 		secrets:      map[string]string{},
-		systems:      systems,
+		systems:      artifactSystems,
 	}
 }
 
@@ -253,6 +265,10 @@ func (b *PythonDevelopmentEnvironment) WithSecrets(secrets map[string]string) *P
 }
 
 func (b *PythonDevelopmentEnvironment) Build(context *config.ConfigContext) (*string, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	cpython, err := artifact.Cpython(context)
 	if err != nil {
 		return nil, err

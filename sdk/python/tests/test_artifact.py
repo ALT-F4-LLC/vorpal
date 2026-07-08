@@ -34,7 +34,9 @@ from vorpal_sdk.artifact import (  # noqa: E402
     get_env_key,
     secrets_to_proto,
 )
+from vorpal_sdk.artifact.language.typescript import TypeScript  # noqa: E402
 from vorpal_sdk.step import bash, docker, shell  # noqa: E402
+from vorpal_sdk.system import normalize_systems  # noqa: E402
 
 _DARWIN = artifact_pb2.AARCH64_DARWIN
 
@@ -77,6 +79,44 @@ def test_secrets_to_proto_sorts_by_name() -> None:
     out = secrets_to_proto({"zebra": "1", "alpha": "2", "mid": "3"})
     assert [s.name for s in out] == ["alpha", "mid", "zebra"]
     assert [s.value for s in out] == ["2", "3", "1"]
+
+
+def test_normalize_systems_accepts_strings_enums_and_preserves_order() -> None:
+    systems = normalize_systems(
+        ["x86_64-linux", _DARWIN, "aarch64-linux"]
+    )
+    assert systems == [
+        artifact_pb2.X8664_LINUX,
+        artifact_pb2.AARCH64_DARWIN,
+        artifact_pb2.AARCH64_LINUX,
+    ]
+
+
+def test_normalize_systems_rejects_unsupported_string() -> None:
+    raised = False
+    try:
+        normalize_systems(["riscv64-linux"])
+    except ValueError as exc:
+        raised = True
+        assert str(exc) == "unsupported system: riscv64-linux"
+    assert raised
+
+
+def test_normalize_systems_rejects_unknown_system() -> None:
+    raised = False
+    try:
+        normalize_systems([artifact_pb2.UNKNOWN_SYSTEM])
+    except ValueError as exc:
+        raised = True
+        assert str(exc) == "unsupported system: 0"
+    assert raised
+
+
+def test_top_level_reexports_system_normalizer() -> None:
+    import vorpal_sdk
+
+    assert hasattr(vorpal_sdk, "ArtifactSystemInput")
+    assert vorpal_sdk.normalize_systems(["aarch64-darwin"]) == [_DARWIN]
 
 
 # --- ArtifactSource --------------------------------------------------------
@@ -146,6 +186,39 @@ def test_artifact_dedupes_sources_and_aliases() -> None:
     assert ctx.last.target == _DARWIN
     assert [s.name for s in ctx.last.sources] == ["dup", "other"]
     assert list(ctx.last.aliases) == ["x", "y"]
+
+
+def test_artifact_accepts_raw_system_strings() -> None:
+    ctx = _StubContext()
+    step = ArtifactStep("bash").with_script("x").build()
+    Artifact("art", [step], ["x86_64-linux", "aarch64-darwin"]).build(ctx)
+    assert ctx.last is not None
+    assert list(ctx.last.systems) == [
+        artifact_pb2.X8664_LINUX,
+        artifact_pb2.AARCH64_DARWIN,
+    ]
+
+
+def test_artifact_defers_system_errors_until_build() -> None:
+    artifact = Artifact("bad", [], ["riscv64-linux"])
+    raised = False
+    try:
+        artifact.build(_StubContext())
+    except ValueError as exc:
+        raised = True
+        assert str(exc) == "unsupported system: riscv64-linux"
+    assert raised
+
+
+def test_language_builder_accepts_raw_system_strings() -> None:
+    ctx = _StubContext()
+    TypeScript("ts-app", ["x86_64-linux", "aarch64-darwin"]).build(ctx)
+    assert ctx.last is not None
+    assert ctx.last.name == "ts-app"
+    assert list(ctx.last.systems) == [
+        artifact_pb2.X8664_LINUX,
+        artifact_pb2.AARCH64_DARWIN,
+    ]
 
 
 # --- bash / docker / shell -------------------------------------------------

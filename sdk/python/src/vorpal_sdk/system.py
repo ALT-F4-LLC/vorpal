@@ -7,8 +7,15 @@ The canonical system strings are ``{arch}-{os}`` (e.g. ``aarch64-darwin``).
 from __future__ import annotations
 
 import platform
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 from vorpal_sdk.api.artifact import artifact_pb2
+
+if TYPE_CHECKING:
+    ArtifactSystemInput: TypeAlias = str | artifact_pb2.ArtifactSystem
+else:
+    ArtifactSystemInput: TypeAlias = str | int
 
 _STRING_TO_SYSTEM: dict[str, artifact_pb2.ArtifactSystem] = {
     "aarch64-darwin": artifact_pb2.AARCH64_DARWIN,
@@ -49,6 +56,20 @@ def get_system(system: str) -> artifact_pb2.ArtifactSystem:
         return _STRING_TO_SYSTEM[system]
     except KeyError:
         raise ValueError(f"unsupported system: {system}") from None
+
+
+def normalize_systems(
+    systems: Sequence[ArtifactSystemInput],
+) -> list[artifact_pb2.ArtifactSystem]:
+    normalized: list[artifact_pb2.ArtifactSystem] = []
+    for system in systems:
+        if isinstance(system, str):
+            normalized.append(get_system(system))
+        elif system in _SYSTEM_TO_STRING:
+            normalized.append(cast(artifact_pb2.ArtifactSystem, system))
+        else:
+            raise ValueError(f"unsupported system: {system}")
+    return normalized
 
 
 def get_system_default() -> artifact_pb2.ArtifactSystem:

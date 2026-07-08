@@ -6,6 +6,7 @@ must match the Rust and Go SDKs character-for-character for the same inputs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from vorpal_sdk.api.artifact import artifact_pb2
@@ -13,11 +14,14 @@ from vorpal_sdk.artifact import (
     Artifact,
     ArtifactSource,
     DevelopmentEnvironment,
+    _normalize_systems_for_build,
+    _raise_systems_error,
     get_env_key,
     secrets_to_proto,
 )
 from vorpal_sdk.artifact.bun import Bun
 from vorpal_sdk.step import shell
+from vorpal_sdk.system import ArtifactSystemInput
 
 if TYPE_CHECKING:
     from vorpal_sdk.context import ConfigContext
@@ -32,7 +36,7 @@ class TypeScript:
     """
 
     def __init__(
-        self, name: str, systems: list[artifact_pb2.ArtifactSystem]
+        self, name: str, systems: Sequence[ArtifactSystemInput]
     ) -> None:
         self._aliases: list[str] = []
         self._artifacts: list[str] = []
@@ -42,7 +46,9 @@ class TypeScript:
         self._name = name
         self._secrets: dict[str, str] = {}
         self._source_scripts: list[str] = []
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
         self._working_dir: str | None = None
 
     def with_aliases(self, aliases: list[str]) -> TypeScript:
@@ -82,6 +88,7 @@ class TypeScript:
         return self
 
     def build(self, context: ConfigContext) -> str:
+        _raise_systems_error(self._systems_error)
         bun_digest = Bun().build(context)
         bun_bin = f"{get_env_key(bun_digest)}/bin"
 
@@ -142,13 +149,15 @@ class TypeScriptDevelopmentEnvironment:
     """Builder for TypeScript development-environment artifacts (Bun only)."""
 
     def __init__(
-        self, name: str, systems: list[artifact_pb2.ArtifactSystem]
+        self, name: str, systems: Sequence[ArtifactSystemInput]
     ) -> None:
         self._artifacts: list[str] = []
         self._environments: list[str] = []
         self._name = name
         self._secrets: dict[str, str] = {}
-        self._systems = systems
+        self._systems, self._systems_error = _normalize_systems_for_build(
+            systems
+        )
 
     def with_artifacts(
         self, artifacts: list[str]
@@ -171,6 +180,7 @@ class TypeScriptDevelopmentEnvironment:
         return self
 
     def build(self, context: ConfigContext) -> str:
+        _raise_systems_error(self._systems_error)
         bun = Bun().build(context)
 
         artifacts = [bun, *self._artifacts]

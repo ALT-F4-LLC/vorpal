@@ -196,7 +196,7 @@ func linuxVorpalBuild(ctx *config.ConfigContext) (*string, error) {
 		"0",
 	}
 
-	systems := []api.ArtifactSystem{api.ArtifactSystem_AARCH64_LINUX, api.ArtifactSystem_X8664_LINUX}
+	systems := []string{"aarch64-linux", "x86_64-linux"}
 
 	steps := make([]*api.ArtifactStep, 0)
 

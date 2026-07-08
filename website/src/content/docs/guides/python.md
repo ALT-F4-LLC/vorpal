@@ -58,15 +58,15 @@ package = false
 Then create a build configuration in `src/vorpal.py`:
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, get_system
+from vorpal_sdk import ConfigContext
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 # Define your artifacts here
@@ -74,7 +74,7 @@ systems = [
 ctx.run()
 ```
 
-Every Vorpal config starts by creating a context and defining target systems. The `get_system` helper converts platform names to the system values expected by artifact builders. The context manages the connection to the Vorpal daemon and tracks all artifacts.
+Every Vorpal config starts by creating a context and defining target systems as canonical system strings. The context manages the connection to the Vorpal daemon and tracks all artifacts.
 
 ## Defining artifacts
 
@@ -89,15 +89,15 @@ Use the `Python` builder to package a Python project into a cross-platform artif
 :::
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Python, get_system
+from vorpal_sdk import ConfigContext, Python
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 (
@@ -138,15 +138,15 @@ Build artifacts like `protoc` and pass them as dependencies to your language art
 :::
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Protoc, Python, get_system
+from vorpal_sdk import ConfigContext, Protoc, Python
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 protoc = Protoc().build(ctx)
@@ -171,15 +171,15 @@ See [Artifacts](/concepts/artifacts/) to learn more.
 Create a portable development shell with pinned tools, environment variables, and more:
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Protoc, PythonDevelopmentEnvironment, get_system
+from vorpal_sdk import ConfigContext, Protoc, PythonDevelopmentEnvironment
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 protoc = Protoc().build(ctx)
@@ -224,15 +224,15 @@ See [Environments](/concepts/environments/) to learn more.
 Jobs run scripts that never cache by default - ideal for CI tasks, tests, and automation.
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Job, Python, get_env_key, get_system
+from vorpal_sdk import ConfigContext, Job, Python, get_env_key
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 example = (
@@ -267,15 +267,15 @@ See [Jobs](/concepts/jobs/) to learn more.
 Processes wrap long-running binaries with start, stop, and logs lifecycle scripts.
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Process, Python, get_env_key, get_system
+from vorpal_sdk import ConfigContext, Process, Python, get_env_key
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 example = (
@@ -314,15 +314,15 @@ See [Processes](/concepts/processes/) to learn more.
 Install tools into your user-wide environment with symlinks:
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import ConfigContext, Python, UserEnvironment, get_env_key, get_system
+from vorpal_sdk import ConfigContext, Python, UserEnvironment, get_env_key
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 example = (
@@ -361,15 +361,15 @@ See [Environments](/concepts/environments/) to learn more.
 Replace the default Bash executor with Docker or any custom binary:
 
 ```python title="src/vorpal.py"
-from vorpal_sdk import Artifact, ArtifactStep, ConfigContext, get_system
+from vorpal_sdk import Artifact, ArtifactStep, ConfigContext
 
 ctx = ConfigContext.create()
 
 systems = [
-    get_system("aarch64-darwin"),
-    get_system("aarch64-linux"),
-    get_system("x86_64-darwin"),
-    get_system("x86_64-linux"),
+    "aarch64-darwin",
+    "aarch64-linux",
+    "x86_64-darwin",
+    "x86_64-linux",
 ]
 
 step = (

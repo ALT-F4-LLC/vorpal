@@ -12,7 +12,7 @@ Every artifact has four components:
 - **Name** -- A human-readable identifier (e.g., `my-app`, `dev-shell`)
 - **Sources** -- Input files that the build steps operate on. Sources can come from the local filesystem or HTTP URLs.
 - **Steps** -- The build instructions. Each step has an entrypoint (the program that runs the step), arguments, environment variables, and optional secrets.
-- **Target systems** -- The platforms this artifact can be built for (e.g., `AARCH64_DARWIN` for macOS Apple Silicon, `X8664_LINUX` for Linux x86_64)
+- **Target systems** -- The platforms this artifact can be built for (e.g., `aarch64-darwin` for macOS Apple Silicon, `x86_64-linux` for Linux x86_64)
 
 ```mermaid
 graph LR
@@ -99,14 +99,16 @@ The base `Artifact` type lets you define arbitrary build steps with any entrypoi
 
 ## Cross-platform targeting
 
-Every artifact declares which platforms it supports using the `ArtifactSystem` enum:
+Every artifact declares which platforms it supports using canonical system strings in public SDK builders:
 
 | Value | Platform |
 |-------|----------|
-| `AARCH64_DARWIN` | macOS Apple Silicon |
-| `AARCH64_LINUX` | Linux ARM64 |
-| `X8664_DARWIN` | macOS Intel |
-| `X8664_LINUX` | Linux x86_64 |
+| `aarch64-darwin` | macOS Apple Silicon |
+| `aarch64-linux` | Linux ARM64 |
+| `x86_64-darwin` | macOS Intel |
+| `x86_64-linux` | Linux x86_64 |
+
+These public strings map to the protobuf `ArtifactSystem` enum in the serialized artifact model.
 
 When you build an artifact, Vorpal only builds it for the current host platform. The target systems declaration is used by the SDK builders to generate platform-appropriate build steps (e.g., selecting the right toolchain download URL for the host architecture).
 
