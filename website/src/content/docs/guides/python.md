@@ -48,7 +48,7 @@ name = "example"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "vorpal-sdk>=0.3.0",
+    "vorpal-sdk>=0.4.0",
 ]
 
 [tool.uv]

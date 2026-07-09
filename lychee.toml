@@ -6,4 +6,5 @@ exclude = [
   "^file://",
   # Fragment anchors URL-encoded as %23 and treated as file paths
   "%23",
+  "^https://docs\\.vorpal\\.build/",
 ]

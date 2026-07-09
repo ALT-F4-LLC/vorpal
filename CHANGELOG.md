@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-07-08
+
+### Changed
+
+- **SDK systems**: normalize systems handling to four-way parity across the
+  Rust, Go, Python, and TypeScript SDKs with canonical-string system parsing,
+  rejection of enum labels and `UNKNOWN_SYSTEM`, an unexported builder
+  `systems` field, codegen and template alignment, and tests (#502).
+
+- **Release metadata**: bump SDK packages, CLI/config crates, templates,
+  install script, and documentation to `0.4.0`.
+
 ## [0.3.0] - 2026-07-06
 
 ### Added
