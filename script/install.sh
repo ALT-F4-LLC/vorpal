@@ -624,7 +624,17 @@ install_linux_prerequisites_apt() {
         need_docker=1
     fi
 
-    if [[ "$need_bwrap" = 0 ]] && [[ "$need_docker" = 0 ]]; then
+    local invoking_user
+    invoking_user="$(id -un)"
+
+    local need_docker_group=0
+    if id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+        print_success "docker group membership (already a member)"
+    else
+        need_docker_group=1
+    fi
+
+    if [[ "$need_bwrap" = 0 ]] && [[ "$need_docker" = 0 ]] && [[ "$need_docker_group" = 0 ]]; then
         return 0
     fi
 
@@ -637,57 +647,83 @@ install_linux_prerequisites_apt() {
     fi
 
     if [[ "$FLAG_DRY_RUN" = 1 ]]; then
-        local pkg
-        for pkg in "${packages[@]}"; do
-            print_step "Would install ${pkg} via apt-get"
-        done
+        if [[ ${#packages[@]} -gt 0 ]]; then
+            local pkg
+            for pkg in "${packages[@]}"; do
+                print_step "Would install ${pkg} via apt-get"
+            done
+        fi
+        if [[ "$need_docker_group" = 1 ]]; then
+            print_step "Would add ${invoking_user} to the docker group (grants root-equivalent access via the docker socket)"
+        fi
         print_success "Linux prerequisites (dry run)"
         return 0
     fi
 
-    print_warning "Vorpal needs to install ${packages[*]} (requires sudo)"
+    if [[ ${#packages[@]} -gt 0 ]]; then
+        print_warning "Vorpal needs to install ${packages[*]} (requires sudo)"
 
-    spin "Updating package lists..."
-    if ! sudo apt-get update -y >/dev/null 2>&1; then
-        spin_stop "failure"
-        print_error \
-            "Failed to update package lists" \
-            "apt-get update failed. This is required before installing packages." \
-            "Options:
+        spin "Updating package lists..."
+        if ! sudo apt-get update -y >/dev/null 2>&1; then
+            spin_stop "failure"
+            print_error \
+                "Failed to update package lists" \
+                "apt-get update failed. This is required before installing packages." \
+                "Options:
     ${_sym_bullet} Check your internet connection
     ${_sym_bullet} Run 'sudo apt-get update' manually and re-run the installer"
-        exit 1
-    fi
-    spin_stop "success" "Updated package lists"
+            exit 1
+        fi
+        spin_stop "success" "Updated package lists"
 
-    if [[ "$need_bwrap" = 1 ]]; then
-        spin "Installing bubblewrap..."
-        if ! sudo apt-get install -y bubblewrap >/dev/null 2>&1; then
-            spin_stop "failure"
-            print_error \
-                "Failed to install bubblewrap" \
-                "Vorpal requires bubblewrap (bwrap) for sandboxed builds on Linux." \
-                "Options:
+        if [[ "$need_bwrap" = 1 ]]; then
+            spin "Installing bubblewrap..."
+            if ! sudo apt-get install -y bubblewrap >/dev/null 2>&1; then
+                spin_stop "failure"
+                print_error \
+                    "Failed to install bubblewrap" \
+                    "Vorpal requires bubblewrap (bwrap) for sandboxed builds on Linux." \
+                    "Options:
     ${_sym_bullet} Run 'sudo apt-get install -y bubblewrap' manually
     ${_sym_bullet} Check that your package sources include bubblewrap"
-            exit 1
+                exit 1
+            fi
+            spin_stop "success" "bubblewrap (installed)"
         fi
-        spin_stop "success" "bubblewrap (installed)"
-    fi
 
-    if [[ "$need_docker" = 1 ]]; then
-        spin "Installing docker..."
-        if ! sudo apt-get install -y docker.io >/dev/null 2>&1; then
-            spin_stop "failure"
-            print_error \
-                "Failed to install docker" \
-                "Vorpal requires docker as a container runtime on Linux." \
-                "Options:
+        if [[ "$need_docker" = 1 ]]; then
+            spin "Installing docker..."
+            if ! sudo apt-get install -y docker.io >/dev/null 2>&1; then
+                spin_stop "failure"
+                print_error \
+                    "Failed to install docker" \
+                    "Vorpal requires docker as a container runtime on Linux." \
+                    "Options:
     ${_sym_bullet} Run 'sudo apt-get install -y docker.io' manually
     ${_sym_bullet} Install Docker from https://docs.docker.com/engine/install/"
+                exit 1
+            fi
+            spin_stop "success" "docker (installed)"
+        fi
+    fi
+
+    if [[ "$need_docker_group" = 1 ]]; then
+        # docker-group membership grants root-equivalent access via the docker socket;
+        # this is the accepted tradeoff for running docker without sudo.
+        print_warning "Adding ${invoking_user} to the docker group grants root-equivalent access via the docker socket (requires sudo)"
+        spin "Adding ${invoking_user} to the docker group..."
+        if ! sudo usermod -aG docker -- "${invoking_user}" >/dev/null 2>&1; then
+            spin_stop "failure"
+            print_error \
+                "Failed to add ${invoking_user} to the docker group" \
+                "Vorpal needs the current user in the docker group to run docker without sudo." \
+                "Options:
+    ${_sym_bullet} Run 'sudo usermod -aG docker ${invoking_user}' manually
+    ${_sym_bullet} Continue running docker commands with sudo"
             exit 1
         fi
-        spin_stop "success" "docker (installed)"
+        spin_stop "success" "Added ${invoking_user} to the docker group"
+        print_warning "Log out and back in (or run 'newgrp docker') for docker group membership to take effect"
     fi
 }
 
@@ -745,7 +781,17 @@ install_linux_prerequisites_dnf() {
         need_docker=1
     fi
 
-    if [[ "$need_bwrap" = 0 ]] && [[ "$need_docker" = 0 ]]; then
+    local invoking_user
+    invoking_user="$(id -un)"
+
+    local need_docker_group=0
+    if id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+        print_success "docker group membership (already a member)"
+    else
+        need_docker_group=1
+    fi
+
+    if [[ "$need_bwrap" = 0 ]] && [[ "$need_docker" = 0 ]] && [[ "$need_docker_group" = 0 ]]; then
         return 0
     fi
 
@@ -767,77 +813,101 @@ install_linux_prerequisites_dnf() {
             print_step "Would install docker-ce docker-ce-cli containerd.io via dnf"
             print_step "Would enable/start docker daemon (systemctl enable --now docker)"
         fi
+        if [[ "$need_docker_group" = 1 ]]; then
+            print_step "Would add ${invoking_user} to the docker group (grants root-equivalent access via the docker socket)"
+        fi
         print_success "Linux prerequisites (dry run)"
         return 0
     fi
 
-    local warn_msg="Vorpal needs to install ${packages[*]}"
-    if [[ "$need_docker" = 1 ]]; then
-        warn_msg="${warn_msg} and enable+start the docker service (runs as a persistent root daemon)"
-    fi
-    print_warning "${warn_msg} (requires sudo)"
-
-    if [[ "$need_bwrap" = 1 ]]; then
-        spin "Installing bubblewrap..."
-        if ! sudo dnf install -y bubblewrap >/dev/null 2>&1; then
-            spin_stop "failure"
-            print_error \
-                "Failed to install bubblewrap" \
-                "Vorpal requires bubblewrap (bwrap) for sandboxed builds on Linux." \
-                "Options:
-    ${_sym_bullet} Run 'sudo dnf install -y bubblewrap' manually
-    ${_sym_bullet} Check that your package sources include bubblewrap"
-            exit 1
+    if [[ ${#packages[@]} -gt 0 ]]; then
+        local warn_msg="Vorpal needs to install ${packages[*]}"
+        if [[ "$need_docker" = 1 ]]; then
+            warn_msg="${warn_msg} and enable+start the docker service (runs as a persistent root daemon)"
         fi
-        spin_stop "success" "bubblewrap (installed)"
-    fi
+        print_warning "${warn_msg} (requires sudo)"
 
-    if [[ "$need_docker" = 1 ]]; then
-        if [[ ! -f /etc/yum.repos.d/docker-ce.repo ]]; then
-            spin "Installing dnf-plugins-core..."
-            if ! sudo dnf install -y dnf-plugins-core >/dev/null 2>&1; then
+        if [[ "$need_bwrap" = 1 ]]; then
+            spin "Installing bubblewrap..."
+            if ! sudo dnf install -y bubblewrap >/dev/null 2>&1; then
                 spin_stop "failure"
                 print_error \
-                    "Failed to install dnf-plugins-core" \
-                    "The Docker CE dnf repo requires dnf-plugins-core (provides dnf config-manager)." \
+                    "Failed to install bubblewrap" \
+                    "Vorpal requires bubblewrap (bwrap) for sandboxed builds on Linux." \
                     "Options:
+    ${_sym_bullet} Run 'sudo dnf install -y bubblewrap' manually
+    ${_sym_bullet} Check that your package sources include bubblewrap"
+                exit 1
+            fi
+            spin_stop "success" "bubblewrap (installed)"
+        fi
+
+        if [[ "$need_docker" = 1 ]]; then
+            if [[ ! -f /etc/yum.repos.d/docker-ce.repo ]]; then
+                spin "Installing dnf-plugins-core..."
+                if ! sudo dnf install -y dnf-plugins-core >/dev/null 2>&1; then
+                    spin_stop "failure"
+                    print_error \
+                        "Failed to install dnf-plugins-core" \
+                        "The Docker CE dnf repo requires dnf-plugins-core (provides dnf config-manager)." \
+                        "Options:
     ${_sym_bullet} Run 'sudo dnf install -y dnf-plugins-core' manually
     ${_sym_bullet} Check your internet connection"
-                exit 1
-            fi
-            spin_stop "success" "dnf-plugins-core (installed)"
+                    exit 1
+                fi
+                spin_stop "success" "dnf-plugins-core (installed)"
 
-            if ! add_docker_ce_dnf_repo; then
-                print_error \
-                    "Failed to add Docker CE repo" \
-                    "Could not add the official Docker CE dnf repo." \
-                    "Options:
+                if ! add_docker_ce_dnf_repo; then
+                    print_error \
+                        "Failed to add Docker CE repo" \
+                        "Could not add the official Docker CE dnf repo." \
+                        "Options:
     ${_sym_bullet} Run 'sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo' manually (dnf5: 'sudo dnf5 config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo')
     ${_sym_bullet} Check your internet connection"
-                exit 1
+                    exit 1
+                fi
             fi
-        fi
 
-        spin "Installing docker..."
-        if ! sudo dnf install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1; then
-            spin_stop "failure"
-            print_error \
-                "Failed to install docker" \
-                "Vorpal requires docker as a container runtime on Linux." \
-                "Options:
+            spin "Installing docker..."
+            if ! sudo dnf install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1; then
+                spin_stop "failure"
+                print_error \
+                    "Failed to install docker" \
+                    "Vorpal requires docker as a container runtime on Linux." \
+                    "Options:
     ${_sym_bullet} Run 'sudo dnf install -y docker-ce docker-ce-cli containerd.io' manually
     ${_sym_bullet} Install Docker from https://docs.docker.com/engine/install/fedora/"
+                exit 1
+            fi
+            spin_stop "success" "docker (installed)"
+
+            spin "Enabling docker service..."
+            if sudo systemctl enable --now docker >/dev/null 2>&1; then
+                spin_stop "success" "Docker service enabled"
+            else
+                spin_stop "failure"
+                print_warning "Docker installed but the service could not be started. Run manually: sudo systemctl enable --now docker"
+            fi
+        fi
+    fi
+
+    if [[ "$need_docker_group" = 1 ]]; then
+        # docker-group membership grants root-equivalent access via the docker socket;
+        # this is the accepted tradeoff for running docker without sudo.
+        print_warning "Adding ${invoking_user} to the docker group grants root-equivalent access via the docker socket (requires sudo)"
+        spin "Adding ${invoking_user} to the docker group..."
+        if ! sudo usermod -aG docker -- "${invoking_user}" >/dev/null 2>&1; then
+            spin_stop "failure"
+            print_error \
+                "Failed to add ${invoking_user} to the docker group" \
+                "Vorpal needs the current user in the docker group to run docker without sudo." \
+                "Options:
+    ${_sym_bullet} Run 'sudo usermod -aG docker ${invoking_user}' manually
+    ${_sym_bullet} Continue running docker commands with sudo"
             exit 1
         fi
-        spin_stop "success" "docker (installed)"
-
-        spin "Enabling docker service..."
-        if sudo systemctl enable --now docker >/dev/null 2>&1; then
-            spin_stop "success" "Docker service enabled"
-        else
-            spin_stop "failure"
-            print_warning "Docker installed but the service could not be started. Run manually: sudo systemctl enable --now docker"
-        fi
+        spin_stop "success" "Added ${invoking_user} to the docker group"
+        print_warning "Log out and back in (or run 'newgrp docker') for docker group membership to take effect"
     fi
 }
 
