@@ -232,11 +232,20 @@ spin() {
 
     local frame_count=${#frames[@]}
 
-    # Run spinner as a background subshell writing to stderr
+    # Run spinner as a background subshell writing to stderr. Elapsed time is
+    # derived from the loop's own iteration count (~0.08s/tick) rather than
+    # shelling out to `date` on every frame, so no extra process/IPC is
+    # needed to carry live status into the subshell.
     (
         local i=0
+        local elapsed=0
+        local elapsed_label=""
         while true; do
-            printf '\r  %s%s%s %s' "${_fmt_cyan}" "${frames[$((i % frame_count))]}" "${_fmt_reset}" "$message" >&2
+            elapsed=$(( (i * 8) / 100 ))
+            if [[ "$elapsed" -ge 2 ]]; then
+                elapsed_label=" (${elapsed}s)"
+            fi
+            printf '\r  %s%s%s %s%s' "${_fmt_cyan}" "${frames[$((i % frame_count))]}" "${_fmt_reset}" "$message" "$elapsed_label" >&2
             i=$((i + 1))
             sleep 0.08
         done
@@ -260,19 +269,23 @@ spin_stop() {
     # In non-TTY / NO_COLOR mode, spin() printed a static step line but no
     # result indicator — print the final status so CI logs show the outcome.
     if [[ ! -t 1 ]] || [[ -n "${NO_COLOR:-}" ]]; then
+        if [[ -n "$message" ]]; then
+            if [[ "$status" = "success" ]]; then
+                print_success "$message"
+            else
+                print_error "$message"
+            fi
+        fi
+        return 0
+    fi
+
+    # Print final status (empty message = stop and clear only, no line printed)
+    if [[ -n "$message" ]]; then
         if [[ "$status" = "success" ]]; then
             print_success "$message"
         else
             print_error "$message"
         fi
-        return 0
-    fi
-
-    # Print final status
-    if [[ "$status" = "success" ]]; then
-        print_success "$message"
-    else
-        print_error "$message"
     fi
 }
 
@@ -573,18 +586,29 @@ check_prerequisites() {
 install_linux_prerequisites() {
     print_header "Installing Linux prerequisites"
 
-    if ! command -v apt-get >/dev/null 2>&1; then
+    local distro_id=""
+    if [[ -f /etc/os-release ]]; then
+        distro_id="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")"
+    fi
+
+    if command -v apt-get >/dev/null 2>&1; then
+        install_linux_prerequisites_apt
+    elif [[ "$distro_id" = "fedora" ]] && command -v dnf >/dev/null 2>&1; then
+        install_linux_prerequisites_dnf
+    else
         print_error \
-            "apt-get not found" \
-            "This installer uses apt-get to install prerequisites (Debian/Ubuntu).
-  Your system does not appear to have apt-get." \
+            "No supported package manager found" \
+            "This installer supports apt-get (Debian/Ubuntu) and dnf (Fedora).
+  Your system does not appear to have either." \
             "Install the following packages manually using your package manager:
     ${_sym_bullet} bubblewrap (provides bwrap)
-    ${_sym_bullet} docker.io (or docker)
+    ${_sym_bullet} docker (see https://docs.docker.com/engine/install/)
   Then re-run the installer."
         exit 1
     fi
+}
 
+install_linux_prerequisites_apt() {
     local need_bwrap=0
     local need_docker=0
 
@@ -623,7 +647,9 @@ install_linux_prerequisites() {
 
     print_warning "Vorpal needs to install ${packages[*]} (requires sudo)"
 
+    spin "Updating package lists..."
     if ! sudo apt-get update -y >/dev/null 2>&1; then
+        spin_stop "failure"
         print_error \
             "Failed to update package lists" \
             "apt-get update failed. This is required before installing packages." \
@@ -632,9 +658,12 @@ install_linux_prerequisites() {
     ${_sym_bullet} Run 'sudo apt-get update' manually and re-run the installer"
         exit 1
     fi
+    spin_stop "success" "Updated package lists"
 
     if [[ "$need_bwrap" = 1 ]]; then
+        spin "Installing bubblewrap..."
         if ! sudo apt-get install -y bubblewrap >/dev/null 2>&1; then
+            spin_stop "failure"
             print_error \
                 "Failed to install bubblewrap" \
                 "Vorpal requires bubblewrap (bwrap) for sandboxed builds on Linux." \
@@ -643,11 +672,13 @@ install_linux_prerequisites() {
     ${_sym_bullet} Check that your package sources include bubblewrap"
             exit 1
         fi
-        print_success "bubblewrap (installed)"
+        spin_stop "success" "bubblewrap (installed)"
     fi
 
     if [[ "$need_docker" = 1 ]]; then
+        spin "Installing docker..."
         if ! sudo apt-get install -y docker.io >/dev/null 2>&1; then
+            spin_stop "failure"
             print_error \
                 "Failed to install docker" \
                 "Vorpal requires docker as a container runtime on Linux." \
@@ -656,7 +687,157 @@ install_linux_prerequisites() {
     ${_sym_bullet} Install Docker from https://docs.docker.com/engine/install/"
             exit 1
         fi
-        print_success "docker (installed)"
+        spin_stop "success" "docker (installed)"
+    fi
+}
+
+# dnf config-manager syntax differs between dnf4 (--add-repo <url>) and dnf5
+# (addrepo --from-repofile=<url>). dnf5 additionally chokes on blank lines in
+# Docker's published .repo file (rpm-software-management/dnf5#1603), so fetch
+# it and strip blank lines first, matching Docker's own installer workaround.
+add_docker_ce_dnf_repo() {
+    local repo_url="https://download.docker.com/linux/fedora/docker-ce.repo"
+
+    spin "Adding Docker CE repository..."
+
+    if command -v dnf5 >/dev/null 2>&1; then
+        local tmp_repo_file
+        tmp_repo_file="$(mktemp)"
+        if ! curl -fsSL "$repo_url" | tr -s '\n' > "$tmp_repo_file"; then
+            rm -f "$tmp_repo_file"
+            spin_stop "failure"
+            return 1
+        fi
+        sudo dnf5 config-manager addrepo --save-filename=docker-ce.repo --overwrite --from-repofile="$tmp_repo_file" >/dev/null 2>&1
+        local status=$?
+        rm -f "$tmp_repo_file"
+        if [[ "$status" -eq 0 ]]; then
+            spin_stop "success" "Added Docker CE repository"
+        else
+            spin_stop "failure"
+        fi
+        return $status
+    fi
+
+    sudo dnf config-manager --add-repo "$repo_url" >/dev/null 2>&1
+    local status=$?
+    if [[ "$status" -eq 0 ]]; then
+        spin_stop "success" "Added Docker CE repository"
+    else
+        spin_stop "failure"
+    fi
+    return $status
+}
+
+install_linux_prerequisites_dnf() {
+    local need_bwrap=0
+    local need_docker=0
+
+    if command -v bwrap >/dev/null 2>&1; then
+        print_success "bubblewrap (already installed)"
+    else
+        need_bwrap=1
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        print_success "docker (already installed)"
+    else
+        need_docker=1
+    fi
+
+    if [[ "$need_bwrap" = 0 ]] && [[ "$need_docker" = 0 ]]; then
+        return 0
+    fi
+
+    local packages=()
+    if [[ "$need_bwrap" = 1 ]]; then
+        packages+=("bubblewrap")
+    fi
+    if [[ "$need_docker" = 1 ]]; then
+        packages+=("docker-ce" "docker-ce-cli" "containerd.io")
+    fi
+
+    if [[ "$FLAG_DRY_RUN" = 1 ]]; then
+        if [[ "$need_bwrap" = 1 ]]; then
+            print_step "Would install bubblewrap via dnf"
+        fi
+        if [[ "$need_docker" = 1 ]]; then
+            print_step "Would install dnf-plugins-core via dnf (if needed)"
+            print_step "Would add Docker CE repo via dnf config-manager"
+            print_step "Would install docker-ce docker-ce-cli containerd.io via dnf"
+            print_step "Would enable/start docker daemon (systemctl enable --now docker)"
+        fi
+        print_success "Linux prerequisites (dry run)"
+        return 0
+    fi
+
+    local warn_msg="Vorpal needs to install ${packages[*]}"
+    if [[ "$need_docker" = 1 ]]; then
+        warn_msg="${warn_msg} and enable+start the docker service (runs as a persistent root daemon)"
+    fi
+    print_warning "${warn_msg} (requires sudo)"
+
+    if [[ "$need_bwrap" = 1 ]]; then
+        spin "Installing bubblewrap..."
+        if ! sudo dnf install -y bubblewrap >/dev/null 2>&1; then
+            spin_stop "failure"
+            print_error \
+                "Failed to install bubblewrap" \
+                "Vorpal requires bubblewrap (bwrap) for sandboxed builds on Linux." \
+                "Options:
+    ${_sym_bullet} Run 'sudo dnf install -y bubblewrap' manually
+    ${_sym_bullet} Check that your package sources include bubblewrap"
+            exit 1
+        fi
+        spin_stop "success" "bubblewrap (installed)"
+    fi
+
+    if [[ "$need_docker" = 1 ]]; then
+        if [[ ! -f /etc/yum.repos.d/docker-ce.repo ]]; then
+            spin "Installing dnf-plugins-core..."
+            if ! sudo dnf install -y dnf-plugins-core >/dev/null 2>&1; then
+                spin_stop "failure"
+                print_error \
+                    "Failed to install dnf-plugins-core" \
+                    "The Docker CE dnf repo requires dnf-plugins-core (provides dnf config-manager)." \
+                    "Options:
+    ${_sym_bullet} Run 'sudo dnf install -y dnf-plugins-core' manually
+    ${_sym_bullet} Check your internet connection"
+                exit 1
+            fi
+            spin_stop "success" "dnf-plugins-core (installed)"
+
+            if ! add_docker_ce_dnf_repo; then
+                print_error \
+                    "Failed to add Docker CE repo" \
+                    "Could not add the official Docker CE dnf repo." \
+                    "Options:
+    ${_sym_bullet} Run 'sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo' manually (dnf5: 'sudo dnf5 config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo')
+    ${_sym_bullet} Check your internet connection"
+                exit 1
+            fi
+        fi
+
+        spin "Installing docker..."
+        if ! sudo dnf install -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1; then
+            spin_stop "failure"
+            print_error \
+                "Failed to install docker" \
+                "Vorpal requires docker as a container runtime on Linux." \
+                "Options:
+    ${_sym_bullet} Run 'sudo dnf install -y docker-ce docker-ce-cli containerd.io' manually
+    ${_sym_bullet} Install Docker from https://docs.docker.com/engine/install/fedora/"
+            exit 1
+        fi
+        spin_stop "success" "docker (installed)"
+
+        spin "Enabling docker service..."
+        if sudo systemctl enable --now docker >/dev/null 2>&1; then
+            spin_stop "success" "Docker service enabled"
+        else
+            spin_stop "failure"
+            print_warning "Docker installed but the service could not be started. Run manually: sudo systemctl enable --now docker"
+        fi
     fi
 }
 
@@ -678,6 +859,7 @@ setup_apparmor_profile() {
 
     print_warning "Vorpal needs to create ${profile_path} (requires sudo)"
 
+    spin "Creating AppArmor profile..."
     if ! sudo tee "$profile_path" >/dev/null 2>&1 <<'APPARMOR_EOF'
 abi <abi/4.0>,
 include <tunables/global>
@@ -690,6 +872,7 @@ profile bwrap /usr/bin/bwrap flags=(unconfined) {
 }
 APPARMOR_EOF
     then
+        spin_stop "failure"
         print_error \
             "Failed to create AppArmor profile for bubblewrap" \
             "Vorpal needs an AppArmor profile at ${profile_path} to allow bubblewrap
@@ -701,9 +884,15 @@ APPARMOR_EOF
         sudo tee ${profile_path} with the bubblewrap profile content"
         exit 1
     fi
+    spin_stop "success" "Created AppArmor profile"
 
-    sudo apparmor_parser -r "$profile_path" 2>/dev/null \
-        || print_warning "AppArmor profile created but could not be loaded. A reboot may be required."
+    spin "Loading AppArmor profile..."
+    if sudo apparmor_parser -r "$profile_path" 2>/dev/null; then
+        spin_stop "success" "Loaded AppArmor profile"
+    else
+        spin_stop "failure"
+        print_warning "AppArmor profile created but could not be loaded. A reboot may be required."
+    fi
 
     print_success "AppArmor bwrap profile (created)"
 }
@@ -722,9 +911,12 @@ resolve_version() {
         local api_response
         local http_code
 
+        spin "Resolving latest version..."
+
         http_code="$(curl -sS -o /dev/null -w "%{http_code}" "$api_url" 2>/dev/null)" || true
 
         if [[ "$http_code" = "403" ]]; then
+            spin_stop "failure"
             print_warning "GitHub API rate limit reached. Falling back to 0.4.0."
             version="0.4.0"
         elif [[ "$http_code" = "200" ]]; then
@@ -735,15 +927,19 @@ resolve_version() {
                 tag="$(printf '%s' "$api_response" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//;s/"//')"
                 if [[ -n "$tag" ]]; then
                     version="$tag"
+                    spin_stop "success" "Resolved latest version (${tag})"
                 else
+                    spin_stop "failure"
                     print_warning "Could not parse latest version from GitHub API. Falling back to 0.4.0."
                     version="0.4.0"
                 fi
             else
+                spin_stop "failure"
                 print_warning "Could not fetch latest version from GitHub API. Falling back to 0.4.0."
                 version="0.4.0"
             fi
         else
+            spin_stop "failure"
             print_warning "GitHub API returned HTTP ${http_code}. Falling back to 0.4.0."
             version="0.4.0"
         fi
@@ -753,10 +949,13 @@ resolve_version() {
     DOWNLOAD_URL="${VORPAL_GITHUB_URL}/releases/download/${version}/${artifact}"
 
     # Validate version exists via HTTP HEAD
+    spin "Verifying version ${version}..."
+
     local head_code
     head_code="$(curl -fsSI -o /dev/null -w "%{http_code}" "$DOWNLOAD_URL" 2>/dev/null)" || true
 
     if [[ "$head_code" != "200" ]] && [[ "$head_code" != "302" ]]; then
+        spin_stop "failure"
         print_error \
             "Version \"${VORPAL_VERSION}\" not found." \
             "Available channels:
@@ -766,6 +965,8 @@ resolve_version() {
   See all releases: ${VORPAL_GITHUB_URL}/releases"
         exit 1
     fi
+
+    spin_stop "success" "Verified version ${version}"
 }
 
 handle_existing() {
@@ -1457,9 +1658,12 @@ run_uninstall() {
 
     # 3. Remove /var/lib/vorpal/ (requires sudo)
     if [[ -d "$VORPAL_SYSTEM_DIR" ]]; then
+        spin "Removing ${VORPAL_SYSTEM_DIR}..."
         if sudo rm -rf "$VORPAL_SYSTEM_DIR" 2>/dev/null; then
+            spin_stop "success" "Removed ${VORPAL_SYSTEM_DIR}/"
             removed+=("$VORPAL_SYSTEM_DIR/")
         else
+            spin_stop "failure"
             print_warning "Could not remove ${VORPAL_SYSTEM_DIR} (sudo required). Remove manually: sudo rm -rf ${VORPAL_SYSTEM_DIR}"
         fi
     fi
