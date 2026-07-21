@@ -5,7 +5,7 @@
     "": {
       "name": "@altf4llc/vorpal-sdk",
       "dependencies": {
-        "@bufbuild/protobuf": "2.12.0",
+        "@bufbuild/protobuf": "2.13.0",
         "@grpc/grpc-js": "1.14.3",
         "smol-toml": "1.6.1",
       },
@@ -18,7 +18,7 @@
     },
   },
   "packages": {
-    "@bufbuild/protobuf": ["@bufbuild/protobuf@2.12.0", "", {}, "sha512-B/XlCaFIP8LOwzo+bz5uFzATYokcwCKQcghqnlfwSmM5eX/qTkvDBnDPs+gXtX/RyjxJ4DRikECcPJbyALA8FA=="],
+    "@bufbuild/protobuf": ["@bufbuild/protobuf@2.13.0", "", {}, "sha512-acq7c49vxfm1ggJ95P70TX7ABDM0vxr1SYD3BB0o0jnBLB4OAqeHyKuN+cD3w80gXEDQ2zxHpR6CUeA+O/aU9g=="],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.28.0", "", { "os": "aix", "cpu": "ppc64" }, "sha512-lhRUCeuOyJQURhTxl4WkpFTjIsbDayJHih5kZC1giwE+MhIzAb7mEsQMqMf18rHLsrb5qI1tafG20mLxEWcWlA=="],
 
@@ -165,6 +165,8 @@
     "yargs": ["yargs@17.7.2", "", { "dependencies": { "cliui": "^8.0.1", "escalade": "^3.1.1", "get-caller-file": "^2.0.5", "require-directory": "^2.1.1", "string-width": "^4.2.3", "y18n": "^5.0.5", "yargs-parser": "^21.1.1" } }, "sha512-7dSzzRQ++CKnNI/krKnYRV7JKKPUXMEh61soaHKg9mrWEhzFWhFnxPxGl+69cD1Ou63C13NUPCnmIcrvqCuM6w=="],
 
     "yargs-parser": ["yargs-parser@21.1.1", "", {}, "sha512-tVpsJW7DdjecAiFpbIB1e3qxIQsE6NoPc5/eTdrbbIC4h0LVsWhnoa3g+m2HclBIujHzsxZ4VJVA+GUuc2/LBw=="],
+
+    "ts-proto/@bufbuild/protobuf": ["@bufbuild/protobuf@2.12.0", "", {}, "sha512-B/XlCaFIP8LOwzo+bz5uFzATYokcwCKQcghqnlfwSmM5eX/qTkvDBnDPs+gXtX/RyjxJ4DRikECcPJbyALA8FA=="],
 
     "ts-proto-descriptors/@bufbuild/protobuf": ["@bufbuild/protobuf@2.11.0", "", {}, "sha512-sBXGT13cpmPR5BMgHE6UEEfEaShh5Ror6rfN3yEK5si7QVrtZg8LEPQb0VVhiLRUslD2yLnXtnRzG035J/mZXQ=="],
   }
