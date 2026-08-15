@@ -10,7 +10,7 @@
     "astro": "bun x astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "0.38.2",
+    "@astrojs/starlight": "0.41.7",
     "astro": "6.4.8",
     "sharp": "0.34.5"
   },
