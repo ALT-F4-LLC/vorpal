@@ -31,7 +31,7 @@ Repository = "https://github.com/ALT-F4-LLC/vorpal"
 # Codegen toolchain (C5): pinned exact so the protoc bundled by grpcio-tools — and thus
 # the generated api/ bindings — is reproducible. Dev-only; never a runtime dependency.
 [dependency-groups]
-dev = ["grpcio-tools==1.81.1"]
+dev = ["grpcio-tools==1.83.0"]
 
 [build-system]
 requires = ["hatchling"]
