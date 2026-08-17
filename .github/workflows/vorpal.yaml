@@ -73,6 +73,7 @@ jobs:
       - run: ./script/dev.sh make .cargo vendor
       - run: ./script/dev.sh make format
       - run: ./script/dev.sh make TARGET=release lint
+      - run: ./script/dev.sh make generate-check
 
   build:
     needs:

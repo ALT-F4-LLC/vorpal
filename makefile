@@ -132,6 +132,9 @@ generate:
 		python sdk/python/script/fix_proto_imports.py sdk/python/src/vorpal_sdk/api
 	cargo run -p vorpal-sdk-codegen
 
+generate-check:
+	cargo run -p vorpal-sdk-codegen -- --check
+
 # Development (with Vorpal)
 
 vorpal-build:
