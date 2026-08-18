@@ -208,7 +208,7 @@ async fn pull_source(
                     return Err(Status::not_found("source archive empty in registry"));
                 }
 
-                publish_archive(&response_data, &source_archive, source_digest).await?;
+                publish_archive(&response_data, &source_archive).await?;
             }
         }
     }
@@ -250,12 +250,8 @@ async fn pull_source(
 /// Builds the staging path for a store entry: a unique sibling of `real_path`,
 /// so the publishing rename stays on one filesystem and `real_path` itself is
 /// only ever created by that rename.
-fn staging_path_for(real_path: &Path, digest: &str) -> Result<PathBuf, Status> {
-    let parent = real_path.parent().ok_or_else(|| {
-        Status::internal(format!("failed to get parent of {}", real_path.display()))
-    })?;
-
-    Ok(parent.join(format!(".tmp-{digest}-{}", Uuid::now_v7())))
+fn staging_path_for(real_path: &Path) -> PathBuf {
+    real_path.with_file_name(format!(".tmp-{}", Uuid::now_v7()))
 }
 
 /// Removes an abandoned staging path. Failures are logged rather than
@@ -284,6 +280,12 @@ async fn discard_staging(staging_path: &Path) {
 /// `DirectoryNotEmpty` (`AlreadyExists` on platforms that report it that way).
 /// Every other errno — no space, permissions, I/O, read-only store — is a real
 /// failure, and the target merely existing is not evidence of a lost race.
+///
+/// This reads a non-empty target as a finished entry, which holds only while
+/// every writer of that path publishes atomically. A producer that populates the
+/// real path in place — `build_artifact` below, and the client-side build and
+/// run commands — can be mid-population when the rename lands here, and its
+/// half-filled directory is then mistaken for a winner's finished one.
 fn is_lost_race(err: &Error) -> bool {
     matches!(
         err.kind(),
@@ -305,6 +307,10 @@ fn is_lost_race(err: &Error) -> bool {
 /// copy is discarded and the winner's content stands. Where the rename replaces
 /// the target rather than failing (an existing file, or an empty directory) the
 /// result is equivalent, because store paths are content-addressed.
+///
+/// A caller that discards the same staging path again on `Err` is correct and
+/// expected: that second call retries a removal this one already warned about,
+/// and is otherwise a no-op.
 async fn publish_atomically(staging_path: &Path, target_path: &Path) -> Result<(), Status> {
     let Err(err) = rename(staging_path, target_path).await else {
         return Ok(());
@@ -329,25 +335,37 @@ async fn publish_atomically(staging_path: &Path, target_path: &Path) -> Result<(
 
 /// Writes `data` to the shared, content-addressed `archive_path`, staging it
 /// first so no reader ever opens a half-written archive.
-async fn publish_archive(data: &[u8], archive_path: &Path, digest: &str) -> Result<(), Status> {
-    let archive_parent = archive_path
-        .parent()
-        .ok_or_else(|| Status::internal("failed to get archive parent"))?;
+async fn publish_archive(data: &[u8], archive_path: &Path) -> Result<(), Status> {
+    let archive_parent = archive_path.parent().ok_or_else(|| {
+        Status::internal(format!(
+            "failed to get parent of archive {}",
+            archive_path.display()
+        ))
+    })?;
 
-    create_dir_all(archive_parent)
-        .await
-        .map_err(|err| Status::internal(format!("failed to create archive parent: {err}")))?;
+    create_dir_all(archive_parent).await.map_err(|err| {
+        Status::internal(format!(
+            "failed to create archive parent {}: {err}",
+            archive_parent.display()
+        ))
+    })?;
 
-    let staging_path = staging_path_for(archive_path, digest)?;
+    let staging_path = staging_path_for(archive_path);
 
     let staged = async {
-        write(&staging_path, data)
-            .await
-            .map_err(|err| Status::internal(format!("failed to write archive: {err}")))?;
+        write(&staging_path, data).await.map_err(|err| {
+            Status::internal(format!(
+                "failed to write archive {}: {err}",
+                archive_path.display()
+            ))
+        })?;
 
-        set_timestamps(&staging_path)
-            .await
-            .map_err(|err| Status::internal(format!("failed to set archive timestamps: {err}")))?;
+        set_timestamps(&staging_path).await.map_err(|err| {
+            Status::internal(format!(
+                "failed to set timestamps on archive {}: {err}",
+                archive_path.display()
+            ))
+        })?;
 
         publish_atomically(&staging_path, archive_path).await
     }
@@ -363,16 +381,15 @@ async fn publish_archive(data: &[u8], archive_path: &Path, digest: &str) -> Resu
 /// Unpacks `archive_path` into the shared, content-addressed `output_path`,
 /// staging it first so the real path is only ever created — whole — by the
 /// final rename.
-async fn publish_unpacked(
-    archive_path: &Path,
-    output_path: &Path,
-    digest: &str,
-) -> Result<(), Status> {
-    let staging_path = staging_path_for(output_path, digest)?;
+async fn publish_unpacked(archive_path: &Path, output_path: &Path) -> Result<(), Status> {
+    let staging_path = staging_path_for(output_path);
 
-    create_dir_all(&staging_path)
-        .await
-        .map_err(|err| Status::internal(format!("failed to create staging path: {err}")))?;
+    create_dir_all(&staging_path).await.map_err(|err| {
+        Status::internal(format!(
+            "failed to create staging path {}: {err}",
+            staging_path.display()
+        ))
+    })?;
 
     let staged = async {
         unpack_zstd(&staging_path, archive_path)
@@ -464,7 +481,7 @@ async fn pull_artifact(
                     return Err(Status::not_found("artifact archive empty in registry"));
                 }
 
-                publish_archive(&response_data, &artifact_archive_path, artifact_digest).await?;
+                publish_archive(&response_data, &artifact_archive_path).await?;
             }
         }
     }
@@ -475,12 +492,7 @@ async fn pull_artifact(
 
     send_message(format!("unpack artifact: {artifact_digest}"), tx).await?;
 
-    publish_unpacked(
-        &artifact_archive_path,
-        &artifact_output_path,
-        artifact_digest,
-    )
-    .await
+    publish_unpacked(&artifact_archive_path, &artifact_output_path).await
 }
 
 fn expand_env(text: &str, envs: &[&String]) -> String {
@@ -1160,6 +1172,12 @@ async fn build_artifact(
     // this producer is tracked as its own change alongside concurrent builds;
     // until then `exists()` on an output path is only a sound cache hit for
     // pulled artifacts.
+    //
+    // The same build also *removes* that shared path outright when it produced
+    // no more than one file (the `remove_dir_all` below), so a build can delete
+    // an output path a concurrent pull already published and a step already
+    // exported. Routing that removal through a rename, and gating it on the
+    // per-digest lock, belongs to the same conversion.
     if let Err(err) = create_dir_all(&artifact_output_path).await {
         error!("worker |> failed to create artifact path: {:?}", err);
         return Err(Status::internal(format!(
@@ -1365,8 +1383,8 @@ mod tests {
     fn staging_path_is_a_unique_sibling_of_the_real_path() {
         let real_path = Path::new("/store/output/abc123");
 
-        let first = staging_path_for(real_path, "abc123").unwrap();
-        let second = staging_path_for(real_path, "abc123").unwrap();
+        let first = staging_path_for(real_path);
+        let second = staging_path_for(real_path);
 
         assert_ne!(first, real_path);
         assert_ne!(first, second);
@@ -1466,30 +1484,137 @@ mod tests {
         );
     }
 
-    // AC2, archive half: the pulled archive reaches its shared path whole, and
-    // republishing the same digest replaces the file rather than truncating one
-    // a concurrent reader may be opening. Nothing but the archive is left under
-    // the store directory afterwards.
+    // AC2, archive half, pinned at the call site rather than at the seam: the
+    // pulled archive is staged elsewhere and published onto its shared path, so
+    // a file already there is replaced whole — a different inode carrying the
+    // new bytes — never truncated in place under a reader's open handle. The
+    // distinct payloads are what tells a replace from a discard.
     #[tokio::test]
-    async fn publish_archive_writes_a_whole_file_at_the_real_path() {
+    async fn publish_archive_replaces_the_real_path_instead_of_writing_into_it() {
         let root = TempDir::new().unwrap();
-        let archive_path = root.path().join("archives").join("abc123.tar.zst");
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
 
-        publish_archive(b"archive-bytes", &archive_path, "abc123")
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        std::fs::write(&archive_path, b"sentinel-bytes").unwrap();
+
+        let sentinel_inode = std::fs::metadata(&archive_path).unwrap().ino();
+
+        publish_archive(b"first-bytes", &archive_path)
             .await
             .unwrap();
 
-        assert_eq!(std::fs::read(&archive_path).unwrap(), b"archive-bytes");
+        assert_eq!(std::fs::read(&archive_path).unwrap(), b"first-bytes");
+        assert_ne!(
+            std::fs::metadata(&archive_path).unwrap().ino(),
+            sentinel_inode,
+            "the archive was written into the real path instead of published onto it"
+        );
 
-        publish_archive(b"archive-bytes", &archive_path, "abc123")
+        publish_archive(b"second-bytes", &archive_path)
             .await
             .unwrap();
 
-        assert_eq!(std::fs::read(&archive_path).unwrap(), b"archive-bytes");
+        assert_eq!(std::fs::read(&archive_path).unwrap(), b"second-bytes");
         assert_eq!(
-            dir_entry_names(archive_path.parent().unwrap()),
+            dir_entry_names(&archive_dir),
             BTreeSet::from(["abc123.tar.zst".to_string()]),
             "a staging file was left under the store directory"
+        );
+    }
+
+    // The publish step's failure path discards the staged copy twice — once
+    // inside publish_atomically, once at the wrapper's error exit, where it
+    // finds nothing left. The caller must still be told the publish failed, and
+    // no staged archive may survive under the store directory.
+    #[tokio::test]
+    async fn publish_archive_reports_a_failed_publish_and_leaves_no_staging() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        std::fs::create_dir_all(&archive_path).unwrap();
+        write_files(&archive_path, &["occupied.txt"], "occupied");
+
+        let err = publish_archive(b"archive-bytes", &archive_path)
+            .await
+            .unwrap_err();
+
+        assert!(err.message().contains("failed to publish"), "{err:?}");
+        assert_eq!(
+            dir_entry_names(&archive_dir),
+            BTreeSet::from(["abc123.tar.zst".to_string()]),
+            "a staged archive survived a failed publish"
+        );
+        assert_eq!(
+            dir_entry_names(&archive_path),
+            BTreeSet::from(["occupied.txt".to_string()])
+        );
+    }
+
+    // A build that produces nothing leaves an empty directory at the output
+    // path, and a rename replaces an empty directory rather than failing. Pin
+    // that outcome: the publisher wins and its content lands whole.
+    #[tokio::test]
+    async fn publish_atomically_replaces_an_empty_target_directory() {
+        let root = TempDir::new().unwrap();
+        let target_path = root.path().join("output");
+
+        std::fs::create_dir_all(&target_path).unwrap();
+
+        let staging_path = staged_dir(root.path(), "staging", &["a.txt"], "payload");
+
+        publish_atomically(&staging_path, &target_path)
+            .await
+            .unwrap();
+
+        assert!(!staging_path.exists());
+        assert_eq!(
+            dir_entry_names(&target_path),
+            BTreeSet::from(["a.txt".to_string()])
+        );
+    }
+
+    // AC1 at the call site: publish_unpacked must never unpack into the real
+    // output path. A dependency already published there survives a pull whose
+    // archive turns out to be garbage, byte for byte and inode for inode — an
+    // in-place unpack would create into that path and then delete it while
+    // cleaning up.
+    #[tokio::test]
+    async fn a_failed_unpack_leaves_an_already_published_output_path_untouched() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+        let output_path = store_path.join("abc123");
+
+        std::fs::create_dir_all(&output_path).unwrap();
+        write_files(&output_path, &["published.txt"], "published-content");
+
+        let published_inode = std::fs::metadata(&output_path).unwrap().ino();
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        std::fs::write(&archive_path, "not a zstd archive").unwrap();
+
+        publish_unpacked(&archive_path, &output_path)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            dir_entry_names(&output_path),
+            BTreeSet::from(["published.txt".to_string()]),
+            "a failed unpack disturbed an already published output path"
+        );
+        assert_eq!(
+            std::fs::read_to_string(output_path.join("published.txt")).unwrap(),
+            "published-content"
+        );
+        assert_eq!(
+            std::fs::metadata(&output_path).unwrap().ino(),
+            published_inode
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::from(["abc123".to_string()]),
+            "a failed unpack left its staging directory under the store"
         );
     }
 
@@ -1510,7 +1635,7 @@ mod tests {
 
         let output_path = store_path.join("abc123");
 
-        publish_unpacked(&archive_path, &output_path, "abc123")
+        publish_unpacked(&archive_path, &output_path)
             .await
             .unwrap_err();
 
