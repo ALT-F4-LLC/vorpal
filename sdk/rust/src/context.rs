@@ -20,10 +20,12 @@ use std::{
     collections::{BTreeMap, HashMap},
     net::{Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 use tokio::{
-    fs::{read, OpenOptions},
+    fs::{read, remove_file, rename, OpenOptions},
     io::AsyncWriteExt,
+    sync::Mutex,
 };
 use tonic::{
     metadata::{Ascii, MetadataValue},
@@ -809,9 +811,17 @@ async fn refresh_access_token(
     issuer: &str,
     refresh_token: &str,
 ) -> Result<(String, u64, u64, Option<String>)> {
+    // Bounded so a hung IdP stalls only this exchange rather than every
+    // caller queued behind CREDENTIALS_REFRESH_LOCK indefinitely (neither
+    // call below had a timeout before, which was tolerable when each caller
+    // hung independently; serializing them makes an unbounded hang total).
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
     // Discover token endpoint
     let discovery_url = format!("{issuer}/.well-known/openid-configuration");
-    let doc: serde_json::Value = reqwest::get(&discovery_url).await?.json().await?;
+    let doc: serde_json::Value = http_client.get(&discovery_url).send().await?.json().await?;
 
     let token_endpoint = doc
         .get("token_endpoint")
@@ -824,7 +834,6 @@ async fn refresh_access_token(
         .set_token_uri(TokenUrl::new(token_endpoint.to_string())?);
 
     // Exchange refresh token
-    let http_client = reqwest::Client::new();
     let refresh_token_obj = RefreshToken::new(refresh_token.to_string());
     let mut request = client.exchange_refresh_token(&refresh_token_obj);
 
@@ -881,46 +890,132 @@ fn apply_token_refresh(
     }
 }
 
-/// Writes credential bytes to `path` enforcing mode 0o600 on file create.
+/// Counter for unique temp-file names in `write_credentials_secure`. Paired
+/// with the process id; `create_new` below is what actually makes the write
+/// fail-closed rather than following a pre-existing path, so the name only
+/// needs to be unique, not unpredictable.
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Writes credential bytes to `path` atomically: a temp file in the same
+/// directory (required for `rename` to be atomic — it is only atomic within
+/// a filesystem) is created, written, `fsync`'d and renamed onto `path`.
 ///
-/// `OpenOptions::mode()` only takes effect when the file is created — if the
-/// file already exists, the existing mode is preserved. Both Rust call sites
-/// for `credentials.json` (login at `cli/src/command.rs` and refresh here)
-/// must use this pattern so the file is born 0o600 and not 0o644 (umask 022).
+/// The temp file is created with `create_new` (`O_EXCL`) and mode 0o600, and
+/// `rename(2)` replaces the destination inode with the source inode — so the
+/// destination's mode after the rename is the temp file's mode, not the old
+/// destination's. The 0o600 enforcement therefore lives on the temp file,
+/// not on `path`; both Rust call sites for `credentials.json` (login at
+/// `cli/src/command.rs` and refresh here) must preserve that, or the file
+/// can end up world-readable via the umask-masked mode of a naive
+/// `File::create` (see the local archive-store writer's temp-file creation
+/// for the shape that must NOT be copied here).
 async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .await?;
-    file.write_all(bytes).await?;
-    file.flush().await?;
-    Ok(())
+    let parent = path.parent().ok_or_else(|| {
+        anyhow!(
+            "credentials path has no parent directory: {}",
+            path.display()
+        )
+    })?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("credentials");
+
+    let temp_path = parent.join(format!(
+        "{}.{}.{}.tmp",
+        file_name,
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+
+    let write_result: Result<()> = async {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp_path)
+            .await?;
+
+        file.write_all(bytes).await?;
+        // fsync, not flush: flush is a userspace buffer flush, and a rename
+        // ordered before the data reaches disk can leave a zero-length
+        // credentials.json after a crash.
+        file.sync_all().await?;
+
+        rename(&temp_path, path).await?;
+
+        Ok(())
+    }
+    .await;
+
+    if write_result.is_err() {
+        // A leaked temp file here is a plaintext refresh token left on disk.
+        let _ = remove_file(&temp_path).await;
+    }
+
+    write_result
 }
 
-/// Builds the `authorization: Bearer <token>` gRPC metadata header for
-/// `registry`, refreshing the stored access token first if it is within five
-/// minutes of expiry. Returns `None` when no credentials file exists or the
-/// registry has no stored issuer, in which case the request proceeds
-/// unauthenticated.
+/// Performs the OAuth refresh-token exchange. Injected as a [`TokenRefresher`]
+/// so tests can count and control exchanges without real network I/O.
+#[tonic::async_trait]
+trait TokenRefresher: Send + Sync {
+    async fn refresh(
+        &self,
+        audience: Option<&str>,
+        client_id: &str,
+        issuer: &str,
+        refresh_token: &str,
+    ) -> Result<(String, u64, u64, Option<String>)>;
+}
+
+struct LiveTokenRefresher;
+
+#[tonic::async_trait]
+impl TokenRefresher for LiveTokenRefresher {
+    async fn refresh(
+        &self,
+        audience: Option<&str>,
+        client_id: &str,
+        issuer: &str,
+        refresh_token: &str,
+    ) -> Result<(String, u64, u64, Option<String>)> {
+        refresh_access_token(audience, client_id, issuer, refresh_token).await
+    }
+}
+
+/// Serializes credential read, refresh-decision, refresh exchange and file
+/// write within this process. Held for the whole critical section, not just
+/// the write, so a waiter re-reads the winner's post-refresh state instead
+/// of retrying a decision it made against a stale snapshot.
 ///
-/// # Errors
-///
-/// Returns an error if the credentials file cannot be read or parsed; if the
-/// registry's issuer has no stored credentials; if the access token is
-/// expired and no refresh token is available; if the token refresh request
-/// fails; if the refreshed credentials cannot be saved; or if the resulting
-/// header value fails to parse.
-pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
-    let credentials_path = get_key_credentials_path();
+/// Scope is this process only: it does not serialize against a separately
+/// spawned config process, a running `vorpal start agent`, or the Go/
+/// TypeScript SDKs writing the same `credentials.json`. `write_credentials_secure`'s
+/// atomic write independently keeps every one of those readers from ever
+/// observing a torn file; only the refresh-exchange race is process-local.
+static CREDENTIALS_REFRESH_LOCK: Mutex<()> = Mutex::const_new(());
+
+/// Core of [`client_auth_header`], taking the credentials path and the
+/// refresh operation as parameters so it is testable without touching the
+/// real `/var/lib/vorpal/key/credentials.json` or performing network I/O.
+/// Deliberately private and not configurable from any production entry
+/// point (env var, global override) — see `client_auth_header`.
+async fn client_auth_header_at(
+    credentials_path: &Path,
+    registry: &str,
+    refresher: &dyn TokenRefresher,
+) -> Result<Option<MetadataValue<Ascii>>> {
+    // Acquired before the existence check and the read below, and held
+    // through the write: see CREDENTIALS_REFRESH_LOCK's doc comment.
+    let _guard = CREDENTIALS_REFRESH_LOCK.lock().await;
 
     if !credentials_path.exists() {
         return Ok(None);
     }
 
-    let credentials_data = read(&credentials_path).await?;
+    let credentials_data = read(credentials_path).await?;
     let mut credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
 
     // Borrowed from `credentials.registry`; the refresh below only mutates
@@ -939,7 +1034,11 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
         .get(registry_issuer)
         .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
 
-    let token_age = now - issuer_creds.issued_at;
+    // `issued_at` is file-sourced and unvalidated; saturating_sub keeps a
+    // clock-skewed or hostile future timestamp from underflowing this
+    // subtraction (a panic in debug/test, a near-u64::MAX wrap in release
+    // that the very next `+ 300` wraps again).
+    let token_age = now.saturating_sub(issuer_creds.issued_at);
 
     // Refresh if token has less than 5 minutes left
     let needs_refresh = token_age + 300 >= issuer_creds.expires_in;
@@ -952,15 +1051,19 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
             ));
         }
 
-        let (new_token, new_expires, new_issued_at, rotated_refresh) = refresh_access_token(
-            issuer_creds.audience.as_deref(),
-            &issuer_creds.client_id,
-            registry_issuer,
-            &issuer_creds.refresh_token,
-        )
-        .await?;
+        let (new_token, new_expires, new_issued_at, rotated_refresh) = refresher
+            .refresh(
+                issuer_creds.audience.as_deref(),
+                &issuer_creds.client_id,
+                registry_issuer,
+                &issuer_creds.refresh_token,
+            )
+            .await?;
 
-        // Now update the credentials
+        // Now update the credentials. No await is introduced between the
+        // exchange above and the write below: the sequence stays
+        // synchronous so the window in which a killed task loses the
+        // rotated token to disk (accepted residual risk) does not widen.
         let issuer_creds = credentials
             .issuer
             .get_mut(registry_issuer)
@@ -974,9 +1077,9 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
             rotated_refresh,
         );
 
-        // Save updated credentials with mode 0o600 enforced on create.
+        // Save updated credentials with mode 0o600 enforced on the temp file.
         let credentials_json = serde_json::to_string_pretty(&credentials)?;
-        write_credentials_secure(&credentials_path, credentials_json.as_bytes()).await?;
+        write_credentials_secure(credentials_path, credentials_json.as_bytes()).await?;
     }
 
     // Get the access token
@@ -991,6 +1094,23 @@ pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<A
         .map_err(|e| anyhow!("failed to parse Bearer token: {e}"))?;
 
     Ok(Some(header))
+}
+
+/// Builds the `authorization: Bearer <token>` gRPC metadata header for
+/// `registry`, refreshing the stored access token first if it is within five
+/// minutes of expiry. Returns `None` when no credentials file exists or the
+/// registry has no stored issuer, in which case the request proceeds
+/// unauthenticated.
+///
+/// # Errors
+///
+/// Returns an error if the credentials file cannot be read or parsed; if the
+/// registry's issuer has no stored credentials; if the access token is
+/// expired and no refresh token is available; if the token refresh request
+/// fails; if the refreshed credentials cannot be saved; or if the resulting
+/// header value fails to parse.
+pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
+    client_auth_header_at(&get_key_credentials_path(), registry, &LiveTokenRefresher).await
 }
 
 #[cfg(test)]
@@ -1133,5 +1253,235 @@ mod tests {
         assert_eq!(parsed.scopes, vec!["openid", "offline_access"]);
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn write_credentials_secure_overwrites_existing_file_mode_to_0o600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-mode-regression-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("credentials.json");
+
+        // Pre-create the destination at 0o644, the mode a naive
+        // `File::create`-based temp writer would carry onto the destination
+        // via `rename` (A-4). The fix must not inherit it.
+        std::fs::write(&path, b"{\"stale\":true}").expect("write pre-existing file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("set pre-existing mode to 0o644");
+
+        write_credentials_secure(&path, b"{\"hello\":\"world\"}")
+            .await
+            .expect("write credentials");
+
+        let mode = std::fs::metadata(&path)
+            .expect("stat credentials")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "credentials file must be 0o600 after overwriting a pre-existing 0o644 file, got {:o}",
+            mode & 0o777
+        );
+
+        let contents = std::fs::read(&path).expect("read credentials");
+        assert_eq!(contents, b"{\"hello\":\"world\"}");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_serializes_concurrent_refresh() {
+        // AC1 + AC2: N concurrent callers deciding "refresh needed" against
+        // the same credentials file must trigger exactly one refresh
+        // exchange, and the file left behind must hold the single winner's
+        // rotated token — not a stale snapshot written by a waiter who
+        // decided "refresh needed" before the guard (A-2).
+        struct CountingRefresher {
+            calls: std::sync::atomic::AtomicU32,
+        }
+
+        #[tonic::async_trait]
+        impl TokenRefresher for CountingRefresher {
+            async fn refresh(
+                &self,
+                _audience: Option<&str>,
+                _client_id: &str,
+                _issuer: &str,
+                _refresh_token: &str,
+            ) -> Result<(String, u64, u64, Option<String>)> {
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                Ok((
+                    "rotated-access".to_string(),
+                    3600,
+                    now,
+                    Some("rotated-refresh-once".to_string()),
+                ))
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-concurrency-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("credentials.json");
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Token 4 minutes from expiry: token_age + 300 >= expires_in.
+        let expires_in = 3600u64;
+        let issued_at = now - (expires_in - 240);
+
+        let mut issuer = BTreeMap::new();
+        issuer.insert(
+            "issuer-1".to_string(),
+            VorpalCredentialsContent {
+                access_token: "old-access".to_string(),
+                audience: None,
+                client_id: "client-1".to_string(),
+                expires_in,
+                issued_at,
+                refresh_token: "old-refresh".to_string(),
+                scopes: vec!["openid".to_string()],
+            },
+        );
+        let mut registry = BTreeMap::new();
+        registry.insert("registry-1".to_string(), "issuer-1".to_string());
+
+        let credentials = VorpalCredentials { issuer, registry };
+        std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
+
+        let refresher = std::sync::Arc::new(CountingRefresher {
+            calls: std::sync::atomic::AtomicU32::new(0),
+        });
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let path = path.clone();
+            let refresher = refresher.clone();
+            tasks.spawn(async move {
+                client_auth_header_at(&path, "registry-1", refresher.as_ref()).await
+            });
+        }
+
+        while let Some(result) = tasks.join_next().await {
+            result
+                .expect("task panicked")
+                .expect("client_auth_header_at failed");
+        }
+
+        assert_eq!(
+            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "exactly one refresh exchange must occur for N concurrent callers"
+        );
+
+        let final_bytes = std::fs::read(&path).expect("read final credentials");
+        let final_credentials: VorpalCredentials =
+            serde_json::from_slice(&final_bytes).expect("parse final credentials");
+        let final_issuer_creds = final_credentials
+            .issuer
+            .get("issuer-1")
+            .expect("issuer present");
+
+        assert_eq!(
+            final_issuer_creds.refresh_token, "rotated-refresh-once",
+            "stored refresh token must be the single winner's rotated token, not a stale replay"
+        );
+        assert_eq!(final_issuer_creds.access_token, "rotated-access");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_rejects_future_issued_at_without_panicking() {
+        // C-6 regression: `issued_at` is file-sourced and unvalidated
+        // (TB-2). A future-dated value must not underflow `now - issued_at`
+        // (panics in the test/debug profile; wraps in release). If the
+        // refresh decision were still broken, this would also attempt a
+        // refresh, which the panicking refresher below would catch.
+        struct UnexpectedRefresher;
+
+        #[tonic::async_trait]
+        impl TokenRefresher for UnexpectedRefresher {
+            async fn refresh(
+                &self,
+                _audience: Option<&str>,
+                _client_id: &str,
+                _issuer: &str,
+                _refresh_token: &str,
+            ) -> Result<(String, u64, u64, Option<String>)> {
+                panic!("refresh must not be attempted for a token outside its refresh window");
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-future-issued-at-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("credentials.json");
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut issuer = BTreeMap::new();
+        issuer.insert(
+            "issuer-1".to_string(),
+            VorpalCredentialsContent {
+                access_token: "old-access".to_string(),
+                audience: None,
+                client_id: "client-1".to_string(),
+                expires_in: 3600,
+                issued_at: now + 3600, // future-dated, e.g. clock skew
+                refresh_token: "old-refresh".to_string(),
+                scopes: vec!["openid".to_string()],
+            },
+        );
+        let mut registry = BTreeMap::new();
+        registry.insert("registry-1".to_string(), "issuer-1".to_string());
+
+        let credentials = VorpalCredentials { issuer, registry };
+        std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
+
+        let header = client_auth_header_at(&path, "registry-1", &UnexpectedRefresher)
+            .await
+            .expect("must not panic or error on a future-dated issued_at");
+
+        assert!(
+            header.is_some(),
+            "a non-expired token must still yield an auth header"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
     }
 }

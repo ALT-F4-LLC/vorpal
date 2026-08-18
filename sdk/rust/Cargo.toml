@@ -19,7 +19,7 @@ reqwest = { version = "0.12.28", default-features = false, features = ["json", "
 serde = { version = "1.0.228", features = ["serde_derive"] }
 serde_json = { version = "1.0.149" }
 sha256 = { version = "1.6.0" }
-tokio = { version = "1.49.0", features = ["process", "rt-multi-thread"] }
+tokio = { version = "1.49.0", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync"] }
 toml = { version = "1.0.0" }
 tonic = { version = "0.14.3", features = ["tls-ring", "tls-native-roots"] }
 tonic-prost = { version = "0.14.3" }
