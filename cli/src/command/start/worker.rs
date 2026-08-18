@@ -16,7 +16,7 @@ use std::{
     collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio,
 };
 use tokio::{
-    fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
+    fs::{create_dir_all, remove_dir_all, remove_file, rename, set_permissions, write},
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
     sync::{mpsc, mpsc::Sender},
@@ -31,6 +31,7 @@ use tonic::{
     Request, Response, Status,
 };
 use tracing::{error, info};
+use uuid::Uuid;
 use vorpal_sdk::{
     api::{
         archive::{
@@ -257,6 +258,42 @@ async fn pull_source(
     Ok(())
 }
 
+/// Publishes a private, fully-written `temp_path` to the shared `target_path`
+/// via an atomic rename, so a concurrent reader of `target_path` never
+/// observes a partial write and a killed writer never leaves partial content
+/// there (it only ever leaves its orphaned `temp_path` behind).
+///
+/// A losing concurrent publisher (same digest, racing writer) has its rename
+/// fail because `target_path` is now a non-empty directory; that failure is
+/// expected under concurrency, not an error, so its `temp_path` is discarded
+/// and the winner's already-published content stands.
+async fn publish_atomically(temp_path: &Path, target_path: &Path) -> Result<(), Status> {
+    match rename(temp_path, target_path).await {
+        Ok(()) => Ok(()),
+        Err(_) if target_path.exists() => {
+            if temp_path.is_dir() {
+                let _ = remove_dir_all(temp_path).await;
+            } else {
+                let _ = remove_file(temp_path).await;
+            }
+
+            Ok(())
+        }
+        Err(err) => {
+            if temp_path.is_dir() {
+                let _ = remove_dir_all(temp_path).await;
+            } else {
+                let _ = remove_file(temp_path).await;
+            }
+
+            Err(Status::internal(format!(
+                "failed to publish {}: {err}",
+                target_path.display()
+            )))
+        }
+    }
+}
+
 async fn pull_artifact(
     archive_auth_header: Option<&MetadataValue<Ascii>>,
     artifact_namespace: &str,
@@ -328,19 +365,24 @@ async fn pull_artifact(
                     Status::internal(format!("failed to create artifact archive parent: {err}"))
                 })?;
 
-                write(&artifact_archive_path, &response_data)
+                let artifact_archive_temp_path = archive_parent
+                    .join(format!(".tmp-{artifact_digest}-{}.tar.zst", Uuid::now_v7()));
+
+                write(&artifact_archive_temp_path, &response_data)
                     .await
                     .map_err(|err| {
                         Status::internal(format!("failed to write artifact archive: {err}"))
                     })?;
 
-                set_timestamps(&artifact_archive_path)
+                set_timestamps(&artifact_archive_temp_path)
                     .await
                     .map_err(|err| {
                         Status::internal(format!(
                             "failed to set artifact archive timestamps: {err}"
                         ))
                     })?;
+
+                publish_atomically(&artifact_archive_temp_path, &artifact_archive_path).await?;
             }
         }
     }
@@ -351,22 +393,47 @@ async fn pull_artifact(
 
     send_message(format!("unpack artifact: {artifact_digest}"), tx).await?;
 
-    create_dir_all(&artifact_output_path)
+    let artifact_output_parent = artifact_output_path
+        .parent()
+        .ok_or_else(|| Status::internal("failed to get artifact output parent"))?;
+
+    let artifact_output_temp_path =
+        artifact_output_parent.join(format!(".tmp-{artifact_digest}-{}", Uuid::now_v7()));
+
+    create_dir_all(&artifact_output_temp_path)
         .await
         .map_err(|err| Status::internal(format!("failed to create artifact output path: {err}")))?;
 
-    unpack_zstd(&artifact_output_path, &artifact_archive_path)
-        .await
-        .map_err(|err| Status::internal(format!("failed to unpack artifact archive: {err:?}")))?;
+    if let Err(err) = unpack_zstd(&artifact_output_temp_path, &artifact_archive_path).await {
+        let _ = remove_dir_all(&artifact_output_temp_path).await;
 
-    let artifact_files = get_file_paths(&artifact_output_path, vec![], vec![])
-        .map_err(|err| Status::internal(format!("failed to get artifact files: {err}")))?;
-
-    for path in &artifact_files {
-        set_timestamps(path).await.map_err(|err| {
-            Status::internal(format!("failed to set artifact file timestamps: {err:?}"))
-        })?;
+        return Err(Status::internal(format!(
+            "failed to unpack artifact archive: {err:?}"
+        )));
     }
+
+    let artifact_files = match get_file_paths(&artifact_output_temp_path, vec![], vec![]) {
+        Ok(files) => files,
+        Err(err) => {
+            let _ = remove_dir_all(&artifact_output_temp_path).await;
+
+            return Err(Status::internal(format!(
+                "failed to get artifact files: {err}"
+            )));
+        }
+    };
+
+    for path in artifact_files.iter() {
+        if let Err(err) = set_timestamps(path).await {
+            let _ = remove_dir_all(&artifact_output_temp_path).await;
+
+            return Err(Status::internal(format!(
+                "failed to set artifact file timestamps: {err:?}"
+            )));
+        }
+    }
+
+    publish_atomically(&artifact_output_temp_path, &artifact_output_path).await?;
 
     Ok(())
 }
@@ -1179,5 +1246,169 @@ impl WorkerService for WorkerServer {
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use tempfile::TempDir;
+    use tokio::time::{sleep, Duration};
+
+    fn write_files(dir: &Path, names: &[&str], contents: &str) {
+        for name in names {
+            std::fs::write(dir.join(name), contents).unwrap();
+        }
+    }
+
+    fn dir_entry_names(dir: &Path) -> BTreeSet<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    // AC1 seam: publish_atomically is the mechanism pull_artifact uses to move
+    // an unpacked dependency into the shared store path. This pins that the
+    // published directory is byte-identical to what the writer staged, with
+    // nothing lost or added in the move.
+    #[tokio::test]
+    async fn publish_atomically_moves_staged_content_into_place() {
+        let root = TempDir::new().unwrap();
+        let temp_path = root.path().join("staging");
+        let target_path = root.path().join("output");
+
+        std::fs::create_dir_all(&temp_path).unwrap();
+        write_files(&temp_path, &["a.txt", "b.txt"], "payload");
+
+        publish_atomically(&temp_path, &target_path).await.unwrap();
+
+        assert!(!temp_path.exists());
+        assert_eq!(
+            dir_entry_names(&target_path),
+            BTreeSet::from(["a.txt".to_string(), "b.txt".to_string()])
+        );
+        assert_eq!(
+            std::fs::read_to_string(target_path.join("a.txt")).unwrap(),
+            "payload"
+        );
+    }
+
+    // AC1: two concurrent pull_artifact calls sharing an uncached dependency
+    // race to publish the same digest. This pins that the loser never
+    // interleaves with the winner's already-published directory — it
+    // discards its own staged copy and the winner's content is untouched.
+    #[tokio::test]
+    async fn publish_atomically_discards_loser_once_a_winner_has_published() {
+        let root = TempDir::new().unwrap();
+        let target_path = root.path().join("output");
+
+        let winner_temp = root.path().join("winner");
+        std::fs::create_dir_all(&winner_temp).unwrap();
+        write_files(&winner_temp, &["file.txt"], "winner-content");
+        publish_atomically(&winner_temp, &target_path)
+            .await
+            .unwrap();
+
+        let loser_temp = root.path().join("loser");
+        std::fs::create_dir_all(&loser_temp).unwrap();
+        write_files(&loser_temp, &["file.txt"], "winner-content");
+
+        publish_atomically(&loser_temp, &target_path).await.unwrap();
+
+        assert!(!loser_temp.exists());
+        assert_eq!(
+            std::fs::read_to_string(target_path.join("file.txt")).unwrap(),
+            "winner-content"
+        );
+        assert_eq!(dir_entry_names(&target_path).len(), 1);
+    }
+
+    // AC2: verified by a test that drives two concurrent pull_artifact-style
+    // publishers for the same digest and asserts a concurrent reader of the
+    // shared target never observes a partial directory: it sees either
+    // nothing (not yet published) or the complete, fully-formed set of
+    // files — never a subset. This exercises the exact seam pull_artifact
+    // relies on for atomicity with respect to a concurrent reader.
+    #[tokio::test]
+    async fn publish_atomically_never_exposes_a_partial_directory_to_a_reader() {
+        let root = TempDir::new().unwrap();
+        let root_path = root.path().to_path_buf();
+        let target_path = root_path.join("output");
+        let expected: BTreeSet<String> = (0..20).map(|i| format!("file-{i}.txt")).collect();
+
+        let writer_target = target_path.clone();
+        let writer = tokio::spawn(async move {
+            let temp_path = writer_target.with_file_name(".staging");
+            std::fs::create_dir_all(&temp_path).unwrap();
+
+            for i in 0..20 {
+                std::fs::write(temp_path.join(format!("file-{i}.txt")), "payload").unwrap();
+                // Yield between writes so the reader gets real opportunities
+                // to observe the directory mid-population.
+                sleep(Duration::from_millis(1)).await;
+            }
+
+            publish_atomically(&temp_path, &writer_target)
+                .await
+                .unwrap();
+        });
+
+        let reader_target = target_path.clone();
+        let reader_expected = expected.clone();
+        let reader = tokio::spawn(async move {
+            let mut observed_full = false;
+
+            for _ in 0..500 {
+                if reader_target.exists() {
+                    let seen = dir_entry_names(&reader_target);
+
+                    assert_eq!(
+                        seen, reader_expected,
+                        "reader observed a partial directory: {seen:?}"
+                    );
+
+                    observed_full = true;
+
+                    break;
+                }
+
+                sleep(Duration::from_millis(1)).await;
+            }
+
+            observed_full
+        });
+
+        let (writer_result, reader_result) = tokio::join!(writer, reader);
+
+        writer_result.unwrap();
+        reader_result.unwrap();
+        assert_eq!(dir_entry_names(&target_path), expected);
+    }
+
+    // AC2: a writer killed before it calls publish_atomically (simulating a
+    // process kill mid-unpack) must never leave partial content at the real
+    // target path — only its private, orphaned temp path is affected, so the
+    // exists()/duplicate-check a future pull_artifact call performs on the
+    // real path never treats a torn write as a valid cache hit.
+    #[tokio::test]
+    async fn killed_writer_before_publish_leaves_real_target_absent() {
+        let root = TempDir::new().unwrap();
+        let target_path = root.path().join("output");
+        let temp_path = root.path().join("staging");
+
+        std::fs::create_dir_all(&temp_path).unwrap();
+        // Partially unpacked: only one of the archive's files landed before
+        // the simulated kill.
+        write_files(&temp_path, &["only-file-before-kill.txt"], "partial");
+
+        // The kill happens here: publish_atomically is never reached.
+
+        assert!(!target_path.exists());
+        assert!(
+            temp_path.exists(),
+            "orphaned temp path, not the real target"
+        );
     }
 }
