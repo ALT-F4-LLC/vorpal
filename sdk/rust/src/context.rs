@@ -19,11 +19,12 @@ use sha256::digest;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     net::{Ipv6Addr, SocketAddr},
+    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 use tokio::{
-    fs::{read, rename, OpenOptions},
+    fs::{read, rename},
     io::AsyncWriteExt,
     sync::Mutex,
 };
@@ -33,7 +34,7 @@ use tonic::{
     Code::NotFound,
     Request, Response, Status,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 /// Artifacts and lookup caches accumulated while a config runs, shared
 /// between [`ConfigContext`] and the [`ConfigServer`] it starts.
@@ -799,39 +800,145 @@ pub async fn build_channel(uri: &str) -> Result<Channel> {
         .with_context(|| format!("failed to connect to {uri}"))
 }
 
+/// Bounds a single refresh exchange so a hung IdP stalls only that exchange
+/// rather than every caller queued behind [`CREDENTIALS_REFRESH`].
+const REFRESH_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A completed refresh exchange: `(access_token, expires_in, issued_at,
+/// rotated_refresh_token)`. `rotated_refresh_token` is `Some(new)` when the
+/// IdP rotated the refresh token (Zitadel default), `None` when it did not
+/// (caller keeps the existing refresh token).
+type RefreshedToken = (String, u64, u64, Option<String>);
+
+/// Why a refresh exchange failed, discriminated by whether the refresh token
+/// had already left this process.
+///
+/// The distinction is what makes the failure safe to act on. A token that
+/// reached the IdP may have been consumed and rotated even when the outcome
+/// never came back, so it must never be sent a second time. A token that
+/// never left is untouched: the fault was local (bad URL, unreachable
+/// discovery endpoint, malformed document), and retrying it once that clears
+/// is correct — latching on those instead bricks every authenticated call in
+/// a long-lived process for a transient DNS failure.
+enum RefreshFailure {
+    /// The exchange was abandoned before the token was put on the wire.
+    NotSent(anyhow::Error),
+
+    /// The token-endpoint request was issued. The IdP may have consumed the
+    /// token whatever came back — including nothing at all.
+    Sent(anyhow::Error),
+}
+
+impl From<RefreshFailure> for anyhow::Error {
+    fn from(failure: RefreshFailure) -> Self {
+        match failure {
+            RefreshFailure::NotSent(err) | RefreshFailure::Sent(err) => err,
+        }
+    }
+}
+
+/// Parses an OIDC URL into its `scheme://host:port` origin, rejecting any
+/// destination a refresh token must not be sent to.
+///
+/// Plaintext HTTP is refused except on loopback, where there is no network to
+/// eavesdrop and local IdP fixtures live. The origin it returns is what pins
+/// the token endpoint — named by a remote discovery document — to the issuer
+/// the user actually logged in to.
+fn credential_egress_origin(raw: &str) -> Result<String> {
+    let url = reqwest::Url::parse(raw).with_context(|| format!("invalid OIDC URL: {}", raw))?;
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("OIDC URL has no host: {}", raw))?;
+
+    let is_loopback = matches!(host, "localhost" | "127.0.0.1" | "::1");
+
+    match url.scheme() {
+        "https" => {}
+        "http" if is_loopback => {}
+        scheme => bail!(
+            "refusing to send a refresh token over {} to {}: the OIDC issuer must be https",
+            scheme,
+            host
+        ),
+    }
+
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| anyhow!("OIDC URL has no port: {}", raw))?;
+
+    Ok(format!("{}://{}:{}", url.scheme(), host, port))
+}
+
 /// Refreshes an expired access token using the refresh token.
 ///
 /// Returns `(access_token, expires_in, issued_at, rotated_refresh_token)`.
 /// `rotated_refresh_token` is `Some(new)` when the `IdP` rotated the refresh
 /// token (Zitadel default), `None` when it did not (caller should keep the
 /// existing refresh token).
+///
+/// Every error is classified as [`RefreshFailure::NotSent`] or
+/// [`RefreshFailure::Sent`] at the point it arises: everything up to and
+/// including the discovery round trip happens before the token is on the
+/// wire, and everything from the token-endpoint request onward happens after
+/// the IdP could have consumed it.
 async fn refresh_access_token(
     audience: Option<&str>,
     client_id: &str,
     issuer: &str,
     refresh_token: &str,
-) -> Result<(String, u64, u64, Option<String>)> {
-    // Bounded so a hung IdP stalls only this exchange rather than every
-    // caller queued behind CREDENTIALS_REFRESH_LOCK indefinitely (neither
-    // call below had a timeout before, which was tolerable when each caller
-    // hung independently; serializing them makes an unbounded hang total).
+    timeout: std::time::Duration,
+) -> std::result::Result<RefreshedToken, RefreshFailure> {
+    // Redirects are refused rather than followed: a 307 from a tampered or
+    // compromised token endpoint would otherwise replay the credential-bearing
+    // POST to a host of the redirector's choosing. The login flow in
+    // `cli/src/command.rs` pins the same policy.
     let http_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()?;
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(timeout)
+        .build()
+        .map_err(|e| RefreshFailure::NotSent(e.into()))?;
+
+    let issuer_origin = credential_egress_origin(issuer).map_err(RefreshFailure::NotSent)?;
 
     // Discover token endpoint
     let discovery_url = format!("{issuer}/.well-known/openid-configuration");
-    let doc: serde_json::Value = http_client.get(&discovery_url).send().await?.json().await?;
+    let doc: serde_json::Value = http_client
+        .get(&discovery_url)
+        .send()
+        .await
+        .map_err(|e| RefreshFailure::NotSent(e.into()))?
+        .json()
+        .await
+        .map_err(|e| RefreshFailure::NotSent(e.into()))?;
 
     let token_endpoint = doc
         .get("token_endpoint")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("missing token_endpoint in OIDC discovery"))?;
+        .ok_or_else(|| {
+            RefreshFailure::NotSent(anyhow!("missing token_endpoint in OIDC discovery"))
+        })?;
+
+    let token_endpoint_origin =
+        credential_egress_origin(token_endpoint).map_err(RefreshFailure::NotSent)?;
+
+    if token_endpoint_origin != issuer_origin {
+        return Err(RefreshFailure::NotSent(anyhow!(
+            "OIDC token_endpoint origin {} does not match issuer origin {}",
+            token_endpoint_origin,
+            issuer_origin
+        )));
+    }
 
     // Create OAuth2 client
+    let auth_uri = AuthUrl::new(issuer.to_string())
+        .map_err(|e| RefreshFailure::NotSent(anyhow!("invalid issuer URL: {}", e)))?;
+    let token_uri = TokenUrl::new(token_endpoint.to_string())
+        .map_err(|e| RefreshFailure::NotSent(anyhow!("invalid token_endpoint URL: {}", e)))?;
+
     let client = BasicClient::new(ClientId::new(client_id.to_string()))
-        .set_auth_uri(AuthUrl::new(issuer.to_string())?)
-        .set_token_uri(TokenUrl::new(token_endpoint.to_string())?);
+        .set_auth_uri(auth_uri)
+        .set_token_uri(token_uri);
 
     // Exchange refresh token
     let refresh_token_obj = RefreshToken::new(refresh_token.to_string());
@@ -842,7 +949,12 @@ async fn refresh_access_token(
         request = request.add_extra_param("audience", aud);
     }
 
-    let token_result = request.request_async(&http_client).await?;
+    // From here on the token is on the wire: a transport error, a timeout and
+    // a rejection are indistinguishable from the IdP having consumed it.
+    let token_result = request
+        .request_async(&http_client)
+        .await
+        .map_err(|e| RefreshFailure::Sent(anyhow!("OAuth refresh-token exchange failed: {}", e)))?;
 
     let new_access_token = token_result.access_token().secret().clone();
     let new_expires_in = token_result.expires_in().map_or(3600, |d| d.as_secs());
@@ -850,7 +962,8 @@ async fn refresh_access_token(
         normalize_rotated_refresh_token(token_result.refresh_token().map(|t| t.secret().clone()));
 
     let issued_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| RefreshFailure::Sent(e.into()))?
         .as_secs();
 
     Ok((
@@ -897,12 +1010,15 @@ fn apply_token_refresh(
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Unlinks the temp file at `path` when dropped, unless [`disarm`] was
-/// called first. Guards `write_credentials_secure`'s temp file from the
-/// moment its path is chosen through to a committed `rename`, so a
-/// cancelled task, a dropped `JoinSet`, or a panic still removes a file
-/// that may hold a live plaintext refresh token (VPL-183 AB-3) — the old
-/// `if write_result.is_err()` cleanup ran only after the write future was
-/// fully awaited, so none of those exits ever reached it.
+/// called first. Owns `write_credentials_secure`'s temp file from the moment
+/// that file is created through to a committed `rename`, so a cancelled
+/// task, a dropped `JoinSet`, or a panic still removes a file that may hold
+/// a live plaintext refresh token (VPL-183 AB-3).
+///
+/// The guard is constructed in the same blocking unit that creates the file,
+/// never around an `.await`: arming earlier would unlink a path this call
+/// never created, and arming later would leave the created file unowned for
+/// as long as the task can be cancelled.
 ///
 /// `Drop` cannot `.await`, so this uses the blocking `std::fs::remove_file`
 /// rather than `tokio::fs::remove_file`. This is the one place in this file
@@ -935,7 +1051,17 @@ impl TempFileGuard {
 impl Drop for TempFileGuard {
     fn drop(&mut self) {
         if self.armed {
-            let _ = std::fs::remove_file(&self.path);
+            // Best effort — `Drop` cannot propagate — but never silent: a
+            // discarded error here is the difference between a temp file
+            // holding a live refresh token being cleaned up and being
+            // leaked, and nothing else reports which happened.
+            if let Err(err) = std::fs::remove_file(&self.path) {
+                debug!(
+                    "failed to remove temp credentials file {}: {}",
+                    self.path.display(),
+                    err
+                );
+            }
         }
     }
 }
@@ -954,9 +1080,9 @@ impl Drop for TempFileGuard {
 /// `File::create` (see the local archive-store writer's temp-file creation
 /// for the shape that must NOT be copied here).
 ///
-/// [`TempFileGuard`] covers the temp file for every exit path from this
-/// function — success disarms it after `rename` commits; any early return,
-/// cancellation, or panic leaves it armed and `Drop` unlinks the file.
+/// [`TempFileGuard`] owns the temp file from creation onward — success
+/// disarms it after `rename` commits; any early return, cancellation, or
+/// panic leaves it armed and `Drop` unlinks the file.
 async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
         anyhow!(
@@ -977,14 +1103,24 @@ async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
         TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
 
-    let mut guard = TempFileGuard::new(temp_path.clone());
+    // Create the file and arm its guard in one blocking unit. A
+    // `spawn_blocking` task runs to completion even when the future awaiting
+    // it is dropped, so the guard and the file it owns come into existence
+    // together and are dropped together; splitting them around an `.await`
+    // leaves a cancellation window in which the open still lands but the
+    // guard is already gone, and the temp file outlives it (VPL-183 AB-9).
+    let open_path = temp_path.clone();
+    let (mut guard, file) = tokio::task::spawn_blocking(move || {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&open_path)
+            .map(|file| (TempFileGuard::new(open_path), file))
+    })
+    .await??;
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temp_path)
-        .await?;
+    let mut file = tokio::fs::File::from_std(file);
 
     file.write_all(bytes).await?;
     // fsync, not flush: flush is a userspace buffer flush, and a rename
@@ -1002,11 +1138,10 @@ async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
 /// Performs the OAuth refresh-token exchange. Injected as a [`TokenRefresher`]
 /// so tests can count and control exchanges without real network I/O.
 ///
-/// Contract: `refresh` runs while `CREDENTIALS_REFRESH_LOCK` is held (see
-/// its doc comment) and must not call back into `client_auth_header` or
-/// `client_auth_header_at` — that lock is a non-reentrant
-/// `tokio::sync::Mutex`, and a re-entrant call deadlocks every authenticated
-/// RPC in the process.
+/// Contract: `refresh` runs while [`CREDENTIALS_REFRESH`] is locked and must
+/// not call back into `client_auth_header` or `client_auth_header_at` — that
+/// lock is a non-reentrant `tokio::sync::Mutex`, and a re-entrant call
+/// deadlocks every authenticated RPC in the process.
 #[tonic::async_trait]
 trait TokenRefresher: Send + Sync {
     async fn refresh(
@@ -1015,7 +1150,7 @@ trait TokenRefresher: Send + Sync {
         client_id: &str,
         issuer: &str,
         refresh_token: &str,
-    ) -> Result<(String, u64, u64, Option<String>)>;
+    ) -> std::result::Result<RefreshedToken, RefreshFailure>;
 }
 
 struct LiveTokenRefresher;
@@ -1028,57 +1163,148 @@ impl TokenRefresher for LiveTokenRefresher {
         client_id: &str,
         issuer: &str,
         refresh_token: &str,
-    ) -> Result<(String, u64, u64, Option<String>)> {
-        refresh_access_token(audience, client_id, issuer, refresh_token).await
+    ) -> std::result::Result<RefreshedToken, RefreshFailure> {
+        refresh_access_token(
+            audience,
+            client_id,
+            issuer,
+            refresh_token,
+            REFRESH_HTTP_TIMEOUT,
+        )
+        .await
+    }
+}
+
+/// Refresh-token values this process has already put on the wire without
+/// durably committing a replacement, keyed by a SHA-256 digest of the token
+/// value — never the plaintext, and never logged.
+///
+/// A failed exchange, and a successful one whose result never reaches disk,
+/// both leave `credentials.json` byte-identical. Re-reading that file cannot
+/// tell either apart from a token that has simply never been tried, so every
+/// waiter re-decides "needs refresh" and replays the same one-time token
+/// against the IdP (VPL-183 AB-1). Serializing the callers spaces that replay
+/// out in time; only remembering the exchange's outcome prevents it.
+///
+/// Being spent is terminal for that token *value*, not a backoff: a
+/// time-based retry would replay the same already-consumed token once the
+/// timer expired, which is the same hazard with a delay. Keying on the value
+/// rather than the issuer is what keeps that from spreading — a legitimately
+/// rotated token has a different digest and is unaffected by an older
+/// value's terminal failure.
+struct RefreshState {
+    spent: BTreeSet<String>,
+}
+
+impl RefreshState {
+    const fn new() -> Self {
+        Self {
+            spent: BTreeSet::new(),
+        }
     }
 }
 
 /// Serializes credential read, refresh-decision, refresh exchange and file
-/// write within this process. Held for the whole critical section, not just
-/// the write, so a waiter re-reads the winner's post-refresh state instead
-/// of retrying a decision it made against a stale snapshot.
+/// write within this process, and guards the spent-token memo those steps
+/// consult. Held for the whole critical section, not just the write, so a
+/// waiter re-reads the winner's post-refresh state instead of retrying a
+/// decision it made against a stale snapshot — and so the memo's
+/// check-then-insert is atomic by construction rather than by an unstated
+/// obligation on a second, separately locked global.
 ///
 /// Scope is this process only: it does not serialize against a separately
 /// spawned config process, a running `vorpal start agent`, or the Go/
-/// TypeScript SDKs writing the same `credentials.json`. `write_credentials_secure`'s
-/// atomic write independently keeps every one of those readers from ever
-/// observing a torn file; only the refresh-exchange race is process-local.
-static CREDENTIALS_REFRESH_LOCK: Mutex<()> = Mutex::const_new(());
+/// TypeScript SDKs writing the same `credentials.json`, and the memo is
+/// neither durable nor visible to them. `write_credentials_secure`'s atomic
+/// write independently keeps every one of those readers from ever observing
+/// a torn file; only the refresh-exchange race is process-local.
+static CREDENTIALS_REFRESH: Mutex<RefreshState> = Mutex::const_new(RefreshState::new());
 
-/// Process-lifetime record of refresh-token *values* whose exchange has
-/// already failed, keyed by a SHA-256 digest of the token value — never the
-/// plaintext, and never logged. A failed or timed-out exchange leaves
-/// `credentials.json` byte-identical, so without this memo every waiter
-/// serialized behind `CREDENTIALS_REFRESH_LOCK` re-reads the same file,
-/// re-decides "needs refresh", and replays the same one-time refresh token
-/// against the IdP (VPL-183 AB-1) — the lock serializes that replay, it does
-/// not prevent it.
+/// Decides whether the stored access token must be refreshed before use.
 ///
-/// Failure here is terminal for that token *value*, not a backoff: a
-/// time-based retry would still replay the same already-consumed token once
-/// the timer expired, which is the same hazard with a delay. Keying on the
-/// value (not the issuer) matters too — a legitimately rotated new token has
-/// a different digest and is unaffected by an older value's terminal
-/// failure.
+/// Pure in its three inputs, so the policy is checkable without a
+/// credentials file, the process lock, or a network round trip.
 ///
-/// Scope matches `CREDENTIALS_REFRESH_LOCK`: process-lifetime only. It is
-/// not durable, and is not visible to a separately spawned process or to
-/// the Go/TypeScript SDKs writing the same file.
-static FAILED_REFRESH_TOKENS: Mutex<BTreeSet<String>> = Mutex::const_new(BTreeSet::new());
+/// A future-dated `issued_at` (clock skew, or a hostile file — the value is
+/// file-sourced and unvalidated, VPL-183 AB-5) means the token's real age is
+/// unknown, and unknown age fails toward refreshing. Clamping it to zero
+/// makes a stale token look freshly issued and suppresses a refresh that is
+/// genuinely due, which is the opposite of fail-safe.
+///
+/// The head room is `min(300, expires_in / 2)`: five minutes for a normally
+/// long-lived token, proportional below that. A flat 300 is discontinuous at
+/// the threshold — it makes this check true one second after a rotation for
+/// any `expires_in` a little above it, and unconditionally true at or below
+/// it, so every caller decides independently to rotate and the rotations
+/// amplify each other (VPL-183 AB-4).
+fn needs_refresh(issued_at: u64, expires_in: u64, now: u64) -> bool {
+    if issued_at > now {
+        return true;
+    }
 
-/// Core of [`client_auth_header`], taking the credentials path and the
-/// refresh operation as parameters so it is testable without touching the
-/// real `/var/lib/vorpal/key/credentials.json` or performing network I/O.
-/// Deliberately private and not configurable from any production entry
-/// point (env var, global override) — see `client_auth_header`.
+    let token_age = now - issued_at;
+    let refresh_window = (expires_in / 2).min(300);
+
+    token_age + refresh_window >= expires_in
+}
+
+/// Applies a completed exchange to `credentials` and writes the result to
+/// `path`. Returns `Err` without committing anything when the IdP's response
+/// is unusable.
+async fn commit_refreshed_credentials(
+    credentials: &mut VorpalCredentials,
+    issuer: &str,
+    path: &Path,
+    refreshed: RefreshedToken,
+) -> Result<()> {
+    let (access_token, expires_in, issued_at, rotated_refresh_token) = refreshed;
+
+    // A zero lifetime can never satisfy the refresh window, so storing it
+    // would make every later call rotate again — and each rotation mints a
+    // fresh token value, which the spent-token memo cannot bound (VPL-183
+    // AB-8). Refuse the record and make the user re-login instead.
+    if expires_in == 0 {
+        bail!(
+            "OAuth refresh for issuer {} returned a token with a zero lifetime. Please run: vorpal login --issuer {}",
+            issuer,
+            issuer
+        );
+    }
+
+    let issuer_creds = credentials
+        .issuer
+        .get_mut(issuer)
+        .ok_or_else(|| anyhow!("no credentials for issuer: {}", issuer))?;
+
+    apply_token_refresh(
+        issuer_creds,
+        access_token,
+        expires_in,
+        issued_at,
+        rotated_refresh_token,
+    );
+
+    // Save updated credentials with mode 0o600 enforced on the temp file.
+    let credentials_json = serde_json::to_string_pretty(credentials)?;
+
+    write_credentials_secure(path, credentials_json.as_bytes()).await
+}
+
+/// Core of [`client_auth_header`], taking the credentials path, the refresh
+/// operation and the current time as parameters so it is testable without
+/// touching the real `/var/lib/vorpal/key/credentials.json`, performing
+/// network I/O, or depending on the wall clock. Deliberately private and not
+/// configurable from any production entry point (env var, global override) —
+/// see `client_auth_header`.
 async fn client_auth_header_at(
     credentials_path: &Path,
     registry: &str,
     refresher: &dyn TokenRefresher,
+    now: u64,
 ) -> Result<Option<MetadataValue<Ascii>>> {
     // Acquired before the existence check and the read below, and held
-    // through the write: see CREDENTIALS_REFRESH_LOCK's doc comment.
-    let _guard = CREDENTIALS_REFRESH_LOCK.lock().await;
+    // through the write: see CREDENTIALS_REFRESH's doc comment.
+    let mut state = CREDENTIALS_REFRESH.lock().await;
 
     if !credentials_path.exists() {
         return Ok(None);
@@ -1087,53 +1313,19 @@ async fn client_auth_header_at(
     let credentials_data = read(credentials_path).await?;
     let mut credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
 
-    // Borrowed from `credentials.registry`; the refresh below only mutates
-    // `credentials.issuer`, so the borrow stays valid across it.
-    let Some(registry_issuer) = credentials.registry.get(registry) else {
+    // Cloned rather than borrowed: `commit_refreshed_credentials` below takes
+    // `&mut credentials` for the whole struct (not just `credentials.issuer`),
+    // so a borrow from `credentials.registry` would still be live across it.
+    let Some(registry_issuer) = credentials.registry.get(registry).cloned() else {
         return Ok(None);
     };
 
-    // Check if token needs refresh
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs();
-
     let issuer_creds = credentials
         .issuer
-        .get(registry_issuer)
+        .get(&registry_issuer)
         .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
 
-    let needs_refresh = {
-        let expires_in = issuer_creds.expires_in;
-
-        if issuer_creds.issued_at > now {
-            // `issued_at` is file-sourced and unvalidated (VPL-183 AB-5). A
-            // future-dated value means the age is unknown, not zero: the
-            // previous `saturating_sub`-only computation clamped this case
-            // to age 0, which made the token look freshly issued and
-            // suppressed a refresh that may genuinely be due — the opposite
-            // of fail-safe. Unknown age must fail toward refreshing.
-            true
-        } else {
-            let token_age = now - issuer_creds.issued_at;
-
-            // Refresh once fewer than `refresh_window` seconds remain.
-            // 300s (5 minutes) is the normal window, but that fixed
-            // constant makes this check unconditionally true the instant an
-            // IdP hands out `expires_in <= 300`, so every waiter decides
-            // independently "needs refresh" against a token that was only
-            // just issued (VPL-183 AB-4, a self-amplifying rotation storm).
-            // For a token that short-lived, use half its lifetime instead,
-            // so a token issued `now` does not immediately re-qualify.
-            let refresh_window = if expires_in <= 300 {
-                expires_in / 2
-            } else {
-                300
-            };
-
-            token_age + refresh_window >= expires_in
-        }
-    };
+    let needs_refresh = needs_refresh(issuer_creds.issued_at, issuer_creds.expires_in, now);
 
     if needs_refresh {
         // Skip refresh if no refresh token available (user must re-login)
@@ -1143,71 +1335,67 @@ async fn client_auth_header_at(
             ));
         }
 
-        // See FAILED_REFRESH_TOKENS: a prior waiter may already have burned
-        // this exact stored token value in a failed exchange. Re-reading the
-        // byte-identical post-failure file cannot tell that apart from a
-        // token that has simply never been tried, so the memo is what does.
+        // A prior caller may already have put this exact stored token value
+        // on the wire. The file it left behind is byte-identical either way,
+        // so the memo is the only thing that can tell the two apart.
         let refresh_token_digest = digest(issuer_creds.refresh_token.as_str());
-        if FAILED_REFRESH_TOKENS
-            .lock()
-            .await
-            .contains(&refresh_token_digest)
-        {
+
+        if state.spent.contains(&refresh_token_digest) {
             return Err(anyhow!(
                 "OAuth refresh-token exchange already failed for the stored token. Please run: vorpal login --issuer {}",
                 registry_issuer
             ));
         }
 
-        let refresh_result = refresher
+        let exchange = refresher
             .refresh(
                 issuer_creds.audience.as_deref(),
                 &issuer_creds.client_id,
-                registry_issuer,
+                &registry_issuer,
                 &issuer_creds.refresh_token,
             )
             .await;
 
-        let (new_token, new_expires, new_issued_at, rotated_refresh) = match refresh_result {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                // Terminal for this token value, never a backoff: see
-                // FAILED_REFRESH_TOKENS's doc comment for why a retry
-                // window still replays a consumed token.
-                FAILED_REFRESH_TOKENS
-                    .lock()
-                    .await
-                    .insert(refresh_token_digest);
+        let refreshed = match exchange {
+            Ok(refreshed) => refreshed,
+
+            // The token never left the process: the fault was local, the
+            // stored token is untouched, and a later caller may use it.
+            Err(RefreshFailure::NotSent(err)) => return Err(err),
+
+            // The token reached the IdP, which may have consumed it whatever
+            // came back. Spend it rather than let the next caller replay it.
+            Err(RefreshFailure::Sent(err)) => {
+                state.spent.insert(refresh_token_digest);
                 return Err(err);
             }
         };
 
-        // Now update the credentials. No await is introduced between the
-        // exchange above and the write below: the sequence stays
-        // synchronous so the window in which a killed task loses the
-        // rotated token to disk (accepted residual risk) does not widen.
-        let issuer_creds = credentials
-            .issuer
-            .get_mut(registry_issuer)
-            .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
-
-        apply_token_refresh(
-            issuer_creds,
-            new_token,
-            new_expires,
-            new_issued_at,
-            rotated_refresh,
-        );
-
-        // Save updated credentials with mode 0o600 enforced on the temp file.
-        let credentials_json = serde_json::to_string_pretty(&credentials)?;
-        write_credentials_secure(credentials_path, credentials_json.as_bytes()).await?;
+        // No await is introduced between the exchange above and the write
+        // below: the sequence stays synchronous so the window in which a
+        // killed task loses the rotated token to disk (accepted residual
+        // risk) does not widen.
+        if let Err(err) = commit_refreshed_credentials(
+            &mut credentials,
+            &registry_issuer,
+            credentials_path,
+            refreshed,
+        )
+        .await
+        {
+            // The exchange happened and nothing was committed, so the file
+            // still names a token the IdP has already rotated away. This is
+            // the same replay hazard as an outright failure and it is spent
+            // for the same reason.
+            state.spent.insert(refresh_token_digest);
+            return Err(err);
+        }
     }
 
     // Get the access token
     let access_token = &credentials
         .issuer
-        .get(registry_issuer)
+        .get(&registry_issuer)
         .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?
         .access_token;
 
@@ -1232,12 +1420,172 @@ async fn client_auth_header_at(
 /// fails; if the refreshed credentials cannot be saved; or if the resulting
 /// header value fails to parse.
 pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
-    client_auth_header_at(&get_key_credentials_path(), registry, &LiveTokenRefresher).await
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+
+    client_auth_header_at(
+        &get_key_credentials_path(),
+        registry,
+        &LiveTokenRefresher,
+        now,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::{atomic::AtomicU32, Arc};
+
+    fn unix_now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    /// A previously-nonexistent scratch directory holding one test's
+    /// `credentials.json`, removed when the test's binding goes out of scope.
+    ///
+    /// `label` is the test's own name. Deriving the directory, the issuer and
+    /// the token values from it keeps each test's entries in the process-wide
+    /// spent-token memo disjoint from every other test's, which is what makes
+    /// the suite order-independent under Rust's parallel test threads. The
+    /// memo has process lifetime by design and is deliberately not reset
+    /// between tests: a reset would race the tests running beside it.
+    struct ScratchCredentials {
+        dir: PathBuf,
+        label: String,
+        path: PathBuf,
+    }
+
+    impl ScratchCredentials {
+        fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "vorpal-creds-{}-{}-{}",
+                label,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+
+            std::fs::create_dir_all(&dir).expect("create scratch dir");
+
+            let path = dir.join("credentials.json");
+
+            Self {
+                dir,
+                label: label.to_string(),
+                path,
+            }
+        }
+
+        /// This test's issuer name, unique to it.
+        fn issuer(&self) -> String {
+            format!("issuer-{}", self.label)
+        }
+
+        /// A token value unique to this test and `name`.
+        fn token(&self, name: &str) -> String {
+            format!("{}-{}", name, self.label)
+        }
+
+        fn write_fixture(&self, expires_in: u64, issued_at: u64, refresh_token: &str) {
+            let mut issuer = BTreeMap::new();
+
+            issuer.insert(
+                self.issuer(),
+                VorpalCredentialsContent {
+                    access_token: "old-access".to_string(),
+                    audience: None,
+                    client_id: "client-1".to_string(),
+                    expires_in,
+                    issued_at,
+                    refresh_token: refresh_token.to_string(),
+                    scopes: vec!["openid".to_string()],
+                },
+            );
+
+            let mut registry = BTreeMap::new();
+
+            registry.insert("registry-1".to_string(), self.issuer());
+
+            let credentials = VorpalCredentials { issuer, registry };
+
+            std::fs::write(&self.path, serde_json::to_vec(&credentials).unwrap())
+                .expect("write fixture");
+        }
+
+        fn stored(&self) -> VorpalCredentialsContent {
+            let bytes = std::fs::read(&self.path).expect("read credentials");
+
+            let mut credentials: VorpalCredentials =
+                serde_json::from_slice(&bytes).expect("parse credentials");
+
+            credentials
+                .issuer
+                .remove(&self.issuer())
+                .expect("issuer present")
+        }
+
+        /// Temp-file names left behind in the scratch directory.
+        fn leftover_temp_files(&self) -> Vec<String> {
+            std::fs::read_dir(&self.dir)
+                .expect("read scratch dir")
+                .map(|entry| entry.expect("dir entry").file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .filter(|name| name.ends_with(".tmp"))
+                .collect()
+        }
+    }
+
+    impl Drop for ScratchCredentials {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o700));
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    type Exchange = std::result::Result<RefreshedToken, RefreshFailure>;
+
+    /// Counts exchanges and answers each with a scripted outcome, so a test
+    /// can pin how many times the real entry point reached the IdP.
+    struct ScriptedRefresher {
+        calls: AtomicU32,
+        respond: Box<dyn Fn(u32) -> Exchange + Send + Sync>,
+    }
+
+    impl ScriptedRefresher {
+        fn new(respond: impl Fn(u32) -> Exchange + Send + Sync + 'static) -> Self {
+            Self {
+                calls: AtomicU32::new(0),
+                respond: Box::new(respond),
+            }
+        }
+
+        fn calls(&self) -> u32 {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[tonic::async_trait]
+    impl TokenRefresher for ScriptedRefresher {
+        async fn refresh(
+            &self,
+            _audience: Option<&str>,
+            _client_id: &str,
+            _issuer: &str,
+            _refresh_token: &str,
+        ) -> Exchange {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+
+            (self.respond)(call)
+        }
+    }
 
     fn sample_creds() -> VorpalCredentialsContent {
         VorpalCredentialsContent {
@@ -1317,36 +1665,30 @@ mod tests {
 
     #[test]
     fn write_credentials_secure_creates_file_with_mode_0o600() -> Result<()> {
-        use std::os::unix::fs::PermissionsExt;
+        let scratch = ScratchCredentials::new("mode");
 
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-mode-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir)?;
-        let path = dir.join("credentials.json");
         // Sanity: the path must not pre-exist — we are testing file birth, not
         // an inherited mode from a pre-created 0o600 file.
-        assert!(!path.exists(), "test path must be previously-nonexistent");
+        assert!(
+            !scratch.path.exists(),
+            "test path must be previously-nonexistent"
+        );
 
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
-        runtime.block_on(write_credentials_secure(&path, b"{\"hello\":\"world\"}"))?;
+        runtime.block_on(write_credentials_secure(
+            &scratch.path,
+            b"{\"hello\":\"world\"}",
+        ))?;
 
-        let mode = std::fs::metadata(&path)?.permissions().mode();
+        let mode = std::fs::metadata(&scratch.path)?.permissions().mode();
         assert_eq!(
             mode & 0o777,
             0o600,
             "credentials file must be born 0o600, got {:o}",
             mode & 0o777
         );
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
 
         Ok(())
     }
@@ -1379,31 +1721,20 @@ mod tests {
 
     #[tokio::test]
     async fn write_credentials_secure_overwrites_existing_file_mode_to_0o600() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-mode-regression-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join("credentials.json");
+        let scratch = ScratchCredentials::new("mode-regression");
 
         // Pre-create the destination at 0o644, the mode a naive
         // `File::create`-based temp writer would carry onto the destination
         // via `rename` (A-4). The fix must not inherit it.
-        std::fs::write(&path, b"{\"stale\":true}").expect("write pre-existing file");
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+        std::fs::write(&scratch.path, b"{\"stale\":true}").expect("write pre-existing file");
+        std::fs::set_permissions(&scratch.path, std::fs::Permissions::from_mode(0o644))
             .expect("set pre-existing mode to 0o644");
 
-        write_credentials_secure(&path, b"{\"hello\":\"world\"}")
+        write_credentials_secure(&scratch.path, b"{\"hello\":\"world\"}")
             .await
             .expect("write credentials");
 
-        let mode = std::fs::metadata(&path)
+        let mode = std::fs::metadata(&scratch.path)
             .expect("stat credentials")
             .permissions()
             .mode();
@@ -1414,96 +1745,47 @@ mod tests {
             mode & 0o777
         );
 
-        let contents = std::fs::read(&path).expect("read credentials");
+        let contents = std::fs::read(&scratch.path).expect("read credentials");
         assert_eq!(contents, b"{\"hello\":\"world\"}");
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
     }
 
     #[tokio::test]
     async fn client_auth_header_at_serializes_concurrent_refresh() {
-        // AC1 + AC2: N concurrent callers deciding "refresh needed" against
-        // the same credentials file must trigger exactly one refresh
-        // exchange, and the file left behind must hold the single winner's
-        // rotated token — not a stale snapshot written by a waiter who
-        // decided "refresh needed" before the guard (A-2).
-        struct CountingRefresher {
-            calls: std::sync::atomic::AtomicU32,
-        }
-
-        #[tonic::async_trait]
-        impl TokenRefresher for CountingRefresher {
-            async fn refresh(
-                &self,
-                _audience: Option<&str>,
-                _client_id: &str,
-                _issuer: &str,
-                _refresh_token: &str,
-            ) -> Result<(String, u64, u64, Option<String>)> {
-                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                Ok((
-                    "rotated-access".to_string(),
-                    3600,
-                    now,
-                    Some("rotated-refresh-once".to_string()),
-                ))
-            }
-        }
-
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-concurrency-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join("credentials.json");
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        // N concurrent callers deciding "refresh needed" against the same
+        // credentials file must trigger exactly one refresh exchange, and the
+        // file left behind must hold the single winner's rotated token — not
+        // a stale snapshot written by a waiter who decided "refresh needed"
+        // before the guard (A-2).
+        let scratch = ScratchCredentials::new("concurrency");
+        let now = unix_now();
+        let rotated = scratch.token("rotated-refresh");
 
         // Token 4 minutes from expiry: token_age + 300 >= expires_in.
         let expires_in = 3600u64;
-        let issued_at = now - (expires_in - 240);
 
-        let mut issuer = BTreeMap::new();
-        issuer.insert(
-            "issuer-1".to_string(),
-            VorpalCredentialsContent {
-                access_token: "old-access".to_string(),
-                audience: None,
-                client_id: "client-1".to_string(),
-                expires_in,
-                issued_at,
-                refresh_token: "old-refresh".to_string(),
-                scopes: vec!["openid".to_string()],
-            },
+        scratch.write_fixture(
+            expires_in,
+            now - (expires_in - 240),
+            &scratch.token("old-refresh"),
         );
-        let mut registry = BTreeMap::new();
-        registry.insert("registry-1".to_string(), "issuer-1".to_string());
 
-        let credentials = VorpalCredentials { issuer, registry };
-        std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
-
-        let refresher = std::sync::Arc::new(CountingRefresher {
-            calls: std::sync::atomic::AtomicU32::new(0),
-        });
+        let refresher = Arc::new(ScriptedRefresher::new(move |_| {
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(rotated.clone()),
+            ))
+        }));
 
         let mut tasks = tokio::task::JoinSet::new();
+
         for _ in 0..8 {
-            let path = path.clone();
+            let path = scratch.path.clone();
             let refresher = refresher.clone();
+
             tasks.spawn(async move {
-                client_auth_header_at(&path, "registry-1", refresher.as_ref()).await
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), now).await
             });
         }
 
@@ -1514,27 +1796,279 @@ mod tests {
         }
 
         assert_eq!(
-            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            refresher.calls(),
             1,
             "exactly one refresh exchange must occur for N concurrent callers"
         );
 
-        let final_bytes = std::fs::read(&path).expect("read final credentials");
-        let final_credentials: VorpalCredentials =
-            serde_json::from_slice(&final_bytes).expect("parse final credentials");
-        let final_issuer_creds = final_credentials
-            .issuer
-            .get("issuer-1")
-            .expect("issuer present");
+        let stored = scratch.stored();
 
         assert_eq!(
-            final_issuer_creds.refresh_token, "rotated-refresh-once",
+            stored.refresh_token,
+            scratch.token("rotated-refresh"),
             "stored refresh token must be the single winner's rotated token, not a stale replay"
         );
-        assert_eq!(final_issuer_creds.access_token, "rotated-access");
+        assert_eq!(stored.access_token, "rotated-access");
+    }
 
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
+    #[tokio::test]
+    async fn client_auth_header_at_never_replays_a_token_whose_refresh_failed_to_persist() {
+        // The exchange succeeds and the IdP rotates the token, but the write
+        // never lands, so `credentials.json` still names a token the IdP has
+        // already consumed. Every waiter that re-reads that file must be told
+        // the token is spent rather than replay it (VPL-183 C1): the outcome
+        // of the exchange is what must be remembered, not the failure of it.
+        let scratch = ScratchCredentials::new("persist-failure");
+        let now = unix_now();
+        let original = scratch.token("old-refresh");
+        let rotated = scratch.token("rotated-refresh");
+
+        scratch.write_fixture(3600, now - 3360, &original);
+
+        // Make the directory unwritable so `create_new` on the temp file
+        // fails after the exchange has already happened.
+        std::fs::set_permissions(&scratch.dir, std::fs::Permissions::from_mode(0o500))
+            .expect("make scratch dir unwritable");
+
+        let refresher = Arc::new(ScriptedRefresher::new(move |_| {
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(rotated.clone()),
+            ))
+        }));
+
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for _ in 0..8 {
+            let path = scratch.path.clone();
+            let refresher = refresher.clone();
+
+            tasks.spawn(async move {
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), now).await
+            });
+        }
+
+        let mut errors = 0;
+
+        while let Some(result) = tasks.join_next().await {
+            assert!(
+                result.expect("task panicked").is_err(),
+                "a refresh that never reached disk must not be reported as success"
+            );
+
+            errors += 1;
+        }
+
+        assert_eq!(errors, 8);
+
+        assert_eq!(
+            refresher.calls(),
+            1,
+            "a consumed refresh token must not be exchanged again after the write failed"
+        );
+
+        std::fs::set_permissions(&scratch.dir, std::fs::Permissions::from_mode(0o700))
+            .expect("restore scratch dir permissions");
+
+        assert_eq!(
+            scratch.stored().refresh_token,
+            original,
+            "the stored token is unchanged, which is exactly why the memo has to remember it"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_retries_a_refresh_that_never_reached_the_idp() {
+        // A discovery or DNS failure aborts the exchange before the token is
+        // on the wire, so the stored token is untouched and a later call must
+        // still be able to use it. Latching on those failures instead bricks
+        // every authenticated call in a long-lived process until it restarts
+        // (VPL-183 C2).
+        let scratch = ScratchCredentials::new("not-sent");
+        let now = unix_now();
+        let rotated = scratch.token("rotated-refresh");
+
+        scratch.write_fixture(3600, now - 3360, &scratch.token("old-refresh"));
+
+        let refresher = ScriptedRefresher::new(move |call| {
+            if call == 0 {
+                return Err(RefreshFailure::NotSent(anyhow!(
+                    "error sending request for url (dns error)"
+                )));
+            }
+
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(rotated.clone()),
+            ))
+        });
+
+        client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+            .await
+            .expect_err("the first call fails locally");
+
+        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+            .await
+            .expect("a token that never left the process must still be usable");
+
+        assert!(header.is_some());
+        assert_eq!(
+            refresher.calls(),
+            2,
+            "the second call must attempt the exchange the first one never made"
+        );
+        assert_eq!(
+            scratch.stored().refresh_token,
+            scratch.token("rotated-refresh")
+        );
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_refreshes_a_new_token_after_an_older_one_is_spent() {
+        // The memo is keyed on the refresh-token value, not the issuer: a
+        // token burned by a failed exchange must not poison a different token
+        // for the same issuer, which is what happens after a re-login
+        // (VPL-183 C12).
+        let scratch = ScratchCredentials::new("value-keyed-memo");
+        let now = unix_now();
+        let rotated = scratch.token("rotated-refresh");
+
+        scratch.write_fixture(3600, now - 3360, &scratch.token("burned-refresh"));
+
+        let refresher = ScriptedRefresher::new(move |call| {
+            if call == 0 {
+                return Err(RefreshFailure::Sent(anyhow!("simulated IdP rejection")));
+            }
+
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(rotated.clone()),
+            ))
+        });
+
+        client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+            .await
+            .expect_err("the first exchange fails and spends its token");
+
+        // A re-login replaces the stored token with a different value.
+        scratch.write_fixture(3600, now - 3360, &scratch.token("fresh-refresh"));
+
+        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+            .await
+            .expect("a different stored token must still be exchangeable");
+
+        assert!(header.is_some());
+        assert_eq!(
+            refresher.calls(),
+            2,
+            "spending one token value must not spend every token for that issuer"
+        );
+        assert_eq!(
+            scratch.stored().refresh_token,
+            scratch.token("rotated-refresh")
+        );
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_stops_rotating_a_zero_lifetime_token() {
+        // An IdP reporting `expires_in = 0` hands back a record that can never
+        // satisfy the refresh window, and each rotation mints a fresh token
+        // value the memo cannot bound, so storing it produces an unbounded
+        // rotation storm (VPL-183 C4). Refuse the record instead.
+        let scratch = ScratchCredentials::new("zero-lifetime");
+        let now = unix_now();
+        let rotated = scratch.token("rotated-refresh");
+
+        scratch.write_fixture(0, now, &scratch.token("old-refresh"));
+
+        let refresher = ScriptedRefresher::new(move |call| {
+            Ok((
+                "rotated-access".to_string(),
+                0,
+                now,
+                Some(format!("{}-{}", rotated, call)),
+            ))
+        });
+
+        for _ in 0..5 {
+            client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+                .await
+                .expect_err("a zero-lifetime token is unusable and must say so");
+        }
+
+        assert_eq!(
+            refresher.calls(),
+            1,
+            "a zero-lifetime response must not be stored and rotated again by every later caller"
+        );
+        assert_eq!(
+            scratch.stored().refresh_token,
+            scratch.token("old-refresh"),
+            "an unusable response must not be committed"
+        );
+    }
+
+    #[test]
+    fn needs_refresh_treats_a_future_issued_at_as_unknown_age() {
+        // Clock skew (or a hostile file) must fail toward refreshing, never
+        // away from it: clamping the age to zero makes a stale token look
+        // freshly issued and suppresses a refresh that is due.
+        assert!(needs_refresh(1_700_003_600, 3600, 1_700_000_000));
+    }
+
+    #[test]
+    fn needs_refresh_holds_off_on_a_freshly_issued_token_at_every_lifetime() {
+        // The window is continuous across the 300s threshold: a token issued
+        // `now` never immediately re-qualifies, whatever its lifetime. A flat
+        // 300s window fails this at 301 and below.
+        let now = 1_700_000_000;
+
+        for expires_in in [1, 2, 60, 299, 300, 301, 600, 3600] {
+            assert!(
+                !needs_refresh(now, expires_in, now),
+                "a token issued now with expires_in {} must not be due for refresh",
+                expires_in
+            );
+        }
+    }
+
+    #[test]
+    fn needs_refresh_is_due_once_the_window_is_reached() {
+        let now = 1_700_000_000;
+
+        // (expires_in, age at which the refresh becomes due).
+        for (expires_in, due_at) in [
+            (60u64, 30u64),
+            (300, 150),
+            (301, 151),
+            (600, 300),
+            (3600, 3300),
+        ] {
+            assert!(
+                !needs_refresh(now - (due_at - 1), expires_in, now),
+                "expires_in {} must not be due one second early",
+                expires_in
+            );
+            assert!(
+                needs_refresh(now - due_at, expires_in, now),
+                "expires_in {} must be due at age {}",
+                expires_in,
+                due_at
+            );
+        }
+    }
+
+    #[test]
+    fn needs_refresh_is_due_for_a_zero_lifetime_token() {
+        // Already expired on arrival: the record is unusable, and the caller
+        // finds that out by attempting the refresh.
+        assert!(needs_refresh(1_700_000_000, 0, 1_700_000_000));
     }
 
     #[tokio::test]
@@ -1548,73 +2082,22 @@ mod tests {
         // being clamped to "just issued". The previous version of this test
         // asserted the opposite with a refresher that panicked if called at
         // all, which pinned the fail-open direction into the suite.
-        struct CountingRefresher {
-            calls: std::sync::atomic::AtomicU32,
-        }
+        let scratch = ScratchCredentials::new("future-issued-at");
+        let now = unix_now();
+        let rotated = scratch.token("rotated-refresh");
 
-        #[tonic::async_trait]
-        impl TokenRefresher for CountingRefresher {
-            async fn refresh(
-                &self,
-                _audience: Option<&str>,
-                _client_id: &str,
-                _issuer: &str,
-                _refresh_token: &str,
-            ) -> Result<(String, u64, u64, Option<String>)> {
-                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                Ok((
-                    "rotated-access".to_string(),
-                    3600,
-                    now,
-                    Some("rotated-refresh-skew".to_string()),
-                ))
-            }
-        }
+        scratch.write_fixture(3600, now + 3600, &scratch.token("old-refresh"));
 
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-future-issued-at-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join("credentials.json");
+        let refresher = ScriptedRefresher::new(move |_| {
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(rotated.clone()),
+            ))
+        });
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let mut issuer = BTreeMap::new();
-        issuer.insert(
-            "issuer-1".to_string(),
-            VorpalCredentialsContent {
-                access_token: "old-access".to_string(),
-                audience: None,
-                client_id: "client-1".to_string(),
-                expires_in: 3600,
-                issued_at: now + 3600, // future-dated, e.g. clock skew
-                refresh_token: "old-refresh-skew".to_string(),
-                scopes: vec!["openid".to_string()],
-            },
-        );
-        let mut registry = BTreeMap::new();
-        registry.insert("registry-1".to_string(), "issuer-1".to_string());
-
-        let credentials = VorpalCredentials { issuer, registry };
-        std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
-
-        let refresher = CountingRefresher {
-            calls: std::sync::atomic::AtomicU32::new(0),
-        };
-
-        let header = client_auth_header_at(&path, "registry-1", &refresher)
+        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
             .await
             .expect("must not panic or error on a future-dated issued_at");
 
@@ -1623,13 +2106,10 @@ mod tests {
             "a refresh attempted for a skewed token must still yield an auth header"
         );
         assert_eq!(
-            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            refresher.calls(),
             1,
             "a future-dated issued_at must not suppress a refresh"
         );
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
     }
 
     #[tokio::test]
@@ -1642,108 +2122,54 @@ mod tests {
         // refresh token against the IdP (AB-1) — this asserts exactly one
         // exchange attempt occurs for 8 concurrent callers racing a
         // guaranteed failure, and that the stored token is never mutated.
-        struct FailingRefresher {
-            calls: std::sync::atomic::AtomicU32,
-        }
-
-        #[tonic::async_trait]
-        impl TokenRefresher for FailingRefresher {
-            async fn refresh(
-                &self,
-                _audience: Option<&str>,
-                _client_id: &str,
-                _issuer: &str,
-                _refresh_token: &str,
-            ) -> Result<(String, u64, u64, Option<String>)> {
-                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Err(anyhow!("simulated IdP timeout"))
-            }
-        }
-
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-failed-exchange-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join("credentials.json");
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let scratch = ScratchCredentials::new("failed-exchange");
+        let now = unix_now();
+        let original = scratch.token("old-refresh");
 
         // Token 4 minutes from expiry: token_age + 300 >= expires_in.
         let expires_in = 3600u64;
-        let issued_at = now - (expires_in - 240);
 
-        let mut issuer = BTreeMap::new();
-        issuer.insert(
-            "issuer-1".to_string(),
-            VorpalCredentialsContent {
-                access_token: "old-access".to_string(),
-                audience: None,
-                client_id: "client-1".to_string(),
-                expires_in,
-                issued_at,
-                refresh_token: "old-refresh-failing".to_string(),
-                scopes: vec!["openid".to_string()],
-            },
-        );
-        let mut registry = BTreeMap::new();
-        registry.insert("registry-1".to_string(), "issuer-1".to_string());
+        scratch.write_fixture(expires_in, now - (expires_in - 240), &original);
 
-        let credentials = VorpalCredentials { issuer, registry };
-        std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
-
-        let refresher = std::sync::Arc::new(FailingRefresher {
-            calls: std::sync::atomic::AtomicU32::new(0),
-        });
+        let refresher = Arc::new(ScriptedRefresher::new(|_| {
+            Err(RefreshFailure::Sent(anyhow!("simulated IdP timeout")))
+        }));
 
         let mut tasks = tokio::task::JoinSet::new();
+
         for _ in 0..8 {
-            let path = path.clone();
+            let path = scratch.path.clone();
             let refresher = refresher.clone();
+
             tasks.spawn(async move {
-                client_auth_header_at(&path, "registry-1", refresher.as_ref()).await
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), now).await
             });
         }
 
         let mut error_count = 0;
+
         while let Some(result) = tasks.join_next().await {
-            let outcome = result.expect("task panicked");
             assert!(
-                outcome.is_err(),
+                result.expect("task panicked").is_err(),
                 "every caller must observe the failure, not a stale success"
             );
+
             error_count += 1;
         }
+
         assert_eq!(error_count, 8);
 
         assert_eq!(
-            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            refresher.calls(),
             1,
             "exactly one exchange attempt must occur even though 8 callers observed a failure"
         );
 
-        let final_bytes = std::fs::read(&path).expect("read final credentials");
-        let final_credentials: VorpalCredentials =
-            serde_json::from_slice(&final_bytes).expect("parse final credentials");
-        let final_issuer_creds = final_credentials
-            .issuer
-            .get("issuer-1")
-            .expect("issuer present");
-
         assert_eq!(
-            final_issuer_creds.refresh_token, "old-refresh-failing",
+            scratch.stored().refresh_token,
+            original,
             "the stored refresh token must be untouched after a failed exchange"
         );
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
     }
 
     #[tokio::test]
@@ -1755,83 +2181,28 @@ mod tests {
         // with the number of concurrent callers, and that a second
         // sequential call right after a successful refresh does not
         // immediately rotate again.
-        struct CountingRefresher {
-            calls: std::sync::atomic::AtomicU32,
-        }
+        let scratch = ScratchCredentials::new("short-expiry");
+        let now = unix_now();
+        let rotated = scratch.token("rotated-refresh");
 
-        #[tonic::async_trait]
-        impl TokenRefresher for CountingRefresher {
-            async fn refresh(
-                &self,
-                _audience: Option<&str>,
-                _client_id: &str,
-                _issuer: &str,
-                _refresh_token: &str,
-            ) -> Result<(String, u64, u64, Option<String>)> {
-                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                Ok((
-                    "rotated-access".to_string(),
-                    60,
-                    now,
-                    Some("rotated-refresh-short-expiry".to_string()),
-                ))
-            }
-        }
+        // Well outside any window, regardless of the window's size.
+        scratch.write_fixture(60, now - 3600, &scratch.token("old-refresh"));
 
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-short-expiry-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join("credentials.json");
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let expires_in = 60u64;
-        let issued_at = now - 3600; // well outside any window, regardless of size
-
-        let mut issuer = BTreeMap::new();
-        issuer.insert(
-            "issuer-1".to_string(),
-            VorpalCredentialsContent {
-                access_token: "old-access".to_string(),
-                audience: None,
-                client_id: "client-1".to_string(),
-                expires_in,
-                issued_at,
-                refresh_token: "old-refresh-short-expiry".to_string(),
-                scopes: vec!["openid".to_string()],
-            },
-        );
-        let mut registry = BTreeMap::new();
-        registry.insert("registry-1".to_string(), "issuer-1".to_string());
-
-        let credentials = VorpalCredentials { issuer, registry };
-        std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
-
-        let refresher = std::sync::Arc::new(CountingRefresher {
-            calls: std::sync::atomic::AtomicU32::new(0),
-        });
+        let refresher = Arc::new(ScriptedRefresher::new(move |_| {
+            Ok(("rotated-access".to_string(), 60, now, Some(rotated.clone())))
+        }));
 
         let mut tasks = tokio::task::JoinSet::new();
+
         for _ in 0..8 {
-            let path = path.clone();
+            let path = scratch.path.clone();
             let refresher = refresher.clone();
+
             tasks.spawn(async move {
-                client_auth_header_at(&path, "registry-1", refresher.as_ref()).await
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), now).await
             });
         }
+
         while let Some(result) = tasks.join_next().await {
             result
                 .expect("task panicked")
@@ -1839,7 +2210,7 @@ mod tests {
         }
 
         assert_eq!(
-            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            refresher.calls(),
             1,
             "exchange count must not scale with the number of concurrent callers for a short-lived token"
         );
@@ -1848,18 +2219,15 @@ mod tests {
         // not immediately rotate again: the freshly issued token
         // (issued_at ~ now, expires_in 60) must fall outside the
         // proportional refresh window.
-        client_auth_header_at(&path, "registry-1", refresher.as_ref())
+        client_auth_header_at(&scratch.path, "registry-1", refresher.as_ref(), now)
             .await
             .expect("second call must succeed");
 
         assert_eq!(
-            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            refresher.calls(),
             1,
             "a freshly rotated short-lived token must not be rotated again immediately"
         );
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1872,21 +2240,14 @@ mod tests {
         // can leave a short or mixed-content read in that window; the
         // rename-based writer cannot, because the directory entry flips
         // atomically to a fully-written inode.
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-torn-read-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join("credentials.json");
-
         const CONTENT_LEN: usize = 8192;
         const ITERATIONS: usize = 150;
+
+        let scratch = ScratchCredentials::new("torn-read");
+        let path = scratch.path.clone();
         let content_a = vec![b'A'; CONTENT_LEN];
         let content_b = vec![b'B'; CONTENT_LEN];
+
         std::fs::write(&path, &content_a).expect("seed file");
 
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1934,35 +2295,29 @@ mod tests {
         writer.await.expect("writer task panicked");
         let (reads, torn) = reader.await.expect("reader task panicked");
 
-        assert!(reads > 0, "reader must have observed at least one read");
+        // A reader scheduled only after the writer finished would record one
+        // read and no tears, and pass having tested nothing. Requiring more
+        // reads than the writer made writes is what establishes the two
+        // actually overlapped; the observed figure is around 70,000.
+        assert!(
+            reads > ITERATIONS,
+            "reader made {reads} reads against {ITERATIONS} writes, so it never raced the writer"
+        );
         assert_eq!(
             torn, 0,
             "reader observed {torn} torn/truncated reads out of {reads}"
         );
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
     }
 
     #[test]
     fn temp_file_guard_removes_the_file_when_dropped_still_armed() {
-        // AC5 (VPL-183 C-4), the direct unit-level check on the mechanism:
-        // deleting TempFileGuard's Drop impl (mutant M7's modern
-        // equivalent, now that cleanup lives in the guard rather than an
-        // `is_err` branch) makes this fail. An armed guard going out of
-        // scope is exactly what happens on a cancelled task, a dropped
-        // `JoinSet`, or a panic — none of those reach a post-await cleanup
-        // branch, but all of them run destructors.
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-guard-armed-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let temp_path = dir.join("credentials.json.12345.0.tmp");
+        // The mechanism on its own: an armed guard going out of scope is
+        // exactly what happens on a cancelled task, a dropped `JoinSet`, or a
+        // panic — none of those reach a post-await cleanup branch, but all of
+        // them run destructors. The tests below pin its use.
+        let scratch = ScratchCredentials::new("guard-armed");
+        let temp_path = scratch.dir.join("credentials.json.12345.0.tmp");
+
         std::fs::write(&temp_path, b"live-refresh-token-bytes").expect("seed temp file");
         assert!(temp_path.exists());
 
@@ -1975,37 +2330,364 @@ mod tests {
             !temp_path.exists(),
             "an armed guard must remove the temp file when dropped"
         );
-
-        let _ = std::fs::remove_dir(&dir);
     }
 
-    #[test]
-    fn temp_file_guard_leaves_the_file_when_disarmed() {
-        // Companion to the test above: a guard disarmed after a committed
-        // rename must not touch the (now-unrelated) path on drop.
-        let dir = std::env::temp_dir().join(format!(
-            "vorpal-creds-guard-disarmed-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let temp_path = dir.join("credentials.json.12345.1.tmp");
-        std::fs::write(&temp_path, b"already-renamed-elsewhere").expect("seed temp file");
+    #[tokio::test]
+    async fn write_credentials_secure_removes_its_temp_file_when_the_commit_fails() {
+        // The guard has to be wired into the write path, not merely exist:
+        // unwiring it leaves the suite green unless a test drives
+        // `write_credentials_secure` itself and asserts the two properties
+        // that matter — no temp file survives, and nothing on disk holds the
+        // token bytes (VPL-183 C5).
+        let scratch = ScratchCredentials::new("commit-failure");
+        let token = scratch.token("live-refresh-token");
+        let bytes = format!("{{\"refresh_token\":\"{}\"}}", token);
 
-        {
-            let mut guard = TempFileGuard::new(temp_path.clone());
-            guard.disarm();
+        // Make `rename` fail after the temp file has been written: a
+        // non-empty directory cannot be replaced by a file.
+        std::fs::create_dir(&scratch.path).expect("create directory at the destination path");
+        std::fs::write(scratch.path.join("occupant"), b"x").expect("occupy the directory");
+
+        write_credentials_secure(&scratch.path, bytes.as_bytes())
+            .await
+            .expect_err("renaming onto a non-empty directory must fail");
+
+        assert!(
+            scratch.leftover_temp_files().is_empty(),
+            "a failed commit must leave no temp file behind, found {:?}",
+            scratch.leftover_temp_files()
+        );
+
+        for entry in std::fs::read_dir(&scratch.dir).expect("read scratch dir") {
+            let path = entry.expect("dir entry").path();
+
+            if path.is_file() {
+                let contents = std::fs::read(&path).expect("read leftover file");
+
+                assert!(
+                    !contents.windows(token.len()).any(|w| w == token.as_bytes()),
+                    "{} still holds the refresh token after a failed commit",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn write_credentials_secure_leaves_no_temp_file_when_cancelled() {
+        // Cancelling a write mid-flight is the case the guard exists for. The
+        // file and its guard are created in one blocking unit, so there is no
+        // instant at which the file exists unowned; arming around the open
+        // instead lets the open land after the guard is already gone and the
+        // temp file outlives the task (VPL-183 C8).
+        let scratch = ScratchCredentials::new("cancelled-write");
+        let bytes = vec![b'x'; 64 * 1024];
+
+        for _ in 0..64 {
+            let path = scratch.path.clone();
+            let bytes = bytes.clone();
+
+            let task = tokio::spawn(async move { write_credentials_secure(&path, &bytes).await });
+
+            tokio::task::yield_now().await;
+            task.abort();
+
+            let _ = task.await;
+        }
+
+        // Aborting a task drops its future, but a `spawn_blocking` unit that
+        // future was awaiting still runs to completion on a pool thread, and
+        // the unlink happens when its result is dropped there. Cleanup is
+        // therefore prompt but not synchronous with the abort, so wait for it
+        // rather than sampling once.
+        let mut leftovers = scratch.leftover_temp_files();
+
+        for _ in 0..500 {
+            if leftovers.is_empty() {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+            leftovers = scratch.leftover_temp_files();
         }
 
         assert!(
-            temp_path.exists(),
-            "a disarmed guard must not touch the file (it already committed via rename)"
+            leftovers.is_empty(),
+            "cancelled writes leaked temp files: {:?}",
+            leftovers
         );
+    }
 
-        let _ = std::fs::remove_file(&temp_path);
-        let _ = std::fs::remove_dir(&dir);
+    /// A minimal HTTP/1.1 stand-in for an IdP: it answers each request with
+    /// whatever `respond` returns for that request's path, or holds the
+    /// connection open forever when that is `None`. Only a true external
+    /// boundary is faked here — the code under test is the real exchange.
+    struct IdpServer {
+        addr: std::net::SocketAddr,
+        paths: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl IdpServer {
+        async fn start(
+            respond: impl Fn(&str, std::net::SocketAddr) -> Option<String> + Send + Sync + 'static,
+        ) -> Self {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind idp fixture");
+            let addr = listener.local_addr().expect("fixture address");
+            let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let respond = Arc::new(respond);
+            let accepted = paths.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    let Ok((mut socket, _)) = listener.accept().await else {
+                        return;
+                    };
+
+                    let respond = respond.clone();
+                    let accepted = accepted.clone();
+
+                    tokio::spawn(async move {
+                        use tokio::io::AsyncReadExt;
+
+                        let mut buffer = vec![0u8; 8192];
+                        let read = socket.read(&mut buffer).await.unwrap_or(0);
+                        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                        let path = request
+                            .split_whitespace()
+                            .nth(1)
+                            .unwrap_or_default()
+                            .to_string();
+
+                        accepted.lock().unwrap().push(path.clone());
+
+                        match respond(&path, addr) {
+                            Some(response) => {
+                                let _ = socket.write_all(response.as_bytes()).await;
+                            }
+                            // Accept and never answer, so the caller's own
+                            // timeout is the only thing that ends the request.
+                            None => std::future::pending::<()>().await,
+                        }
+                    });
+                }
+            });
+
+            Self { addr, paths }
+        }
+
+        fn issuer(&self) -> String {
+            format!("http://127.0.0.1:{}", self.addr.port())
+        }
+
+        fn requested_paths(&self) -> Vec<String> {
+            self.paths.lock().unwrap().clone()
+        }
+    }
+
+    fn http_json(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+    }
+
+    fn discovery_document(addr: std::net::SocketAddr) -> String {
+        http_json(&format!(
+            "{{\"token_endpoint\":\"http://127.0.0.1:{}/token\"}}",
+            addr.port()
+        ))
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_exchanges_against_a_live_token_endpoint() {
+        // The real exchange — discovery, the token POST, `expires_in`
+        // defaulting, rotation normalization — against a local IdP. None of
+        // it was covered by any test before (VPL-183 C15).
+        let idp = IdpServer::start(|path, addr| {
+            if path.contains(".well-known") {
+                return Some(discovery_document(addr));
+            }
+
+            // No `expires_in` in the response, which must default to 3600.
+            Some(http_json(
+                "{\"access_token\":\"fresh-access\",\"token_type\":\"bearer\",\"refresh_token\":\"rotated-by-idp\"}",
+            ))
+        })
+        .await;
+
+        let before = unix_now();
+
+        let (access_token, expires_in, issued_at, rotated) = refresh_access_token(
+            Some("aud-1"),
+            "client-1",
+            &idp.issuer(),
+            "stored-refresh",
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .map_err(anyhow::Error::from)
+        .expect("exchange against the fixture IdP");
+
+        assert_eq!(access_token, "fresh-access");
+        assert_eq!(
+            expires_in, 3600,
+            "a missing expires_in must default to 3600"
+        );
+        assert_eq!(rotated.as_deref(), Some("rotated-by-idp"));
+        assert!(issued_at >= before);
+        assert_eq!(
+            idp.requested_paths(),
+            vec![
+                "/.well-known/openid-configuration".to_string(),
+                "/token".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn live_token_refresher_performs_the_real_exchange() {
+        let idp = IdpServer::start(|path, addr| {
+            if path.contains(".well-known") {
+                return Some(discovery_document(addr));
+            }
+
+            Some(http_json(
+                "{\"access_token\":\"fresh-access\",\"token_type\":\"bearer\",\"expires_in\":120}",
+            ))
+        })
+        .await;
+
+        let (access_token, expires_in, _, rotated) = LiveTokenRefresher
+            .refresh(None, "client-1", &idp.issuer(), "stored-refresh")
+            .await
+            .map_err(anyhow::Error::from)
+            .expect("live refresher exchange");
+
+        assert_eq!(access_token, "fresh-access");
+        assert_eq!(expires_in, 120);
+        assert_eq!(
+            rotated, None,
+            "an IdP that does not rotate must leave the stored token alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_gives_up_on_a_hung_idp() {
+        // The timeout is the only thing standing between a hung IdP and a
+        // permanently stalled refresh, and it defends a failure no other test
+        // injects.
+        let idp = IdpServer::start(|_, _| None).await;
+
+        let failure = refresh_access_token(
+            None,
+            "client-1",
+            &idp.issuer(),
+            "stored-refresh",
+            std::time::Duration::from_millis(250),
+        )
+        .await
+        .expect_err("a hung IdP must not hang the caller");
+
+        assert!(
+            matches!(failure, RefreshFailure::NotSent(_)),
+            "a discovery request that never completed never carried the token"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_refuses_a_plaintext_issuer() {
+        let failure = refresh_access_token(
+            None,
+            "client-1",
+            "http://idp.example.com",
+            "stored-refresh",
+            std::time::Duration::from_millis(250),
+        )
+        .await
+        .expect_err("a refresh token must not travel in cleartext");
+
+        let error = anyhow::Error::from(failure).to_string();
+
+        assert!(
+            error.contains("must be https"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_refuses_a_token_endpoint_on_another_origin() {
+        // The token endpoint is named by remote data. A tampered discovery
+        // document must not be able to relocate the refresh token to a host
+        // the user never logged in to (VPL-183 C16).
+        let idp = IdpServer::start(|path, _| {
+            if path.contains(".well-known") {
+                return Some(http_json(
+                    "{\"token_endpoint\":\"https://attacker.example.com/token\"}",
+                ));
+            }
+
+            Some(http_json("{}"))
+        })
+        .await;
+
+        let failure = refresh_access_token(
+            None,
+            "client-1",
+            &idp.issuer(),
+            "stored-refresh",
+            std::time::Duration::from_millis(250),
+        )
+        .await
+        .expect_err("a cross-origin token endpoint must be refused");
+
+        assert!(
+            matches!(failure, RefreshFailure::NotSent(_)),
+            "the token is refused before it is sent, so it stays usable"
+        );
+        assert_eq!(
+            idp.requested_paths(),
+            vec!["/.well-known/openid-configuration".to_string()],
+            "no token request may be issued once the endpoint is rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_does_not_follow_a_redirected_token_endpoint() {
+        // A 307 preserves the method and the body, so following one would
+        // replay the credential-bearing POST wherever the redirector points.
+        let elsewhere = IdpServer::start(|_, _| Some(http_json("{}"))).await;
+        let elsewhere_port = elsewhere.addr.port();
+
+        let idp = IdpServer::start(move |path, addr| {
+            if path.contains(".well-known") {
+                return Some(discovery_document(addr));
+            }
+
+            Some(format!(
+                "HTTP/1.1 307 Temporary Redirect\r\nlocation: http://127.0.0.1:{}/token\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                elsewhere_port
+            ))
+        })
+        .await;
+
+        refresh_access_token(
+            None,
+            "client-1",
+            &idp.issuer(),
+            "stored-refresh",
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect_err("a redirected token exchange must fail rather than be followed");
+
+        assert!(
+            elsewhere.requested_paths().is_empty(),
+            "the refresh token must not be replayed to the redirect target"
+        );
     }
 }
