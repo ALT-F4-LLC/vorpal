@@ -17,13 +17,13 @@ use oauth2::{basic::BasicClient, AuthUrl, ClientId, RefreshToken, TokenResponse,
 use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     net::{Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 use tokio::{
-    fs::{read, remove_file, rename, OpenOptions},
+    fs::{read, rename, OpenOptions},
     io::AsyncWriteExt,
     sync::Mutex,
 };
@@ -896,6 +896,50 @@ fn apply_token_refresh(
 /// needs to be unique, not unpredictable.
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Unlinks the temp file at `path` when dropped, unless [`disarm`] was
+/// called first. Guards `write_credentials_secure`'s temp file from the
+/// moment its path is chosen through to a committed `rename`, so a
+/// cancelled task, a dropped `JoinSet`, or a panic still removes a file
+/// that may hold a live plaintext refresh token (VPL-183 AB-3) — the old
+/// `if write_result.is_err()` cleanup ran only after the write future was
+/// fully awaited, so none of those exits ever reached it.
+///
+/// `Drop` cannot `.await`, so this uses the blocking `std::fs::remove_file`
+/// rather than `tokio::fs::remove_file`. This is the one place in this file
+/// where a synchronous filesystem call is correct; do not "fix" it back to
+/// an async call.
+///
+/// Honest boundary: `Drop` does not run on `exit(1)` (e.g.
+/// `cli/src/command/build.rs`) or `SIGKILL`. Those exits are not covered by
+/// any destructor-based guard and are an accepted residual risk, not a gap
+/// in this one.
+///
+/// [`disarm`]: TempFileGuard::disarm
+struct TempFileGuard {
+    armed: bool,
+    path: PathBuf,
+}
+
+impl TempFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { armed: true, path }
+    }
+
+    /// Marks the temp file as committed (renamed onto its destination) so
+    /// `Drop` leaves it alone.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 /// Writes credential bytes to `path` atomically: a temp file in the same
 /// directory (required for `rename` to be atomic — it is only atomic within
 /// a filesystem) is created, written, `fsync`'d and renamed onto `path`.
@@ -909,6 +953,10 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// can end up world-readable via the umask-masked mode of a naive
 /// `File::create` (see the local archive-store writer's temp-file creation
 /// for the shape that must NOT be copied here).
+///
+/// [`TempFileGuard`] covers the temp file for every exit path from this
+/// function — success disarms it after `rename` commits; any early return,
+/// cancellation, or panic leaves it armed and `Drop` unlinks the file.
 async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
         anyhow!(
@@ -929,36 +977,36 @@ async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
         TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
 
-    let write_result: Result<()> = async {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temp_path)
-            .await?;
+    let mut guard = TempFileGuard::new(temp_path.clone());
 
-        file.write_all(bytes).await?;
-        // fsync, not flush: flush is a userspace buffer flush, and a rename
-        // ordered before the data reaches disk can leave a zero-length
-        // credentials.json after a crash.
-        file.sync_all().await?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temp_path)
+        .await?;
 
-        rename(&temp_path, path).await?;
+    file.write_all(bytes).await?;
+    // fsync, not flush: flush is a userspace buffer flush, and a rename
+    // ordered before the data reaches disk can leave a zero-length
+    // credentials.json after a crash.
+    file.sync_all().await?;
 
-        Ok(())
-    }
-    .await;
+    rename(&temp_path, path).await?;
 
-    if write_result.is_err() {
-        // A leaked temp file here is a plaintext refresh token left on disk.
-        let _ = remove_file(&temp_path).await;
-    }
+    guard.disarm();
 
-    write_result
+    Ok(())
 }
 
 /// Performs the OAuth refresh-token exchange. Injected as a [`TokenRefresher`]
 /// so tests can count and control exchanges without real network I/O.
+///
+/// Contract: `refresh` runs while `CREDENTIALS_REFRESH_LOCK` is held (see
+/// its doc comment) and must not call back into `client_auth_header` or
+/// `client_auth_header_at` — that lock is a non-reentrant
+/// `tokio::sync::Mutex`, and a re-entrant call deadlocks every authenticated
+/// RPC in the process.
 #[tonic::async_trait]
 trait TokenRefresher: Send + Sync {
     async fn refresh(
@@ -997,6 +1045,27 @@ impl TokenRefresher for LiveTokenRefresher {
 /// observing a torn file; only the refresh-exchange race is process-local.
 static CREDENTIALS_REFRESH_LOCK: Mutex<()> = Mutex::const_new(());
 
+/// Process-lifetime record of refresh-token *values* whose exchange has
+/// already failed, keyed by a SHA-256 digest of the token value — never the
+/// plaintext, and never logged. A failed or timed-out exchange leaves
+/// `credentials.json` byte-identical, so without this memo every waiter
+/// serialized behind `CREDENTIALS_REFRESH_LOCK` re-reads the same file,
+/// re-decides "needs refresh", and replays the same one-time refresh token
+/// against the IdP (VPL-183 AB-1) — the lock serializes that replay, it does
+/// not prevent it.
+///
+/// Failure here is terminal for that token *value*, not a backoff: a
+/// time-based retry would still replay the same already-consumed token once
+/// the timer expired, which is the same hazard with a delay. Keying on the
+/// value (not the issuer) matters too — a legitimately rotated new token has
+/// a different digest and is unaffected by an older value's terminal
+/// failure.
+///
+/// Scope matches `CREDENTIALS_REFRESH_LOCK`: process-lifetime only. It is
+/// not durable, and is not visible to a separately spawned process or to
+/// the Go/TypeScript SDKs writing the same file.
+static FAILED_REFRESH_TOKENS: Mutex<BTreeSet<String>> = Mutex::const_new(BTreeSet::new());
+
 /// Core of [`client_auth_header`], taking the credentials path and the
 /// refresh operation as parameters so it is testable without touching the
 /// real `/var/lib/vorpal/key/credentials.json` or performing network I/O.
@@ -1034,14 +1103,37 @@ async fn client_auth_header_at(
         .get(registry_issuer)
         .ok_or_else(|| anyhow!("no credentials for issuer: {registry_issuer}"))?;
 
-    // `issued_at` is file-sourced and unvalidated; saturating_sub keeps a
-    // clock-skewed or hostile future timestamp from underflowing this
-    // subtraction (a panic in debug/test, a near-u64::MAX wrap in release
-    // that the very next `+ 300` wraps again).
-    let token_age = now.saturating_sub(issuer_creds.issued_at);
+    let needs_refresh = {
+        let expires_in = issuer_creds.expires_in;
 
-    // Refresh if token has less than 5 minutes left
-    let needs_refresh = token_age + 300 >= issuer_creds.expires_in;
+        if issuer_creds.issued_at > now {
+            // `issued_at` is file-sourced and unvalidated (VPL-183 AB-5). A
+            // future-dated value means the age is unknown, not zero: the
+            // previous `saturating_sub`-only computation clamped this case
+            // to age 0, which made the token look freshly issued and
+            // suppressed a refresh that may genuinely be due — the opposite
+            // of fail-safe. Unknown age must fail toward refreshing.
+            true
+        } else {
+            let token_age = now - issuer_creds.issued_at;
+
+            // Refresh once fewer than `refresh_window` seconds remain.
+            // 300s (5 minutes) is the normal window, but that fixed
+            // constant makes this check unconditionally true the instant an
+            // IdP hands out `expires_in <= 300`, so every waiter decides
+            // independently "needs refresh" against a token that was only
+            // just issued (VPL-183 AB-4, a self-amplifying rotation storm).
+            // For a token that short-lived, use half its lifetime instead,
+            // so a token issued `now` does not immediately re-qualify.
+            let refresh_window = if expires_in <= 300 {
+                expires_in / 2
+            } else {
+                300
+            };
+
+            token_age + refresh_window >= expires_in
+        }
+    };
 
     if needs_refresh {
         // Skip refresh if no refresh token available (user must re-login)
@@ -1051,14 +1143,44 @@ async fn client_auth_header_at(
             ));
         }
 
-        let (new_token, new_expires, new_issued_at, rotated_refresh) = refresher
+        // See FAILED_REFRESH_TOKENS: a prior waiter may already have burned
+        // this exact stored token value in a failed exchange. Re-reading the
+        // byte-identical post-failure file cannot tell that apart from a
+        // token that has simply never been tried, so the memo is what does.
+        let refresh_token_digest = digest(issuer_creds.refresh_token.as_str());
+        if FAILED_REFRESH_TOKENS
+            .lock()
+            .await
+            .contains(&refresh_token_digest)
+        {
+            return Err(anyhow!(
+                "OAuth refresh-token exchange already failed for the stored token. Please run: vorpal login --issuer {}",
+                registry_issuer
+            ));
+        }
+
+        let refresh_result = refresher
             .refresh(
                 issuer_creds.audience.as_deref(),
                 &issuer_creds.client_id,
                 registry_issuer,
                 &issuer_creds.refresh_token,
             )
-            .await?;
+            .await;
+
+        let (new_token, new_expires, new_issued_at, rotated_refresh) = match refresh_result {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                // Terminal for this token value, never a backoff: see
+                // FAILED_REFRESH_TOKENS's doc comment for why a retry
+                // window still replays a consumed token.
+                FAILED_REFRESH_TOKENS
+                    .lock()
+                    .await
+                    .insert(refresh_token_digest);
+                return Err(err);
+            }
+        };
 
         // Now update the credentials. No await is introduced between the
         // exchange above and the write below: the sequence stays
@@ -1416,16 +1538,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_auth_header_at_rejects_future_issued_at_without_panicking() {
-        // C-6 regression: `issued_at` is file-sourced and unvalidated
-        // (TB-2). A future-dated value must not underflow `now - issued_at`
-        // (panics in the test/debug profile; wraps in release). If the
-        // refresh decision were still broken, this would also attempt a
-        // refresh, which the panicking refresher below would catch.
-        struct UnexpectedRefresher;
+    async fn client_auth_header_at_refreshes_despite_future_issued_at() {
+        // AC4 (VPL-183, reversing a wrong-direction test pinned by VPL-129):
+        // `issued_at` is file-sourced and unvalidated (AB-5). A future-dated
+        // value must not underflow `now - issued_at` (panics in the
+        // test/debug profile; wraps in release) — that part is unchanged —
+        // but a future-dated `issued_at` also means the token's real age is
+        // unknown, and unknown age must fail toward refreshing rather than
+        // being clamped to "just issued". The previous version of this test
+        // asserted the opposite with a refresher that panicked if called at
+        // all, which pinned the fail-open direction into the suite.
+        struct CountingRefresher {
+            calls: std::sync::atomic::AtomicU32,
+        }
 
         #[tonic::async_trait]
-        impl TokenRefresher for UnexpectedRefresher {
+        impl TokenRefresher for CountingRefresher {
             async fn refresh(
                 &self,
                 _audience: Option<&str>,
@@ -1433,7 +1561,17 @@ mod tests {
                 _issuer: &str,
                 _refresh_token: &str,
             ) -> Result<(String, u64, u64, Option<String>)> {
-                panic!("refresh must not be attempted for a token outside its refresh window");
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                Ok((
+                    "rotated-access".to_string(),
+                    3600,
+                    now,
+                    Some("rotated-refresh-skew".to_string()),
+                ))
             }
         }
 
@@ -1462,7 +1600,7 @@ mod tests {
                 client_id: "client-1".to_string(),
                 expires_in: 3600,
                 issued_at: now + 3600, // future-dated, e.g. clock skew
-                refresh_token: "old-refresh".to_string(),
+                refresh_token: "old-refresh-skew".to_string(),
                 scopes: vec!["openid".to_string()],
             },
         );
@@ -1472,16 +1610,402 @@ mod tests {
         let credentials = VorpalCredentials { issuer, registry };
         std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
 
-        let header = client_auth_header_at(&path, "registry-1", &UnexpectedRefresher)
+        let refresher = CountingRefresher {
+            calls: std::sync::atomic::AtomicU32::new(0),
+        };
+
+        let header = client_auth_header_at(&path, "registry-1", &refresher)
             .await
             .expect("must not panic or error on a future-dated issued_at");
 
         assert!(
             header.is_some(),
-            "a non-expired token must still yield an auth header"
+            "a refresh attempted for a skewed token must still yield an auth header"
+        );
+        assert_eq!(
+            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a future-dated issued_at must not suppress a refresh"
         );
 
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_never_replays_refresh_token_after_a_failed_exchange() {
+        // AC1 (VPL-183 C-1): a failed or timed-out exchange must be
+        // memoized as a terminal outcome for that stored refresh-token
+        // value, not merely serialized in time. Without the memo, every
+        // waiter behind the lock re-reads the byte-identical post-failure
+        // file, re-decides "needs refresh", and replays the same one-time
+        // refresh token against the IdP (AB-1) — this asserts exactly one
+        // exchange attempt occurs for 8 concurrent callers racing a
+        // guaranteed failure, and that the stored token is never mutated.
+        struct FailingRefresher {
+            calls: std::sync::atomic::AtomicU32,
+        }
+
+        #[tonic::async_trait]
+        impl TokenRefresher for FailingRefresher {
+            async fn refresh(
+                &self,
+                _audience: Option<&str>,
+                _client_id: &str,
+                _issuer: &str,
+                _refresh_token: &str,
+            ) -> Result<(String, u64, u64, Option<String>)> {
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err(anyhow!("simulated IdP timeout"))
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-failed-exchange-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("credentials.json");
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Token 4 minutes from expiry: token_age + 300 >= expires_in.
+        let expires_in = 3600u64;
+        let issued_at = now - (expires_in - 240);
+
+        let mut issuer = BTreeMap::new();
+        issuer.insert(
+            "issuer-1".to_string(),
+            VorpalCredentialsContent {
+                access_token: "old-access".to_string(),
+                audience: None,
+                client_id: "client-1".to_string(),
+                expires_in,
+                issued_at,
+                refresh_token: "old-refresh-failing".to_string(),
+                scopes: vec!["openid".to_string()],
+            },
+        );
+        let mut registry = BTreeMap::new();
+        registry.insert("registry-1".to_string(), "issuer-1".to_string());
+
+        let credentials = VorpalCredentials { issuer, registry };
+        std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
+
+        let refresher = std::sync::Arc::new(FailingRefresher {
+            calls: std::sync::atomic::AtomicU32::new(0),
+        });
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let path = path.clone();
+            let refresher = refresher.clone();
+            tasks.spawn(async move {
+                client_auth_header_at(&path, "registry-1", refresher.as_ref()).await
+            });
+        }
+
+        let mut error_count = 0;
+        while let Some(result) = tasks.join_next().await {
+            let outcome = result.expect("task panicked");
+            assert!(
+                outcome.is_err(),
+                "every caller must observe the failure, not a stale success"
+            );
+            error_count += 1;
+        }
+        assert_eq!(error_count, 8);
+
+        assert_eq!(
+            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "exactly one exchange attempt must occur even though 8 callers observed a failure"
+        );
+
+        let final_bytes = std::fs::read(&path).expect("read final credentials");
+        let final_credentials: VorpalCredentials =
+            serde_json::from_slice(&final_bytes).expect("parse final credentials");
+        let final_issuer_creds = final_credentials
+            .issuer
+            .get("issuer-1")
+            .expect("issuer present");
+
+        assert_eq!(
+            final_issuer_creds.refresh_token, "old-refresh-failing",
+            "the stored refresh token must be untouched after a failed exchange"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_does_not_scale_short_expiry_rotations_with_callers() {
+        // AC2 (VPL-183 C-2): a fixed 300s refresh window makes
+        // `token_age + 300 >= expires_in` unconditionally true whenever
+        // `expires_in <= 300`, so every waiter independently decides
+        // "needs refresh" (AB-4). Assert the exchange count does not scale
+        // with the number of concurrent callers, and that a second
+        // sequential call right after a successful refresh does not
+        // immediately rotate again.
+        struct CountingRefresher {
+            calls: std::sync::atomic::AtomicU32,
+        }
+
+        #[tonic::async_trait]
+        impl TokenRefresher for CountingRefresher {
+            async fn refresh(
+                &self,
+                _audience: Option<&str>,
+                _client_id: &str,
+                _issuer: &str,
+                _refresh_token: &str,
+            ) -> Result<(String, u64, u64, Option<String>)> {
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                Ok((
+                    "rotated-access".to_string(),
+                    60,
+                    now,
+                    Some("rotated-refresh-short-expiry".to_string()),
+                ))
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-short-expiry-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("credentials.json");
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let expires_in = 60u64;
+        let issued_at = now - 3600; // well outside any window, regardless of size
+
+        let mut issuer = BTreeMap::new();
+        issuer.insert(
+            "issuer-1".to_string(),
+            VorpalCredentialsContent {
+                access_token: "old-access".to_string(),
+                audience: None,
+                client_id: "client-1".to_string(),
+                expires_in,
+                issued_at,
+                refresh_token: "old-refresh-short-expiry".to_string(),
+                scopes: vec!["openid".to_string()],
+            },
+        );
+        let mut registry = BTreeMap::new();
+        registry.insert("registry-1".to_string(), "issuer-1".to_string());
+
+        let credentials = VorpalCredentials { issuer, registry };
+        std::fs::write(&path, serde_json::to_vec(&credentials).unwrap()).expect("write fixture");
+
+        let refresher = std::sync::Arc::new(CountingRefresher {
+            calls: std::sync::atomic::AtomicU32::new(0),
+        });
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let path = path.clone();
+            let refresher = refresher.clone();
+            tasks.spawn(async move {
+                client_auth_header_at(&path, "registry-1", refresher.as_ref()).await
+            });
+        }
+        while let Some(result) = tasks.join_next().await {
+            result
+                .expect("task panicked")
+                .expect("client_auth_header_at failed");
+        }
+
+        assert_eq!(
+            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "exchange count must not scale with the number of concurrent callers for a short-lived token"
+        );
+
+        // A second sequential call right after the successful refresh must
+        // not immediately rotate again: the freshly issued token
+        // (issued_at ~ now, expires_in 60) must fall outside the
+        // proportional refresh window.
+        client_auth_header_at(&path, "registry-1", refresher.as_ref())
+            .await
+            .expect("second call must succeed");
+
+        assert_eq!(
+            refresher.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a freshly rotated short-lived token must not be rotated again immediately"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn write_credentials_secure_never_exposes_torn_content_to_a_concurrent_reader() {
+        // AC3 (VPL-183 C-7 note: this targets write_credentials_secure
+        // itself, which is what keeps AC3 satisfiable within this file's
+        // declared scope). A reader racing the writer must always observe
+        // either the previous full write or the next full write, never a
+        // partial one. Mutant M6 (truncate-in-place, the pre-VPL-129 shape)
+        // can leave a short or mixed-content read in that window; the
+        // rename-based writer cannot, because the directory entry flips
+        // atomically to a fully-written inode.
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-torn-read-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("credentials.json");
+
+        const CONTENT_LEN: usize = 8192;
+        const ITERATIONS: usize = 150;
+        let content_a = vec![b'A'; CONTENT_LEN];
+        let content_b = vec![b'B'; CONTENT_LEN];
+        std::fs::write(&path, &content_a).expect("seed file");
+
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let writer_path = path.clone();
+        let writer_content_a = content_a.clone();
+        let writer_content_b = content_b.clone();
+        let writer_done = done.clone();
+        let writer = tokio::spawn(async move {
+            for i in 0..ITERATIONS {
+                let bytes = if i % 2 == 0 {
+                    &writer_content_b
+                } else {
+                    &writer_content_a
+                };
+                write_credentials_secure(&writer_path, bytes)
+                    .await
+                    .expect("write credentials");
+            }
+            writer_done.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let reader_path = path.clone();
+        let reader_done = done.clone();
+        let reader = tokio::task::spawn_blocking(move || {
+            let mut reads = 0usize;
+            let mut torn = 0usize;
+            loop {
+                let finished = reader_done.load(std::sync::atomic::Ordering::SeqCst);
+                if let Ok(bytes) = std::fs::read(&reader_path) {
+                    reads += 1;
+                    let is_pure_a = bytes == content_a;
+                    let is_pure_b = bytes == content_b;
+                    if !(is_pure_a || is_pure_b) {
+                        torn += 1;
+                    }
+                }
+                if finished {
+                    break;
+                }
+            }
+            (reads, torn)
+        });
+
+        writer.await.expect("writer task panicked");
+        let (reads, torn) = reader.await.expect("reader task panicked");
+
+        assert!(reads > 0, "reader must have observed at least one read");
+        assert_eq!(
+            torn, 0,
+            "reader observed {torn} torn/truncated reads out of {reads}"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn temp_file_guard_removes_the_file_when_dropped_still_armed() {
+        // AC5 (VPL-183 C-4), the direct unit-level check on the mechanism:
+        // deleting TempFileGuard's Drop impl (mutant M7's modern
+        // equivalent, now that cleanup lives in the guard rather than an
+        // `is_err` branch) makes this fail. An armed guard going out of
+        // scope is exactly what happens on a cancelled task, a dropped
+        // `JoinSet`, or a panic — none of those reach a post-await cleanup
+        // branch, but all of them run destructors.
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-guard-armed-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let temp_path = dir.join("credentials.json.12345.0.tmp");
+        std::fs::write(&temp_path, b"live-refresh-token-bytes").expect("seed temp file");
+        assert!(temp_path.exists());
+
+        {
+            let _guard = TempFileGuard::new(temp_path.clone());
+            // guard drops here, still armed — simulating cancellation.
+        }
+
+        assert!(
+            !temp_path.exists(),
+            "an armed guard must remove the temp file when dropped"
+        );
+
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn temp_file_guard_leaves_the_file_when_disarmed() {
+        // Companion to the test above: a guard disarmed after a committed
+        // rename must not touch the (now-unrelated) path on drop.
+        let dir = std::env::temp_dir().join(format!(
+            "vorpal-creds-guard-disarmed-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let temp_path = dir.join("credentials.json.12345.1.tmp");
+        std::fs::write(&temp_path, b"already-renamed-elsewhere").expect("seed temp file");
+
+        {
+            let mut guard = TempFileGuard::new(temp_path.clone());
+            guard.disarm();
+        }
+
+        assert!(
+            temp_path.exists(),
+            "a disarmed guard must not touch the file (it already committed via rename)"
+        );
+
+        let _ = std::fs::remove_file(&temp_path);
         let _ = std::fs::remove_dir(&dir);
     }
 }
