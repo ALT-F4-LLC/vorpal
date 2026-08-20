@@ -1148,8 +1148,10 @@ async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
 /// value collides on `create_new`; without a retry that one stale leftover
 /// fails the write closed and burns the credential (VPL-283 AB-283-4). At
 /// most [`TEMP_FILE_MAX_ATTEMPTS`] names are tried and exhaustion returns
-/// `Err` — the bound lives here so no caller can shorten or remove it, and
-/// this is defense against a stale file, not against an adversarial loop (a
+/// `Err`. The bound lives here as a ceiling no caller can raise or remove; a
+/// caller may still offer fewer names than that, and both test callers do, in
+/// which case exhaustion is reported against the number actually offered.
+/// This is defense against a stale file, not against an adversarial loop (a
 /// same-UID adversary that could occupy every name already has the token,
 /// VPL-283 threat model A2).
 ///
@@ -1184,6 +1186,16 @@ async fn write_credentials_secure_with_names(
     // holds per attempt, not just for the first one.
     let (mut guard, file) = loop {
         let Some(name) = candidate_names.next() else {
+            // No name was ever drawn, so nothing collided: reporting this as
+            // exhaustion would claim a collision that never happened, which
+            // is the distinction the exhaustion message exists to make.
+            if attempts == 0 {
+                bail!(
+                    "no candidate temp-file name was offered for writing {}",
+                    path.display()
+                );
+            }
+
             bail!(
                 "every one of {} candidate temp-file names was already taken writing {}",
                 attempts,
@@ -1383,6 +1395,26 @@ async fn commit_refreshed_credentials(
     write_credentials_secure(path, credentials_json.as_bytes()).await
 }
 
+/// The error every arm that spends the stored refresh token returns: what
+/// went wrong locally, that the grant is over, and the one command that
+/// restores it.
+///
+/// `cause` is inlined into the message rather than left to the source chain
+/// alone. Every production caller of [`client_auth_header`] re-wraps this
+/// error with `map_err` and a `Display` format (`cli/src/command/build.rs`,
+/// `run.rs`, `inspect.rs`, `start/agent.rs`), and anyhow's `Display` prints
+/// only the outermost context — so a cause left underneath is invisible
+/// everywhere a user reads it. The chain is still attached for `{:#}` and
+/// `Debug` renderings.
+fn spent_grant_error(issuer: &str, summary: &str, cause: anyhow::Error) -> anyhow::Error {
+    let message = format!(
+        "{} ({:#}). Please run: vorpal login --issuer {}",
+        summary, cause, issuer
+    );
+
+    cause.context(message)
+}
+
 /// Core of [`client_auth_header`], taking the credentials path, the refresh
 /// operation and a clock as parameters so it is testable without touching
 /// the real `/var/lib/vorpal/key/credentials.json`, performing network I/O,
@@ -1481,7 +1513,15 @@ async fn client_auth_header_at(
             // came back. Spend it rather than let the next caller replay it.
             Err(RefreshFailure::Sent(err)) => {
                 state.spent.insert(refresh_token_digest);
-                return Err(err);
+
+                return Err(spent_grant_error(
+                    &registry_issuer,
+                    &format!(
+                        "The OAuth refresh-token exchange for issuer {} failed after the token had been sent, so the stored refresh token is no longer usable",
+                        registry_issuer
+                    ),
+                    err,
+                ));
             }
         };
 
@@ -1507,10 +1547,14 @@ async fn client_auth_header_at(
             // the reader sees only the local cause (a temp-file path, a full
             // disk) and concludes the problem is disk state, while the actual
             // state is a credential that no retry can revive.
-            return Err(err.context(format!(
-                "Refreshed credentials for issuer {} could not be saved, so the stored refresh token is no longer usable. Please run: vorpal login --issuer {}",
-                registry_issuer, registry_issuer
-            )));
+            return Err(spent_grant_error(
+                &registry_issuer,
+                &format!(
+                    "Refreshed credentials for issuer {} could not be saved, so the stored refresh token is no longer usable",
+                    registry_issuer
+                ),
+                err,
+            ));
         }
     }
 
@@ -1528,10 +1572,15 @@ async fn client_auth_header_at(
     Ok(Some(header))
 }
 
-/// This module's only reading of the wall clock: seconds since the Unix
-/// epoch. Both the refresh decision and the `issued_at` it mints come through
-/// here, so the answer to "where does this module read the clock?" is one
-/// grep.
+/// The only wall-clock reading any refresh decision is made against: seconds
+/// since the Unix epoch. Both the refresh decision and the `issued_at` it
+/// mints come through here, so the answer to "what clock does this module
+/// decide on?" is this one function.
+///
+/// Not the only `SystemTime::now` in the file: `#[cfg(test)]` code reads the
+/// clock directly twice on purpose — for a scratch directory's unique name,
+/// and for a ground truth the live-wiring test must not take from the
+/// function it exercises. Neither decides refresh behaviour.
 fn system_now() -> Result<u64> {
     Ok(std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
@@ -1578,6 +1627,17 @@ mod tests {
 
     fn unix_now() -> u64 {
         system_now().expect("system clock is after the Unix epoch")
+    }
+
+    /// Epoch seconds read without going through `system_now`, for the one
+    /// test that drives production's real clock end to end: a fixture stamped
+    /// by the very function under test moves with it, so a clock that never
+    /// advances compares equal to itself and the test stays green.
+    fn independent_unix_now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock is after the Unix epoch")
+            .as_secs()
     }
 
     /// A previously-nonexistent scratch directory holding one test's
@@ -1985,17 +2045,44 @@ mod tests {
         }
 
         let mut errors = 0;
+        let mut commit_failures = 0;
 
         while let Some(result) = tasks.join_next().await {
-            assert!(
-                result.expect("task panicked").is_err(),
-                "a refresh that never reached disk must not be reported as success"
-            );
+            let error = result
+                .expect("task panicked")
+                .expect_err("a refresh that never reached disk must not be reported as success");
+
+            // Display, not `{:#}` — every production caller re-wraps this
+            // error with a `Display` format, so the outermost rendering is
+            // the only one a user ever reads. The one caller that hit the
+            // commit-failure arm must see both what failed locally and that
+            // the grant is over; the other seven are told the token is spent.
+            let rendered = error.to_string();
+
+            if rendered.contains("could not be saved") {
+                commit_failures += 1;
+
+                assert!(
+                    rendered.contains("Permission denied"),
+                    "the local cause must survive into the message a caller prints, got: {}",
+                    rendered
+                );
+                assert!(
+                    rendered.contains("no longer usable")
+                        && rendered.contains("vorpal login --issuer"),
+                    "a spent grant must name the remedy, got: {}",
+                    rendered
+                );
+            }
 
             errors += 1;
         }
 
         assert_eq!(errors, 8);
+        assert_eq!(
+            commit_failures, 1,
+            "exactly one caller reaches the commit-failure arm; the rest are answered by the memo"
+        );
 
         assert_eq!(
             refresher.calls(),
@@ -2281,17 +2368,37 @@ mod tests {
         }
 
         let mut error_count = 0;
+        let mut sent_failures = 0;
 
         while let Some(result) = tasks.join_next().await {
-            assert!(
-                result.expect("task panicked").is_err(),
-                "every caller must observe the failure, not a stale success"
-            );
+            let error = result
+                .expect("task panicked")
+                .expect_err("every caller must observe the failure, not a stale success");
+
+            let rendered = error.to_string();
+
+            // The caller that reached the IdP ends the grant here, so its
+            // message says so — a bare transport complaint sends the reader
+            // looking for a network fault while the state is a dead grant.
+            if rendered.contains("simulated IdP timeout") {
+                sent_failures += 1;
+
+                assert!(
+                    rendered.contains("no longer usable")
+                        && rendered.contains("vorpal login --issuer"),
+                    "a spent grant must name the remedy, got: {}",
+                    rendered
+                );
+            }
 
             error_count += 1;
         }
 
         assert_eq!(error_count, 8);
+        assert_eq!(
+            sent_failures, 1,
+            "exactly one caller reaches the IdP; the rest are answered by the memo"
+        );
 
         assert_eq!(
             refresher.calls(),
@@ -2463,9 +2570,22 @@ mod tests {
         // Long enough that the spawned call has been polled (so a pre-lock
         // sample would already have happened) and that the stamp below is a
         // strictly later whole second.
+        //
+        // Real elapsed time is the synchronization here, which no other test
+        // in this module needs: tokio's pause/advance cannot drive a test
+        // whose whole subject is the real `system_now`, and the margin is a
+        // guess at scheduler latency. The trade is deliberate and it does not
+        // scale — a second test wanting this shape should take the ordering
+        // from this one rather than add another second of wall time, and a
+        // margin trimmed too far fails toward the mutant surviving, not
+        // toward a spurious red.
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
 
-        scratch.write_fixture(3600, unix_now(), &scratch.token("stored-refresh"));
+        scratch.write_fixture(
+            3600,
+            independent_unix_now(),
+            &scratch.token("stored-refresh"),
+        );
 
         drop(state);
 
@@ -2769,6 +2889,73 @@ mod tests {
         assert_eq!(std::fs::read(&collider_b).unwrap(), b"b");
     }
 
+    #[tokio::test]
+    async fn write_credentials_secure_reports_an_empty_candidate_list_as_no_attempt() {
+        // Exhaustion means every name drawn was taken. A caller that offers
+        // no names collided with nothing, and saying "every one of 0 names
+        // was already taken" reports a collision that never happened.
+        let scratch = ScratchCredentials::new("no-candidates");
+
+        let error =
+            write_credentials_secure_with_names(&scratch.path, b"{}", std::iter::empty::<String>())
+                .await
+                .expect_err("a write with no candidate name cannot succeed")
+                .to_string();
+
+        assert!(
+            !error.contains("already taken"),
+            "no name was drawn, so nothing was taken, got: {}",
+            error
+        );
+        assert!(
+            error.contains("no candidate temp-file name was offered"),
+            "the error must say no name was offered, got: {}",
+            error
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn write_credentials_secure_gives_overlapping_writes_their_own_temp_names() {
+        // The shipped composition, not the seam beneath it:
+        // `write_credentials_secure` must hand the retry the per-call name
+        // generator. A wrapper passing one constant name instead satisfies
+        // every test that writes alone into a fresh directory, because a
+        // reused name only collides while another write's temp file is still
+        // on disk — between its `create_new` and its `rename`.
+        //
+        // Any timing weakness here fails toward that mutant surviving, never
+        // toward a spurious red: with a fresh name per call, every possible
+        // interleaving succeeds.
+        let scratch = ScratchCredentials::new("overlapping-writes");
+        let bytes = vec![b'x'; 512 * 1024];
+
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for _ in 0..8 {
+            let path = scratch.path.clone();
+            let bytes = bytes.clone();
+
+            tasks.spawn(async move { write_credentials_secure(&path, &bytes).await });
+        }
+
+        while let Some(result) = tasks.join_next().await {
+            result
+                .expect("task panicked")
+                .expect("overlapping credential writes must each draw their own temp name");
+        }
+
+        assert_eq!(
+            std::fs::read(&scratch.path)
+                .expect("read destination")
+                .len(),
+            bytes.len()
+        );
+        assert!(
+            scratch.leftover_temp_files().is_empty(),
+            "a committed write leaves no temp file behind"
+        );
+    }
+
     #[test]
     fn temp_file_candidate_names_draws_a_fresh_name_for_every_attempt() {
         // The retry is only a retry if each attempt gets a name the last one
@@ -2778,9 +2965,12 @@ mod tests {
         // passes to the retry, drawn here directly because the counter it
         // advances is process-global and racing it from a write is not
         // deterministic under the parallel test harness.
-        let path = std::env::temp_dir().join("vorpal-names/credentials.json");
+        // A bare path: the generator reads only its file name, and spelling a
+        // real temp directory here would suggest a filesystem the test never
+        // touches.
+        let path = Path::new("credentials.json");
 
-        let names: Vec<String> = temp_file_candidate_names(&path)
+        let names: Vec<String> = temp_file_candidate_names(path)
             .take(TEMP_FILE_MAX_ATTEMPTS)
             .collect();
 
