@@ -1,8 +1,9 @@
 use crate::command::store::{
     archives::unpack_zstd,
     paths::{
-        get_artifact_alias_path, get_artifact_archive_path, get_artifact_output_path,
-        get_file_paths, set_timestamps,
+        discard_staging, get_artifact_alias_path, get_artifact_archive_path,
+        get_artifact_output_path, get_file_paths, publish_atomically, set_timestamps,
+        staging_path_for,
     },
 };
 use anyhow::{anyhow, bail, Context, Result};
@@ -91,6 +92,71 @@ async fn read_alias_digest(alias_path: &Path, artifact_name: &str) -> Result<Str
     Ok(artifact_digest)
 }
 
+/// Writes `data` to a staged sibling of `archive_path`, then publishes it
+/// with a single rename onto the shared store path. No reader of
+/// `archive_path` ever observes a partial or truncated file — mirrors the
+/// worker's own publish path (`cli/src/command/start/worker.rs`).
+async fn publish_archive_bytes(data: &[u8], archive_path: &Path) -> Result<()> {
+    if let Some(parent) = archive_path.parent() {
+        create_dir_all(parent)
+            .await
+            .with_context(|| format!("failed to create directory: {}", parent.display()))?;
+    }
+
+    let staging_path = staging_path_for(archive_path);
+
+    let staged: Result<()> = async {
+        write(&staging_path, data)
+            .await
+            .with_context(|| format!("failed to write: {}", staging_path.display()))?;
+
+        set_timestamps(&staging_path).await?;
+
+        publish_atomically(&staging_path, archive_path)
+            .await
+            .map_err(|status| anyhow!(status.message().to_string()))
+    }
+    .await;
+
+    if staged.is_err() {
+        discard_staging(&staging_path).await;
+    }
+
+    staged
+}
+
+/// Unpacks `archive_path` into a staged sibling of `output_path`, then
+/// publishes it with a single rename, so the real output path is only ever
+/// created — whole — by that rename. Mirrors the worker's own publish path.
+async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Result<()> {
+    let staging_path = staging_path_for(output_path);
+
+    create_dir_all(&staging_path)
+        .await
+        .with_context(|| format!("failed to create staging path: {}", staging_path.display()))?;
+
+    let staged: Result<()> = async {
+        unpack_zstd(&staging_path, archive_path).await?;
+
+        let staged_files = get_file_paths(&staging_path.to_path_buf(), vec![], vec![])?;
+
+        for path in staged_files.iter() {
+            set_timestamps(path).await?;
+        }
+
+        publish_atomically(&staging_path, output_path)
+            .await
+            .map_err(|status| anyhow!(status.message().to_string()))
+    }
+    .await;
+
+    if staged.is_err() {
+        discard_staging(&staging_path).await;
+    }
+
+    staged
+}
+
 async fn pull_artifact_from_registry(
     registry: &str,
     digest: &str,
@@ -160,37 +226,14 @@ async fn pull_artifact_from_registry(
 
         // Write archive to local store
 
-        let archive_path_parent = archive_path
-            .parent()
-            .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
-
-        create_dir_all(archive_path_parent).await?;
-
-        write(&archive_path, &stream_data)
-            .await
-            .with_context(|| format!("failed to write archive: {}", archive_path.display()))?;
-
-        set_timestamps(&archive_path).await?;
+        publish_archive_bytes(&stream_data, &archive_path).await?;
     }
 
     // Unpack archive to output path
 
     info!("unpacking artifact: {digest}");
 
-    create_dir_all(output_path).await.with_context(|| {
-        format!(
-            "failed to create output directory: {}",
-            output_path.display()
-        )
-    })?;
-
-    unpack_zstd(output_path, &archive_path).await?;
-
-    let artifact_files = get_file_paths(&output_path.to_path_buf(), vec![], vec![])?;
-
-    for file in &artifact_files {
-        set_timestamps(file).await?;
-    }
+    publish_unpacked_output(&archive_path, output_path).await?;
 
     Ok(())
 }
@@ -324,11 +367,32 @@ async fn resolve_alias_digest(
                     })?;
                 }
 
-                write(&alias_path, digest.as_bytes())
-                    .await
-                    .with_context(|| {
-                        format!("failed to write alias file: {}", alias_path.display())
-                    })?;
+                // Staged then published atomically, per C9: a concurrent
+                // reader of `alias_path` (`read_alias_digest`) must never
+                // observe a truncated digest mid-write.
+                let alias_staging_path = staging_path_for(&alias_path);
+
+                let staged: Result<()> = async {
+                    write(&alias_staging_path, digest.as_bytes())
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "failed to write alias file: {}",
+                                alias_staging_path.display()
+                            )
+                        })?;
+
+                    publish_atomically(&alias_staging_path, &alias_path)
+                        .await
+                        .map_err(|status| anyhow!(status.message().to_string()))
+                }
+                .await;
+
+                if staged.is_err() {
+                    discard_staging(&alias_staging_path).await;
+                }
+
+                staged?;
             }
 
             Err(err) => {
@@ -426,4 +490,115 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
 
     // exec() only returns on error
     bail!("failed to execute {}: {}", binary_path.display(), err,);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use tempfile::TempDir;
+
+    fn write_files(dir: &Path, names: &[&str], contents: &str) {
+        for name in names {
+            std::fs::write(dir.join(name), contents).unwrap();
+        }
+    }
+
+    fn dir_entry_names(dir: &Path) -> BTreeSet<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    // AC3, archive half, pinned at `run`'s own call site: a pulled archive
+    // is staged elsewhere and published onto its shared path, so a file
+    // already there is replaced whole rather than truncated in place under
+    // a reader's open handle.
+    #[tokio::test]
+    async fn publish_archive_bytes_replaces_the_real_path_instead_of_writing_into_it() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        std::fs::write(&archive_path, b"first-bytes").unwrap();
+
+        publish_archive_bytes(b"second-bytes", &archive_path)
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&archive_path).unwrap(), b"second-bytes");
+        assert_eq!(
+            dir_entry_names(&archive_dir),
+            BTreeSet::from(["abc123.tar.zst".to_string()]),
+            "a staging file was left under the store directory"
+        );
+    }
+
+    // AC1 at `run`'s own call site: publish_unpacked_output must never
+    // unpack into the real output path. An artifact already published there
+    // survives a pull whose archive turns out to be garbage, byte for byte
+    // — an in-place unpack (the pre-fix `create_dir_all` + `unpack_zstd`
+    // directly onto the real path) would create into that path and then
+    // delete it while cleaning up.
+    #[tokio::test]
+    async fn publish_unpacked_output_leaves_an_already_published_output_path_untouched() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+        let output_path = store_path.join("abc123");
+
+        std::fs::create_dir_all(&output_path).unwrap();
+        write_files(&output_path, &["published.txt"], "published-content");
+
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        std::fs::write(&archive_path, "not a zstd archive").unwrap();
+
+        publish_unpacked_output(&archive_path, &output_path)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            dir_entry_names(&output_path),
+            BTreeSet::from(["published.txt".to_string()]),
+            "a failed unpack disturbed an already published output path"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::from(["abc123".to_string()]),
+            "a failed unpack left its staging directory under the store"
+        );
+    }
+
+    // AC2: an unpack that fails must leave nothing at the real output path,
+    // so the `exists()` check `run` performs before falling back to a pull
+    // can never mistake wreckage for a finished artifact.
+    #[tokio::test]
+    async fn publish_unpacked_output_leaves_the_real_output_path_absent_on_failure() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+
+        std::fs::create_dir_all(&store_path).unwrap();
+
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        std::fs::write(&archive_path, "not a zstd archive").unwrap();
+
+        let output_path = store_path.join("abc123");
+
+        publish_unpacked_output(&archive_path, &output_path)
+            .await
+            .unwrap_err();
+
+        assert!(
+            !output_path.exists(),
+            "a failed unpack left debris at the real output path"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "a failed unpack left its staging directory under the store"
+        );
+    }
 }

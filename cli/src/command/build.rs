@@ -4,8 +4,9 @@ use crate::command::{
     store::{
         archives::unpack_zstd,
         paths::{
-            get_artifact_archive_path, get_artifact_output_lock_path, get_artifact_output_path,
-            get_file_paths, set_timestamps,
+            discard_staging, get_artifact_archive_path, get_artifact_output_lock_path,
+            get_artifact_output_path, get_file_paths, publish_atomically, set_timestamps,
+            staging_path_for,
         },
     },
     VorpalConfigSource,
@@ -16,7 +17,7 @@ use std::{
     path::{Path, PathBuf},
     process::exit,
 };
-use tokio::fs::{create_dir_all, remove_dir_all, remove_file, write};
+use tokio::fs::{create_dir_all, rename, write};
 use tonic::{transport::Channel, Code, Request};
 use tracing::{error, info};
 use vorpal_sdk::{
@@ -172,28 +173,19 @@ async fn pull_archive(
     }
 
     if !stream_data.is_empty() {
-        let archive_path_parent = archive_path
-            .parent()
-            .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
-
-        create_dir_all(archive_path_parent).await?;
-
-        write(archive_path, &stream_data)
-            .await
-            .context("failed to write archive")?;
-
-        set_timestamps(archive_path).await?;
+        publish_archive_bytes(&stream_data, archive_path).await?;
     }
 
     Ok(())
 }
 
-/// Unpacks `archive_path` into `artifact_path` and refreshes file timestamps,
-/// if the archive is present. Returns whether output files exist afterward.
+/// Unpacks `archive_path` into a staged sibling of `artifact_path` and
+/// publishes it with a single rename, if the archive is present. Returns
+/// whether output files exist afterward.
 async fn unpack_archive_if_present(
     artifact_name: &str,
     artifact_digest: &str,
-    artifact_path: &PathBuf,
+    artifact_path: &Path,
     archive_path: &Path,
 ) -> Result<bool> {
     if !archive_path.exists() {
@@ -202,19 +194,94 @@ async fn unpack_archive_if_present(
 
     info!("{artifact_name} |> unpack: {artifact_digest}");
 
-    create_dir_all(artifact_path)
-        .await
-        .context("failed to create artifact path")?;
+    publish_unpacked_output(archive_path, artifact_path).await?;
 
-    unpack_zstd(artifact_path, archive_path).await?;
-
-    let artifact_files = get_file_paths(artifact_path, vec![], vec![])?;
-
-    for artifact_file in &artifact_files {
-        set_timestamps(artifact_file).await?;
-    }
+    let artifact_files = get_file_paths(&artifact_path.to_path_buf(), vec![], vec![])?;
 
     Ok(!artifact_files.is_empty())
+}
+
+/// Writes `data` to a staged sibling of `archive_path`, then publishes it
+/// with a single rename onto the shared store path. No reader of
+/// `archive_path` ever observes a partial or truncated file — mirrors the
+/// worker's own publish path (`cli/src/command/start/worker.rs`).
+async fn publish_archive_bytes(data: &[u8], archive_path: &Path) -> Result<()> {
+    let archive_parent = archive_path
+        .parent()
+        .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+
+    create_dir_all(archive_parent).await?;
+
+    let staging_path = staging_path_for(archive_path);
+
+    let staged: Result<()> = async {
+        write(&staging_path, data)
+            .await
+            .map_err(|err| anyhow!("failed to write archive {}: {err}", archive_path.display()))?;
+
+        set_timestamps(&staging_path).await?;
+
+        publish_atomically(&staging_path, archive_path)
+            .await
+            .map_err(|status| anyhow!(status.message().to_string()))
+    }
+    .await;
+
+    if staged.is_err() {
+        discard_staging(&staging_path).await;
+    }
+
+    staged
+}
+
+/// Unpacks `archive_path` into a staged sibling of `output_path`, then
+/// publishes it with a single rename, so the real output path is only ever
+/// created — whole — by that rename. Mirrors the worker's own publish path.
+async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Result<()> {
+    let staging_path = staging_path_for(output_path);
+
+    create_dir_all(&staging_path).await?;
+
+    let staged: Result<()> = async {
+        unpack_zstd(&staging_path, archive_path).await?;
+
+        let staged_files = get_file_paths(&staging_path, vec![], vec![])?;
+
+        for path in staged_files.iter() {
+            set_timestamps(path).await?;
+        }
+
+        publish_atomically(&staging_path, output_path)
+            .await
+            .map_err(|status| anyhow!(status.message().to_string()))
+    }
+    .await;
+
+    if staged.is_err() {
+        discard_staging(&staging_path).await;
+    }
+
+    staged
+}
+
+/// Retires `real_path` (file or directory) so a concurrent reader observes
+/// the whole entry or nothing, never a partial removal mid-`remove_dir_all`:
+/// renames it onto a staging sibling, then discards the staged copy.
+/// Retiring a path that is already gone is a no-op, not an error.
+async fn retire_atomically(real_path: &Path) -> Result<()> {
+    if !real_path.exists() {
+        return Ok(());
+    }
+
+    let staging_path = staging_path_for(real_path);
+
+    rename(real_path, &staging_path)
+        .await
+        .map_err(|err| anyhow!("failed to retire {}: {err}", real_path.display()))?;
+
+    discard_staging(&staging_path).await;
+
+    Ok(())
 }
 
 async fn build(
@@ -681,45 +748,31 @@ async fn collect_config_artifacts(
     Ok(config_artifacts_store)
 }
 
-/// Removes the config and selected artifacts' existing output/lock files so
-/// `--rebuild` forces both to be rebuilt from scratch.
+/// Retires the config and selected artifacts' existing output/lock files so
+/// `--rebuild` forces both to be rebuilt from scratch. Each path is retired
+/// via `retire_atomically` (rename onto a staging sibling, then discard), so
+/// a concurrent reader of any of these shared paths observes the whole entry
+/// or nothing, never a partial removal.
 async fn remove_outputs_for_rebuild(
     config_digest: &str,
     selected_artifact_digest: &str,
     namespace: &str,
 ) -> Result<()> {
-    let config_artifact_output_lock_path = get_artifact_output_lock_path(config_digest, namespace);
+    retire_atomically(&get_artifact_output_lock_path(config_digest, namespace)).await?;
 
-    if config_artifact_output_lock_path.exists() {
-        remove_file(&config_artifact_output_lock_path)
-            .await
-            .context("failed to remove config artifact lock file")?;
-    }
+    retire_atomically(&get_artifact_output_path(config_digest, namespace)).await?;
 
-    let config_artifact_output_path = get_artifact_output_path(config_digest, namespace);
+    retire_atomically(&get_artifact_output_lock_path(
+        selected_artifact_digest,
+        namespace,
+    ))
+    .await?;
 
-    if config_artifact_output_path.exists() {
-        remove_dir_all(&config_artifact_output_path)
-            .await
-            .context("failed to remove config artifact path")?;
-    }
-
-    let artifact_output_lock_path =
-        get_artifact_output_lock_path(selected_artifact_digest, namespace);
-
-    if artifact_output_lock_path.exists() {
-        remove_file(&artifact_output_lock_path)
-            .await
-            .context("failed to remove artifact lock file")?;
-    }
-
-    let artifact_output_path = get_artifact_output_path(selected_artifact_digest, namespace);
-
-    if artifact_output_path.exists() {
-        remove_dir_all(&artifact_output_path)
-            .await
-            .context("failed to remove artifact path")?;
-    }
+    retire_atomically(&get_artifact_output_path(
+        selected_artifact_digest,
+        namespace,
+    ))
+    .await?;
 
     Ok(())
 }
@@ -995,6 +1048,150 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+    use tempfile::TempDir;
+
+    fn write_files(dir: &Path, names: &[&str], contents: &str) {
+        for name in names {
+            std::fs::write(dir.join(name), contents).unwrap();
+        }
+    }
+
+    fn dir_entry_names(dir: &Path) -> BTreeSet<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    // AC3, archive half, pinned at the CLI's own call site: a pulled
+    // archive is staged elsewhere and published onto its shared path, so a
+    // reader gating on `archive_path.exists()` never opens a half-written
+    // file, and a file already there is replaced whole rather than
+    // truncated in place under a reader's open handle.
+    #[tokio::test]
+    async fn publish_archive_bytes_replaces_the_real_path_instead_of_writing_into_it() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        std::fs::write(&archive_path, b"first-bytes").unwrap();
+
+        publish_archive_bytes(b"second-bytes", &archive_path)
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&archive_path).unwrap(), b"second-bytes");
+        assert_eq!(
+            dir_entry_names(&archive_dir),
+            BTreeSet::from(["abc123.tar.zst".to_string()]),
+            "a staging file was left under the store directory"
+        );
+    }
+
+    // AC1 at the CLI's own call site: publish_unpacked_output must never
+    // unpack into the real output path. A dependency already published
+    // there survives a pull whose archive turns out to be garbage, byte for
+    // byte — an in-place unpack (the pre-fix `create_dir_all` +
+    // `unpack_zstd` directly onto the real path) would create into that
+    // path and then delete it while cleaning up.
+    #[tokio::test]
+    async fn publish_unpacked_output_leaves_an_already_published_output_path_untouched() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+        let output_path = store_path.join("abc123");
+
+        std::fs::create_dir_all(&output_path).unwrap();
+        write_files(&output_path, &["published.txt"], "published-content");
+
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        std::fs::write(&archive_path, "not a zstd archive").unwrap();
+
+        publish_unpacked_output(&archive_path, &output_path)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            dir_entry_names(&output_path),
+            BTreeSet::from(["published.txt".to_string()]),
+            "a failed unpack disturbed an already published output path"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::from(["abc123".to_string()]),
+            "a failed unpack left its staging directory under the store"
+        );
+    }
+
+    // AC2, kill/error case: an unpack that fails must leave nothing at the
+    // real output path, so the `exists()` cache-hit check a later build
+    // performs can never mistake wreckage for a finished artifact.
+    #[tokio::test]
+    async fn publish_unpacked_output_leaves_the_real_output_path_absent_on_failure() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+
+        std::fs::create_dir_all(&store_path).unwrap();
+
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        std::fs::write(&archive_path, "not a zstd archive").unwrap();
+
+        let output_path = store_path.join("abc123");
+
+        publish_unpacked_output(&archive_path, &output_path)
+            .await
+            .unwrap_err();
+
+        assert!(
+            !output_path.exists(),
+            "a failed unpack left debris at the real output path"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "a failed unpack left its staging directory under the store"
+        );
+    }
+
+    // AC5: `--rebuild` must retire a store path rather than empty it in
+    // place, so a concurrent reader walking `bin/` (or executing a binary
+    // from it) never observes the directory disintegrating underneath it.
+    // This pins that retiring replaces the real path with "gone" atomically
+    // (no reader can observe a half-emptied directory) rather than via
+    // `remove_dir_all` walking the real path entry by entry.
+    #[tokio::test]
+    async fn retire_atomically_removes_the_real_path_and_leaves_no_staging_behind() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+        let real_path = store_path.join("abc123");
+
+        std::fs::create_dir_all(&real_path).unwrap();
+        write_files(&real_path, &["bin"], "binary-content");
+
+        retire_atomically(&real_path).await.unwrap();
+
+        assert!(!real_path.exists(), "retire left the real path behind");
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "retire left a staging directory under the store"
+        );
+    }
+
+    // Retiring a path that never existed (e.g. a rebuild of an artifact
+    // that was never built) must be a no-op, not an error — the original
+    // check-then-act code guarded every removal with `.exists()` for the
+    // same reason.
+    #[tokio::test]
+    async fn retire_atomically_is_a_no_op_for_an_absent_path() {
+        let root = TempDir::new().unwrap();
+        let missing_path = root.path().join("does-not-exist");
+
+        retire_atomically(&missing_path).await.unwrap();
+    }
 
     #[test]
     fn resolve_config_system_forces_host_native_for_prepare_only() {
