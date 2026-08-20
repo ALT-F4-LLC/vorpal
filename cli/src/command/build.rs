@@ -247,6 +247,25 @@ async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Res
 
         let staged_files = get_file_paths(&staging_path, vec![], vec![])?;
 
+        // `get_file_paths` walks from the staging root down and reports every
+        // entry, so its result is never empty for a directory that exists and
+        // counting it says nothing about content: an archive of no entries, or
+        // of directory entries only, unpacks to a tree with no regular file in
+        // it. Publishing that leaves a store path every later `exists()` check
+        // reads as a finished artifact and no reader can use, so refuse before
+        // the rename. This is a smoke test for "the unpack produced something",
+        // never evidence the tree is the intended one — the archive bytes are
+        // not verified against the digest anywhere.
+        if !staged_files.iter().any(|path| path.is_file()) {
+            // The archive is the unusable input, so retire it too: otherwise
+            // the `archive_path.exists()` check short-circuits the pull on
+            // every later invocation and this digest can never be built again,
+            // not even with `--rebuild`.
+            retire_atomically(archive_path).await?;
+
+            bail!("archive unpacked no files: {}", archive_path.display());
+        }
+
         for path in staged_files.iter() {
             set_timestamps(path).await?;
         }
@@ -1064,6 +1083,49 @@ mod tests {
             .collect()
     }
 
+    // Builds a real `.tar.zst` at `archive_path` holding `files` as regular
+    // entries and `dirs` as directory entries. `compress_zstd` cannot serve
+    // here: it stages through the real store root.
+    async fn write_tar_zst(archive_path: &Path, files: &[(&str, &str)], dirs: &[&str]) {
+        use tokio::io::AsyncWriteExt;
+
+        let file = tokio::fs::File::create(archive_path).await.unwrap();
+        let encoder = async_compression::tokio::write::ZstdEncoder::new(file);
+        let mut builder = tokio_tar::Builder::new(encoder);
+
+        for name in dirs {
+            let mut header = tokio_tar::Header::new_gnu();
+
+            header.set_entry_type(tokio_tar::EntryType::Directory);
+            header.set_mode(0o755);
+            header.set_size(0);
+
+            builder
+                .append_data(&mut header, name, tokio::io::empty())
+                .await
+                .unwrap();
+        }
+
+        for (name, contents) in files {
+            let mut header = tokio_tar::Header::new_gnu();
+
+            header.set_entry_type(tokio_tar::EntryType::Regular);
+            header.set_mode(0o644);
+            header.set_size(contents.len() as u64);
+
+            builder
+                .append_data(&mut header, name, contents.as_bytes())
+                .await
+                .unwrap();
+        }
+
+        builder.finish().await.unwrap();
+
+        let mut encoder = builder.into_inner().await.unwrap();
+
+        encoder.shutdown().await.unwrap();
+    }
+
     // AC3, archive half, pinned at the CLI's own call site: a pulled
     // archive is staged elsewhere and published onto its shared path, so a
     // reader gating on `archive_path.exists()` never opens a half-written
@@ -1153,6 +1215,82 @@ mod tests {
             dir_entry_names(&store_path),
             BTreeSet::new(),
             "a failed unpack left its staging directory under the store"
+        );
+    }
+
+    // C8, fail closed before the rename: an archive that unpacks to no
+    // regular file — no entries at all, or directory entries only — must
+    // never be published, because the `exists()` cache-hit check every later
+    // build performs would read that empty tree as a finished artifact. The
+    // refused archive is retired with it, so the next build re-pulls instead
+    // of short-circuiting on a cached archive it already rejected.
+    #[tokio::test]
+    async fn publish_unpacked_output_refuses_an_archive_that_unpacked_no_files() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+
+        std::fs::create_dir_all(&store_path).unwrap();
+
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        write_tar_zst(&archive_path, &[], &["bin"]).await;
+
+        let output_path = store_path.join("abc123");
+
+        let err = publish_unpacked_output(&archive_path, &output_path)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("unpacked no files"),
+            "a file-less archive was not refused: {err}"
+        );
+        assert!(
+            !output_path.exists(),
+            "a file-less archive was published as a finished artifact"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "refusing the archive left its staging directory under the store"
+        );
+        assert!(
+            !archive_path.exists(),
+            "the refused archive stayed cached, so every later build skips the pull and fails again"
+        );
+    }
+
+    // C8, the other half: a publish that fails for any reason other than a
+    // lost race must surface as an error rather than collapse to `Ok`, and
+    // must leave no staging behind. A regular file at the output path makes
+    // the publishing rename fail `ENOTDIR`, which is a genuine I/O failure.
+    #[tokio::test]
+    async fn publish_unpacked_output_reports_a_failed_publish_and_leaves_no_staging() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+
+        std::fs::create_dir_all(&store_path).unwrap();
+
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        write_tar_zst(&archive_path, &[("bin", "binary-content")], &[]).await;
+
+        let output_path = store_path.join("abc123");
+
+        std::fs::write(&output_path, b"not a directory").unwrap();
+
+        let err = publish_unpacked_output(&archive_path, &output_path)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("failed to publish"),
+            "a genuine publish failure did not surface as an error: {err}"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::from(["abc123".to_string()]),
+            "a failed publish left its staging directory under the store"
         );
     }
 
