@@ -27,6 +27,34 @@ use vorpal_sdk::{
     context::{build_channel, client_auth_header, parse_artifact_alias},
 };
 
+/// Length of a sha256 digest in lowercase hex, the only shape a store path
+/// component ever takes (`sdk/rust/src/context.rs` hashes artifact JSON with
+/// `sha256::digest`).
+const ARTIFACT_DIGEST_LENGTH: usize = 64;
+
+/// A digest is joined straight into a store path by
+/// `get_artifact_output_path` and `get_artifact_archive_path`, and the
+/// directory it names is executed from. Anything other than a bare sha256
+/// hex string therefore lets whoever supplied the digest — a registry, or
+/// the alias file on disk — choose a destination outside the store, so the
+/// shape is checked at every point the value enters this process rather than
+/// trusted from its source.
+fn parse_artifact_digest(digest: &str, source: &str) -> Result<String> {
+    let is_lowercase_hex = digest
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+
+    if digest.len() != ARTIFACT_DIGEST_LENGTH || !is_lowercase_hex {
+        bail!(
+            "invalid artifact digest from {source}: expected {ARTIFACT_DIGEST_LENGTH} lowercase \
+             hex characters, got {:?}",
+            digest,
+        );
+    }
+
+    Ok(digest.to_string())
+}
+
 async fn get_alias_from_registry(
     registry: &str,
     name: &str,
@@ -67,7 +95,7 @@ async fn get_alias_from_registry(
         bail!("registry returned empty digest for alias");
     }
 
-    Ok(digest)
+    parse_artifact_digest(&digest, "registry")
 }
 
 async fn read_alias_digest(alias_path: &Path, artifact_name: &str) -> Result<String> {
@@ -89,7 +117,7 @@ async fn read_alias_digest(alias_path: &Path, artifact_name: &str) -> Result<Str
         );
     }
 
-    Ok(artifact_digest)
+    parse_artifact_digest(&artifact_digest, "alias file")
 }
 
 /// Writes `data` to a staged sibling of `archive_path`, then publishes it
@@ -367,9 +395,12 @@ async fn resolve_alias_digest(
                     })?;
                 }
 
-                // Staged then published atomically, per C9: a concurrent
-                // reader of `alias_path` (`read_alias_digest`) must never
-                // observe a truncated digest mid-write.
+                // This writer publishes the alias by rename, so it never
+                // leaves a truncated digest behind. That is a property of
+                // this producer only: the local registry backend
+                // (`start/registry/artifact/local.rs`) still writes the same
+                // alias path in place, so a reader can still observe a
+                // partial digest written by that one.
                 let alias_staging_path = staging_path_for(&alias_path);
 
                 let staged: Result<()> = async {
@@ -533,6 +564,47 @@ mod tests {
             dir_entry_names(&archive_dir),
             BTreeSet::from(["abc123.tar.zst".to_string()]),
             "a staging file was left under the store directory"
+        );
+    }
+
+    // A digest names a store path, so a value that is not a bare sha256 hex
+    // string lets whoever supplied it choose where `run` reads and executes
+    // from. Both traversal and absolute forms must be refused before the
+    // digest reaches `get_artifact_output_path`.
+    #[tokio::test]
+    async fn read_alias_digest_refuses_a_digest_that_is_not_a_bare_hex_string() {
+        let root = TempDir::new().unwrap();
+
+        for hostile in [
+            "../../../../../../Users/u/Library/LaunchAgents",
+            "/Users/u/.ssh",
+            "ABC123",
+            "abc123",
+        ] {
+            let alias_path = root.path().join("alias");
+
+            std::fs::write(&alias_path, hostile).unwrap();
+
+            let err = read_alias_digest(&alias_path, "example").await.unwrap_err();
+
+            assert!(
+                err.to_string().contains("invalid artifact digest"),
+                "accepted a digest that does not name a store path: {hostile}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn read_alias_digest_accepts_a_sha256_digest() {
+        let root = TempDir::new().unwrap();
+        let alias_path = root.path().join("alias");
+        let digest = "a".repeat(64);
+
+        std::fs::write(&alias_path, format!("{digest}\n")).unwrap();
+
+        assert_eq!(
+            read_alias_digest(&alias_path, "example").await.unwrap(),
+            digest
         );
     }
 
