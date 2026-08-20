@@ -922,6 +922,15 @@ async fn refresh_access_token(
     let token_endpoint_origin =
         credential_egress_origin(token_endpoint).map_err(RefreshFailure::NotSent)?;
 
+    // Contract, not incidental: the discovery document's token_endpoint must
+    // share the issuer's scheme://host:port. This is deliberate — it closes
+    // an egress-redirection hazard in which a tampered or compromised
+    // discovery document steers the credential-bearing POST to a host of its
+    // own choosing, and it is the sibling of the `redirect::Policy::none()`
+    // set above: an origin pin without a redirect ban is not a pin. A
+    // legitimate multi-host IdP deployment must be reconciled with this
+    // constraint (e.g. by fronting the token endpoint on the issuer's own
+    // origin) rather than this check being relaxed or bypassed.
     if token_endpoint_origin != issuer_origin {
         return Err(RefreshFailure::NotSent(anyhow!(
             "OIDC token_endpoint origin {} does not match issuer origin {}",
@@ -1009,6 +1018,14 @@ fn apply_token_refresh(
 /// needs to be unique, not unpredictable.
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// How many fresh temp-file names `write_credentials_secure` tries before
+/// giving up. `TEMP_FILE_COUNTER` resets to 0 on every process start, so a
+/// leaked temp file from a prior invocation that reused this process's PID
+/// and counter value collides on `create_new` — defense against that stale
+/// leftover, not an adversarial loop (a same-UID adversary that wants to
+/// exhaust this budget already has the token, VPL-283 threat model A2).
+const TEMP_FILE_MAX_ATTEMPTS: u32 = 8;
+
 /// Unlinks the temp file at `path` when dropped, unless [`disarm`] was
 /// called first. Owns `write_credentials_secure`'s temp file from the moment
 /// that file is created through to a committed `rename`, so a cancelled
@@ -1083,7 +1100,51 @@ impl Drop for TempFileGuard {
 /// [`TempFileGuard`] owns the temp file from creation onward — success
 /// disarms it after `rename` commits; any early return, cancellation, or
 /// panic leaves it armed and `Drop` unlinks the file.
+///
+/// A `create_new` collision (`ErrorKind::AlreadyExists`) is retried against a
+/// fresh candidate name up to [`TEMP_FILE_MAX_ATTEMPTS`] times rather than
+/// failing closed on the first stale leftover (VPL-283 C-4): see
+/// [`write_credentials_secure_with_names`] for the retry itself.
 async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("credentials")
+        .to_string();
+    let pid = std::process::id();
+
+    let candidate_names = std::iter::repeat_with(move || {
+        format!(
+            "{}.{}.{}.tmp",
+            file_name,
+            pid,
+            TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        )
+    })
+    .take(TEMP_FILE_MAX_ATTEMPTS as usize);
+
+    write_credentials_secure_with_names(path, bytes, candidate_names).await
+}
+
+/// Core of [`write_credentials_secure`], taking the candidate temp-file names
+/// as a parameter so a collision on the first one is testable without racing
+/// the real `TEMP_FILE_COUNTER` static under Rust's parallel test harness.
+/// Deliberately private and not configurable from any production entry point
+/// (env var, global override) — same discipline as `client_auth_header_at`,
+/// see its doc comment.
+///
+/// Every attempt uses `create_new` (`O_EXCL`) and `.mode(0o600)`: never falls
+/// back to a non-exclusive open (that would follow a pre-existing path
+/// instead of refusing it) and never unlinks or truncates a name that is
+/// already taken (that name may belong to a concurrently-writing same-UID
+/// process). Both are the fail-open directions this retry must not
+/// reintroduce (VPL-283 C-4). Exhausting every candidate name returns `Err`
+/// rather than looping.
+async fn write_credentials_secure_with_names(
+    path: &Path,
+    bytes: &[u8],
+    mut candidate_names: impl Iterator<Item = String> + Send,
+) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
         anyhow!(
             "credentials path has no parent directory: {}",
@@ -1091,34 +1152,43 @@ async fn write_credentials_secure(path: &Path, bytes: &[u8]) -> Result<()> {
         )
     })?;
 
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("credentials");
-
-    let temp_path = parent.join(format!(
-        "{}.{}.{}.tmp",
-        file_name,
-        std::process::id(),
-        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-
     // Create the file and arm its guard in one blocking unit. A
     // `spawn_blocking` task runs to completion even when the future awaiting
     // it is dropped, so the guard and the file it owns come into existence
     // together and are dropped together; splitting them around an `.await`
     // leaves a cancellation window in which the open still lands but the
     // guard is already gone, and the temp file outlives it (VPL-183 AB-9).
-    let open_path = temp_path.clone();
-    let (mut guard, file) = tokio::task::spawn_blocking(move || {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&open_path)
-            .map(|file| (TempFileGuard::new(open_path), file))
-    })
-    .await??;
+    // Each retry attempt is its own `spawn_blocking` unit so this property
+    // holds per attempt, not just for the first one.
+    let (mut guard, file, temp_path) = loop {
+        let name = candidate_names.next().ok_or_else(|| {
+            anyhow!(
+                "exhausted {} candidate temp-file names writing {}",
+                TEMP_FILE_MAX_ATTEMPTS,
+                path.display()
+            )
+        })?;
+
+        let open_path = parent.join(name);
+        let attempt_path = open_path.clone();
+
+        let opened: std::io::Result<(TempFileGuard, std::fs::File)> =
+            tokio::task::spawn_blocking(move || {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&attempt_path)
+                    .map(|file| (TempFileGuard::new(attempt_path), file))
+            })
+            .await?;
+
+        match opened {
+            Ok((guard, file)) => break (guard, file, open_path),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err.into()),
+        }
+    };
 
     let mut file = tokio::fs::File::from_std(file);
 
@@ -1291,20 +1361,35 @@ async fn commit_refreshed_credentials(
 }
 
 /// Core of [`client_auth_header`], taking the credentials path, the refresh
-/// operation and the current time as parameters so it is testable without
-/// touching the real `/var/lib/vorpal/key/credentials.json`, performing
-/// network I/O, or depending on the wall clock. Deliberately private and not
-/// configurable from any production entry point (env var, global override) —
-/// see `client_auth_header`.
+/// operation and a clock as parameters so it is testable without touching
+/// the real `/var/lib/vorpal/key/credentials.json`, performing network I/O,
+/// or depending on the wall clock. Deliberately private and not configurable
+/// from any production entry point (env var, global override) — see
+/// `client_auth_header`.
+///
+/// `now` is a closure, not a plain value, and it is called only after
+/// [`CREDENTIALS_REFRESH`] is held — never before. A value sampled before
+/// requesting the lock can predate a still-in-flight winner's later commit;
+/// a waiter that then compares its stale, pre-lock reading against the
+/// winner's freshly committed `issued_at` sees a future-dated token and
+/// refreshes again, once per waiter (VPL-283 AB-283-1 / C-1). Every candidate
+/// fix that instead clamps or ignores a future-dated `issued_at` in
+/// [`needs_refresh`] is fail-open (VPL-283 C-2) — this seam fixes the sample
+/// point, not the policy.
 async fn client_auth_header_at(
     credentials_path: &Path,
     registry: &str,
     refresher: &dyn TokenRefresher,
-    now: u64,
+    now: &(dyn Fn() -> Result<u64> + Send + Sync),
 ) -> Result<Option<MetadataValue<Ascii>>> {
     // Acquired before the existence check and the read below, and held
     // through the write: see CREDENTIALS_REFRESH's doc comment.
     let mut state = CREDENTIALS_REFRESH.lock().await;
+
+    // Sampled here, strictly after the lock is held — see this function's
+    // doc comment. Not in `client_auth_header`, whose pre-lock sample was
+    // the defect.
+    let now = now()?;
 
     if !credentials_path.exists() {
         return Ok(None);
@@ -1406,6 +1491,16 @@ async fn client_auth_header_at(
     Ok(Some(header))
 }
 
+/// Real wall-clock seconds since the Unix epoch. Passed to
+/// `client_auth_header_at` as its clock seam rather than sampled once here
+/// and passed down as a plain value — see that function's doc comment for
+/// why the call site of the sample, not just its value, is the fix.
+fn system_now() -> Result<u64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs())
+}
+
 /// Builds the `authorization: Bearer <token>` gRPC metadata header for
 /// `registry`, refreshing the stored access token first if it is within five
 /// minutes of expiry. Returns `None` when no credentials file exists or the
@@ -1420,15 +1515,11 @@ async fn client_auth_header_at(
 /// fails; if the refreshed credentials cannot be saved; or if the resulting
 /// header value fails to parse.
 pub async fn client_auth_header(registry: &str) -> Result<Option<MetadataValue<Ascii>>> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs();
-
     client_auth_header_at(
         &get_key_credentials_path(),
         registry,
         &LiveTokenRefresher,
-        now,
+        &system_now,
     )
     .await
 }
@@ -1785,7 +1876,7 @@ mod tests {
             let refresher = refresher.clone();
 
             tasks.spawn(async move {
-                client_auth_header_at(&path, "registry-1", refresher.as_ref(), now).await
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), &|| Ok(now)).await
             });
         }
 
@@ -1846,7 +1937,7 @@ mod tests {
             let refresher = refresher.clone();
 
             tasks.spawn(async move {
-                client_auth_header_at(&path, "registry-1", refresher.as_ref(), now).await
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), &|| Ok(now)).await
             });
         }
 
@@ -1907,11 +1998,11 @@ mod tests {
             ))
         });
 
-        client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+        client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(now))
             .await
             .expect_err("the first call fails locally");
 
-        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(now))
             .await
             .expect("a token that never left the process must still be usable");
 
@@ -1952,14 +2043,14 @@ mod tests {
             ))
         });
 
-        client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+        client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(now))
             .await
             .expect_err("the first exchange fails and spends its token");
 
         // A re-login replaces the stored token with a different value.
         scratch.write_fixture(3600, now - 3360, &scratch.token("fresh-refresh"));
 
-        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(now))
             .await
             .expect("a different stored token must still be exchangeable");
 
@@ -1997,7 +2088,7 @@ mod tests {
         });
 
         for _ in 0..5 {
-            client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+            client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(now))
                 .await
                 .expect_err("a zero-lifetime token is unusable and must say so");
         }
@@ -2097,7 +2188,7 @@ mod tests {
             ))
         });
 
-        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, now)
+        let header = client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(now))
             .await
             .expect("must not panic or error on a future-dated issued_at");
 
@@ -2142,7 +2233,7 @@ mod tests {
             let refresher = refresher.clone();
 
             tasks.spawn(async move {
-                client_auth_header_at(&path, "registry-1", refresher.as_ref(), now).await
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), &|| Ok(now)).await
             });
         }
 
@@ -2199,7 +2290,7 @@ mod tests {
             let refresher = refresher.clone();
 
             tasks.spawn(async move {
-                client_auth_header_at(&path, "registry-1", refresher.as_ref(), now).await
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), &|| Ok(now)).await
             });
         }
 
@@ -2219,7 +2310,7 @@ mod tests {
         // not immediately rotate again: the freshly issued token
         // (issued_at ~ now, expires_in 60) must fall outside the
         // proportional refresh window.
-        client_auth_header_at(&scratch.path, "registry-1", refresher.as_ref(), now)
+        client_auth_header_at(&scratch.path, "registry-1", refresher.as_ref(), &|| Ok(now))
             .await
             .expect("second call must succeed");
 
@@ -2227,6 +2318,82 @@ mod tests {
             refresher.calls(),
             1,
             "a freshly rotated short-lived token must not be rotated again immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_samples_the_clock_after_the_refresh_lock_not_before() {
+        // AC8 (VPL-283 C-1), reproducing judge-correctness's PROBE674-A: a
+        // `now` sampled before a waiter even requested CREDENTIALS_REFRESH
+        // can predate a still-in-flight winner's later commit. This clock
+        // models real elapsed time — it starts at the value every waiter
+        // would have sampled before queuing on the lock, and the winning
+        // exchange advances it to a strictly later value, exactly as a real
+        // wall clock does while the other 7 wait. A waiter whose `now` read
+        // happens only after it holds the lock necessarily observes the
+        // winner's advance (the winner cannot release the lock until its
+        // commit, which bumps the clock, has already happened); a waiter
+        // that read the clock before requesting the lock cannot.
+        let scratch = ScratchCredentials::new("clock-skew-storm");
+        let before_lock = unix_now();
+        let rotated = scratch.token("rotated-refresh");
+
+        // Token 4 minutes from expiry: token_age + 300 >= expires_in, so a
+        // waiter evaluating against a correctly current clock still finds a
+        // refresh due before the winner commits.
+        let expires_in = 3600u64;
+
+        scratch.write_fixture(
+            expires_in,
+            before_lock - (expires_in - 240),
+            &scratch.token("old-refresh"),
+        );
+
+        let sim_clock = Arc::new(AtomicU64::new(before_lock));
+        let refresher_clock = sim_clock.clone();
+
+        let refresher = Arc::new(ScriptedRefresher::new(move |_| {
+            // Every exchange mints its issued_at from a clock reading one
+            // second later than the last, the same self-healing shape
+            // `refresh_access_token` uses against the real wall clock
+            // (`SystemTime::now()`), and advances the shared clock to match
+            // — modeling time passing while an exchange is in flight.
+            let issued_at = refresher_clock.fetch_add(1, Ordering::SeqCst) + 1;
+
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                issued_at,
+                Some(rotated.clone()),
+            ))
+        }));
+
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for _ in 0..8 {
+            let path = scratch.path.clone();
+            let refresher = refresher.clone();
+            let clock = sim_clock.clone();
+
+            tasks.spawn(async move {
+                client_auth_header_at(&path, "registry-1", refresher.as_ref(), &move || {
+                    Ok(clock.load(Ordering::SeqCst))
+                })
+                .await
+            });
+        }
+
+        while let Some(result) = tasks.join_next().await {
+            result
+                .expect("task panicked")
+                .expect("client_auth_header_at failed");
+        }
+
+        assert_eq!(
+            refresher.calls(),
+            1,
+            "exactly one exchange must occur for 8 waiters racing the refresh lock, got {}",
+            refresher.calls()
         );
     }
 
@@ -2419,6 +2586,98 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn write_credentials_secure_retries_past_an_eexist_collision() {
+        // AC10 / C-4: `TEMP_FILE_COUNTER` resets to 0 on every process
+        // start, so a leaked temp file from a prior invocation that reused
+        // this process's pid and counter value collides on `create_new` and,
+        // without a retry, fails the open closed — permanently burning the
+        // credential on one stale leftover file (VPL-283 AB-283-4).
+        let scratch = ScratchCredentials::new("eexist-retry");
+        let collider = scratch.dir.join("credentials.json.leftover.tmp");
+        let occupant_bytes = b"a leftover file from a prior process, untouched by the retry";
+
+        std::fs::write(&collider, occupant_bytes).expect("seed colliding temp file");
+
+        let collider_name = collider
+            .file_name()
+            .expect("collider has a file name")
+            .to_str()
+            .expect("collider name is utf-8")
+            .to_string();
+        let fresh_name = "credentials.json.fresh.tmp".to_string();
+
+        write_credentials_secure_with_names(
+            &scratch.path,
+            b"{\"hello\":\"world\"}",
+            vec![collider_name, fresh_name].into_iter(),
+        )
+        .await
+        .expect("write must retry past the collision and succeed");
+
+        assert_eq!(
+            std::fs::read(&scratch.path).expect("read destination"),
+            b"{\"hello\":\"world\"}"
+        );
+
+        let mode = std::fs::metadata(&scratch.path)
+            .expect("stat credentials")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "the successful retry attempt must still carry mode 0o600"
+        );
+
+        // Prohibition (a): unlinking or truncating a name that is already
+        // taken is the one way this fix could turn a same-UID nuisance into
+        // a destructive primitive against a concurrently-writing process.
+        assert_eq!(
+            std::fs::read(&collider).expect("read collider"),
+            occupant_bytes,
+            "the pre-existing colliding file must survive untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_credentials_secure_gives_up_once_every_candidate_name_is_taken() {
+        // Bound test pairing AC10: every candidate occupied must return
+        // `Err`, not retry forever.
+        let scratch = ScratchCredentials::new("eexist-exhausted");
+        let collider_a = scratch.dir.join("a.tmp");
+        let collider_b = scratch.dir.join("b.tmp");
+
+        std::fs::write(&collider_a, b"a").expect("seed collider a");
+        std::fs::write(&collider_b, b"b").expect("seed collider b");
+
+        let names = vec![
+            collider_a
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
+            collider_b
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
+        ];
+
+        write_credentials_secure_with_names(&scratch.path, b"{}", names.into_iter())
+            .await
+            .expect_err("every candidate occupied must fail rather than loop");
+
+        assert!(
+            !scratch.path.exists(),
+            "an exhausted retry must not write the destination"
+        );
+        assert_eq!(std::fs::read(&collider_a).unwrap(), b"a");
+        assert_eq!(std::fs::read(&collider_b).unwrap(), b"b");
+    }
+
     /// A minimal HTTP/1.1 stand-in for an IdP: it answers each request with
     /// whatever `respond` returns for that request's path, or holds the
     /// connection open forever when that is `None`. Only a true external
@@ -2500,6 +2759,16 @@ mod tests {
             "{{\"token_endpoint\":\"http://127.0.0.1:{}/token\"}}",
             addr.port()
         ))
+    }
+
+    /// A 400 response carrying a JSON body — the shape a token endpoint
+    /// sends back for an invalid or already-consumed refresh token.
+    fn http_json_error(body: &str) -> String {
+        format!(
+            "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
     }
 
     #[tokio::test]
@@ -2616,6 +2885,55 @@ mod tests {
             error.contains("must be https"),
             "unexpected error: {}",
             error
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_classifies_a_rejected_token_post_as_sent() {
+        // AC9 (VPL-283 C-6): the Sent/NotSent split at the token-POST call
+        // site (`.map_err(|e| RefreshFailure::Sent(...))`) is what the memo
+        // depends on to decide whether a failed exchange is safe to retry.
+        // Every "replay" test elsewhere in this module builds a `Sent`
+        // verdict by hand via `ScriptedRefresher`; none exercises the real
+        // classification, so mutating that single arm to `NotSent` left the
+        // full suite green (VPL183-T9). Drive the real POST through a
+        // fixture that rejects it instead.
+        let idp = IdpServer::start(|path, addr| {
+            if path.contains(".well-known") {
+                return Some(discovery_document(addr));
+            }
+
+            Some(http_json_error("{\"error\":\"invalid_grant\"}"))
+        })
+        .await;
+
+        let failure = refresh_access_token(
+            None,
+            "client-1",
+            &idp.issuer(),
+            "stored-refresh",
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect_err("a rejected token POST must be classified as an error");
+
+        assert!(
+            matches!(failure, RefreshFailure::Sent(_)),
+            "a rejected token POST must be classified Sent: the IdP may already have consumed the token"
+        );
+
+        // Positive control discriminating against AB-283-6: without this,
+        // the assertion above cannot tell "classified Sent by the real POST"
+        // from "rejected as NotSent at the origin check before the POST was
+        // ever made" — both produce an error, but only one exercises the
+        // mutant's line.
+        assert_eq!(
+            idp.requested_paths(),
+            vec![
+                "/.well-known/openid-configuration".to_string(),
+                "/token".to_string()
+            ],
+            "the token POST must actually have been attempted"
         );
     }
 
