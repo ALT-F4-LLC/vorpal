@@ -1,11 +1,12 @@
-use anyhow::{bail, Error, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use filetime::{set_file_times, set_symlink_file_times, FileTime};
 use std::{
     io::{Error as IoError, ErrorKind},
     path::{Path, PathBuf},
 };
-use tokio::fs::{copy, create_dir_all, metadata, remove_dir_all, remove_file, rename, symlink};
-use tonic::Status;
+use tokio::fs::{
+    copy, create_dir_all, metadata, remove_dir_all, remove_file, rename, symlink, symlink_metadata,
+};
 use tracing::{info, warn};
 use uuid::Uuid;
 use vorpal_sdk::api::artifact::ArtifactSystem;
@@ -166,11 +167,11 @@ pub fn get_artifact_output_path(digest: &str, namespace: &str) -> PathBuf {
 // A shared store path (an archive, or an artifact output directory) must
 // never be observable by a reader in a partial state. Every producer that
 // writes one stages its content at a private sibling path first, then
-// publishes with a single rename. These three functions are that mechanism;
-// moving them here (rather than leaving them private to the gRPC service
-// module) is what lets every producer — pull, build, and eventually the CLI's
-// own build/run commands — share one implementation instead of each growing
-// its own copy of the same invariant.
+// publishes with a single rename. These three functions are that mechanism,
+// and they live here rather than private to the gRPC service module so that
+// every producer — the worker's pull and build paths, and the CLI's own
+// build/run commands — shares one implementation instead of each growing its
+// own copy of the same invariant.
 
 /// Builds the staging path for a store entry: a unique sibling of `real_path`,
 /// so the publishing rename stays on one filesystem and `real_path` itself is
@@ -183,8 +184,13 @@ pub fn staging_path_for(real_path: &Path) -> PathBuf {
 /// propagated — the caller is already returning the failure that abandoned it
 /// — but they are never silent, so a store root that has stopped accepting
 /// removals is visible.
+///
+/// The file-or-directory decision is made on the link itself, not on what it
+/// points at: a build step owns the staging directory while it runs and can
+/// replace it with a symlink, and a following stat would then send
+/// `remove_dir_all` at the symlink's target instead of at the link.
 pub async fn discard_staging(staging_path: &Path) {
-    let removed = match metadata(staging_path).await {
+    let removed = match symlink_metadata(staging_path).await {
         Ok(meta) if meta.is_dir() => remove_dir_all(staging_path).await,
         Ok(_) => remove_file(staging_path).await,
         Err(err) if err.kind() == ErrorKind::NotFound => return,
@@ -193,7 +199,7 @@ pub async fn discard_staging(staging_path: &Path) {
 
     if let Err(err) = removed {
         warn!(
-            "worker |> failed to discard staging path {}: {err}",
+            "store |> failed to discard staging path {}: {err}",
             staging_path.display()
         );
     }
@@ -207,15 +213,34 @@ pub async fn discard_staging(staging_path: &Path) {
 /// failure, and the target merely existing is not evidence of a lost race.
 ///
 /// This reads a non-empty target as a finished entry, which holds only while
-/// every writer of that path publishes atomically. The CLI's own `build` and
-/// `run` commands still populate the real path in place (tracked separately)
-/// and can be mid-population when the rename lands here, and their
-/// half-filled directory is then mistaken for a winner's finished one.
+/// every writer of that path publishes atomically. Every producer in this
+/// repository now does — the worker's pull and build paths and the CLI's
+/// `build` and `run` commands all stage and rename through this function — so
+/// a non-empty target is another publisher's completed rename. A future
+/// producer that populates a store path in place breaks that reading, and its
+/// half-filled directory would be mistaken here for a winner's finished one.
 fn is_lost_race(err: &IoError) -> bool {
     matches!(
         err.kind(),
         ErrorKind::DirectoryNotEmpty | ErrorKind::AlreadyExists
     )
+}
+
+/// Which publisher's bytes stand at the target path once a publish succeeds.
+///
+/// The distinction matters because it is not observable from the path
+/// afterwards: store paths are recipe-addressed (`digest(artifact_json)`), not
+/// content-addressed, so two publishers of one digest can hold genuinely
+/// different bytes and the loser has no way to notice. A caller that already
+/// shipped its own copy somewhere else — pushed an archive to a registry, say
+/// — needs to know that the copy it shipped is not the one in the store.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublishOutcome {
+    /// This caller's staged content is what now stands at the target path.
+    Published,
+    /// Another publisher of the same path got there first. This caller's
+    /// staged copy was discarded and the target holds the winner's bytes.
+    Superseded,
 }
 
 /// Publishes fully-written `staging_path` to shared `target_path` with a single
@@ -227,38 +252,37 @@ fn is_lost_race(err: &IoError) -> bool {
 /// entry, never a partial one — including when a writer is killed, which
 /// strands only its staging path.
 ///
-/// Losing a race to another publisher of the same digest is `Ok`: the staged
-/// copy is discarded and the winner's content stands. Where the rename replaces
-/// the target rather than failing (an existing file, or an empty directory) the
-/// result is treated as equivalent — but that is a statement about the
-/// recipe, not the bytes: store paths are recipe-addressed
-/// (`digest(artifact_json)`), not content-addressed, and nothing in this
-/// function verifies the winner's output bytes against anything. Callers must
-/// not read "lost the race, discarded cleanly" as "verified identical."
+/// Losing a race to another publisher of the same digest is `Ok`, reported as
+/// `Superseded`: the staged copy is discarded and the winner's content stands.
+/// Where the rename replaces the target rather than failing (an existing file,
+/// or an empty directory) this caller won, and the result is `Published`.
+/// Neither outcome says anything about the bytes — nothing in this function
+/// verifies any publisher's content against anything — so callers must not read
+/// `Superseded` as "verified identical."
 ///
 /// A caller that discards the same staging path again on `Err` is correct and
 /// expected: that second call retries a removal this one already warned about,
 /// and is otherwise a no-op.
-pub async fn publish_atomically(staging_path: &Path, target_path: &Path) -> Result<(), Status> {
+pub async fn publish_atomically(staging_path: &Path, target_path: &Path) -> Result<PublishOutcome> {
     let Err(err) = rename(staging_path, target_path).await else {
-        return Ok(());
+        return Ok(PublishOutcome::Published);
     };
 
     discard_staging(staging_path).await;
 
     if is_lost_race(&err) {
         info!(
-            "worker |> discarded staged copy of {}: published concurrently",
+            "store |> discarded staged copy of {}: published concurrently",
             target_path.display()
         );
 
-        return Ok(());
+        return Ok(PublishOutcome::Superseded);
     }
 
-    Err(Status::internal(format!(
+    Err(anyhow!(
         "failed to publish {}: {err}",
         target_path.display()
-    )))
+    ))
 }
 
 // Temp paths
@@ -464,10 +488,10 @@ mod tests {
         path
     }
 
-    // AC1 seam: publish_atomically is the mechanism pull_artifact uses to move
-    // an unpacked dependency into the shared store path. This pins that the
-    // published directory is byte-identical to what the writer staged, with
-    // nothing lost or added in the move.
+    // The seam every producer publishes through — the worker's pull and build
+    // paths and the CLI's build/run commands. This pins that the published
+    // directory is byte-identical to what the writer staged, with nothing lost
+    // or added in the move.
     #[tokio::test]
     async fn publish_atomically_moves_staged_content_into_place() {
         let root = TempDir::new().unwrap();
@@ -506,11 +530,11 @@ mod tests {
         assert_eq!(second.parent(), real_path.parent());
     }
 
-    // AC1: two concurrent pull_artifact calls sharing an uncached dependency
-    // race to publish the same digest. The loser's content differs from the
-    // winner's so the assertions can tell which one is on disk: the winner's
-    // directory must survive untouched, down to the same inode, and the loser
-    // must leave nothing of itself behind.
+    // Two producers of the same digest race to publish it. The loser's content
+    // differs from the winner's so the assertions can tell which one is on
+    // disk: the winner's directory must survive untouched, down to the same
+    // inode, the loser must leave nothing of itself behind, and the loser must
+    // be told it was superseded rather than that it published.
     #[tokio::test]
     async fn publish_atomically_discards_a_loser_without_disturbing_the_winner() {
         let root = TempDir::new().unwrap();
@@ -518,14 +542,21 @@ mod tests {
 
         let winner_temp = staged_dir(root.path(), "winner", &["winner.txt"], "winner-content");
 
-        publish_atomically(&winner_temp, &target_path)
-            .await
-            .unwrap();
+        assert_eq!(
+            publish_atomically(&winner_temp, &target_path)
+                .await
+                .unwrap(),
+            PublishOutcome::Published
+        );
 
         let published_inode = std::fs::metadata(&target_path).unwrap().ino();
         let loser_temp = staged_dir(root.path(), "loser", &["loser.txt"], "loser-content");
 
-        publish_atomically(&loser_temp, &target_path).await.unwrap();
+        assert_eq!(
+            publish_atomically(&loser_temp, &target_path).await.unwrap(),
+            PublishOutcome::Superseded,
+            "the loser was told it published its own bytes"
+        );
 
         assert!(!loser_temp.exists());
         assert_eq!(
@@ -561,7 +592,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(err.message().contains("failed to publish"), "{err:?}");
+        assert!(err.to_string().contains("failed to publish"), "{err:?}");
         assert!(
             !staging_path.exists(),
             "staged copy left behind after a failed publish"
@@ -572,9 +603,35 @@ mod tests {
         );
     }
 
-    // The archive half of a pull stages a file rather than a directory, so the
-    // failure path has to dispose of a file. Publishing onto an occupied
-    // directory fails, and the staged archive must not survive it.
+    // A build step owns its staging directory while it runs, so it can replace
+    // that directory with a symlink and then fail. Discarding must delete the
+    // link the producer staged, never walk through it into whatever it points
+    // at — the pointed-at directory here stands in for anything else on the
+    // host the worker can write.
+    #[tokio::test]
+    async fn discard_staging_removes_a_symlinked_staging_path_not_its_target() {
+        let root = TempDir::new().unwrap();
+        let elsewhere = staged_dir(root.path(), "elsewhere", &["keep.txt"], "keep");
+        let staging_path = root.path().join(".tmp-staging");
+
+        tokio::fs::symlink(&elsewhere, &staging_path).await.unwrap();
+
+        discard_staging(&staging_path).await;
+
+        assert!(
+            !staging_path.exists(),
+            "the staged symlink survived discarding"
+        );
+        assert_eq!(
+            dir_entry_names(&elsewhere),
+            BTreeSet::from(["keep.txt".to_string()]),
+            "discarding followed the symlink and deleted its target"
+        );
+    }
+
+    // Producers that publish an archive or an alias stage a file rather than a
+    // directory, so the failure path has to dispose of a file. Publishing onto
+    // an occupied directory fails, and the staged file must not survive it.
     #[tokio::test]
     async fn publish_atomically_discards_a_staged_file_when_publishing_fails() {
         let root = TempDir::new().unwrap();
@@ -598,9 +655,11 @@ mod tests {
         );
     }
 
-    // A build that produces nothing leaves an empty directory at the output
-    // path, and a rename replaces an empty directory rather than failing. Pin
-    // that outcome: the publisher wins and its content lands whole.
+    // A rename onto an empty directory replaces it rather than failing, so an
+    // empty target is not a racer this publisher lost to. Pin that outcome:
+    // the publisher wins, its content lands whole, and it is told it won —
+    // which is why no producer may publish an empty directory in the first
+    // place (see `stage_then_publish` in the worker).
     #[tokio::test]
     async fn publish_atomically_replaces_an_empty_target_directory() {
         let root = TempDir::new().unwrap();
@@ -610,9 +669,12 @@ mod tests {
 
         let staging_path = staged_dir(root.path(), "staging", &["a.txt"], "payload");
 
-        publish_atomically(&staging_path, &target_path)
-            .await
-            .unwrap();
+        assert_eq!(
+            publish_atomically(&staging_path, &target_path)
+                .await
+                .unwrap(),
+            PublishOutcome::Published
+        );
 
         assert!(!staging_path.exists());
         assert_eq!(
@@ -621,12 +683,11 @@ mod tests {
         );
     }
 
-    // AC2: verified by a test that drives two concurrent pull_artifact-style
-    // publishers for the same digest and asserts a concurrent reader of the
-    // shared target never observes a partial directory: it sees either
-    // nothing (not yet published) or the complete, fully-formed set of
-    // files — never a subset. This exercises the exact seam pull_artifact
-    // relies on for atomicity with respect to a concurrent reader.
+    // The property every reader in the store depends on: a reader polling the
+    // shared target while a publisher stages it sees either nothing (not yet
+    // published) or the complete, fully-formed set of files — never a subset.
+    // Readers test readiness with a bare `exists()`, so a partial directory
+    // appearing here would be taken for a finished entry.
     #[tokio::test]
     async fn publish_atomically_never_exposes_a_partial_directory_to_a_reader() {
         let root = TempDir::new().unwrap();

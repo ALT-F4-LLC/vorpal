@@ -6,7 +6,7 @@ use crate::command::{
         paths::{
             discard_staging, get_artifact_archive_path, get_artifact_output_lock_path,
             get_artifact_output_path, get_file_paths, get_key_service_key_path, publish_atomically,
-            set_timestamps, staging_path_for,
+            set_timestamps, staging_path_for, PublishOutcome,
         },
         temps::{create_sandbox_dir, create_sandbox_file},
     },
@@ -14,10 +14,18 @@ use crate::command::{
 use anyhow::Result;
 use sha256::digest;
 use std::{
-    collections::HashSet, fs::Permissions, os::unix::fs::PermissionsExt, path::Path, process::Stdio,
+    collections::HashSet,
+    fs::Permissions,
+    future::Future,
+    os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+    path::{Path, PathBuf},
+    process::Stdio,
 };
 use tokio::{
-    fs::{create_dir_all, remove_dir_all, remove_file, set_permissions, write},
+    fs::{
+        create_dir_all, read_dir, read_link, remove_dir_all, remove_file, set_permissions,
+        symlink_metadata, write, File,
+    },
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
     sync::{mpsc, mpsc::Sender},
@@ -277,7 +285,10 @@ async fn publish_archive(data: &[u8], archive_path: &Path) -> Result<(), Status>
             ))
         })?;
 
-        publish_atomically(&staging_path, archive_path).await
+        publish_atomically(&staging_path, archive_path)
+            .await
+            .map(|_| ())
+            .map_err(|err| Status::internal(err.to_string()))
     }
     .await;
 
@@ -317,7 +328,10 @@ async fn publish_unpacked(archive_path: &Path, output_path: &Path) -> Result<(),
             })?;
         }
 
-        publish_atomically(&staging_path, output_path).await
+        publish_atomically(&staging_path, output_path)
+            .await
+            .map(|_| ())
+            .map_err(|err| Status::internal(err.to_string()))
     }
     .await;
 
@@ -326,6 +340,137 @@ async fn publish_unpacked(archive_path: &Path, output_path: &Path) -> Result<(),
     }
 
     staged
+}
+
+/// Produces a store entry under a private staging directory and publishes it
+/// to `output_path` with a single rename.
+///
+/// `produce` is handed the staging directory and never learns `output_path`:
+/// the real path comes into existence exactly once, in the publish below. A
+/// producer that fails, or a worker that is killed, therefore strands only the
+/// staging directory, and no reader's `exists()` check on the real path can
+/// mistake a half-built entry for a finished one.
+///
+/// A producer that wrote nothing does not publish. An empty directory passes
+/// every one of those `exists()` readers as a complete entry and would cache a
+/// build that produced no output forever, so it is discarded and the failure
+/// reported, leaving the digest buildable.
+async fn stage_then_publish<F, Fut>(
+    output_path: &Path,
+    produce: F,
+) -> Result<PublishOutcome, Status>
+where
+    F: FnOnce(PathBuf) -> Fut,
+    Fut: Future<Output = Result<(), Status>>,
+{
+    let staging_path = staging_path_for(output_path);
+
+    create_dir_all(&staging_path).await.map_err(|err| {
+        Status::internal(format!(
+            "failed to create staging path {}: {err}",
+            staging_path.display()
+        ))
+    })?;
+
+    let staged = async {
+        produce(staging_path.clone()).await?;
+
+        let mut staged_entries = read_dir(&staging_path)
+            .await
+            .map_err(|err| Status::internal(format!("failed to read staged output: {err}")))?;
+
+        let is_empty = staged_entries
+            .next_entry()
+            .await
+            .map_err(|err| Status::internal(format!("failed to read staged output: {err}")))?
+            .is_none();
+
+        if is_empty {
+            return Err(Status::internal("artifact produced no output files"));
+        }
+
+        publish_atomically(&staging_path, output_path)
+            .await
+            .map_err(|err| Status::internal(err.to_string()))
+    }
+    .await;
+
+    if staged.is_err() {
+        discard_staging(&staging_path).await;
+    }
+
+    staged
+}
+
+/// Reports the first entry under a staged tree that carries `needle` in its
+/// bytes — file contents or symlink target.
+///
+/// Files are read in overlapping chunks so a match straddling a chunk boundary
+/// is still found and an artifact larger than memory is still scannable.
+async fn find_embedded_reference(
+    staged_files: &[PathBuf],
+    needle: &str,
+) -> Result<Option<PathBuf>, Status> {
+    let needle = needle.as_bytes();
+    let overlap = needle.len() - 1;
+
+    for path in staged_files.iter() {
+        let metadata = symlink_metadata(path)
+            .await
+            .map_err(|err| Status::internal(format!("failed to stat output file: {err}")))?;
+
+        if metadata.is_symlink() {
+            let target = read_link(path)
+                .await
+                .map_err(|err| Status::internal(format!("failed to read output link: {err}")))?;
+
+            if target
+                .as_os_str()
+                .as_bytes()
+                .windows(needle.len())
+                .any(|w| w == needle)
+            {
+                return Ok(Some(path.clone()));
+            }
+
+            continue;
+        }
+
+        if !metadata.is_file() {
+            continue;
+        }
+
+        let mut reader = BufReader::new(
+            File::open(path)
+                .await
+                .map_err(|err| Status::internal(format!("failed to open output file: {err}")))?,
+        );
+
+        let mut buf = vec![0u8; DEFAULT_CHUNKS_SIZE + overlap];
+        let mut carried = 0usize;
+
+        loop {
+            let read = reader
+                .read(&mut buf[carried..])
+                .await
+                .map_err(|err| Status::internal(format!("failed to read output file: {err}")))?;
+
+            if read == 0 {
+                break;
+            }
+
+            let filled = carried + read;
+
+            if buf[..filled].windows(needle.len()).any(|w| w == needle) {
+                return Ok(Some(path.clone()));
+            }
+
+            carried = overlap.min(filled);
+            buf.copy_within(filled - carried..filled, 0);
+        }
+    }
+
+    Ok(None)
 }
 
 async fn pull_artifact(
@@ -460,6 +605,31 @@ fn expand_env(text: &str, envs: &[&String]) -> String {
     })
 }
 
+/// The environment a step observes for the artifact it is building.
+///
+/// `artifact_path` is wherever the caller is physically building right now — a
+/// private staging directory during a build, never the shared store path,
+/// which only comes to exist via the publish rename once every step has
+/// finished. A step's reference to its own digest must therefore be that same
+/// path: asking `get_artifact_output_path` for it would hand the step a path
+/// that does not exist yet, and would disagree with `VORPAL_OUTPUT` — two
+/// different answers for one physical location.
+fn output_environments(
+    artifact_digest: &str,
+    artifact_path: &Path,
+    workspace_path: &Path,
+) -> Vec<String> {
+    vec![
+        format!(
+            "VORPAL_ARTIFACT_{}={}",
+            artifact_digest,
+            artifact_path.display()
+        ),
+        format!("VORPAL_OUTPUT={}", artifact_path.display()),
+        format!("VORPAL_WORKSPACE={}", workspace_path.display()),
+    ]
+}
+
 /// Builds the sorted list of `KEY=value` environment variable strings for one step:
 /// per-artifact `VORPAL_ARTIFACT_*` paths, `VORPAL_ARTIFACTS`, the step's own
 /// `VORPAL_ARTIFACT_*`/`VORPAL_OUTPUT`/`VORPAL_WORKSPACE`, its custom environment
@@ -499,23 +669,11 @@ async fn build_step_environments(
         environments.push(format!("VORPAL_ARTIFACTS={}", paths.join(" ")));
     }
 
-    // `artifact_path` is wherever the caller is physically building this
-    // artifact right now — a private staging directory during a build, never
-    // the shared real path directly (that only comes to exist via the
-    // publish rename once every step has finished). The self-reference below
-    // must agree with `VORPAL_OUTPUT` for that same reason: a step that reads
-    // its own digest's env var and one that reads `VORPAL_OUTPUT` need the
-    // same answer, and `get_artifact_output_path` would give a path that
-    // does not exist yet.
-    environments.extend([
-        format!(
-            "VORPAL_ARTIFACT_{}={}",
-            artifact_digest,
-            artifact_path.display()
-        ),
-        format!("VORPAL_OUTPUT={}", artifact_path.display()),
-        format!("VORPAL_WORKSPACE={}", workspace_path.display()),
-    ]);
+    environments.extend(output_environments(
+        artifact_digest,
+        artifact_path,
+        workspace_path,
+    ));
 
     // Add all custom environment variables
 
@@ -768,10 +926,9 @@ async fn push_artifact_archive(
 /// produced more than one output file (a single-file artifact is published as-is by
 /// the caller's unconditional `publish_atomically`).
 ///
-/// `artifact_staging_path` is the private staging directory the caller built into,
-/// not yet the shared real path — every error return here first discards it via
-/// `discard_staging`, so a failure at any step leaves nothing but the caller's own
-/// already-abandoned staging directory behind, never a half-published store entry.
+/// Runs inside the `stage_then_publish` closure in `build_artifact`: every error here
+/// propagates via `?` rather than discarding the staging directory itself, since
+/// `stage_then_publish` discards it centrally on any `Err` from the closure.
 #[expect(
     clippy::too_many_arguments,
     reason = "each argument is independent context (paths, digests, auth headers, request payload) threaded through from build_artifact; grouping them would need a bespoke struct with no reuse beyond this call site"
@@ -788,50 +945,35 @@ async fn pack_push_and_store_artifact(
     request_artifact_namespace: String,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
-    if let Err(err) = send_message(format!("pack: {artifact_digest}"), tx).await {
-        discard_staging(artifact_staging_path).await;
-        return Err(err);
-    }
+    send_message(format!("pack: {artifact_digest}"), tx).await?;
 
     // Sanitize files
 
     for path in artifact_path_files {
-        if let Err(err) = set_timestamps(path).await {
+        set_timestamps(path).await.map_err(|err| {
             error!("worker |> failed to sanitize output files: {:?}", err);
-            discard_staging(artifact_staging_path).await;
-            return Err(Status::internal(format!(
-                "failed to sanitize output files: {err:?}"
-            )));
-        }
+            Status::internal(format!("failed to sanitize output files: {err:?}"))
+        })?;
     }
 
     // Create archive
 
-    let artifact_archive = match create_sandbox_file(Some("tar.zst")).await {
-        Ok(path) => path,
-        Err(err) => {
-            discard_staging(artifact_staging_path).await;
-            return Err(Status::internal(format!(
-                "failed to create artifact archive: {err}"
-            )));
-        }
-    };
+    let artifact_archive = create_sandbox_file(Some("tar.zst"))
+        .await
+        .map_err(|err| Status::internal(format!("failed to create artifact archive: {err}")))?;
 
-    if let Err(err) =
-        compress_zstd(artifact_staging_path, artifact_path_files, &artifact_archive).await
-    {
-        error!("worker |> failed to compress artifact: {:?}", err);
-        discard_staging(artifact_staging_path).await;
-        return Err(Status::internal(format!(
-            "failed to compress artifact: {err:?}"
-        )));
-    }
+    compress_zstd(artifact_staging_path, artifact_path_files, &artifact_archive)
+        .await
+        .map_err(|err| {
+            error!("worker |> failed to compress artifact: {:?}", err);
+            Status::internal(format!("failed to compress artifact: {err:?}"))
+        })?;
 
     // TODO: check if archive is already uploaded
 
     // Upload archive
 
-    if let Err(err) = push_artifact_archive(
+    push_artifact_archive(
         &artifact_archive,
         artifact_digest,
         &request_artifact_namespace,
@@ -839,24 +981,14 @@ async fn pack_push_and_store_artifact(
         registry,
         tx,
     )
-    .await
-    {
-        discard_staging(artifact_staging_path).await;
-        return Err(err);
-    }
+    .await?;
 
     // Store artifact in registry
 
     // Create authenticated artifact client
-    let client_artifact_channel = match build_channel(registry).await {
-        Ok(channel) => channel,
-        Err(e) => {
-            discard_staging(artifact_staging_path).await;
-            return Err(Status::internal(format!(
-                "failed to connect to registry: {e}"
-            )));
-        }
-    };
+    let client_artifact_channel = build_channel(registry)
+        .await
+        .map_err(|e| Status::internal(format!("failed to connect to registry: {e}")))?;
 
     // Create client with authorization interceptor if token is available
     let mut client_artifact = ArtifactServiceClient::with_interceptor(
@@ -870,22 +1002,17 @@ async fn pack_push_and_store_artifact(
         artifact_namespace: request_artifact_namespace,
     };
 
-    if let Err(err) = client_artifact.store_artifact(request).await {
-        discard_staging(artifact_staging_path).await;
-        return Err(Status::internal(format!(
-            "failed to store artifact in registry: {err}"
-        )));
-    }
+    client_artifact
+        .store_artifact(request)
+        .await
+        .map_err(|err| Status::internal(format!("failed to store artifact in registry: {err}")))?;
 
     // Remove artifact archive
 
-    if let Err(err) = remove_file(&artifact_archive).await {
+    remove_file(&artifact_archive).await.map_err(|err| {
         error!("worker |> failed to remove artifact archive: {:?}", err);
-        discard_staging(artifact_staging_path).await;
-        return Err(Status::internal(format!(
-            "failed to remove artifact archive: {err:?}"
-        )));
-    }
+        Status::internal(format!("failed to remove artifact archive: {err:?}"))
+    })?;
 
     Ok(())
 }
@@ -1108,92 +1235,109 @@ async fn build_artifact(
     )
     .await?;
 
-    // Run steps
+    // Run steps, then publish
     //
-    // Steps build under a private staging directory, never the shared real
-    // path: `artifact_output_path` itself is created by exactly one
-    // operation, the `publish_atomically` rename at the end of this
-    // function, so a crash or kill mid-build strands only the staging
-    // directory. `pull_artifact`, `run_step`'s dependency gate, and the
-    // already-exists check above all read the real path with a bare
-    // `exists()`, and none of them can observe this build until that rename
-    // lands — there is no window where a partial or empty directory is
-    // mistaken for a finished one.
+    // Everything a build writes goes into the private staging directory
+    // `stage_then_publish` hands the closure below; `artifact_output_path`
+    // comes into existence only in that helper's publish rename. A crash, a
+    // kill, or any failure inside the closure therefore strands the staging
+    // directory alone, and the bare `exists()` readers of the real path —
+    // `pull_artifact`, `run_step`'s dependency gate, the already-exists check
+    // above — cannot observe this build until it is complete.
     //
-    // Known residual risk, not fixed by this change: a step embeds its own
-    // build-time output path into what it produces (`VORPAL_OUTPUT`,
-    // `VORPAL_ARTIFACT_<digest>`, passed as the staging path above), so a
-    // published artifact's absolute paths point at the vanished
-    // `.tmp-<uuid>` staging directory rather than at the store entry it now
-    // lives in. Keeping the observed and published path textually identical
-    // would need a bind mount, which is not cheaply available on darwin.
-    let artifact_staging_path = staging_path_for(&artifact_output_path);
+    // The references are re-bound here so the `move` closure copies them
+    // rather than taking ownership of locals the tail of this function still
+    // uses.
+    let registry = &registry;
+    let archive_auth_header = &archive_auth_header;
+    let artifact_auth_header = &artifact_auth_header;
+    let tx = &tx;
+    let workspace = workspace_path.as_path();
+    let artifact_aliases = request.artifact_aliases;
+    let store_namespace = artifact_namespace.clone();
 
-    if let Err(err) = create_dir_all(&artifact_staging_path).await {
-        error!(
-            "worker |> failed to create artifact staging path: {:?}",
-            err
-        );
-        return Err(Status::internal(format!(
-            "failed to create artifact staging path: {err:?}"
-        )));
-    }
-
-    // artifact is iterated by reference here and moved whole into
-    // pack_push_and_store_artifact below; run_step needs an owned ArtifactStep.
-    for step in &artifact.steps {
-        if let Err(err) = run_step(
-            artifact_digest,
-            artifact_namespace,
-            &artifact_staging_path,
-            step.clone(),
-            tx,
-            &workspace_path,
-        )
-        .await
-        {
-            error!("worker |> failed to run step: {:?}", err);
-            discard_staging(&artifact_staging_path).await;
-            return Err(Status::internal(err.message()));
+    let published = stage_then_publish(&artifact_output_path, move |artifact_staging_path| async move {
+        for step in artifact.steps.iter() {
+            run_step(
+                artifact_digest,
+                artifact_namespace,
+                &artifact_staging_path,
+                step.clone(),
+                tx,
+                workspace,
+            )
+            .await
+            .map_err(|err| {
+                error!("worker |> failed to run step: {:?}", err);
+                Status::internal(err.message())
+            })?;
         }
-    }
 
-    let artifact_path_files = match get_file_paths(&artifact_staging_path, vec![], vec![]) {
-        Ok(files) => files,
-        Err(err) => {
-            discard_staging(&artifact_staging_path).await;
+        let artifact_path_files = get_file_paths(&artifact_staging_path, vec![], vec![])
+            .map_err(|err| Status::internal(format!("failed to get output files: {err}")))?;
+
+        // Refuse to publish output that records where it was built.
+        //
+        // Steps observe the staging directory through `VORPAL_OUTPUT` and
+        // `VORPAL_ARTIFACT_<digest>`, and the publish rename deletes that
+        // directory. Anything that wrote the path into what it produced would
+        // be published — and pushed to the registry for every other worker —
+        // referring to a directory that no longer exists, inside a namespace
+        // directory a local user can create entries in. Making the observed
+        // path equal the published one needs a bind mount, which is not
+        // cheaply available on darwin, so the honest answer here is to fail
+        // rather than ship the artifact broken.
+        let staging_name = artifact_staging_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| Status::internal("failed to read staging path name"))?;
+
+        if let Some(offender) = find_embedded_reference(&artifact_path_files, staging_name).await? {
+            let offender = offender
+                .strip_prefix(&artifact_staging_path)
+                .unwrap_or(&offender)
+                .display()
+                .to_string();
+
+            error!("worker |> artifact embeds its build path: {}", offender);
+
             return Err(Status::internal(format!(
-                "failed to get output files: {err}"
+                "artifact embeds its build-time output path in {offender}, which does not survive publishing"
             )));
         }
-    };
 
-    if artifact_path_files.len() > 1 {
-        let request_artifact_aliases = request.artifact_aliases;
-        let request_artifact_namespace = request.artifact_namespace;
+        // A build that produced nothing has nothing to pack or push;
+        // `stage_then_publish` refuses to publish it either way.
+        if artifact_path_files.len() > 1 {
+            pack_push_and_store_artifact(
+                artifact,
+                artifact_digest,
+                &artifact_staging_path,
+                &artifact_path_files,
+                archive_auth_header.as_ref(),
+                artifact_auth_header.as_ref(),
+                registry,
+                artifact_aliases,
+                store_namespace,
+                tx,
+            )
+            .await?;
+        }
 
-        pack_push_and_store_artifact(
-            artifact,
-            artifact_digest,
-            &artifact_staging_path,
-            &artifact_path_files,
-            archive_auth_header.as_ref(),
-            artifact_auth_header.as_ref(),
-            &registry,
-            request_artifact_aliases,
-            request_artifact_namespace,
-            tx,
-        )
-        .await?;
+        Ok(())
+    })
+    .await?;
+
+    // Losing the publish race is not a failure, but this build already pushed
+    // its own archive to the registry, and the store now holds someone else's
+    // bytes for this digest. Nothing verifies the two agree, so say which
+    // happened rather than reporting a plain success.
+    if published == PublishOutcome::Superseded {
+        info!(
+            "worker |> published concurrently by another builder: {}",
+            artifact_digest
+        );
     }
-
-    // Publish: the real path comes into existence here and only here, via a
-    // single rename of the now-complete staging directory. This runs for
-    // every build regardless of file count — a zero- or one-file artifact is
-    // published exactly like a packed one, so a dependent build resolving it
-    // finds it, instead of the digest being locked out forever the way an
-    // unconditional `remove_dir_all` used to leave it.
-    publish_atomically(&artifact_staging_path, &artifact_output_path).await?;
 
     // Remove workspace
 
@@ -1290,7 +1434,11 @@ impl WorkerService for WorkerServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{collections::BTreeSet, os::unix::fs::MetadataExt};
+    use std::{
+        collections::BTreeSet,
+        os::unix::fs::MetadataExt,
+        sync::{Arc, Mutex},
+    };
     use tempfile::TempDir;
 
     fn write_files(dir: &Path, names: &[&str], contents: &str) {
@@ -1447,5 +1595,215 @@ mod tests {
             BTreeSet::new(),
             "a failed unpack left its staging directory under the store"
         );
+    }
+
+    fn store_dir() -> (TempDir, PathBuf, PathBuf) {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+
+        std::fs::create_dir_all(&store_path).unwrap();
+
+        let output_path = store_path.join("abc123");
+
+        (root, store_path, output_path)
+    }
+
+    // The conversion this seam exists for: a build never writes at the real
+    // output path, and the real path is created by moving the finished
+    // staging directory onto it. Producing in place would satisfy the inode
+    // assertion on its own and observing a different directory would satisfy
+    // the identity assertion on its own — together they pin the rename.
+    #[tokio::test]
+    async fn a_finished_producer_is_published_by_renaming_its_staging_directory() {
+        let (_root, store_path, output_path) = store_dir();
+        let staged_inode = Arc::new(Mutex::new(None));
+
+        let recorder = Arc::clone(&staged_inode);
+        let real_path = output_path.clone();
+
+        let outcome = stage_then_publish(&output_path, move |staging_path| async move {
+            assert_ne!(
+                staging_path, real_path,
+                "the producer was handed the real output path to build in"
+            );
+            assert!(
+                !real_path.exists(),
+                "the real output path existed while the producer was still building"
+            );
+
+            std::fs::write(staging_path.join("built.txt"), "built").unwrap();
+
+            *recorder.lock().unwrap() = Some(std::fs::metadata(&staging_path).unwrap().ino());
+
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(outcome, PublishOutcome::Published);
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::from(["abc123".to_string()]),
+            "a staging directory was left under the store"
+        );
+        assert_eq!(
+            std::fs::read_to_string(output_path.join("built.txt")).unwrap(),
+            "built"
+        );
+        assert_eq!(
+            std::fs::metadata(&output_path).unwrap().ino(),
+            staged_inode.lock().unwrap().unwrap(),
+            "the staged content was copied into the real path instead of renamed onto it"
+        );
+    }
+
+    // A build that dies partway — a failing step, a compress or push failure —
+    // must leave the digest exactly as buildable as it was. Every reader tests
+    // readiness with a bare `exists()`, so half-written output surviving at the
+    // real path would be taken for a finished artifact forever.
+    #[tokio::test]
+    async fn a_failing_producer_leaves_the_real_output_path_absent() {
+        let (_root, store_path, output_path) = store_dir();
+
+        let err = stage_then_publish(&output_path, |staging_path| async move {
+            std::fs::write(staging_path.join("half-written.txt"), "half").unwrap();
+
+            Err(Status::internal("step failed"))
+        })
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.message(), "step failed");
+        assert!(
+            !output_path.exists(),
+            "a failed build left debris at the real output path"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "a failed build left its staging directory under the store"
+        );
+    }
+
+    // An empty directory is indistinguishable from a complete artifact to
+    // every `exists()` reader, and a rename publishes one perfectly happily.
+    // A producer that wrote nothing must therefore not reach the store at all:
+    // caching emptiness at a digest denies that digest to every later build.
+    #[tokio::test]
+    async fn a_producer_that_wrote_nothing_publishes_nothing() {
+        let (_root, store_path, output_path) = store_dir();
+
+        let err = stage_then_publish(
+            &output_path,
+            |_staging_path| async move { Ok::<(), Status>(()) },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.message().contains("no output files"), "{err:?}");
+        assert!(
+            !output_path.exists(),
+            "an empty build was published onto the shared store path"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "an empty build left its staging directory under the store"
+        );
+    }
+
+    // Output that records the directory it was built in cannot be published:
+    // the publish rename deletes that directory. The reference is found
+    // wherever it sits, including straddling the boundary between two reads of
+    // a file far larger than one buffer.
+    #[tokio::test]
+    async fn find_embedded_reference_finds_a_reference_across_a_read_boundary() {
+        let root = TempDir::new().unwrap();
+        let needle = ".tmp-0199b0f0-0000-7000-8000-000000000000";
+        let straddling = root.path().join("binary");
+
+        // The scan reads DEFAULT_CHUNKS_SIZE + needle.len() - 1 bytes at a
+        // time, so straddle that boundary: half the reference lands in one
+        // read and half in the next, and only the carried overlap can see it
+        // whole.
+        let boundary = DEFAULT_CHUNKS_SIZE + needle.len() - 1;
+        let mut contents = vec![b'.'; boundary - (needle.len() / 2)];
+
+        contents.extend_from_slice(needle.as_bytes());
+        contents.resize(boundary * 2, b'.');
+
+        std::fs::write(&straddling, &contents).unwrap();
+
+        let found = find_embedded_reference(std::slice::from_ref(&straddling), needle)
+            .await
+            .unwrap();
+
+        assert_eq!(found, Some(straddling));
+    }
+
+    // A symlink records its target without any of its bytes appearing in a
+    // file, so the target is where it has to be read from.
+    #[tokio::test]
+    async fn find_embedded_reference_reads_symlink_targets() {
+        let root = TempDir::new().unwrap();
+        let needle = ".tmp-0199b0f0-0000-7000-8000-000000000000";
+        let link = root.path().join("link");
+
+        std::os::unix::fs::symlink(root.path().join(needle).join("lib"), &link).unwrap();
+
+        assert_eq!(
+            find_embedded_reference(std::slice::from_ref(&link), needle)
+                .await
+                .unwrap(),
+            Some(link)
+        );
+    }
+
+    // The negative control: ordinary output that merely mentions the store,
+    // or the same UUID shape under a different name, must publish normally.
+    #[tokio::test]
+    async fn find_embedded_reference_ignores_output_without_the_reference() {
+        let root = TempDir::new().unwrap();
+        let needle = ".tmp-0199b0f0-0000-7000-8000-000000000000";
+        let clean = root.path().join("clean");
+
+        std::fs::write(
+            &clean,
+            "/var/lib/vorpal/store/artifact/output/default/abc123/bin/tool",
+        )
+        .unwrap();
+
+        assert_eq!(
+            find_embedded_reference(&[clean], needle).await.unwrap(),
+            None
+        );
+    }
+
+    // A step reading `VORPAL_OUTPUT` and a step reading its own digest's
+    // variable are asking the same question, and a build answers it with the
+    // staging directory. Two different answers would silently publish an
+    // artifact built half against a path that does not exist yet.
+    #[test]
+    fn a_step_sees_one_path_for_its_own_output() {
+        let environments = output_environments(
+            "abc123",
+            Path::new("/store/output/default/.tmp-uuid"),
+            Path::new("/workspace"),
+        );
+
+        let value_of = |key: &str| {
+            environments
+                .iter()
+                .find_map(|e| e.strip_prefix(&format!("{key}=")))
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("{key} missing from {environments:?}"))
+        };
+
+        assert_eq!(value_of("VORPAL_OUTPUT"), "/store/output/default/.tmp-uuid");
+        assert_eq!(
+            value_of("VORPAL_ARTIFACT_abc123"),
+            value_of("VORPAL_OUTPUT")
+        );
+        assert_eq!(value_of("VORPAL_WORKSPACE"), "/workspace");
     }
 }

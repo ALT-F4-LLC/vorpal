@@ -223,7 +223,7 @@ async fn publish_archive_bytes(data: &[u8], archive_path: &Path) -> Result<()> {
 
         publish_atomically(&staging_path, archive_path)
             .await
-            .map_err(|status| anyhow!(status.message().to_string()))
+            .map(|_| ())
     }
     .await;
 
@@ -253,7 +253,7 @@ async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Res
 
         publish_atomically(&staging_path, output_path)
             .await
-            .map_err(|status| anyhow!(status.message().to_string()))
+            .map(|_| ())
     }
     .await;
 

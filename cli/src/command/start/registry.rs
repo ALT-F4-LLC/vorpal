@@ -557,6 +557,7 @@ mod tests {
     /// Recorded (digest, namespace, `collected_data`) for one push call.
     type PushCall = (String, String, Vec<u8>);
 
+
     /// Mock backend that tracks call counts, received data, and returns configurable results.
     struct MockBackend {
         check_call_count: Arc<AtomicUsize>,
@@ -958,37 +959,13 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_local_backend_temp_file_cleanup_on_stream_error(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // Test that LocalBackend cleans up temp files when a stream error occurs.
-        // We use a real temp directory to exercise the actual filesystem code path.
-        use std::env;
-
-        let test_dir = env::temp_dir().join(format!("vorpal-test-{}", uuid::Uuid::now_v7()));
-        let ns_dir = test_dir.join("default");
-        tokio::fs::create_dir_all(&ns_dir).await?;
-
-        // We cannot easily redirect LocalBackend's path (it uses get_artifact_archive_path
-        // which is hardcoded to /var/lib/vorpal). This test documents the expected behavior
-        // rather than exercising it directly. The actual temp file cleanup logic is at
-        // local.rs:125: `if result.is_err() { let _ = remove_file(&temp_path).await; }`
-        //
-        // Integration tests against a real LocalBackend require either:
-        // 1. Running with write access to /var/lib/vorpal (CI/container environment)
-        // 2. Making the base path configurable (would require production code change)
-        //
-        // For now, we verify the pattern works via the MockBackend stream error test above,
-        // and the code review confirms the cleanup path exists in local.rs:124-127:
-        //   if result.is_err() {
-        //       let _ = remove_file(&temp_path).await;
-        //   }
-
-        // Cleanup test dir
-        let _ = tokio::fs::remove_dir_all(&test_dir).await;
-
-        Ok(())
-    }
+    // LocalBackend's own temp-file cleanup on a stream error
+    // (`registry/archive/local.rs`) has no test here. It writes under
+    // `get_artifact_archive_path`, which is hardcoded to /var/lib/vorpal, so
+    // reaching it needs either write access to that path or a configurable
+    // base path. The test that used to sit here asserted a constant and
+    // exercised nothing; it was removed rather than left reporting a pass for
+    // behavior it never ran.
 
     #[tokio::test]
     async fn test_push_large_multi_chunk_stream() -> Result<(), Box<dyn std::error::Error>> {
