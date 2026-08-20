@@ -23,8 +23,8 @@ use std::{
 };
 use tokio::{
     fs::{
-        create_dir_all, read_dir, read_link, remove_dir_all, remove_file, set_permissions,
-        symlink_metadata, write, File,
+        create_dir_all, read_link, remove_dir_all, remove_file, set_permissions, symlink_metadata,
+        write, File,
     },
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
@@ -56,6 +56,7 @@ use vorpal_sdk::{
     artifact::system::get_system_default,
     context::build_channel,
 };
+use walkdir::{DirEntry, WalkDir};
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // default grpc limit
 
@@ -302,44 +303,57 @@ async fn publish_archive(data: &[u8], archive_path: &Path) -> Result<(), Status>
 /// Unpacks `archive_path` into the shared `output_path` (recipe-addressed,
 /// not content-addressed — see `publish_atomically`), staging it first so
 /// the real path is only ever created — whole — by the final rename.
+/// An archive that unpacks to no files is refused here for the same reason a
+/// build that produced none is: `stage_then_publish` owns that rule, and a
+/// pull is the other way an empty entry reaches a shared store path.
 async fn publish_unpacked(archive_path: &Path, output_path: &Path) -> Result<(), Status> {
-    let staging_path = staging_path_for(output_path);
-
-    create_dir_all(&staging_path).await.map_err(|err| {
-        Status::internal(format!(
-            "failed to create staging path {}: {err}",
-            staging_path.display()
-        ))
-    })?;
-
-    let staged = async {
+    stage_then_publish(output_path, move |staging_path| async move {
         unpack_zstd(&staging_path, archive_path)
             .await
             .map_err(|err| {
                 Status::internal(format!("failed to unpack artifact archive: {err:?}"))
             })?;
 
-        let staged_files = get_file_paths(&staging_path, vec![], vec![])
-            .map_err(|err| Status::internal(format!("failed to get artifact files: {err}")))?;
-
-        for path in staged_files.iter() {
-            set_timestamps(path).await.map_err(|err| {
-                Status::internal(format!("failed to set artifact file timestamps: {err:?}"))
-            })?;
+        for entry in staged_entries(&staging_path)? {
+            set_timestamps(&entry.path().to_path_buf())
+                .await
+                .map_err(|err| {
+                    Status::internal(format!("failed to set artifact file timestamps: {err:?}"))
+                })?;
         }
 
-        publish_atomically(&staging_path, output_path)
-            .await
-            .map(|_| ())
-            .map_err(|err| Status::internal(err.to_string()))
-    }
-    .await;
+        Ok(())
+    })
+    .await
+    .map(|_| ())
+}
 
-    if staged.is_err() {
-        discard_staging(&staging_path).await;
-    }
+/// Every entry staged under `staging_path`, the root included, in walk order.
+///
+/// Walked here rather than through `get_file_paths`: that walker builds a
+/// packing list, so it drops `.git` entries and turns a walk error into a
+/// silently missing subtree. The publish renames the whole staging directory,
+/// so an entry missing from this list is published unscanned and is absent
+/// from the archive pushed for the same digest — two workers would then hold
+/// different content under one digest.
+fn staged_entries(staging_path: &Path) -> Result<Vec<DirEntry>, Status> {
+    WalkDir::new(staging_path)
+        .into_iter()
+        .map(|entry| {
+            entry.map_err(|err| Status::internal(format!("failed to read staged output: {err}")))
+        })
+        .collect()
+}
 
-    staged
+/// The staged entries that carry an artifact's bytes: regular files and
+/// symlinks. A tree of directories alone carries none, so there is nothing in
+/// it for a dependent to use.
+fn staged_content_paths(entries: &[DirEntry]) -> Vec<PathBuf> {
+    entries
+        .iter()
+        .filter(|entry| entry.file_type().is_file() || entry.file_type().is_symlink())
+        .map(|entry| entry.path().to_path_buf())
+        .collect()
 }
 
 /// Produces a store entry under a private staging directory and publishes it
@@ -351,10 +365,13 @@ async fn publish_unpacked(archive_path: &Path, output_path: &Path) -> Result<(),
 /// staging directory, and no reader's `exists()` check on the real path can
 /// mistake a half-built entry for a finished one.
 ///
-/// A producer that wrote nothing does not publish. An empty directory passes
-/// every one of those `exists()` readers as a complete entry and would cache a
-/// build that produced no output forever, so it is discarded and the failure
-/// reported, leaving the digest buildable.
+/// A producer that wrote no files does not publish — files and symlinks are
+/// what carry an artifact's bytes, so a tree of directories alone counts as
+/// nothing. Such a tree passes every one of those `exists()` readers as a
+/// complete entry and would cache a build that produced no output forever, so
+/// it is discarded and the failure reported. Callers must release whatever
+/// they hold for the digest when that happens, or the refusal denies the
+/// digest instead of leaving it buildable.
 async fn stage_then_publish<F, Fut>(
     output_path: &Path,
     produce: F,
@@ -366,26 +383,32 @@ where
     let staging_path = staging_path_for(output_path);
 
     create_dir_all(&staging_path).await.map_err(|err| {
-        Status::internal(format!(
-            "failed to create staging path {}: {err}",
+        error!(
+            "worker |> failed to create staging path {}: {err}",
             staging_path.display()
-        ))
+        );
+
+        Status::internal("failed to create staging path")
     })?;
 
     let staged = async {
         produce(staging_path.clone()).await?;
 
-        let mut staged_entries = read_dir(&staging_path)
+        // The producer owned this path for its whole run and could have put a
+        // symlink in its place. Reads follow symlinks and the publish rename
+        // does not, so a check made through a link would describe one tree
+        // while the link itself is installed as the store entry.
+        let staged_metadata = symlink_metadata(&staging_path)
             .await
-            .map_err(|err| Status::internal(format!("failed to read staged output: {err}")))?;
+            .map_err(|err| Status::internal(format!("failed to stat staged output: {err}")))?;
 
-        let is_empty = staged_entries
-            .next_entry()
-            .await
-            .map_err(|err| Status::internal(format!("failed to read staged output: {err}")))?
-            .is_none();
+        if !staged_metadata.is_dir() {
+            return Err(Status::internal("staged output is no longer a directory"));
+        }
 
-        if is_empty {
+        let entries = staged_entries(&staging_path)?;
+
+        if staged_content_paths(&entries).is_empty() {
             return Err(Status::internal("artifact produced no output files"));
         }
 
@@ -402,11 +425,21 @@ where
     staged
 }
 
+/// Size of one scan read. Deliberately its own constant: this is a local file
+/// read, and it agrees with the gRPC chunk limit only by coincidence.
+const SCAN_CHUNK_SIZE: usize = 8192;
+
 /// Reports the first entry under a staged tree that carries `needle` in its
 /// bytes — file contents or symlink target.
 ///
 /// Files are read in overlapping chunks so a match straddling a chunk boundary
 /// is still found and an artifact larger than memory is still scannable.
+///
+/// This finds a literal occurrence, so it binds a cooperating producer only: a
+/// step that encodes, compresses or splits the path defeats it, as does one
+/// that writes the path after the scan has run. It is a regression guard
+/// against an artifact accidentally recording where it was built, not a
+/// control against a hostile step.
 async fn find_embedded_reference(
     staged_files: &[PathBuf],
     needle: &str,
@@ -446,7 +479,7 @@ async fn find_embedded_reference(
                 .map_err(|err| Status::internal(format!("failed to open output file: {err}")))?,
         );
 
-        let mut buf = vec![0u8; DEFAULT_CHUNKS_SIZE + overlap];
+        let mut buf = vec![0u8; SCAN_CHUNK_SIZE + overlap];
         let mut carried = 0usize;
 
         loop {
@@ -922,9 +955,8 @@ async fn push_artifact_archive(
 }
 
 /// Packs the built artifact's output files into a zstd archive, pushes the archive to
-/// the registry, and stores the artifact record. Called only when the artifact
-/// produced more than one output file (a single-file artifact is published as-is by
-/// the caller's unconditional `publish_atomically`).
+/// the registry, and stores the artifact record. Called for every build whose staged
+/// output passed `stage_then_publish`'s empty-output and embedded-path checks.
 ///
 /// Runs inside the `stage_then_publish` closure in `build_artifact`: every error here
 /// propagates via `?` rather than discarding the staging directory itself, since
@@ -1178,6 +1210,22 @@ async fn obtain_build_credentials(
     (archive_auth_header, artifact_auth_header)
 }
 
+/// Releases what a failed build holds for its digest: the workspace it ran in
+/// and the lock every later build of the same digest trips over.
+///
+/// Failures are logged rather than returned, because the caller is already
+/// reporting the failure that brought it here and replacing that message with
+/// a cleanup error would hide it.
+async fn release_build(workspace_path: &Path, lock_path: &Path) {
+    if let Err(err) = remove_dir_all(workspace_path).await {
+        error!("worker |> failed to remove workspace: {:?}", err);
+    }
+
+    if let Err(err) = remove_file(lock_path).await {
+        error!("worker |> failed to remove lock file: {:?}", err);
+    }
+}
+
 async fn build_artifact(
     issuer: Option<&str>,
     issuer_audience: Option<&str>,
@@ -1245,12 +1293,9 @@ async fn build_artifact(
     // `pull_artifact`, `run_step`'s dependency gate, the already-exists check
     // above — cannot observe this build until it is complete.
     //
-    // The references are re-bound here so the `move` closure copies them
-    // rather than taking ownership of locals the tail of this function still
-    // uses.
-    let registry = &registry;
-    let archive_auth_header = &archive_auth_header;
-    let artifact_auth_header = &artifact_auth_header;
+    // `tx` and the workspace are re-bound as references so the `move` closure
+    // copies them: the tail of this function still reports through `tx` and
+    // still has to clean the workspace up.
     let tx = &tx;
     let workspace = workspace_path.as_path();
     let artifact_aliases = request.artifact_aliases;
@@ -1273,8 +1318,19 @@ async fn build_artifact(
             })?;
         }
 
-        let artifact_path_files = get_file_paths(&artifact_staging_path, vec![], vec![])
-            .map_err(|err| Status::internal(format!("failed to get output files: {err}")))?;
+        let staged = staged_entries(&artifact_staging_path)?;
+        let staged_paths: Vec<PathBuf> = staged
+            .iter()
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
+        let staged_files = staged_content_paths(&staged);
+
+        // Decide here that there is nothing to publish, before scanning or
+        // packing a build that cannot ship. `stage_then_publish` makes the
+        // same call as the backstop for every other producer.
+        if staged_files.is_empty() {
+            return Err(Status::internal("artifact produced no output files"));
+        }
 
         // Refuse to publish output that records where it was built.
         //
@@ -1287,12 +1343,16 @@ async fn build_artifact(
         // path equal the published one needs a bind mount, which is not
         // cheaply available on darwin, so the honest answer here is to fail
         // rather than ship the artifact broken.
+        //
+        // Only the staging root is scanned for. `VORPAL_WORKSPACE` is equally
+        // ephemeral and is not, because nothing has measured what would stop
+        // building if it were.
         let staging_name = artifact_staging_path
             .file_name()
             .and_then(|name| name.to_str())
-            .ok_or_else(|| Status::internal("failed to read staging path name"))?;
+            .expect("staging_path_for names every staging directory `.tmp-<uuid>`");
 
-        if let Some(offender) = find_embedded_reference(&artifact_path_files, staging_name).await? {
+        if let Some(offender) = find_embedded_reference(&staged_files, staging_name).await? {
             let offender = offender
                 .strip_prefix(&artifact_staging_path)
                 .unwrap_or(&offender)
@@ -1306,37 +1366,53 @@ async fn build_artifact(
             )));
         }
 
-        // A build that produced nothing has nothing to pack or push;
-        // `stage_then_publish` refuses to publish it either way.
-        if artifact_path_files.len() > 1 {
-            pack_push_and_store_artifact(
-                artifact,
-                artifact_digest,
-                &artifact_staging_path,
-                &artifact_path_files,
-                archive_auth_header.as_ref(),
-                artifact_auth_header.as_ref(),
-                registry,
-                artifact_aliases,
-                store_namespace,
-                tx,
-            )
-            .await?;
-        }
+        pack_push_and_store_artifact(
+            artifact,
+            artifact_digest,
+            &artifact_staging_path,
+            &staged_paths,
+            archive_auth_header.as_ref(),
+            artifact_auth_header.as_ref(),
+            &registry,
+            artifact_aliases,
+            store_namespace,
+            tx,
+        )
+        .await?;
 
         Ok(())
     })
-    .await?;
+    .await;
+
+    // A build that refuses to publish — one that produced no files, or one
+    // whose output records the directory it was built in — must leave the
+    // digest exactly as buildable as it was. The lock is what the next build
+    // of this digest trips over, and digests are recipe-addressed, so a
+    // stranded lock denies that recipe until someone deletes the file by hand.
+    let published = match published {
+        Ok(published) => published,
+        Err(err) => {
+            release_build(&workspace_path, &artifact_output_lock).await;
+
+            return Err(err);
+        }
+    };
 
     // Losing the publish race is not a failure, but this build already pushed
     // its own archive to the registry, and the store now holds someone else's
-    // bytes for this digest. Nothing verifies the two agree, so say which
-    // happened rather than reporting a plain success.
+    // bytes for this digest. Nothing verifies the two agree, so tell the
+    // client that pushed those bytes rather than reporting a plain success.
     if published == PublishOutcome::Superseded {
         info!(
             "worker |> published concurrently by another builder: {}",
             artifact_digest
         );
+
+        if let Err(err) = send_message(format!("superseded: {artifact_digest}"), tx).await {
+            release_build(&workspace_path, &artifact_output_lock).await;
+
+            return Err(err);
+        }
     }
 
     // Remove workspace
@@ -1712,6 +1788,153 @@ mod tests {
         );
     }
 
+    // Directories carry no bytes. A producer whose whole output is
+    // `mkdir -p $VORPAL_OUTPUT/bin` — which artifacts in this repository do —
+    // has produced nothing a dependent can use, and every `exists()` reader
+    // would take the published tree for a finished artifact forever.
+    #[tokio::test]
+    async fn a_producer_that_made_only_directories_publishes_nothing() {
+        let (_root, store_path, output_path) = store_dir();
+
+        let err = stage_then_publish(&output_path, |staging_path| async move {
+            std::fs::create_dir_all(staging_path.join("bin")).unwrap();
+
+            Ok::<(), Status>(())
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.message().contains("no output files"), "{err:?}");
+        assert!(
+            !output_path.exists(),
+            "a build that produced only directories was published onto the shared store path"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "a fileless build left its staging directory under the store"
+        );
+    }
+
+    // The producer owns the staging directory for the whole of its run and can
+    // replace it with a symlink. Reads follow symlinks and the publish rename
+    // does not, so a check made through the link would describe one tree while
+    // another — the link itself — is installed as the store entry.
+    #[tokio::test]
+    async fn a_producer_that_swapped_its_staging_directory_for_a_symlink_publishes_nothing() {
+        let (root, store_path, output_path) = store_dir();
+        let elsewhere = root.path().join("elsewhere");
+
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        write_files(&elsewhere, &["borrowed.txt"], "borrowed");
+
+        let target = elsewhere.clone();
+
+        let err = stage_then_publish(&output_path, move |staging_path| async move {
+            std::fs::remove_dir(&staging_path).unwrap();
+            std::os::unix::fs::symlink(&target, &staging_path).unwrap();
+
+            Ok::<(), Status>(())
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.message().contains("no longer a directory"), "{err:?}");
+        assert!(
+            !output_path.exists(),
+            "a step-controlled symlink was published as the store entry"
+        );
+        assert_eq!(
+            dir_entry_names(&elsewhere),
+            BTreeSet::from(["borrowed.txt".to_string()]),
+            "the symlink's target was disturbed"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "the staging symlink survived under the store"
+        );
+    }
+
+    // Two builders can stage one digest at once, and the loser has already
+    // pushed its own archive by the time it publishes. It must be told it lost
+    // rather than handed the same success the winner gets.
+    #[tokio::test]
+    async fn a_producer_that_lost_the_publish_race_is_told_it_lost() {
+        let (_root, store_path, output_path) = store_dir();
+
+        std::fs::create_dir_all(&output_path).unwrap();
+        write_files(&output_path, &["winner.txt"], "winner");
+
+        let outcome = stage_then_publish(&output_path, |staging_path| async move {
+            std::fs::write(staging_path.join("loser.txt"), "loser").unwrap();
+
+            Ok::<(), Status>(())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(outcome, PublishOutcome::Superseded);
+        assert_eq!(
+            dir_entry_names(&output_path),
+            BTreeSet::from(["winner.txt".to_string()]),
+            "the loser overwrote the winner's published entry"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::from(["abc123".to_string()]),
+            "the loser's staging directory survived under the store"
+        );
+    }
+
+    // The embedded-path scan and the packing list are both computed from this
+    // walk, and the publish renames the whole staged tree. An entry the walk
+    // drops is published unscanned and is absent from the archive pushed for
+    // the same digest; `.git` is what the packing walker drops, and a
+    // submodule checkout puts an absolute build path inside `.git`.
+    #[test]
+    fn staged_entries_reports_the_dot_git_entries_the_packing_walker_drops() {
+        let root = TempDir::new().unwrap();
+        let staged = root.path().join("staged");
+        let git_dir = staged.join(".git");
+
+        std::fs::create_dir_all(&git_dir).unwrap();
+        write_files(
+            &git_dir,
+            &["config"],
+            "gitdir: /store/output/default/.tmp-uuid",
+        );
+        write_files(&staged, &["a.txt"], "a");
+
+        let relative: BTreeSet<String> = staged_entries(&staged)
+            .unwrap()
+            .iter()
+            .map(|entry| {
+                entry
+                    .path()
+                    .strip_prefix(&staged)
+                    .unwrap()
+                    .display()
+                    .to_string()
+            })
+            .filter(|path| !path.is_empty())
+            .collect();
+
+        assert_eq!(
+            relative,
+            BTreeSet::from([
+                ".git".to_string(),
+                ".git/config".to_string(),
+                "a.txt".to_string()
+            ])
+        );
+        assert_eq!(
+            get_file_paths(&staged, vec![], vec![]).unwrap().len(),
+            2,
+            "the packing walker stopped dropping .git, so this test no longer pins anything"
+        );
+    }
+
     // Output that records the directory it was built in cannot be published:
     // the publish rename deletes that directory. The reference is found
     // wherever it sits, including straddling the boundary between two reads of
@@ -1722,11 +1945,10 @@ mod tests {
         let needle = ".tmp-0199b0f0-0000-7000-8000-000000000000";
         let straddling = root.path().join("binary");
 
-        // The scan reads DEFAULT_CHUNKS_SIZE + needle.len() - 1 bytes at a
-        // time, so straddle that boundary: half the reference lands in one
-        // read and half in the next, and only the carried overlap can see it
-        // whole.
-        let boundary = DEFAULT_CHUNKS_SIZE + needle.len() - 1;
+        // The scan reads SCAN_CHUNK_SIZE + needle.len() - 1 bytes at a time,
+        // so straddle that boundary: half the reference lands in one read and
+        // half in the next, and only the carried overlap can see it whole.
+        let boundary = SCAN_CHUNK_SIZE + needle.len() - 1;
         let mut contents = vec![b'.'; boundary - (needle.len() / 2)];
 
         contents.extend_from_slice(needle.as_bytes());

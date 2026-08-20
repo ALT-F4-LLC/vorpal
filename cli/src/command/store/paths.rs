@@ -657,9 +657,11 @@ mod tests {
 
     // A rename onto an empty directory replaces it rather than failing, so an
     // empty target is not a racer this publisher lost to. Pin that outcome:
-    // the publisher wins, its content lands whole, and it is told it won —
-    // which is why no producer may publish an empty directory in the first
-    // place (see `stage_then_publish` in the worker).
+    // the publisher wins, its content lands whole, and it is told it won.
+    //
+    // Publishing nothing is refused by `stage_then_publish` in the worker, so
+    // the refusal binds the worker's producers only — the CLI's `build` and
+    // `run` write these paths without it.
     #[tokio::test]
     async fn publish_atomically_replaces_an_empty_target_directory() {
         let root = TempDir::new().unwrap();
