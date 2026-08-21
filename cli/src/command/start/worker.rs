@@ -5,8 +5,9 @@ use crate::command::{
         notary,
         paths::{
             discard_staging, get_artifact_archive_path, get_artifact_output_lock_path,
-            get_artifact_output_path, get_file_paths, get_key_service_key_path, publish_atomically,
-            set_timestamps, staging_path_for, PublishOutcome,
+            get_artifact_output_path, get_file_paths, get_key_service_key_path,
+            parse_artifact_digest, parse_store_path_component, publish_atomically, set_timestamps,
+            staging_path_for, PublishOutcome,
         },
         temps::{create_sandbox_dir, create_sandbox_file},
     },
@@ -551,6 +552,16 @@ async fn pull_artifact(
     registry: &str,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
+    // Both values are joined into store paths below. `build_artifact` parses
+    // them at the request boundary; parsing them again here costs two string
+    // scans and keeps the guarantee with the function that does the joining,
+    // rather than with whoever calls it.
+    parse_store_path_component(artifact_namespace, "namespace")
+        .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
+    parse_artifact_digest(artifact_digest, "artifact dependency")
+        .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
     let artifact_output_path = get_artifact_output_path(artifact_digest, artifact_namespace);
 
     if artifact_output_path.exists() {
@@ -999,6 +1010,23 @@ async fn validate_and_lock_artifact(
         return Err(Status::invalid_argument("artifact 'steps' are missing"));
     }
 
+    for step in artifact.steps.iter() {
+        for step_artifact in step.artifacts.iter() {
+            parse_artifact_digest(step_artifact, "artifact step")
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        }
+    }
+
+    for artifact_source in artifact.sources.iter() {
+        if let Some(source_digest) = artifact_source.digest.as_ref() {
+            parse_artifact_digest(source_digest, "artifact source")
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        }
+
+        parse_store_path_component(&artifact_source.name, "source name")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+    }
+
     let artifact_target = ArtifactSystem::try_from(artifact.target).map_err(|err| {
         Status::invalid_argument(format!("artifact failed to parse target: {err}"))
     })?;
@@ -1101,7 +1129,15 @@ async fn build_artifact(
         .artifact
         .ok_or_else(|| Status::invalid_argument("artifact is missing"))?;
 
-    let artifact_namespace = &request.artifact_namespace;
+    // The namespace and every digest inside the recipe are request strings that
+    // this function, `pull_source`, `pull_artifact` and `run_step` all join
+    // straight into store paths. Parse their shapes here, before the first path
+    // is composed, so a value that would name a destination outside the store is
+    // refused as a bad request rather than resolved against the filesystem.
+    let artifact_namespace = parse_store_path_component(&request.artifact_namespace, "namespace")
+        .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
+    let artifact_namespace = &artifact_namespace;
 
     let artifact_json = serde_json::to_string(&artifact)
         .map_err(|err| Status::internal(format!("artifact failed to serialize: {err}")))?;
@@ -1203,16 +1239,18 @@ async fn build_artifact(
         // `pull_artifact`, `run_step`'s dependency gate, the already-exists check
         // above — cannot observe this build until it is complete.
         //
-        // `tx` and the workspace are re-bound as references so the `move` closure
-        // copies them: the tail of this function still reports through `tx` and
-        // still has to clean the workspace up.
+        // `tx`, the workspace and the recipe's steps are re-bound as references so
+        // the `move` closure copies those rather than the values: the tail of this
+        // function still reports through `tx`, still has to clean the workspace
+        // up, and still has to register `artifact` with the registry.
         let tx = &tx;
         let workspace = workspace_path.as_path();
+        let artifact_steps = &artifact.steps;
         let artifact_aliases = request.artifact_aliases;
         let store_namespace = artifact_namespace.clone();
 
         let published = stage_then_publish(&artifact_output_path, move |artifact_staging_path| async move {
-            for step in artifact.steps.iter() {
+            for step in artifact_steps.iter() {
                 run_step(
                     artifact_digest,
                     artifact_namespace,
@@ -1228,23 +1266,8 @@ async fn build_artifact(
                 })?;
             }
 
-            // Everything below this line has effects the seam cannot undo: the
-            // archive is pushed to the registry and the artifact is registered
-            // there, and the publish that follows is local. So the gates the seam
-            // applies at publish time are applied here too, before any of that
-            // happens — otherwise a build the seam goes on to refuse has already
-            // told every other worker where to find its bytes.
-            ensure_staged_directory(&artifact_staging_path).await?;
-
             let staged = staged_entries(&artifact_staging_path)?;
             let staged_files = staged_content_paths(&staged);
-
-            // Decide here that there is nothing to publish, before scanning or
-            // packing a build that cannot ship. `stage_then_publish` makes the
-            // same call as the backstop for every other producer.
-            if staged_files.is_empty() {
-                return Err(Status::internal("artifact produced no output files"));
-            }
 
             // Refuse to publish output that records where it was built.
             //
@@ -1286,130 +1309,29 @@ async fn build_artifact(
                 )));
             }
 
-            send_message(format!("pack: {artifact_digest}"), tx).await?;
-
-            // The packing list: every staged entry, directories and the staging
-            // root included, which is what the archive has to carry. Distinct from
-            // `staged_files` above, which is only what carries bytes and is what
-            // the two guards that can still refuse this build were asked about.
-            let packing_paths: Vec<PathBuf> = staged
-                .iter()
-                .map(|entry| entry.path().to_path_buf())
-                .collect();
-
             // Sanitize files
-
-            for path in packing_paths.iter() {
-                set_timestamps(path).await.map_err(|err| {
-                    error!("worker |> failed to sanitize output files: {:?}", err);
-                    Status::internal(format!("failed to sanitize output files: {err:?}"))
-                })?;
+            //
+            // Before the publish rather than after it: these are the bytes the
+            // rename installs as the store entry, and the archive pushed for this
+            // digest is packed from that entry afterwards.
+            for entry in staged.iter() {
+                set_timestamps(&entry.path().to_path_buf())
+                    .await
+                    .map_err(|err| {
+                        error!("worker |> failed to sanitize output files: {:?}", err);
+                        Status::internal(format!("failed to sanitize output files: {err:?}"))
+                    })?;
             }
-
-            // Create archive
-
-            let artifact_archive = create_sandbox_file(Some("tar.zst")).await.map_err(|err| {
-                Status::internal(format!("failed to create artifact archive: {err}"))
-            })?;
-
-            compress_zstd(&artifact_staging_path, &packing_paths, &artifact_archive)
-                .await
-                .map_err(|err| {
-                    error!("worker |> failed to compress artifact: {:?}", err);
-                    Status::internal(format!("failed to compress artifact: {err:?}"))
-                })?;
-
-            // TODO: check if archive is already uploaded
-
-            // Upload archive
-
-            // Create authenticated archive client for pushing
-            let client_archive_channel = build_channel(&registry)
-                .await
-                .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
-
-            // Create client with authorization interceptor for pushing if token is available
-            let mut client_archive = ArchiveServiceClient::with_interceptor(
-                client_archive_channel,
-                apply_auth_to_request(archive_auth_header.as_ref()),
-            );
-
-            send_message(format!("push: {artifact_digest}"), tx).await?;
-
-            let artifact_file = File::open(&artifact_archive).await.map_err(|err| {
-                Status::internal(format!("failed to open artifact archive: {err}"))
-            })?;
-
-            let digest_for_stream = artifact_digest.to_string();
-            let namespace_for_stream = artifact_namespace.to_string();
-
-            let request_stream = async_stream::stream! {
-                let mut reader = BufReader::new(artifact_file);
-                let mut buf = vec![0u8; DEFAULT_CHUNKS_SIZE];
-                loop {
-                    match reader.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            yield ArchivePushRequest {
-                                data: buf[..n].to_vec(),
-                                digest: digest_for_stream.clone(),
-                                namespace: namespace_for_stream.clone(),
-                            };
-                        }
-                        Err(err) => {
-                            error!("worker |> failed to read artifact archive chunk: {err}");
-                            break;
-                        }
-                    }
-                }
-            };
-
-            client_archive.push(request_stream).await.map_err(|err| {
-                error!("worker |> failed to push artifact: {:?}", err);
-                Status::internal(format!("failed to push artifact: {err:?}"))
-            })?;
-
-            // Store artifact in registry
-
-            // Create authenticated artifact client
-            let client_artifact_channel = build_channel(&registry)
-                .await
-                .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
-
-            // Create client with authorization interceptor if token is available
-            let mut client_artifact = ArtifactServiceClient::with_interceptor(
-                client_artifact_channel,
-                apply_auth_to_request(artifact_auth_header.as_ref()),
-            );
-
-            let store_request = StoreArtifactRequest {
-                artifact: Some(artifact),
-                artifact_aliases,
-                artifact_namespace: store_namespace,
-            };
-
-            client_artifact
-                .store_artifact(store_request)
-                .await
-                .map_err(|err| {
-                    Status::internal(format!("failed to store artifact in registry: {err}"))
-                })?;
-
-            // Remove artifact archive
-
-            remove_file(&artifact_archive).await.map_err(|err| {
-                error!("worker |> failed to remove artifact archive: {:?}", err);
-                Status::internal(format!("failed to remove artifact archive: {err:?}"))
-            })?;
 
             Ok(())
         })
         .await?;
 
-        // Losing the publish race is not a failure, but this build already pushed
-        // its own archive to the registry, and the store now holds someone else's
-        // bytes for this digest. Nothing verifies the two agree, so tell the
-        // client that pushed those bytes rather than reporting a plain success.
+        // Losing the publish race is not a failure: the winner's bytes stand at
+        // the digest and this build's staged copy is gone. Nothing this build
+        // produced is in the store, so there is nothing for it to advertise —
+        // pushing its archive now would point every other worker at bytes this
+        // worker does not hold — and the registry is left to the winner.
         if published == PublishOutcome::Superseded {
             info!(
                 "worker |> published concurrently by another builder: {}",
@@ -1417,7 +1339,124 @@ async fn build_artifact(
             );
 
             send_message(format!("superseded: {artifact_digest}"), tx).await?;
+
+            return Ok(());
         }
+
+        // Publish to the registry, after the local publish and never before it.
+        //
+        // A push and a `store_artifact` are effects nothing local can take back:
+        // once they land, every other worker resolves this digest to these bytes.
+        // The local publish is the last step that can still refuse this build or
+        // lose it to another builder, so it goes first and the registry only ever
+        // learns about a digest this worker really holds. The archive is packed
+        // from the published path for the same reason — that is where the staged
+        // content now lives, and it is what a puller of this digest will get.
+
+        let published_entries = staged_entries(&artifact_output_path)?;
+
+        let packing_paths: Vec<PathBuf> = published_entries
+            .iter()
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
+
+        send_message(format!("pack: {artifact_digest}"), tx).await?;
+
+        // Create archive
+
+        let artifact_archive = create_sandbox_file(Some("tar.zst"))
+            .await
+            .map_err(|err| Status::internal(format!("failed to create artifact archive: {err}")))?;
+
+        compress_zstd(&artifact_output_path, &packing_paths, &artifact_archive)
+            .await
+            .map_err(|err| {
+                error!("worker |> failed to compress artifact: {:?}", err);
+                Status::internal(format!("failed to compress artifact: {err:?}"))
+            })?;
+
+        // TODO: check if archive is already uploaded
+
+        // Upload archive
+
+        // Create authenticated archive client for pushing
+        let client_archive_channel = build_channel(&registry)
+            .await
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
+
+        // Create client with authorization interceptor for pushing if token is available
+        let mut client_archive = ArchiveServiceClient::with_interceptor(
+            client_archive_channel,
+            apply_auth_to_request(archive_auth_header.as_ref()),
+        );
+
+        send_message(format!("push: {artifact_digest}"), tx).await?;
+
+        let artifact_file = File::open(&artifact_archive)
+            .await
+            .map_err(|err| Status::internal(format!("failed to open artifact archive: {err}")))?;
+
+        let digest_for_stream = artifact_digest.to_string();
+        let namespace_for_stream = artifact_namespace.to_string();
+
+        let request_stream = async_stream::stream! {
+            let mut reader = BufReader::new(artifact_file);
+            let mut buf = vec![0u8; DEFAULT_CHUNKS_SIZE];
+            loop {
+                match reader.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        yield ArchivePushRequest {
+                            data: buf[..n].to_vec(),
+                            digest: digest_for_stream.clone(),
+                            namespace: namespace_for_stream.clone(),
+                        };
+                    }
+                    Err(err) => {
+                        error!("worker |> failed to read artifact archive chunk: {err}");
+                        break;
+                    }
+                }
+            }
+        };
+
+        client_archive.push(request_stream).await.map_err(|err| {
+            error!("worker |> failed to push artifact: {:?}", err);
+            Status::internal(format!("failed to push artifact: {err:?}"))
+        })?;
+
+        // Store artifact in registry
+
+        // Create authenticated artifact client
+        let client_artifact_channel = build_channel(&registry)
+            .await
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
+
+        // Create client with authorization interceptor if token is available
+        let mut client_artifact = ArtifactServiceClient::with_interceptor(
+            client_artifact_channel,
+            apply_auth_to_request(artifact_auth_header.as_ref()),
+        );
+
+        let store_request = StoreArtifactRequest {
+            artifact: Some(artifact),
+            artifact_aliases,
+            artifact_namespace: store_namespace,
+        };
+
+        client_artifact
+            .store_artifact(store_request)
+            .await
+            .map_err(|err| {
+                Status::internal(format!("failed to store artifact in registry: {err}"))
+            })?;
+
+        // Remove artifact archive
+
+        remove_file(&artifact_archive).await.map_err(|err| {
+            error!("worker |> failed to remove artifact archive: {:?}", err);
+            Status::internal(format!("failed to remove artifact archive: {err:?}"))
+        })?;
 
         Ok(())
     }
@@ -1539,6 +1578,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
     use tempfile::TempDir;
+    use vorpal_sdk::api::artifact::Artifact;
 
     fn write_files(dir: &Path, names: &[&str], contents: &str) {
         for name in names {
@@ -2294,5 +2334,138 @@ mod tests {
         let flags = "VORPAL_FLAGS=--define=x".to_string();
 
         assert_eq!(expand_env("$VORPAL_FLAGS", &[&flags]), "--define=x");
+    }
+
+    /// A build request carrying one dependency digest and one source, with
+    /// every other field valid. `UnknownSystem` is the target because the
+    /// target check is the first thing past the shape checks below: a request
+    /// that reaches it has been accepted by all of them, and it is refused
+    /// before the worker touches the filesystem or the network.
+    fn build_request(
+        namespace: &str,
+        dependency_digest: &str,
+        source_digest: &str,
+    ) -> BuildArtifactRequest {
+        BuildArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec![],
+                name: "artifact".to_string(),
+                sources: vec![ArtifactSource {
+                    digest: Some(source_digest.to_string()),
+                    excludes: vec![],
+                    includes: vec![],
+                    name: "source".to_string(),
+                    path: ".".to_string(),
+                }],
+                steps: vec![ArtifactStep {
+                    arguments: vec![],
+                    artifacts: vec![dependency_digest.to_string()],
+                    entrypoint: Some("/bin/true".to_string()),
+                    environments: vec![],
+                    secrets: vec![],
+                    script: None,
+                }],
+                systems: vec![],
+                target: ArtifactSystem::UnknownSystem.into(),
+            }),
+            artifact_aliases: vec![],
+            artifact_namespace: namespace.to_string(),
+            registry: "http://localhost:0".to_string(),
+        }
+    }
+
+    async fn build_refusal(request: BuildArtifactRequest) -> Status {
+        let (tx, _rx) = mpsc::channel(100);
+
+        build_artifact(None, None, None, None, request, &tx)
+            .await
+            .expect_err("a build request with an invalid field is refused")
+    }
+
+    fn valid_digest(fill: &str) -> String {
+        fill.repeat(64 / fill.len())
+    }
+
+    // The namespace names a directory under every store root. A request that
+    // supplies a path instead of a component is answered as a bad request,
+    // before any path is composed from it.
+    #[tokio::test]
+    async fn build_artifact_refuses_a_namespace_that_is_not_one_path_component() {
+        let digest = valid_digest("a");
+
+        for hostile in ["../../../etc", "/etc", "", ".", "..", "a/b"] {
+            let status = build_refusal(build_request(hostile, &digest, &digest)).await;
+
+            assert_eq!(status.code(), tonic::Code::InvalidArgument, "{hostile:?}");
+            assert!(
+                status.message().contains("namespace"),
+                "{hostile:?}: {}",
+                status.message()
+            );
+        }
+
+        // Positive control: the same request with a valid namespace and valid
+        // digests is not refused here — it reaches the target check.
+        let status = build_refusal(build_request("library", &digest, &digest)).await;
+
+        assert_eq!(status.message(), "unknown target");
+    }
+
+    // A dependency digest is joined into the store path a dependency is pulled
+    // to and run from, so it is refused unless it is a bare sha256 digest.
+    #[tokio::test]
+    async fn build_artifact_refuses_a_dependency_digest_that_is_not_a_bare_hex_string() {
+        let digest = valid_digest("a");
+
+        for hostile in ["../../../etc/passwd", "/etc/passwd", "", &digest[..63]] {
+            let status = build_refusal(build_request("library", hostile, &digest)).await;
+
+            assert_eq!(status.code(), tonic::Code::InvalidArgument, "{hostile:?}");
+            assert!(
+                status.message().contains("digest"),
+                "{hostile:?}: {}",
+                status.message()
+            );
+        }
+
+        let status = build_refusal(build_request("library", &digest, &digest)).await;
+
+        assert_eq!(status.message(), "unknown target");
+    }
+
+    // A source digest reaches `pull_source`, which joins it into the archive
+    // path the source is downloaded to.
+    #[tokio::test]
+    async fn build_artifact_refuses_a_source_digest_that_is_not_a_bare_hex_string() {
+        let digest = valid_digest("a");
+
+        for hostile in ["../../../etc/passwd", "/etc/passwd", ""] {
+            let status = build_refusal(build_request("library", &digest, hostile)).await;
+
+            assert_eq!(status.code(), tonic::Code::InvalidArgument, "{hostile:?}");
+            assert!(
+                status.message().contains("digest"),
+                "{hostile:?}: {}",
+                status.message()
+            );
+        }
+
+        let status = build_refusal(build_request("library", &digest, &digest)).await;
+
+        assert_eq!(status.message(), "unknown target");
+    }
+
+    // `pull_artifact` composes store paths from its own arguments, so it makes
+    // the same refusal rather than trusting the caller to have made it.
+    #[tokio::test]
+    async fn pull_artifact_refuses_a_digest_that_is_not_a_bare_hex_string() {
+        let (tx, _rx) = mpsc::channel(100);
+
+        let status = pull_artifact(None, "library", "../../../etc", "http://localhost:0", &tx)
+            .await
+            .expect_err("a traversing digest is refused");
+
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert!(status.message().contains("digest"), "{}", status.message());
     }
 }

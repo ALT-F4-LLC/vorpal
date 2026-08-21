@@ -162,6 +162,65 @@ pub fn get_artifact_output_path(digest: &str, namespace: &str) -> PathBuf {
     get_artifact_output_dir_path(namespace).join(digest)
 }
 
+// Store path components
+//
+// The functions above join a digest and a namespace straight into a store
+// path, and every one of those values reaches this process from somewhere else
+// — a gRPC request, a registry response, an alias file on disk. A value that
+// is not a single, inert path component therefore lets whoever supplied it
+// choose a destination outside the store. Both shapes are parsed here, beside
+// the joins they protect, so there is one rule rather than one per caller.
+
+/// Length of a sha256 digest in lowercase hex, the only shape a store path
+/// component ever takes (`sdk/rust/src/context.rs` hashes artifact JSON with
+/// `sha256::digest`).
+const ARTIFACT_DIGEST_LENGTH: usize = 64;
+
+/// Parses a digest naming a store entry. `source` names where the value came
+/// from, so a refusal says which input was hostile.
+pub fn parse_artifact_digest(digest: &str, source: &str) -> Result<String> {
+    let is_lowercase_hex = digest
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+
+    if digest.len() != ARTIFACT_DIGEST_LENGTH || !is_lowercase_hex {
+        bail!(
+            "invalid artifact digest from {source}: expected {ARTIFACT_DIGEST_LENGTH} lowercase \
+             hex characters, got {:?}",
+            digest,
+        );
+    }
+
+    Ok(digest.to_string())
+}
+
+/// Parses a value that names exactly one directory under a store root — a
+/// namespace, an alias name, a tag. A value carrying a separator, or equal to
+/// `.` or `..`, escapes that root the same way a hostile digest would, and one
+/// wearing the staging prefix is indistinguishable from a staging sibling.
+///
+/// Returns the component rather than `()` so the checked value is what callers
+/// go on to use: a call site that drops the parse stops compiling instead of
+/// quietly joining the unchecked string into a store path.
+pub fn parse_store_path_component(value: &str, field: &str) -> Result<String> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+        || value.starts_with(STAGING_PREFIX)
+    {
+        bail!(
+            "invalid artifact {field} {:?}: must be non-empty, contain no path separator, \
+             not be '.' or '..', and not start with the reserved staging prefix {:?}",
+            value,
+            STAGING_PREFIX,
+        );
+    }
+
+    Ok(value.to_string())
+}
+
 // Staged publishing
 //
 // A shared store path (an archive, or an artifact output directory) must
@@ -173,11 +232,15 @@ pub fn get_artifact_output_path(digest: &str, namespace: &str) -> PathBuf {
 // build/run commands — shares one implementation instead of each growing its
 // own copy of the same invariant.
 
+/// The name every staging path starts with, reserved so no store entry can
+/// wear it (`parse_store_path_component`).
+const STAGING_PREFIX: &str = ".tmp-";
+
 /// Builds the staging path for a store entry: a unique sibling of `real_path`,
 /// so the publishing rename stays on one filesystem and `real_path` itself is
 /// only ever created by that rename.
 pub fn staging_path_for(real_path: &Path) -> PathBuf {
-    real_path.with_file_name(format!(".tmp-{}", Uuid::now_v7()))
+    real_path.with_file_name(format!("{STAGING_PREFIX}{}", Uuid::now_v7()))
 }
 
 /// Removes an abandoned staging path. Failures are logged rather than
