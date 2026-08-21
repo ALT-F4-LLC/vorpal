@@ -751,7 +751,16 @@ mod unlock_parse_tests {
     fn build_jobs_omitted_defaults_to_available_parallelism() {
         let cli = parse(&["build", "foo"]).expect("should parse");
         match cli.command {
-            Command::Build { jobs, .. } => assert_eq!(jobs, get_default_jobs()),
+            Command::Build { jobs, .. } => {
+                assert_eq!(jobs, get_default_jobs());
+
+                // The property the flag actually promises, rather than the
+                // wiring compared to itself: an omitted `--jobs` is a usable
+                // width. `get_default_jobs`'s own `unwrap_or(1)` fallback is
+                // not otherwise reachable from a test, since
+                // `available_parallelism()` is not injectable.
+                assert!(jobs >= 1, "the default --jobs must be at least 1");
+            }
             _ => panic!("expected Build command"),
         }
     }
@@ -783,8 +792,8 @@ mod clamp_jobs_tests {
     }
 
     // C-6 / AB-6: a value above the ceiling is capped rather than trusted,
-    // since it is what bounds peak CLI memory (jobs x largest concurrent
-    // archive), not thread safety.
+    // since it is what bounds how much work one invocation has outstanding
+    // against the store and the worker, not thread safety.
     #[test]
     fn clamp_jobs_caps_a_value_above_the_ceiling() {
         assert_eq!(clamp_jobs(JOBS_CEILING + 1), JOBS_CEILING);
@@ -884,12 +893,14 @@ fn get_default_jobs() -> usize {
         .unwrap_or(1)
 }
 
-/// Ceiling on `--jobs`/`-j`. Not a thread-safety limit — the hazard is
-/// memory, not concurrency: each concurrent `build()` accumulates a whole
-/// pulled archive into a `Vec<u8>` before writing it out
-/// (`cli/src/command/build.rs`'s `build()`), so peak CLI memory is roughly
-/// `jobs` times the largest concurrent archive. A reasoned posture, not a
-/// measurement — no real archive-size data backs this number.
+/// Ceiling on `--jobs`/`-j`. Not a thread-safety limit — it bounds how many
+/// artifacts are pulled, unpacked and built at once, and with them how many
+/// worker RPCs one invocation has outstanding. Peak memory is no longer the
+/// reason: pulled archives stream into their staged file a chunk at a time
+/// (`StagedArchive`, `cli/src/command/build.rs`) rather than being
+/// accumulated whole, so this ceiling is defence in depth rather than the
+/// only bound between an archive's size — the registry's choice, not the
+/// user's — and the host. A reasoned posture, not a measurement.
 const JOBS_CEILING: usize = 64;
 
 /// Clamps a requested `--jobs`/`-j` value to `[1, JOBS_CEILING]`, deliberately
@@ -1248,6 +1259,20 @@ async fn run_login(
     // born world-readable on a default-umask (022) system. This is
     // the file-birth point — `OpenOptions::mode()` only applies when
     // the file is created, so getting it right here is load-bearing.
+    //
+    // KNOWN OPEN RISK, deliberately not fixed here: this write is
+    // truncate-then-write, so a concurrent reader can observe the
+    // file empty or partial and a crash mid-write leaves it
+    // zero-length, and the mode is not re-asserted on a file that
+    // already exists. `vorpal build` now reads this file from up to
+    // `--jobs` tasks at once, which multiplies how often a reader is
+    // in that window. The correct fix is to route this through the
+    // SDK's own atomic writer (`write_credentials_secure`,
+    // `sdk/rust/src/context.rs`, temp file + fsync + rename, with
+    // its own torn-read tests) rather than growing a second
+    // implementation here — that needs the SDK to export it, which
+    // is outside this change's declared scope and is filed as its
+    // own issue.
     let mut credentials_file = OpenOptions::new()
         .write(true)
         .create(true)

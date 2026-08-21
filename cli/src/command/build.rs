@@ -13,23 +13,26 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap, HashSet},
     future::Future,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::exit,
 };
 use tokio::{
-    fs::{create_dir_all, read_link, rename, symlink_metadata, write, File},
-    io::{AsyncReadExt, BufReader},
+    fs::{create_dir_all, read_link, rename, symlink_metadata, File},
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     task::JoinSet,
 };
-use tonic::{transport::Channel, Code, Request};
+use tonic::{transport::Channel, Code, Request, Streaming};
 use tracing::{error, info};
 use vorpal_sdk::{
     api::{
         agent::agent_service_client::AgentServiceClient,
-        archive::{archive_service_client::ArchiveServiceClient, ArchivePullRequest},
+        archive::{
+            archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePullResponse,
+        },
         artifact::{
             artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
             ArtifactSystem, ArtifactsRequest,
@@ -328,6 +331,162 @@ pub struct RunArgsService {
     pub worker: String,
 }
 
+/// Unpacks `archive_path` into a staged sibling of `artifact_path` and
+/// publishes it with a single rename, if the archive is present. Returns
+/// whether output files exist afterward.
+async fn unpack_archive_if_present(
+    artifact_name: &str,
+    artifact_digest: &str,
+    artifact_path: &Path,
+    archive_path: &Path,
+) -> Result<bool> {
+    if !archive_path.exists() {
+        return Ok(false);
+    }
+
+    info!("{artifact_name} |> unpack: {artifact_digest}");
+
+    publish_unpacked_output(archive_path, artifact_path).await?;
+
+    let artifact_files = get_file_paths(&artifact_path.to_path_buf(), vec![], vec![])?;
+
+    Ok(!artifact_files.is_empty())
+}
+
+/// An archive being written into a staged sibling of its real store path.
+/// Bytes land in the staged file as they arrive and the real path is only
+/// ever created — whole — by `publish`'s single rename, so no reader of it
+/// observes a partial or truncated archive (mirrors the worker's own publish
+/// path, `cli/src/command/start/worker.rs`).
+///
+/// Writing incrementally is what keeps peak memory to one chunk per
+/// concurrent pull: accumulating a whole archive into a `Vec<u8>` first made
+/// peak CLI memory `jobs` times the largest concurrent archive, and an
+/// archive's size is the registry's choice rather than the user's, so
+/// `--jobs`'s own ceiling was bounding the wrong unit.
+struct StagedArchive {
+    archive_path: PathBuf,
+    bytes_written: usize,
+    file: File,
+    staging_path: PathBuf,
+}
+
+impl StagedArchive {
+    async fn create(archive_path: &Path) -> Result<Self> {
+        let archive_parent = archive_path
+            .parent()
+            .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+
+        create_dir_all(archive_parent).await?;
+
+        let staging_path = staging_path_for(archive_path);
+        let file = File::create(&staging_path)
+            .await
+            .map_err(|err| anyhow!("failed to write archive {}: {err}", archive_path.display()))?;
+
+        Ok(Self {
+            archive_path: archive_path.to_path_buf(),
+            bytes_written: 0,
+            file,
+            staging_path,
+        })
+    }
+
+    async fn write_chunk(&mut self, data: &[u8]) -> Result<()> {
+        self.file.write_all(data).await.map_err(|err| {
+            anyhow!(
+                "failed to write archive {}: {err}",
+                self.archive_path.display()
+            )
+        })?;
+
+        self.bytes_written += data.len();
+
+        Ok(())
+    }
+
+    /// Publishes the staged bytes onto the real archive path, reporting
+    /// whether anything was published: an archive that carried no bytes at
+    /// all publishes nothing and leaves the store path absent, so the caller
+    /// falls through to building it. The staged file is discarded on every
+    /// path that does not publish, this one included.
+    async fn publish(mut self) -> Result<bool> {
+        let published: Result<bool> = async {
+            self.file.flush().await?;
+
+            if self.bytes_written == 0 {
+                return Ok(false);
+            }
+
+            set_timestamps(&self.staging_path).await?;
+
+            publish_atomically(&self.staging_path, &self.archive_path).await?;
+
+            Ok(true)
+        }
+        .await;
+
+        // The compensator runs on the `Err` and empty arms: a *dropped*
+        // future is neither, and leaves the staged file behind. That a drop
+        // never happens on the build path is `run_scheduler`'s
+        // drain-never-abort property (see its C-3 paragraph), not a property
+        // of this type — adding a cancellation point above this call (a
+        // `select!`, a timeout, a ctrl-C handler) without a drop guard here
+        // orphans staged archives, which nothing reaps.
+        if !matches!(published, Ok(true)) {
+            discard_staging(&self.staging_path).await;
+        }
+
+        published
+    }
+
+    async fn discard(self) {
+        discard_staging(&self.staging_path).await;
+    }
+}
+
+/// Streams `stream`'s chunks straight into a `StagedArchive` and publishes
+/// it, reporting whether anything was published.
+///
+/// A `NotFound` stream error ends the pull with whatever arrived, matching
+/// the pull request's own "the registry does not have it" path; any other
+/// stream error is an error and the staged archive is discarded.
+async fn publish_archive_stream(
+    stream: &mut Streaming<ArchivePullResponse>,
+    archive_path: &Path,
+    error_context: &str,
+) -> Result<bool> {
+    let mut staged = StagedArchive::create(archive_path).await?;
+
+    loop {
+        match stream.message().await {
+            Ok(Some(chunk)) => {
+                if !chunk.data.is_empty() {
+                    if let Err(err) = staged.write_chunk(&chunk.data).await {
+                        staged.discard().await;
+
+                        return Err(err);
+                    }
+                }
+            }
+
+            Ok(None) => break,
+
+            Err(status) => {
+                if status.code() != Code::NotFound {
+                    staged.discard().await;
+
+                    bail!("{error_context}: {:?}", status);
+                }
+
+                break;
+            }
+        }
+    }
+
+    staged.publish().await
+}
+
 /// Pulls `artifact_digest`'s archive from the registry into `archive_path` if
 /// it is not already present locally. A registry `NotFound` is not an error:
 /// it means the archive genuinely has no output (e.g. a source-only
@@ -375,88 +534,10 @@ async fn pull_archive(
     };
 
     let mut stream = response.into_inner();
-    let mut stream_data = Vec::new();
 
-    loop {
-        match stream.message().await {
-            Ok(Some(chunk)) => {
-                if !chunk.data.is_empty() {
-                    stream_data.extend_from_slice(&chunk.data);
-                }
-            }
-
-            Ok(None) => break,
-
-            Err(status) => {
-                if status.code() != Code::NotFound {
-                    bail!("registry stream error ({error_label}): {status:?}");
-                }
-
-                break;
-            }
-        }
-    }
-
-    if !stream_data.is_empty() {
-        publish_archive_bytes(&stream_data, archive_path).await?;
-    }
+    publish_archive_stream(&mut stream, archive_path, error_label).await?;
 
     Ok(())
-}
-
-/// Unpacks `archive_path` into a staged sibling of `artifact_path` and
-/// publishes it with a single rename, if the archive is present. Returns
-/// whether output files exist afterward.
-async fn unpack_archive_if_present(
-    artifact_name: &str,
-    artifact_digest: &str,
-    artifact_path: &Path,
-    archive_path: &Path,
-) -> Result<bool> {
-    if !archive_path.exists() {
-        return Ok(false);
-    }
-
-    info!("{artifact_name} |> unpack: {artifact_digest}");
-
-    publish_unpacked_output(archive_path, artifact_path).await?;
-
-    let artifact_files = get_file_paths(&artifact_path.to_path_buf(), vec![], vec![])?;
-
-    Ok(!artifact_files.is_empty())
-}
-
-/// Writes `data` to a staged sibling of `archive_path`, then publishes it
-/// with a single rename onto the shared store path. No reader of
-/// `archive_path` ever observes a partial or truncated file — mirrors the
-/// worker's own publish path (`cli/src/command/start/worker.rs`).
-async fn publish_archive_bytes(data: &[u8], archive_path: &Path) -> Result<()> {
-    let archive_parent = archive_path
-        .parent()
-        .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
-
-    create_dir_all(archive_parent).await?;
-
-    let staging_path = staging_path_for(archive_path);
-
-    let staged: Result<()> = async {
-        write(&staging_path, data)
-            .await
-            .map_err(|err| anyhow!("failed to write archive {}: {err}", archive_path.display()))?;
-
-        set_timestamps(&staging_path).await?;
-
-        publish_atomically(&staging_path, archive_path)
-            .await
-            .map(|_| ())
-    }
-    .await;
-
-    if staged.is_err() {
-        discard_staging(&staging_path).await;
-    }
-
-    staged
 }
 
 /// Unpacks `archive_path` into a staged sibling of `output_path`, then
@@ -537,6 +618,12 @@ async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Res
     }
     .await;
 
+    // As in `publish_archive_bytes`: `Err` is compensated, a dropped future
+    // is not. This unpacked staging tree is the larger of the two — an
+    // orphaned one holds a whole unpacked artifact — and nothing reaps
+    // staging names, so this arm depends on `run_scheduler` draining rather
+    // than aborting (its C-3 paragraph) for as long as it stays a plain
+    // `is_err()` check rather than a drop guard.
     if staged.is_err() {
         discard_staging(&staging_path).await;
     }
@@ -564,6 +651,13 @@ async fn retire_atomically(real_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Builds one artifact: pull, unpack, or build-then-pull. This is the body
+/// `run_scheduler` spawns, so it — and everything it calls — must report
+/// failure by returning `Err` and never by `process::exit` or a panic
+/// (C-4/AB-4). A task that kills the process takes every sibling build in
+/// flight with it, skipping each one's staging compensator and its
+/// credential-refresh commit window. The `exit` calls in `run()` are a
+/// different case: they run on the single driver task before any dispatch.
 async fn build(
     artifact: &Artifact,
     artifact_aliases: Vec<String>,
@@ -696,12 +790,20 @@ async fn build(
     Ok(())
 }
 
+/// How many stuck digests the scheduler's fail-closed `bail!` names before
+/// summarising the rest as a count.
+const STUCK_DIGESTS_LISTED: usize = 8;
+
 /// Ready-set scheduler over `tokio::task::JoinSet`: dispatches every key of
 /// `build_store` through `dispatch`, at most `jobs` concurrently, never
 /// starting a node before every digest in its own `steps[].artifacts` has
-/// completed. `order` seeds the initial ready set and settles ties among
-/// simultaneously-ready nodes, so `--jobs 1` reproduces `order`'s dispatch
-/// sequence exactly (C-8) — pass `get_order`'s toposort output.
+/// completed. `order` is the dispatch order: among nodes that are ready at
+/// the same moment, the one earliest in `order` goes first, whether it was
+/// ready from the start or freed by a completion, so `--jobs 1` reproduces
+/// `order` exactly (C-8) — pass `get_order`'s toposort output. A plain FIFO
+/// queue does not: it runs every initially-ready root before any node a
+/// completion freed, which is a different sequence from `order` on any graph
+/// whose toposort interleaves a root's dependents before the next root.
 ///
 /// C-1: the dependency invariant is checked against `build_store`'s own
 /// edges before any dispatch, and an edge naming a digest `build_store` does
@@ -715,12 +817,22 @@ async fn build(
 /// `bail!` naming a stuck count — is decided from `completed` and
 /// `first_error` afterward, never by the ready queue alone going empty.
 ///
-/// C-3: nothing is ever aborted. On the first `Err` (or a spawned task's
-/// panic, surfaced as a `JoinError`), dispatch stops — but every task
-/// already spawned is still drained to completion via `join_next()`, because
-/// one of `build()`'s await points sits inside the process-global credential
-/// refresh lock, and cancelling a task there can lose a just-rotated refresh
-/// token (`sdk/rust/src/context.rs:1382-1385`).
+/// C-3: no task is aborted on any error path. On the first `Err` (or a
+/// spawned task's panic, surfaced as a `JoinError`), dispatch stops — but
+/// every task already spawned is still drained to completion via
+/// `join_next()`, because one of `build()`'s await points sits inside the
+/// process-global credential refresh lock, and cancelling a task there can
+/// lose a just-rotated refresh token (`sdk/rust/src/context.rs:1382-1385`).
+/// The staging compensators in `StagedArchive::publish` and
+/// `publish_unpacked_output` are `Err`-arm checks rather than drop guards,
+/// and lean on this same property for their own coverage.
+///
+/// The guarantee is over this function's error paths, not over every way its
+/// frame can be left: an unwind through the scheduler itself drops the
+/// `JoinSet` with tasks live, which does abort them. Every panic reachable
+/// here is a programmer-error `expect` over a map this function has just
+/// built, so it is latent rather than reachable from any graph a caller can
+/// supply — but a new fallible step in this loop must return, not panic.
 ///
 /// C-7: dispatch is deduplicated by the bare digest string alone — the ready
 /// queue, `indegree`, and `dependents` are all keyed on it, never on a tuple
@@ -736,6 +848,15 @@ where
     F: Fn(String) -> Fut,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
+    // The invariant lives with the function that depends on it: `jobs == 0`
+    // would leave the dispatch guard below false forever and report a bad
+    // argument as a stuck dependency graph. Callers clamp it too
+    // (`clamp_jobs`, `cli/src/command.rs`), which is a convention a second
+    // construction site does not inherit.
+    if jobs == 0 {
+        bail!("build scheduler needs at least one job, got 0");
+    }
+
     for artifact in build_store.values() {
         for step in artifact.steps.iter() {
             for hash in step.artifacts.iter() {
@@ -752,19 +873,18 @@ where
         .collect();
     let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
 
-    // `order` is iterated in its own (toposort) order, so each `dependents`
-    // list ends up sorted the same way: a node's dependents are appended to
-    // its dependencies' lists in the order the nodes themselves appear in
-    // `order`, which is what lets a single-threaded run reproduce `order`
-    // exactly (C-8).
+    // A node's position in `order` is its dispatch priority among nodes ready
+    // at the same moment (C-8).
+    let position: HashMap<&str, usize> = order
+        .iter()
+        .enumerate()
+        .map(|(index, digest)| (digest.as_str(), index))
+        .collect();
+
     for digest in &order {
-        let Some(artifact) = build_store.get(digest) else {
-            // Every digest in `order` is a `build_store` key once the C-1
-            // check above has passed (see this function's own doc comment);
-            // reached only if `order` was not actually derived from
-            // `build_store`, which no caller does.
-            continue;
-        };
+        let artifact = build_store
+            .get(digest)
+            .expect("order is a build_store key once the C-1 refusal above has passed");
 
         let mut seen: HashSet<&str> = HashSet::new();
 
@@ -784,25 +904,31 @@ where
         }
     }
 
-    let mut ready: VecDeque<String> = order
-        .into_iter()
-        .filter(|digest| indegree.get(digest) == Some(&0))
+    // `Reverse` makes the max-heap pop the *smallest* position first, so the
+    // node earliest in `order` is always the next one dispatched.
+    let mut ready: BinaryHeap<Reverse<(usize, &str)>> = order
+        .iter()
+        .enumerate()
+        .filter(|(_, digest)| indegree.get(digest.as_str()) == Some(&0))
+        .map(|(index, digest)| Reverse((index, digest.as_str())))
         .collect();
 
     let node_count = build_store.len();
-    let mut completed = 0usize;
+    // The completed set rather than a counter: which digests finished is what
+    // the fail-closed `bail!` below has to name, and a count cannot say.
+    let mut completed: HashSet<String> = HashSet::new();
     let mut in_flight = 0usize;
     let mut join_set: JoinSet<(String, Result<()>)> = JoinSet::new();
     let mut first_error: Option<anyhow::Error> = None;
 
     loop {
         while first_error.is_none() && in_flight < jobs {
-            let Some(digest) = ready.pop_front() else {
+            let Some(Reverse((_, digest))) = ready.pop() else {
                 break;
             };
 
-            let task_digest = digest.clone();
-            let fut = dispatch(digest);
+            let task_digest = digest.to_string();
+            let fut = dispatch(digest.to_string());
 
             join_set.spawn(async move { (task_digest, fut.await) });
 
@@ -813,41 +939,49 @@ where
             break;
         }
 
-        let (digest, result) = join_set
+        let joined = join_set
             .join_next()
             .await
-            .expect("in_flight tracks the live JoinSet length")
-            .unwrap_or_else(|join_err| {
-                (
-                    String::new(),
-                    Err(anyhow!("build task panicked: {join_err}")),
-                )
-            });
+            .expect("in_flight tracks the live JoinSet length");
 
         in_flight -= 1;
 
-        match result {
-            Ok(()) => {
-                completed += 1;
-
+        match joined {
+            // A panicking task has no digest to report and no dependents to
+            // free — only an error to carry out.
+            Err(join_err) => {
                 if first_error.is_none() {
-                    if let Some(waiting) = dependents.get(&digest) {
-                        for dependent in waiting {
-                            let entry = indegree
-                                .get_mut(dependent)
-                                .expect("dependent is a build_store key");
-
-                            *entry -= 1;
-
-                            if *entry == 0 {
-                                ready.push_back(dependent.clone());
-                            }
-                        }
-                    }
+                    first_error = Some(anyhow!("build task panicked: {join_err}"));
                 }
             }
 
-            Err(err) => {
+            Ok((digest, Ok(()))) => {
+                // Nothing re-reads `ready` once `first_error` is set — the
+                // dispatch loop above is gated on it — so freeing dependents
+                // here after a failure is inert rather than a second path
+                // out of the queue.
+                if let Some(waiting) = dependents.get(&digest) {
+                    for dependent in waiting {
+                        let entry = indegree
+                            .get_mut(dependent)
+                            .expect("dependent is a build_store key");
+
+                        *entry -= 1;
+
+                        if *entry == 0 {
+                            let index = *position
+                                .get(dependent.as_str())
+                                .expect("dependent is in order");
+
+                            ready.push(Reverse((index, dependent.as_str())));
+                        }
+                    }
+                }
+
+                completed.insert(digest);
+            }
+
+            Ok((_, Err(err))) => {
                 if first_error.is_none() {
                     first_error = Some(err);
                 }
@@ -859,11 +993,40 @@ where
         return Err(err);
     }
 
-    if completed != node_count {
+    if completed.len() != node_count {
+        // Which artifacts are still waiting is what an operator needs here:
+        // this bail fires on a graph the scheduler cannot complete, which a
+        // hostile or broken config binary is what produces, and a bare count
+        // leaves them nothing to look at. Capped, since such a graph can be
+        // any size.
+        let mut stuck: Vec<&str> = build_store
+            .keys()
+            .filter(|digest| !completed.contains(digest.as_str()))
+            .map(|digest| digest.as_str())
+            .collect();
+
+        stuck.sort_unstable();
+
+        let listed = stuck
+            .iter()
+            .take(STUCK_DIGESTS_LISTED)
+            .copied()
+            .collect::<Vec<&str>>()
+            .join(", ");
+
+        let remainder = stuck.len().saturating_sub(STUCK_DIGESTS_LISTED);
+
         bail!(
-            "build scheduler made no further progress with {} of {} artifacts complete",
-            completed,
-            node_count
+            "build scheduler made no further progress with {} of {} artifacts complete; \
+             waiting on: {}{}",
+            completed.len(),
+            node_count,
+            listed,
+            if remainder > 0 {
+                format!(" (and {remainder} more)")
+            } else {
+                String::new()
+            },
         );
     }
 
@@ -1557,8 +1720,6 @@ mod tests {
         dirs: &[&str],
         links: &[(&str, &str)],
     ) {
-        use tokio::io::AsyncWriteExt;
-
         let file = tokio::fs::File::create(archive_path).await.unwrap();
         let encoder = async_compression::tokio::write::ZstdEncoder::new(file);
         let mut builder = tokio_tar::Builder::new(encoder);
@@ -1625,7 +1786,7 @@ mod tests {
     // file, and a file already there is replaced whole rather than
     // truncated in place under a reader's open handle.
     #[tokio::test]
-    async fn publish_archive_bytes_replaces_the_real_path_instead_of_writing_into_it() {
+    async fn staged_archive_replaces_the_real_path_instead_of_writing_into_it() {
         let root = TempDir::new().unwrap();
         let archive_dir = root.path().join("archives");
         let archive_path = archive_dir.join("abc123.tar.zst");
@@ -1633,15 +1794,63 @@ mod tests {
         std::fs::create_dir_all(&archive_dir).unwrap();
         std::fs::write(&archive_path, b"first-bytes").unwrap();
 
-        publish_archive_bytes(b"second-bytes", &archive_path)
-            .await
-            .unwrap();
+        let mut staged = StagedArchive::create(&archive_path).await.unwrap();
+
+        // Two chunks, because chunks are how the pull actually arrives: the
+        // published file must be their concatenation, not the last one.
+        staged.write_chunk(b"second-").await.unwrap();
+        staged.write_chunk(b"bytes").await.unwrap();
+
+        assert!(staged.publish().await.unwrap());
 
         assert_eq!(std::fs::read(&archive_path).unwrap(), b"second-bytes");
         assert_eq!(
             dir_entry_names(&archive_dir),
             BTreeSet::from(["abc123.tar.zst".to_string()]),
             "a staging file was left under the store directory"
+        );
+    }
+
+    // C-6: an archive that carried no bytes publishes nothing, so the caller
+    // still sees `archive_path.exists() == false` and falls through to
+    // building it — and the staged file it opened does not survive as debris
+    // in the store directory.
+    #[tokio::test]
+    async fn staged_archive_publishes_nothing_when_no_byte_ever_arrived() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        let staged = StagedArchive::create(&archive_path).await.unwrap();
+
+        assert!(
+            !staged.publish().await.unwrap(),
+            "an empty archive reported itself as published"
+        );
+        assert!(!archive_path.exists(), "an empty archive was published");
+        assert!(
+            dir_entry_names(&archive_dir).is_empty(),
+            "an empty archive left a staging file behind"
+        );
+    }
+
+    // C-6: a discarded pull (a stream error mid-archive) leaves the store
+    // directory exactly as it found it.
+    #[tokio::test]
+    async fn staged_archive_discard_leaves_no_file_behind() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        let mut staged = StagedArchive::create(&archive_path).await.unwrap();
+
+        staged.write_chunk(b"partial").await.unwrap();
+        staged.discard().await;
+
+        assert!(!archive_path.exists(), "a discarded pull published anyway");
+        assert!(
+            dir_entry_names(&archive_dir).is_empty(),
+            "a discarded pull left a staging file behind"
         );
     }
 
@@ -2277,9 +2486,11 @@ mod tests {
     }
 
     // AC1: independent artifacts run concurrently, observable as overlap -
-    // peak simultaneous in-flight count reaching `jobs` rather than staying
-    // at 1.
-    #[tokio::test]
+    // peak simultaneous in-flight count reaching more than 1. Run on the
+    // multi-threaded runtime the binary itself uses (`rt-multi-thread`,
+    // cli/Cargo.toml), so the overlap pinned here is real parallelism rather
+    // than cooperative interleaving on one thread.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn run_scheduler_runs_independent_nodes_concurrently_up_to_jobs() {
         let mut build_store = HashMap::new();
         build_store.insert("x".to_string(), artifact_depending_on(&[]));
@@ -2314,10 +2525,86 @@ mod tests {
             .await
             .expect("two independent nodes must succeed");
 
-        assert_eq!(
-            peak.load(Ordering::SeqCst),
-            2,
+        assert!(
+            peak.load(Ordering::SeqCst) >= 2,
             "independent artifacts never overlapped in flight"
+        );
+    }
+
+    // C-6 / AC1's other half: `jobs` is an upper bound, not just a target.
+    // More ready nodes than slots is the only shape that can catch an
+    // unbounded fan-out - every fixture whose node count equals `jobs`
+    // passes identically with the bound removed, and an unbounded scheduler
+    // is what the `--jobs` ceiling exists to prevent.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn run_scheduler_never_exceeds_jobs_in_flight() {
+        let names = ["n1", "n2", "n3", "n4", "n5"];
+        let mut build_store = HashMap::new();
+
+        for name in names {
+            build_store.insert(name.to_string(), artifact_depending_on(&[]));
+        }
+
+        let order: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+
+        let dispatch = {
+            let in_flight = in_flight.clone();
+            let peak = peak.clone();
+
+            move |_digest: String| {
+                let in_flight = in_flight.clone();
+                let peak = peak.clone();
+
+                async move {
+                    let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+
+                    Ok(())
+                }
+            }
+        };
+
+        run_scheduler(&build_store, order, 2, dispatch)
+            .await
+            .expect("five independent nodes must succeed");
+
+        assert!(
+            peak.load(Ordering::SeqCst) <= 2,
+            "peak in-flight was {}, above the requested --jobs 2",
+            peak.load(Ordering::SeqCst)
+        );
+    }
+
+    // `jobs = 0` is a refusal that names the argument, not a build that
+    // stalls and reports itself as a stuck dependency graph. The clamp at
+    // the CLI call site is a convention a second construction site does not
+    // inherit; this is the invariant living with the function.
+    #[tokio::test]
+    async fn run_scheduler_refuses_zero_jobs() {
+        let mut build_store = HashMap::new();
+        build_store.insert("only".to_string(), artifact_depending_on(&[]));
+
+        let err = run_scheduler(
+            &build_store,
+            vec!["only".to_string()],
+            0,
+            |digest: String| async move {
+                let _ = digest;
+                Ok(())
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("at least one job"),
+            "jobs = 0 was not reported as a bad argument: {err}"
         );
     }
 
@@ -2415,9 +2702,17 @@ mod tests {
         .await
         .expect("a cycle must fail fast, not hang");
 
+        let err = result.expect_err("a scheduler cycle returned Ok instead of failing closed");
+
+        // The stuck digests, not just a count: this bail fires when a
+        // hostile or broken config binary hands over a graph the scheduler
+        // cannot complete, which is exactly when the operator has least
+        // context to work out which artifacts were waiting.
+        let message = err.to_string();
+
         assert!(
-            result.is_err(),
-            "a scheduler cycle returned Ok instead of failing closed"
+            message.contains("waiting on: a, b"),
+            "the stuck digests were not named: {message}"
         );
     }
 
@@ -2426,7 +2721,7 @@ mod tests {
     // `after` (only reachable through `slow`'s own dependents) is never
     // dispatched because dependents are not processed once an error has been
     // recorded.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn run_scheduler_drains_in_flight_work_and_starts_nothing_new_after_a_failure() {
         let mut build_store = HashMap::new();
         build_store.insert("fail".to_string(), artifact_depending_on(&[]));
@@ -2481,9 +2776,60 @@ mod tests {
         );
     }
 
-    // C-7: a digest shared by two parents (a diamond graph) is dispatched
-    // exactly once, deduplicated by the bare digest string alone. Positive
-    // control in the same test: all four nodes are still dispatched.
+    // C-3/C-4's other arm: a task that *panics* surfaces as a `JoinError`,
+    // not a process exit, and is drained around exactly like a returned
+    // `Err` - the sibling still runs to completion and the panic is reported
+    // as this build's error. The returned-`Err` arm above never reaches this
+    // code, so without this test the whole panicking-task path is unrun.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn run_scheduler_reports_a_panicking_task_and_still_drains_its_siblings() {
+        let mut build_store = HashMap::new();
+        build_store.insert("boom".to_string(), artifact_depending_on(&[]));
+        build_store.insert("slow".to_string(), artifact_depending_on(&[]));
+
+        let order = vec!["boom".to_string(), "slow".to_string()];
+        let slow_completed = Arc::new(AtomicUsize::new(0));
+
+        let dispatch = {
+            let slow_completed = slow_completed.clone();
+
+            move |digest: String| {
+                let slow_completed = slow_completed.clone();
+
+                async move {
+                    if digest == "boom" {
+                        panic!("boom task panicked on purpose");
+                    }
+
+                    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+                    slow_completed.store(1, Ordering::SeqCst);
+
+                    Ok(())
+                }
+            }
+        };
+
+        let err = run_scheduler(&build_store, order, 2, dispatch)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("build task panicked"),
+            "a panicking task was not reported as a build failure: {err}"
+        );
+        assert_eq!(
+            slow_completed.load(Ordering::SeqCst),
+            1,
+            "a sibling was cancelled instead of drained when a task panicked"
+        );
+    }
+
+    // C-7: the join of a diamond graph - the node two completing parents can
+    // each free - is dispatched exactly once, deduplicated by the bare digest
+    // string alone. The root cannot double-dispatch (it is seeded once and
+    // freed by nobody), so `d`, not `a`, is where the defect class lives.
+    // Positive control in the same test: all four nodes are still dispatched.
     #[tokio::test]
     async fn run_scheduler_dispatches_a_shared_dependency_exactly_once() {
         let mut build_store = HashMap::new();
@@ -2520,9 +2866,9 @@ mod tests {
         let dispatched = dispatched.lock().await;
 
         assert_eq!(
-            dispatched.iter().filter(|d| *d == "a").count(),
+            dispatched.iter().filter(|d| *d == "d").count(),
             1,
-            "a digest shared by two parents was dispatched more than once"
+            "the node two parents each freed was dispatched more than once"
         );
 
         let mut got = dispatched.clone();
@@ -2538,15 +2884,20 @@ mod tests {
         );
     }
 
-    // C-8: `--jobs 1` reproduces the seed order's dispatch sequence exactly,
-    // including the tie-break among two independent roots and the order a
-    // completion frees up a dependent.
+    // C-8: `--jobs 1` reproduces the seed order's dispatch sequence exactly.
+    //
+    // The graph is the one that tells order-indexed readiness apart from a
+    // FIFO queue: `q` depends on `p`, `r` does not, and the order puts `q`
+    // (the dependent) before `r` (the second root) - the interleaved shape
+    // `get_order`'s reverse-postorder DFS actually produces. A FIFO ready
+    // queue dispatches p, r, q, because both roots are seeded before `q` is
+    // freed; only position-in-`order` gives p, q, r.
     #[tokio::test]
     async fn run_scheduler_jobs_one_reproduces_the_seed_order_exactly() {
         let mut build_store = HashMap::new();
         build_store.insert("p".to_string(), artifact_depending_on(&[]));
-        build_store.insert("q".to_string(), artifact_depending_on(&[]));
-        build_store.insert("r".to_string(), artifact_depending_on(&["p"]));
+        build_store.insert("q".to_string(), artifact_depending_on(&["p"]));
+        build_store.insert("r".to_string(), artifact_depending_on(&[]));
 
         let order = vec!["p".to_string(), "q".to_string(), "r".to_string()];
         let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
@@ -2575,28 +2926,56 @@ mod tests {
         );
     }
 
-    // C-4 (reviewer-facing regression net, not a runtime test): the worker-
-    // stream-error path inside `build()`'s task body must never reach for
-    // `process::exit` again - `grep -n "exit(" ` in the `build()` function
-    // body must return nothing, so a spawned task's failure can only ever
-    // surface as a returned `Err` the scheduler can drain around.
-    #[test]
-    fn build_task_body_never_calls_process_exit() {
-        let source = include_str!("build.rs");
-        let start = source
-            .find("async fn build(\n")
-            .expect("build() must exist");
-        let after_start = &source[start..];
-        let end = after_start
-            .find("\nasync fn run_scheduler")
-            .expect("run_scheduler must follow build() in this file");
+    // A dependency named twice - here once per step, the shape a config
+    // binary produces when two steps of one artifact both consume the same
+    // toolchain - counts once. Indegree and dependents currently gain the
+    // duplicate symmetrically, so the graph completes either way; this
+    // fixture is what makes a later change to one side of that symmetry
+    // (dependents as a set, say) fail instead of hanging.
+    #[tokio::test]
+    async fn run_scheduler_counts_a_repeated_dependency_digest_once() {
+        let child = Artifact {
+            steps: vec![
+                ArtifactStep {
+                    artifacts: vec!["dep".to_string()],
+                    ..Default::default()
+                },
+                ArtifactStep {
+                    artifacts: vec!["dep".to_string()],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
 
-        assert!(
-            !after_start[..end].contains("exit("),
-            "build()'s task body must return Err, not call process::exit \
-             (C-4): a spawned task killing the process leaves every \
-             sibling in-flight build's credential-refresh window and \
-             staged-write compensation unrun"
+        let mut build_store = HashMap::new();
+        build_store.insert("dep".to_string(), artifact_depending_on(&[]));
+        build_store.insert("child".to_string(), child);
+
+        let order = vec!["dep".to_string(), "child".to_string()];
+        let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
+
+        let dispatch = {
+            let dispatched = dispatched.clone();
+
+            move |digest: String| {
+                let dispatched = dispatched.clone();
+
+                async move {
+                    dispatched.lock().await.push(digest);
+                    Ok(())
+                }
+            }
+        };
+
+        run_scheduler(&build_store, order.clone(), 2, dispatch)
+            .await
+            .expect("a repeated dependency edge must not stall the graph");
+
+        assert_eq!(
+            *dispatched.lock().await,
+            order,
+            "a dependency named twice was not counted once"
         );
     }
 }
