@@ -185,9 +185,11 @@ async fn find_staging_path_reference(staged_files: &[PathBuf]) -> Result<Option<
             continue;
         }
 
-        let mut reader = BufReader::new(File::open(path).await.map_err(|err| {
-            anyhow!("failed to open staged file {}: {err}", path.display())
-        })?);
+        let mut reader = BufReader::new(
+            File::open(path)
+                .await
+                .map_err(|err| anyhow!("failed to open staged file {}: {err}", path.display()))?,
+        );
 
         let mut buf = vec![0u8; STAGING_SCAN_CHUNK_SIZE + overlap];
         let mut carried = 0usize;
