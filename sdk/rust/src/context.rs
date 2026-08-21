@@ -2989,7 +2989,11 @@ mod tests {
                 "a candidate name must stay a bare temp name beside the credentials file, got {}",
                 name
             );
-            assert!(name.ends_with(".tmp"), "unexpected candidate name: {}", name);
+            assert!(
+                name.ends_with(".tmp"),
+                "unexpected candidate name: {}",
+                name
+            );
         }
     }
 
