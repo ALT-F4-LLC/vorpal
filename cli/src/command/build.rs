@@ -13,7 +13,8 @@ use crate::command::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
+    future::Future,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::exit,
@@ -21,6 +22,7 @@ use std::{
 use tokio::{
     fs::{create_dir_all, read_link, rename, symlink_metadata, write, File},
     io::{AsyncReadExt, BufReader},
+    task::JoinSet,
 };
 use tonic::{transport::Channel, Code, Request};
 use tracing::{error, info};
@@ -275,6 +277,7 @@ pub struct RunArgsArtifact {
     pub list: bool,
     pub name: String,
     pub namespace: String,
+    pub jobs: usize,
     pub path: bool,
     pub prepare_only: bool,
     pub rebuild: bool,
@@ -646,8 +649,16 @@ async fn build(
             Ok(None) => break,
 
             Err(err) => {
-                error!("{} |> {}", &artifact.name, err.message());
-                exit(1);
+                // A spawned scheduler task cannot terminate the process:
+                // that would kill every sibling build in flight with no
+                // drain (C-4, AB-4). Return the error instead so the
+                // scheduler can stop dispatching and drain what is already
+                // running.
+                bail!(
+                    "{} |> worker stream error: {}",
+                    &artifact.name,
+                    err.message()
+                );
             }
         };
     }
@@ -685,60 +696,236 @@ async fn build(
     Ok(())
 }
 
-async fn build_artifacts(
-    artifact_namespace: &str,
-    artifact_selected: Option<&Artifact>,
-    artifact_selected_aliases: Vec<String>,
+/// Ready-set scheduler over `tokio::task::JoinSet`: dispatches every key of
+/// `build_store` through `dispatch`, at most `jobs` concurrently, never
+/// starting a node before every digest in its own `steps[].artifacts` has
+/// completed. `order` seeds the initial ready set and settles ties among
+/// simultaneously-ready nodes, so `--jobs 1` reproduces `order`'s dispatch
+/// sequence exactly (C-8) — pass `get_order`'s toposort output.
+///
+/// C-1: the dependency invariant is checked against `build_store`'s own
+/// edges before any dispatch, and an edge naming a digest `build_store` does
+/// not have is a refusal, not a filter. `get_order`'s `DiGraphMap` invents a
+/// node for a dangling edge (`config.rs:380-384`), so `order` is a superset
+/// of a safe node set and is never used as one here — only `build_store`'s
+/// keys are.
+///
+/// C-2: termination is explicit. The loop exits only when nothing is
+/// in-flight; what happens next — return `Ok`, return the first error, or
+/// `bail!` naming a stuck count — is decided from `completed` and
+/// `first_error` afterward, never by the ready queue alone going empty.
+///
+/// C-3: nothing is ever aborted. On the first `Err` (or a spawned task's
+/// panic, surfaced as a `JoinError`), dispatch stops — but every task
+/// already spawned is still drained to completion via `join_next()`, because
+/// one of `build()`'s await points sits inside the process-global credential
+/// refresh lock, and cancelling a task there can lose a just-rotated refresh
+/// token (`sdk/rust/src/context.rs:1382-1385`).
+///
+/// C-7: dispatch is deduplicated by the bare digest string alone — the ready
+/// queue, `indegree`, and `dependents` are all keyed on it, never on a tuple
+/// carrying aliases or a parent, so a digest shared by two parents in a
+/// diamond graph is still only ever spawned once.
+async fn run_scheduler<F, Fut>(
     build_store: &HashMap<String, Artifact>,
-    client_archive: &mut ArchiveServiceClient<Channel>,
-    client_worker: &mut WorkerServiceClient<Channel>,
-    registry: &str,
-) -> Result<()> {
-    let artifact_order = get_order(build_store).await?;
-
-    let mut build_complete = std::collections::HashSet::<String>::new();
-
-    for artifact_digest in artifact_order {
-        match build_store.get(&artifact_digest) {
-            None => bail!("artifact 'config' not found: {artifact_digest}"),
-
-            Some(artifact) => {
-                for step in &artifact.steps {
-                    for hash in &step.artifacts {
-                        if !build_complete.contains(hash) {
-                            bail!("artifact 'build' not found: {hash}");
-                        }
-                    }
+    order: Vec<String>,
+    jobs: usize,
+    dispatch: F,
+) -> Result<()>
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Result<()>> + Send + 'static,
+{
+    for artifact in build_store.values() {
+        for step in artifact.steps.iter() {
+            for hash in step.artifacts.iter() {
+                if !build_store.contains_key(hash) {
+                    bail!("artifact 'build' not found: {}", hash);
                 }
-
-                let mut artifact_aliases = vec![];
-
-                if let Some(selected) = artifact_selected {
-                    if selected.name == artifact.name {
-                        // loop can revisit this branch across iterations; can't move out of it once
-                        artifact_aliases = artifact_selected_aliases.clone();
-                    }
-                }
-
-                build(
-                    artifact,
-                    artifact_aliases,
-                    &artifact_digest,
-                    artifact_namespace,
-                    client_archive,
-                    client_worker,
-                    registry,
-                )
-                .await?;
-
-                build_complete.insert(artifact_digest);
-
-                // Sources are managed by the agent, no artifact entries needed
             }
         }
     }
 
+    let mut indegree: HashMap<String, usize> = build_store
+        .keys()
+        .map(|digest| (digest.clone(), 0))
+        .collect();
+    let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
+
+    // `order` is iterated in its own (toposort) order, so each `dependents`
+    // list ends up sorted the same way: a node's dependents are appended to
+    // its dependencies' lists in the order the nodes themselves appear in
+    // `order`, which is what lets a single-threaded run reproduce `order`
+    // exactly (C-8).
+    for digest in &order {
+        let Some(artifact) = build_store.get(digest) else {
+            // Every digest in `order` is a `build_store` key once the C-1
+            // check above has passed (see this function's own doc comment);
+            // reached only if `order` was not actually derived from
+            // `build_store`, which no caller does.
+            continue;
+        };
+
+        let mut seen: HashSet<&str> = HashSet::new();
+
+        for step in artifact.steps.iter() {
+            for dep in step.artifacts.iter() {
+                if seen.insert(dep.as_str()) {
+                    *indegree
+                        .get_mut(digest)
+                        .expect("digest is a build_store key") += 1;
+
+                    dependents
+                        .entry(dep.clone())
+                        .or_default()
+                        .push(digest.clone());
+                }
+            }
+        }
+    }
+
+    let mut ready: VecDeque<String> = order
+        .into_iter()
+        .filter(|digest| indegree.get(digest) == Some(&0))
+        .collect();
+
+    let node_count = build_store.len();
+    let mut completed = 0usize;
+    let mut in_flight = 0usize;
+    let mut join_set: JoinSet<(String, Result<()>)> = JoinSet::new();
+    let mut first_error: Option<anyhow::Error> = None;
+
+    loop {
+        while first_error.is_none() && in_flight < jobs {
+            let Some(digest) = ready.pop_front() else {
+                break;
+            };
+
+            let task_digest = digest.clone();
+            let fut = dispatch(digest);
+
+            join_set.spawn(async move { (task_digest, fut.await) });
+
+            in_flight += 1;
+        }
+
+        if in_flight == 0 {
+            break;
+        }
+
+        let (digest, result) = join_set
+            .join_next()
+            .await
+            .expect("in_flight tracks the live JoinSet length")
+            .unwrap_or_else(|join_err| {
+                (
+                    String::new(),
+                    Err(anyhow!("build task panicked: {join_err}")),
+                )
+            });
+
+        in_flight -= 1;
+
+        match result {
+            Ok(()) => {
+                completed += 1;
+
+                if first_error.is_none() {
+                    if let Some(waiting) = dependents.get(&digest) {
+                        for dependent in waiting {
+                            let entry = indegree
+                                .get_mut(dependent)
+                                .expect("dependent is a build_store key");
+
+                            *entry -= 1;
+
+                            if *entry == 0 {
+                                ready.push_back(dependent.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            Err(err) => {
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+            }
+        }
+    }
+
+    if let Some(err) = first_error {
+        return Err(err);
+    }
+
+    if completed != node_count {
+        bail!(
+            "build scheduler made no further progress with {} of {} artifacts complete",
+            completed,
+            node_count
+        );
+    }
+
     Ok(())
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "driver function threading namespace/selection/store/clients/jobs/registry through \
+              the scheduler; grouping would only relocate the count, not reduce it"
+)]
+async fn build_artifacts(
+    artifact_namespace: &str,
+    artifact_selected: Option<&Artifact>,
+    artifact_selected_aliases: Vec<String>,
+    build_store: HashMap<String, Artifact>,
+    client_archive: ArchiveServiceClient<Channel>,
+    client_worker: WorkerServiceClient<Channel>,
+    jobs: usize,
+    registry: &str,
+) -> Result<()> {
+    // Still called once: `get_order`'s cycle detection stands (config.rs:387-390),
+    // and its toposort output seeds the scheduler's deterministic FIFO tie-break.
+    let artifact_order = get_order(&build_store).await?;
+
+    let dispatch = |digest: String| {
+        let artifact = build_store
+            .get(&digest)
+            .cloned()
+            .expect("scheduler only dispatches digests present in build_store");
+
+        let mut artifact_aliases = vec![];
+
+        if let Some(selected) = artifact_selected {
+            if selected.name == artifact.name {
+                artifact_aliases = artifact_selected_aliases.clone();
+            }
+        }
+
+        // Both clients are `#[derive(Clone)]` over a `Channel`, a cheap
+        // multiplexed handle - cloning per dispatch is the mechanism, not
+        // overhead.
+        let mut client_archive = client_archive.clone();
+        let mut client_worker = client_worker.clone();
+        let artifact_namespace = artifact_namespace.to_string();
+        let registry = registry.to_string();
+
+        async move {
+            build(
+                &artifact,
+                artifact_aliases,
+                &digest,
+                &artifact_namespace,
+                &mut client_archive,
+                &mut client_worker,
+                &registry,
+            )
+            .await
+        }
+    };
+
+    run_scheduler(&build_store, artifact_order, jobs, dispatch).await
 }
 
 /// Builds the config binary for `config.language` (go, rust, python, or
@@ -1196,10 +1383,10 @@ pub async fn run(
     // Prepare lock path early for incremental artifact updates
 
     let client_archive_channel = build_channel(&service.registry).await?;
-    let mut client_archive = ArchiveServiceClient::new(client_archive_channel);
+    let client_archive = ArchiveServiceClient::new(client_archive_channel);
 
     let client_worker_channel = build_channel(&service.worker).await?;
-    let mut client_worker = WorkerServiceClient::new(client_worker_channel);
+    let client_worker = WorkerServiceClient::new(client_worker_channel);
 
     // Build config dependencies first to ensure config binary exists
     let config_store = config_context.get_artifact_store();
@@ -1208,9 +1395,10 @@ pub async fn run(
         &artifact_namespace,
         None,
         vec![],
-        config_store,
-        &mut client_archive,
-        &mut client_worker,
+        config_store.clone(),
+        client_archive.clone(),
+        client_worker.clone(),
+        artifact.jobs,
         &service.registry,
     )
     .await?;
@@ -1318,9 +1506,10 @@ pub async fn run(
         &artifact_namespace,
         Some(selected_artifact),
         artifact.aliases,
-        &build_store,
-        &mut client_archive,
-        &mut client_worker,
+        build_store,
+        client_archive,
+        client_worker,
+        artifact.jobs,
         &service.registry,
     )
     .await?;
@@ -2021,6 +2210,393 @@ mod tests {
         assert!(
             !archive_path.exists(),
             "an archive the scan never judged stayed cached, so every later build skips the pull"
+        );
+    }
+
+    // --- run_scheduler ---
+    //
+    // These tests exercise the ready-set scheduler directly, through fake
+    // `dispatch` closures, rather than through `build_artifacts`/`build()` -
+    // `build()`'s own corpus is real gRPC clients and the store filesystem,
+    // neither of which this scheduling logic touches (fakes over an internal
+    // seam, per fragments/tdd-discipline.md).
+
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tokio::sync::Mutex as AsyncMutex;
+    use vorpal_sdk::api::artifact::ArtifactStep;
+
+    fn artifact_depending_on(deps: &[&str]) -> Artifact {
+        Artifact {
+            steps: vec![ArtifactStep {
+                artifacts: deps.iter().map(|d| d.to_string()).collect(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    // AC2 / C-8: a non-trivial dependency chain (A depends on B depends on
+    // C) dispatches in strict topological order under a `jobs` well above
+    // the chain's own width, because readiness - not `jobs` - is what
+    // sequences it.
+    #[tokio::test]
+    async fn run_scheduler_never_starts_a_node_before_its_dependencies_complete() {
+        let mut build_store = HashMap::new();
+        build_store.insert("c".to_string(), artifact_depending_on(&[]));
+        build_store.insert("b".to_string(), artifact_depending_on(&["c"]));
+        build_store.insert("a".to_string(), artifact_depending_on(&["b"]));
+
+        let order = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let started: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+
+        let dispatch = {
+            let started = started.clone();
+
+            move |digest: String| {
+                let started = started.clone();
+
+                async move {
+                    started.lock().await.push(digest);
+                    Ok(())
+                }
+            }
+        };
+
+        run_scheduler(&build_store, order, 3, dispatch)
+            .await
+            .expect("a completable chain must succeed");
+
+        assert_eq!(
+            *started.lock().await,
+            vec!["c".to_string(), "b".to_string(), "a".to_string()],
+            "a dependency chain dispatched out of order"
+        );
+    }
+
+    // AC1: independent artifacts run concurrently, observable as overlap -
+    // peak simultaneous in-flight count reaching `jobs` rather than staying
+    // at 1.
+    #[tokio::test]
+    async fn run_scheduler_runs_independent_nodes_concurrently_up_to_jobs() {
+        let mut build_store = HashMap::new();
+        build_store.insert("x".to_string(), artifact_depending_on(&[]));
+        build_store.insert("y".to_string(), artifact_depending_on(&[]));
+
+        let order = vec!["x".to_string(), "y".to_string()];
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+
+        let dispatch = {
+            let in_flight = in_flight.clone();
+            let peak = peak.clone();
+
+            move |_digest: String| {
+                let in_flight = in_flight.clone();
+                let peak = peak.clone();
+
+                async move {
+                    let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+
+                    Ok(())
+                }
+            }
+        };
+
+        run_scheduler(&build_store, order, 2, dispatch)
+            .await
+            .expect("two independent nodes must succeed");
+
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            2,
+            "independent artifacts never overlapped in flight"
+        );
+    }
+
+    // C-1: an edge naming a digest `build_store` does not have is a
+    // refusal before any dispatch, not a filter. Positive control in the
+    // same shape: the dependency present builds both nodes.
+    #[tokio::test]
+    async fn run_scheduler_refuses_a_dangling_dependency_edge_before_dispatching_anything() {
+        let mut build_store = HashMap::new();
+        build_store.insert("child".to_string(), artifact_depending_on(&["missing"]));
+
+        let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
+        let dispatch = {
+            let dispatched = dispatched.clone();
+
+            move |digest: String| {
+                let dispatched = dispatched.clone();
+
+                async move {
+                    dispatched.lock().await.push(digest);
+                    Ok(())
+                }
+            }
+        };
+
+        let err = run_scheduler(&build_store, vec!["child".to_string()], 4, dispatch)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("not found"),
+            "a dangling dependency edge was not refused: {err}"
+        );
+        assert!(
+            dispatched.lock().await.is_empty(),
+            "a dangling dependency edge let dispatch proceed anyway"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_scheduler_positive_control_builds_both_nodes_when_the_dependency_is_present() {
+        let mut build_store = HashMap::new();
+        build_store.insert("dep".to_string(), artifact_depending_on(&[]));
+        build_store.insert("child".to_string(), artifact_depending_on(&["dep"]));
+
+        let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
+        let dispatch = {
+            let dispatched = dispatched.clone();
+
+            move |digest: String| {
+                let dispatched = dispatched.clone();
+
+                async move {
+                    dispatched.lock().await.push(digest);
+                    Ok(())
+                }
+            }
+        };
+
+        run_scheduler(
+            &build_store,
+            vec!["dep".to_string(), "child".to_string()],
+            4,
+            dispatch,
+        )
+        .await
+        .expect("a satisfied dependency must build both nodes");
+
+        let mut got = dispatched.lock().await.clone();
+        got.sort();
+        assert_eq!(got, vec!["child".to_string(), "dep".to_string()]);
+    }
+
+    // C-2: a graph the scheduler can never complete (a genuine cycle - not
+    // catchable by the C-1 check above, since every edge here does name a
+    // real `build_store` key) fails closed rather than hanging or reporting
+    // `Ok` on ready-queue exhaustion. Wrapped in a timeout so a regression to
+    // the hang shape fails the test instead of blocking CI.
+    #[tokio::test]
+    async fn run_scheduler_fails_closed_on_a_cycle_instead_of_hanging_or_succeeding() {
+        let mut build_store = HashMap::new();
+        build_store.insert("a".to_string(), artifact_depending_on(&["b"]));
+        build_store.insert("b".to_string(), artifact_depending_on(&["a"]));
+
+        let order = vec!["a".to_string(), "b".to_string()];
+        let dispatch = |digest: String| async move {
+            let _ = digest;
+            Ok(())
+        };
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_scheduler(&build_store, order, 2, dispatch),
+        )
+        .await
+        .expect("a cycle must fail fast, not hang");
+
+        assert!(
+            result.is_err(),
+            "a scheduler cycle returned Ok instead of failing closed"
+        );
+    }
+
+    // C-3: on the first error, dispatch stops but nothing already spawned is
+    // aborted - `slow` runs to completion and its marker is observed, and
+    // `after` (only reachable through `slow`'s own dependents) is never
+    // dispatched because dependents are not processed once an error has been
+    // recorded.
+    #[tokio::test]
+    async fn run_scheduler_drains_in_flight_work_and_starts_nothing_new_after_a_failure() {
+        let mut build_store = HashMap::new();
+        build_store.insert("fail".to_string(), artifact_depending_on(&[]));
+        build_store.insert("slow".to_string(), artifact_depending_on(&[]));
+        build_store.insert("after".to_string(), artifact_depending_on(&["slow"]));
+
+        let order = vec!["fail".to_string(), "slow".to_string(), "after".to_string()];
+        let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
+        let slow_completed = Arc::new(AtomicUsize::new(0));
+
+        let dispatch = {
+            let dispatched = dispatched.clone();
+            let slow_completed = slow_completed.clone();
+
+            move |digest: String| {
+                let dispatched = dispatched.clone();
+                let slow_completed = slow_completed.clone();
+
+                async move {
+                    dispatched.lock().await.push(digest.clone());
+
+                    if digest == "fail" {
+                        bail!("fail task refused on purpose");
+                    }
+
+                    if digest == "slow" {
+                        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                        slow_completed.store(1, Ordering::SeqCst);
+                    }
+
+                    Ok(())
+                }
+            }
+        };
+
+        let err = run_scheduler(&build_store, order, 2, dispatch)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("fail task refused on purpose"),
+            "the returned error was not the failing task's own error: {err}"
+        );
+        assert_eq!(
+            slow_completed.load(Ordering::SeqCst),
+            1,
+            "the slow sibling was cancelled instead of drained to completion"
+        );
+        assert!(
+            !dispatched.lock().await.contains(&"after".to_string()),
+            "a node was dispatched after the failure was already recorded"
+        );
+    }
+
+    // C-7: a digest shared by two parents (a diamond graph) is dispatched
+    // exactly once, deduplicated by the bare digest string alone. Positive
+    // control in the same test: all four nodes are still dispatched.
+    #[tokio::test]
+    async fn run_scheduler_dispatches_a_shared_dependency_exactly_once() {
+        let mut build_store = HashMap::new();
+        build_store.insert("a".to_string(), artifact_depending_on(&[]));
+        build_store.insert("b".to_string(), artifact_depending_on(&["a"]));
+        build_store.insert("c".to_string(), artifact_depending_on(&["a"]));
+        build_store.insert("d".to_string(), artifact_depending_on(&["b", "c"]));
+
+        let order = vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+        ];
+        let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
+
+        let dispatch = {
+            let dispatched = dispatched.clone();
+
+            move |digest: String| {
+                let dispatched = dispatched.clone();
+
+                async move {
+                    dispatched.lock().await.push(digest);
+                    Ok(())
+                }
+            }
+        };
+
+        run_scheduler(&build_store, order, 4, dispatch)
+            .await
+            .expect("a diamond graph must complete");
+
+        let dispatched = dispatched.lock().await;
+
+        assert_eq!(
+            dispatched.iter().filter(|d| *d == "a").count(),
+            1,
+            "a digest shared by two parents was dispatched more than once"
+        );
+
+        let mut got = dispatched.clone();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string()
+            ]
+        );
+    }
+
+    // C-8: `--jobs 1` reproduces the seed order's dispatch sequence exactly,
+    // including the tie-break among two independent roots and the order a
+    // completion frees up a dependent.
+    #[tokio::test]
+    async fn run_scheduler_jobs_one_reproduces_the_seed_order_exactly() {
+        let mut build_store = HashMap::new();
+        build_store.insert("p".to_string(), artifact_depending_on(&[]));
+        build_store.insert("q".to_string(), artifact_depending_on(&[]));
+        build_store.insert("r".to_string(), artifact_depending_on(&["p"]));
+
+        let order = vec!["p".to_string(), "q".to_string(), "r".to_string()];
+        let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
+
+        let dispatch = {
+            let dispatched = dispatched.clone();
+
+            move |digest: String| {
+                let dispatched = dispatched.clone();
+
+                async move {
+                    dispatched.lock().await.push(digest);
+                    Ok(())
+                }
+            }
+        };
+
+        run_scheduler(&build_store, order.clone(), 1, dispatch)
+            .await
+            .expect("a completable graph under jobs=1 must succeed");
+
+        assert_eq!(
+            *dispatched.lock().await,
+            order,
+            "--jobs 1 did not reproduce the toposort-seeded dispatch order"
+        );
+    }
+
+    // C-4 (reviewer-facing regression net, not a runtime test): the worker-
+    // stream-error path inside `build()`'s task body must never reach for
+    // `process::exit` again - `grep -n "exit(" ` in the `build()` function
+    // body must return nothing, so a spawned task's failure can only ever
+    // surface as a returned `Err` the scheduler can drain around.
+    #[test]
+    fn build_task_body_never_calls_process_exit() {
+        let source = include_str!("build.rs");
+        let start = source
+            .find("async fn build(\n")
+            .expect("build() must exist");
+        let after_start = &source[start..];
+        let end = after_start
+            .find("\nasync fn run_scheduler")
+            .expect("run_scheduler must follow build() in this file");
+
+        assert!(
+            !after_start[..end].contains("exit("),
+            "build()'s task body must return Err, not call process::exit \
+             (C-4): a spawned task killing the process leaves every \
+             sibling in-flight build's credential-refresh window and \
+             staged-write compensation unrun"
         );
     }
 }

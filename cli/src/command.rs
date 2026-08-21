@@ -23,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{fs::OpenOptions, io::AsyncWriteExt, time::sleep};
-use tracing::{error, subscriber, Level};
+use tracing::{error, subscriber, warn, Level};
 use tracing_subscriber::{
     filter::{LevelFilter, Targets},
     layer::{Context, SubscriberExt},
@@ -175,6 +175,10 @@ pub enum Command {
         #[arg(default_value_t = false, long)]
         export: bool,
 
+        /// Maximum number of artifacts to build concurrently (default: available CPU parallelism)
+        #[arg(default_value_t = get_default_jobs(), long, short = 'j')]
+        jobs: usize,
+
         /// List artifact and dependencies (name + digest) without building
         #[arg(default_value_t = false, long, conflicts_with = "export")]
         list: bool,
@@ -234,6 +238,10 @@ pub enum Command {
         /// Artifact context
         #[arg(default_value = ".", long)]
         context: PathBuf,
+
+        /// Maximum number of artifacts to build concurrently (default: available CPU parallelism)
+        #[arg(default_value_t = get_default_jobs(), long, short = 'j')]
+        jobs: usize,
 
         /// Artifact namespace
         #[arg(default_value_t = get_default_namespace(), long)]
@@ -717,6 +725,76 @@ mod unlock_parse_tests {
         assert!(!unlock);
         Ok(())
     }
+
+    // C-6 positive control: an explicit `--jobs`/`-j` value round-trips
+    // through clap unchanged (clamping is a separate, later step - see
+    // `clamp_jobs_tests` below).
+    #[test]
+    fn build_jobs_long_flag_parses() {
+        let cli = parse(&["build", "foo", "--jobs", "4"]).expect("should parse");
+        match cli.command {
+            Command::Build { jobs, .. } => assert_eq!(jobs, 4),
+            _ => panic!("expected Build command"),
+        }
+    }
+
+    #[test]
+    fn build_jobs_short_flag_parses() {
+        let cli = parse(&["build", "foo", "-j", "4"]).expect("should parse");
+        match cli.command {
+            Command::Build { jobs, .. } => assert_eq!(jobs, 4),
+            _ => panic!("expected Build command"),
+        }
+    }
+
+    #[test]
+    fn build_jobs_omitted_defaults_to_available_parallelism() {
+        let cli = parse(&["build", "foo"]).expect("should parse");
+        match cli.command {
+            Command::Build { jobs, .. } => assert_eq!(jobs, get_default_jobs()),
+            _ => panic!("expected Build command"),
+        }
+    }
+
+    #[test]
+    fn prepare_jobs_flag_parses() {
+        let cli = parse(&["prepare", "foo", "--jobs", "3"]).expect("should parse");
+        match cli.command {
+            Command::Prepare { jobs, .. } => assert_eq!(jobs, 3),
+            _ => panic!("expected Prepare command"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod clamp_jobs_tests {
+    use super::*;
+
+    // C-6: `--jobs 0` is a stated decision (floor to 1), not a refusal.
+    #[test]
+    fn clamp_jobs_floors_zero_to_one() {
+        assert_eq!(clamp_jobs(0), 1);
+    }
+
+    // C-6 positive control: an ordinary value passes through unchanged.
+    #[test]
+    fn clamp_jobs_passes_through_an_ordinary_value() {
+        assert_eq!(clamp_jobs(4), 4);
+    }
+
+    // C-6 / AB-6: a value above the ceiling is capped rather than trusted,
+    // since it is what bounds peak CLI memory (jobs x largest concurrent
+    // archive), not thread safety.
+    #[test]
+    fn clamp_jobs_caps_a_value_above_the_ceiling() {
+        assert_eq!(clamp_jobs(JOBS_CEILING + 1), JOBS_CEILING);
+        assert_eq!(clamp_jobs(usize::MAX), JOBS_CEILING);
+    }
+
+    #[test]
+    fn clamp_jobs_accepts_the_ceiling_value_itself() {
+        assert_eq!(clamp_jobs(JOBS_CEILING), JOBS_CEILING);
+    }
 }
 
 #[cfg(test)]
@@ -796,6 +874,45 @@ fn apply_default(parsed: &str, was_explicit: bool, resolved_value: &str) -> Stri
 /// clap default value.
 fn is_explicit(sub_matches: &ArgMatches, arg_id: &str) -> bool {
     sub_matches.value_source(arg_id) == Some(ValueSource::CommandLine)
+}
+
+/// `--jobs`/`-j`'s default: the host's available CPU parallelism, or `1` if
+/// the platform cannot report it.
+fn get_default_jobs() -> usize {
+    std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
+}
+
+/// Ceiling on `--jobs`/`-j`. Not a thread-safety limit — the hazard is
+/// memory, not concurrency: each concurrent `build()` accumulates a whole
+/// pulled archive into a `Vec<u8>` before writing it out
+/// (`cli/src/command/build.rs`'s `build()`), so peak CLI memory is roughly
+/// `jobs` times the largest concurrent archive. A reasoned posture, not a
+/// measurement — no real archive-size data backs this number.
+const JOBS_CEILING: usize = 64;
+
+/// Clamps a requested `--jobs`/`-j` value to `[1, JOBS_CEILING]`, deliberately
+/// downstream of CLI parsing rather than baked into the flag itself, and
+/// never routed through `ResolvedSettings` (whose precedence puts a built
+/// project's own `Vorpal.toml` above the invoking user's config) — `--jobs`'s
+/// provenance stays CLI/env only. `0` floors to `1` rather than refusing the
+/// build; a value above the ceiling is capped, with a warning, rather than
+/// refused outright.
+fn clamp_jobs(requested: usize) -> usize {
+    if requested == 0 {
+        return 1;
+    }
+
+    if requested > JOBS_CEILING {
+        warn!(
+            "--jobs {requested} exceeds the ceiling of {JOBS_CEILING}; clamping to {JOBS_CEILING}"
+        );
+
+        return JOBS_CEILING;
+    }
+
+    requested
 }
 
 /// Build-output flags shared between `build` and `prepare`, mirroring the
@@ -918,6 +1035,7 @@ async fn run_build_or_prepare(
     agent: &str,
     context: &Path,
     flags: BuildFlags,
+    jobs: usize,
     namespace: &str,
     registry: &str,
     system: &str,
@@ -977,6 +1095,7 @@ async fn run_build_or_prepare(
         aliases: vec![],
         context: context.clone(), // reused below for `run_config`
         export: flags.export,
+        jobs: clamp_jobs(jobs),
         list: flags.list,
         name: name.to_string(),
         namespace: effective_namespace,
@@ -1312,6 +1431,7 @@ pub async fn run() -> Result<()> {
             agent,
             context,
             export,
+            jobs,
             list,
             name,
             namespace,
@@ -1339,6 +1459,7 @@ pub async fn run() -> Result<()> {
                     rebuild,
                     unlock,
                 },
+                jobs,
                 &namespace,
                 &registry,
                 &system,
@@ -1351,6 +1472,7 @@ pub async fn run() -> Result<()> {
         Command::Prepare {
             agent,
             context,
+            jobs,
             name,
             namespace,
             registry,
@@ -1375,6 +1497,7 @@ pub async fn run() -> Result<()> {
                     rebuild: false,
                     unlock,
                 },
+                jobs,
                 &namespace,
                 &registry,
                 &system,
