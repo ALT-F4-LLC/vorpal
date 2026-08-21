@@ -9,11 +9,14 @@ use crate::command::store::{
 use anyhow::{anyhow, bail, Context, Result};
 use std::fmt::Write as _;
 use std::{
-    os::unix::{fs::PermissionsExt, process::CommandExt},
+    os::unix::{ffi::OsStrExt, fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
     process::Command,
 };
-use tokio::fs::{create_dir_all, read_to_string, rename, write};
+use tokio::{
+    fs::{create_dir_all, read_link, read_to_string, rename, symlink_metadata, write, File},
+    io::{AsyncReadExt, BufReader},
+};
 use tonic::{Code, Request};
 use tracing::{debug, info};
 use vorpal_sdk::{
@@ -120,6 +123,99 @@ async fn read_alias_digest(alias_path: &Path, artifact_name: &str) -> Result<Str
     parse_artifact_digest(&artifact_digest, "alias file")
 }
 
+/// `parse_artifact_alias`'s own component check (`sdk/rust/src/context.rs`,
+/// `is_valid_component`) allows `.`, so a namespace of `..` passes it and
+/// resolves one level up when joined into a store path. That is not the
+/// traversal the caller was trying to allow, so it is rejected here too: a
+/// stricter, redundant check at the one place this process's own store paths
+/// are built from the alias's namespace.
+fn parse_artifact_namespace(namespace: &str) -> Result<()> {
+    if namespace == "." || namespace == ".." {
+        bail!(
+            "invalid artifact namespace {:?}: must not be '.' or '..'",
+            namespace,
+        );
+    }
+
+    Ok(())
+}
+
+/// The prefix every staging path is named with (`staging_path_for`,
+/// `store/paths.rs`). This producer's corpus is archive content from
+/// whoever the registry forwards, not content this process staged itself, so
+/// an archive that embeds this prefix hands whoever crafted it a path a
+/// concurrent build's own staging traffic will pass through once this
+/// producer's rename retires the directory the archive named. Unlike the
+/// worker's own embedded-reference scan (which matches the one staging name
+/// a single build used), this check matches the general prefix.
+const STAGING_PATH_NEEDLE: &[u8] = b".tmp-";
+
+const STAGING_SCAN_CHUNK_SIZE: usize = 8192;
+
+/// Scans every regular file and symlink target under `staged_files` for
+/// `STAGING_PATH_NEEDLE`, in overlapping chunks so a match straddling a read
+/// boundary is still found. Returns the first offending path, if any.
+async fn find_staging_path_reference(staged_files: &[PathBuf]) -> Result<Option<PathBuf>> {
+    let needle = STAGING_PATH_NEEDLE;
+    let overlap = needle.len() - 1;
+
+    for path in staged_files.iter() {
+        let metadata = symlink_metadata(path)
+            .await
+            .map_err(|err| anyhow!("failed to stat staged file {}: {err}", path.display()))?;
+
+        if metadata.is_symlink() {
+            let target = read_link(path)
+                .await
+                .map_err(|err| anyhow!("failed to read staged link {}: {err}", path.display()))?;
+
+            if target
+                .as_os_str()
+                .as_bytes()
+                .windows(needle.len())
+                .any(|w| w == needle)
+            {
+                return Ok(Some(path.clone()));
+            }
+
+            continue;
+        }
+
+        if !metadata.is_file() {
+            continue;
+        }
+
+        let mut reader = BufReader::new(File::open(path).await.map_err(|err| {
+            anyhow!("failed to open staged file {}: {err}", path.display())
+        })?);
+
+        let mut buf = vec![0u8; STAGING_SCAN_CHUNK_SIZE + overlap];
+        let mut carried = 0usize;
+
+        loop {
+            let read = reader
+                .read(&mut buf[carried..])
+                .await
+                .map_err(|err| anyhow!("failed to read staged file {}: {err}", path.display()))?;
+
+            if read == 0 {
+                break;
+            }
+
+            let filled = carried + read;
+
+            if buf[..filled].windows(needle.len()).any(|w| w == needle) {
+                return Ok(Some(path.clone()));
+            }
+
+            carried = overlap.min(filled);
+            buf.copy_within(filled - carried..filled, 0);
+        }
+    }
+
+    Ok(None)
+}
+
 /// Writes `data` to a staged sibling of `archive_path`, then publishes it
 /// with a single rename onto the shared store path. No reader of
 /// `archive_path` ever observes a partial or truncated file — mirrors the
@@ -184,6 +280,24 @@ async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Res
             retire_atomically(archive_path).await?;
 
             bail!("archive unpacked no files: {}", archive_path.display());
+        }
+
+        if let Some(offender) = find_staging_path_reference(&staged_files).await? {
+            // As with the emptiness bail above, the archive is the unusable
+            // input: retire it so the next invocation re-pulls instead of
+            // short-circuiting on a cached archive already rejected.
+            retire_atomically(archive_path).await?;
+
+            let offender = offender
+                .strip_prefix(&staging_path)
+                .unwrap_or(&offender)
+                .display()
+                .to_string();
+
+            bail!(
+                "archive embeds a staging-path reference in {offender}, which does not survive \
+                 publishing"
+            );
         }
 
         for path in staged_files.iter() {
@@ -492,6 +606,9 @@ async fn resolve_alias_digest(
 
 pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str) -> Result<()> {
     let alias_parsed = parse_artifact_alias(alias)?;
+
+    parse_artifact_namespace(&alias_parsed.namespace)?;
+
     let system = get_system_default()?;
 
     debug!(
@@ -828,6 +945,101 @@ mod tests {
             dir_entry_names(&store_path),
             BTreeSet::new(),
             "a failed unpack left its staging directory under the store"
+        );
+    }
+
+    // C1: `parse_artifact_alias`'s own component check allows `.`, so `..`
+    // passes it and must be caught here instead, before it is joined into a
+    // store path.
+    #[test]
+    fn parse_artifact_namespace_refuses_dot_and_dot_dot() {
+        for hostile in [".", ".."] {
+            let err = parse_artifact_namespace(hostile).unwrap_err();
+
+            assert!(
+                err.to_string().contains("invalid artifact namespace"),
+                "accepted a namespace that traverses the store root: {hostile:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_artifact_namespace_accepts_an_ordinary_namespace() {
+        parse_artifact_namespace("library").unwrap();
+        parse_artifact_namespace("my-namespace.v2").unwrap();
+    }
+
+    // C5, positive control: an archive whose regular files hold ordinary
+    // content must still publish - the scan below must not turn into a
+    // content check that rejects anything unexpected.
+    #[tokio::test]
+    async fn publish_unpacked_output_publishes_an_archive_with_ordinary_content() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+
+        std::fs::create_dir_all(&store_path).unwrap();
+
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        write_tar_zst(&archive_path, &[("bin", "ordinary binary content")], &[]).await;
+
+        let output_path = store_path.join("abc123");
+
+        publish_unpacked_output(&archive_path, &output_path)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            dir_entry_names(&output_path),
+            BTreeSet::from(["bin".to_string()]),
+        );
+    }
+
+    // C5 / AC-8: a registry-supplied archive whose only regular file embeds
+    // a `.tmp-` staging-path reference must be refused rather than
+    // published, so a local user cannot pre-create the directory a
+    // concurrent producer's staging traffic will pass through.
+    #[tokio::test]
+    async fn publish_unpacked_output_refuses_an_archive_embedding_a_staging_path_reference() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+
+        std::fs::create_dir_all(&store_path).unwrap();
+
+        let archive_path = root.path().join("abc123.tar.zst");
+
+        write_tar_zst(
+            &archive_path,
+            &[(
+                "bin",
+                "some content referencing /var/lib/vorpal/store/artifact/output/library/.tmp-deadbeef/x",
+            )],
+            &[],
+        )
+        .await;
+
+        let output_path = store_path.join("abc123");
+
+        let err = publish_unpacked_output(&archive_path, &output_path)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("embeds a staging-path reference"),
+            "an archive embedding a staging-path reference was not refused: {err}"
+        );
+        assert!(
+            !output_path.exists(),
+            "an archive embedding a staging-path reference was published"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::new(),
+            "refusing the archive left its staging directory under the store"
+        );
+        assert!(
+            !archive_path.exists(),
+            "the refused archive stayed cached, so every later run skips the pull and fails again"
         );
     }
 }
