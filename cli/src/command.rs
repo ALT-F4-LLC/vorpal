@@ -900,7 +900,11 @@ fn get_default_jobs() -> usize {
 /// (`StagedArchive`, `cli/src/command/build.rs`) rather than being
 /// accumulated whole, so this ceiling is defence in depth rather than the
 /// only bound between an archive's size — the registry's choice, not the
-/// user's — and the host. A reasoned posture, not a measurement.
+/// user's — and the host. What streaming moved rather than removed is the
+/// interrupt cost: a transfer killed mid-stream (SIGKILL, power loss — not
+/// an error path, which is compensated) strands one staged `.tmp-*` file
+/// per in-flight pull, up to this many, and nothing reaps them. A reasoned
+/// posture, not a measurement.
 const JOBS_CEILING: usize = 64;
 
 /// Clamps a requested `--jobs`/`-j` value to `[1, JOBS_CEILING]`, deliberately

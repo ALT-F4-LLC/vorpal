@@ -25,7 +25,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
     task::JoinSet,
 };
-use tonic::{transport::Channel, Code, Request, Streaming};
+use tonic::{transport::Channel, Code, Request, Status, Streaming};
 use tracing::{error, info};
 use vorpal_sdk::{
     api::{
@@ -366,41 +366,59 @@ async fn unpack_archive_if_present(
 /// `--jobs`'s own ceiling was bounding the wrong unit.
 struct StagedArchive {
     archive_path: PathBuf,
-    bytes_written: usize,
-    file: File,
+    /// Opened by the first non-empty chunk, so a pull that publishes nothing
+    /// — `NotFound` on the first message, or an empty stream — never touches
+    /// the store directory, and an interrupted transfer can only strand a
+    /// staged file that holds real bytes.
+    file: Option<File>,
     staging_path: PathBuf,
 }
 
 impl StagedArchive {
-    async fn create(archive_path: &Path) -> Result<Self> {
-        let archive_parent = archive_path
-            .parent()
-            .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
-
-        create_dir_all(archive_parent).await?;
-
-        let staging_path = staging_path_for(archive_path);
-        let file = File::create(&staging_path)
-            .await
-            .map_err(|err| anyhow!("failed to write archive {}: {err}", archive_path.display()))?;
-
-        Ok(Self {
+    fn new(archive_path: &Path) -> Self {
+        Self {
             archive_path: archive_path.to_path_buf(),
-            bytes_written: 0,
-            file,
-            staging_path,
-        })
+            file: None,
+            staging_path: staging_path_for(archive_path),
+        }
+    }
+
+    fn received_bytes(&self) -> bool {
+        self.file.is_some()
     }
 
     async fn write_chunk(&mut self, data: &[u8]) -> Result<()> {
-        self.file.write_all(data).await.map_err(|err| {
+        if data.is_empty() {
+            return Ok(());
+        }
+
+        let file = match self.file.as_mut() {
+            Some(file) => file,
+            None => {
+                let archive_parent = self
+                    .archive_path
+                    .parent()
+                    .ok_or_else(|| anyhow!("failed to get archive parent path"))?;
+
+                create_dir_all(archive_parent).await?;
+
+                let file = File::create(&self.staging_path).await.map_err(|err| {
+                    anyhow!(
+                        "failed to write archive {}: {err}",
+                        self.archive_path.display()
+                    )
+                })?;
+
+                self.file.insert(file)
+            }
+        };
+
+        file.write_all(data).await.map_err(|err| {
             anyhow!(
                 "failed to write archive {}: {err}",
                 self.archive_path.display()
             )
         })?;
-
-        self.bytes_written += data.len();
 
         Ok(())
     }
@@ -411,80 +429,110 @@ impl StagedArchive {
     /// falls through to building it. The staged file is discarded on every
     /// path that does not publish, this one included.
     async fn publish(mut self) -> Result<bool> {
-        let published: Result<bool> = async {
-            self.file.flush().await?;
+        let Some(file) = self.file.as_mut() else {
+            return Ok(false);
+        };
 
-            if self.bytes_written == 0 {
-                return Ok(false);
-            }
+        let published: Result<()> = async {
+            file.flush().await?;
 
             set_timestamps(&self.staging_path).await?;
 
             publish_atomically(&self.staging_path, &self.archive_path).await?;
 
-            Ok(true)
+            Ok(())
         }
         .await;
 
-        // The compensator runs on the `Err` and empty arms: a *dropped*
-        // future is neither, and leaves the staged file behind. That a drop
-        // never happens on the build path is `run_scheduler`'s
-        // drain-never-abort property (see its C-3 paragraph), not a property
-        // of this type — adding a cancellation point above this call (a
-        // `select!`, a timeout, a ctrl-C handler) without a drop guard here
-        // orphans staged archives, which nothing reaps.
-        if !matches!(published, Ok(true)) {
+        // The compensator runs on the `Err` arm: a *dropped* future is not
+        // one, and leaves the staged file behind. That a drop never happens
+        // on the build path is `run_scheduler`'s drain-never-abort property
+        // (see its C-3 paragraph), not a property of this type — adding a
+        // cancellation point above this call (a `select!`, a timeout, a
+        // ctrl-C handler) without a drop guard here orphans staged archives,
+        // which nothing reaps.
+        if published.is_err() {
             discard_staging(&self.staging_path).await;
         }
 
-        published
+        published.map(|()| true)
     }
 
     async fn discard(self) {
-        discard_staging(&self.staging_path).await;
+        if self.file.is_some() {
+            discard_staging(&self.staging_path).await;
+        }
     }
 }
 
-/// Streams `stream`'s chunks straight into a `StagedArchive` and publishes
-/// it, reporting whether anything was published.
+/// One side of a registry pull: the sequence of chunks and the status that
+/// ends it. `tonic::Streaming` is the production source; tests hand-feed a
+/// sequence, because `build()` — the only production caller — is
+/// un-fakeable (real gRPC clients and the real store).
+trait ChunkSource {
+    async fn next_chunk(&mut self) -> Result<Option<ArchivePullResponse>, Status>;
+}
+
+impl ChunkSource for Streaming<ArchivePullResponse> {
+    async fn next_chunk(&mut self) -> Result<Option<ArchivePullResponse>, Status> {
+        self.message().await
+    }
+}
+
+/// Streams `source`'s chunks straight into a `StagedArchive` and publishes
+/// it. Whether anything was published is answered by `archive_path.exists()`
+/// afterwards, which is the single source of truth every caller already
+/// reads — and, under `--jobs`, the only one that also counts a sibling task
+/// that published the same digest first.
 ///
-/// A `NotFound` stream error ends the pull with whatever arrived, matching
-/// the pull request's own "the registry does not have it" path; any other
-/// stream error is an error and the staged archive is discarded.
+/// `NotFound` before any byte arrives ends the pull with nothing published,
+/// matching the pull request's own "the registry does not have it" path.
+/// `NotFound` after bytes have arrived is a failed transfer of an object the
+/// registry did have, not an absent object: publishing what arrived would
+/// cache a truncated archive under the digest, and every later invocation
+/// would skip the pull and fail on the unpack instead. So it, like any other
+/// stream error, discards the staged archive and returns `Err`, and the next
+/// run retries the pull.
 async fn publish_archive_stream(
-    stream: &mut Streaming<ArchivePullResponse>,
+    source: &mut impl ChunkSource,
     archive_path: &Path,
     error_context: &str,
-) -> Result<bool> {
-    let mut staged = StagedArchive::create(archive_path).await?;
+) -> Result<()> {
+    let mut staged = StagedArchive::new(archive_path);
 
     loop {
-        match stream.message().await {
+        match source.next_chunk().await {
             Ok(Some(chunk)) => {
-                if !chunk.data.is_empty() {
-                    if let Err(err) = staged.write_chunk(&chunk.data).await {
-                        staged.discard().await;
+                if let Err(err) = staged.write_chunk(&chunk.data).await {
+                    staged.discard().await;
 
-                        return Err(err);
-                    }
+                    return Err(err);
                 }
             }
 
             Ok(None) => break,
 
             Err(status) => {
-                if status.code() != Code::NotFound {
-                    staged.discard().await;
-
-                    bail!("{error_context}: {:?}", status);
+                if status.code() == Code::NotFound && !staged.received_bytes() {
+                    break;
                 }
 
-                break;
+                staged.discard().await;
+
+                if status.code() == Code::NotFound {
+                    bail!(
+                        "{error_context}: stream ended with NotFound after bytes arrived, \
+                         discarding the partial archive {}",
+                        archive_path.display()
+                    );
+                }
+
+                bail!("{error_context}: {:?}", status);
             }
         }
     }
 
-    staged.publish().await
+    staged.publish().await.map(|_| ())
 }
 
 /// Pulls `artifact_digest`'s archive from the registry into `archive_path` if
@@ -618,8 +666,9 @@ async fn publish_unpacked_output(archive_path: &Path, output_path: &Path) -> Res
     }
     .await;
 
-    // As in `publish_archive_bytes`: `Err` is compensated, a dropped future
-    // is not. This unpacked staging tree is the larger of the two — an
+    // As in `StagedArchive::publish`: `Err` is compensated, a dropped future
+    // is not (`cli/src/command/run.rs` keeps the older buffer-then-publish
+    // shape, deliberately). This unpacked staging tree is the larger of the two — an
     // orphaned one holds a whole unpacked artifact — and nothing reaps
     // staging names, so this arm depends on `run_scheduler` draining rather
     // than aborting (its C-3 paragraph) for as long as it stays a plain
@@ -657,7 +706,8 @@ async fn retire_atomically(real_path: &Path) -> Result<()> {
 /// (C-4/AB-4). A task that kills the process takes every sibling build in
 /// flight with it, skipping each one's staging compensator and its
 /// credential-refresh commit window. The `exit` calls in `run()` are a
-/// different case: they run on the single driver task before any dispatch.
+/// different case: no build task is in flight at any of them, because
+/// `run_scheduler` drains to `in_flight == 0` before it returns.
 async fn build(
     artifact: &Artifact,
     artifact_aliases: Vec<String>,
@@ -829,10 +879,11 @@ const STUCK_DIGESTS_LISTED: usize = 8;
 ///
 /// The guarantee is over this function's error paths, not over every way its
 /// frame can be left: an unwind through the scheduler itself drops the
-/// `JoinSet` with tasks live, which does abort them. Every panic reachable
-/// here is a programmer-error `expect` over a map this function has just
-/// built, so it is latent rather than reachable from any graph a caller can
-/// supply — but a new fallible step in this loop must return, not panic.
+/// `JoinSet` with tasks live, which does abort them. Both inputs a caller
+/// controls — the edge set and `order`'s membership — are refused before any
+/// dispatch, so every `expect` left in the loop is over a map this function
+/// has just built from inputs it has already checked. A new fallible step in
+/// this loop must return, not panic.
 ///
 /// C-7: dispatch is deduplicated by the bare digest string alone — the ready
 /// queue, `indegree`, and `dependents` are all keyed on it, never on a tuple
@@ -881,11 +932,19 @@ where
         .map(|(index, digest)| (digest.as_str(), index))
         .collect();
 
-    for digest in &order {
-        let artifact = build_store
-            .get(digest)
-            .expect("order is a build_store key once the C-1 refusal above has passed");
+    // The other half of the C-1 refusal: every node must appear in `order`,
+    // or the release path below has no priority for it. `get_order` and
+    // this function derive the graph separately (cluster C14), so a
+    // disagreement between them is refused here rather than surfacing as a
+    // panic that unwinds through the scheduler frame and aborts in-flight
+    // tasks — the one thing C-3 forbids.
+    for digest in build_store.keys() {
+        if !position.contains_key(digest.as_str()) {
+            bail!("artifact 'build' missing from dispatch order: {}", digest);
+        }
+    }
 
+    for (digest, artifact) in build_store {
         let mut seen: HashSet<&str> = HashSet::new();
 
         for step in artifact.steps.iter() {
@@ -893,7 +952,7 @@ where
                 if seen.insert(dep.as_str()) {
                     *indegree
                         .get_mut(digest)
-                        .expect("digest is a build_store key") += 1;
+                        .expect("indegree was seeded from every build_store key") += 1;
 
                     dependents
                         .entry(dep.clone())
@@ -904,13 +963,18 @@ where
         }
     }
 
-    // `Reverse` makes the max-heap pop the *smallest* position first, so the
-    // node earliest in `order` is always the next one dispatched.
-    let mut ready: BinaryHeap<Reverse<(usize, &str)>> = order
+    // The ready set holds positions in `order` only — the digest is
+    // `order[position]`, one fact with one home. `Reverse` makes the
+    // max-heap pop the *smallest* position first, so the node earliest in
+    // `order` is always the next one dispatched. `order` may name digests
+    // `build_store` lacks (`get_order` invents a node for a dangling edge);
+    // only `build_store` keys have an indegree, so only they are ever seeded
+    // or released.
+    let mut ready: BinaryHeap<Reverse<usize>> = order
         .iter()
         .enumerate()
         .filter(|(_, digest)| indegree.get(digest.as_str()) == Some(&0))
-        .map(|(index, digest)| Reverse((index, digest.as_str())))
+        .map(|(index, _)| Reverse(index))
         .collect();
 
     let node_count = build_store.len();
@@ -923,12 +987,12 @@ where
 
     loop {
         while first_error.is_none() && in_flight < jobs {
-            let Some(Reverse((_, digest))) = ready.pop() else {
+            let Some(Reverse(index)) = ready.pop() else {
                 break;
             };
 
-            let task_digest = digest.to_string();
-            let fut = dispatch(digest.to_string());
+            let task_digest = order[index].clone();
+            let fut = dispatch(task_digest.clone());
 
             join_set.spawn(async move { (task_digest, fut.await) });
 
@@ -962,18 +1026,18 @@ where
                 // out of the queue.
                 if let Some(waiting) = dependents.get(&digest) {
                     for dependent in waiting {
-                        let entry = indegree
-                            .get_mut(dependent)
-                            .expect("dependent is a build_store key");
+                        let entry = indegree.get_mut(dependent).expect(
+                            "dependents are build_store keys: they were pushed from its iteration",
+                        );
 
                         *entry -= 1;
 
                         if *entry == 0 {
                             let index = *position
                                 .get(dependent.as_str())
-                                .expect("dependent is in order");
+                                .expect("every build_store key is in order once the membership refusal above has passed");
 
-                            ready.push(Reverse((index, dependent.as_str())));
+                            ready.push(Reverse(index));
                         }
                     }
                 }
@@ -1049,7 +1113,7 @@ async fn build_artifacts(
     registry: &str,
 ) -> Result<()> {
     // Still called once: `get_order`'s cycle detection stands (config.rs:387-390),
-    // and its toposort output seeds the scheduler's deterministic FIFO tie-break.
+    // and its toposort output is the scheduler's dispatch order.
     let artifact_order = get_order(&build_store).await?;
 
     let dispatch = |digest: String| {
@@ -1794,7 +1858,7 @@ mod tests {
         std::fs::create_dir_all(&archive_dir).unwrap();
         std::fs::write(&archive_path, b"first-bytes").unwrap();
 
-        let mut staged = StagedArchive::create(&archive_path).await.unwrap();
+        let mut staged = StagedArchive::new(&archive_path);
 
         // Two chunks, because chunks are how the pull actually arrives: the
         // published file must be their concatenation, not the last one.
@@ -1821,7 +1885,7 @@ mod tests {
         let archive_dir = root.path().join("archives");
         let archive_path = archive_dir.join("abc123.tar.zst");
 
-        let staged = StagedArchive::create(&archive_path).await.unwrap();
+        let staged = StagedArchive::new(&archive_path);
 
         assert!(
             !staged.publish().await.unwrap(),
@@ -1829,8 +1893,8 @@ mod tests {
         );
         assert!(!archive_path.exists(), "an empty archive was published");
         assert!(
-            dir_entry_names(&archive_dir).is_empty(),
-            "an empty archive left a staging file behind"
+            !archive_dir.exists(),
+            "an empty archive touched the store directory"
         );
     }
 
@@ -1842,7 +1906,7 @@ mod tests {
         let archive_dir = root.path().join("archives");
         let archive_path = archive_dir.join("abc123.tar.zst");
 
-        let mut staged = StagedArchive::create(&archive_path).await.unwrap();
+        let mut staged = StagedArchive::new(&archive_path);
 
         staged.write_chunk(b"partial").await.unwrap();
         staged.discard().await;
@@ -1851,6 +1915,192 @@ mod tests {
         assert!(
             dir_entry_names(&archive_dir).is_empty(),
             "a discarded pull left a staging file behind"
+        );
+    }
+
+    // C31: the `Err` arm of `publish` — the one the C-3/C-5 comments lean on
+    // — runs and leaves no staging file. Publishing onto an occupied
+    // directory is the injection `store::paths` already uses for the same
+    // arm of `publish_atomically`.
+    #[tokio::test]
+    async fn staged_archive_discards_the_staged_file_when_publishing_fails() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        std::fs::create_dir_all(&archive_path).unwrap();
+        write_files(&archive_path, &["existing.txt"], "existing");
+
+        let mut staged = StagedArchive::new(&archive_path);
+
+        staged.write_chunk(b"bytes").await.unwrap();
+        staged
+            .publish()
+            .await
+            .expect_err("publishing onto an occupied directory succeeded");
+
+        assert_eq!(
+            dir_entry_names(&archive_dir),
+            BTreeSet::from(["abc123.tar.zst".to_string()]),
+            "a failed publish left a staging file behind"
+        );
+        assert_eq!(
+            dir_entry_names(&archive_path),
+            BTreeSet::from(["existing.txt".to_string()]),
+            "a failed publish disturbed the occupant"
+        );
+    }
+
+    // --- publish_archive_stream ---
+    //
+    // Hand-fed chunk sequences over the `ChunkSource` seam, the way
+    // `run_scheduler` takes a dispatch closure: `build()` cannot be faked.
+
+    struct ScriptedChunks(std::collections::VecDeque<Result<Option<ArchivePullResponse>, Status>>);
+
+    impl ScriptedChunks {
+        fn new(script: Vec<Result<Option<ArchivePullResponse>, Status>>) -> Self {
+            Self(script.into())
+        }
+    }
+
+    impl ChunkSource for ScriptedChunks {
+        async fn next_chunk(&mut self) -> Result<Option<ArchivePullResponse>, Status> {
+            self.0
+                .pop_front()
+                .expect("publish_archive_stream read past the end of the scripted stream")
+        }
+    }
+
+    fn chunk(data: &[u8]) -> Result<Option<ArchivePullResponse>, Status> {
+        Ok(Some(ArchivePullResponse {
+            data: data.to_vec(),
+        }))
+    }
+
+    // C24: the bytes that arrive are the bytes published, in order, across
+    // chunk boundaries, with empty keep-alive chunks contributing nothing.
+    #[tokio::test]
+    async fn publish_archive_stream_publishes_every_arriving_byte_in_order() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        let mut source = ScriptedChunks::new(vec![
+            chunk(b""),
+            chunk(b"first-"),
+            chunk(b""),
+            chunk(b"second"),
+            Ok(None),
+        ]);
+
+        publish_archive_stream(&mut source, &archive_path, "test")
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&archive_path).unwrap(), b"first-second");
+        assert_eq!(
+            dir_entry_names(&archive_dir),
+            BTreeSet::from(["abc123.tar.zst".to_string()]),
+            "a staging file was left under the store directory"
+        );
+    }
+
+    // C23: a pull the registry answers with `NotFound` before any byte
+    // publishes nothing and never touches the store directory — no parent
+    // created, no staged file opened and unlinked.
+    #[tokio::test]
+    async fn publish_archive_stream_touches_nothing_when_the_registry_has_no_archive() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        let mut source = ScriptedChunks::new(vec![Err(Status::not_found("no such archive"))]);
+
+        publish_archive_stream(&mut source, &archive_path, "test")
+            .await
+            .unwrap();
+
+        assert!(!archive_path.exists(), "an absent archive was published");
+        assert!(
+            !archive_dir.exists(),
+            "an absent archive created its store directory"
+        );
+
+        // The empty-stream shape of the same answer.
+        let mut source = ScriptedChunks::new(vec![chunk(b""), Ok(None)]);
+
+        publish_archive_stream(&mut source, &archive_path, "test")
+            .await
+            .unwrap();
+
+        assert!(
+            !archive_dir.exists(),
+            "an empty stream created its store directory"
+        );
+    }
+
+    // C25: `NotFound` after bytes have arrived is a truncated transfer, not
+    // an absent object. Publishing it would cache a partial archive under
+    // the digest and every later run would skip the pull and fail on the
+    // unpack; refusing it leaves the path absent so the next run retries.
+    #[tokio::test]
+    async fn publish_archive_stream_refuses_a_stream_cut_short_by_not_found() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        let mut source = ScriptedChunks::new(vec![
+            chunk(b"partial"),
+            Err(Status::not_found("evicted mid-stream")),
+        ]);
+
+        let err = publish_archive_stream(&mut source, &archive_path, "test")
+            .await
+            .expect_err("a truncated archive was published as complete");
+
+        assert!(
+            err.to_string().contains("partial archive"),
+            "the refusal did not say why: {err}"
+        );
+        assert!(
+            !archive_path.exists(),
+            "a truncated archive was cached under the digest"
+        );
+        assert!(
+            dir_entry_names(&archive_dir).is_empty(),
+            "a refused pull left a staging file behind"
+        );
+    }
+
+    // Any other stream error discards the staged archive and surfaces the
+    // status with the caller's context.
+    #[tokio::test]
+    async fn publish_archive_stream_discards_on_a_stream_error() {
+        let root = TempDir::new().unwrap();
+        let archive_dir = root.path().join("archives");
+        let archive_path = archive_dir.join("abc123.tar.zst");
+
+        let mut source = ScriptedChunks::new(vec![
+            chunk(b"partial"),
+            Err(Status::unavailable("registry went away")),
+        ]);
+
+        let err = publish_archive_stream(&mut source, &archive_path, "registry stream error")
+            .await
+            .expect_err("a failed stream published anyway");
+
+        assert!(
+            err.to_string().starts_with("registry stream error"),
+            "the caller's context was dropped: {err}"
+        );
+        assert!(
+            !archive_path.exists(),
+            "a failed stream was cached under the digest"
+        );
+        assert!(
+            dir_entry_names(&archive_dir).is_empty(),
+            "a failed stream left a staging file behind"
         );
     }
 
@@ -2644,6 +2894,46 @@ mod tests {
         );
     }
 
+    // C27, the other half of the C-1 refusal: a `build_store` key that
+    // `order` does not name is refused before dispatch, not discovered as a
+    // panic on the release path while sibling tasks are in flight.
+    #[tokio::test]
+    async fn run_scheduler_refuses_an_order_that_omits_a_build_store_key() {
+        let mut build_store = HashMap::new();
+        build_store.insert("dep".to_string(), artifact_depending_on(&[]));
+        build_store.insert("child".to_string(), artifact_depending_on(&["dep"]));
+
+        let dispatched = Arc::new(AsyncMutex::new(Vec::<String>::new()));
+        let dispatch = {
+            let dispatched = dispatched.clone();
+
+            move |digest: String| {
+                let dispatched = dispatched.clone();
+
+                async move {
+                    dispatched.lock().await.push(digest);
+                    Ok(())
+                }
+            }
+        };
+
+        // `dep` is ready from the start; without the refusal, its completion
+        // would release `child` and look it up in an order that lacks it.
+        let err = run_scheduler(&build_store, vec!["dep".to_string()], 4, dispatch)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("missing from dispatch order: child"),
+            "an incomplete order was not refused: {err}"
+        );
+        assert!(
+            dispatched.lock().await.is_empty(),
+            "an incomplete order let dispatch proceed anyway"
+        );
+    }
+
     #[tokio::test]
     async fn run_scheduler_positive_control_builds_both_nodes_when_the_dependency_is_present() {
         let mut build_store = HashMap::new();
@@ -2713,6 +3003,38 @@ mod tests {
         assert!(
             message.contains("waiting on: a, b"),
             "the stuck digests were not named: {message}"
+        );
+    }
+
+    // C32: the stuck-digest list is capped, and the cap says how many it
+    // left out.
+    #[tokio::test]
+    async fn run_scheduler_counts_the_stuck_digests_it_does_not_name() {
+        let mut build_store = HashMap::new();
+        let names: Vec<String> = (0..STUCK_DIGESTS_LISTED + 2)
+            .map(|i| format!("n{i:02}"))
+            .collect();
+
+        // A ring: every node waits on the next, so none is ever ready.
+        for (i, name) in names.iter().enumerate() {
+            let next = &names[(i + 1) % names.len()];
+            build_store.insert(name.clone(), artifact_depending_on(&[next]));
+        }
+
+        let dispatch = |digest: String| async move {
+            let _ = digest;
+            Ok(())
+        };
+
+        let err = run_scheduler(&build_store, names.clone(), 2, dispatch)
+            .await
+            .expect_err("a ring returned Ok instead of failing closed");
+        let message = err.to_string();
+        let listed = names[..STUCK_DIGESTS_LISTED].join(", ");
+
+        assert!(
+            message.contains(&format!("waiting on: {listed} (and 2 more)")),
+            "the overflow count was wrong or missing: {message}"
         );
     }
 
