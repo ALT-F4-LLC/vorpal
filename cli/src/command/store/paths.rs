@@ -221,6 +221,43 @@ pub fn parse_store_path_component(value: &str, field: &str) -> Result<String> {
     Ok(value.to_string())
 }
 
+/// Longest alias name the registry will write, matching the bound
+/// `store_artifact` has enforced on write since it was introduced.
+const ARTIFACT_ALIAS_NAME_LENGTH: usize = 255;
+
+/// Parses an artifact alias name: the naming policy `store_artifact` already
+/// enforces on write, now the one place both a write (`store_artifact`) and a
+/// read (`get_artifact_alias`) call to check a name before it is joined into
+/// a store path. Stricter than [`parse_store_path_component`] because an
+/// alias name is also a user-facing identifier, not merely a containment
+/// boundary: no leading/trailing `.`/`-`, no whitespace, and an
+/// alphanumeric/`_`/`-`/`.` allowlist rather than a denylist.
+pub fn parse_alias_name(name: &str) -> Result<String> {
+    let is_allowed_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.';
+
+    if name.is_empty()
+        || name.len() > ARTIFACT_ALIAS_NAME_LENGTH
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || name.starts_with('.')
+        || name.ends_with('.')
+        || name.starts_with('-')
+        || name.ends_with('-')
+        || name.chars().any(char::is_whitespace)
+        || !name.chars().all(is_allowed_char)
+    {
+        bail!(
+            "invalid artifact alias name {:?}: must be non-empty, at most {ARTIFACT_ALIAS_NAME_LENGTH} \
+             characters, contain only alphanumeric characters, '_', '-', and '.', and not start \
+             or end with '.' or '-'",
+            name,
+        );
+    }
+
+    Ok(name.to_string())
+}
+
 // Staged publishing
 //
 // A shared store path (an archive, or an artifact output directory) must

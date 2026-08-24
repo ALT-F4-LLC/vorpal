@@ -1,5 +1,6 @@
-use crate::command::start::auth::{
-    get_user_context, require_namespace_or_service_trust, PrincipalKind,
+use crate::command::{
+    start::auth::{get_user_context, require_namespace_or_service_trust, PrincipalKind},
+    store::paths::{parse_alias_name, parse_artifact_digest, parse_store_path_component},
 };
 use anyhow::{bail, Result};
 use aws_config::BehaviorVersion;
@@ -172,11 +173,15 @@ impl ArchiveService for ArchiveServer {
     ) -> Result<Response<ArchiveResponse>, Status> {
         let req = request.into_inner();
 
-        if req.digest.is_empty() {
-            return Err(Status::invalid_argument("missing `digest` field"));
-        }
+        let digest = parse_artifact_digest(&req.digest, "archive digest")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        let namespace = parse_store_path_component(&req.namespace, "namespace")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
-        let cache_key = format!("{}/{}", req.namespace, req.digest);
+        // Safe only because `digest` and `namespace` are each a single path
+        // component with no separator: an unvalidated pair could collide
+        // ("a"/"b/c" vs "a/b"/"c") and answer for the wrong namespace.
+        let cache_key = format!("{}/{}", namespace, digest);
         info!("registry |> archive check: cache_key={}", cache_key);
 
         // Try cache first
@@ -221,6 +226,18 @@ impl ArchiveService for ArchiveServer {
         &self,
         request: Request<ArchivePullRequest>,
     ) -> Result<Response<Self::PullStream>, Status> {
+        // Reject a hostile digest or namespace before any I/O, including
+        // before spawning the task below — a value that never reaches a
+        // path join cannot escape the store root (VPL-383).
+        {
+            let req_inner = request.get_ref();
+
+            parse_artifact_digest(&req_inner.digest, "archive digest")
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+            parse_store_path_component(&req_inner.namespace, "namespace")
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        }
+
         // Authorization check before spawning task.
         //
         // DKT-64: swapped from `require_namespace_permission` to
@@ -250,17 +267,6 @@ impl ArchiveService for ArchiveServer {
         tokio::spawn(async move {
             let request = request.into_inner();
 
-            if request.digest.is_empty() {
-                if let Err(err) = tx
-                    .send(Err(Status::invalid_argument("missing `digest` field")))
-                    .await
-                {
-                    error!("failed to send store error: {:?}", err);
-                }
-
-                return;
-            }
-
             if let Err(err) = backend.pull(&request, &tx).await {
                 if let Err(err) = tx.send(Err(err)).await {
                     error!("failed to send store error: {:?}", err);
@@ -286,16 +292,10 @@ impl ArchiveService for ArchiveServer {
             .ok_or_else(|| Status::invalid_argument("empty stream"))?
             .map_err(|err| Status::internal(err.to_string()))?;
 
-        let request_digest = first_chunk.digest;
-        let request_namespace = first_chunk.namespace;
-
-        if request_digest.is_empty() {
-            return Err(Status::invalid_argument("missing `digest` field"));
-        }
-
-        if request_namespace.is_empty() {
-            return Err(Status::invalid_argument("missing `namespace` field"));
-        }
+        let request_digest = parse_artifact_digest(&first_chunk.digest, "archive digest")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        let request_namespace = parse_store_path_component(&first_chunk.namespace, "namespace")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
         // Create an adapter stream that yields data bytes from the first chunk
         // and all remaining chunks without accumulating into a Vec<u8>
@@ -382,16 +382,14 @@ impl ArtifactService for ArtifactServer {
 
         let request = request.into_inner();
 
-        if request.digest.is_empty() {
-            return Err(Status::invalid_argument("missing `digest` field"));
-        }
+        let digest = parse_artifact_digest(&request.digest, "artifact digest")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        let namespace = parse_store_path_component(&request.namespace, "namespace")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
-        let artifact = self
-            .backend
-            .get_artifact(&request.digest, &request.namespace)
-            .await?;
+        let artifact = self.backend.get_artifact(&digest, &namespace).await?;
 
-        info!("artifact |> get: {}", request.digest);
+        info!("artifact |> get: {}", digest);
 
         Ok(Response::new(artifact))
     }
@@ -420,22 +418,30 @@ impl ArtifactService for ArtifactServer {
 
         let request = request.into_inner();
 
+        // Reject a hostile name, namespace or tag before the join
+        // `get_artifact_alias_path` performs — this handler previously
+        // checked nothing, so any of the three could walk the read outside
+        // the store root (VPL-383).
+        let name = parse_alias_name(&request.name)
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        let namespace = parse_store_path_component(&request.namespace, "namespace")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        let tag = parse_store_path_component(&request.tag, "tag")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
         let request_system = ArtifactSystem::try_from(request.system);
 
         let digest = self
             .backend
             .get_artifact_alias(
-                &request.name,
-                &request.namespace,
+                &name,
+                &namespace,
                 request_system.unwrap_or(ArtifactSystem::UnknownSystem),
-                &request.tag,
+                &tag,
             )
             .await?;
 
-        info!(
-            "artifact |> alias get: {}:{} -> {}",
-            request.name, request.tag, digest
-        );
+        info!("artifact |> alias get: {}:{} -> {}", name, tag, digest);
 
         Ok(Response::new(GetArtifactAliasResponse { digest }))
     }
@@ -479,13 +485,39 @@ impl ArtifactService for ArtifactServer {
             .artifact
             .ok_or_else(|| Status::invalid_argument("missing `artifact` field"))?;
 
+        let artifact_namespace =
+            parse_store_path_component(&request.artifact_namespace, "namespace")
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
+        // Every alias this call will write — from the artifact itself and
+        // from the request — goes through the same read-side rule
+        // (`parse_alias_name`) before any backend runs, so a hostile name or
+        // tag never reaches a path join. An empty name is skipped rather than
+        // rejected, matching the backends' own "no alias requested" reading
+        // of an empty entry.
+        for alias in artifact
+            .aliases
+            .iter()
+            .chain(request.artifact_aliases.iter())
+        {
+            let alias_name = alias.split(':').next().unwrap_or(alias);
+
+            if alias_name.is_empty() {
+                continue;
+            }
+
+            parse_alias_name(alias_name)
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
+            let alias_tag = alias.split(':').nth(1).unwrap_or("latest");
+
+            parse_store_path_component(alias_tag, "tag")
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        }
+
         let digest = self
             .backend
-            .store_artifact(
-                artifact,
-                request.artifact_aliases,
-                request.artifact_namespace,
-            )
+            .store_artifact(artifact, request.artifact_aliases, artifact_namespace)
             .await?;
 
         info!("artifact |> store: {}", digest);
@@ -656,6 +688,16 @@ mod tests {
         }
     }
 
+    // Bare 64-char lowercase hex, the only shape `parse_artifact_digest`
+    // accepts — every pre-existing cache test below used a placeholder like
+    // "digest1" that a real digest never takes, so they now use one of
+    // these instead.
+    const DIGEST_1: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+    const DIGEST_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const DIGEST_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const DIGEST_GENERIC: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    const DIGEST_MISSING: &str = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+
     fn make_check_request(namespace: &str, digest: &str) -> Request<ArchivePullRequest> {
         Request::new(ArchivePullRequest {
             namespace: namespace.to_string(),
@@ -670,8 +712,8 @@ mod tests {
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
         // When: we check the same archive twice
-        server.check(make_check_request("ns", "digest1")).await?;
-        server.check(make_check_request("ns", "digest1")).await?;
+        server.check(make_check_request("ns", DIGEST_1)).await?;
+        server.check(make_check_request("ns", DIGEST_1)).await?;
 
         // Then: backend should only be called once (second call hits cache)
         assert_eq!(backend.call_count(), 1);
@@ -685,8 +727,8 @@ mod tests {
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
         // When: we check different digests
-        server.check(make_check_request("ns", "digest-a")).await?;
-        server.check(make_check_request("ns", "digest-b")).await?;
+        server.check(make_check_request("ns", DIGEST_A)).await?;
+        server.check(make_check_request("ns", DIGEST_B)).await?;
 
         // Then: backend should be called twice (each is a cache miss)
         assert_eq!(backend.call_count(), 2);
@@ -700,8 +742,8 @@ mod tests {
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
         // When: we check the same digest in different namespaces
-        server.check(make_check_request("ns1", "digest")).await?;
-        server.check(make_check_request("ns2", "digest")).await?;
+        server.check(make_check_request("ns1", DIGEST_GENERIC)).await?;
+        server.check(make_check_request("ns2", DIGEST_GENERIC)).await?;
 
         // Then: backend should be called twice (different cache keys)
         assert_eq!(backend.call_count(), 2);
@@ -715,8 +757,8 @@ mod tests {
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
         // When: we check the same archive twice
-        let result1 = server.check(make_check_request("ns", "missing")).await;
-        let result2 = server.check(make_check_request("ns", "missing")).await;
+        let result1 = server.check(make_check_request("ns", DIGEST_MISSING)).await;
+        let result2 = server.check(make_check_request("ns", DIGEST_MISSING)).await;
 
         // Then: both should return not_found
         let Err(err1) = result1 else {
@@ -740,9 +782,9 @@ mod tests {
         let server = ArchiveServer::new(backend.box_clone(), 0);
 
         // When: we check the same archive multiple times
-        server.check(make_check_request("ns", "digest")).await?;
-        server.check(make_check_request("ns", "digest")).await?;
-        server.check(make_check_request("ns", "digest")).await?;
+        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
+        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
+        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
 
         // Then: backend should be called every time (no caching)
         assert_eq!(backend.call_count(), 3);
@@ -756,13 +798,13 @@ mod tests {
         let server = ArchiveServer::new(backend.box_clone(), 1);
 
         // When: we check, wait for TTL to expire, then check again
-        server.check(make_check_request("ns", "digest")).await?;
+        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
         assert_eq!(backend.call_count(), 1);
 
         // Wait for cache to expire
         tokio::time::sleep(Duration::from_millis(1100)).await;
 
-        server.check(make_check_request("ns", "digest")).await?;
+        server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
 
         // Then: backend should be called twice (second call after expiration)
         assert_eq!(backend.call_count(), 2);
@@ -787,6 +829,302 @@ mod tests {
         // And: backend should not be called
         assert_eq!(backend.call_count(), 0);
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Namespace/digest collision (VPL-383 AC-4): a traversing pair must be
+    // refused rather than silently answering for a different namespace via
+    // string concatenation.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_check_rejects_a_namespace_that_is_not_a_single_component() {
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        // (namespace="a", digest="b/c") would compose to the same store path
+        // as (namespace="a/b", digest="c") if `digest` alone were checked.
+        let result = server.check(make_check_request("a", "b/c")).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_check_rejects_a_digest_that_is_not_64_hex_characters() {
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        // One character short of a real sha256 digest.
+        let short_digest = &DIGEST_GENERIC[..63];
+        let result = server.check(make_check_request("ns", short_digest)).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_check_rejects_a_traversing_digest() {
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let result = server
+            .check(make_check_request(
+                "library",
+                "../../../../../etc/cron.d/pwn",
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_check_accepts_a_well_formed_digest_and_namespace() {
+        // Positive control: a real 64-hex digest with a single-component
+        // namespace still reaches the backend.
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let result = server
+            .check(make_check_request("library", DIGEST_GENERIC))
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(backend.call_count(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // `ArtifactService::get_artifact_alias` (VPL-383 AC-1/AC-2): this handler
+    // previously checked nothing. A hostile `name` or `tag` reached the
+    // backend's path join and, on the local backend, returned the target
+    // file's bytes to the caller.
+    // -----------------------------------------------------------------------
+
+    struct MockArtifactBackend {
+        get_artifact_alias_calls: Arc<AtomicUsize>,
+        store_artifact_calls: Arc<AtomicUsize>,
+    }
+
+    impl MockArtifactBackend {
+        fn new() -> Self {
+            Self {
+                get_artifact_alias_calls: Arc::new(AtomicUsize::new(0)),
+                store_artifact_calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn alias_call_count(&self) -> usize {
+            self.get_artifact_alias_calls.load(Ordering::SeqCst)
+        }
+
+        fn store_call_count(&self) -> usize {
+            self.store_artifact_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[tonic::async_trait]
+    impl ArtifactBackend for MockArtifactBackend {
+        async fn get_artifact(&self, _digest: &str, _namespace: &str) -> Result<Artifact, Status> {
+            unimplemented!("not needed for validation tests")
+        }
+
+        async fn get_artifact_alias(
+            &self,
+            _name: &str,
+            _namespace: &str,
+            _system: ArtifactSystem,
+            _version: &str,
+        ) -> Result<String, Status> {
+            self.get_artifact_alias_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(DIGEST_GENERIC.to_string())
+        }
+
+        async fn store_artifact(
+            &self,
+            _artifact: Artifact,
+            _artifact_aliases: Vec<String>,
+            _artifact_namespace: String,
+        ) -> Result<String, Status> {
+            self.store_artifact_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(DIGEST_GENERIC.to_string())
+        }
+
+        fn box_clone(&self) -> Box<dyn ArtifactBackend> {
+            Box::new(MockArtifactBackend {
+                get_artifact_alias_calls: Arc::clone(&self.get_artifact_alias_calls),
+                store_artifact_calls: Arc::clone(&self.store_artifact_calls),
+            })
+        }
+    }
+
+    fn make_alias_request(
+        name: &str,
+        namespace: &str,
+        tag: &str,
+    ) -> Request<GetArtifactAliasRequest> {
+        Request::new(GetArtifactAliasRequest {
+            system: ArtifactSystem::Aarch64Linux as i32,
+            name: name.to_string(),
+            namespace: namespace.to_string(),
+            tag: tag.to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_get_artifact_alias_rejects_a_traversing_name_before_any_read() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .get_artifact_alias(make_alias_request(
+                "../../../../../key",
+                "library",
+                "credentials.json",
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.alias_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_artifact_alias_rejects_an_absolute_name() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .get_artifact_alias(make_alias_request("/etc/passwd", "library", "latest"))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.alias_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_artifact_alias_rejects_a_traversing_tag() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .get_artifact_alias(make_alias_request("rust", "library", "../../etc/shadow"))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.alias_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_artifact_alias_rejects_a_namespace_that_is_not_a_single_component() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .get_artifact_alias(make_alias_request("rust", "library/../secret", "latest"))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.alias_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_artifact_alias_accepts_a_well_formed_request() {
+        // Positive control: a real alias name, namespace and tag still reach
+        // the backend.
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .get_artifact_alias(make_alias_request("rust", "library", "latest"))
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(backend.alias_call_count(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // `ArtifactService::store_artifact` (VPL-383 AC-2): the namespace and
+    // every alias name/tag — from both the artifact's own `aliases` and the
+    // request's `artifact_aliases` — must be rejected before the backend
+    // writes anything.
+    // -----------------------------------------------------------------------
+
+    fn make_store_request(
+        namespace: &str,
+        artifact_aliases: Vec<&str>,
+    ) -> Request<StoreArtifactRequest> {
+        Request::new(StoreArtifactRequest {
+            artifact: Some(Artifact::default()),
+            artifact_aliases: artifact_aliases.into_iter().map(String::from).collect(),
+            artifact_namespace: namespace.to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_store_artifact_rejects_a_namespace_that_is_not_a_single_component() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .store_artifact(make_store_request("../../etc", vec![]))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.store_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_store_artifact_rejects_a_traversing_alias_name() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .store_artifact(make_store_request(
+                "library",
+                vec!["../../../../../x:latest"],
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.store_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_store_artifact_rejects_a_traversing_alias_tag() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .store_artifact(make_store_request("library", vec!["rust:../../../../../x"]))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.store_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_store_artifact_accepts_a_well_formed_request() {
+        // Positive control: a well-formed namespace and alias still reach
+        // the backend.
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .store_artifact(make_store_request("library", vec!["rust:latest"]))
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(backend.store_call_count(), 1);
     }
 
     // -----------------------------------------------------------------------

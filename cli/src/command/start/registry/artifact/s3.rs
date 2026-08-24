@@ -127,56 +127,10 @@ impl ArtifactBackend for S3Backend {
                 continue;
             }
 
-            if alias_name.len() > 255 {
-                return Err(Status::invalid_argument(format!(
-                    "alias name '{alias_name}' is too long (max 255 characters)"
-                )));
-            }
-
-            if alias_name.contains('/') {
-                return Err(Status::invalid_argument(format!(
-                    "alias name '{alias_name}' cannot contain '/'"
-                )));
-            }
-
-            if alias_name.contains('\\') {
-                return Err(Status::invalid_argument(format!(
-                    "alias name '{alias_name}' cannot contain '\\'"
-                )));
-            }
-
-            if alias_name.contains('\0') {
-                return Err(Status::invalid_argument(format!(
-                    "alias name '{alias_name}' cannot contain null bytes"
-                )));
-            }
-
-            if alias_name.starts_with('.') || alias_name.ends_with('.') {
-                return Err(Status::invalid_argument(format!(
-                    "alias name '{alias_name}' cannot start or end with '.'"
-                )));
-            }
-
-            if alias_name.starts_with('-') || alias_name.ends_with('-') {
-                return Err(Status::invalid_argument(format!(
-                    "alias name '{alias_name}' cannot start or end with '-'"
-                )));
-            }
-
-            if alias_name.chars().any(char::is_whitespace) {
-                return Err(Status::invalid_argument(format!(
-                    "alias name '{alias_name}' cannot contain whitespace"
-                )));
-            }
-
-            if alias_name
-                .chars()
-                .any(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.')
-            {
-                return Err(Status::invalid_argument(format!(
-                    "alias name '{alias_name}' can only contain alphanumeric characters, '_', '-', and '.'"
-                )));
-            }
+            // `alias_name` and the tag derived below are already validated by
+            // `parse_alias_name` / `parse_store_path_component` in the
+            // `ArtifactService::store_artifact` handler (`registry.rs`),
+            // which runs before this backend is ever called (VPL-383).
 
             let alias_tag = alias.split(':').nth(1).unwrap_or("latest").to_string();
 
