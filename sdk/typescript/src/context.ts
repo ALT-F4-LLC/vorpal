@@ -1,6 +1,15 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 import * as grpc from "@grpc/grpc-js";
 import type {
   Artifact as ArtifactMsg,
@@ -102,13 +111,109 @@ interface OIDCDiscovery {
 }
 
 /**
+ * A completed refresh exchange. `expiresIn` is `undefined` when the IdP's
+ * response omitted the field — distinct from an explicit `0`, which
+ * {@link commitRefreshedCredentials} refuses to persist (C-10). `refreshToken`
+ * is set only when the IdP rotated the refresh token (Zitadel default);
+ * `undefined` means the caller keeps the existing one.
+ */
+interface RefreshedToken {
+  accessToken: string;
+  expiresIn: number | undefined;
+  issuedAt: number;
+  refreshToken?: string;
+}
+
+/**
+ * Why a refresh exchange failed, discriminated by whether the refresh token
+ * had already left this process. `sent === false` means the fault was local
+ * (bad URL, unreachable discovery endpoint, malformed document) and the
+ * stored token is untouched — safe to retry. `sent === true` means the
+ * token-endpoint request was issued, so the IdP may have consumed the token
+ * whatever came back — it must never be sent a second time. Mirrors Rust's
+ * `RefreshFailure` enum and Go's `refreshFailureError`.
+ */
+class RefreshFailure extends Error {
+  readonly sent: boolean;
+
+  constructor(message: string, sent: boolean, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "RefreshFailure";
+    this.sent = sent;
+  }
+}
+
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function notSent(cause: unknown): RefreshFailure {
+  return new RefreshFailure(errMessage(cause), false, { cause });
+}
+
+function sent(cause: unknown): RefreshFailure {
+  return new RefreshFailure(errMessage(cause), true, { cause });
+}
+
+/** Every discovery and token-endpoint request is bounded by this timeout
+ * (C-9). C-1's process-wide lock is held across the whole exchange, so a
+ * hung IdP would otherwise stall every authenticated call in the process. */
+const REFRESH_HTTP_TIMEOUT_MS = 30_000;
+
+/**
+ * Parses an OIDC URL into its `scheme://host:port` origin, refusing any
+ * destination a refresh token must not be sent to. Plaintext HTTP is
+ * refused except on loopback, where there is no network to eavesdrop and
+ * local IdP fixtures live. Mirrors Rust's `credential_egress_origin`
+ * (context.rs:688-712) and Go's `credentialEgressOrigin`.
+ */
+/** @internal Exported for unit tests only; not part of the public SDK surface. */
+export function credentialEgressOrigin(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`invalid OIDC URL: ${raw}`);
+  }
+
+  const host = url.hostname;
+  if (!host) {
+    throw new Error(`OIDC URL has no host: ${raw}`);
+  }
+
+  const isLoopback = host === "localhost" || host === "127.0.0.1" || host === "::1";
+
+  if (url.protocol === "https:") {
+    // ok
+  } else if (url.protocol === "http:" && isLoopback) {
+    // ok
+  } else {
+    throw new Error(
+      `refusing to send a refresh token over ${url.protocol.replace(":", "")} to ${host}: the OIDC issuer must be https`,
+    );
+  }
+
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+
+  return `${url.protocol}//${host}:${port}`;
+}
+
+/**
  * Refreshes an expired access token using the OIDC refresh-token grant.
  *
- * Mirrors `refreshAccessToken` in Go and `refresh_access_token` in Rust:
+ * Mirrors `refresh_access_token` in Rust and `refreshAccessToken` in Go:
  * 1. Discover the token endpoint via `<issuer>/.well-known/openid-configuration`
  * 2. POST a `grant_type=refresh_token` form to the token endpoint
  * 3. Return the new access token, expiry, issued-at timestamp, and any
  *    rotated refresh token (some IdPs, e.g. Zitadel, rotate by default)
+ *
+ * Every error is classified via {@link notSent}/{@link sent} at the point it
+ * arises: everything up to and including the discovery round trip happens
+ * before the token is on the wire (C-4). No redirect is followed on either
+ * request and both are bounded by {@link REFRESH_HTTP_TIMEOUT_MS} (C-9): a
+ * redirect followed here previously let a compromised token endpoint replay
+ * the credential-bearing POST to a host of its choosing (AB-10, REPRODUCED
+ * against Node's default fetch during the VPL-189 threat model).
  *
  * @internal Exported for unit tests only; not part of the public SDK surface.
  */
@@ -117,23 +222,51 @@ export async function refreshAccessToken(
   clientId: string,
   issuer: string,
   refreshToken: string,
-): Promise<{
-  accessToken: string;
-  expiresIn: number;
-  issuedAt: number;
-  refreshToken?: string;
-}> {
+): Promise<RefreshedToken> {
+  let issuerOrigin: string;
+  try {
+    issuerOrigin = credentialEgressOrigin(issuer);
+  } catch (err) {
+    throw notSent(err);
+  }
+
   // Discover token endpoint
   const discoveryUrl = `${issuer}/.well-known/openid-configuration`;
-  const discoveryResp = await fetch(discoveryUrl);
-  if (!discoveryResp.ok) {
-    throw new Error(
-      `Failed to fetch OIDC discovery from ${discoveryUrl}: ${discoveryResp.status} ${discoveryResp.statusText}`,
-    );
+  let discoveryResp: Response;
+  try {
+    discoveryResp = await fetch(discoveryUrl, {
+      redirect: "error",
+      signal: AbortSignal.timeout(REFRESH_HTTP_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw notSent(new Error(`failed to fetch OIDC discovery from ${discoveryUrl}: ${errMessage(err)}`));
   }
+  if (!discoveryResp.ok) {
+    throw notSent(new Error(`OIDC discovery failed with status: ${discoveryResp.status}`));
+  }
+
   const discovery = (await discoveryResp.json()) as OIDCDiscovery;
   if (!discovery.token_endpoint) {
-    throw new Error("missing token_endpoint in OIDC discovery");
+    throw notSent(new Error("missing token_endpoint in OIDC discovery"));
+  }
+
+  let tokenEndpointOrigin: string;
+  try {
+    tokenEndpointOrigin = credentialEgressOrigin(discovery.token_endpoint);
+  } catch (err) {
+    throw notSent(err);
+  }
+
+  // Contract, not incidental: the discovery document's token_endpoint must
+  // share the issuer's scheme://host:port — closes the egress-redirection
+  // hazard in which a tampered or compromised discovery document steers the
+  // credential-bearing POST to a host of its own choosing.
+  if (tokenEndpointOrigin !== issuerOrigin) {
+    throw notSent(
+      new Error(
+        `OIDC token_endpoint origin ${tokenEndpointOrigin} does not match issuer origin ${issuerOrigin}`,
+      ),
+    );
   }
 
   // Build refresh token request (application/x-www-form-urlencoded)
@@ -145,29 +278,35 @@ export async function refreshAccessToken(
     params.set("audience", audience);
   }
 
-  const tokenResp = await fetch(discovery.token_endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
-
-  if (!tokenResp.ok) {
-    throw new Error(
-      `Token refresh failed with status: ${tokenResp.status}`,
-    );
+  // From here on the token is on the wire: a transport error, a timeout and
+  // a rejection are indistinguishable from the IdP having consumed it.
+  let tokenResp: Response;
+  try {
+    tokenResp = await fetch(discovery.token_endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+      redirect: "error",
+      signal: AbortSignal.timeout(REFRESH_HTTP_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw sent(new Error(`failed to refresh token: ${errMessage(err)}`));
   }
 
-  const tokenResult = (await tokenResp.json()) as {
-    access_token: string;
-    expires_in?: number;
-    refresh_token?: string;
-  };
+  if (!tokenResp.ok) {
+    throw sent(new Error(`token refresh failed with status: ${tokenResp.status}`));
+  }
 
-  const expiresIn = tokenResult.expires_in ?? 3600; // default 1 hour
-  const issuedAt = Math.floor(Date.now() / 1000);
+  let tokenResult: { access_token: string; expires_in?: number; refresh_token?: string };
+  try {
+    tokenResult = (await tokenResp.json()) as typeof tokenResult;
+  } catch (err) {
+    throw sent(new Error(`failed to parse token response: ${errMessage(err)}`));
+  }
 
-  // IdPs that rotate refresh tokens (e.g., Zitadel) return a new one here.
-  // Pass it back to the caller so the on-disk credential can be updated.
+  // IdPs that rotate refresh tokens (e.g., Zitadel) return a new one here;
+  // some send an empty string rather than omitting the field, which must
+  // not overwrite the stored refresh token with an empty value.
   const rotatedRefreshToken =
     typeof tokenResult.refresh_token === "string" && tokenResult.refresh_token.length > 0
       ? tokenResult.refresh_token
@@ -175,10 +314,280 @@ export async function refreshAccessToken(
 
   return {
     accessToken: tokenResult.access_token,
-    expiresIn,
-    issuedAt,
+    expiresIn: tokenResult.expires_in,
+    issuedAt: Math.floor(Date.now() / 1000),
     refreshToken: rotatedRefreshToken,
   };
+}
+
+async function liveRefresher(
+  audience: string | undefined,
+  clientId: string,
+  issuer: string,
+  refreshToken: string,
+): Promise<RefreshedToken> {
+  return refreshAccessToken(audience, clientId, issuer, refreshToken);
+}
+
+/**
+ * Decides whether the stored access token must be refreshed before use.
+ * Pure in its three inputs so the policy is checkable with no file, no lock
+ * and no network.
+ *
+ * A future-dated `issuedAt` (clock skew, or a hostile file — the value is
+ * file-sourced and unvalidated beyond {@link validateIssuerCredentials})
+ * means the token's real age is unknown, and unknown age fails toward
+ * refreshing: clamping it to zero would make a stale token look freshly
+ * issued and suppress a refresh that is genuinely due — the fail-open
+ * direction VPL-183 reverses in Rust (context.rs:1185-1194).
+ *
+ * Rust, Go and TypeScript deliberately agree on this skew-safe direction. A
+ * later "restore cross-SDK parity" pass must not revert it back to
+ * suppress-on-skew — the divergence from the pre-VPL-183 behavior is
+ * intentional, not drift.
+ */
+/** @internal Exported for unit tests only; not part of the public SDK surface. */
+export function needsRefresh(issuedAt: number, expiresIn: number, now: number): boolean {
+  if (issuedAt > now) {
+    return true;
+  }
+
+  const tokenAge = now - issuedAt;
+  const window = Math.min(300, Math.floor(expiresIn / 2));
+
+  return tokenAge + window >= expiresIn;
+}
+
+function digestHex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/**
+ * The error every arm that spends the stored refresh token throws: what
+ * went wrong locally, that the grant is over, and the one command that
+ * restores it. `cause` is inlined into the message because every production
+ * caller formats only the outermost message, and preserved via
+ * `ErrorOptions.cause` for programmatic inspection.
+ */
+function spentGrantError(issuer: string, summary: string, cause: unknown): Error {
+  return new Error(`${summary} (${errMessage(cause)}). Please run: vorpal login --issuer ${issuer}`, { cause });
+}
+
+/**
+ * Validates a single issuer credential record at first contact (C-11).
+ * TypeScript's `interface` types are erased at runtime and provide no
+ * validation whatever, so a corrupt or hostile field (e.g. a non-numeric
+ * `issued_at`) would otherwise silently propagate as `NaN` into
+ * {@link needsRefresh} and suppress a due refresh (AB-7b).
+ */
+function validateIssuerCredentials(issuerName: string, value: unknown): asserts value is IssuerCredentials {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`credentials for issuer ${issuerName} is not an object`);
+  }
+
+  const v = value as Record<string, unknown>;
+
+  if (typeof v.access_token !== "string") {
+    throw new Error(`access_token for issuer ${issuerName} must be a string`);
+  }
+  if (typeof v.refresh_token !== "string") {
+    throw new Error(`refresh_token for issuer ${issuerName} must be a string`);
+  }
+  if (typeof v.client_id !== "string") {
+    throw new Error(`client_id for issuer ${issuerName} must be a string`);
+  }
+  if (typeof v.issued_at !== "number" || !Number.isFinite(v.issued_at)) {
+    throw new Error(`issued_at for issuer ${issuerName} must be a finite number`);
+  }
+  if (v.issued_at < 0) {
+    throw new Error(`issued_at for issuer ${issuerName} must not be negative`);
+  }
+  if (typeof v.expires_in !== "number" || !Number.isFinite(v.expires_in)) {
+    throw new Error(`expires_in for issuer ${issuerName} must be a finite number`);
+  }
+  if (v.expires_in < 0) {
+    throw new Error(`expires_in for issuer ${issuerName} must not be negative`);
+  }
+  if (v.audience !== undefined && typeof v.audience !== "string") {
+    throw new Error(`audience for issuer ${issuerName} must be a string when present`);
+  }
+}
+
+/**
+ * Parses and validates a credentials.json document (C-11). Rejects the file
+ * outright rather than letting an invalid record reach {@link needsRefresh}
+ * or a refresh exchange.
+ */
+function parseCredentials(raw: string): VorpalCredentials {
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("credentials file does not contain a JSON object");
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  const issuerField = obj.issuer;
+  const registryField = obj.registry;
+
+  if (typeof issuerField !== "object" || issuerField === null) {
+    throw new Error("credentials file missing 'issuer' object");
+  }
+  if (typeof registryField !== "object" || registryField === null) {
+    throw new Error("credentials file missing 'registry' object");
+  }
+
+  for (const [issuerName, value] of Object.entries(issuerField as Record<string, unknown>)) {
+    validateIssuerCredentials(issuerName, value);
+  }
+
+  return { issuer: issuerField, registry: registryField } as VorpalCredentials;
+}
+
+/** Bounds the retry against a temp-file name collision (C-5). TypeScript has
+ * no `mkstemp` equivalent, so name generation, `wx` exclusivity and this
+ * bounded retry are all authored rather than inherited from Rust. */
+const TEMP_FILE_MAX_ATTEMPTS = 8;
+
+function tempFileCandidateName(path: string): string {
+  return `${basename(path)}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+}
+
+/**
+ * Writes `data` to `path` atomically: a temp file in the same directory
+ * (required for `renameSync` to be atomic — it is only atomic within a
+ * filesystem) is created exclusively (`wx`, i.e. `O_CREAT | O_EXCL`) at
+ * mode 0600, written, `fsync`'d, and renamed onto `path` (C-5). `renameSync`
+ * replaces the destination inode with the source inode, so the
+ * destination's mode after the rename is the temp file's mode, not any
+ * pre-existing destination mode (closes AB-6). The temp file is unlinked on
+ * every failure path (closes AB-13).
+ */
+function writeCredentialsSecure(path: string, data: string): void {
+  const dir = dirname(path);
+  let lastErr: unknown;
+
+  for (let attempt = 0; attempt < TEMP_FILE_MAX_ATTEMPTS; attempt++) {
+    const tmpPath = join(dir, tempFileCandidateName(path));
+
+    let fd: number;
+    try {
+      fd = openSync(tmpPath, "wx", 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+
+    let closed = false;
+    let committed = false;
+    try {
+      writeSync(fd, data, null, "utf-8");
+      // fsync, not just close: a rename ordered ahead of the data reaching
+      // disk can leave a zero-length credentials file after a crash.
+      fsyncSync(fd);
+      closeSync(fd);
+      closed = true;
+      renameSync(tmpPath, path);
+      committed = true;
+    } finally {
+      if (!closed) {
+        try {
+          closeSync(fd);
+        } catch {
+          /* already closed or never opened */
+        }
+      }
+      if (!committed) {
+        try {
+          unlinkSync(tmpPath);
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+
+    return;
+  }
+
+  throw new Error(
+    `every one of ${TEMP_FILE_MAX_ATTEMPTS} candidate temp-file names was already taken writing ${path}` +
+      (lastErr ? `: ${errMessage(lastErr)}` : ""),
+  );
+}
+
+/**
+ * Applies a completed exchange to `credentials` and writes the result to
+ * `path`. Throws without committing anything when the IdP's response is
+ * unusable (C-10): an absent `expiresIn` defaults to 3600, but an explicit
+ * value `<= 0` can never satisfy {@link needsRefresh}'s window, which would
+ * make every later call rotate again (AB-11) — refused instead.
+ */
+function commitRefreshedCredentials(
+  credentials: VorpalCredentials,
+  issuer: string,
+  path: string,
+  refreshed: RefreshedToken,
+): void {
+  let expires: number;
+  if (refreshed.expiresIn === undefined) {
+    expires = 3600;
+  } else if (refreshed.expiresIn <= 0) {
+    throw new Error(
+      `OAuth refresh for issuer ${issuer} returned a token with a zero lifetime. Please run: vorpal login --issuer ${issuer}`,
+    );
+  } else {
+    expires = refreshed.expiresIn;
+  }
+
+  const issuerCreds = credentials.issuer[issuer];
+  if (!issuerCreds) {
+    throw new Error(`no credentials for issuer: ${issuer}`);
+  }
+
+  issuerCreds.access_token = refreshed.accessToken;
+  issuerCreds.expires_in = expires;
+  issuerCreds.issued_at = refreshed.issuedAt;
+  // Persist rotated refresh token when the IdP returned one; leave the
+  // existing value untouched when omitted (some IdPs do not rotate and
+  // reuse the original refresh token).
+  if (refreshed.refreshToken) {
+    issuerCreds.refresh_token = refreshed.refreshToken;
+  }
+
+  writeCredentialsSecure(path, JSON.stringify(credentials, null, 2));
+}
+
+/**
+ * Serializes the whole critical section — read, refresh decision, exchange,
+ * write — within this process (C-1), and guards
+ * {@link credentialsRefreshSpent}, the memo of refresh-token digests this
+ * process has already put on the wire without durably committing a
+ * replacement (C-3).
+ *
+ * Node/Bun are single-threaded, but every `await` is an interleaving point:
+ * `await`-ing the chain tail before the existence check and releasing after
+ * the write is what makes this a real mutex rather than a no-op — a
+ * synchronous critical section would not need it, but this one spans
+ * `await fetch(...)` twice.
+ *
+ * Scope is this process only: it does not serialize against a separately
+ * spawned config process, a running `vorpal start agent`, or the Rust/Go
+ * SDKs writing the same `credentials.json` — an accepted residual risk
+ * shared with Rust (context.rs:1160-1166) and Go.
+ */
+let credentialsRefreshChain: Promise<void> = Promise.resolve();
+const credentialsRefreshSpent = new Set<string>();
+
+function withCredentialsRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = credentialsRefreshChain.then(fn);
+  // The chain link always resolves regardless of fn's outcome, so a
+  // rejection from one caller never poisons the next waiter's turn.
+  credentialsRefreshChain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 /**
@@ -188,72 +597,118 @@ export async function refreshAccessToken(
  * credentials file or no mapping for this registry (allowing
  * unauthenticated requests), or throws on unrecoverable errors.
  *
- * Matches Rust `client_auth_header()` and Go `ClientAuthHeader()`.
+ * Matches Rust `client_auth_header()` / `client_auth_header_at()` and Go
+ * `ClientAuthHeader()` / `clientAuthHeaderAt()`. `credentialsPath` already
+ * made this function's core testable without touching the real
+ * `/var/lib/vorpal/key/credentials.json` (C-12 required no change here);
+ * `refresher` and `now` extend that same parameter shape rather than
+ * becoming module-level mutable exports, so a test can drive the refresh
+ * exchange and the clock without real network I/O or the wall clock.
+ *
+ * `now` is called only after {@link withCredentialsRefreshLock}'s chain tail
+ * is awaited — never before (C-2). A value sampled before acquiring the
+ * lock can predate a still-in-flight winner's later commit; a waiter that
+ * then compares its stale, pre-lock reading against the winner's freshly
+ * committed `issued_at` sees a future-dated token and refreshes again, once
+ * per waiter (AB-2).
  *
  * @internal Exported for unit tests only; not part of the public SDK surface.
  */
 export async function clientAuthHeader(
   registry: string,
   credentialsPath: string = VORPAL_CREDENTIALS_PATH,
+  refresher: typeof liveRefresher = liveRefresher,
+  now: () => number = () => Math.floor(Date.now() / 1000),
 ): Promise<string | null> {
-  // Check if credentials file exists
-  if (!existsSync(credentialsPath)) {
-    return null;
-  }
+  return withCredentialsRefreshLock(async () => {
+    // Read here, strictly after the lock — see this function's doc comment.
+    const nowUnix = now();
 
-  // Read and parse credentials
-  const credentialsData = readFileSync(credentialsPath, "utf-8");
-  const credentials: VorpalCredentials = JSON.parse(credentialsData);
-
-  // Lookup registry -> issuer mapping
-  const registryIssuer = credentials.registry[registry];
-  if (!registryIssuer) {
-    // No registry mapping — allow unauthenticated requests
-    return null;
-  }
-
-  // Lookup issuer credentials
-  const issuerCreds = credentials.issuer[registryIssuer];
-  if (!issuerCreds) {
-    throw new Error(`no credentials for issuer: ${registryIssuer}`);
-  }
-
-  // Check if token needs refresh (5-minute buffer, matching Go/Rust)
-  const now = Math.floor(Date.now() / 1000);
-  const tokenAge = now - issuerCreds.issued_at;
-  const needsRefresh = tokenAge + 300 >= issuerCreds.expires_in;
-
-  if (needsRefresh) {
-    if (!issuerCreds.refresh_token) {
-      throw new Error(
-        `Access token expired and no refresh token available. Please run: vorpal login --issuer ${registryIssuer}`,
-      );
+    if (!existsSync(credentialsPath)) {
+      return null;
     }
 
-    const refreshed = await refreshAccessToken(
-      issuerCreds.audience,
-      issuerCreds.client_id,
-      registryIssuer,
-      issuerCreds.refresh_token,
-    );
+    const credentialsData = readFileSync(credentialsPath, "utf-8");
+    const credentials = parseCredentials(credentialsData);
 
-    // Update credentials in memory
-    issuerCreds.access_token = refreshed.accessToken;
-    issuerCreds.expires_in = refreshed.expiresIn;
-    issuerCreds.issued_at = refreshed.issuedAt;
-    if (refreshed.refreshToken) {
-      issuerCreds.refresh_token = refreshed.refreshToken;
+    const registryIssuer = credentials.registry[registry];
+    if (!registryIssuer) {
+      // No registry mapping — allow unauthenticated requests
+      return null;
     }
 
-    // Save updated credentials to disk (matching Go/Rust behavior)
-    writeFileSync(
-      credentialsPath,
-      JSON.stringify(credentials, null, 2),
-      { mode: 0o600 },
-    );
-  }
+    let issuerCreds = credentials.issuer[registryIssuer];
+    if (!issuerCreds) {
+      throw new Error(`no credentials for issuer: ${registryIssuer}`);
+    }
 
-  return `Bearer ${issuerCreds.access_token}`;
+    if (needsRefresh(issuerCreds.issued_at, issuerCreds.expires_in, nowUnix)) {
+      if (!issuerCreds.refresh_token) {
+        throw new Error(
+          `Access token expired and no refresh token available. Please run: vorpal login --issuer ${registryIssuer}`,
+        );
+      }
+
+      // A prior caller may already have put this exact stored token value
+      // on the wire. The file it left behind is byte-identical either way,
+      // so the memo is the only thing that can tell the two apart.
+      const refreshTokenDigest = digestHex(issuerCreds.refresh_token);
+
+      if (credentialsRefreshSpent.has(refreshTokenDigest)) {
+        throw new Error(
+          `OAuth refresh-token exchange already failed for the stored token. Please run: vorpal login --issuer ${registryIssuer}`,
+        );
+      }
+
+      let refreshed: RefreshedToken;
+      try {
+        refreshed = await refresher(
+          issuerCreds.audience,
+          issuerCreds.client_id,
+          registryIssuer,
+          issuerCreds.refresh_token,
+        );
+      } catch (err) {
+        if (err instanceof RefreshFailure && err.sent) {
+          credentialsRefreshSpent.add(refreshTokenDigest);
+          throw spentGrantError(
+            registryIssuer,
+            `the OAuth refresh-token exchange for issuer ${registryIssuer} failed after the token had been sent, so the stored refresh token is no longer usable`,
+            err,
+          );
+        }
+
+        // NotSent, or an unclassified error: the token never left the
+        // process, the stored token is untouched, and a later caller may
+        // use it.
+        throw new Error(`failed to refresh token: ${errMessage(err)}`);
+      }
+
+      // No `await` is introduced between the exchange above and the commit
+      // below: the sequence stays synchronous so the window in which a
+      // killed process loses the rotated token to disk (accepted residual
+      // risk) does not widen.
+      try {
+        commitRefreshedCredentials(credentials, registryIssuer, credentialsPath, refreshed);
+      } catch (err) {
+        // The exchange happened and nothing was committed, so the file
+        // still names a token the IdP may have already rotated away. This
+        // is the same replay hazard as an outright failure and it is spent
+        // for the same reason.
+        credentialsRefreshSpent.add(refreshTokenDigest);
+
+        throw spentGrantError(
+          registryIssuer,
+          `refreshed credentials for issuer ${registryIssuer} could not be saved, so the stored refresh token is no longer usable`,
+          err,
+        );
+      }
+
+      issuerCreds = credentials.issuer[registryIssuer];
+    }
+
+    return `Bearer ${issuerCreds.access_token}`;
+  });
 }
 
 // ---------------------------------------------------------------------------

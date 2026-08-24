@@ -12,17 +12,12 @@ func GetRootKeyDirPath() string {
 	return filepath.Join(GetRootDirPath(), "key")
 }
 
-// getKeyCredentialsPathDefault is the default implementation
-func getKeyCredentialsPathDefault() string {
-	return filepath.Join(GetRootKeyDirPath(), "credentials.json")
-}
-
-// getKeyCredentialsPathFunc is a variable that can be replaced for testing
-var getKeyCredentialsPathFunc = getKeyCredentialsPathDefault
-
-// GetKeyCredentialsPath returns the credentials file path
+// GetKeyCredentialsPath returns the credentials file path. Deliberately not
+// configurable from any production entry point (env var, global override) —
+// tests drive clientAuthHeaderAt, which takes the credentials path as a
+// parameter, instead of redirecting this function.
 func GetKeyCredentialsPath() string {
-	return getKeyCredentialsPathFunc()
+	return filepath.Join(GetRootKeyDirPath(), "credentials.json")
 }
 
 // GetKeyCaPath returns the path to the CA certificate

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clientAuthHeader } from "../context.js";
+import { clientAuthHeader, credentialEgressOrigin, needsRefresh, refreshAccessToken } from "../context.js";
 
 const ISSUER = "https://issuer.example";
 const TOKEN_ENDPOINT = "https://issuer.example/oauth/token";
@@ -45,6 +45,8 @@ function writeCredentialsFile(path: string, opts: CredentialsFixtureOptions = {}
 interface FetchScenario {
   /** Body returned by the token endpoint. */
   tokenResponse: Record<string, unknown>;
+  /** Status code for the token endpoint response. Defaults to 200. */
+  tokenStatus?: number;
 }
 
 function installFetchMock(scenario: FetchScenario): ReturnType<typeof mock> {
@@ -58,7 +60,7 @@ function installFetchMock(scenario: FetchScenario): ReturnType<typeof mock> {
     }
     if (url === TOKEN_ENDPOINT) {
       return new Response(JSON.stringify(scenario.tokenResponse), {
-        status: 200,
+        status: scenario.tokenStatus ?? 200,
         headers: { "content-type": "application/json" },
       });
     }
@@ -86,7 +88,7 @@ describe("clientAuthHeader: refresh-token rotation", () => {
   });
 
   test("persists rotated refresh_token returned by the IdP", async () => {
-    writeCredentialsFile(credentialsPath, { refreshToken: "old-refresh-token" });
+    writeCredentialsFile(credentialsPath, { refreshToken: "rotation-old-refresh-token" });
     installFetchMock({
       tokenResponse: {
         access_token: "new-access-token",
@@ -109,7 +111,7 @@ describe("clientAuthHeader: refresh-token rotation", () => {
   });
 
   test("leaves existing refresh_token untouched when IdP omits one", async () => {
-    writeCredentialsFile(credentialsPath, { refreshToken: "old-refresh-token" });
+    writeCredentialsFile(credentialsPath, { refreshToken: "omit-old-refresh-token" });
     installFetchMock({
       tokenResponse: {
         access_token: "new-access-token",
@@ -123,12 +125,12 @@ describe("clientAuthHeader: refresh-token rotation", () => {
     expect(header).toBe("Bearer new-access-token");
 
     const persisted = JSON.parse(readFileSync(credentialsPath, "utf-8"));
-    expect(persisted.issuer[ISSUER].refresh_token).toBe("old-refresh-token");
+    expect(persisted.issuer[ISSUER].refresh_token).toBe("omit-old-refresh-token");
     expect(persisted.issuer[ISSUER].access_token).toBe("new-access-token");
   });
 
   test("leaves existing refresh_token untouched when IdP returns empty string", async () => {
-    writeCredentialsFile(credentialsPath, { refreshToken: "old-refresh-token" });
+    writeCredentialsFile(credentialsPath, { refreshToken: "empty-old-refresh-token" });
     installFetchMock({
       tokenResponse: {
         access_token: "new-access-token",
@@ -140,7 +142,7 @@ describe("clientAuthHeader: refresh-token rotation", () => {
     await clientAuthHeader(REGISTRY, credentialsPath);
 
     const persisted = JSON.parse(readFileSync(credentialsPath, "utf-8"));
-    expect(persisted.issuer[ISSUER].refresh_token).toBe("old-refresh-token");
+    expect(persisted.issuer[ISSUER].refresh_token).toBe("empty-old-refresh-token");
   });
 
   test("does not rewrite credentials when token is still valid", async () => {
@@ -164,5 +166,416 @@ describe("clientAuthHeader: refresh-token rotation", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     const after = readFileSync(credentialsPath, "utf-8");
     expect(after).toBe(before);
+  });
+
+  // ---------------------------------------------------------------------
+  // C-1 / C-2 — serialization and post-lock clock sampling (AB-1, AB-2)
+  // ---------------------------------------------------------------------
+
+  test("serializes concurrent refreshes into exactly one exchange", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "concurrent-old-refresh-token" });
+    let calls = 0;
+    installFetchMockCounting(() => {
+      calls += 1;
+      return { access_token: "new-access-token", expires_in: 3600 };
+    });
+
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => clientAuthHeader(REGISTRY, credentialsPath)),
+    );
+
+    for (const header of results) {
+      expect(header).toBe("Bearer new-access-token");
+    }
+    expect(calls).toBe(1);
+  });
+
+  function installFetchMockCounting(tokenResponse: () => Record<string, unknown>): void {
+    const mockFetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return new Response(JSON.stringify({ token_endpoint: TOKEN_ENDPOINT }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify(tokenResponse()), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+  }
+
+  // ---------------------------------------------------------------------
+  // C-3 / C-4 — spent-token memo and NotSent/Sent classification (AB-1, AB-3, AB-4)
+  // ---------------------------------------------------------------------
+
+  test("never replays a token after a Sent failure", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "sent-fail-refresh-token" });
+    installFetchMock({ tokenResponse: { error: "server_error" }, tokenStatus: 500 });
+
+    await expect(clientAuthHeader(REGISTRY, credentialsPath)).rejects.toThrow();
+
+    const secondError = await clientAuthHeader(REGISTRY, credentialsPath).catch((e) => e as Error);
+    expect(secondError).toBeInstanceOf(Error);
+    expect((secondError as Error).message).toContain("already failed");
+  });
+
+  test("retries a refresh that never reached the IdP", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "not-sent-refresh-token" });
+
+    let attempt = 0;
+    const mockFetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        attempt += 1;
+        if (attempt === 1) {
+          throw new Error("simulated DNS failure");
+        }
+        return new Response(JSON.stringify({ token_endpoint: TOKEN_ENDPOINT }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        return new Response(
+          JSON.stringify({ access_token: "new-access-token", expires_in: 3600 }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+
+    const firstError = await clientAuthHeader(REGISTRY, credentialsPath).catch((e) => e as Error);
+    expect(firstError).toBeInstanceOf(Error);
+    expect((firstError as Error).message).not.toContain("already failed");
+
+    const header = await clientAuthHeader(REGISTRY, credentialsPath);
+    expect(header).toBe("Bearer new-access-token");
+  });
+
+  // ---------------------------------------------------------------------
+  // C-6 / C-7 — skew-safe age and proportional window (AB-7, AB-8)
+  // ---------------------------------------------------------------------
+
+  test("refreshes despite a future-dated issued_at", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    writeCredentialsFile(credentialsPath, {
+      issuedAt: now + 3600,
+      expiresIn: 3600,
+      refreshToken: "future-issued-refresh-token",
+    });
+    let calls = 0;
+    installFetchMockCounting(() => {
+      calls += 1;
+      return { access_token: "new-access-token", expires_in: 3600 };
+    });
+
+    const header = await clientAuthHeader(REGISTRY, credentialsPath);
+
+    expect(header).toBe("Bearer new-access-token");
+    expect(calls).toBe(1);
+  });
+
+  // ---------------------------------------------------------------------
+  // C-10 — refuse an unusable token lifetime (AB-11)
+  // ---------------------------------------------------------------------
+
+  test("refuses to persist a zero-lifetime token", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "zero-lifetime-refresh-token" });
+    installFetchMock({ tokenResponse: { access_token: "new-access-token", expires_in: 0 } });
+
+    await expect(clientAuthHeader(REGISTRY, credentialsPath)).rejects.toThrow();
+
+    const persisted = JSON.parse(readFileSync(credentialsPath, "utf-8"));
+    expect(persisted.issuer[ISSUER].access_token).toBe("old-access-token");
+  });
+
+  // ---------------------------------------------------------------------
+  // C-11 — validate the credential record at first contact (AB-7b, AB-12)
+  // ---------------------------------------------------------------------
+
+  test("rejects a non-numeric issued_at rather than suppressing refresh via NaN", async () => {
+    const raw = JSON.stringify({
+      issuer: {
+        [ISSUER]: {
+          access_token: "old-access-token",
+          client_id: "vorpal-cli",
+          expires_in: 3600,
+          issued_at: "corrupt",
+          refresh_token: "corrupt-issued-at-refresh-token",
+          scopes: [],
+        },
+      },
+      registry: { [REGISTRY]: ISSUER },
+    });
+    writeFileSync(credentialsPath, raw, { mode: 0o600 });
+
+    await expect(clientAuthHeader(REGISTRY, credentialsPath)).rejects.toThrow();
+  });
+
+  test("rejects a negative expires_in", async () => {
+    writeCredentialsFile(credentialsPath, { expiresIn: -1, refreshToken: "negative-expires-refresh-token" });
+
+    await expect(clientAuthHeader(REGISTRY, credentialsPath)).rejects.toThrow();
+  });
+
+  // ---------------------------------------------------------------------
+  // C-14 — no token material in errors
+  // ---------------------------------------------------------------------
+
+  test("error messages never contain the refresh token value", async () => {
+    const secretToken = "super-secret-refresh-token-value";
+    writeCredentialsFile(credentialsPath, { refreshToken: secretToken });
+    installFetchMock({ tokenResponse: { error: "server_error" }, tokenStatus: 500 });
+
+    const err = await clientAuthHeader(REGISTRY, credentialsPath).catch((e) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).not.toContain(secretToken);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C-5 — atomic, mode-enforcing write (AB-5, AB-6)
+// ---------------------------------------------------------------------------
+
+describe("clientAuthHeader: atomic credential write", () => {
+  let tmpDir: string;
+  let credentialsPath: string;
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "vorpal-sdk-test-write-"));
+    credentialsPath = join(tmpDir, "credentials.json");
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("overwrites a pre-existing loose file mode to 0600", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "mode-refresh-token" });
+    // Simulate a credentials file that pre-dates this control.
+    chmodSync(credentialsPath, 0o644);
+    expect(statSync(credentialsPath).mode & 0o777).toBe(0o644);
+
+    installFetchMock({ tokenResponse: { access_token: "new-access-token", expires_in: 3600 } });
+    await clientAuthHeader(REGISTRY, credentialsPath);
+
+    expect(statSync(credentialsPath).mode & 0o777).toBe(0o600);
+  });
+
+  function installFetchMock(scenario: FetchScenario): void {
+    const mockFetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return new Response(JSON.stringify({ token_endpoint: TOKEN_ENDPOINT }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify(scenario.tokenResponse), {
+          status: scenario.tokenStatus ?? 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+  }
+
+  test("a reader looping on parse never observes a torn file", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "reader-writer-refresh-token" });
+
+    let stop = false;
+    let readError: Error | undefined;
+    const readerLoop = (async () => {
+      while (!stop) {
+        try {
+          const data = readFileSync(credentialsPath, "utf-8");
+          JSON.parse(data);
+        } catch (err) {
+          if (err instanceof SyntaxError) {
+            readError = err;
+            return;
+          }
+          // ENOENT during the rename window is not a torn read.
+        }
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    })();
+
+    let n = 0;
+    installFetchMockCounting(() => {
+      n += 1;
+      return { access_token: `access-${n}`, expires_in: 3600, refresh_token: `reader-writer-refresh-token-${n}` };
+    });
+
+    for (let i = 0; i < 30; i++) {
+      const now = Math.floor(Date.now() / 1000) - 7200;
+      writeCredentialsFile(credentialsPath, { issuedAt: now, refreshToken: `reader-writer-refresh-token-${i}` });
+      await clientAuthHeader(REGISTRY, credentialsPath);
+    }
+
+    stop = true;
+    await readerLoop;
+
+    expect(readError).toBeUndefined();
+  });
+
+  function installFetchMockCounting(tokenResponse: () => Record<string, unknown>): void {
+    const mockFetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return new Response(JSON.stringify({ token_endpoint: TOKEN_ENDPOINT }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify(tokenResponse()), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// C-6 / C-7 — needsRefresh unit behavior
+// ---------------------------------------------------------------------------
+
+describe("needsRefresh", () => {
+  test("treats a future issued_at as unknown age", () => {
+    const now = 1_000_000;
+    expect(needsRefresh(now + 3600, 3600, now)).toBe(true);
+  });
+
+  test.each([1, 2, 60, 299, 300, 301, 600, 3600])(
+    "is never due when just issued, and due at its window boundary (expiresIn=%d)",
+    (expiresIn) => {
+      const issuedAt = 1_000_000;
+      const window = Math.min(300, Math.floor(expiresIn / 2));
+
+      expect(needsRefresh(issuedAt, expiresIn, issuedAt)).toBe(false);
+
+      const boundaryNow = issuedAt + expiresIn - window;
+      expect(needsRefresh(issuedAt, expiresIn, boundaryNow)).toBe(true);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// C-8 — egress origin validation (AB-9, AB-10 discovery arm)
+// ---------------------------------------------------------------------------
+
+describe("credentialEgressOrigin", () => {
+  test("refuses a non-loopback http issuer", () => {
+    expect(() => credentialEgressOrigin("http://idp.example.com")).toThrow();
+  });
+
+  test("allows loopback http", () => {
+    expect(credentialEgressOrigin("http://127.0.0.1:8080")).toBe("http://127.0.0.1:8080");
+  });
+
+  test("normalizes the default https port", () => {
+    expect(credentialEgressOrigin("https://idp.example.com")).toBe("https://idp.example.com:443");
+  });
+});
+
+describe("refreshAccessToken: egress and redirect controls", () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("refuses a non-https issuer before making any request", async () => {
+    const mockFetch = mock(async () => {
+      throw new Error("must not be called");
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+
+    await expect(
+      refreshAccessToken(undefined, "client", "http://idp.example.com", "refresh-token"),
+    ).rejects.toThrow();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test("refuses a token_endpoint on a different origin than the issuer", async () => {
+    let otherCalled = false;
+    const mockFetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return new Response(JSON.stringify({ token_endpoint: "https://attacker.example/token" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "https://attacker.example/token") {
+        otherCalled = true;
+        return new Response("{}", { status: 200 });
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+
+    await expect(refreshAccessToken(undefined, "client", ISSUER, "refresh-token")).rejects.toThrow();
+    expect(otherCalled).toBe(false);
+  });
+
+  // C-9: redirect ban. `redirect: "error"` (set on every request refreshAccessToken
+  // issues) makes fetch reject rather than follow — the positive control for
+  // why this matters is that Node/Bun's *default* fetch follows a 307 and
+  // resends the credential-bearing POST body verbatim (REPRODUCED during the
+  // VPL-189 threat model against a local pair of httptest-equivalent servers).
+  test("refuses a redirect from the token endpoint", async () => {
+    let secondCalled = false;
+    const mockFetch = mock(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return new Response(JSON.stringify({ token_endpoint: TOKEN_ENDPOINT }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        if (init?.redirect === "error") {
+          // Faithful to real fetch semantics: a redirect response under
+          // redirect:"error" is surfaced as a rejected promise, not a 3xx
+          // Response.
+          throw new TypeError("unexpected redirect");
+        }
+        secondCalled = true;
+        return new Response("{}", { status: 200 });
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+
+    await expect(refreshAccessToken(undefined, "client", ISSUER, "refresh-token")).rejects.toThrow();
+    expect(secondCalled).toBe(false);
   });
 });

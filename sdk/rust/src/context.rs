@@ -1342,6 +1342,12 @@ static CREDENTIALS_REFRESH: Mutex<RefreshState> = Mutex::const_new(RefreshState:
 /// any `expires_in` a little above it, and unconditionally true at or below
 /// it, so every caller decides independently to rotate and the rotations
 /// amplify each other (VPL-183 AB-4).
+///
+/// Rust, Go (`sdk/go/pkg/config/context.go`'s `needsRefresh`) and TypeScript
+/// (`sdk/typescript/src/context.ts`'s `needsRefresh`) deliberately agree on
+/// this skew-safe direction (VPL-189). A later "restore cross-SDK parity"
+/// pass must not revert any of the three back to suppress-on-skew — the
+/// divergence from the pre-VPL-183 behavior is intentional, not drift.
 fn needs_refresh(issued_at: u64, expires_in: u64, now: u64) -> bool {
     if issued_at > now {
         return true;

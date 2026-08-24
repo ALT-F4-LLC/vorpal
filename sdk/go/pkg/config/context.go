@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,8 +15,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent"
@@ -115,21 +119,138 @@ func (s *ConfigServer) GetArtifacts(ctx context.Context, request *artifact.Artif
 	return response, nil
 }
 
-// refreshAccessToken refreshes an expired access token using the refresh token.
-// Returns the new access token, its expires_in (seconds), its issued-at timestamp,
-// and an optional rotated refresh token (empty string when the IdP did not rotate).
-func refreshAccessToken(audience *string, clientId, issuer, refreshToken string) (string, int64, int64, string, error) {
+// refreshHTTPTimeout bounds every discovery and token-endpoint request. This
+// matters because C-1's process-wide lock is held across the whole exchange:
+// without a timeout, a hung IdP stalls every authenticated call in the
+// process, not just its own.
+const refreshHTTPTimeout = 30 * time.Second
+
+// refreshFailureKind classifies why a refresh exchange failed, by whether the
+// refresh token had already left this process. NotSent means the fault was
+// local (bad URL, unreachable discovery endpoint, malformed document) and the
+// stored token is untouched — safe to retry. Sent means the token-endpoint
+// request was issued, so the IdP may have consumed the token whatever came
+// back — it must never be sent a second time.
+type refreshFailureKind int
+
+const (
+	refreshFailureNotSent refreshFailureKind = iota
+	refreshFailureSent
+)
+
+// refreshFailureError wraps an error with its refreshFailureKind. Rust's
+// equivalent is the RefreshFailure enum in sdk/rust/src/context.rs.
+type refreshFailureError struct {
+	kind refreshFailureKind
+	err  error
+}
+
+func (e *refreshFailureError) Error() string { return e.err.Error() }
+func (e *refreshFailureError) Unwrap() error { return e.err }
+
+func notSentErr(err error) error { return &refreshFailureError{kind: refreshFailureNotSent, err: err} }
+func sentErr(err error) error    { return &refreshFailureError{kind: refreshFailureSent, err: err} }
+
+// credentialEgressOrigin parses an OIDC URL into its scheme://host:port
+// origin, refusing any destination a refresh token must not be sent to.
+// Plaintext HTTP is refused except on loopback, where there is no network to
+// eavesdrop and local IdP fixtures live. Mirrors Rust's
+// credential_egress_origin (context.rs:688-712).
+func credentialEgressOrigin(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid OIDC URL: %s: %w", raw, err)
+	}
+
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("OIDC URL has no host: %s", raw)
+	}
+
+	isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
+
+	switch {
+	case u.Scheme == "https":
+	case u.Scheme == "http" && isLoopback:
+	default:
+		return "", fmt.Errorf("refusing to send a refresh token over %s to %s: the OIDC issuer must be https", u.Scheme, host)
+	}
+
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "https":
+			port = "443"
+		case "http":
+			port = "80"
+		default:
+			return "", fmt.Errorf("OIDC URL has no port: %s", raw)
+		}
+	}
+
+	return fmt.Sprintf("%s://%s:%s", u.Scheme, host, port), nil
+}
+
+// refreshHTTPClient returns an *http.Client with the timeout and redirect
+// policy every refresh-exchange request must carry (C-9): no redirect is
+// followed (a 307 surfaces as a non-200 to the existing status check rather
+// than being replayed to a host of the redirector's choosing), and the whole
+// request is bounded so a hung IdP cannot stall the process-wide lock.
+func refreshHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// refreshAccessToken refreshes an expired access token using the refresh
+// token. Returns the new access token, its expires_in (nil when the IdP's
+// response omitted the field, distinct from an explicit zero — C-10), its
+// issued-at timestamp, and an optional rotated refresh token (empty string
+// when the IdP did not rotate). Every error is classified as a
+// *refreshFailureError: NotSent up through and including the discovery round
+// trip, Sent from the token-endpoint request onward.
+func refreshAccessToken(audience *string, clientId, issuer, refreshToken string, timeout time.Duration) (string, *int64, int64, string, error) {
+	client := refreshHTTPClient(timeout)
+
+	issuerOrigin, err := credentialEgressOrigin(issuer)
+	if err != nil {
+		return "", nil, 0, "", notSentErr(err)
+	}
+
 	// Discover token endpoint
 	discoveryURL := fmt.Sprintf("%s/.well-known/openid-configuration", issuer)
-	resp, err := http.Get(discoveryURL)
+	resp, err := client.Get(discoveryURL)
 	if err != nil {
-		return "", 0, 0, "", fmt.Errorf("failed to fetch OIDC discovery: %w", err)
+		return "", nil, 0, "", notSentErr(fmt.Errorf("failed to fetch OIDC discovery: %w", err))
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, 0, "", notSentErr(fmt.Errorf("OIDC discovery failed with status: %d", resp.StatusCode))
+	}
+
 	var discovery OIDCDiscovery
 	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil {
-		return "", 0, 0, "", fmt.Errorf("failed to parse OIDC discovery: %w", err)
+		return "", nil, 0, "", notSentErr(fmt.Errorf("failed to parse OIDC discovery: %w", err))
+	}
+
+	tokenEndpointOrigin, err := credentialEgressOrigin(discovery.TokenEndpoint)
+	if err != nil {
+		return "", nil, 0, "", notSentErr(err)
+	}
+
+	// Contract, not incidental: the discovery document's token_endpoint must
+	// share the issuer's scheme://host:port, closing the egress-redirection
+	// hazard in which a tampered or compromised discovery document steers the
+	// credential-bearing POST to a host of its own choosing.
+	if tokenEndpointOrigin != issuerOrigin {
+		return "", nil, 0, "", notSentErr(fmt.Errorf(
+			"OIDC token_endpoint origin %s does not match issuer origin %s",
+			tokenEndpointOrigin, issuerOrigin,
+		))
 	}
 
 	// Build refresh token request
@@ -141,116 +262,374 @@ func refreshAccessToken(audience *string, clientId, issuer, refreshToken string)
 		data.Set("audience", *audience)
 	}
 
-	tokenResp, err := http.PostForm(discovery.TokenEndpoint, data)
+	// From here on the token is on the wire: a transport error, a timeout and
+	// a rejection are indistinguishable from the IdP having consumed it.
+	tokenResp, err := client.PostForm(discovery.TokenEndpoint, data)
 	if err != nil {
-		return "", 0, 0, "", fmt.Errorf("failed to refresh token: %w", err)
+		return "", nil, 0, "", sentErr(fmt.Errorf("failed to refresh token: %w", err))
 	}
 	defer tokenResp.Body.Close()
 
 	if tokenResp.StatusCode != http.StatusOK {
-		return "", 0, 0, "", fmt.Errorf("token refresh failed with status: %d", tokenResp.StatusCode)
+		return "", nil, 0, "", sentErr(fmt.Errorf("token refresh failed with status: %d", tokenResp.StatusCode))
 	}
 
 	var tokenResult struct {
 		AccessToken  string `json:"access_token"`
-		ExpiresIn    int64  `json:"expires_in"`
+		ExpiresIn    *int64 `json:"expires_in"`
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
-		return "", 0, 0, "", fmt.Errorf("failed to parse token response: %w", err)
-	}
-
-	expiresIn := tokenResult.ExpiresIn
-	if expiresIn == 0 {
-		expiresIn = 3600 // default 1 hour
+		return "", nil, 0, "", sentErr(fmt.Errorf("failed to parse token response: %w", err))
 	}
 
 	issuedAt := time.Now().Unix()
 
-	return tokenResult.AccessToken, expiresIn, issuedAt, tokenResult.RefreshToken, nil
+	return tokenResult.AccessToken, tokenResult.ExpiresIn, issuedAt, tokenResult.RefreshToken, nil
 }
 
-// ClientAuthHeader retrieves the authorization header for a given registry.
-// Returns the Bearer token string if credentials exist, empty string otherwise, or error on failure.
-// This matches the Rust SDK's client_auth_header function.
-func ClientAuthHeader(registry string) (string, error) {
-	credentialsPath := GetKeyCredentialsPath()
+// needsRefresh decides whether the stored access token must be refreshed
+// before use. Pure in its three inputs so the policy is checkable with no
+// file, no lock and no network. A future-dated issuedAt (clock skew, or a
+// hostile file — the value is file-sourced and unvalidated) means the
+// token's real age is unknown, and unknown age fails toward refreshing:
+// clamping it to zero would make a stale token look freshly issued and
+// suppress a refresh that is genuinely due — the fail-open direction VPL-183
+// reverses in Rust (context.rs:1185-1194), agreed here on purpose.
+//
+// Rust, Go and TypeScript deliberately agree on this skew-safe direction. A
+// later "restore cross-SDK parity" pass must not revert it back to
+// suppress-on-skew — the divergence from the pre-VPL-183 behavior is
+// intentional, not drift.
+func needsRefresh(issuedAt, expiresIn, now int64) bool {
+	if issuedAt > now {
+		return true
+	}
 
-	// Check if credentials file exists (like Rust's .exists())
+	tokenAge := now - issuedAt
+	window := expiresIn / 2
+	if window > 300 {
+		window = 300
+	}
+
+	return tokenAge+window >= expiresIn
+}
+
+// digestHex returns the hex-encoded SHA-256 digest of s, used to key the
+// spent-refresh-token memo (C-3) without ever storing the plaintext value.
+func digestHex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// spentGrantError is the error every arm that spends the stored refresh
+// token returns: what went wrong locally, that the grant is over, and the
+// one command that restores it. cause is inlined into the message because
+// every production caller wraps this error and formats only the outermost
+// message, so a cause left in the chain alone would be invisible to the
+// user; the chain is preserved via %w for programmatic inspection.
+func spentGrantError(issuer, summary string, cause error) error {
+	return fmt.Errorf("%s (%w). Please run: vorpal login --issuer %s", summary, cause, issuer)
+}
+
+// tempFileMaxAttempts bounds writeCredentialsSecure's retry against a
+// collision on the temp-file name. os.CreateTemp already draws a random
+// suffix and retries internally on O_EXCL collision, so this is a ceiling on
+// top of that, not the primary collision handling.
+const tempFileMaxAttempts = 8
+
+// writeCredentialsSecure writes data to path atomically: a temp file in the
+// same directory (required for os.Rename to be atomic — it is only atomic
+// within a filesystem) is created exclusively at mode 0600, written,
+// fsync'd, and renamed onto path. os.Rename replaces the destination inode
+// with the source inode, so the destination's mode after the rename is the
+// temp file's mode, not any pre-existing destination mode (C-5, closing
+// AB-6). The temp file is unlinked on every failure path (closing AB-13).
+func writeCredentialsSecure(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+
+	var lastErr error
+
+	for attempt := 0; attempt < tempFileMaxAttempts; attempt++ {
+		f, err := os.CreateTemp(dir, base+".*.tmp")
+		if err != nil {
+			if errors.Is(err, os.ErrExist) {
+				lastErr = err
+				continue
+			}
+			return fmt.Errorf("failed to create temp credentials file: %w", err)
+		}
+
+		tmpPath := f.Name()
+		committed := false
+		defer func() {
+			if !committed {
+				os.Remove(tmpPath)
+			}
+		}()
+
+		if err := writeCredentialsSecureCommit(f, tmpPath, path, data); err != nil {
+			return err
+		}
+
+		committed = true
+		return nil
+	}
+
+	return fmt.Errorf("every one of %d candidate temp-file names was already taken writing %s: %w", tempFileMaxAttempts, path, lastErr)
+}
+
+// writeCredentialsSecureCommit writes data to the already-created temp file
+// f, fsyncs it (never just flushes — a rename ordered ahead of the data
+// reaching disk can leave a zero-length credentials file after a crash), and
+// renames it onto path.
+func writeCredentialsSecureCommit(f *os.File, tmpPath, path string, data []byte) error {
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("failed to write temp credentials file: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("failed to fsync temp credentials file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to close temp credentials file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("failed to rename temp credentials file: %w", err)
+	}
+	return nil
+}
+
+// validateIssuerCredentials rejects a credential record whose numeric fields
+// are out of range (C-11). json.Unmarshal already rejects a type mismatch
+// (e.g. a string where an int64 is expected) into VorpalCredentialsContent,
+// so only the range check is added here.
+func validateIssuerCredentials(c VorpalCredentialsContent) error {
+	if c.ExpiresIn < 0 {
+		return fmt.Errorf("expires_in must not be negative: %d", c.ExpiresIn)
+	}
+	if c.IssuedAt < 0 {
+		return fmt.Errorf("issued_at must not be negative: %d", c.IssuedAt)
+	}
+	return nil
+}
+
+// commitRefreshedCredentials applies a completed exchange to credentials and
+// writes the result to path. Returns an error without committing anything
+// when the IdP's response is unusable (C-10): an absent expires_in defaults
+// to 3600, but an explicit value <= 0 can never satisfy needsRefresh's
+// window, which would make every later call rotate again — refused instead.
+func commitRefreshedCredentials(
+	credentials *VorpalCredentials,
+	issuer string,
+	path string,
+	accessToken string,
+	expiresIn *int64,
+	issuedAt int64,
+	rotatedRefreshToken string,
+) error {
+	var expires int64
+	switch {
+	case expiresIn == nil:
+		expires = 3600
+	case *expiresIn <= 0:
+		return fmt.Errorf(
+			"OAuth refresh for issuer %s returned a token with a zero lifetime. Please run: vorpal login --issuer %s",
+			issuer, issuer,
+		)
+	default:
+		expires = *expiresIn
+	}
+
+	issuerCreds, ok := credentials.Issuer[issuer]
+	if !ok {
+		return fmt.Errorf("no credentials for issuer: %s", issuer)
+	}
+
+	issuerCreds.AccessToken = accessToken
+	issuerCreds.ExpiresIn = expires
+	issuerCreds.IssuedAt = issuedAt
+	// Persist rotated refresh token when the IdP returned one; leave the
+	// existing value untouched when omitted (some IdPs do not rotate and
+	// reuse the original refresh token).
+	if rotatedRefreshToken != "" {
+		issuerCreds.RefreshToken = rotatedRefreshToken
+	}
+	credentials.Issuer[issuer] = issuerCreds
+
+	data, err := json.MarshalIndent(credentials, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to serialize credentials: %w", err)
+	}
+
+	return writeCredentialsSecure(path, data)
+}
+
+// credentialsRefresh serializes the whole critical section — read, refresh
+// decision, exchange, write — within this process (C-1), and guards
+// credentialsRefreshSpent, the memo of refresh-token digests this process
+// has already put on the wire without durably committing a replacement
+// (C-3). Held for the whole span, not just the write, so a waiter re-reads
+// the winner's committed state instead of acting on its own stale snapshot
+// (closing AB-2), and so the memo's check-then-insert is atomic by
+// construction.
+//
+// Scope is this process only: it does not serialize against a separately
+// spawned config process, a running vorpal start agent, or the Rust/
+// TypeScript SDKs writing the same credentials.json — an accepted residual
+// risk shared with Rust (context.rs:1160-1166).
+var credentialsRefresh sync.Mutex
+var credentialsRefreshSpent = make(map[string]struct{})
+
+// tokenRefresher performs the OAuth refresh-token exchange. Injected so
+// tests can count and control exchanges without real network I/O. Contract:
+// refresher runs while credentialsRefresh is held and must not call back
+// into ClientAuthHeader or clientAuthHeaderAt — sync.Mutex is non-reentrant
+// and a re-entrant call deadlocks every authenticated call in the process.
+type tokenRefresher func(audience *string, clientId, issuer, refreshToken string) (string, *int64, int64, string, error)
+
+// liveTokenRefresher is the production tokenRefresher: the real IdP
+// exchange over the real network.
+func liveTokenRefresher(audience *string, clientId, issuer, refreshToken string) (string, *int64, int64, string, error) {
+	return refreshAccessToken(audience, clientId, issuer, refreshToken, refreshHTTPTimeout)
+}
+
+// clientAuthHeaderAt is the core of ClientAuthHeader, taking the credentials
+// path, the refresh operation and a clock as parameters so it is testable
+// without touching the real /var/lib/vorpal/key/credentials.json,
+// performing network I/O, or depending on the wall clock. Deliberately
+// private and not configurable from any production entry point (env var,
+// global override) — see ClientAuthHeader.
+//
+// now is a function, not a plain value, and it is called only after
+// credentialsRefresh is held — never before. A value sampled before
+// acquiring the lock can predate a still-in-flight winner's later commit; a
+// waiter that then compares its stale, pre-lock reading against the
+// winner's freshly committed IssuedAt sees a future-dated token and
+// refreshes again, once per waiter (C-2, closing AB-2).
+func clientAuthHeaderAt(
+	credentialsPath string,
+	registry string,
+	refresher tokenRefresher,
+	now func() (int64, error),
+) (string, error) {
+	credentialsRefresh.Lock()
+	defer credentialsRefresh.Unlock()
+
+	// Read here, strictly after the lock — see this function's doc comment.
+	nowUnix, err := now()
+	if err != nil {
+		return "", fmt.Errorf("failed to read clock: %w", err)
+	}
+
 	if _, err := os.Stat(credentialsPath); os.IsNotExist(err) {
 		// No credentials file - return empty string (optional auth)
 		return "", nil
 	}
 
-	// Read credentials file
 	credentialsData, err := os.ReadFile(credentialsPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read credentials file: %w", err)
 	}
 
-	// Parse JSON
 	var credentials VorpalCredentials
 	if err := json.Unmarshal(credentialsData, &credentials); err != nil {
 		return "", fmt.Errorf("failed to parse credentials: %w", err)
 	}
 
-	// Lookup registry -> issuer mapping
 	registryIssuer, ok := credentials.Registry[registry]
 	if !ok {
 		// No registry mapping - allow unauthenticated requests
 		return "", nil
 	}
 
-	// Lookup issuer credentials
 	issuerCredentials, ok := credentials.Issuer[registryIssuer]
 	if !ok {
 		return "", fmt.Errorf("no credentials for issuer: %s", registryIssuer)
 	}
 
-	// Check if token needs refresh (5-minute buffer)
-	now := time.Now().Unix()
-	tokenAge := now - issuerCredentials.IssuedAt
-	needsRefresh := tokenAge+300 >= issuerCredentials.ExpiresIn
+	if err := validateIssuerCredentials(issuerCredentials); err != nil {
+		return "", fmt.Errorf("invalid credentials for issuer %s: %w", registryIssuer, err)
+	}
 
-	if needsRefresh {
+	if needsRefresh(issuerCredentials.IssuedAt, issuerCredentials.ExpiresIn, nowUnix) {
 		if issuerCredentials.RefreshToken == "" {
 			return "", fmt.Errorf("access token expired and no refresh token available. Please run: vorpal login --issuer %s", registryIssuer)
 		}
 
-		newToken, newExpires, newIssuedAt, newRefreshToken, err := refreshAccessToken(
+		// A prior caller may already have put this exact stored token value
+		// on the wire. The file it left behind is byte-identical either way,
+		// so the memo is the only thing that can tell the two apart.
+		refreshTokenDigest := digestHex(issuerCredentials.RefreshToken)
+
+		if _, spent := credentialsRefreshSpent[refreshTokenDigest]; spent {
+			return "", fmt.Errorf("OAuth refresh-token exchange already failed for the stored token. Please run: vorpal login --issuer %s", registryIssuer)
+		}
+
+		newToken, newExpiresIn, newIssuedAt, newRefreshToken, err := refresher(
 			issuerCredentials.Audience,
 			issuerCredentials.ClientId,
 			registryIssuer,
 			issuerCredentials.RefreshToken,
 		)
 		if err != nil {
+			var failure *refreshFailureError
+			if errors.As(err, &failure) && failure.kind == refreshFailureSent {
+				credentialsRefreshSpent[refreshTokenDigest] = struct{}{}
+				return "", spentGrantError(
+					registryIssuer,
+					fmt.Sprintf("the OAuth refresh-token exchange for issuer %s failed after the token had been sent, so the stored refresh token is no longer usable", registryIssuer),
+					failure.err,
+				)
+			}
+
+			// NotSent, or an unclassified error: the token never left the
+			// process, the stored token is untouched, and a later caller may
+			// use it.
 			return "", fmt.Errorf("failed to refresh token: %w", err)
 		}
 
-		// Update credentials
-		issuerCredentials.AccessToken = newToken
-		issuerCredentials.ExpiresIn = newExpires
-		issuerCredentials.IssuedAt = newIssuedAt
-		// Persist rotated refresh token when the IdP returned one;
-		// leave the existing value untouched when omitted (some IdPs
-		// do not rotate and reuse the original refresh token).
-		if newRefreshToken != "" {
-			issuerCredentials.RefreshToken = newRefreshToken
-		}
-		credentials.Issuer[registryIssuer] = issuerCredentials
+		// No blocking work is introduced between the exchange above and the
+		// commit below: the sequence stays synchronous so the window in
+		// which a killed process loses the rotated token to disk (accepted
+		// residual risk) does not widen.
+		if err := commitRefreshedCredentials(
+			&credentials,
+			registryIssuer,
+			credentialsPath,
+			newToken,
+			newExpiresIn,
+			newIssuedAt,
+			newRefreshToken,
+		); err != nil {
+			// The exchange happened and nothing was committed, so the file
+			// still names a token the IdP may have already rotated away.
+			// This is the same replay hazard as an outright failure and it
+			// is spent for the same reason.
+			credentialsRefreshSpent[refreshTokenDigest] = struct{}{}
 
-		// Save updated credentials
-		updatedData, err := json.MarshalIndent(credentials, "", "  ")
-		if err != nil {
-			return "", fmt.Errorf("failed to serialize credentials: %w", err)
+			return "", spentGrantError(
+				registryIssuer,
+				fmt.Sprintf("refreshed credentials for issuer %s could not be saved, so the stored refresh token is no longer usable", registryIssuer),
+				err,
+			)
 		}
-		if err := os.WriteFile(credentialsPath, updatedData, 0o600); err != nil {
-			return "", fmt.Errorf("failed to write credentials: %w", err)
-		}
+
+		issuerCredentials = credentials.Issuer[registryIssuer]
 	}
 
-	// Format Bearer token
 	return fmt.Sprintf("Bearer %s", issuerCredentials.AccessToken), nil
+}
+
+// ClientAuthHeader retrieves the authorization header for a given registry.
+// Returns the Bearer token string if credentials exist, empty string otherwise, or error on failure.
+// This matches the Rust SDK's client_auth_header function.
+func ClientAuthHeader(registry string) (string, error) {
+	return clientAuthHeaderAt(GetKeyCredentialsPath(), registry, liveTokenRefresher, func() (int64, error) {
+		return time.Now().Unix(), nil
+	})
 }
 
 // getTransportCredentials returns the appropriate gRPC transport credentials
