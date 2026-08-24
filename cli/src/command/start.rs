@@ -13,6 +13,7 @@ use crate::command::{
 use anyhow::{bail, Result};
 use fs4::fs_std::FileExt;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::fs::read_to_string;
 use tokio::net::{TcpListener, UnixListener};
@@ -52,21 +53,158 @@ pub struct RunArgs {
     pub registry_backend_s3_force_path_style: bool,
     /// Registries the worker's `build_artifact` may pull from or push to. A
     /// request-supplied `registry` is at most a selector over this set; an
-    /// empty set means no registry is configured (fail-closed — never "any
-    /// registry"). Populated from `--registry-allowed` (or
-    /// `VORPAL_REGISTRY_ALLOWED`) in `cli/src/command.rs`, which defaults an
-    /// omitted flag to the worker's own default registry address rather
-    /// than to empty — an explicit empty value is what fails closed.
-    pub registry_allowed: Vec<String>,
+    /// explicit empty set means no registry is configured (fail-closed —
+    /// never "any registry"). Populated from `--registry-allowed` (or
+    /// `VORPAL_REGISTRY_ALLOWED`) in `cli/src/command.rs`. `None` means the
+    /// flag was omitted: `run` below resolves it to this process's own
+    /// listening address — computed from `effective_port`/`tls`, not from
+    /// the client-facing `get_default_address()` helper, so a TCP or TLS
+    /// deployment (or one where the registry runs split from this worker's
+    /// socket default) gets a default that actually matches what it is
+    /// listening on rather than refusing every build.
+    pub registry_allowed: Option<Vec<String>>,
     pub services: Vec<String>,
     pub tls: bool,
 }
 
+/// The registry `resolve_registry` selected. Wrapping it distinguishes it,
+/// at the type level, from `request.registry` (a bare `String` on the
+/// unvalidated request) — `worker::pull_source`, `worker::pull_artifact` and
+/// `agent::build_source` accept only this type, so a future edit that
+/// threads the raw request field into any of them instead of the resolved
+/// value fails to compile rather than silently reopening the
+/// registry-pinning check (C1/A2 in the threat model). The tuple field has
+/// no visibility modifier, so it is private to this module: neither `worker`
+/// nor `agent` (both children of this module) can construct one with a bare
+/// tuple literal — `resolve_registry`, defined here, is structurally the
+/// only constructor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ResolvedRegistry(String);
+
+impl PartialEq<&str> for ResolvedRegistry {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl std::ops::Deref for ResolvedRegistry {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ResolvedRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Resolves the registry a build may pull from and push to, from the
+/// caller-supplied `requested` value and the operator-configured `allowed`
+/// set. Shared by the worker's `build_artifact` and the agent's
+/// `prepare_artifact` — both dial a caller-named registry, so both need the
+/// identical check, living here in the module both share rather than in
+/// either sibling.
+///
+/// A request-supplied registry is at most a selector over the
+/// operator-configured set: it never introduces a registry the operator did
+/// not name. An empty `allowed` set is fail-closed — it means no registry is
+/// configured for this process, never "any registry is acceptable" (the
+/// inverse of `issuer_service_client_ids`, where empty means "trust nobody"
+/// but every token still routes through namespace RBAC rather than being
+/// refused outright).
+///
+/// Matching is exact string equality after trimming one trailing `/` from
+/// each side — not a URI parse of scheme/host/port, and never prefix or
+/// substring, which would let `https://registry.example.com.evil.test` or a
+/// query-string trick slip past an allow-list entry of
+/// `https://registry.example.com`. Two URIs that are equivalent as parsed
+/// components (e.g. differing only in path, case, or a second trailing `/`)
+/// but differ as strings after one trim are treated as different registries
+/// — stricter than semantic URI equality, which is the safe direction for an
+/// allow-list to err in.
+pub(super) fn resolve_registry(
+    requested: &str,
+    allowed: &[String],
+) -> Result<ResolvedRegistry, tonic::Status> {
+    fn normalized(value: &str) -> &str {
+        value.strip_suffix('/').unwrap_or(value)
+    }
+
+    let Some(default_registry) = allowed.first() else {
+        return Err(tonic::Status::invalid_argument(
+            "no registry is configured for this worker",
+        ));
+    };
+
+    if requested.is_empty() {
+        return Ok(ResolvedRegistry(default_registry.clone()));
+    }
+
+    allowed
+        .iter()
+        .find(|candidate| normalized(candidate) == normalized(requested))
+        .cloned()
+        .map(ResolvedRegistry)
+        .ok_or_else(|| {
+            tonic::Status::invalid_argument(format!(
+                "registry {requested:?} is not in the configured allow-list"
+            ))
+        })
+}
+
 /// `build_channel` (sdk/rust/src/context.rs) skips TLS entirely for the
-/// `http://` and `unix://` schemes, so a registry allow-list entry using
-/// either one carries the worker's service bearer token in cleartext.
-fn registry_carries_no_tls(entry: &str) -> bool {
-    entry.starts_with("http://") || entry.starts_with("unix://")
+/// `http://` scheme, so an allow-list entry using it carries the worker's
+/// service bearer token in cleartext. `unix://` is excluded deliberately: it
+/// is a same-host socket, so the token never crosses a network wire, and
+/// warning on it would tell the operator to act on a channel that carries no
+/// exposure.
+fn registry_crosses_network_without_tls(entry: &str) -> bool {
+    entry.starts_with("http://")
+}
+
+/// This process's own registry endpoint, in the shape `resolve_registry`
+/// compares against — used as the sole default allow-list entry when
+/// `--registry-allowed`/`VORPAL_REGISTRY_ALLOWED` is omitted.
+///
+/// Deliberately independent of `vorpal_sdk::artifact::get_default_address()`:
+/// that helper is a *client*-facing default (env `VORPAL_SOCKET_PATH`, else
+/// the hardcoded Unix socket path) with no knowledge of `--port`/`--tls`, so
+/// a TCP or TLS-configured process defaulted to it names a socket nothing is
+/// listening on and refuses every build. This mirrors `effective_port`/
+/// `args.tls` — the same values `run` already used to decide what to
+/// bind — so the default always names the transport this process actually
+/// serves on.
+fn own_registry_address(effective_port: Option<u16>, tls: bool, socket_path: &Path) -> String {
+    match effective_port {
+        Some(port) => {
+            let scheme = if tls { "https" } else { "http" };
+            format!("{scheme}://127.0.0.1:{port}")
+        }
+        None => format!("unix://{}", socket_path.display()),
+    }
+}
+
+/// Whether `run` should emit the registry allow-list startup log at all —
+/// scoped to processes running a worker or an agent, since a registry-only
+/// process configures no allow-list of its own and logging about it would
+/// be a false signal. The gate itself, not just the predicate the log body
+/// calls, is what a mis-wired `services` list could silently skip.
+fn registry_allowed_log_is_active(has_worker: bool, has_agent: bool) -> bool {
+    has_worker || has_agent
+}
+
+/// The entries of `registry_allowed` that carry the worker's service bearer
+/// token in cleartext — the cleartext-scheme warning loop, pulled out as
+/// pure logic so it is testable without standing up a server.
+fn registries_needing_tls_warning(registry_allowed: &[String]) -> Vec<&str> {
+    registry_allowed
+        .iter()
+        .filter(|entry| registry_crosses_network_without_tls(entry))
+        .map(String::as_str)
+        .collect()
 }
 
 async fn new_tls_config() -> Result<ServerTlsConfig> {
@@ -204,6 +342,7 @@ async fn add_registry_services(
 async fn add_worker_service(
     mut router: tonic::transport::server::Router,
     args: &RunArgs,
+    registry_allowed: Vec<String>,
     transport_label: &str,
 ) -> Result<tonic::transport::server::Router> {
     // callee in start/worker.rs takes ownership; `args` is a shared reference reused below
@@ -212,7 +351,7 @@ async fn add_worker_service(
         args.issuer_audience.clone(),
         args.issuer_client_id.clone(),
         args.issuer_client_secret.clone(),
-        args.registry_allowed.clone(),
+        registry_allowed,
     );
 
     if let Some(issuer) = &args.issuer {
@@ -459,41 +598,8 @@ async fn serve_with_shutdown(
 pub async fn run(args: RunArgs) -> Result<()> {
     log_trusted_service_clients(&args.issuer_service_client_ids);
 
-    // Emit the registry allow-list at startup for the same reason: a worker
-    // or agent with an empty list refuses every registry dial (fail-closed),
-    // which should be visible at boot rather than discovered from the first
-    // refused build. Scoped to processes that actually run one of those two
-    // services — a registry-only process configures no allow-list of its
-    // own and logging about it here would be a false signal.
     let has_worker = args.services.contains(&"worker".to_string());
     let has_agent = args.services.contains(&"agent".to_string());
-
-    if has_worker || has_agent {
-        if args.registry_allowed.is_empty() {
-            info!("no registry configured for worker/agent registry dials");
-        } else {
-            info!(
-                "registry allow-list configured ({}): {}",
-                args.registry_allowed.len(),
-                args.registry_allowed.join(", ")
-            );
-
-            // `http://` and `unix://` channels carry no TLS (`build_channel`,
-            // sdk/rust/src/context.rs), so the worker's service bearer
-            // token — attached to every RPC on that channel — crosses in
-            // cleartext. The allow-list has no scheme policy to refuse this
-            // outright (a `unix://` entry is a legitimate same-host socket),
-            // so this is a warning an operator can act on, not a refusal.
-            for entry in &args.registry_allowed {
-                if registry_carries_no_tls(entry) {
-                    warn!(
-                        "registry allow-list entry {entry:?} carries no TLS; \
-                         service bearer tokens cross it in cleartext"
-                    );
-                }
-            }
-        }
-    }
 
     let effective_port = resolve_effective_port(
         args.port,
@@ -501,6 +607,63 @@ pub async fn run(args: RunArgs) -> Result<()> {
         args.health_check,
         args.health_check_port,
     )?;
+
+    // An omitted `--registry-allowed` resolves to this process's own
+    // listening address, computed from the transport just decided above —
+    // not from the client-facing `get_default_address()` helper, which
+    // knows nothing about `--port`/`--tls` and would default a TCP or TLS
+    // deployment to a Unix socket path nothing is listening on, refusing
+    // every build. An explicit (possibly empty) `--registry-allowed` is the
+    // operator's own choice and is used as given.
+    let registry_allowed = args.registry_allowed.clone().unwrap_or_else(|| {
+        vec![own_registry_address(effective_port, args.tls, &get_socket_path())]
+    });
+
+    // Emit the registry allow-list at startup for the same reason the
+    // trusted-service list is emitted above: a worker or agent with an
+    // empty list refuses every registry dial (fail-closed), which should be
+    // visible at boot rather than discovered from the first refused build.
+    // Scoped to processes that actually run one of those two services — a
+    // registry-only process configures no allow-list of its own and logging
+    // about it here would be a false signal.
+    if registry_allowed_log_is_active(has_worker, has_agent) {
+        if registry_allowed.is_empty() {
+            // Only reachable when `--registry-allowed ""` (or
+            // `VORPAL_REGISTRY_ALLOWED=`, which reads identically to clap)
+            // was passed explicitly — the omitted-flag case is defaulted to
+            // `own_registry_address` above and is never empty. An operator
+            // deliberately refusing every build on this process is
+            // indistinguishable, from a bare info line, from an empty env
+            // var nobody meant to set — so this is a `warn!`, naming both
+            // possible sources, rather than the info line a healthy,
+            // fully-configured process also produces.
+            warn!(
+                "registry allow-list is explicitly empty (--registry-allowed \"\" or \
+                 VORPAL_REGISTRY_ALLOWED=\"\"); every worker/agent registry dial will \
+                 be refused"
+            );
+        } else {
+            info!(
+                "registry allow-list configured ({}): {}",
+                registry_allowed.len(),
+                registry_allowed.join(", ")
+            );
+
+            // `http://` channels carry no TLS (`build_channel`,
+            // sdk/rust/src/context.rs), so the worker's service bearer
+            // token — attached to every RPC on that channel — crosses in
+            // cleartext. The allow-list has no scheme policy to refuse this
+            // outright, so this is a warning an operator can act on, not a
+            // refusal. `unix://` is excluded: see
+            // `registry_crosses_network_without_tls`.
+            for entry in registries_needing_tls_warning(&registry_allowed) {
+                warn!(
+                    "registry allow-list entry {entry:?} carries no TLS; \
+                     service bearer tokens cross it in cleartext"
+                );
+            }
+        }
+    }
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
@@ -528,7 +691,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     };
 
     if has_agent {
-        let service = AgentServiceServer::new(AgentServer::new(args.registry_allowed.clone()));
+        let service = AgentServiceServer::new(AgentServer::new(registry_allowed.clone()));
 
         router = router.add_service(service);
 
@@ -542,7 +705,10 @@ pub async fn run(args: RunArgs) -> Result<()> {
     }
 
     if has_worker {
-        router = add_worker_service(router, &args, &transport_label).await?;
+        router =
+            add_worker_service(router, &args, registry_allowed.clone(), &transport_label).await?;
+
+        info!("worker |> service: {}", transport_label);
     }
 
     tokio::spawn(async move {
@@ -620,15 +786,99 @@ mod registry_scheme_tests {
     use super::*;
 
     #[test]
-    fn registry_carries_no_tls_for_http_and_unix() {
-        assert!(registry_carries_no_tls("http://registry.example.com"));
-        assert!(registry_carries_no_tls(
+    fn registry_crosses_network_without_tls_for_http() {
+        assert!(registry_crosses_network_without_tls(
+            "http://registry.example.com"
+        ));
+    }
+
+    // C3 (reconcile): a unix:// entry is a same-host socket and must not
+    // trigger the cleartext-over-network warning.
+    #[test]
+    fn registry_crosses_network_without_tls_is_false_for_unix() {
+        assert!(!registry_crosses_network_without_tls(
             "unix:///var/lib/vorpal/vorpal.sock"
         ));
     }
 
     #[test]
-    fn registry_carries_no_tls_is_false_for_https() {
-        assert!(!registry_carries_no_tls("https://registry.example.com"));
+    fn registry_crosses_network_without_tls_is_false_for_https() {
+        assert!(!registry_crosses_network_without_tls(
+            "https://registry.example.com"
+        ));
+    }
+
+    // C11 (reconcile): pin the cleartext-warning loop itself, not just the
+    // predicate it calls.
+    #[test]
+    fn registries_needing_tls_warning_filters_to_only_http_entries() {
+        let allowed = vec![
+            "http://registry.example.com".to_string(),
+            "https://registry.example.com".to_string(),
+            "unix:///var/lib/vorpal/vorpal.sock".to_string(),
+        ];
+
+        assert_eq!(
+            registries_needing_tls_warning(&allowed),
+            vec!["http://registry.example.com"]
+        );
+    }
+
+    #[test]
+    fn registries_needing_tls_warning_is_empty_when_nothing_qualifies() {
+        let allowed = vec![
+            "https://registry.example.com".to_string(),
+            "unix:///var/lib/vorpal/vorpal.sock".to_string(),
+        ];
+
+        assert!(registries_needing_tls_warning(&allowed).is_empty());
+    }
+
+    // C11 (reconcile): pin the startup-log gate itself, not just the
+    // predicate the log body calls.
+    #[test]
+    fn registry_allowed_log_is_active_for_worker_or_agent() {
+        assert!(registry_allowed_log_is_active(true, false));
+        assert!(registry_allowed_log_is_active(false, true));
+        assert!(registry_allowed_log_is_active(true, true));
+    }
+
+    #[test]
+    fn registry_allowed_log_is_inactive_for_registry_only_process() {
+        assert!(!registry_allowed_log_is_active(false, false));
+    }
+}
+
+#[cfg(test)]
+mod own_registry_address_tests {
+    use super::*;
+
+    // C1 (reconcile): the default must reflect this process's own listening
+    // transport, not the client-facing `get_default_address()` helper.
+    #[test]
+    fn own_registry_address_uses_unix_socket_in_uds_mode() {
+        let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
+        assert_eq!(
+            own_registry_address(None, false, socket_path),
+            "unix:///var/lib/vorpal/vorpal.sock"
+        );
+    }
+
+    #[test]
+    fn own_registry_address_uses_http_when_a_plaintext_port_is_bound() {
+        let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
+        assert_eq!(
+            own_registry_address(Some(23151), false, socket_path),
+            "http://127.0.0.1:23151"
+        );
+    }
+
+    #[test]
+    fn own_registry_address_uses_https_when_tls_is_enabled() {
+        let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
+        assert_eq!(
+            own_registry_address(Some(23151), true, socket_path),
+            "https://127.0.0.1:23151"
+        );
     }
 }

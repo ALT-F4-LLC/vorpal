@@ -38,13 +38,14 @@ use tokio_stream::{
 use tonic::{
     metadata::{Ascii, MetadataValue},
     Code::NotFound,
-    Request, Response, Status,
+    Request, Response, Status, Streaming,
 };
 use tracing::{error, info};
 use vorpal_sdk::{
     api::{
         archive::{
-            archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePushRequest,
+            archive_service_client::ArchiveServiceClient, ArchivePullRequest,
+            ArchivePullResponse, ArchivePushRequest,
         },
         artifact::{
             artifact_service_client::ArtifactServiceClient, Artifact, ArtifactSource, ArtifactStep,
@@ -93,86 +94,13 @@ impl WorkerServer {
     }
 }
 
-/// Resolves the registry a build may pull from and push to, from the
-/// caller-supplied `requested` value and the operator-configured
-/// `allowed` set.
-///
-/// A request-supplied registry is at most a selector over the
-/// operator-configured set: it never introduces a registry the operator did
-/// not name. An empty `allowed` set is fail-closed — it means no registry is
-/// configured for this worker, never "any registry is acceptable" (the
-/// inverse of `issuer_service_client_ids`, where empty means "trust
-/// nobody" but every token still routes through namespace RBAC rather than
-/// being refused outright).
-///
-/// Matching is exact string equality after trimming one trailing `/` from
-/// each side — not a URI parse of scheme/host/port, and never prefix or
-/// substring, which would let `https://registry.example.com.evil.test` or a
-/// query-string trick slip past an allow-list entry of
-/// `https://registry.example.com`. Two URIs that are equivalent as parsed
-/// components (e.g. differing only in path, case, or a second trailing `/`)
-/// but differ as strings after one trim are treated as different registries
-/// — stricter than semantic URI equality, which is the safe direction for
-/// an allow-list to err in.
-/// The registry `resolve_registry` selected. Wrapping it distinguishes it,
-/// at the type level, from `request.registry` (a bare `String` on the
-/// unvalidated request) — `pull_source` and `pull_artifact` accept only
-/// this type, so a future edit that threads the raw request field into
-/// either of them instead of the resolved value fails to compile rather
-/// than silently reopening the registry-pinning check (C1/A2 in the threat
-/// model). Only `resolve_registry` constructs one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ResolvedRegistry(String);
-
-impl PartialEq<&str> for ResolvedRegistry {
-    fn eq(&self, other: &&str) -> bool {
-        self.0 == *other
-    }
-}
-
-impl std::ops::Deref for ResolvedRegistry {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ResolvedRegistry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-pub(super) fn resolve_registry(
-    requested: &str,
-    allowed: &[String],
-) -> Result<ResolvedRegistry, Status> {
-    fn normalized(value: &str) -> &str {
-        value.strip_suffix('/').unwrap_or(value)
-    }
-
-    let Some(default_registry) = allowed.first() else {
-        return Err(Status::invalid_argument(
-            "no registry is configured for this worker",
-        ));
-    };
-
-    if requested.is_empty() {
-        return Ok(ResolvedRegistry(default_registry.clone()));
-    }
-
-    allowed
-        .iter()
-        .find(|candidate| normalized(candidate) == normalized(requested))
-        .cloned()
-        .map(ResolvedRegistry)
-        .ok_or_else(|| {
-            Status::invalid_argument(format!(
-                "registry {requested:?} is not in the configured allow-list"
-            ))
-        })
-}
+// `resolve_registry`/`ResolvedRegistry` live in `cli/src/command/start.rs`
+// (the shared parent of this module and `agent`), not here — both the
+// worker's `build_artifact` and the agent's `prepare_artifact` dial a
+// caller-named registry, so both need the identical check, and a shared
+// parent is where a policy two siblings depend on belongs, rather than one
+// sibling importing it sideways from the other.
+use super::{resolve_registry, ResolvedRegistry};
 
 /// Obtains `OAuth2` service credentials for service-to-service authentication
 ///
@@ -230,6 +158,73 @@ fn apply_auth_to_request(
     }
 }
 
+/// One side of a registry pull: the sequence of chunks and the status that
+/// ends it. `tonic::Streaming` is the production source; tests hand-feed a
+/// scripted sequence so the truncated-publish fix (threat model C3) is
+/// testable without a real registry connection.
+trait ChunkSource {
+    async fn next_chunk(&mut self) -> Result<Option<ArchivePullResponse>, Status>;
+}
+
+impl ChunkSource for Streaming<ArchivePullResponse> {
+    async fn next_chunk(&mut self) -> Result<Option<ArchivePullResponse>, Status> {
+        self.message().await
+    }
+}
+
+/// Accumulates one registry pull stream into memory. Shared by `pull_source`
+/// and `pull_artifact`, which were previously two copies of this same loop.
+///
+/// Explicit match, not `while let Ok(..)`: that pattern treats a stream
+/// `Err` the same as a clean end-of-stream, so a connection drop
+/// mid-transfer fell through to the caller's `publish_archive` with only the
+/// bytes received so far — caching a truncated archive under the digest
+/// (threat model C3). Returning `Err` here instead means the caller's
+/// `response_data` is discarded by never being produced.
+///
+/// `NotFound` before any byte arrived is the same "the registry does not
+/// have it" disposition as an RPC-initiation `NotFound` — not an internal
+/// worker fault (threat model C3's reviewer checklist item 5; mirrors
+/// `cli/src/command/build.rs`'s `publish_archive_stream`) — so it ends the
+/// loop with whatever was accumulated (nothing), leaving the caller's own
+/// empty-check to answer it the same way that check already does.
+/// `NotFound` after bytes arrived, or any other error, is a genuine
+/// transfer failure: the full `Status` (transport/metadata detail) is
+/// logged server-side only, never returned to the client.
+async fn accumulate_archive_stream(
+    source: &mut impl ChunkSource,
+    error_context: &str,
+) -> Result<Vec<u8>, Status> {
+    let mut response_data = Vec::new();
+
+    loop {
+        match source.next_chunk().await {
+            Ok(Some(res)) => {
+                if !res.data.is_empty() {
+                    response_data.extend(res.data);
+                }
+            }
+            Ok(None) => break,
+            Err(status) => {
+                if status.code() == NotFound && response_data.is_empty() {
+                    break;
+                }
+
+                error!(
+                    "worker |> {error_context} stream failed after {} bytes: {status:?}",
+                    response_data.len()
+                );
+
+                return Err(Status::internal(format!(
+                    "{error_context} stream failed before completion"
+                )));
+            }
+        }
+    }
+
+    Ok(response_data)
+}
+
 async fn pull_source(
     archive_auth_header: Option<MetadataValue<Ascii>>,
     artifact_namespace: String,
@@ -284,30 +279,9 @@ async fn pull_source(
 
             Ok(response) => {
                 let mut response = response.into_inner();
-                let mut response_data = Vec::new();
 
-                // Explicit match, not `while let Ok(..)`: that pattern treats
-                // a stream `Err` the same as a clean end-of-stream, so a
-                // connection drop mid-transfer fell through to `publish_archive`
-                // with only the bytes received so far — caching a truncated
-                // archive under the digest (threat model C3). An error here
-                // discards `response_data` by returning before publish.
-                loop {
-                    match response.message().await {
-                        Ok(Some(res)) => {
-                            if !res.data.is_empty() {
-                                response_data.extend(res.data);
-                            }
-                        }
-                        Ok(None) => break,
-                        Err(status) => {
-                            return Err(Status::internal(format!(
-                                "source archive stream failed after {} bytes: {status:?}",
-                                response_data.len()
-                            )));
-                        }
-                    }
-                }
+                let response_data =
+                    accumulate_archive_stream(&mut response, "source archive").await?;
 
                 if response_data.is_empty() {
                     return Err(Status::not_found("source archive empty in registry"));
@@ -700,28 +674,9 @@ async fn pull_artifact(
 
             Ok(response) => {
                 let mut response = response.into_inner();
-                let mut response_data = Vec::new();
 
-                // Explicit match, not `while let Ok(..)` — see the identical
-                // comment in `pull_source` (threat model C3): a stream `Err`
-                // must discard `response_data` rather than fall through to
-                // `publish_archive` with a truncated prefix.
-                loop {
-                    match response.message().await {
-                        Ok(Some(res)) => {
-                            if !res.data.is_empty() {
-                                response_data.extend(res.data);
-                            }
-                        }
-                        Ok(None) => break,
-                        Err(status) => {
-                            return Err(Status::internal(format!(
-                                "artifact archive stream failed after {} bytes: {status:?}",
-                                response_data.len()
-                            )));
-                        }
-                    }
-                }
+                let response_data =
+                    accumulate_archive_stream(&mut response, "artifact archive").await?;
 
                 if response_data.is_empty() {
                     return Err(Status::not_found("artifact archive empty in registry"));
@@ -1834,6 +1789,108 @@ mod tests {
         );
     }
 
+    /// A scripted `ChunkSource`, driven from a fixed sequence rather than a
+    /// real connection — the fixture `accumulate_archive_stream`'s tests
+    /// need to inject a stream error at a chosen point.
+    struct ScriptedChunks {
+        script: std::collections::VecDeque<Result<Option<ArchivePullResponse>, Status>>,
+    }
+
+    impl ScriptedChunks {
+        fn new(script: Vec<Result<Option<ArchivePullResponse>, Status>>) -> Self {
+            Self {
+                script: script.into(),
+            }
+        }
+    }
+
+    impl ChunkSource for ScriptedChunks {
+        async fn next_chunk(&mut self) -> Result<Option<ArchivePullResponse>, Status> {
+            self.script
+                .pop_front()
+                .expect("accumulate_archive_stream read past the end of the scripted stream")
+        }
+    }
+
+    fn chunk(data: &[u8]) -> Result<Option<ArchivePullResponse>, Status> {
+        Ok(Some(ArchivePullResponse {
+            data: data.to_vec(),
+        }))
+    }
+
+    // C8 (reconcile): the truncated-publish fix had no failure-injection
+    // test — reverting `accumulate_archive_stream`'s explicit match to the
+    // pre-fix `while let Ok(..)` pattern (treating a stream `Err` as a clean
+    // end-of-stream) would return `Ok(b"first-chunk")` here instead of
+    // erroring, leaving this test the only thing that would catch it.
+    #[tokio::test]
+    async fn accumulate_archive_stream_discards_and_errors_on_a_stream_failure() {
+        let mut source = ScriptedChunks::new(vec![
+            chunk(b"first-chunk"),
+            chunk(b"second-chunk"),
+            Err(Status::internal("connection reset")),
+        ]);
+
+        let err = accumulate_archive_stream(&mut source, "test archive")
+            .await
+            .expect_err("a mid-stream failure must not return the partial bytes as success");
+
+        assert_eq!(err.code(), tonic::Code::Internal);
+        // The upstream `Status` debug rendering is logged, not returned —
+        // the client-facing message names only the sanitized disposition.
+        assert!(
+            !err.message().contains("connection reset"),
+            "the upstream status detail must not reach the client: {}",
+            err.message()
+        );
+    }
+
+    // Positive control: an uninterrupted stream publishes every chunk, in
+    // order — proves the discard above is about the error, not about
+    // `accumulate_archive_stream` losing bytes generally.
+    #[tokio::test]
+    async fn accumulate_archive_stream_returns_every_chunk_in_order_on_success() {
+        let mut source =
+            ScriptedChunks::new(vec![chunk(b"first-chunk"), chunk(b"second-chunk"), Ok(None)]);
+
+        let data = accumulate_archive_stream(&mut source, "test archive")
+            .await
+            .expect("an uninterrupted stream must publish");
+
+        assert_eq!(data, b"first-chunksecond-chunk".to_vec());
+    }
+
+    // C7 (reconcile): `NotFound` before any byte arrived is "the registry
+    // does not have it", not an internal worker fault — the same
+    // disposition as the RPC-initiation `NotFound` handled by the caller.
+    #[tokio::test]
+    async fn accumulate_archive_stream_treats_not_found_before_any_byte_as_empty() {
+        let mut source = ScriptedChunks::new(vec![Err(Status::not_found("no such archive"))]);
+
+        let data = accumulate_archive_stream(&mut source, "test archive")
+            .await
+            .expect("NotFound before any byte must not be an internal error");
+
+        assert!(data.is_empty());
+    }
+
+    // NotFound *after* bytes arrived is a truncated transfer of an object
+    // the registry did have, not an absent object — it must still discard
+    // and error, exactly like any other mid-stream failure.
+    #[tokio::test]
+    async fn accumulate_archive_stream_errors_on_not_found_after_bytes_arrived() {
+        let mut source = ScriptedChunks::new(vec![
+            chunk(b"first-chunk"),
+            Err(Status::not_found("stream ended early")),
+        ]);
+
+        let err = accumulate_archive_stream(&mut source, "test archive")
+            .await
+            .expect_err("NotFound after bytes arrived is a truncated transfer, not an absence");
+
+        assert_eq!(err.code(), tonic::Code::Internal);
+    }
+
     // AC1 at the call site: publish_unpacked must never unpack into the real
     // output path. A dependency already published there survives a pull whose
     // archive turns out to be garbage, byte for byte and inode for inode — an
@@ -2780,8 +2837,15 @@ mod tests {
         let issuer = format!("http://{issuer_addr}");
         let (tx, _rx) = mpsc::channel(100);
 
+        // The exact budget is not the discriminator — a refusal that runs
+        // ahead of `obtain_service_credentials` returns in microseconds,
+        // while one that reaches the hung listener would block far longer
+        // than any of this test's real work. 5s gives that gap comfortable
+        // headroom under CI load without buying any real signal from a
+        // tighter number (C10 reconcile: the original 500ms budget was a
+        // flake source with no discriminating value of its own).
         let result = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
+            std::time::Duration::from_secs(5),
             build_artifact(
                 Some(&issuer),
                 None,

@@ -1,6 +1,6 @@
 use crate::command::{
     lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
-    start::worker::resolve_registry,
+    start::{resolve_registry, ResolvedRegistry},
     store::{
         archives::{compress_zstd, unpack_zip},
         hashes::get_source_digest,
@@ -439,13 +439,13 @@ pub async fn build_source(
     artifact_namespace: String,
     artifact_source: &ArtifactSource,
     artifact_unlock: bool,
-    registry: String,
+    registry: &ResolvedRegistry,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
 ) -> Result<String> {
     // Create authenticated archive client first
-    let channel = build_channel(&registry).await?;
+    let channel = build_channel(registry).await?;
 
-    let client_auth_header = client_auth_header(&registry)
+    let client_auth_header = client_auth_header(registry)
         .await
         .map_err(|e| anyhow!("failed to get client auth header: {e}"))?;
 
@@ -740,7 +740,7 @@ async fn resolve_and_upsert_source(
     request_artifact_context: &str,
     request_artifact_namespace: &str,
     request_artifact_unlock: bool,
-    request_registry: &str,
+    request_registry: &ResolvedRegistry,
     lock_path: &Path,
     lock_file: Option<&Lockfile>,
     target_platform: &str,
@@ -811,7 +811,7 @@ async fn resolve_and_upsert_source(
             request_artifact_namespace.to_string(),
             &artifact_source,
             request_artifact_unlock,
-            request_registry.to_string(),
+            request_registry,
             tx,
         )
         .await
@@ -879,7 +879,7 @@ async fn prepare_artifact(
     // the threat model). Resolve it once, ahead of the source loop, so a
     // request naming a registry outside the allow-list is refused before
     // any network I/O rather than per-source.
-    let registry = resolve_registry(&request.registry, registry_allowed)?.to_string();
+    let registry = resolve_registry(&request.registry, registry_allowed)?;
 
     // TODO: Check if artifact already exists in the registry
 
@@ -977,7 +977,8 @@ async fn prepare_artifact(
 pub struct AgentServer {
     /// The operator-configured registry allow-list a remote source may be
     /// pulled through — same set, same fail-closed default, and the same
-    /// `resolve_registry` seam the worker uses (`worker.rs`); the agent
+    /// `resolve_registry` seam the worker uses, both imported from
+    /// `cli/src/command/start.rs` (the parent module they share); the agent
     /// dials a caller-supplied registry too, so it needs the identical
     /// check.
     registry_allowed: Vec<String>,

@@ -62,18 +62,17 @@ fn parse_comma_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
-/// Resolves `--registry-allowed`/`VORPAL_REGISTRY_ALLOWED` into the worker's
-/// allow-list. Unset (the flag never passed) defaults to the worker's own
-/// default registry address — the same `get_default_address()` every other
-/// command already targets — so a fresh deployment does not refuse every
-/// build. An explicit but empty value (`--registry-allowed ""`) parses to no
-/// entries, which is fail-closed: it means the operator deliberately
+/// Parses `--registry-allowed`/`VORPAL_REGISTRY_ALLOWED` without resolving a
+/// default: `None` means the flag was never passed, and `start::run` is what
+/// defaults that to a registry address, because only `start::run` knows the
+/// process's actual transport (`--port`/`--tls`) — resolving the default
+/// here against `get_default_address()` (a *client*-facing helper, ignorant
+/// of this process's own listen mode) is exactly the bug this parses around.
+/// An explicit but empty value (`--registry-allowed ""`) parses to
+/// `Some(vec![])`, which is fail-closed: it means the operator deliberately
 /// configured no registry, never "any registry".
-fn resolve_registry_allowed_flag(raw: Option<&str>) -> Vec<String> {
-    match raw {
-        None => vec![get_default_address()],
-        Some(raw) => parse_comma_list(raw),
-    }
+fn resolve_registry_allowed_flag(raw: Option<&str>) -> Option<Vec<String>> {
+    raw.map(parse_comma_list)
 }
 
 #[cfg(test)]
@@ -93,35 +92,69 @@ mod registry_allowed_tests {
         assert_eq!(parse_comma_list(""), Vec::<String>::new());
     }
 
-    // C1: the flag omitted entirely must not fail closed to nothing — every
-    // worker deployment shipped today would otherwise refuse every build.
+    // C1 (reconcile): the flag omitted entirely must resolve to `None`, not
+    // to a default computed here — `start::run` is the only place that
+    // knows this process's actual transport, so it is the only place that
+    // can name a default that matches what the process is listening on.
     #[test]
-    fn resolve_registry_allowed_flag_defaults_to_the_default_address_when_unset() {
-        assert_eq!(
-            resolve_registry_allowed_flag(None),
-            vec![get_default_address()]
-        );
+    fn resolve_registry_allowed_flag_defers_to_the_caller_when_unset() {
+        assert_eq!(resolve_registry_allowed_flag(None), None);
     }
 
     #[test]
     fn resolve_registry_allowed_flag_parses_an_explicit_list() {
         assert_eq!(
             resolve_registry_allowed_flag(Some("http://a.example.com,http://b.example.com")),
-            vec![
+            Some(vec![
                 "http://a.example.com".to_string(),
                 "http://b.example.com".to_string()
-            ]
+            ])
         );
     }
 
     // An explicit empty value is a deliberate fail-closed choice, distinct
-    // from leaving the flag unset.
+    // from leaving the flag unset (`None` above).
     #[test]
     fn resolve_registry_allowed_flag_explicit_empty_string_fails_closed() {
         assert_eq!(
             resolve_registry_allowed_flag(Some("")),
-            Vec::<String>::new()
+            Some(Vec::<String>::new())
         );
+    }
+
+    // C9 (reconcile): C1's original migration-default bug lived at this call
+    // site (`resolve_registry_allowed_flag(registry_allowed.as_deref())`
+    // below, in the `Start` match arm), not inside the helper — a helper-only
+    // test suite passed on the buggy call site because the helper itself was
+    // never wrong; only what the caller did with its `None` case was. Drive
+    // the same call the match arm makes, end to end, so a regression that
+    // reintroduces a default *here* (rather than leaving it to `start::run`)
+    // fails a test instead of shipping silently.
+    #[test]
+    fn command_start_arm_forwards_an_unset_flag_as_none_to_run_args() {
+        let registry_allowed_flag: Option<String> = None;
+
+        let registry_allowed = resolve_registry_allowed_flag(registry_allowed_flag.as_deref());
+
+        let run_args = crate::command::start::RunArgs {
+            archive_cache_ttl: 300,
+            health_check: false,
+            health_check_port: 23152,
+            issuer: None,
+            issuer_audience: None,
+            issuer_client_id: None,
+            issuer_client_secret: None,
+            issuer_service_client_ids: vec![],
+            port: None,
+            registry_backend: "local".to_string(),
+            registry_backend_s3_bucket: None,
+            registry_backend_s3_force_path_style: false,
+            registry_allowed,
+            services: vec!["worker".to_string()],
+            tls: false,
+        };
+
+        assert_eq!(run_args.registry_allowed, None);
     }
 }
 
@@ -186,9 +219,13 @@ pub enum CommandSystemServices {
         /// value from this list (or leave it unset to get the first entry,
         /// the worker's own configured value); a request naming anything
         /// else is refused. Leave unset (default) and the worker allows only
-        /// its own default registry address (the same `get_default_address()`
-        /// every other command already targets); pass an explicit empty
-        /// string to fail closed and refuse every build instead.
+        /// this process's own registry endpoint — computed from `--port`/
+        /// `--tls` at start time (`unix://<socket>`, `http://127.0.0.1:<port>`
+        /// or `https://127.0.0.1:<port>`), not the client-facing
+        /// `get_default_address()` default every other command targets, which
+        /// would name a Unix socket a TCP- or TLS-configured process is not
+        /// listening on. Pass an explicit empty string to fail closed and
+        /// refuse every build instead.
         #[arg(env = "VORPAL_REGISTRY_ALLOWED", long)]
         registry_allowed: Option<String>,
 
