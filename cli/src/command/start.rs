@@ -50,6 +50,12 @@ pub struct RunArgs {
     pub registry_backend: String,
     pub registry_backend_s3_bucket: Option<String>,
     pub registry_backend_s3_force_path_style: bool,
+    /// Registries the worker's `build_artifact` may pull from or push to. A
+    /// request-supplied `registry` is at most a selector over this set; an
+    /// empty set means no registry is configured (fail-closed — never "any
+    /// registry"). Populated from `--registry-allowed` (or
+    /// `VORPAL_REGISTRY_ALLOWED`) in `cli/src/command.rs`.
+    pub registry_allowed: Vec<String>,
     pub services: Vec<String>,
     pub tls: bool,
 }
@@ -197,6 +203,7 @@ async fn add_worker_service(
         args.issuer_audience.clone(),
         args.issuer_client_id.clone(),
         args.issuer_client_secret.clone(),
+        args.registry_allowed.clone(),
     );
 
     if let Some(issuer) = &args.issuer {
@@ -442,6 +449,19 @@ async fn serve_with_shutdown(
 
 pub async fn run(args: RunArgs) -> Result<()> {
     log_trusted_service_clients(&args.issuer_service_client_ids);
+
+    // Emit the registry allow-list at startup for the same reason: a worker
+    // with an empty list refuses every build (fail-closed), which should be
+    // visible at boot rather than discovered from the first refused build.
+    if args.registry_allowed.is_empty() {
+        info!("no registry configured for worker builds");
+    } else {
+        info!(
+            "registry allow-list configured ({}): {}",
+            args.registry_allowed.len(),
+            args.registry_allowed.join(", ")
+        );
+    }
 
     let effective_port = resolve_effective_port(
         args.port,

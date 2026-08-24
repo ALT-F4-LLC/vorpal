@@ -105,6 +105,16 @@ pub enum CommandSystemServices {
         #[arg(default_value_t = false, long)]
         registry_backend_s3_force_path_style: bool,
 
+        /// Comma-separated registries the worker's `build_artifact` may pull
+        /// from or push to. A request-supplied `registry` may only select a
+        /// value from this list (or leave it unset to get the first entry,
+        /// the worker's own configured value); a request naming anything
+        /// else is refused. Leave unset (default) and the worker refuses
+        /// every build — there is no "any registry" default, unlike
+        /// `issuer_service_client_ids`.
+        #[arg(env = "VORPAL_REGISTRY_ALLOWED", long)]
+        registry_allowed: Option<String>,
+
         /// Enable TLS for the main gRPC listener (requires keys in /var/lib/vorpal/key/)
         #[arg(default_value_t = false, long)]
         tls: bool,
@@ -1382,6 +1392,7 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                 registry_backend,
                 registry_backend_s3_bucket,
                 registry_backend_s3_force_path_style,
+                registry_allowed,
                 services,
                 tls,
             } => {
@@ -1391,6 +1402,17 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                 // Silent-filter matches clap's ergonomic expectation for
                 // comma-delimited values and keeps config-by-env forgiving.
                 let issuer_service_client_ids = issuer_service_client_ids
+                    .as_deref()
+                    .map(|raw| {
+                        raw.split(',')
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                            .collect::<Vec<String>>()
+                    })
+                    .unwrap_or_default();
+
+                let registry_allowed = registry_allowed
                     .as_deref()
                     .map(|raw| {
                         raw.split(',')
@@ -1414,6 +1436,7 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                     registry_backend,
                     registry_backend_s3_bucket,
                     registry_backend_s3_force_path_style,
+                    registry_allowed,
                     services: services
                         .split(',')
                         .map(std::string::ToString::to_string)

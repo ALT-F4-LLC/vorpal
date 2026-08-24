@@ -67,6 +67,12 @@ pub struct WorkerServer {
     pub issuer_client_id: Option<String>,
     pub issuer_client_secret: Option<String>,
     pub issuer: Option<String>,
+    /// The operator-configured registry allow-list. A `BuildArtifactRequest`
+    /// may only select a registry from this set (or leave it unset to get
+    /// the worker's own configured value); see `resolve_registry`. Populated
+    /// from `--registry-allowed` (or `VORPAL_REGISTRY_ALLOWED`) in
+    /// `cli/src/command.rs`.
+    pub registry_allowed: Vec<String>,
 }
 
 impl WorkerServer {
@@ -75,14 +81,58 @@ impl WorkerServer {
         issuer_audience: Option<String>,
         issuer_client_id: Option<String>,
         issuer_client_secret: Option<String>,
+        registry_allowed: Vec<String>,
     ) -> Self {
         Self {
             issuer_audience,
             issuer_client_id,
             issuer_client_secret,
             issuer,
+            registry_allowed,
         }
     }
+}
+
+/// Resolves the registry a build may pull from and push to, from the
+/// caller-supplied `requested` value and the operator-configured
+/// `allowed` set.
+///
+/// A request-supplied registry is at most a selector over the
+/// operator-configured set: it never introduces a registry the operator did
+/// not name. An empty `allowed` set is fail-closed — it means no registry is
+/// configured for this worker, never "any registry is acceptable" (the
+/// inverse of `issuer_service_client_ids`, where empty means "trust
+/// nobody" but every token still routes through namespace RBAC rather than
+/// being refused outright).
+///
+/// Matching is whole-URI (scheme + host + port), after trimming one
+/// trailing `/` from both sides — never prefix or substring, which would
+/// let `https://registry.example.com.evil.test` or a query-string trick
+/// slip past an allow-list entry of `https://registry.example.com`.
+fn resolve_registry(requested: &str, allowed: &[String]) -> Result<String, Status> {
+    fn normalized(value: &str) -> &str {
+        value.strip_suffix('/').unwrap_or(value)
+    }
+
+    let Some(default_registry) = allowed.first() else {
+        return Err(Status::invalid_argument(
+            "no registry is configured for this worker",
+        ));
+    };
+
+    if requested.is_empty() {
+        return Ok(default_registry.clone());
+    }
+
+    allowed
+        .iter()
+        .find(|candidate| normalized(candidate) == normalized(requested))
+        .cloned()
+        .ok_or_else(|| {
+            Status::invalid_argument(format!(
+                "registry {requested:?} is not in the configured allow-list"
+            ))
+        })
 }
 
 /// Obtains `OAuth2` service credentials for service-to-service authentication
@@ -1122,6 +1172,7 @@ async fn build_artifact(
     issuer_audience: Option<&str>,
     issuer_client_id: Option<&str>,
     issuer_client_secret: Option<&str>,
+    registry_allowed: &[String],
     request: BuildArtifactRequest,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
@@ -1138,6 +1189,15 @@ async fn build_artifact(
         .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
     let artifact_namespace = &artifact_namespace;
+
+    // The registry is the one request field on this path with no allow-list
+    // check until now — resolve it before the target check and, critically,
+    // before `obtain_service_credentials` below, which performs its own
+    // network round trip to the issuer. A request naming a registry outside
+    // the operator's configured set is refused here, before any network I/O.
+    let registry = resolve_registry(&request.registry, registry_allowed)?;
+
+    info!("worker |> resolved registry: {}", registry);
 
     let artifact_json = serde_json::to_string(&artifact)
         .map_err(|err| Status::internal(format!("artifact failed to serialize: {err}")))?;
@@ -1185,8 +1245,6 @@ async fn build_artifact(
         }
 
         // Pull sources
-
-        let registry = request.registry;
 
         for artifact_source in artifact.sources.iter() {
             pull_source(
@@ -1547,6 +1605,7 @@ impl WorkerService for WorkerServer {
         let issuer_client_id = self.issuer_client_id.clone();
         let issuer_client_secret = self.issuer_client_secret.clone();
         let issuer = self.issuer.clone();
+        let registry_allowed = self.registry_allowed.clone();
 
         tokio::spawn(async move {
             if let Err(err) = build_artifact(
@@ -1554,6 +1613,7 @@ impl WorkerService for WorkerServer {
                 issuer_audience.as_deref(),
                 issuer_client_id.as_deref(),
                 issuer_client_secret.as_deref(),
+                &registry_allowed,
                 request.into_inner(),
                 &tx,
             )
@@ -2374,10 +2434,25 @@ mod tests {
         }
     }
 
+    // Every existing negative-control test names a registry the worker
+    // accepts, so its allow-list is fixed to exactly that one value: the
+    // registry check passes and each test still exercises the check it was
+    // written for.
+    fn default_registry_allowed() -> Vec<String> {
+        vec!["http://localhost:0".to_string()]
+    }
+
     async fn build_refusal(request: BuildArtifactRequest) -> Status {
+        build_refusal_with_registries(request, &default_registry_allowed()).await
+    }
+
+    async fn build_refusal_with_registries(
+        request: BuildArtifactRequest,
+        registry_allowed: &[String],
+    ) -> Status {
         let (tx, _rx) = mpsc::channel(100);
 
-        build_artifact(None, None, None, None, request, &tx)
+        build_artifact(None, None, None, None, registry_allowed, request, &tx)
             .await
             .expect_err("a build request with an invalid field is refused")
     }
@@ -2451,6 +2526,139 @@ mod tests {
         }
 
         let status = build_refusal(build_request("library", &digest, &digest)).await;
+
+        assert_eq!(status.message(), "unknown target");
+    }
+
+    // `resolve_registry` is the seam the request-shape block calls. Unit tests
+    // pin its cases directly; the `build_artifact` tests below confirm it is
+    // actually wired in ahead of the target check.
+    #[test]
+    fn resolve_registry_defaults_to_the_sole_configured_value_when_the_request_is_silent() {
+        let allowed = vec!["http://registry.example.com:9000".to_string()];
+
+        assert_eq!(
+            resolve_registry("", &allowed).unwrap(),
+            "http://registry.example.com:9000"
+        );
+    }
+
+    #[test]
+    fn resolve_registry_refuses_a_mismatch_even_with_a_sole_configured_value() {
+        let allowed = vec!["http://registry.example.com:9000".to_string()];
+
+        let err = resolve_registry("http://attacker.example.com", &allowed).unwrap_err();
+
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn resolve_registry_defaults_to_the_first_entry_when_the_request_is_silent() {
+        let allowed = vec![
+            "http://registry-a.example.com".to_string(),
+            "http://registry-b.example.com".to_string(),
+        ];
+
+        assert_eq!(
+            resolve_registry("", &allowed).unwrap(),
+            "http://registry-a.example.com"
+        );
+    }
+
+    #[test]
+    fn resolve_registry_accepts_a_listed_selection() {
+        let allowed = vec![
+            "http://registry-a.example.com".to_string(),
+            "http://registry-b.example.com".to_string(),
+        ];
+
+        assert_eq!(
+            resolve_registry("http://registry-b.example.com", &allowed).unwrap(),
+            "http://registry-b.example.com"
+        );
+    }
+
+    #[test]
+    fn resolve_registry_trims_one_trailing_slash_on_both_sides() {
+        let allowed = vec!["http://registry.example.com/".to_string()];
+
+        assert_eq!(
+            resolve_registry("http://registry.example.com", &allowed).unwrap(),
+            "http://registry.example.com/"
+        );
+    }
+
+    #[test]
+    fn resolve_registry_refuses_a_selection_outside_the_allow_list() {
+        let allowed = vec![
+            "http://registry-a.example.com".to_string(),
+            "http://registry-b.example.com".to_string(),
+        ];
+
+        let err = resolve_registry("http://attacker.example.com", &allowed).unwrap_err();
+
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("registry"), "{}", err.message());
+    }
+
+    // Prefix and substring near-misses must not be admitted by a whole-URI
+    // allow-list entry: `starts_with` would let a `.evil.test` suffix through,
+    // and `contains` would let a query-string trick through.
+    #[test]
+    fn resolve_registry_refuses_prefix_and_substring_near_misses() {
+        let allowed = vec!["https://registry.example.com".to_string()];
+
+        for hostile in [
+            "https://registry.example.com.evil.test",
+            "https://evil.test/?u=https://registry.example.com",
+        ] {
+            let err = resolve_registry(hostile, &allowed).unwrap_err();
+
+            assert_eq!(err.code(), tonic::Code::InvalidArgument, "{hostile:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_registry_refuses_everything_when_nothing_is_configured() {
+        let err = resolve_registry("http://registry.example.com", &[]).unwrap_err();
+
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    // A request naming a registry outside the allow-list is refused ahead of
+    // the target check — the same "unknown target" positive control the other
+    // request-shape tests use proves the ordering: it only appears once the
+    // registry has passed.
+    #[tokio::test]
+    async fn build_artifact_refuses_a_registry_outside_the_allow_list() {
+        let digest = valid_digest("a");
+        let mut request = build_request("library", &digest, &digest);
+        request.registry = "http://attacker.example.com".to_string();
+
+        let status =
+            build_refusal_with_registries(request, &["http://registry.example.com".to_string()])
+                .await;
+
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert!(
+            status.message().contains("registry"),
+            "{}",
+            status.message()
+        );
+        assert_ne!(status.message(), "unknown target");
+    }
+
+    // Positive control: the allow-listed registry reaches the target check,
+    // proving the refusal above is about the registry and not a side effect.
+    #[tokio::test]
+    async fn build_artifact_accepts_an_allow_listed_registry() {
+        let digest = valid_digest("a");
+        let mut request = build_request("library", &digest, &digest);
+        request.registry = "http://registry.example.com".to_string();
+
+        let status =
+            build_refusal_with_registries(request, &["http://registry.example.com".to_string()])
+                .await;
 
         assert_eq!(status.message(), "unknown target");
     }
