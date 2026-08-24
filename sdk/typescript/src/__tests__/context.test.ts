@@ -340,6 +340,129 @@ describe("clientAuthHeader: refresh-token rotation", () => {
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).not.toContain(secretToken);
   });
+
+  // ---------------------------------------------------------------------
+  // C-4 — a malformed token-endpoint body must not escape Sent classification
+  // (VPL-189-CL1/CL2). Before this fix, a literal `null` body passed
+  // `tokenResp.json()` (it is valid JSON) and then threw an unclassified
+  // TypeError reading `.refresh_token` off `null` — the token was already
+  // on the wire, but the failure was never marked Sent, so a second caller
+  // replayed it against the IdP instead of getting a "please re-login"
+  // error.
+  // ---------------------------------------------------------------------
+
+  test("classifies a null token-endpoint body as Sent rather than replaying", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "malformed-body-refresh-token" });
+    const mockFetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return new Response(JSON.stringify({ token_endpoint: TOKEN_ENDPOINT }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        // Valid JSON, wrong shape: `tokenResp.json()` resolves successfully
+        // with `null`, so only a shape check (not the parse try/catch
+        // alone) can classify this as Sent.
+        return new Response("null", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+
+    const first = await clientAuthHeader(REGISTRY, credentialsPath).catch((e) => e as Error);
+    expect(first).toBeInstanceOf(Error);
+
+    const second = await clientAuthHeader(REGISTRY, credentialsPath).catch((e) => e as Error);
+    expect(second).toBeInstanceOf(Error);
+    expect((second as Error).message).toContain("already failed");
+  });
+
+  test("refuses to persist a token response missing access_token", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "missing-access-token-refresh-token" });
+    installFetchMock({ tokenResponse: { expires_in: 3600 } });
+
+    await expect(clientAuthHeader(REGISTRY, credentialsPath)).rejects.toThrow();
+
+    const persisted = JSON.parse(readFileSync(credentialsPath, "utf-8"));
+    expect(persisted.issuer[ISSUER].access_token).toBe("old-access-token");
+  });
+
+  // ---------------------------------------------------------------------
+  // C-3 — a commit failure after a successful exchange must spend the
+  // token (AB-3), same as Go's equivalent chmod-based test.
+  // ---------------------------------------------------------------------
+
+  test("never replays a token whose refresh succeeded but failed to persist", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "persist-fail-refresh-token" });
+    installFetchMock({ tokenResponse: { access_token: "new-access-token", expires_in: 3600 } });
+
+    chmodSync(tmpDir, 0o500);
+    try {
+      const first = await clientAuthHeader(REGISTRY, credentialsPath).catch((e) => e as Error);
+      expect(first).toBeInstanceOf(Error);
+    } finally {
+      chmodSync(tmpDir, 0o700);
+    }
+
+    const second = await clientAuthHeader(REGISTRY, credentialsPath).catch((e) => e as Error);
+    expect(second).toBeInstanceOf(Error);
+    expect((second as Error).message).toContain("already failed");
+  });
+
+  // ---------------------------------------------------------------------
+  // C-2 — the clock must be sampled after the lock is held, not before
+  // (AB-2 waiter storm). With the wall clock as `now` and a deliberately
+  // slow winner exchange, a pre-lock sample would be provably stale by the
+  // time a waiter gets the lock: the winner's freshly committed issued_at
+  // (stamped near the end of the delay) would postdate that stale reading,
+  // needsRefresh's future-dated-issued_at rule would read it as due, and
+  // every waiter would refresh again. A post-lock sample reads the winner's
+  // already-committed, now-fresh state and finds no refresh due.
+  // ---------------------------------------------------------------------
+
+  test("samples the clock after the lock, so concurrent waiters never over-refresh", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    writeCredentialsFile(credentialsPath, { issuedAt: now - 7200, refreshToken: "clock-after-lock-refresh-token" });
+    let calls = 0;
+    const mockFetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return new Response(JSON.stringify({ token_endpoint: TOKEN_ENDPOINT }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        calls += 1;
+        // Deliberately slow: gives every other concurrent caller a chance
+        // to have already sampled `now` before the winner commits, if the
+        // implementation samples it before acquiring the lock.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return new Response(JSON.stringify({ access_token: "new-access-token", expires_in: 3600 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+
+    const wallClockNow = () => Math.floor(Date.now() / 1000);
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        clientAuthHeader(REGISTRY, credentialsPath, refreshAccessToken, wallClockNow),
+      ),
+    );
+
+    for (const header of results) {
+      expect(header).toBe("Bearer new-access-token");
+    }
+    expect(calls).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -496,6 +619,14 @@ describe("credentialEgressOrigin", () => {
   test("normalizes the default https port", () => {
     expect(credentialEgressOrigin("https://idp.example.com")).toBe("https://idp.example.com:443");
   });
+
+  // WHATWG URL keeps the bracket syntax in `.hostname` for an IPv6
+  // literal ("[::1]", not "::1"), unlike Go's url.Hostname() — the
+  // loopback comparison must strip it or every IPv6-loopback issuer is
+  // wrongly refused as non-loopback.
+  test("allows IPv6 loopback http", () => {
+    expect(credentialEgressOrigin("http://[::1]:8080")).toBe("http://::1:8080");
+  });
 });
 
 describe("refreshAccessToken: egress and redirect controls", () => {
@@ -520,6 +651,30 @@ describe("refreshAccessToken: egress and redirect controls", () => {
       refreshAccessToken(undefined, "client", "http://idp.example.com", "refresh-token"),
     ).rejects.toThrow();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test("does not double the slash discovering an issuer with a trailing slash", async () => {
+    const mockFetch = mock(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === `${ISSUER}/.well-known/openid-configuration`) {
+        return new Response(JSON.stringify({ token_endpoint: TOKEN_ENDPOINT }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify({ access_token: "new-access-token", expires_in: 3600 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch URL in test: ${url}`);
+    });
+    // @ts-expect-error overriding the global is intentional for test isolation
+    globalThis.fetch = mockFetch;
+
+    const result = await refreshAccessToken(undefined, "client", `${ISSUER}/`, "refresh-token");
+    expect(result.accessToken).toBe("new-access-token");
   });
 
   test("refuses a token_endpoint on a different origin than the issuer", async () => {

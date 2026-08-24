@@ -162,7 +162,11 @@ func credentialEgressOrigin(raw string) (string, error) {
 		return "", fmt.Errorf("invalid OIDC URL: %s: %w", raw, err)
 	}
 
-	host := u.Hostname()
+	// Lowercase before comparing: TypeScript's WHATWG URL always lowercases
+	// the host, so an issuer and a token_endpoint that differ only in host
+	// case would compare unequal here (a false pin failure) while TS treats
+	// them as the same origin — normalize to match TS rather than diverge.
+	host := strings.ToLower(u.Hostname())
 	if host == "" {
 		return "", fmt.Errorf("OIDC URL has no host: %s", raw)
 	}
@@ -220,8 +224,10 @@ func refreshAccessToken(audience *string, clientId, issuer, refreshToken string,
 		return "", nil, 0, "", notSentErr(err)
 	}
 
-	// Discover token endpoint
-	discoveryURL := fmt.Sprintf("%s/.well-known/openid-configuration", issuer)
+	// Discover token endpoint. Trim a trailing slash first: an issuer of
+	// "https://idp.example/" would otherwise double the slash and 404
+	// rather than reach the discovery document.
+	discoveryURL := fmt.Sprintf("%s/.well-known/openid-configuration", strings.TrimRight(issuer, "/"))
 	resp, err := client.Get(discoveryURL)
 	if err != nil {
 		return "", nil, 0, "", notSentErr(fmt.Errorf("failed to fetch OIDC discovery: %w", err))
@@ -281,6 +287,14 @@ func refreshAccessToken(audience *string, clientId, issuer, refreshToken string,
 	}
 	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
 		return "", nil, 0, "", sentErr(fmt.Errorf("failed to parse token response: %w", err))
+	}
+
+	// A 200 with an empty access_token is a malformed response, not a
+	// usable credential: persisting it destroys the working access token
+	// with an empty string. Classified Sent — the refresh token was already
+	// on the wire by the time this response arrived.
+	if tokenResult.AccessToken == "" {
+		return "", nil, 0, "", sentErr(fmt.Errorf("token endpoint returned a 200 response with an empty access_token"))
 	}
 
 	issuedAt := time.Now().Unix()
@@ -467,25 +481,34 @@ func commitRefreshedCredentials(
 	return writeCredentialsSecure(path, data)
 }
 
-// credentialsRefresh serializes the whole critical section — read, refresh
-// decision, exchange, write — within this process (C-1), and guards
-// credentialsRefreshSpent, the memo of refresh-token digests this process
-// has already put on the wire without durably committing a replacement
-// (C-3). Held for the whole span, not just the write, so a waiter re-reads
-// the winner's committed state instead of acting on its own stale snapshot
-// (closing AB-2), and so the memo's check-then-insert is atomic by
-// construction.
+// credentialsRefreshState bundles the process-wide refresh lock (C-1) with
+// spent, the memo of refresh-token digests this process has already put on
+// the wire without durably committing a replacement (C-3), as a single
+// global rather than two separately declared ones. Every read or write of
+// spent happens while mu is held — putting both fields on the same struct
+// makes that a structural fact of the state's shape rather than an
+// unstated obligation a future edit could violate by adding a second,
+// independently locked package-level map. Mirrors Rust's
+// Mutex<RefreshState> (context.rs:1140-1166), which the compiler enforces;
+// Go's sync.Mutex does not embed its data, so the struct shape is the
+// closest available discipline. mu is held for the whole critical
+// section — read, refresh decision, exchange, write — not just the write,
+// so a waiter re-reads the winner's committed state instead of acting on
+// its own stale snapshot (closing AB-2), and so spent's check-then-insert
+// is atomic by construction.
 //
 // Scope is this process only: it does not serialize against a separately
 // spawned config process, a running vorpal start agent, or the Rust/
 // TypeScript SDKs writing the same credentials.json — an accepted residual
 // risk shared with Rust (context.rs:1160-1166).
-var credentialsRefresh sync.Mutex
-var credentialsRefreshSpent = make(map[string]struct{})
+var credentialsRefreshState = struct {
+	mu    sync.Mutex
+	spent map[string]struct{}
+}{spent: make(map[string]struct{})}
 
 // tokenRefresher performs the OAuth refresh-token exchange. Injected so
 // tests can count and control exchanges without real network I/O. Contract:
-// refresher runs while credentialsRefresh is held and must not call back
+// refresher runs while credentialsRefreshState.mu is held and must not call back
 // into ClientAuthHeader or clientAuthHeaderAt — sync.Mutex is non-reentrant
 // and a re-entrant call deadlocks every authenticated call in the process.
 type tokenRefresher func(audience *string, clientId, issuer, refreshToken string) (string, *int64, int64, string, error)
@@ -504,7 +527,7 @@ func liveTokenRefresher(audience *string, clientId, issuer, refreshToken string)
 // global override) — see ClientAuthHeader.
 //
 // now is a function, not a plain value, and it is called only after
-// credentialsRefresh is held — never before. A value sampled before
+// credentialsRefreshState.mu is held — never before. A value sampled before
 // acquiring the lock can predate a still-in-flight winner's later commit; a
 // waiter that then compares its stale, pre-lock reading against the
 // winner's freshly committed IssuedAt sees a future-dated token and
@@ -515,8 +538,8 @@ func clientAuthHeaderAt(
 	refresher tokenRefresher,
 	now func() (int64, error),
 ) (string, error) {
-	credentialsRefresh.Lock()
-	defer credentialsRefresh.Unlock()
+	credentialsRefreshState.mu.Lock()
+	defer credentialsRefreshState.mu.Unlock()
 
 	// Read here, strictly after the lock — see this function's doc comment.
 	nowUnix, err := now()
@@ -564,7 +587,7 @@ func clientAuthHeaderAt(
 		// so the memo is the only thing that can tell the two apart.
 		refreshTokenDigest := digestHex(issuerCredentials.RefreshToken)
 
-		if _, spent := credentialsRefreshSpent[refreshTokenDigest]; spent {
+		if _, spent := credentialsRefreshState.spent[refreshTokenDigest]; spent {
 			return "", fmt.Errorf("OAuth refresh-token exchange already failed for the stored token. Please run: vorpal login --issuer %s", registryIssuer)
 		}
 
@@ -577,7 +600,7 @@ func clientAuthHeaderAt(
 		if err != nil {
 			var failure *refreshFailureError
 			if errors.As(err, &failure) && failure.kind == refreshFailureSent {
-				credentialsRefreshSpent[refreshTokenDigest] = struct{}{}
+				credentialsRefreshState.spent[refreshTokenDigest] = struct{}{}
 				return "", spentGrantError(
 					registryIssuer,
 					fmt.Sprintf("the OAuth refresh-token exchange for issuer %s failed after the token had been sent, so the stored refresh token is no longer usable", registryIssuer),
@@ -608,7 +631,7 @@ func clientAuthHeaderAt(
 			// still names a token the IdP may have already rotated away.
 			// This is the same replay hazard as an outright failure and it
 			// is spent for the same reason.
-			credentialsRefreshSpent[refreshTokenDigest] = struct{}{}
+			credentialsRefreshState.spent[refreshTokenDigest] = struct{}{}
 
 			return "", spentGrantError(
 				registryIssuer,

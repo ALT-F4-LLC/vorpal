@@ -176,7 +176,11 @@ export function credentialEgressOrigin(raw: string): string {
     throw new Error(`invalid OIDC URL: ${raw}`);
   }
 
-  const host = url.hostname;
+  // WHATWG URL keeps the bracket syntax in `hostname` for an IPv6 literal
+  // (`[::1]`, not `::1`), unlike Go's url.Hostname(). Strip it before
+  // comparing so the loopback exemption actually matches "::1" rather than
+  // silently refusing every IPv6-loopback issuer.
+  const host = url.hostname.replace(/^\[|\]$/g, "");
   if (!host) {
     throw new Error(`OIDC URL has no host: ${raw}`);
   }
@@ -230,8 +234,10 @@ export async function refreshAccessToken(
     throw notSent(err);
   }
 
-  // Discover token endpoint
-  const discoveryUrl = `${issuer}/.well-known/openid-configuration`;
+  // Discover token endpoint. Strip a trailing slash first: an issuer of
+  // "https://idp.example/" would otherwise double the slash and 404 rather
+  // than reach the discovery document.
+  const discoveryUrl = `${issuer.replace(/\/+$/, "")}/.well-known/openid-configuration`;
   let discoveryResp: Response;
   try {
     discoveryResp = await fetch(discoveryUrl, {
@@ -299,7 +305,30 @@ export async function refreshAccessToken(
 
   let tokenResult: { access_token: string; expires_in?: number; refresh_token?: string };
   try {
-    tokenResult = (await tokenResp.json()) as typeof tokenResult;
+    // `tokenResp.json()` only guarantees valid JSON, not the shape below —
+    // an unchecked cast here would let a malformed or hostile token
+    // response (e.g. a bare `null`, an array, or a body missing
+    // `access_token`) either throw an unclassified TypeError past this
+    // function's Sent/NotSent boundary (so the caller never marks the
+    // token spent and replays it — the token is already on the wire by
+    // this point) or silently persist an unusable access token. Validate
+    // the shape here, inside the same Sent boundary as the parse failure
+    // above, rather than trusting the cast.
+    const parsed: unknown = await tokenResp.json();
+    if (typeof parsed !== "object" || parsed === null) {
+      throw new Error("token response is not a JSON object");
+    }
+    const candidate = parsed as Record<string, unknown>;
+    if (typeof candidate.access_token !== "string" || candidate.access_token.length === 0) {
+      throw new Error("token response is missing a non-empty access_token");
+    }
+    if (candidate.expires_in !== undefined && typeof candidate.expires_in !== "number") {
+      throw new Error("token response's expires_in must be a number when present");
+    }
+    if (candidate.refresh_token !== undefined && typeof candidate.refresh_token !== "string") {
+      throw new Error("token response's refresh_token must be a string when present");
+    }
+    tokenResult = candidate as typeof tokenResult;
   } catch (err) {
     throw sent(new Error(`failed to parse token response: ${errMessage(err)}`));
   }
@@ -482,7 +511,16 @@ function writeCredentialsSecure(path: string, data: string): void {
     let closed = false;
     let committed = false;
     try {
-      writeSync(fd, data, null, "utf-8");
+      // writeSync is not guaranteed to write the whole buffer in one call;
+      // a discarded short-write return value would let a partial write be
+      // fsync'd and renamed onto path as if it were complete (SEC-1).
+      const expectedBytes = Buffer.byteLength(data, "utf-8");
+      const writtenBytes = writeSync(fd, data, null, "utf-8");
+      if (writtenBytes !== expectedBytes) {
+        throw new Error(
+          `short write to temp credentials file: wrote ${writtenBytes} of ${expectedBytes} bytes`,
+        );
+      }
       // fsync, not just close: a rename ordered ahead of the data reaching
       // disk can leave a zero-length credentials file after a crash.
       fsyncSync(fd);
@@ -560,10 +598,19 @@ function commitRefreshedCredentials(
 
 /**
  * Serializes the whole critical section — read, refresh decision, exchange,
- * write — within this process (C-1), and guards
- * {@link credentialsRefreshSpent}, the memo of refresh-token digests this
- * process has already put on the wire without durably committing a
- * replacement (C-3).
+ * write — within this process (C-1), and owns `spent`, the memo of
+ * refresh-token digests this process has already put on the wire without
+ * durably committing a replacement (C-3).
+ *
+ * `spent` lives on the same object as the lock chain rather than as a
+ * second, separately declared module-level global: every read or write of
+ * it happens inside {@link withCredentialsRefreshLock}'s callback, so this
+ * bundling makes that a structural fact of the state's shape
+ * rather than an unstated obligation a future edit could violate by adding
+ * a new top-level `let`. Mirrors Rust's `Mutex<RefreshState>`
+ * (`context.rs:1140-1166`), which the language enforces at compile time;
+ * TypeScript has no equivalent guarantee, so the single-object shape is the
+ * closest available discipline.
  *
  * Node/Bun are single-threaded, but every `await` is an interleaving point:
  * `await`-ing the chain tail before the existence check and releasing after
@@ -576,14 +623,16 @@ function commitRefreshedCredentials(
  * SDKs writing the same `credentials.json` — an accepted residual risk
  * shared with Rust (context.rs:1160-1166) and Go.
  */
-let credentialsRefreshChain: Promise<void> = Promise.resolve();
-const credentialsRefreshSpent = new Set<string>();
+const credentialsRefreshState: { chain: Promise<void>; spent: Set<string> } = {
+  chain: Promise.resolve(),
+  spent: new Set<string>(),
+};
 
 function withCredentialsRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
-  const result = credentialsRefreshChain.then(fn);
+  const result = credentialsRefreshState.chain.then(fn);
   // The chain link always resolves regardless of fn's outcome, so a
   // rejection from one caller never poisons the next waiter's turn.
-  credentialsRefreshChain = result.then(
+  credentialsRefreshState.chain = result.then(
     () => undefined,
     () => undefined,
   );
@@ -631,7 +680,13 @@ export async function clientAuthHeader(
     const credentialsData = readFileSync(credentialsPath, "utf-8");
     const credentials = parseCredentials(credentialsData);
 
-    const registryIssuer = credentials.registry[registry];
+    // A plain-object index lookup falls through to the prototype chain for
+    // a registry named e.g. "constructor" or "toString", returning an
+    // inherited function instead of undefined. hasOwnProperty rules that
+    // out so an unmapped registry always takes the "no mapping" branch.
+    const registryIssuer = Object.prototype.hasOwnProperty.call(credentials.registry, registry)
+      ? credentials.registry[registry]
+      : undefined;
     if (!registryIssuer) {
       // No registry mapping — allow unauthenticated requests
       return null;
@@ -654,7 +709,7 @@ export async function clientAuthHeader(
       // so the memo is the only thing that can tell the two apart.
       const refreshTokenDigest = digestHex(issuerCreds.refresh_token);
 
-      if (credentialsRefreshSpent.has(refreshTokenDigest)) {
+      if (credentialsRefreshState.spent.has(refreshTokenDigest)) {
         throw new Error(
           `OAuth refresh-token exchange already failed for the stored token. Please run: vorpal login --issuer ${registryIssuer}`,
         );
@@ -670,7 +725,7 @@ export async function clientAuthHeader(
         );
       } catch (err) {
         if (err instanceof RefreshFailure && err.sent) {
-          credentialsRefreshSpent.add(refreshTokenDigest);
+          credentialsRefreshState.spent.add(refreshTokenDigest);
           throw spentGrantError(
             registryIssuer,
             `the OAuth refresh-token exchange for issuer ${registryIssuer} failed after the token had been sent, so the stored refresh token is no longer usable`,
@@ -695,7 +750,7 @@ export async function clientAuthHeader(
         // still names a token the IdP may have already rotated away. This
         // is the same replay hazard as an outright failure and it is spent
         // for the same reason.
-        credentialsRefreshSpent.add(refreshTokenDigest);
+        credentialsRefreshState.spent.add(refreshTokenDigest);
 
         throw spentGrantError(
           registryIssuer,

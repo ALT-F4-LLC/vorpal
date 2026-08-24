@@ -72,6 +72,21 @@ func noRefresherExpected(t *testing.T) tokenRefresher {
 	}
 }
 
+// resetSpentTokenMemo clears the package-global spent-refresh-token memo
+// (C-3) via t.Cleanup, so every test that exercises a refresh starts from
+// an empty memo regardless of what an earlier test in the same binary
+// spent. Without this, `go test -count=2` (or any test ordering that
+// revisits the same digest) fails: the memo is process-global by design
+// and outlives any single test.
+func resetSpentTokenMemo(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		credentialsRefreshState.mu.Lock()
+		defer credentialsRefreshState.mu.Unlock()
+		credentialsRefreshState.spent = make(map[string]struct{})
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Basic lookup behavior (AC 1, unchanged shape, ported to the new seam — C-12)
 // ---------------------------------------------------------------------------
@@ -188,6 +203,29 @@ func TestClientAuthHeaderAtMultipleRegistries(t *testing.T) {
 	}
 }
 
+// TestClientAuthHeaderWiresProductionPathRefresherAndClock exercises the
+// exported ClientAuthHeader wrapper itself (VPL-189-CL26: it had no test at
+// all after the path-override test seam was removed by C-12). C-12
+// deliberately leaves no way to redirect ClientAuthHeader off the real
+// /var/lib/vorpal/key/credentials.json, so this can only assert the one
+// branch reachable without that file existing on the test host: "no
+// credentials file" returns an empty header and no error, exactly like
+// clientAuthHeaderAt's equivalent branch, proving the production wiring
+// reaches that shared core rather than diverging from it.
+func TestClientAuthHeaderWiresProductionPathRefresherAndClock(t *testing.T) {
+	if _, err := os.Stat(GetKeyCredentialsPath()); err == nil {
+		t.Skip("a real credentials file exists on this host; skipping to avoid depending on its contents")
+	}
+
+	header, err := ClientAuthHeader("https://registry.example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if header != "" {
+		t.Fatalf("expected empty header when no credentials file exists, got %q", header)
+	}
+}
+
 func TestGetKeyCredentialsPath(t *testing.T) {
 	rootDir := GetRootDirPath()
 	if rootDir != "/var/lib/vorpal" {
@@ -244,6 +282,7 @@ func newOIDCRefreshTestServer(t *testing.T, tokenResponseBody string) *httptest.
 }
 
 func TestClientAuthHeaderAtRefreshPersistsRotatedToken(t *testing.T) {
+	resetSpentTokenMemo(t)
 	tokenBody := `{
 		"access_token": "new-access-token",
 		"expires_in": 3600,
@@ -284,6 +323,7 @@ func TestClientAuthHeaderAtRefreshPersistsRotatedToken(t *testing.T) {
 }
 
 func TestClientAuthHeaderAtRefreshPreservesRefreshTokenWhenOmitted(t *testing.T) {
+	resetSpentTokenMemo(t)
 	tokenBody := `{"access_token": "new-access-token", "expires_in": 3600}`
 	server := newOIDCRefreshTestServer(t, tokenBody)
 	defer server.Close()
@@ -312,6 +352,7 @@ func TestClientAuthHeaderAtRefreshPreservesRefreshTokenWhenOmitted(t *testing.T)
 // ---------------------------------------------------------------------------
 
 func TestClientAuthHeaderAtSerializesConcurrentRefresh(t *testing.T) {
+	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
 	credPath := filepath.Join(tempDir, "credentials.json")
 	now := time.Now().Unix()
@@ -354,6 +395,7 @@ func TestClientAuthHeaderAtSerializesConcurrentRefresh(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestClientAuthHeaderAtNeverReplaysATokenAfterSentFailure(t *testing.T) {
+	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
 	credPath := filepath.Join(tempDir, "credentials.json")
 	now := time.Now().Unix()
@@ -383,6 +425,7 @@ func TestClientAuthHeaderAtNeverReplaysATokenAfterSentFailure(t *testing.T) {
 }
 
 func TestClientAuthHeaderAtRetriesARefreshThatNeverReachedTheIdp(t *testing.T) {
+	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
 	credPath := filepath.Join(tempDir, "credentials.json")
 	now := time.Now().Unix()
@@ -420,6 +463,7 @@ func TestClientAuthHeaderAtRetriesARefreshThatNeverReachedTheIdp(t *testing.T) {
 }
 
 func TestClientAuthHeaderAtNeverReplaysATokenWhoseRefreshFailedToPersist(t *testing.T) {
+	resetSpentTokenMemo(t)
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permission-based write denial is not enforced")
 	}
@@ -493,6 +537,37 @@ func TestWriteCredentialsSecureOverwritesExistingFileMode(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("expected mode 0600 after rewrite of a pre-existing 0644 file, got %o", info.Mode().Perm())
+	}
+}
+
+// TestWriteCredentialsSecureUnlinksTempFileOnRenameFailure directly tests
+// AB-13's failure window: a fault AFTER the temp file is created but BEFORE
+// the rename commits. The dir-permission trick used elsewhere in this file
+// (chmod 0500) blocks os.CreateTemp itself, so its "no leftover .tmp"
+// assertion is vacuous — no temp file is ever created for it to leak
+// (VPL-189-CL20/F5). Making the destination a pre-existing directory lets
+// the temp file be created normally and fails only at os.Rename, isolating
+// the window the control is actually meant to close.
+func TestWriteCredentialsSecureUnlinksTempFileOnRenameFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, "credentials.json")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatalf("failed to create directory at destination path: %v", err)
+	}
+
+	err := writeCredentialsSecure(path, []byte(`{"issuer":{},"registry":{}}`))
+	if err == nil {
+		t.Fatal("expected writeCredentialsSecure to fail when the destination is a directory")
+	}
+
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("failed to list temp dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("leftover temp credentials file after a failed rename: %s", e.Name())
+		}
 	}
 }
 
@@ -573,6 +648,7 @@ func TestNeedsRefreshProportionalWindow(t *testing.T) {
 }
 
 func TestClientAuthHeaderAtRefreshesDespiteFutureIssuedAt(t *testing.T) {
+	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
 	credPath := filepath.Join(tempDir, "credentials.json")
 	now := time.Now().Unix()
@@ -595,6 +671,54 @@ func TestClientAuthHeaderAtRefreshesDespiteFutureIssuedAt(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("expected exactly one exchange, got %d", got)
+	}
+}
+
+// TestClientAuthHeaderAtSamplesClockAfterLock is C-2's own test (VPL-189-CL22):
+// TestClientAuthHeaderAtSerializesConcurrentRefresh above proves exactly one
+// exchange happens, but with a fast refresher and near-identical real
+// timestamps it would pass even if now() were sampled before Lock() — the
+// clock deltas involved are negligible either way. Here the winning
+// refresher is deliberately slow, so a pre-lock sample would be
+// observably stale by the time a waiter's turn comes: it would predate the
+// winner's freshly committed IssuedAt, needsRefresh's future-dated-IssuedAt
+// rule (C-6) would read that as due, and every waiter would refresh again.
+func TestClientAuthHeaderAtSamplesClockAfterLock(t *testing.T) {
+	resetSpentTokenMemo(t)
+	tempDir := t.TempDir()
+	credPath := filepath.Join(tempDir, "credentials.json")
+	now := time.Now().Unix()
+	writeFixture(t, credPath, credentialsFixture("https://issuer.example", "refresh-tok-clock-after-lock", now-7200, 3600, "old-access-token"))
+
+	var calls int32
+	refresher := func(_ *string, _, _, _ string) (string, *int64, int64, string, error) {
+		atomic.AddInt32(&calls, 1)
+		time.Sleep(50 * time.Millisecond)
+		expires := int64(3600)
+		return "new-access-token", &expires, time.Now().Unix(), "", nil
+	}
+	wallClock := func() (int64, error) { return time.Now().Unix(), nil }
+
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := clientAuthHeaderAt(credPath, "https://registry.example.com", refresher, wallClock)
+			errs[i] = err
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: unexpected error: %v", i, err)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("expected exactly one refresh exchange despite the slow winner, got %d", got)
 	}
 }
 
@@ -663,6 +787,137 @@ func TestRefreshAccessTokenRefusesMismatchedTokenEndpointOrigin(t *testing.T) {
 	}
 }
 
+func TestRefreshAccessTokenDoesNotDoubleSlashForTrailingSlashIssuer(t *testing.T) {
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"token_endpoint": %q}`, server.URL+"/token")
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"access_token": "new-access-token", "expires_in": 3600}`)
+	})
+	server = httptest.NewServer(mux)
+	defer server.Close()
+
+	accessToken, _, _, _, err := refreshAccessToken(nil, "client", server.URL+"/", "refresh-token", time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error for a trailing-slash issuer: %v", err)
+	}
+	if accessToken != "new-access-token" {
+		t.Fatalf("got %q", accessToken)
+	}
+}
+
+func TestCredentialEgressOriginIsHostCaseInsensitive(t *testing.T) {
+	origin, err := credentialEgressOrigin("https://IdP.Example.COM")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if origin != "https://idp.example.com:443" {
+		t.Fatalf("expected lowercased host, got %q", origin)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C-4 — refreshAccessToken's real Sent/NotSent classification, exercised
+// through actual HTTP round trips rather than fabricated by a mock
+// refresher (VPL-189-CL16: the replay-guard tests above prove
+// clientAuthHeaderAt honors a classification it is handed, not that
+// refreshAccessToken produces the right one).
+// ---------------------------------------------------------------------------
+
+func TestRefreshAccessTokenClassifiesTokenEndpointStatusAsSent(t *testing.T) {
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"token_endpoint": %q}`, server.URL+"/token")
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server_error", http.StatusInternalServerError)
+	})
+	server = httptest.NewServer(mux)
+	defer server.Close()
+
+	_, _, _, _, err := refreshAccessToken(nil, "client", server.URL, "refresh-token", time.Second)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var failure *refreshFailureError
+	if !errors.As(err, &failure) || failure.kind != refreshFailureSent {
+		t.Fatalf("expected Sent classification for a token-endpoint 500, got: %v", err)
+	}
+}
+
+func TestRefreshAccessTokenClassifiesMalformedTokenResponseAsSent(t *testing.T) {
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"token_endpoint": %q}`, server.URL+"/token")
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "not json")
+	})
+	server = httptest.NewServer(mux)
+	defer server.Close()
+
+	_, _, _, _, err := refreshAccessToken(nil, "client", server.URL, "refresh-token", time.Second)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var failure *refreshFailureError
+	if !errors.As(err, &failure) || failure.kind != refreshFailureSent {
+		t.Fatalf("expected Sent classification for an unparseable token response, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C-3 — an empty access_token in a 200 response must not destroy the
+// working credential (VPL-189-CL3).
+// ---------------------------------------------------------------------------
+
+func TestRefreshAccessTokenRefusesEmptyAccessToken(t *testing.T) {
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"token_endpoint": %q}`, server.URL+"/token")
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"access_token": "", "expires_in": 3600}`)
+	})
+	server = httptest.NewServer(mux)
+	defer server.Close()
+
+	_, _, _, _, err := refreshAccessToken(nil, "client", server.URL, "refresh-token", time.Second)
+	if err == nil {
+		t.Fatal("expected error for an empty access_token")
+	}
+	var failure *refreshFailureError
+	if !errors.As(err, &failure) || failure.kind != refreshFailureSent {
+		t.Fatalf("expected Sent classification, got: %v", err)
+	}
+}
+
+func TestClientAuthHeaderAtRefusesEmptyAccessToken(t *testing.T) {
+	resetSpentTokenMemo(t)
+	tempDir := t.TempDir()
+	credPath := filepath.Join(tempDir, "credentials.json")
+	now := time.Now().Unix()
+	writeFixture(t, credPath, credentialsFixture("https://issuer.example", "refresh-tok-empty-access", now-7200, 3600, "old-access-token"))
+
+	refresher := func(_ *string, _, _, _ string) (string, *int64, int64, string, error) {
+		return "", nil, 0, "", sentErr(fmt.Errorf("token endpoint returned a 200 response with an empty access_token"))
+	}
+
+	if _, err := clientAuthHeaderAt(credPath, "https://registry.example.com", refresher, fixedClock(now)); err == nil {
+		t.Fatal("expected error")
+	}
+
+	persisted := readPersisted(t, credPath)
+	if persisted.Issuer["https://issuer.example"].AccessToken != "old-access-token" {
+		t.Fatalf("expected old working credential preserved, got %+v", persisted.Issuer["https://issuer.example"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // C-9 — redirect ban and timeout (AB-10 redirect arm)
 // ---------------------------------------------------------------------------
@@ -699,6 +954,7 @@ func TestRefreshAccessTokenRefusesRedirectFromTokenEndpoint(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestClientAuthHeaderAtStopsRotatingAZeroLifetimeToken(t *testing.T) {
+	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
 	credPath := filepath.Join(tempDir, "credentials.json")
 	now := time.Now().Unix()
@@ -765,6 +1021,7 @@ func TestClientAuthHeaderAtRejectsNonNumericIssuedAt(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestClientAuthHeaderAtErrorsNeverContainRefreshToken(t *testing.T) {
+	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
 	credPath := filepath.Join(tempDir, "credentials.json")
 	now := time.Now().Unix()
