@@ -1,6 +1,8 @@
 use crate::command::{
     start::registry::{ArtifactBackend, LocalBackend},
-    store::paths::{get_artifact_alias_path, get_artifact_config_path, set_timestamps},
+    store::paths::{
+        get_artifact_alias_path, get_artifact_config_path, set_timestamps, split_alias_name_tag,
+    },
 };
 use sha256::digest;
 use tokio::fs::{create_dir_all, read, write};
@@ -87,24 +89,25 @@ impl ArtifactBackend for LocalBackend {
             .collect::<Vec<String>>();
 
         for alias in aliases {
-            let alias_name = alias.split(':').next().unwrap_or(&alias);
+            let (alias_name, alias_tag) = split_alias_name_tag(&alias);
 
             if alias_name.is_empty() {
                 continue;
             }
 
-            // `alias_name` and the tag derived below are already validated by
+            // `alias_name` and `alias_tag` are already validated by
             // `parse_alias_name` / `parse_store_path_component` in the
             // `ArtifactService::store_artifact` handler (`registry.rs`),
-            // which runs before this backend is ever called (VPL-383).
-
-            let alias_tag = alias.split(':').nth(1).unwrap_or("latest").to_string();
+            // which runs before this backend is ever called (VPL-383). The
+            // split itself is shared with that handler and the S3 backend
+            // (`split_alias_name_tag`), so the pair validated there is the
+            // same pair joined into a path here.
 
             let alias_path = get_artifact_alias_path(
                 alias_name,
                 &artifact_namespace,
                 artifact_system,
-                &alias_tag,
+                alias_tag,
             )
             .map_err(|err| Status::internal(format!("failed to get artifact alias path: {err}")))?;
 

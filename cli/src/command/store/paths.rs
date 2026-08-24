@@ -208,11 +208,12 @@ pub fn parse_store_path_component(value: &str, field: &str) -> Result<String> {
         || value == ".."
         || value.contains('/')
         || value.contains('\\')
+        || value.contains('\0')
         || value.starts_with(STAGING_PREFIX)
     {
         bail!(
-            "invalid artifact {field} {:?}: must be non-empty, contain no path separator, \
-             not be '.' or '..', and not start with the reserved staging prefix {:?}",
+            "invalid artifact {field} {:?}: must be non-empty, contain no path separator or NUL \
+             byte, not be '.' or '..', and not start with the reserved staging prefix {:?}",
             value,
             STAGING_PREFIX,
         );
@@ -232,7 +233,7 @@ const ARTIFACT_ALIAS_NAME_LENGTH: usize = 255;
 /// alias name is also a user-facing identifier, not merely a containment
 /// boundary: no leading/trailing `.`/`-`, no whitespace, and an
 /// alphanumeric/`_`/`-`/`.` allowlist rather than a denylist.
-pub fn parse_alias_name(name: &str) -> Result<String> {
+pub fn parse_alias_name(name: &str, field: &str) -> Result<String> {
     let is_allowed_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.';
 
     if name.is_empty()
@@ -248,7 +249,7 @@ pub fn parse_alias_name(name: &str) -> Result<String> {
         || !name.chars().all(is_allowed_char)
     {
         bail!(
-            "invalid artifact alias name {:?}: must be non-empty, at most {ARTIFACT_ALIAS_NAME_LENGTH} \
+            "invalid artifact {field} {:?}: must be non-empty, at most {ARTIFACT_ALIAS_NAME_LENGTH} \
              characters, contain only alphanumeric characters, '_', '-', and '.', and not start \
              or end with '.' or '-'",
             name,
@@ -256,6 +257,20 @@ pub fn parse_alias_name(name: &str) -> Result<String> {
     }
 
     Ok(name.to_string())
+}
+
+/// Splits an alias string of the form `"name"` or `"name:tag"` into its name
+/// and tag, defaulting the tag to `"latest"` when absent. The single home for
+/// this split: `store_artifact`'s handler and both `ArtifactBackend`
+/// implementations (`local.rs`, `s3.rs`) each used to keep their own copy, so
+/// a validated `(name, tag)` pair and the pair a backend actually joined into
+/// a path could drift apart if one copy changed and the others did not.
+pub fn split_alias_name_tag(alias: &str) -> (&str, &str) {
+    let mut parts = alias.split(':');
+    let name = parts.next().unwrap_or(alias);
+    let tag = parts.next().unwrap_or("latest");
+
+    (name, tag)
 }
 
 // Staged publishing
@@ -917,5 +932,111 @@ mod tests {
             vec!["z_ascii", "\u{03b1}_alpha", "\u{20ac}_euro"]
         );
         Ok(())
+    }
+
+    // -------------------------------------------------------------------
+    // Store path component parsers (VPL-383): these guard every value a
+    // gRPC caller supplies before it is joined into a store path, so their
+    // own rejection shapes need to be pinned directly rather than only
+    // through the registry handlers that call them.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn parse_store_path_component_rejects_a_nul_byte() {
+        let result = parse_store_path_component("a\0b", "tag");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_store_path_component_accepts_a_well_formed_value() {
+        let result = parse_store_path_component("library", "namespace");
+
+        assert_eq!(result.unwrap(), "library");
+    }
+
+    #[test]
+    fn parse_store_path_component_error_names_the_field_not_a_store_path() {
+        // The refusal must say *which input* was hostile without ever
+        // constructing or naming the store path the value would have
+        // joined into — the parser runs before any path is built, so it
+        // has no path to leak, but the message text is the only place
+        // that invariant is checked.
+        let err = parse_store_path_component("a/b", "namespace")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("namespace"));
+        assert!(!err.contains("/var/lib/vorpal"));
+        assert!(!err.contains("store/artifact"));
+    }
+
+    #[test]
+    fn parse_alias_name_rejects_a_nul_byte() {
+        let result = parse_alias_name("a\0b", "alias name");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_alias_name_rejects_a_path_separator() {
+        assert!(parse_alias_name("../etc/passwd", "alias name").is_err());
+        assert!(parse_alias_name("a/b", "alias name").is_err());
+        assert!(parse_alias_name("a\\b", "alias name").is_err());
+    }
+
+    #[test]
+    fn parse_alias_name_rejects_leading_or_trailing_dot_or_dash() {
+        assert!(parse_alias_name(".rust", "alias name").is_err());
+        assert!(parse_alias_name("rust.", "alias name").is_err());
+        assert!(parse_alias_name("-rust", "alias name").is_err());
+        assert!(parse_alias_name("rust-", "alias name").is_err());
+    }
+
+    #[test]
+    fn parse_alias_name_rejects_whitespace_and_disallowed_characters() {
+        assert!(parse_alias_name("rust 1", "alias name").is_err());
+        assert!(parse_alias_name("rust!", "alias name").is_err());
+        assert!(parse_alias_name("", "alias name").is_err());
+    }
+
+    #[test]
+    fn parse_alias_name_rejects_a_name_over_the_length_bound() {
+        let long_name = "a".repeat(ARTIFACT_ALIAS_NAME_LENGTH + 1);
+
+        assert!(parse_alias_name(&long_name, "alias name").is_err());
+    }
+
+    #[test]
+    fn parse_alias_name_accepts_a_well_formed_name() {
+        let result = parse_alias_name("rust_1.85-nightly", "alias name");
+
+        assert_eq!(result.unwrap(), "rust_1.85-nightly");
+    }
+
+    #[test]
+    fn parse_alias_name_error_names_the_field() {
+        let err = parse_alias_name("a/b", "artifact alias name")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("artifact alias name"));
+    }
+
+    #[test]
+    fn split_alias_name_tag_splits_name_and_tag() {
+        assert_eq!(split_alias_name_tag("rust:1.85"), ("rust", "1.85"));
+    }
+
+    #[test]
+    fn split_alias_name_tag_defaults_tag_to_latest() {
+        assert_eq!(split_alias_name_tag("rust"), ("rust", "latest"));
+    }
+
+    #[test]
+    fn split_alias_name_tag_ignores_a_third_colon_delimited_segment() {
+        // Matches the pre-existing behavior every caller relied on: only the
+        // first two colon-delimited segments are meaningful.
+        assert_eq!(split_alias_name_tag("rust:1.85:extra"), ("rust", "1.85"));
     }
 }

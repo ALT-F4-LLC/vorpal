@@ -1,6 +1,9 @@
-use crate::command::start::registry::{
-    s3::{get_artifact_alias_key, get_artifact_config_key},
-    ArtifactBackend, S3Backend,
+use crate::command::{
+    start::registry::{
+        s3::{get_artifact_alias_key, get_artifact_config_key},
+        ArtifactBackend, S3Backend,
+    },
+    store::paths::split_alias_name_tag,
 };
 use sha256::digest;
 use tonic::{async_trait, Status};
@@ -121,25 +124,41 @@ impl ArtifactBackend for S3Backend {
             .collect::<Vec<String>>();
 
         for alias in aliases {
-            let alias_name = alias.split(':').next().unwrap_or(&alias);
+            let (alias_name, alias_tag) = split_alias_name_tag(&alias);
 
             if alias_name.is_empty() {
                 continue;
             }
 
-            // `alias_name` and the tag derived below are already validated by
+            // `alias_name` and `alias_tag` are already validated by
             // `parse_alias_name` / `parse_store_path_component` in the
             // `ArtifactService::store_artifact` handler (`registry.rs`),
-            // which runs before this backend is ever called (VPL-383).
+            // which runs before this backend is ever called (VPL-383). The
+            // split itself is shared with that handler and the local
+            // backend (`split_alias_name_tag`), so the pair validated there
+            // is the same pair joined into a key here.
 
-            let alias_tag = alias.split(':').nth(1).unwrap_or("latest").to_string();
+            let alias_key =
+                get_artifact_alias_key(alias_name, &artifact_namespace, artifact_system, alias_tag);
 
-            let alias_key = get_artifact_alias_key(
-                alias_name,
-                &artifact_namespace,
-                artifact_system,
-                &alias_tag,
-            );
+            // Parity with `LocalBackend`, which refuses to overwrite an
+            // existing alias (`local.rs`, `alias_path.exists()`): without
+            // this check the S3 backend silently overwrote an alias that
+            // pointed at a different digest, which `LocalBackend` treats as
+            // a conflict rather than a no-op or a silent republish.
+            let alias_head = client
+                .head_object()
+                .bucket(bucket)
+                .key(&alias_key)
+                .send()
+                .await;
+
+            if alias_head.is_ok() {
+                return Err(Status::already_exists(format!(
+                    "alias '{}' already exists",
+                    alias
+                )));
+            }
 
             let alias_data = artifact_digest.as_bytes().to_vec();
 

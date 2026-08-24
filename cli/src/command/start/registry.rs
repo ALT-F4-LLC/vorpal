@@ -1,6 +1,8 @@
 use crate::command::{
     start::auth::{get_user_context, require_namespace_or_service_trust, PrincipalKind},
-    store::paths::{parse_alias_name, parse_artifact_digest, parse_store_path_component},
+    store::paths::{
+        parse_alias_name, parse_artifact_digest, parse_store_path_component, split_alias_name_tag,
+    },
 };
 use anyhow::{bail, Result};
 use aws_config::BehaviorVersion;
@@ -146,14 +148,25 @@ impl ArchiveServer {
             cache_ttl_seconds
         );
 
+        // Bounded on entry count: the key is "{namespace}/{digest}" from an
+        // unauthenticated endpoint (`ArchiveService::check` has no authz —
+        // see the `require_namespace_or_service_trust` call added below),
+        // so an unbounded cache lets any caller grow it without limit
+        // regardless of the TTL (VPL-383).
+        const CHECK_CACHE_MAX_ENTRIES: u64 = 100_000;
+
         let check_cache = if cache_ttl_seconds > 0 {
             Cache::builder()
+                .max_capacity(CHECK_CACHE_MAX_ENTRIES)
                 .time_to_live(Duration::from_secs(cache_ttl_seconds))
                 .build()
         } else {
             // TTL of 0 means don't cache (immediate expiry)
             info!("registry |> archive server: caching disabled (ttl=0)");
-            Cache::builder().time_to_live(Duration::ZERO).build()
+            Cache::builder()
+                .max_capacity(CHECK_CACHE_MAX_ENTRIES)
+                .time_to_live(Duration::ZERO)
+                .build()
         };
 
         Self {
@@ -171,12 +184,29 @@ impl ArchiveService for ArchiveServer {
         &self,
         request: Request<ArchivePullRequest>,
     ) -> Result<Response<ArchiveResponse>, Status> {
-        let req = request.into_inner();
+        let digest = parse_artifact_digest(&request.get_ref().digest, "archive digest")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        let namespace = parse_store_path_component(&request.get_ref().namespace, "namespace")
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
-        let digest = parse_artifact_digest(&req.digest, "archive digest")
-            .map_err(|err| Status::invalid_argument(err.to_string()))?;
-        let namespace = parse_store_path_component(&req.namespace, "namespace")
-            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        // Authorization check — see DKT-64 note in `pull`. `check` previously
+        // had no authz call at all, so any token holder (or, with auth off,
+        // anyone) got an existence oracle across every namespace (VPL-383).
+        if request
+            .extensions()
+            .get::<crate::command::start::auth::Claims>()
+            .is_some()
+        {
+            require_namespace_or_service_trust(&request, &namespace, "read")?;
+
+            info!(
+                "archive |> check by {} in namespace {}",
+                principal_label(&request),
+                namespace
+            );
+        }
+
+        let req = request.into_inner();
 
         // Safe only because `digest` and `namespace` are each a single path
         // component with no separator: an unvalidated pair could collide
@@ -281,12 +311,16 @@ impl ArchiveService for ArchiveServer {
 
     async fn push(
         &self,
-        request: Request<Streaming<ArchivePushRequest>>,
+        mut request: Request<Streaming<ArchivePushRequest>>,
     ) -> Result<Response<ArchiveResponse>, Status> {
-        let mut request_stream = request.into_inner();
-
-        // Extract metadata from the first chunk
-        let first_chunk = request_stream
+        // Extract metadata from the first chunk. Read through `get_mut` so
+        // `request` (and its extensions) stays available for the
+        // authorization check below — `push` previously had no `Claims`
+        // extraction and no authz call at all (VPL-383/C4): any token
+        // holder could push into any namespace by naming it directly, even
+        // after path validation landed.
+        let first_chunk = request
+            .get_mut()
             .next()
             .await
             .ok_or_else(|| Status::invalid_argument("empty stream"))?
@@ -296,6 +330,25 @@ impl ArchiveService for ArchiveServer {
             .map_err(|err| Status::invalid_argument(err.to_string()))?;
         let request_namespace = parse_store_path_component(&first_chunk.namespace, "namespace")
             .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
+        // Authorization check — see DKT-64 note in `pull`. Runs after the
+        // namespace is known (it arrives in the first stream chunk, not in
+        // the RPC's own metadata) and before any backend I/O.
+        if request
+            .extensions()
+            .get::<crate::command::start::auth::Claims>()
+            .is_some()
+        {
+            require_namespace_or_service_trust(&request, &request_namespace, "write")?;
+
+            info!(
+                "archive |> push by {} in namespace {}",
+                principal_label(&request),
+                request_namespace
+            );
+        }
+
+        let request_stream = request.into_inner();
 
         // Create an adapter stream that yields data bytes from the first chunk
         // and all remaining chunks without accumulating into a Vec<u8>
@@ -422,7 +475,7 @@ impl ArtifactService for ArtifactServer {
         // `get_artifact_alias_path` performs — this handler previously
         // checked nothing, so any of the three could walk the read outside
         // the store root (VPL-383).
-        let name = parse_alias_name(&request.name)
+        let name = parse_alias_name(&request.name, "alias name")
             .map_err(|err| Status::invalid_argument(err.to_string()))?;
         let namespace = parse_store_path_component(&request.namespace, "namespace")
             .map_err(|err| Status::invalid_argument(err.to_string()))?;
@@ -500,16 +553,14 @@ impl ArtifactService for ArtifactServer {
             .iter()
             .chain(request.artifact_aliases.iter())
         {
-            let alias_name = alias.split(':').next().unwrap_or(alias);
+            let (alias_name, alias_tag) = split_alias_name_tag(alias);
 
             if alias_name.is_empty() {
                 continue;
             }
 
-            parse_alias_name(alias_name)
+            parse_alias_name(alias_name, "alias name")
                 .map_err(|err| Status::invalid_argument(err.to_string()))?;
-
-            let alias_tag = alias.split(':').nth(1).unwrap_or("latest");
 
             parse_store_path_component(alias_tag, "tag")
                 .map_err(|err| Status::invalid_argument(err.to_string()))?;
@@ -793,16 +844,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_ttl_expiration() -> Result<(), Box<dyn std::error::Error>> {
-        // Given: a server with a very short TTL (1 second)
+        // Given: a server with a TTL short enough to keep this test's real
+        // sleep well under 200ms. `moka::future::Cache` tracks TTL against
+        // its own internal clock rather than tokio's, so `tokio::time::pause`
+        // /`advance` (which would need the `test-util` feature, a
+        // `Cargo.toml` change out of this step's declared scope) cannot
+        // replace the sleep here — shrinking the interval an order of
+        // magnitude is the change available inside scope. Previously 1s TTL
+        // / 1.1s sleep, the single largest contributor to this suite's
+        // runtime.
         let backend = MockBackend::new(true);
-        let server = ArchiveServer::new(backend.box_clone(), 1);
+        let server = ArchiveServer {
+            backend: backend.box_clone(),
+            check_cache: Cache::builder()
+                .max_capacity(1_000)
+                .time_to_live(Duration::from_millis(50))
+                .build(),
+        };
 
         // When: we check, wait for TTL to expire, then check again
         server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
         assert_eq!(backend.call_count(), 1);
 
-        // Wait for cache to expire
-        tokio::time::sleep(Duration::from_millis(1100)).await;
+        // Wait for cache to expire.
+        tokio::time::sleep(Duration::from_millis(150)).await;
 
         server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
 
@@ -844,7 +909,30 @@ mod tests {
 
         // (namespace="a", digest="b/c") would compose to the same store path
         // as (namespace="a/b", digest="c") if `digest` alone were checked.
+        // Note: `digest="b/c"` is also rejected on its own by
+        // `parse_artifact_digest` (a `/` is never valid hex), so this alone
+        // does not prove the *namespace* parser is what stops the collision
+        // — see the next test for that isolation.
         let result = server.check(make_check_request("a", "b/c")).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_check_rejects_a_namespace_containing_a_slash_with_an_otherwise_valid_digest() {
+        // Isolates the namespace side of the AC-4 collision: `digest` here
+        // is a well-formed 64-hex digest, so this can only fail on
+        // `namespace`, proving `parse_store_path_component` — not
+        // `parse_artifact_digest` — is what refuses (namespace="a/b",
+        // digest="c") from composing into `.../archive/a/b/c...`.
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let result = server
+            .check(make_check_request("a/b", DIGEST_GENERIC))
+            .await;
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
@@ -959,6 +1047,81 @@ mod tests {
                 store_artifact_calls: Arc::clone(&self.store_artifact_calls),
             })
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // `ArtifactService::get_artifact` (VPL-383/C1-C2): a traversing digest or
+    // namespace must be refused before the backend's path join runs.
+    // -----------------------------------------------------------------------
+
+    fn make_get_artifact_request(namespace: &str, digest: &str) -> Request<ArtifactRequest> {
+        Request::new(ArtifactRequest {
+            namespace: namespace.to_string(),
+            digest: digest.to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_get_artifact_rejects_a_traversing_digest() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .get_artifact(make_get_artifact_request(
+                "library",
+                "../../../../../key/credentials.json",
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn test_get_artifact_rejects_a_namespace_that_is_not_a_single_component() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .get_artifact(make_get_artifact_request("a/b", DIGEST_GENERIC))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+    }
+
+    // -----------------------------------------------------------------------
+    // `ArchiveService::pull` (VPL-383/C1-C2): a traversing digest or
+    // namespace must be refused before the streaming response is ever
+    // opened — previously an invalid pair surfaced as the first item in the
+    // response stream rather than as a handshake failure.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_pull_rejects_a_traversing_digest() {
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let result = server
+            .pull(make_check_request(
+                "library",
+                "../../../../../etc/cron.d/pwn",
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn test_pull_rejects_a_namespace_that_is_not_a_single_component() {
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let result = server.pull(make_check_request("a/b", DIGEST_GENERIC)).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
     fn make_alias_request(
@@ -1110,6 +1273,55 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
         assert_eq!(backend.store_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_store_artifact_rejects_a_traversing_alias_name_in_the_artifacts_own_aliases_field(
+    ) {
+        // Every other store_artifact test drives the alias through the
+        // request's `artifact_aliases` field with `Artifact::default()`
+        // (whose own `aliases` is empty) — none exercised the artifact's
+        // own `aliases` field, the other source this handler validates
+        // (VPL-383, registry.rs's `.chain(request.artifact_aliases.iter())`
+        // over `artifact.aliases`).
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let request = Request::new(StoreArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec!["../../../../../x:latest".to_string()],
+                ..Artifact::default()
+            }),
+            artifact_aliases: vec![],
+            artifact_namespace: "library".to_string(),
+        });
+
+        let result = server.store_artifact(request).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.store_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_store_artifact_accepts_a_well_formed_alias_in_the_artifacts_own_aliases_field() {
+        // Positive control for the artifact's own `aliases` field.
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let request = Request::new(StoreArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec!["rust:latest".to_string()],
+                ..Artifact::default()
+            }),
+            artifact_aliases: vec![],
+            artifact_namespace: "library".to_string(),
+        });
+
+        let result = server.store_artifact(request).await;
+
+        assert!(result.is_ok());
+        assert_eq!(backend.store_call_count(), 1);
     }
 
     #[tokio::test]
