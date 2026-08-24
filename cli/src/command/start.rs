@@ -54,10 +54,19 @@ pub struct RunArgs {
     /// request-supplied `registry` is at most a selector over this set; an
     /// empty set means no registry is configured (fail-closed — never "any
     /// registry"). Populated from `--registry-allowed` (or
-    /// `VORPAL_REGISTRY_ALLOWED`) in `cli/src/command.rs`.
+    /// `VORPAL_REGISTRY_ALLOWED`) in `cli/src/command.rs`, which defaults an
+    /// omitted flag to the worker's own default registry address rather
+    /// than to empty — an explicit empty value is what fails closed.
     pub registry_allowed: Vec<String>,
     pub services: Vec<String>,
     pub tls: bool,
+}
+
+/// `build_channel` (sdk/rust/src/context.rs) skips TLS entirely for the
+/// `http://` and `unix://` schemes, so a registry allow-list entry using
+/// either one carries the worker's service bearer token in cleartext.
+fn registry_carries_no_tls(entry: &str) -> bool {
+    entry.starts_with("http://") || entry.starts_with("unix://")
 }
 
 async fn new_tls_config() -> Result<ServerTlsConfig> {
@@ -451,16 +460,39 @@ pub async fn run(args: RunArgs) -> Result<()> {
     log_trusted_service_clients(&args.issuer_service_client_ids);
 
     // Emit the registry allow-list at startup for the same reason: a worker
-    // with an empty list refuses every build (fail-closed), which should be
-    // visible at boot rather than discovered from the first refused build.
-    if args.registry_allowed.is_empty() {
-        info!("no registry configured for worker builds");
-    } else {
-        info!(
-            "registry allow-list configured ({}): {}",
-            args.registry_allowed.len(),
-            args.registry_allowed.join(", ")
-        );
+    // or agent with an empty list refuses every registry dial (fail-closed),
+    // which should be visible at boot rather than discovered from the first
+    // refused build. Scoped to processes that actually run one of those two
+    // services — a registry-only process configures no allow-list of its
+    // own and logging about it here would be a false signal.
+    let has_worker = args.services.contains(&"worker".to_string());
+    let has_agent = args.services.contains(&"agent".to_string());
+
+    if has_worker || has_agent {
+        if args.registry_allowed.is_empty() {
+            info!("no registry configured for worker/agent registry dials");
+        } else {
+            info!(
+                "registry allow-list configured ({}): {}",
+                args.registry_allowed.len(),
+                args.registry_allowed.join(", ")
+            );
+
+            // `http://` and `unix://` channels carry no TLS (`build_channel`,
+            // sdk/rust/src/context.rs), so the worker's service bearer
+            // token — attached to every RPC on that channel — crosses in
+            // cleartext. The allow-list has no scheme policy to refuse this
+            // outright (a `unix://` entry is a legitimate same-host socket),
+            // so this is a warning an operator can act on, not a refusal.
+            for entry in &args.registry_allowed {
+                if registry_carries_no_tls(entry) {
+                    warn!(
+                        "registry allow-list entry {entry:?} carries no TLS; \
+                         service bearer tokens cross it in cleartext"
+                    );
+                }
+            }
+        }
     }
 
     let effective_port = resolve_effective_port(
@@ -495,10 +527,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
         None => get_socket_path().display().to_string(),
     };
 
-    let has_agent = args.services.contains(&"agent".to_string());
-
     if has_agent {
-        let service = AgentServiceServer::new(AgentServer::new());
+        let service = AgentServiceServer::new(AgentServer::new(args.registry_allowed.clone()));
 
         router = router.add_service(service);
 
@@ -510,8 +540,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
     if has_registry {
         router = add_registry_services(router, &args, &transport_label).await?;
     }
-
-    let has_worker = args.services.contains(&"worker".to_string());
 
     if has_worker {
         router = add_worker_service(router, &args, &transport_label).await?;
@@ -585,4 +613,22 @@ pub async fn run(args: RunArgs) -> Result<()> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod registry_scheme_tests {
+    use super::*;
+
+    #[test]
+    fn registry_carries_no_tls_for_http_and_unix() {
+        assert!(registry_carries_no_tls("http://registry.example.com"));
+        assert!(registry_carries_no_tls(
+            "unix:///var/lib/vorpal/vorpal.sock"
+        ));
+    }
+
+    #[test]
+    fn registry_carries_no_tls_is_false_for_https() {
+        assert!(!registry_carries_no_tls("https://registry.example.com"));
+    }
 }

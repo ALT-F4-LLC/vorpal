@@ -49,6 +49,82 @@ pub fn get_default_namespace() -> String {
     DEFAULT_NAMESPACE.to_string()
 }
 
+/// Parses a comma-separated list, trimming whitespace per entry and
+/// dropping empty segments, so inputs like "worker-id," or " a , , b " never
+/// produce `""` entries. Shared by `--issuer-service-client-ids` and
+/// `--registry-allowed`: silent-filtering matches clap's ergonomic
+/// expectation for comma-delimited values and keeps config-by-env forgiving.
+fn parse_comma_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Resolves `--registry-allowed`/`VORPAL_REGISTRY_ALLOWED` into the worker's
+/// allow-list. Unset (the flag never passed) defaults to the worker's own
+/// default registry address — the same `get_default_address()` every other
+/// command already targets — so a fresh deployment does not refuse every
+/// build. An explicit but empty value (`--registry-allowed ""`) parses to no
+/// entries, which is fail-closed: it means the operator deliberately
+/// configured no registry, never "any registry".
+fn resolve_registry_allowed_flag(raw: Option<&str>) -> Vec<String> {
+    match raw {
+        None => vec![get_default_address()],
+        Some(raw) => parse_comma_list(raw),
+    }
+}
+
+#[cfg(test)]
+mod registry_allowed_tests {
+    use super::*;
+
+    #[test]
+    fn parse_comma_list_trims_and_drops_empty_segments() {
+        assert_eq!(
+            parse_comma_list(" a , , b ,c"),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_comma_list_of_empty_string_is_empty() {
+        assert_eq!(parse_comma_list(""), Vec::<String>::new());
+    }
+
+    // C1: the flag omitted entirely must not fail closed to nothing — every
+    // worker deployment shipped today would otherwise refuse every build.
+    #[test]
+    fn resolve_registry_allowed_flag_defaults_to_the_default_address_when_unset() {
+        assert_eq!(
+            resolve_registry_allowed_flag(None),
+            vec![get_default_address()]
+        );
+    }
+
+    #[test]
+    fn resolve_registry_allowed_flag_parses_an_explicit_list() {
+        assert_eq!(
+            resolve_registry_allowed_flag(Some("http://a.example.com,http://b.example.com")),
+            vec![
+                "http://a.example.com".to_string(),
+                "http://b.example.com".to_string()
+            ]
+        );
+    }
+
+    // An explicit empty value is a deliberate fail-closed choice, distinct
+    // from leaving the flag unset.
+    #[test]
+    fn resolve_registry_allowed_flag_explicit_empty_string_fails_closed() {
+        assert_eq!(
+            resolve_registry_allowed_flag(Some("")),
+            Vec::<String>::new()
+        );
+    }
+}
+
 #[derive(Subcommand)]
 pub enum CommandSystemKeys {
     Generate {},
@@ -109,9 +185,10 @@ pub enum CommandSystemServices {
         /// from or push to. A request-supplied `registry` may only select a
         /// value from this list (or leave it unset to get the first entry,
         /// the worker's own configured value); a request naming anything
-        /// else is refused. Leave unset (default) and the worker refuses
-        /// every build — there is no "any registry" default, unlike
-        /// `issuer_service_client_ids`.
+        /// else is refused. Leave unset (default) and the worker allows only
+        /// its own default registry address (the same `get_default_address()`
+        /// every other command already targets); pass an explicit empty
+        /// string to fail closed and refuse every build instead.
         #[arg(env = "VORPAL_REGISTRY_ALLOWED", long)]
         registry_allowed: Option<String>,
 
@@ -1396,32 +1473,12 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                 services,
                 tls,
             } => {
-                // Parse the comma-separated list. Trim whitespace per entry and
-                // silently drop empty segments, so inputs like "worker-id,"
-                // or " a , , b " never produce `""` entries in the allow-list.
-                // Silent-filter matches clap's ergonomic expectation for
-                // comma-delimited values and keeps config-by-env forgiving.
                 let issuer_service_client_ids = issuer_service_client_ids
                     .as_deref()
-                    .map(|raw| {
-                        raw.split(',')
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string)
-                            .collect::<Vec<String>>()
-                    })
+                    .map(parse_comma_list)
                     .unwrap_or_default();
 
-                let registry_allowed = registry_allowed
-                    .as_deref()
-                    .map(|raw| {
-                        raw.split(',')
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string)
-                            .collect::<Vec<String>>()
-                    })
-                    .unwrap_or_default();
+                let registry_allowed = resolve_registry_allowed_flag(registry_allowed.as_deref());
 
                 let run_args = start::RunArgs {
                     archive_cache_ttl,

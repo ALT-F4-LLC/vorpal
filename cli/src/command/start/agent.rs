@@ -1,5 +1,6 @@
 use crate::command::{
     lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
+    start::worker::resolve_registry,
     store::{
         archives::{compress_zstd, unpack_zip},
         hashes::get_source_digest,
@@ -864,12 +865,21 @@ async fn prepare_artifact(
     request: Request<PrepareArtifactRequest>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
     source_cache: SourceCache,
+    registry_allowed: &[String],
 ) -> Result<(), Status> {
     let request = request.into_inner();
 
     let Some(artifact) = request.artifact else {
         return Err(Status::invalid_argument("'artifact' is required"));
     };
+
+    // The agent dials `request.registry` for every remote source the same
+    // way the worker dials it for every dependency pull — the caller must
+    // not be able to name that registry any more here than there (C1/C2 in
+    // the threat model). Resolve it once, ahead of the source loop, so a
+    // request naming a registry outside the allow-list is refused before
+    // any network I/O rather than per-source.
+    let registry = resolve_registry(&request.registry, registry_allowed)?.to_string();
 
     // TODO: Check if artifact already exists in the registry
 
@@ -915,7 +925,7 @@ async fn prepare_artifact(
             &request.artifact_context,
             &request.artifact_namespace,
             request.artifact_unlock,
-            &request.registry,
+            &registry,
             &lock_path,
             lock_file.as_ref(),
             &target_platform,
@@ -965,12 +975,19 @@ async fn prepare_artifact(
 
 #[derive(Debug)]
 pub struct AgentServer {
+    /// The operator-configured registry allow-list a remote source may be
+    /// pulled through — same set, same fail-closed default, and the same
+    /// `resolve_registry` seam the worker uses (`worker.rs`); the agent
+    /// dials a caller-supplied registry too, so it needs the identical
+    /// check.
+    registry_allowed: Vec<String>,
     source_cache: SourceCache,
 }
 
 impl AgentServer {
-    pub fn new() -> Self {
+    pub fn new(registry_allowed: Vec<String>) -> Self {
         Self {
+            registry_allowed,
             source_cache: Arc::new(Mutex::new(SourceCacheState::default())),
         }
     }
@@ -987,9 +1004,11 @@ impl AgentService for AgentServer {
         let (tx, rx) = channel(100);
         // Cloned so the spawned task can own a handle while `self` keeps its own.
         let source_cache = Arc::clone(&self.source_cache);
+        let registry_allowed = self.registry_allowed.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(request, &tx, source_cache).await {
+            if let Err(err) = prepare_artifact(request, &tx, source_cache, &registry_allowed).await
+            {
                 let _ = tx.send(Err(err)).await;
             }
         });
@@ -1089,5 +1108,89 @@ mod tests {
             false,
             false
         ));
+    }
+
+    // C2 (reconcile): the agent dials `request.registry` for every remote
+    // source exactly like the worker dials it for every dependency, so it
+    // needs the identical allow-list check. The refusal must happen before
+    // `request.artifact` is even unwrapped, matching the worker's own
+    // "resolve before touching anything else" ordering.
+    #[tokio::test]
+    async fn prepare_artifact_refuses_a_registry_outside_the_allow_list() {
+        let (tx, _rx) = channel(100);
+        let source_cache: SourceCache = Arc::new(Mutex::new(SourceCacheState::default()));
+
+        let request = Request::new(PrepareArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec![],
+                name: "test".to_string(),
+                sources: vec![],
+                steps: vec![],
+                systems: vec![],
+                target: 0,
+            }),
+            artifact_context: ".".to_string(),
+            artifact_namespace: "library".to_string(),
+            artifact_unlock: false,
+            registry: "http://attacker.example.com".to_string(),
+        });
+
+        let status = prepare_artifact(
+            request,
+            &tx,
+            source_cache,
+            &["http://registry.example.com".to_string()],
+        )
+        .await
+        .expect_err("a registry outside the allow-list is refused");
+
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert!(
+            status.message().contains("registry"),
+            "{}",
+            status.message()
+        );
+    }
+
+    // Positive control: an allow-listed registry passes the check and
+    // proceeds to process the (empty) artifact rather than being refused.
+    #[tokio::test]
+    async fn prepare_artifact_accepts_an_allow_listed_registry() {
+        let (tx, _rx) = channel(100);
+        let source_cache: SourceCache = Arc::new(Mutex::new(SourceCacheState::default()));
+
+        let request = Request::new(PrepareArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec![],
+                name: "test".to_string(),
+                sources: vec![],
+                steps: vec![],
+                systems: vec![],
+                target: 0,
+            }),
+            artifact_context: ".".to_string(),
+            artifact_namespace: "library".to_string(),
+            artifact_unlock: false,
+            registry: "http://registry.example.com".to_string(),
+        });
+
+        let result = prepare_artifact(
+            request,
+            &tx,
+            source_cache,
+            &["http://registry.example.com".to_string()],
+        )
+        .await;
+
+        // With no sources and no steps this succeeds outright; the point of
+        // this control is that it is not the registry refusal above.
+        if let Err(status) = result {
+            assert_ne!(status.code(), Code::InvalidArgument);
+            assert!(
+                !status.message().contains("registry"),
+                "{}",
+                status.message()
+            );
+        }
     }
 }

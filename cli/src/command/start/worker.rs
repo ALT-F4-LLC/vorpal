@@ -105,11 +105,49 @@ impl WorkerServer {
 /// nobody" but every token still routes through namespace RBAC rather than
 /// being refused outright).
 ///
-/// Matching is whole-URI (scheme + host + port), after trimming one
-/// trailing `/` from both sides — never prefix or substring, which would
-/// let `https://registry.example.com.evil.test` or a query-string trick
-/// slip past an allow-list entry of `https://registry.example.com`.
-fn resolve_registry(requested: &str, allowed: &[String]) -> Result<String, Status> {
+/// Matching is exact string equality after trimming one trailing `/` from
+/// each side — not a URI parse of scheme/host/port, and never prefix or
+/// substring, which would let `https://registry.example.com.evil.test` or a
+/// query-string trick slip past an allow-list entry of
+/// `https://registry.example.com`. Two URIs that are equivalent as parsed
+/// components (e.g. differing only in path, case, or a second trailing `/`)
+/// but differ as strings after one trim are treated as different registries
+/// — stricter than semantic URI equality, which is the safe direction for
+/// an allow-list to err in.
+/// The registry `resolve_registry` selected. Wrapping it distinguishes it,
+/// at the type level, from `request.registry` (a bare `String` on the
+/// unvalidated request) — `pull_source` and `pull_artifact` accept only
+/// this type, so a future edit that threads the raw request field into
+/// either of them instead of the resolved value fails to compile rather
+/// than silently reopening the registry-pinning check (C1/A2 in the threat
+/// model). Only `resolve_registry` constructs one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ResolvedRegistry(String);
+
+impl PartialEq<&str> for ResolvedRegistry {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl std::ops::Deref for ResolvedRegistry {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ResolvedRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+pub(super) fn resolve_registry(
+    requested: &str,
+    allowed: &[String],
+) -> Result<ResolvedRegistry, Status> {
     fn normalized(value: &str) -> &str {
         value.strip_suffix('/').unwrap_or(value)
     }
@@ -121,13 +159,14 @@ fn resolve_registry(requested: &str, allowed: &[String]) -> Result<String, Statu
     };
 
     if requested.is_empty() {
-        return Ok(default_registry.clone());
+        return Ok(ResolvedRegistry(default_registry.clone()));
     }
 
     allowed
         .iter()
         .find(|candidate| normalized(candidate) == normalized(requested))
         .cloned()
+        .map(ResolvedRegistry)
         .ok_or_else(|| {
             Status::invalid_argument(format!(
                 "registry {requested:?} is not in the configured allow-list"
@@ -196,7 +235,7 @@ async fn pull_source(
     artifact_namespace: String,
     artifact_source: &ArtifactSource,
     artifact_source_dir_path: &Path,
-    registry: String,
+    registry: ResolvedRegistry,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     if artifact_source.name.is_empty() {
@@ -247,14 +286,25 @@ async fn pull_source(
                 let mut response = response.into_inner();
                 let mut response_data = Vec::new();
 
-                while let Ok(message) = response.message().await {
-                    if message.is_none() {
-                        break;
-                    }
-
-                    if let Some(res) = message {
-                        if !res.data.is_empty() {
-                            response_data.extend(res.data);
+                // Explicit match, not `while let Ok(..)`: that pattern treats
+                // a stream `Err` the same as a clean end-of-stream, so a
+                // connection drop mid-transfer fell through to `publish_archive`
+                // with only the bytes received so far — caching a truncated
+                // archive under the digest (threat model C3). An error here
+                // discards `response_data` by returning before publish.
+                loop {
+                    match response.message().await {
+                        Ok(Some(res)) => {
+                            if !res.data.is_empty() {
+                                response_data.extend(res.data);
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(status) => {
+                            return Err(Status::internal(format!(
+                                "source archive stream failed after {} bytes: {status:?}",
+                                response_data.len()
+                            )));
                         }
                     }
                 }
@@ -599,7 +649,7 @@ async fn pull_artifact(
     archive_auth_header: Option<&MetadataValue<Ascii>>,
     artifact_namespace: &str,
     artifact_digest: &str,
-    registry: &str,
+    registry: &ResolvedRegistry,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
 ) -> Result<(), Status> {
     // Both values are joined into store paths below. `build_artifact` parses
@@ -652,14 +702,23 @@ async fn pull_artifact(
                 let mut response = response.into_inner();
                 let mut response_data = Vec::new();
 
-                while let Ok(message) = response.message().await {
-                    if message.is_none() {
-                        break;
-                    }
-
-                    if let Some(res) = message {
-                        if !res.data.is_empty() {
-                            response_data.extend(res.data);
+                // Explicit match, not `while let Ok(..)` — see the identical
+                // comment in `pull_source` (threat model C3): a stream `Err`
+                // must discard `response_data` rather than fall through to
+                // `publish_archive` with a truncated prefix.
+                loop {
+                    match response.message().await {
+                        Ok(Some(res)) => {
+                            if !res.data.is_empty() {
+                                response_data.extend(res.data);
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(status) => {
+                            return Err(Status::internal(format!(
+                                "artifact archive stream failed after {} bytes: {status:?}",
+                                response_data.len()
+                            )));
                         }
                     }
                 }
@@ -2588,6 +2647,19 @@ mod tests {
         );
     }
 
+    // The prior test only trims the allow-list side; a request-supplied
+    // trailing slash must be trimmed too, or the two sides of the same
+    // normalization would be tested asymmetrically.
+    #[test]
+    fn resolve_registry_trims_one_trailing_slash_on_the_request_side_too() {
+        let allowed = vec!["http://registry.example.com".to_string()];
+
+        assert_eq!(
+            resolve_registry("http://registry.example.com/", &allowed).unwrap(),
+            "http://registry.example.com"
+        );
+    }
+
     #[test]
     fn resolve_registry_refuses_a_selection_outside_the_allow_list() {
         let allowed = vec![
@@ -2668,12 +2740,72 @@ mod tests {
     #[tokio::test]
     async fn pull_artifact_refuses_a_digest_that_is_not_a_bare_hex_string() {
         let (tx, _rx) = mpsc::channel(100);
+        let registry = resolve_registry("", &["http://localhost:0".to_string()]).unwrap();
 
-        let status = pull_artifact(None, "library", "../../../etc", "http://localhost:0", &tx)
+        let status = pull_artifact(None, "library", "../../../etc", &registry, &tx)
             .await
             .expect_err("a traversing digest is refused");
 
         assert_eq!(status.code(), tonic::Code::InvalidArgument);
         assert!(status.message().contains("digest"), "{}", status.message());
+    }
+
+    // C4/C5 (threat model): the registry refusal must run before
+    // `obtain_service_credentials`, which performs its own OIDC discovery
+    // round trip. Drives `build_artifact` directly with real issuer
+    // credentials pointed at a listener that accepts the TCP connection but
+    // never answers — if the refusal ran after the credential fetch, the
+    // discovery request would hang against it and the outer `timeout` below
+    // would elapse instead of the call returning promptly.
+    #[tokio::test]
+    async fn build_artifact_registry_refusal_precedes_obtaining_service_credentials() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local listener");
+        let issuer_addr = listener.local_addr().expect("local addr");
+
+        tokio::spawn(async move {
+            // Accept and hold each connection open with no response, so any
+            // OIDC discovery request against this issuer would hang rather
+            // than fail fast.
+            while let Ok((stream, _)) = listener.accept().await {
+                std::mem::forget(stream);
+            }
+        });
+
+        let digest = valid_digest("a");
+        let mut request = build_request("library", &digest, &digest);
+        request.registry = "http://attacker.example.com".to_string();
+
+        let issuer = format!("http://{issuer_addr}");
+        let (tx, _rx) = mpsc::channel(100);
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            build_artifact(
+                Some(&issuer),
+                None,
+                Some("client-id"),
+                Some("client-secret"),
+                &["http://registry.example.com".to_string()],
+                request,
+                &tx,
+            ),
+        )
+        .await;
+
+        let status = result
+            .expect(
+                "registry refusal must return before obtain_service_credentials \
+                 contacts the issuer",
+            )
+            .expect_err("a build request naming an unlisted registry is refused");
+
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert!(
+            status.message().contains("registry"),
+            "{}",
+            status.message()
+        );
     }
 }
