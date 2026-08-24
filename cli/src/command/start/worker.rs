@@ -44,8 +44,8 @@ use tracing::{error, info};
 use vorpal_sdk::{
     api::{
         archive::{
-            archive_service_client::ArchiveServiceClient, ArchivePullRequest,
-            ArchivePullResponse, ArchivePushRequest,
+            archive_service_client::ArchiveServiceClient, ArchivePullRequest, ArchivePullResponse,
+            ArchivePushRequest,
         },
         artifact::{
             artifact_service_client::ArtifactServiceClient, Artifact, ArtifactSource, ArtifactStep,
@@ -1850,8 +1850,11 @@ mod tests {
     // `accumulate_archive_stream` losing bytes generally.
     #[tokio::test]
     async fn accumulate_archive_stream_returns_every_chunk_in_order_on_success() {
-        let mut source =
-            ScriptedChunks::new(vec![chunk(b"first-chunk"), chunk(b"second-chunk"), Ok(None)]);
+        let mut source = ScriptedChunks::new(vec![
+            chunk(b"first-chunk"),
+            chunk(b"second-chunk"),
+            Ok(None),
+        ]);
 
         let data = accumulate_archive_stream(&mut source, "test archive")
             .await

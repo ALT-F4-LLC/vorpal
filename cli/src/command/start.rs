@@ -616,7 +616,11 @@ pub async fn run(args: RunArgs) -> Result<()> {
     // every build. An explicit (possibly empty) `--registry-allowed` is the
     // operator's own choice and is used as given.
     let registry_allowed = args.registry_allowed.clone().unwrap_or_else(|| {
-        vec![own_registry_address(effective_port, args.tls, &get_socket_path())]
+        vec![own_registry_address(
+            effective_port,
+            args.tls,
+            &get_socket_path(),
+        )]
     });
 
     // Emit the registry allow-list at startup for the same reason the
