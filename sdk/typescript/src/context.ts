@@ -110,6 +110,13 @@ interface OIDCDiscovery {
   token_endpoint: string;
 }
 
+/** The shape {@link parseTokenResponse} validates a token-endpoint body into. */
+interface TokenResponse {
+  access_token: string;
+  expires_in?: number;
+  refresh_token?: string;
+}
+
 /**
  * A completed refresh exchange. `expiresIn` is `undefined` when the IdP's
  * response omitted the field — distinct from an explicit `0`, which
@@ -179,7 +186,12 @@ export function credentialEgressOrigin(raw: string): string {
   // WHATWG URL keeps the bracket syntax in `hostname` for an IPv6 literal
   // (`[::1]`, not `::1`), unlike Go's url.Hostname(). Strip it before
   // comparing so the loopback exemption actually matches "::1" rather than
-  // silently refusing every IPv6-loopback issuer.
+  // silently refusing every IPv6-loopback issuer. Deliberate divergence from
+  // Rust: reqwest::Url::host_str() keeps the brackets and Rust never strips
+  // them (sdk/rust/src/context.rs:690-695), so Rust's identical-looking
+  // "::1" match never fires and every IPv6-loopback issuer is refused there
+  // — recorded so a future parity pass reads TS's behavior (matching Go) as
+  // the considered one, not Rust's as the baseline to restore.
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (!host) {
     throw new Error(`OIDC URL has no host: ${raw}`);
@@ -200,6 +212,52 @@ export function credentialEgressOrigin(raw: string): string {
   const port = url.port || (url.protocol === "https:" ? "443" : "80");
 
   return `${url.protocol}//${host}:${port}`;
+}
+
+/**
+ * Validates a parsed token-endpoint response body into {@link TokenResponse}.
+ * `tokenResp.json()` only guarantees valid JSON, not this shape — an
+ * unchecked cast would let a malformed or hostile token response (a bare
+ * `null`, an array, or a body missing `access_token`) either throw an
+ * unclassified TypeError past the Sent/NotSent boundary (so the caller never
+ * marks the token spent and replays it — the token is already on the wire by
+ * this point) or silently persist an unusable access token. Named and
+ * exported for the same reason {@link parseCredentials} is: this file's
+ * established pattern for validating externally-sourced JSON is a named
+ * parser, not an inline check-then-cast at the call site.
+ */
+/** @internal Exported for unit tests only; not part of the public SDK surface. */
+export function parseTokenResponse(parsed: unknown): TokenResponse {
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("token response is not a JSON object");
+  }
+  const candidate = parsed as Record<string, unknown>;
+  if (typeof candidate.access_token !== "string" || candidate.access_token.length === 0) {
+    throw new Error("token response is missing a non-empty access_token");
+  }
+  // Number.isFinite, not just typeof: `Infinity`/`NaN` are typeof "number"
+  // but neither survives round-tripping through JSON.stringify — Infinity
+  // serializes as `null`, which would brick credentials.json for every
+  // future call reading this issuer back.
+  if (
+    candidate.expires_in !== undefined &&
+    (typeof candidate.expires_in !== "number" || !Number.isFinite(candidate.expires_in))
+  ) {
+    throw new Error("token response's expires_in must be a finite number when present");
+  }
+  if (candidate.refresh_token !== undefined && typeof candidate.refresh_token !== "string") {
+    throw new Error("token response's refresh_token must be a string when present");
+  }
+  // Every field TokenResponse declares has just been checked above; build
+  // the return value explicitly rather than casting `candidate` (whose
+  // index signature makes every property type `unknown`) so the compiler
+  // verifies this function's own claim about its return type instead of
+  // trusting an assertion.
+  return {
+    access_token: candidate.access_token,
+    expires_in: candidate.expires_in as number | undefined,
+    refresh_token: candidate.refresh_token as string | undefined,
+  };
 }
 
 /**
@@ -236,7 +294,10 @@ export async function refreshAccessToken(
 
   // Discover token endpoint. Strip a trailing slash first: an issuer of
   // "https://idp.example/" would otherwise double the slash and 404 rather
-  // than reach the discovery document.
+  // than reach the discovery document. Deliberate divergence from Rust,
+  // which does not trim (sdk/rust/src/context.rs:741) and so 404s on a
+  // trailing-slash issuer instead of tolerating it — record it here so a
+  // future parity pass reads this as a considered improvement, not drift.
   const discoveryUrl = `${issuer.replace(/\/+$/, "")}/.well-known/openid-configuration`;
   let discoveryResp: Response;
   try {
@@ -303,32 +364,11 @@ export async function refreshAccessToken(
     throw sent(new Error(`token refresh failed with status: ${tokenResp.status}`));
   }
 
-  let tokenResult: { access_token: string; expires_in?: number; refresh_token?: string };
+  // Validated inside the same Sent boundary as the parse failure below,
+  // rather than trusting an unchecked cast of tokenResp.json().
+  let tokenResult: TokenResponse;
   try {
-    // `tokenResp.json()` only guarantees valid JSON, not the shape below —
-    // an unchecked cast here would let a malformed or hostile token
-    // response (e.g. a bare `null`, an array, or a body missing
-    // `access_token`) either throw an unclassified TypeError past this
-    // function's Sent/NotSent boundary (so the caller never marks the
-    // token spent and replays it — the token is already on the wire by
-    // this point) or silently persist an unusable access token. Validate
-    // the shape here, inside the same Sent boundary as the parse failure
-    // above, rather than trusting the cast.
-    const parsed: unknown = await tokenResp.json();
-    if (typeof parsed !== "object" || parsed === null) {
-      throw new Error("token response is not a JSON object");
-    }
-    const candidate = parsed as Record<string, unknown>;
-    if (typeof candidate.access_token !== "string" || candidate.access_token.length === 0) {
-      throw new Error("token response is missing a non-empty access_token");
-    }
-    if (candidate.expires_in !== undefined && typeof candidate.expires_in !== "number") {
-      throw new Error("token response's expires_in must be a number when present");
-    }
-    if (candidate.refresh_token !== undefined && typeof candidate.refresh_token !== "string") {
-      throw new Error("token response's refresh_token must be a string when present");
-    }
-    tokenResult = candidate as typeof tokenResult;
+    tokenResult = parseTokenResponse(await tokenResp.json());
   } catch (err) {
     throw sent(new Error(`failed to parse token response: ${errMessage(err)}`));
   }
@@ -407,7 +447,12 @@ function spentGrantError(issuer: string, summary: string, cause: unknown): Error
  * TypeScript's `interface` types are erased at runtime and provide no
  * validation whatever, so a corrupt or hostile field (e.g. a non-numeric
  * `issued_at`) would otherwise silently propagate as `NaN` into
- * {@link needsRefresh} and suppress a due refresh (AB-7b).
+ * {@link needsRefresh} and suppress a due refresh (AB-7b). This does both
+ * the type check and the range check in one place; Go's equivalent
+ * (`validateIssuerCredentials` in context.go) only adds the range check,
+ * because `json.Unmarshal` already rejects a type mismatch before Go's
+ * validator runs. Same control, a narrower boundary in Go because the
+ * language gives it a static decode step TypeScript does not have.
  */
 function validateIssuerCredentials(issuerName: string, value: unknown): asserts value is IssuerCredentials {
   if (typeof value !== "object" || value === null) {
@@ -513,7 +558,7 @@ function writeCredentialsSecure(path: string, data: string): void {
     try {
       // writeSync is not guaranteed to write the whole buffer in one call;
       // a discarded short-write return value would let a partial write be
-      // fsync'd and renamed onto path as if it were complete (SEC-1).
+      // fsync'd and renamed onto path as if it were complete.
       const expectedBytes = Buffer.byteLength(data, "utf-8");
       const writtenBytes = writeSync(fd, data, null, "utf-8");
       if (writtenBytes !== expectedBytes) {
@@ -692,7 +737,13 @@ export async function clientAuthHeader(
       return null;
     }
 
-    let issuerCreds = credentials.issuer[registryIssuer];
+    // Same hazard as the registry lookup above, reachable through the same
+    // shape: registryIssuer is untrusted file content, so an issuer value
+    // of "constructor" or "toString" would otherwise return an inherited
+    // prototype function instead of undefined and skip the check below.
+    let issuerCreds = Object.prototype.hasOwnProperty.call(credentials.issuer, registryIssuer)
+      ? credentials.issuer[registryIssuer]
+      : undefined;
     if (!issuerCreds) {
       throw new Error(`no credentials for issuer: ${registryIssuer}`);
     }

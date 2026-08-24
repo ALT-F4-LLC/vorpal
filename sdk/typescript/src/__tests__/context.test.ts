@@ -169,6 +169,42 @@ describe("clientAuthHeader: refresh-token rotation", () => {
   });
 
   // ---------------------------------------------------------------------
+  // AB-15 — a registry or issuer name that collides with an inherited
+  // Object.prototype property (e.g. "constructor") must not resolve
+  // through the prototype chain instead of taking the "no mapping" /
+  // "no credentials" branch.
+  // ---------------------------------------------------------------------
+
+  test("a registry named after a prototype property finds no mapping rather than an inherited value", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "proto-registry-refresh-token" });
+
+    const header = await clientAuthHeader("constructor", credentialsPath);
+
+    expect(header).toBeNull();
+  });
+
+  test("an issuer named after a prototype property is reported missing rather than resolved", async () => {
+    const raw = JSON.stringify({
+      issuer: {
+        [ISSUER]: {
+          access_token: "old-access-token",
+          client_id: "vorpal-cli",
+          expires_in: 3600,
+          issued_at: 0,
+          refresh_token: "proto-issuer-refresh-token",
+          scopes: [],
+        },
+      },
+      registry: { [REGISTRY]: "constructor" },
+    });
+    writeFileSync(credentialsPath, raw, { mode: 0o600 });
+
+    await expect(clientAuthHeader(REGISTRY, credentialsPath)).rejects.toThrow(
+      "no credentials for issuer: constructor",
+    );
+  });
+
+  // ---------------------------------------------------------------------
   // C-1 / C-2 — serialization and post-lock clock sampling (AB-1, AB-2)
   // ---------------------------------------------------------------------
 
@@ -421,6 +457,15 @@ describe("clientAuthHeader: refresh-token rotation", () => {
   // needsRefresh's future-dated-issued_at rule would read it as due, and
   // every waiter would refresh again. A post-lock sample reads the winner's
   // already-committed, now-fresh state and finds no refresh due.
+  //
+  // The delay is just over one second, not 50ms (round 1's testing judge
+  // reproduced the 50ms version passing 18/20 runs under the exact mutation
+  // it exists to catch): both `now` and `issued_at` are truncated to whole
+  // seconds by Math.floor(Date.now() / 1000), so a 50ms gap only crosses a
+  // second boundary by chance. Any delay >= 1s advances Math.floor by at
+  // least 1 on every run (floor(x+1) = floor(x)+1 for every x), making the
+  // pre-lock/post-lock second value differ deterministically instead of on
+  // the minority of runs that happened to straddle a boundary.
   // ---------------------------------------------------------------------
 
   test("samples the clock after the lock, so concurrent waiters never over-refresh", async () => {
@@ -440,7 +485,7 @@ describe("clientAuthHeader: refresh-token rotation", () => {
         // Deliberately slow: gives every other concurrent caller a chance
         // to have already sampled `now` before the winner commits, if the
         // implementation samples it before acquiring the lock.
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 1050));
         return new Response(JSON.stringify({ access_token: "new-access-token", expires_in: 3600 }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -577,6 +622,76 @@ describe("clientAuthHeader: atomic credential write", () => {
     // @ts-expect-error overriding the global is intentional for test isolation
     globalThis.fetch = mockFetch;
   }
+
+  // -------------------------------------------------------------------
+  // The in-process reader loop above shares this test's single-threaded
+  // event loop with clientAuthHeader itself: writeCredentialsSecure runs
+  // start to finish with no `await` inside it, so nothing ever yields the
+  // loop mid-write, and no in-process reader — whatever the write does,
+  // atomic or not — can ever be scheduled between two of its syscalls.
+  // That test therefore cannot discriminate a correct atomic write from a
+  // reverted truncating one; only a genuinely separate OS process, racing
+  // the real kernel scheduler against the writer's syscalls, can. This
+  // test spawns one.
+  // -------------------------------------------------------------------
+  test("a second OS process looping on parse never observes a torn file", async () => {
+    // The fixture is written exactly once, atomically, before the reader
+    // starts: every subsequent write the loop below triggers goes through
+    // clientAuthHeader's own writeCredentialsSecure, the atomic path under
+    // test. Re-writing the fixture on every iteration via the test's
+    // truncating writeCredentialsFile helper (as an earlier version of this
+    // test did) would inject genuine torn reads of its own, from a write
+    // path that isn't the one this test exists to verify.
+    writeCredentialsFile(credentialsPath, {
+      issuedAt: 0,
+      refreshToken: "cross-process-refresh-token-0",
+    });
+
+    const durationMs = 500;
+    const resultPath = join(tmpDir, "reader-result.txt");
+    const readerScript = [
+      `const { readFileSync, writeFileSync } = require("node:fs");`,
+      `const path = ${JSON.stringify(credentialsPath)};`,
+      `const resultPath = ${JSON.stringify(resultPath)};`,
+      `const deadline = Date.now() + ${durationMs};`,
+      `let torn = false;`,
+      `while (Date.now() < deadline) {`,
+      `  try { JSON.parse(readFileSync(path, "utf-8")); }`,
+      `  catch (err) { if (err instanceof SyntaxError) { torn = true; break; } }`,
+      `}`,
+      `writeFileSync(resultPath, torn ? "TORN" : "OK");`,
+    ].join("\n");
+
+    const reader = Bun.spawn([process.execPath, "-e", readerScript], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+
+    let n = 0;
+    const countingRefresher = async () => {
+      n += 1;
+      return {
+        accessToken: `access-${n}`,
+        expiresIn: 3600,
+        issuedAt: 0, // always "expired": every fakeNow() call below is due for refresh
+        refreshToken: `cross-process-refresh-token-${n}`,
+      };
+    };
+    // Strictly increasing and always far past any issuedAt this test
+    // commits, so every call is due for refresh — the loop keeps writing
+    // (through the real atomic path) for the reader to race against.
+    let fakeNow = 1_000_000_000;
+    const advancingClock = () => (fakeNow += 10_000);
+
+    const deadline = Date.now() + durationMs;
+    while (Date.now() < deadline) {
+      await clientAuthHeader(REGISTRY, credentialsPath, countingRefresher, advancingClock);
+    }
+
+    await reader.exited;
+    const result = readFileSync(resultPath, "utf-8");
+    expect(result).toBe("OK");
+  });
 });
 
 // ---------------------------------------------------------------------------

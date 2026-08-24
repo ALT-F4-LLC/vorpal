@@ -683,6 +683,18 @@ func TestClientAuthHeaderAtRefreshesDespiteFutureIssuedAt(t *testing.T) {
 // observably stale by the time a waiter's turn comes: it would predate the
 // winner's freshly committed IssuedAt, needsRefresh's future-dated-IssuedAt
 // rule (C-6) would read that as due, and every waiter would refresh again.
+//
+// The delay is just over one second, not 50ms (round 1's testing judge
+// reproduced the 50ms version passing 56/60 runs under the exact mutation
+// it exists to catch): both now() and IssuedAt are truncated to whole
+// seconds by time.Time.Unix(), so a 50ms gap only crosses a second
+// boundary by chance — most runs sample and commit inside the same integer
+// second regardless of ordering, and the mutant is caught only when they
+// happen to straddle one. Adding any duration >= 1s to a real number always
+// advances its floor by at least 1 (floor(x+1) = floor(x)+1 for every x),
+// so a >1s delay makes the pre-lock/post-lock second value differ on every
+// run, deterministically, rather than on the ~5% of runs that happened to
+// cross a boundary.
 func TestClientAuthHeaderAtSamplesClockAfterLock(t *testing.T) {
 	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
@@ -693,7 +705,7 @@ func TestClientAuthHeaderAtSamplesClockAfterLock(t *testing.T) {
 	var calls int32
 	refresher := func(_ *string, _, _, _ string) (string, *int64, int64, string, error) {
 		atomic.AddInt32(&calls, 1)
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(1050 * time.Millisecond)
 		expires := int64(3600)
 		return "new-access-token", &expires, time.Now().Unix(), "", nil
 	}
@@ -848,6 +860,46 @@ func TestRefreshAccessTokenClassifiesTokenEndpointStatusAsSent(t *testing.T) {
 	}
 }
 
+// TestRefreshAccessTokenClassifiesTransportFailureAsSent exercises the
+// PostForm error return itself (context.go's `client.PostForm(...)` failing
+// directly), not a token endpoint that responds with a bad status — the two
+// prior Sent tests above both get a real HTTP response and fail on its
+// content. Hijacking and closing the connection with no response at all
+// forces a transport-level error out of PostForm, the arm VPL-189-CL37
+// found untested (VPL-189-CL37, VPL-189-G2).
+func TestRefreshAccessTokenClassifiesTransportFailureAsSent(t *testing.T) {
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"token_endpoint": %q}`, server.URL+"/token")
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("test server's ResponseWriter does not support hijacking")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("failed to hijack connection: %v", err)
+		}
+		// Close with no response at all: the client sees a transport
+		// failure (EOF/connection reset) out of PostForm itself, not a
+		// parsed HTTP response with an error status.
+		conn.Close()
+	})
+	server = httptest.NewServer(mux)
+	defer server.Close()
+
+	_, _, _, _, err := refreshAccessToken(nil, "client", server.URL, "refresh-token", time.Second)
+	if err == nil {
+		t.Fatal("expected error when the token endpoint connection is closed with no response")
+	}
+	var failure *refreshFailureError
+	if !errors.As(err, &failure) || failure.kind != refreshFailureSent {
+		t.Fatalf("expected Sent classification for a transport failure on the token request, got: %v", err)
+	}
+}
+
 func TestRefreshAccessTokenClassifiesMalformedTokenResponseAsSent(t *testing.T) {
 	mux := http.NewServeMux()
 	var server *httptest.Server
@@ -897,7 +949,15 @@ func TestRefreshAccessTokenRefusesEmptyAccessToken(t *testing.T) {
 	}
 }
 
-func TestClientAuthHeaderAtRefusesEmptyAccessToken(t *testing.T) {
+// TestClientAuthHeaderAtPreservesOldAccessTokenOnSentFailure exercises
+// clientAuthHeaderAt's own decision — leave the stored credential untouched
+// when a Sent-classified refresh failure is handed to it — using a mock
+// refresher that hands back the same failure refreshAccessToken produces for
+// an empty access_token. It does not itself decide to refuse an empty
+// access_token; TestRefreshAccessTokenRefusesEmptyAccessToken above is what
+// exercises that decision, in refreshAccessToken (VPL-189-CL41: this test
+// was previously named for the wrong function's decision).
+func TestClientAuthHeaderAtPreservesOldAccessTokenOnSentFailure(t *testing.T) {
 	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
 	credPath := filepath.Join(tempDir, "credentials.json")
@@ -946,6 +1006,49 @@ func TestRefreshAccessTokenRefusesRedirectFromTokenEndpoint(t *testing.T) {
 	}
 	if atomic.LoadInt32(&secondCalled) != 0 {
 		t.Fatal("the redirect target must never receive the credential-bearing request")
+	}
+}
+
+// TestRefreshAccessTokenBoundsAHungDiscoveryEndpoint proves C-9's timeout is
+// actually wired into the request, not merely claimed: a discovery handler
+// that never responds inside the configured timeout must still return in
+// bounded time. This matters beyond the request itself — C-1's mutex is
+// held across the whole exchange, so an unbounded discovery request would
+// stall every authenticated call in the process, not just this one
+// (VPL-189-CL21).
+func TestRefreshAccessTokenBoundsAHungDiscoveryEndpoint(t *testing.T) {
+	unblock := make(chan struct{})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		<-unblock // never returns before the test's timeout budget
+	})
+	server := httptest.NewServer(mux)
+	// Deliberate order: httptest.Server.Close waits for every in-flight
+	// handler to return, and the handler above only returns once unblock is
+	// closed. Deferred calls run LIFO, so registering close(unblock) after
+	// server.Close() makes the handler exit first when this function
+	// returns — the reverse order deadlocks Close() waiting on a handler
+	// that will never see unblock close until Close() itself has returned.
+	defer server.Close()
+	defer close(unblock)
+
+	const timeout = 200 * time.Millisecond
+	start := time.Now()
+	_, _, _, _, err := refreshAccessToken(nil, "client", server.URL, "refresh-token", timeout)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error from a discovery endpoint that never responds")
+	}
+	var failure *refreshFailureError
+	if !errors.As(err, &failure) || failure.kind != refreshFailureNotSent {
+		t.Fatalf("expected NotSent classification for a timeout before the token was on the wire, got: %v", err)
+	}
+	// Generous upper bound (10x the configured timeout) to absorb scheduler
+	// jitter in CI without accepting a client.Timeout that silently no-ops.
+	if elapsed > 10*timeout {
+		t.Fatalf("expected the request to be bounded by %v, took %v", timeout, elapsed)
 	}
 }
 

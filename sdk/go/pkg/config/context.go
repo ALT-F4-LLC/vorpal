@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/agent"
 	"github.com/ALT-F4-LLC/vorpal/sdk/go/pkg/api/artifact"
@@ -171,6 +172,28 @@ func credentialEgressOrigin(raw string) (string, error) {
 		return "", fmt.Errorf("OIDC URL has no host: %s", raw)
 	}
 
+	// Refuse any non-ASCII host outright rather than comparing a lowercased
+	// copy of it. net/url.Hostname() does not apply IDNA/punycode
+	// normalization the way TypeScript's WHATWG URL does, so the string this
+	// function compares and the string an outbound request actually
+	// resolves are the same bytes only for ASCII hosts; for anything else a
+	// Unicode-casefolded comparison here could accept an origin pin that a
+	// DNS lookup of the raw, un-normalized host would not treat as the same
+	// name. Refusing keeps the compared value and the dialed value identical
+	// by construction instead of by two independent normalizations agreeing.
+	for i := 0; i < len(host); i++ {
+		if host[i] > unicode.MaxASCII {
+			return "", fmt.Errorf("OIDC URL host must be ASCII: %s", raw)
+		}
+	}
+
+	// Deliberate divergence from Rust: net/url.Hostname() strips the bracket
+	// syntax from an IPv6 literal ("::1", not "[::1]"), so this "::1" match
+	// fires for a real IPv6-loopback issuer. Rust's reqwest::Url::host_str()
+	// keeps the brackets, so Rust's identical-looking match at
+	// sdk/rust/src/context.rs:695 never fires and every IPv6-loopback issuer
+	// is refused there — recorded here so a future parity pass reads Go's
+	// behavior as the considered one, not Rust's as the baseline to restore.
 	isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
 
 	switch {
@@ -226,7 +249,10 @@ func refreshAccessToken(audience *string, clientId, issuer, refreshToken string,
 
 	// Discover token endpoint. Trim a trailing slash first: an issuer of
 	// "https://idp.example/" would otherwise double the slash and 404
-	// rather than reach the discovery document.
+	// rather than reach the discovery document. Deliberate divergence from
+	// Rust, which does not trim (sdk/rust/src/context.rs:741) and so 404s on
+	// a trailing-slash issuer instead of tolerating it — record it here so a
+	// future parity pass reads this as a considered improvement, not drift.
 	discoveryURL := fmt.Sprintf("%s/.well-known/openid-configuration", strings.TrimRight(issuer, "/"))
 	resp, err := client.Get(discoveryURL)
 	if err != nil {
@@ -365,33 +391,60 @@ func writeCredentialsSecure(path string, data []byte) error {
 
 	var lastErr error
 
+	// The per-attempt work lives in its own function so its defer runs at
+	// the end of that attempt, not at the end of writeCredentialsSecure: a
+	// defer written directly in this loop's body would still be scoped to
+	// the whole function and only actually run on return, which happens to
+	// be harmless today (every path out of the loop body returns
+	// immediately) but is a defer-in-loop shape a future edit could easily
+	// turn into a real accumulation bug by adding a second iteration that
+	// doesn't return.
 	for attempt := 0; attempt < tempFileMaxAttempts; attempt++ {
-		f, err := os.CreateTemp(dir, base+".*.tmp")
+		committed, err := writeCredentialsSecureAttempt(dir, base, path, data)
 		if err != nil {
 			if errors.Is(err, os.ErrExist) {
 				lastErr = err
 				continue
 			}
-			return fmt.Errorf("failed to create temp credentials file: %w", err)
-		}
-
-		tmpPath := f.Name()
-		committed := false
-		defer func() {
-			if !committed {
-				os.Remove(tmpPath)
-			}
-		}()
-
-		if err := writeCredentialsSecureCommit(f, tmpPath, path, data); err != nil {
 			return err
 		}
-
-		committed = true
-		return nil
+		if committed {
+			return nil
+		}
 	}
 
 	return fmt.Errorf("every one of %d candidate temp-file names was already taken writing %s: %w", tempFileMaxAttempts, path, lastErr)
+}
+
+// writeCredentialsSecureAttempt performs one candidate-name attempt of
+// writeCredentialsSecure's retry loop: create the temp file exclusively,
+// write/fsync/rename it, and unlink it on any failure. Returns
+// (true, nil) on a committed write, (false, err) with err wrapping
+// os.ErrExist when the candidate name was already taken (the caller
+// retries), and (false, err) for any other failure (the caller stops).
+func writeCredentialsSecureAttempt(dir, base, path string, data []byte) (bool, error) {
+	f, err := os.CreateTemp(dir, base+".*.tmp")
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, err
+		}
+		return false, fmt.Errorf("failed to create temp credentials file: %w", err)
+	}
+
+	tmpPath := f.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if err := writeCredentialsSecureCommit(f, tmpPath, path, data); err != nil {
+		return false, err
+	}
+
+	committed = true
+	return true, nil
 }
 
 // writeCredentialsSecureCommit writes data to the already-created temp file
@@ -417,9 +470,16 @@ func writeCredentialsSecureCommit(f *os.File, tmpPath, path string, data []byte)
 }
 
 // validateIssuerCredentials rejects a credential record whose numeric fields
-// are out of range (C-11). json.Unmarshal already rejects a type mismatch
-// (e.g. a string where an int64 is expected) into VorpalCredentialsContent,
-// so only the range check is added here.
+// are out of range (C-11). The boundary this function is responsible for is
+// deliberately narrower than TypeScript's parseCredentials/
+// validateIssuerCredentials: json.Unmarshal already rejects a type mismatch
+// (e.g. a string where an int64 is expected) into VorpalCredentialsContent
+// before this function ever runs, so only the range check is added here.
+// TypeScript has no equivalent static decode step — its interface types are
+// erased at runtime — so its validator does both the type check and the
+// range check in one place. Same control, a different boundary in each
+// language because the language gives each SDK a different amount of
+// checking for free.
 func validateIssuerCredentials(c VorpalCredentialsContent) error {
 	if c.ExpiresIn < 0 {
 		return fmt.Errorf("expires_in must not be negative: %d", c.ExpiresIn)
@@ -494,8 +554,11 @@ func commitRefreshedCredentials(
 // closest available discipline. mu is held for the whole critical
 // section — read, refresh decision, exchange, write — not just the write,
 // so a waiter re-reads the winner's committed state instead of acting on
-// its own stale snapshot (closing AB-2), and so spent's check-then-insert
-// is atomic by construction.
+// its own stale snapshot (closing AB-2), and spent's check-then-insert is
+// atomic because that whole span runs with mu held — a discipline every
+// access site must observe, not a guarantee the struct shape enforces:
+// Go's compiler does not stop a future edit from reading or writing spent
+// outside the lock the way Rust's Mutex<RefreshState> does.
 //
 // Scope is this process only: it does not serialize against a separately
 // spawned config process, a running vorpal start agent, or the Rust/
