@@ -11,6 +11,10 @@ VORPAL_NAMESPACE := library
 VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
+# system services start now refuses a worker/registry with no issuer
+# (VPL-434); default to the repository's own docker-compose.yaml Keycloak
+# so vorpal-start/lima-vorpal-start keep working out of the box.
+VORPAL_ISSUER ?= http://localhost:8080/realms/vorpal
 LIMA_ARCH := $(ARCH)
 LIMA_CPUS := 8
 LIMA_DISK := 100
@@ -153,7 +157,7 @@ vorpal-prepare:
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- prepare $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
-	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start $(VORPAL_FLAGS)
+	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start --issuer "$(VORPAL_ISSUER)" $(VORPAL_FLAGS)
 
 vorpal-website-start:
 	bun run --cwd=website dev
@@ -178,4 +182,4 @@ lima-vorpal:
 	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal build $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)'
 
 lima-vorpal-start:
-	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal system services start $(VORPAL_FLAGS)'
+	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal system services start --issuer "$(VORPAL_ISSUER)" $(VORPAL_FLAGS)'

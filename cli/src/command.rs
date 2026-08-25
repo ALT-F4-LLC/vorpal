@@ -180,7 +180,14 @@ pub enum CommandSystemServices {
         #[arg(default_value = "23152", long)]
         health_check_port: u16,
 
-        #[arg(long)]
+        /// OIDC issuer URL for `--services worker`/`registry` authentication.
+        /// Settable via VORPAL_ISSUER so a default install
+        /// (`script/install.sh`) can supply it without a flag (VPL-711
+        /// AC1). Validated at parse time by `parse_issuer` so a value on
+        /// either channel that is empty or not a well-formed issuer never
+        /// reaches `resolve_required_issuer` disguised as "present"
+        /// (VPL-711 AB2).
+        #[arg(env = "VORPAL_ISSUER", long, value_parser = parse_issuer)]
         issuer: Option<String>,
 
         #[arg(long)]
@@ -1085,6 +1092,28 @@ fn login_http_client(timeout: Duration) -> Result<reqwest::Client> {
         .build()?)
 }
 
+/// clap `value_parser` for `system services start --issuer` (VPL-711 AC1,
+/// C1). Applied identically whether the value arrives via `--issuer` or the
+/// `VORPAL_ISSUER` environment variable, so an empty env value — which clap
+/// treats as present, not absent — is rejected here rather than reaching
+/// `resolve_required_issuer` as a false "issuer configured" (VPL-711 AB2).
+/// Reuses the same https-or-loopback rule already enforced for `vorpal
+/// login` (`credential_egress_origin`) so the two issuer-accepting paths in
+/// this binary agree on what a valid issuer looks like.
+fn parse_issuer(raw: &str) -> std::result::Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(
+            "issuer must not be empty; set --issuer or VORPAL_ISSUER to your OIDC issuer URL \
+             (e.g. https://idp.example.com/realms/vorpal)"
+                .to_string(),
+        );
+    }
+    let normalized = trimmed.trim_end_matches('/').to_string();
+    credential_egress_origin(&normalized).map_err(|err| err.to_string())?;
+    Ok(normalized)
+}
+
 /// Normalizes and validates the `--issuer` value before any network request
 /// touches it (VPL-280 AC1). Trimming and validation happen at this one call
 /// site so every later consumer — the discovery URL, `AuthUrl`, and both
@@ -1858,6 +1887,60 @@ pub async fn run() -> Result<()> {
 #[cfg(test)]
 mod login_egress_tests {
     use super::*;
+
+    // --- parse_issuer (VPL-711 AC1) ----------------------------------------
+
+    #[test]
+    fn parse_issuer_refuses_empty_string() {
+        // VPL-711 AB2: `VORPAL_ISSUER=` sets the env var to `Some("")`
+        // under clap's semantics; the parser must not treat that as a
+        // usable issuer.
+        let error = parse_issuer("").expect_err("an empty issuer must be refused");
+
+        assert!(
+            error.contains("must not be empty"),
+            "unexpected message: {error}"
+        );
+    }
+
+    #[test]
+    fn parse_issuer_refuses_whitespace_only() {
+        let error = parse_issuer("   ").expect_err("a whitespace-only issuer must be refused");
+
+        assert!(
+            error.contains("must not be empty"),
+            "unexpected message: {error}"
+        );
+    }
+
+    #[test]
+    fn parse_issuer_refuses_plaintext_off_loopback() {
+        let error = parse_issuer("http://idp.example.com")
+            .expect_err("a plaintext non-loopback issuer must be refused");
+
+        assert!(
+            error.contains("must be https"),
+            "unexpected message: {error}"
+        );
+    }
+
+    #[test]
+    fn parse_issuer_accepts_plaintext_loopback() {
+        // Positive control (VPL-711 C1's loopback exception): the shipped
+        // `makefile`/`docker-compose.yaml` Keycloak default.
+        let normalized = parse_issuer("http://localhost:8080/realms/vorpal")
+            .expect("a loopback issuer must validate");
+
+        assert_eq!(normalized, "http://localhost:8080/realms/vorpal");
+    }
+
+    #[test]
+    fn parse_issuer_trims_a_trailing_slash() {
+        let normalized = parse_issuer("https://tenant.example.com/")
+            .expect("a well-formed https issuer must validate");
+
+        assert_eq!(normalized, "https://tenant.example.com");
+    }
 
     // --- normalize_and_validate_login_issuer (AC1, AC4) -------------------
 

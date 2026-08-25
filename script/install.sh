@@ -516,6 +516,62 @@ validate_services() {
     done
 }
 
+# Rejects an $ISSUER that is not a well-formed https (or http+loopback)
+# URL, or that carries a character an installed unit/plist file could
+# reinterpret as its own syntax (VPL-711 AC2/C5). Mirrors validate_services'
+# allow-list shape rather than escaping: $ISSUER crosses into two different
+# downstream grammars (systemd unit, launchd plist XML), and one allow-list
+# is cheaper to get right than two escapers.
+validate_issuer() {
+    if [[ -z "$ISSUER" ]]; then
+        return
+    fi
+
+    case "$ISSUER" in
+        *$'\n'* | *'"'* | *'<'* | *'>'* | *'&'* | *'%'* | *'\'*)
+            print_error "Invalid issuer: contains a disallowed character" \
+                "Issuer values may not contain newlines, quotes, angle brackets, '&', '%', or backslashes." \
+                "Example: install.sh --issuer https://idp.example.com/realms/vorpal"
+            exit 1
+            ;;
+    esac
+
+    case "$ISSUER" in
+        https://*) ;;
+        http://localhost* | http://127.0.0.1* | http://\[::1\]*) ;;
+        *)
+            print_error "Invalid issuer: '$ISSUER'" \
+                "The issuer must be an https URL (plaintext http is only allowed on localhost, 127.0.0.1 or [::1])." \
+                "Example: install.sh --issuer https://idp.example.com/realms/vorpal"
+            exit 1
+            ;;
+    esac
+}
+
+# Refuses to write a worker/registry unit that cannot start (VPL-711
+# AC2/AC4/C6): `resolve_required_issuer` (cli/src/command/start.rs) refuses
+# any worker or registry start with no --issuer, so an installed unit with
+# no issuer would enter a restart loop instead of running. Naming the exact
+# migration step here, before install_service writes anything, is cheaper
+# than letting the operator find it in a service log (VPL-711 AC4/C7).
+require_issuer_for_authenticated_services() {
+    if [[ -n "$ISSUER" ]]; then
+        return
+    fi
+
+    local IFS=','
+    for svc in $SERVICES; do
+        case "$svc" in
+            worker | registry)
+                print_error "Missing --issuer for service '$svc'" \
+                    "Starting a worker or registry service now requires an OIDC issuer; unauthenticated starts are refused." \
+                    "Supply one: install.sh --issuer https://idp.example.com/realms/vorpal (or VORPAL_ISSUER=...). Unauthenticated installs are not supported yet."
+                exit 1
+                ;;
+        esac
+    done
+}
+
 # -- Signal handling & cleanup ------------------------------------------------
 
 cleanup() {
@@ -1824,6 +1880,8 @@ main() {
 
     if [[ "$NO_SERVICE" != 1 ]]; then
         validate_services
+        validate_issuer
+        require_issuer_for_authenticated_services
         install_service
         verify_service
     else
