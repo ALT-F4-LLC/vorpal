@@ -1074,8 +1074,10 @@ const LOGIN_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// hardened client and an unhardened `reqwest::get` coexisting a few lines
 /// apart, with the unhardened one used for discovery. Tests call this same
 /// function (with a short timeout) rather than building their own client, so
-/// a mutant that strips the redirect policy or the timeout fails here, not
-/// only in production.
+/// a mutant that strips either control fails here, not only in production:
+/// a stripped redirect policy fails the requested-paths assertion in the
+/// redirected-discovery test, and a stripped timeout fails the outer-bound
+/// assertion in the hung-IdP test.
 fn login_http_client(timeout: Duration) -> Result<reqwest::Client> {
     Ok(reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
@@ -2219,20 +2221,40 @@ mod login_egress_tests {
 
     #[tokio::test]
     async fn fetch_login_discovery_endpoints_times_out_on_a_hung_idp() {
-        // C-5(b): a discovery endpoint that accepts and never answers must
-        // not stall the command past the client's own timeout.
+        // VPL-732 C-1/C-2/C-3: a discovery endpoint that accepts and never
+        // answers must not stall the command past the client's own timeout.
+        // The outer bound below is the test harness's failure detector, not
+        // the control under test — asserting only that it fired (as the old
+        // `elapsed()` check effectively did once moved after an unbounded
+        // await) would pass even if the client's own timeout were stripped,
+        // since the outer bound would still end the request. So the outer
+        // `expect` must be the one that goes red, and the inner error must
+        // be pinned to a client-side timeout, not merely "some error".
         let idp = IdpServer::start(|_, _| None).await;
 
         let client = login_http_client(Duration::from_millis(250)).expect("test client must build");
-        let started = std::time::Instant::now();
 
-        fetch_login_discovery_endpoints(&client, &idp.issuer())
-            .await
-            .expect_err("a hung discovery endpoint must not hang the caller");
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            fetch_login_discovery_endpoints(&client, &idp.issuer()),
+        )
+        .await
+        .expect("the client's own timeout, not the test harness, must end this request");
+
+        let error = outcome.expect_err("a hung discovery endpoint must not hang the caller");
+        let reqwest_error = error
+            .downcast_ref::<reqwest::Error>()
+            .expect("the client timeout must surface as a reqwest::Error");
 
         assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "the client timeout, not the test harness, must have ended this request"
+            reqwest_error.is_timeout(),
+            "unexpected error: {}",
+            reqwest_error
+        );
+        assert_eq!(
+            idp.requested_paths(),
+            vec!["/.well-known/openid-configuration".to_string()],
+            "the request must actually reach the fixture before timing out"
         );
     }
 }
