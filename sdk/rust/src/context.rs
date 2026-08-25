@@ -1331,12 +1331,29 @@ impl RefreshState {
 /// check-then-insert is atomic by construction rather than by an unstated
 /// obligation on a second, separately locked global.
 ///
-/// Scope is this process only: it does not serialize against a separately
-/// spawned config process, a running `vorpal start agent`, or the Go/
-/// TypeScript SDKs writing the same `credentials.json`, and the memo is
-/// neither durable nor visible to them. `write_credentials_secure`'s atomic
-/// write independently keeps every one of those readers from ever observing
-/// a torn file; only the refresh-exchange race is process-local.
+/// Scope for the decision-making (the refresh-due check, the exchange, the
+/// spent-token memo) is this process only: two processes each holding their
+/// own `CREDENTIALS_REFRESH` do not serialize against each other, and the
+/// memo is neither durable nor visible across processes.
+///
+/// The commit itself is additionally guarded — `commit_refreshed_credentials`
+/// re-reads and merges `credentials.json` under a cross-process
+/// [`CredentialsFileLock`] spanning the read through the rename (VPL-281).
+/// That is what actually closes the race this comment used to (incorrectly)
+/// attribute to `write_credentials_secure`'s atomic write alone: an atomic,
+/// rename-based write prevents a reader from ever observing a *torn* file,
+/// but it does not prevent a *lost update* — two processes each reading the
+/// whole file before either commits will each write the whole file back, and
+/// whichever commits second silently discards the first's change. The file
+/// lock is what now guarantees no lost update **between Rust processes that
+/// take it**.
+///
+/// Still unserialized by either guard: `vorpal login`
+/// (`cli/src/command.rs:1604-1614`) truncates the file to a single issuer
+/// without taking any lock (VPL-188), and the Go and TypeScript SDKs
+/// (`sdk/go/pkg/config/context.go:589-592`,
+/// `sdk/typescript/src/context.ts:703`) hold only a process-local mutex, no
+/// file lock. A refresh racing any of those three can still lose an update.
 static CREDENTIALS_REFRESH: Mutex<RefreshState> = Mutex::const_new(RefreshState::new());
 
 /// Decides whether the stored access token must be refreshed before use.
@@ -1373,11 +1390,96 @@ fn needs_refresh(issued_at: u64, expires_in: u64, now: u64) -> bool {
     token_age + refresh_window >= expires_in
 }
 
-/// Applies a completed exchange to `credentials` and writes the result to
-/// `path`. Returns `Err` without committing anything when the IdP's response
-/// is unusable.
+/// The sidecar this process locks instead of `path` itself.
+///
+/// `write_credentials_secure`'s commit replaces `path`'s inode on every write
+/// (`rename`, `:1090`), and `flock(2)` binds to the open file description's
+/// inode, not the path — so a process that locked `path` directly would hold
+/// a lock on an inode a concurrent committer has already replaced, and the
+/// next opener would acquire an uncontested lock on the *new* inode while
+/// believing it excludes the first. Locking a name the code never renames,
+/// unlinks, or truncates is what keeps the lock meaningful across a commit.
+fn credentials_lock_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("credentials")
+        .to_string();
+    name.push_str(".lock");
+    path.with_file_name(name)
+}
+
+/// Holds an exclusive, cross-process lock on a credentials file's sidecar for
+/// as long as this guard lives.
+///
+/// Released by the kernel when the underlying file descriptor closes — on
+/// `Drop`, on ordinary process exit, and on `SIGKILL` alike — never by
+/// unlinking the lock file or depending on a destructor running. An
+/// existence-sentinel lock (create-then-unlink) would instead brick every
+/// later acquirer after any exit that skips destructors; a kernel-released
+/// lock cannot get stuck that way.
+struct CredentialsFileLock {
+    _file: std::fs::File,
+}
+
+/// Acquires the cross-process credentials lock guarding `path`, blocking
+/// until held.
+///
+/// Runs on a `spawn_blocking` thread, never a tokio worker — `flock` without
+/// `LOCK_NB` blocks the calling OS thread, and blocking a worker would stall
+/// every other task scheduled on it (the same hazard `write_credentials_secure_with_names`'s
+/// temp-file open already avoids for the same reason). The lock file is
+/// opened with `O_NOFOLLOW` so a symlink planted at the lock path is refused
+/// rather than followed, and created at mode 0o600 on first use — the same
+/// discipline `write_credentials_secure_with_names` applies to its temp file.
+async fn acquire_credentials_lock(path: &Path) -> Result<CredentialsFileLock> {
+    let lock_path = credentials_lock_path(path);
+
+    tokio::task::spawn_blocking(move || {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&lock_path)
+            .with_context(|| {
+                format!(
+                    "failed to open credentials lock file: {}",
+                    lock_path.display()
+                )
+            })?;
+
+        // Blocks the calling OS thread (this is `spawn_blocking`, never a
+        // tokio worker) until the exclusive lock is held; released by the
+        // kernel when `file` closes.
+        file.lock().with_context(|| {
+            format!("failed to lock credentials file: {}", lock_path.display())
+        })?;
+
+        Ok(CredentialsFileLock { _file: file })
+    })
+    .await?
+}
+
+/// Applies a completed exchange to `path`'s on-disk credentials and commits
+/// the result. Returns `Err` without committing anything when the IdP's
+/// response is unusable.
+///
+/// The cross-process [`CredentialsFileLock`] spans the whole critical
+/// section — re-read, merge, serialize, write and rename — so a concurrent
+/// process refreshing a *different* issuer cannot lose this call's update or
+/// have this call lose its own (VPL-281). The merge re-reads `path` under the
+/// lock and mutates only `issuer`'s entry in that fresh copy: the in-memory
+/// document a caller read before the exchange started is never the thing
+/// serialized, so an issuer another writer added, removed, or rotated
+/// concurrently is neither clobbered nor resurrected.
+///
+/// [`CREDENTIALS_REFRESH`] alone does not provide this: it is one
+/// process-global mutex and does not serialize against another process, so
+/// two processes each holding *their own* `CREDENTIALS_REFRESH` can still
+/// race the file. The file lock is what closes that gap.
 async fn commit_refreshed_credentials(
-    credentials: &mut VorpalCredentials,
     issuer: &str,
     path: &Path,
     refreshed: RefreshedToken,
@@ -1396,6 +1498,13 @@ async fn commit_refreshed_credentials(
         );
     }
 
+    let lock = acquire_credentials_lock(path).await?;
+
+    let credentials_data = read(path)
+        .await
+        .with_context(|| format!("failed to read credentials file: {}", path.display()))?;
+    let mut credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
+
     let issuer_creds = credentials
         .issuer
         .get_mut(issuer)
@@ -1410,9 +1519,13 @@ async fn commit_refreshed_credentials(
     );
 
     // Save updated credentials with mode 0o600 enforced on the temp file.
-    let credentials_json = serde_json::to_string_pretty(credentials)?;
+    let credentials_json = serde_json::to_string_pretty(&credentials)?;
 
-    write_credentials_secure(path, credentials_json.as_bytes()).await
+    let result = write_credentials_secure(path, credentials_json.as_bytes()).await;
+
+    drop(lock);
+
+    result
 }
 
 /// The error every arm that spends the stored refresh token returns: what
@@ -1477,7 +1590,7 @@ async fn client_auth_header_at(
     }
 
     let credentials_data = read(credentials_path).await?;
-    let mut credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
+    let credentials: VorpalCredentials = serde_json::from_slice(&credentials_data)?;
 
     // Cloned rather than borrowed: `commit_refreshed_credentials` below takes
     // `&mut credentials` for the whole struct (not just `credentials.issuer`),
@@ -1545,17 +1658,22 @@ async fn client_auth_header_at(
             }
         };
 
+        // The access token this call returns comes from `refreshed` itself,
+        // never from a later re-read of `credentials_path`: the commit below
+        // re-reads and merges the file under the cross-process lock (VPL-281),
+        // so what lands on disk for this issuer can differ from what a
+        // foreign writer left there for it moments before. Returning the
+        // freshly minted value here is what keeps the header this call hands
+        // back in sync with what it just committed, rather than with
+        // whatever another writer's entry happens to say.
+        let refreshed_access_token = refreshed.0.clone();
+
         // No await is introduced between the exchange above and the write
         // below: the sequence stays synchronous so the window in which a
         // killed task loses the rotated token to disk (accepted residual
         // risk) does not widen.
-        if let Err(err) = commit_refreshed_credentials(
-            &mut credentials,
-            &registry_issuer,
-            credentials_path,
-            refreshed,
-        )
-        .await
+        if let Err(err) =
+            commit_refreshed_credentials(&registry_issuer, credentials_path, refreshed).await
         {
             // The exchange happened and nothing was committed, so the file
             // still names a token the IdP has already rotated away. This is
@@ -1576,9 +1694,15 @@ async fn client_auth_header_at(
                 err,
             ));
         }
+
+        let header = format!("Bearer {}", refreshed_access_token)
+            .parse()
+            .map_err(|e| anyhow!("failed to parse Bearer token: {}", e))?;
+
+        return Ok(Some(header));
     }
 
-    // Get the access token
+    // No refresh was due: the access token already on disk is current.
     let access_token = &credentials
         .issuer
         .get(&registry_issuer)
@@ -2694,6 +2818,310 @@ mod tests {
         assert_eq!(
             torn, 0,
             "reader observed {torn} torn/truncated reads out of {reads}"
+        );
+    }
+
+    #[test]
+    fn commit_refreshed_credentials_survives_two_concurrent_refreshes_for_different_issuers() {
+        // AC2 / C-281-12(b): genuinely independent writers, not two tasks
+        // sharing one process's CREDENTIALS_REFRESH. `commit_refreshed_credentials`
+        // is called directly, on two OS threads each running its own tokio
+        // runtime — this path never touches CREDENTIALS_REFRESH (that mutex
+        // lives only in `client_auth_header_at`), so the only thing that can
+        // serialize these two calls is the cross-process file lock this
+        // issue adds. A test built as "two runtimes calling
+        // client_auth_header_at" would instead be serialized for free by the
+        // pre-existing process-global mutex and pass against the unfixed
+        // commit path (AB-281-13) — this shape is what avoids that.
+        let scratch = ScratchCredentials::new("multi-issuer-concurrency");
+        let issuer_a = "issuer-a".to_string();
+        let issuer_b = "issuer-b".to_string();
+
+        let mut issuer = BTreeMap::new();
+        issuer.insert(
+            issuer_a.clone(),
+            VorpalCredentialsContent {
+                access_token: "a-old-access".to_string(),
+                audience: None,
+                client_id: "client-a".to_string(),
+                expires_in: 3600,
+                issued_at: 1_700_000_000,
+                refresh_token: "a-old-refresh".to_string(),
+                scopes: vec!["openid".to_string()],
+            },
+        );
+        issuer.insert(
+            issuer_b.clone(),
+            VorpalCredentialsContent {
+                access_token: "b-old-access".to_string(),
+                audience: None,
+                client_id: "client-b".to_string(),
+                expires_in: 3600,
+                issued_at: 1_700_000_000,
+                refresh_token: "b-old-refresh".to_string(),
+                scopes: vec!["openid".to_string()],
+            },
+        );
+
+        let fixture = VorpalCredentials {
+            issuer,
+            registry: BTreeMap::new(),
+        };
+        std::fs::write(&scratch.path, serde_json::to_vec(&fixture).unwrap()).expect("seed fixture");
+
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+
+        let path_a = scratch.path.clone();
+        let barrier_a = barrier.clone();
+        let issuer_a_thread = issuer_a.clone();
+        let handle_a = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime a");
+            barrier_a.wait();
+            runtime.block_on(commit_refreshed_credentials(
+                &issuer_a_thread,
+                &path_a,
+                (
+                    "a-new-access".to_string(),
+                    3600,
+                    1_700_000_500,
+                    Some("a-new-refresh".to_string()),
+                ),
+            ))
+        });
+
+        let path_b = scratch.path.clone();
+        let barrier_b = barrier.clone();
+        let issuer_b_thread = issuer_b.clone();
+        let handle_b = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime b");
+            barrier_b.wait();
+            runtime.block_on(commit_refreshed_credentials(
+                &issuer_b_thread,
+                &path_b,
+                (
+                    "b-new-access".to_string(),
+                    3600,
+                    1_700_000_500,
+                    Some("b-new-refresh".to_string()),
+                ),
+            ))
+        });
+
+        handle_a
+            .join()
+            .expect("thread a panicked")
+            .expect("commit a failed");
+        handle_b
+            .join()
+            .expect("thread b panicked")
+            .expect("commit b failed");
+
+        let bytes = std::fs::read(&scratch.path).expect("read final credentials");
+        let final_credentials: VorpalCredentials =
+            serde_json::from_slice(&bytes).expect("parse final credentials");
+
+        let a = final_credentials
+            .issuer
+            .get(&issuer_a)
+            .expect("issuer a's entry must survive the concurrent refresh");
+        assert_eq!(a.access_token, "a-new-access");
+        assert_eq!(a.refresh_token, "a-new-refresh");
+
+        let b = final_credentials
+            .issuer
+            .get(&issuer_b)
+            .expect("issuer b's entry must survive the concurrent refresh");
+        assert_eq!(b.access_token, "b-new-access");
+        assert_eq!(b.refresh_token, "b-new-refresh");
+    }
+
+    #[test]
+    fn naive_read_modify_write_without_the_lock_loses_a_concurrent_issuers_update() {
+        // C-281-12's mandatory negative control: this reproduces AB-281-1 in
+        // the exact shape VPL-281 describes — read the whole file, mutate
+        // one issuer's entry, write the whole file back, no lock at all —
+        // against two issuers on one file, with a barrier forcing both
+        // readers to complete their read before either writer commits. This
+        // is what the test above must be able to fail against; it is a
+        // REPRODUCED demonstration of the pre-fix defect, built from a
+        // bespoke helper rather than `commit_refreshed_credentials` (which
+        // now takes the lock and cannot lose the update).
+        async fn naive_commit(
+            path: &Path,
+            issuer: &str,
+            access_token: &str,
+            ready: &std::sync::Barrier,
+        ) {
+            let bytes = tokio::fs::read(path).await.expect("read credentials");
+            let mut credentials: VorpalCredentials =
+                serde_json::from_slice(&bytes).expect("parse credentials");
+
+            // Both writers must have read the pre-image before either
+            // commits, or this would just prove ordinary sequential safety.
+            ready.wait();
+
+            credentials
+                .issuer
+                .get_mut(issuer)
+                .expect("issuer present")
+                .access_token = access_token.to_string();
+
+            let json = serde_json::to_string_pretty(&credentials).expect("serialize");
+            write_credentials_secure(path, json.as_bytes())
+                .await
+                .expect("write credentials");
+        }
+
+        let scratch = ScratchCredentials::new("naive-lost-update");
+        let issuer_a = "issuer-a".to_string();
+        let issuer_b = "issuer-b".to_string();
+
+        let mut issuer = BTreeMap::new();
+        issuer.insert(issuer_a.clone(), sample_creds());
+        issuer.insert(issuer_b.clone(), sample_creds());
+
+        let fixture = VorpalCredentials {
+            issuer,
+            registry: BTreeMap::new(),
+        };
+        std::fs::write(&scratch.path, serde_json::to_vec(&fixture).unwrap()).expect("seed fixture");
+
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+
+        let path_a = scratch.path.clone();
+        let barrier_a = barrier.clone();
+        let issuer_a_thread = issuer_a.clone();
+        let handle_a = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime a");
+            runtime.block_on(naive_commit(
+                &path_a,
+                &issuer_a_thread,
+                "a-new-access",
+                &barrier_a,
+            ));
+        });
+
+        let path_b = scratch.path.clone();
+        let barrier_b = barrier.clone();
+        let issuer_b_thread = issuer_b.clone();
+        let handle_b = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime b");
+            runtime.block_on(naive_commit(
+                &path_b,
+                &issuer_b_thread,
+                "b-new-access",
+                &barrier_b,
+            ));
+        });
+
+        handle_a.join().expect("thread a panicked");
+        handle_b.join().expect("thread b panicked");
+
+        let bytes = std::fs::read(&scratch.path).expect("read final credentials");
+        let final_credentials: VorpalCredentials =
+            serde_json::from_slice(&bytes).expect("parse final credentials");
+
+        let a_survived = final_credentials
+            .issuer
+            .get(&issuer_a)
+            .map(|c| c.access_token == "a-new-access")
+            .unwrap_or(false);
+        let b_survived = final_credentials
+            .issuer
+            .get(&issuer_b)
+            .map(|c| c.access_token == "b-new-access")
+            .unwrap_or(false);
+
+        assert!(
+            !(a_survived && b_survived),
+            "an unlocked read-modify-write was expected to lose one issuer's update, but both survived"
+        );
+    }
+
+    #[test]
+    fn credentials_file_lock_excludes_a_second_acquirer_until_the_first_releases() {
+        // C-281-1 positive control.
+        let scratch = ScratchCredentials::new("lock-excludes");
+        let path = scratch.path.clone();
+
+        let runtime_a = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build runtime a");
+        let lock_a = runtime_a
+            .block_on(acquire_credentials_lock(&path))
+            .expect("acquire lock a");
+
+        let path_b = path.clone();
+        let handle_b = std::thread::spawn(move || {
+            let runtime_b = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build runtime b");
+            let start = std::time::Instant::now();
+            let lock_b = runtime_b
+                .block_on(acquire_credentials_lock(&path_b))
+                .expect("acquire lock b");
+            (start.elapsed(), lock_b)
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        drop(lock_a);
+
+        let (elapsed, _lock_b) = handle_b.join().expect("thread b panicked");
+        assert!(
+            elapsed >= std::time::Duration::from_millis(150),
+            "second acquirer got the lock after {:?}, so it did not wait for the first to release",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn flock_on_a_renamed_path_does_not_exclude_a_post_rename_opener() {
+        // C-281-1 negative control, against the raw `flock(2)` primitive
+        // rather than this file's helper: demonstrates why the lock must
+        // never be `path` itself. Process A locks the original file at
+        // `path`; something then renames a new file onto that same path
+        // (exactly what `write_credentials_secure` does on every commit).
+        // Process B, opening `path` fresh, must acquire immediately — the
+        // lock followed the old inode, not the name.
+        let scratch = ScratchCredentials::new("lock-negative-control");
+        let path = scratch.path.clone();
+        std::fs::write(&path, b"original").expect("seed original file");
+
+        let file_a = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .expect("open original");
+        file_a
+            .lock()
+            .expect("process A must acquire the lock on the original inode");
+
+        let replacement = scratch.dir.join("replacement");
+        std::fs::write(&replacement, b"replacement").expect("write replacement");
+        std::fs::rename(&replacement, &path).expect("rename replacement onto path");
+
+        let file_b = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .expect("open replacement");
+        assert!(
+            file_b.try_lock().is_ok(),
+            "flock on the renamed path must acquire immediately against the new inode, proving a lock on `path` itself would not exclude a post-rename opener"
         );
     }
 
