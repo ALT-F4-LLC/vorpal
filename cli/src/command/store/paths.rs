@@ -202,8 +202,15 @@ pub fn parse_artifact_digest(digest: &str, source: &str) -> Result<String> {
 /// Returns the component rather than `()` so the checked value is what callers
 /// go on to use: a call site that drops the parse stops compiling instead of
 /// quietly joining the unchecked string into a store path.
+///
+/// Bounded in length to the same ceiling as [`parse_alias_name`]: the
+/// registry's archive-check cache keys a bounded-entry-count cache on
+/// `"{namespace}/{digest}"` (`registry.rs`'s `check_cache`), so an unbounded
+/// namespace or tag length was still unbounded per-entry memory even after
+/// the entry-count cap landed (VPL-383 CLUSTER-17).
 pub fn parse_store_path_component(value: &str, field: &str) -> Result<String> {
     if value.is_empty()
+        || value.len() > ARTIFACT_ALIAS_NAME_LENGTH
         || value == "."
         || value == ".."
         || value.contains('/')
@@ -212,8 +219,9 @@ pub fn parse_store_path_component(value: &str, field: &str) -> Result<String> {
         || value.starts_with(STAGING_PREFIX)
     {
         bail!(
-            "invalid artifact {field} {:?}: must be non-empty, contain no path separator or NUL \
-             byte, not be '.' or '..', and not start with the reserved staging prefix {:?}",
+            "invalid artifact {field} {:?}: must be non-empty, at most \
+             {ARTIFACT_ALIAS_NAME_LENGTH} characters, contain no path separator or NUL byte, not \
+             be '.' or '..', and not start with the reserved staging prefix {:?}",
             value,
             STAGING_PREFIX,
         );
@@ -961,19 +969,44 @@ mod tests {
     }
 
     #[test]
-    fn parse_store_path_component_error_names_the_field_not_a_store_path() {
-        // The refusal must say *which input* was hostile without ever
-        // constructing or naming the store path the value would have
-        // joined into — the parser runs before any path is built, so it
-        // has no path to leak, but the message text is the only place
-        // that invariant is checked.
+    fn parse_store_path_component_rejects_a_value_over_the_length_bound() {
+        // VPL-383 CLUSTER-17: an unbounded namespace/tag length kept the
+        // archive-check cache's per-entry memory unbounded even after its
+        // entry count was capped, because the cache key is built from these
+        // components directly.
+        let too_long = "a".repeat(ARTIFACT_ALIAS_NAME_LENGTH + 1);
+
+        let result = parse_store_path_component(&too_long, "namespace");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_store_path_component_accepts_a_value_at_the_length_bound() {
+        let at_bound = "a".repeat(ARTIFACT_ALIAS_NAME_LENGTH);
+
+        let result = parse_store_path_component(&at_bound, "namespace");
+
+        assert_eq!(result.unwrap(), at_bound);
+    }
+
+    #[test]
+    fn parse_store_path_component_error_names_the_field() {
+        // The refusal must say *which input* was hostile. (VPL-383
+        // CLUSTER-13: this test previously also asserted the message
+        // excludes "/var/lib/vorpal" and "store/artifact" — properties that
+        // cannot fail as long as this function's `bail!` format string is
+        // unchanged, since the function never calls a path builder or reads
+        // a root path to begin with; those assertions pinned nothing. The
+        // property that actually matters — that a rejected value never
+        // reaches a path join — is proven at the call site, not here: see
+        // `registry.rs`'s `test_check_rejects_a_traversing_digest` and its
+        // siblings, which assert the mock backend's call count stays 0.)
         let err = parse_store_path_component("a/b", "namespace")
             .unwrap_err()
             .to_string();
 
         assert!(err.contains("namespace"));
-        assert!(!err.contains("/var/lib/vorpal"));
-        assert!(!err.contains("store/artifact"));
     }
 
     #[test]

@@ -10,12 +10,12 @@ use tokio::{
 use tokio_stream::{Stream, StreamExt};
 use tonic::{async_trait, Status};
 use uuid::Uuid;
-use vorpal_sdk::api::archive::{ArchivePullRequest, ArchivePullResponse};
+use vorpal_sdk::api::archive::ArchivePullResponse;
 
 #[async_trait]
 impl ArchiveBackend for LocalBackend {
-    async fn check(&self, request: &ArchivePullRequest) -> Result<(), Status> {
-        let request_path = get_artifact_archive_path(&request.digest, &request.namespace);
+    async fn check(&self, digest: &str, namespace: &str) -> Result<(), Status> {
+        let request_path = get_artifact_archive_path(digest, namespace);
 
         if !request_path.exists() {
             return Err(Status::not_found("archive not found"));
@@ -26,10 +26,11 @@ impl ArchiveBackend for LocalBackend {
 
     async fn pull(
         &self,
-        request: &ArchivePullRequest,
+        digest: &str,
+        namespace: &str,
         tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
     ) -> Result<(), Status> {
-        let request_path = get_artifact_archive_path(&request.digest, &request.namespace);
+        let request_path = get_artifact_archive_path(digest, namespace);
 
         if !request_path.exists() {
             return Err(Status::not_found("archive not found"));

@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt};
 use tonic::{async_trait, Status};
 use tracing::{info, warn};
-use vorpal_sdk::api::archive::{ArchivePullRequest, ArchivePullResponse};
+use vorpal_sdk::api::archive::ArchivePullResponse;
 
 /// S3 minimum part size for multipart uploads (5 MiB).
 const S3_MIN_PART_SIZE: usize = 5 * 1024 * 1024;
@@ -147,11 +147,11 @@ async fn finish_upload(
 
 #[async_trait]
 impl ArchiveBackend for S3Backend {
-    async fn check(&self, request: &ArchivePullRequest) -> Result<(), Status> {
+    async fn check(&self, digest: &str, namespace: &str) -> Result<(), Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let archive_key = get_artifact_archive_key(&request.digest, &request.namespace);
+        let archive_key = get_artifact_archive_key(digest, namespace);
 
         client
             .head_object()
@@ -166,13 +166,14 @@ impl ArchiveBackend for S3Backend {
 
     async fn pull(
         &self,
-        request: &ArchivePullRequest,
+        digest: &str,
+        namespace: &str,
         tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
     ) -> Result<(), Status> {
         let client = &self.client;
         let bucket = &self.bucket;
 
-        let archive_key = get_artifact_archive_key(&request.digest, &request.namespace);
+        let archive_key = get_artifact_archive_key(digest, namespace);
 
         // archive_key is reused below (get_object); bucket is a borrow of self,
         // reusable as-is since the S3 builder accepts &String via Into<String>.

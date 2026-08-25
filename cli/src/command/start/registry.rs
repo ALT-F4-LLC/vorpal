@@ -110,11 +110,19 @@ impl S3Backend {
 
 #[tonic::async_trait]
 pub trait ArchiveBackend: Send + Sync + 'static {
-    async fn check(&self, req: &ArchivePullRequest) -> Result<(), Status>;
+    /// `digest` and `namespace` are the handler's already-parsed values
+    /// (`parse_artifact_digest` / `parse_store_path_component`), not the raw
+    /// request — matching `push`'s signature below. Previously this took the
+    /// whole unparsed `&ArchivePullRequest` and re-read `.digest`/`.namespace`
+    /// off it, so the chokepoint the handler enforces was a convention a
+    /// future backend or call site could silently skip, not something the
+    /// type system required (VPL-383 CLUSTER-5).
+    async fn check(&self, digest: &str, namespace: &str) -> Result<(), Status>;
 
     async fn pull(
         &self,
-        req: &ArchivePullRequest,
+        digest: &str,
+        namespace: &str,
         tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
     ) -> Result<(), Status>;
 
@@ -148,6 +156,22 @@ impl ArchiveServer {
             cache_ttl_seconds
         );
 
+        if cache_ttl_seconds == 0 {
+            // TTL of 0 means don't cache (immediate expiry)
+            info!("registry |> archive server: caching disabled (ttl=0)");
+        }
+
+        Self::with_check_cache_ttl(backend, Duration::from_secs(cache_ttl_seconds))
+    }
+
+    /// Shared cache-construction path behind [`Self::new`], parameterized on
+    /// `Duration` rather than whole seconds so the TTL-expiration test below
+    /// can build a real `ArchiveServer` — going through the same cache
+    /// sizing as production — with a sub-second interval instead of either
+    /// waiting a real second per test run or constructing the struct
+    /// literal directly and bypassing this constructor entirely (VPL-383
+    /// CLUSTER-12R).
+    fn with_check_cache_ttl(backend: Box<dyn ArchiveBackend>, ttl: Duration) -> Self {
         // Bounded on entry count: the key is "{namespace}/{digest}", and
         // `ArchiveService::check`'s authz call (`authorize_namespace_if_authenticated`,
         // below) only runs when the deployment is authenticated at all — an
@@ -155,22 +179,16 @@ impl ArchiveServer {
         // grow this cache, and even an authenticated caller only needs
         // *some* namespace grant to keep issuing distinct cache keys within
         // it, so an unbounded cache still lets any caller grow it without
-        // limit regardless of the TTL (VPL-383).
+        // limit regardless of the TTL (VPL-383). Each key/value pair is also
+        // now bounded in size: `parse_store_path_component` caps namespace
+        // and tag length (CLUSTER-17), and `parse_artifact_digest` fixes the
+        // digest length.
         const CHECK_CACHE_MAX_ENTRIES: u64 = 100_000;
 
-        let check_cache = if cache_ttl_seconds > 0 {
-            Cache::builder()
-                .max_capacity(CHECK_CACHE_MAX_ENTRIES)
-                .time_to_live(Duration::from_secs(cache_ttl_seconds))
-                .build()
-        } else {
-            // TTL of 0 means don't cache (immediate expiry)
-            info!("registry |> archive server: caching disabled (ttl=0)");
-            Cache::builder()
-                .max_capacity(CHECK_CACHE_MAX_ENTRIES)
-                .time_to_live(Duration::ZERO)
-                .build()
-        };
+        let check_cache = Cache::builder()
+            .max_capacity(CHECK_CACHE_MAX_ENTRIES)
+            .time_to_live(ttl)
+            .build();
 
         Self {
             backend,
@@ -205,8 +223,6 @@ impl ArchiveService for ArchiveServer {
             );
         }
 
-        let req = request.into_inner();
-
         // Safe only because `digest` and `namespace` are each a single path
         // component with no separator: an unvalidated pair could collide
         // ("a"/"b/c" vs "a/b"/"c") and answer for the wrong namespace.
@@ -217,10 +233,10 @@ impl ArchiveService for ArchiveServer {
         if let Some(exists) = self.check_cache.get(&cache_key).await {
             info!(
                 "registry |> archive check: cache hit, exists={}, digest={}",
-                exists, req.digest
+                exists, digest
             );
             if exists {
-                info!("registry |> archive check (cached): {}", req.digest);
+                info!("registry |> archive check (cached): {}", digest);
                 return Ok(Response::new(ArchiveResponse {}));
             }
             return Err(Status::not_found("archive not found"));
@@ -228,11 +244,11 @@ impl ArchiveService for ArchiveServer {
 
         info!(
             "registry |> archive check: cache miss, calling backend, digest={}",
-            req.digest
+            digest
         );
 
         // Cache miss - call backend
-        let result = self.backend.check(&req).await;
+        let result = self.backend.check(&digest, &namespace).await;
 
         // Cache the result
         let exists = result.is_ok();
@@ -243,7 +259,7 @@ impl ArchiveService for ArchiveServer {
         self.check_cache.insert(cache_key, exists).await;
 
         if exists {
-            info!("registry |> archive check: {}", req.digest);
+            info!("registry |> archive check: {}", digest);
             Ok(Response::new(ArchiveResponse {}))
         } else {
             result?;
@@ -257,15 +273,19 @@ impl ArchiveService for ArchiveServer {
     ) -> Result<Response<Self::PullStream>, Status> {
         // Reject a hostile digest or namespace before any I/O, including
         // before spawning the task below — a value that never reaches a
-        // path join cannot escape the store root (VPL-383).
-        {
+        // path join cannot escape the store root (VPL-383). The parsed
+        // values themselves are what the spawned task hands to the backend
+        // (CLUSTER-5): the backend never sees the raw, unparsed request.
+        let (digest, namespace) = {
             let req_inner = request.get_ref();
 
-            parse_artifact_digest(&req_inner.digest, "archive digest")
+            let digest = parse_artifact_digest(&req_inner.digest, "archive digest")
                 .map_err(|err| Status::invalid_argument(err.to_string()))?;
-            parse_store_path_component(&req_inner.namespace, "namespace")
+            let namespace = parse_store_path_component(&req_inner.namespace, "namespace")
                 .map_err(|err| Status::invalid_argument(err.to_string()))?;
-        }
+
+            (digest, namespace)
+        };
 
         // Authorization check before spawning task.
         //
@@ -273,13 +293,13 @@ impl ArchiveService for ArchiveServer {
         // `require_namespace_or_service_trust` so service-user tokens with an
         // `azp` in `--issuer-service-client-ids` bypass namespace RBAC while
         // human tokens still go through the unchanged permission check.
-        authorize_namespace_if_authenticated(&request, &request.get_ref().namespace, "read")?;
+        authorize_namespace_if_authenticated(&request, &namespace, "read")?;
 
         if request.extensions().get::<Claims>().is_some() {
             info!(
                 "archive |> pull by {} in namespace {}",
                 principal_label(&request),
-                request.get_ref().namespace
+                namespace
             );
         }
 
@@ -289,15 +309,13 @@ impl ArchiveService for ArchiveServer {
         let backend = self.backend.clone();
 
         tokio::spawn(async move {
-            let request = request.into_inner();
-
-            if let Err(err) = backend.pull(&request, &tx).await {
+            if let Err(err) = backend.pull(&digest, &namespace, &tx).await {
                 if let Err(err) = tx.send(Err(err)).await {
                     error!("failed to send store error: {:?}", err);
                 }
             }
 
-            info!("registry |> archive pull: {}", request.digest);
+            info!("registry |> archive pull: {}", digest);
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -527,21 +545,38 @@ impl ArtifactService for ArtifactServer {
         // tag never reaches a path join. An empty name is skipped rather than
         // rejected, matching the backends' own "no alias requested" reading
         // of an empty entry.
-        for alias in artifact
-            .aliases
-            .iter()
-            .chain(request.artifact_aliases.iter())
-        {
+        //
+        // The two sources are validated in separate passes, each with its
+        // own `field` label (VPL-383 CLUSTER-8): this is the one call site
+        // `parse_alias_name`'s `field` parameter needed to vary at, since a
+        // single chained loop over both sources could not say, in a
+        // rejection message, whether the hostile value came from the
+        // artifact's own `aliases` or from the request's `artifact_aliases`.
+        for alias in &artifact.aliases {
             let (alias_name, alias_tag) = split_alias_name_tag(alias);
 
             if alias_name.is_empty() {
                 continue;
             }
 
-            parse_alias_name(alias_name, "alias name")
+            parse_alias_name(alias_name, "artifact alias name")
                 .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
-            parse_store_path_component(alias_tag, "tag")
+            parse_store_path_component(alias_tag, "artifact alias tag")
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        }
+
+        for alias in &request.artifact_aliases {
+            let (alias_name, alias_tag) = split_alias_name_tag(alias);
+
+            if alias_name.is_empty() {
+                continue;
+            }
+
+            parse_alias_name(alias_name, "request alias name")
+                .map_err(|err| Status::invalid_argument(err.to_string()))?;
+
+            parse_store_path_component(alias_tag, "request alias tag")
                 .map_err(|err| Status::invalid_argument(err.to_string()))?;
         }
 
@@ -663,7 +698,7 @@ mod tests {
 
     #[tonic::async_trait]
     impl ArchiveBackend for MockBackend {
-        async fn check(&self, _req: &ArchivePullRequest) -> Result<(), Status> {
+        async fn check(&self, _digest: &str, _namespace: &str) -> Result<(), Status> {
             self.check_call_count.fetch_add(1, Ordering::SeqCst);
             if self.should_exist {
                 Ok(())
@@ -674,7 +709,8 @@ mod tests {
 
         async fn pull(
             &self,
-            _req: &ArchivePullRequest,
+            _digest: &str,
+            _namespace: &str,
             tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
         ) -> Result<(), Status> {
             self.pull_call_count.fetch_add(1, Ordering::SeqCst);
@@ -845,14 +881,13 @@ mod tests {
         // magnitude is the change available inside scope. Previously 1s TTL
         // / 1.1s sleep, the single largest contributor to this suite's
         // runtime.
+        //
+        // Built through `ArchiveServer::with_check_cache_ttl`, the same
+        // cache-construction path `new` uses, rather than a bare struct
+        // literal that bypasses it (VPL-383 CLUSTER-12R).
         let backend = MockBackend::new(true);
-        let server = ArchiveServer {
-            backend: backend.box_clone(),
-            check_cache: Cache::builder()
-                .max_capacity(1_000)
-                .time_to_live(Duration::from_millis(50))
-                .build(),
-        };
+        let server =
+            ArchiveServer::with_check_cache_ttl(backend.box_clone(), Duration::from_millis(50));
 
         // When: we check, wait for TTL to expire, then check again
         server.check(make_check_request("ns", DIGEST_GENERIC)).await?;
@@ -1139,6 +1174,36 @@ mod tests {
         assert_eq!(backend.get_artifact_call_count(), 1);
     }
 
+    #[tokio::test]
+    async fn test_get_artifact_denies_when_principal_lacks_namespace_permission() {
+        // VPL-383 CLUSTER-24R: `get_artifact`'s authz call had no denial
+        // test before this round.
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let mut request = make_get_artifact_request("library", DIGEST_GENERIC);
+        request.extensions_mut().insert(PrincipalKind::Human);
+        request.extensions_mut().insert(Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("attacker".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(std::collections::HashMap::from([(
+                "other".to_string(),
+                vec!["read".to_string()],
+            )])),
+        });
+
+        let result = server.get_artifact(request).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
+        assert_eq!(backend.get_artifact_call_count(), 0);
+    }
+
     // -----------------------------------------------------------------------
     // `ArchiveService::pull` (VPL-383/C1-C2): a traversing digest or
     // namespace must be refused before the streaming response is ever
@@ -1192,6 +1257,38 @@ mod tests {
         let _ = stream.next().await;
 
         assert_eq!(backend.pull_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_pull_denies_when_principal_lacks_namespace_permission() {
+        // VPL-383 CLUSTER-24R: of the six migrated authorization call sites,
+        // only `check` and `push` had a denial test before this round —
+        // deleting any of the other four's authz call left the suite fully
+        // green. This is `pull`'s.
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let mut request = make_check_request("library", DIGEST_GENERIC);
+        request.extensions_mut().insert(PrincipalKind::Human);
+        request.extensions_mut().insert(Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("attacker".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(std::collections::HashMap::from([(
+                "other".to_string(),
+                vec!["read".to_string()],
+            )])),
+        });
+
+        let result = server.pull(request).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
+        assert_eq!(backend.pull_count(), 0);
     }
 
     fn make_alias_request(
@@ -1280,6 +1377,36 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(backend.alias_call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_artifact_alias_denies_when_principal_lacks_namespace_permission() {
+        // VPL-383 CLUSTER-24R: `get_artifact_alias`'s authz call had no
+        // denial test before this round.
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let mut request = make_alias_request("rust", "library", "latest");
+        request.extensions_mut().insert(PrincipalKind::Human);
+        request.extensions_mut().insert(Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("attacker".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(std::collections::HashMap::from([(
+                "other".to_string(),
+                vec!["read".to_string()],
+            )])),
+        });
+
+        let result = server.get_artifact_alias(request).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
+        assert_eq!(backend.alias_call_count(), 0);
     }
 
     // -----------------------------------------------------------------------
@@ -1409,6 +1536,36 @@ mod tests {
         assert_eq!(backend.store_call_count(), 1);
     }
 
+    #[tokio::test]
+    async fn test_store_artifact_denies_when_principal_lacks_namespace_permission() {
+        // VPL-383 CLUSTER-24R: `store_artifact`'s authz call had no denial
+        // test before this round.
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let mut request = make_store_request("library", vec!["rust:latest"]);
+        request.extensions_mut().insert(PrincipalKind::Human);
+        request.extensions_mut().insert(Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("attacker".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(std::collections::HashMap::from([(
+                "other".to_string(),
+                vec!["write".to_string()],
+            )])),
+        });
+
+        let result = server.store_artifact(request).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
+        assert_eq!(backend.store_call_count(), 0);
+    }
+
     // -----------------------------------------------------------------------
     // Streaming push tests (DKT-16)
     // -----------------------------------------------------------------------
@@ -1421,7 +1578,10 @@ mod tests {
     // has no way to distinguish "stream ended normally" from "client dropped
     // connection after sending some data". No integrity control catches this:
     // the store is recipe-addressed, not content-addressed (VPL-383 threat
-    // model §4 AC-2, `paths.rs:288-294`), and nothing verifies a pulled
+    // model §4 AC-2, `paths.rs`'s `PublishOutcome` doc comment — VPL-383
+    // CLUSTER-28: the line range previously cited here, `paths.rs:288-294`,
+    // landed on the unrelated `STAGING_PREFIX` constant, not this doc, after
+    // an earlier round's edits shifted the file), and nothing verifies a pulled
     // archive's bytes against its digest before a build unpacks it
     // (`build.rs:646-686`) — a partial write from this gap is
     // indistinguishable, downstream, from a deliberately planted one.
@@ -1528,6 +1688,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_push_handler_rejects_a_traversing_namespace_before_any_backend_call() {
+        // VPL-383 CLUSTER-26: every real-handler push test before this round
+        // varied `digest`; the handler's `namespace` validation — the other
+        // half of the same call, `parse_store_path_component(&first_chunk.namespace, ...)`
+        // — was left unpinned. A digest-only regression would still fail the
+        // sibling test above, but a namespace-only one would not have.
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let request = make_push_streaming_request(vec![ArchivePushRequest {
+            data: b"hello".to_vec(),
+            digest: DIGEST_GENERIC.to_string(),
+            namespace: "a/b".to_string(),
+        }]);
+
+        let result = server.push(request).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.push_count(), 0);
+    }
+
+    #[tokio::test]
     async fn test_push_handler_accepts_a_well_formed_streaming_request() {
         // Given: a server with a real Streaming<ArchivePushRequest> request
         let backend = MockBackend::new(true);
@@ -1550,6 +1733,48 @@ mod tests {
         assert_eq!(calls[0].0, DIGEST_GENERIC);
         assert_eq!(calls[0].1, "library");
         assert_eq!(calls[0].2, b"hello world");
+    }
+
+    #[tokio::test]
+    async fn test_push_handler_streams_every_chunk_after_the_first() {
+        // VPL-383 CLUSTER-27: every push test that drives the real handler
+        // (`ArchiveServer::push`, via `make_push_streaming_request`) sent
+        // exactly one chunk. The multi-chunk coverage that did exist
+        // (`test_push_large_multi_chunk_stream`,
+        // `test_mock_backend_push_drains_stream_and_records_args`) called
+        // `ArchiveBackend::push` directly, bypassing the handler's own
+        // stream-chaining (`tokio_stream::once(first_data).chain(&mut
+        // remainder)`) entirely — a handler that silently dropped every
+        // chunk after the first would still pass all of them. Three chunks
+        // here, only the first of which the handler reads metadata from.
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let request = make_push_streaming_request(vec![
+            ArchivePushRequest {
+                data: b"chunk-one-".to_vec(),
+                digest: DIGEST_GENERIC.to_string(),
+                namespace: "library".to_string(),
+            },
+            ArchivePushRequest {
+                data: b"chunk-two-".to_vec(),
+                digest: DIGEST_GENERIC.to_string(),
+                namespace: "library".to_string(),
+            },
+            ArchivePushRequest {
+                data: b"chunk-three".to_vec(),
+                digest: DIGEST_GENERIC.to_string(),
+                namespace: "library".to_string(),
+            },
+        ]);
+
+        let result = server.push(request).await;
+
+        assert!(result.is_ok());
+        assert_eq!(backend.push_count(), 1);
+        let push_calls = backend.push_calls();
+        let calls = push_calls.lock().await;
+        assert_eq!(calls[0].2, b"chunk-one-chunk-two-chunk-three");
     }
 
     #[tokio::test]

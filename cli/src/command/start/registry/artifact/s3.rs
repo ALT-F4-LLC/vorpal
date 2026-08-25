@@ -146,18 +146,40 @@ impl ArtifactBackend for S3Backend {
             // this check the S3 backend silently overwrote an alias that
             // pointed at a different digest, which `LocalBackend` treats as
             // a conflict rather than a no-op or a silent republish.
-            let alias_head = client
+            //
+            // `head_object`'s error case must be inspected, not treated as
+            // "absent": S3's own throttling, a transient network failure, or
+            // an `AccessDenied` on this one key all surface as the same
+            // `Err` as a genuine 404, and a caller who can force one of
+            // those (or is merely unlucky) previously overwrote an alias
+            // this check exists to protect (VPL-383 CLUSTER-18). Only a
+            // modeled "not found" is treated as absence; every other error
+            // propagates as a failure instead of silently proceeding.
+            match client
                 .head_object()
                 .bucket(bucket)
                 .key(&alias_key)
                 .send()
-                .await;
+                .await
+            {
+                Ok(_) => {
+                    return Err(Status::already_exists(format!(
+                        "alias '{}' already exists",
+                        alias
+                    )));
+                }
+                Err(err) => {
+                    let is_not_found = err
+                        .as_service_error()
+                        .map(|service_err| service_err.is_not_found())
+                        .unwrap_or(false);
 
-            if alias_head.is_ok() {
-                return Err(Status::already_exists(format!(
-                    "alias '{}' already exists",
-                    alias
-                )));
+                    if !is_not_found {
+                        return Err(Status::internal(format!(
+                            "failed to check alias existence: {err}"
+                        )));
+                    }
+                }
             }
 
             let alias_data = artifact_digest.as_bytes().to_vec();
