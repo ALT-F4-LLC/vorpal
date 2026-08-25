@@ -31,7 +31,9 @@ use tracing_subscriber::{
 };
 use vorpal_sdk::{
     artifact::{get_default_address, system::get_system_default_str},
-    context::{VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE},
+    context::{
+        credential_egress_origin, VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE,
+    },
 };
 
 mod build;
@@ -1059,6 +1061,110 @@ fn clamp_jobs(requested: usize) -> usize {
     requested
 }
 
+/// Bounds every HTTP request `Command::Login` makes so a hung or malicious
+/// IdP stalls the command rather than hanging until the user interrupts it
+/// (VPL-280 AB-7). Same value as the SDK refresh path's
+/// `REFRESH_HTTP_TIMEOUT`.
+const LOGIN_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Normalizes and validates the `--issuer` value before any network request
+/// touches it (VPL-280 AC1). Trimming and validation happen at this one call
+/// site so every later consumer — the discovery URL, `AuthUrl`, and both
+/// credentials-file keys — reads the same value (VPL-280 AC4, TB-4): storing
+/// an untrimmed issuer in one place and a trimmed one in another is the bug
+/// that made the refresh path mis-format its discovery URL.
+fn normalize_and_validate_login_issuer(issuer: &str) -> Result<String> {
+    let normalized = issuer.trim_end_matches('/').to_string();
+    credential_egress_origin(&normalized)?;
+    Ok(normalized)
+}
+
+/// Validates a login discovery document against the requested issuer and
+/// extracts the two endpoint URLs the device-authorization flow uses
+/// (VPL-280 AC2). Three checks, all before either endpoint reaches the
+/// network:
+///
+/// - the document's own `issuer` claim must equal `issuer` exactly (after
+///   trailing-slash normalization) — the origin pin below is blind to path,
+///   so on a multi-tenant IdP that shares one origin across realms it alone
+///   would let a co-tenant substitute its own endpoints (VPL-280 AB-4); a
+///   missing `issuer` field fails closed rather than skipping the check
+/// - `device_authorization_endpoint` must share the issuer's
+///   `scheme://host:port` origin — not named by any of VPL-280's acceptance
+///   criteria, but required per the threat model (VPL-280 C-3): it is what
+///   the CLI prints for the user to open in a browser, so leaving it
+///   unchecked is IdP-credential phishing through the same document
+///   (VPL-280 AB-3)
+/// - `token_endpoint` must share the issuer's origin (VPL-280 AC2, AB-1)
+///
+/// A pure function over the parsed document so each check is testable
+/// without driving a live device-authorization flow (VPL-280 C-7).
+fn login_discovery_targets(issuer: &str, doc: &serde_json::Value) -> Result<(String, String)> {
+    let issuer_origin = credential_egress_origin(issuer)?;
+
+    let doc_issuer = doc
+        .get("issuer")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("OIDC discovery document is missing issuer"))?;
+
+    if doc_issuer.trim_end_matches('/') != issuer {
+        bail!(
+            "OIDC discovery issuer {} does not match requested issuer {}",
+            doc_issuer,
+            issuer
+        );
+    }
+
+    let device_endpoint = doc
+        .get("device_authorization_endpoint")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("missing device_authorization_endpoint"))?;
+
+    if credential_egress_origin(device_endpoint)? != issuer_origin {
+        bail!(
+            "OIDC device_authorization_endpoint {} does not match issuer origin {}",
+            device_endpoint,
+            issuer_origin
+        );
+    }
+
+    let token_endpoint = doc
+        .get("token_endpoint")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("missing token_endpoint"))?;
+
+    if credential_egress_origin(token_endpoint)? != issuer_origin {
+        bail!(
+            "OIDC token_endpoint {} does not match issuer origin {}",
+            token_endpoint,
+            issuer_origin
+        );
+    }
+
+    Ok((device_endpoint.to_string(), token_endpoint.to_string()))
+}
+
+/// Fetches and validates the login discovery document with an
+/// already-hardened client (VPL-280 AC2, AC3): the caller controls the
+/// redirect policy and timeout, so this function's own behavior under a
+/// redirected or hung discovery response is exactly what production gets.
+async fn fetch_login_discovery_endpoints(
+    client: &reqwest::Client,
+    issuer: &str,
+) -> Result<(String, String)> {
+    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+
+    let doc: serde_json::Value = client
+        .get(&discovery_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    login_discovery_targets(issuer, &doc)
+}
+
 /// Build-output flags shared between `build` and `prepare`, mirroring the
 /// independent boolean CLI flags on [`Command::Build`] one-to-one.
 #[expect(
@@ -1277,38 +1383,30 @@ async fn run_login(
     issuer_client_id: &str,
     registry: &str,
 ) -> Result<()> {
-    let discovery_url = format!(
-        "{}/.well-known/openid-configuration",
-        issuer.trim_end_matches('/')
-    );
+    let normalized_issuer = normalize_and_validate_login_issuer(issuer)?;
 
-    let doc: serde_json::Value = reqwest::get(&discovery_url)
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-
-    let device_endpoint = doc
-        .get("device_authorization_endpoint")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("missing device_authorization_endpoint"))?;
-
-    let token_endpoint = doc
-        .get("token_endpoint")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("missing token_endpoint"))?;
-
-    let client_device_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
-
-    let client = BasicClient::new(ClientId::new(issuer_client_id.to_string()))
-        .set_auth_uri(AuthUrl::new(issuer.to_string())?)
-        .set_token_uri(TokenUrl::new(token_endpoint.to_string())?)
-        .set_device_authorization_url(client_device_url);
-
+    // One hardened client for every request this flow makes (AC3): no
+    // redirects, and a timeout so a hung or malicious IdP cannot stall the
+    // command indefinitely. Previously the discovery GET used bare
+    // `reqwest::get` — the unhardened default client — while an equivalent
+    // hardened client, built further down, was used only for the device and
+    // token requests; that split is what let the discovery fetch go
+    // unhardened.
     let http_client = reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
+        .timeout(LOGIN_HTTP_TIMEOUT)
         .build()
         .context("failed to build HTTP client")?;
+
+    let (device_endpoint, token_endpoint) =
+        fetch_login_discovery_endpoints(&http_client, &normalized_issuer).await?;
+
+    let client_device_url = DeviceAuthorizationUrl::new(device_endpoint)?;
+
+    let client = BasicClient::new(ClientId::new(issuer_client_id.to_string()))
+        .set_auth_uri(AuthUrl::new(normalized_issuer.clone())?)
+        .set_token_uri(TokenUrl::new(token_endpoint)?)
+        .set_device_authorization_url(client_device_url);
 
     let mut device_request = client
         .exchange_device_code()
@@ -1378,8 +1476,8 @@ async fn run_login(
     let mut issuer_map = BTreeMap::new();
     let mut registry_map = BTreeMap::new();
 
-    issuer_map.insert(issuer.to_string(), content);
-    registry_map.insert(registry.to_string(), issuer.to_string());
+    issuer_map.insert(normalized_issuer.clone(), content);
+    registry_map.insert(registry.to_string(), normalized_issuer);
 
     let credentials = VorpalCredentials {
         issuer: issuer_map,
@@ -1726,5 +1824,337 @@ pub async fn run() -> Result<()> {
         }
 
         Command::System(system) => dispatch_system(system).await,
+    }
+}
+
+#[cfg(test)]
+mod login_egress_tests {
+    use super::*;
+
+    // --- normalize_and_validate_login_issuer (AC1, AC4) -------------------
+
+    #[test]
+    fn normalize_and_validate_login_issuer_refuses_plaintext_off_loopback() {
+        let error = normalize_and_validate_login_issuer("http://idp.example.com")
+            .expect_err("a plaintext non-loopback issuer must be refused");
+
+        assert!(
+            error.to_string().contains("must be https"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn normalize_and_validate_login_issuer_permits_loopback_plaintext() {
+        // Positive control: the shipped default issuer is
+        // `http://localhost:8080/realms/vorpal` (`Command::Login`'s clap
+        // default). If this refused loopback plaintext, a flagless
+        // `vorpal login` would be broken.
+        let normalized = normalize_and_validate_login_issuer("http://localhost:8080/realms/vorpal")
+            .expect("loopback plaintext must be permitted");
+
+        assert_eq!(normalized, "http://localhost:8080/realms/vorpal");
+    }
+
+    #[test]
+    fn normalize_and_validate_login_issuer_trims_a_trailing_slash() {
+        let normalized = normalize_and_validate_login_issuer("https://tenant.example.com/")
+            .expect("a well-formed https issuer must validate");
+
+        assert_eq!(normalized, "https://tenant.example.com");
+    }
+
+    // --- login_discovery_targets (AC2, C-3, C-4) ---------------------------
+
+    fn matching_doc(issuer: &str) -> serde_json::Value {
+        serde_json::json!({
+            "issuer": issuer,
+            "device_authorization_endpoint": format!("{issuer}/device"),
+            "token_endpoint": format!("{issuer}/token"),
+        })
+    }
+
+    #[test]
+    fn login_discovery_targets_accepts_a_matching_document() {
+        let issuer = "https://idp.example.com";
+        let (device, token) =
+            login_discovery_targets(issuer, &matching_doc(issuer)).expect("matching document");
+
+        assert_eq!(device, "https://idp.example.com/device");
+        assert_eq!(token, "https://idp.example.com/token");
+    }
+
+    #[test]
+    fn login_discovery_targets_refuses_an_off_origin_token_endpoint() {
+        let issuer = "https://idp.example.com";
+        let mut doc = matching_doc(issuer);
+        doc["token_endpoint"] = serde_json::json!("https://attacker.example.com/token");
+
+        let error = login_discovery_targets(issuer, &doc)
+            .expect_err("an off-origin token_endpoint must be refused");
+
+        assert!(
+            error.to_string().contains("token_endpoint"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn login_discovery_targets_refuses_an_off_origin_device_endpoint() {
+        // C-3: not one of VPL-280's five ACs, but required by the threat
+        // model — the device endpoint is what the CLI prints for the user
+        // to open in a browser (AB-3).
+        let issuer = "https://idp.example.com";
+        let mut doc = matching_doc(issuer);
+        doc["device_authorization_endpoint"] =
+            serde_json::json!("https://attacker.example.com/device");
+
+        let error = login_discovery_targets(issuer, &doc)
+            .expect_err("an off-origin device_authorization_endpoint must be refused");
+
+        assert!(
+            error.to_string().contains("device_authorization_endpoint"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn login_discovery_targets_refuses_an_issuer_claim_mismatch() {
+        // C-4: the origin pin above is blind to path, so a same-origin
+        // co-tenant on a multi-realm IdP (AB-4) would otherwise pass.
+        let issuer = "https://idp.example.com/realms/vorpal";
+        let doc = matching_doc("https://idp.example.com/realms/other");
+
+        let error = login_discovery_targets(issuer, &doc)
+            .expect_err("a document declaring a different issuer must be refused");
+
+        assert!(
+            error.to_string().contains("does not match requested issuer"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn login_discovery_targets_refuses_a_missing_issuer_field() {
+        let issuer = "https://idp.example.com";
+        let doc = serde_json::json!({
+            "device_authorization_endpoint": format!("{issuer}/device"),
+            "token_endpoint": format!("{issuer}/token"),
+        });
+
+        let error = login_discovery_targets(issuer, &doc)
+            .expect_err("a document with no issuer field must fail closed");
+
+        assert!(
+            error.to_string().contains("missing issuer"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    // --- fetch_login_discovery_endpoints (AC2, AC3, AC5) -------------------
+    //
+    // A minimal HTTP/1.1 stand-in for an IdP, mirroring
+    // `sdk/rust/src/context.rs`'s own `IdpServer` fixture: the CLI's
+    // discovery fetch cannot import that one across the crate boundary
+    // (it is `#[cfg(test)]`-private to the SDK), so AC5's "local HTTP
+    // double" is this equivalent in the CLI's own test module.
+
+    struct IdpServer {
+        addr: std::net::SocketAddr,
+        paths: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl IdpServer {
+        async fn start(
+            respond: impl Fn(&str, std::net::SocketAddr) -> Option<String> + Send + Sync + 'static,
+        ) -> Self {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind idp fixture");
+            let addr = listener.local_addr().expect("fixture address");
+            let paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let respond = std::sync::Arc::new(respond);
+            let accepted = paths.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    let Ok((mut socket, _)) = listener.accept().await else {
+                        return;
+                    };
+
+                    let respond = respond.clone();
+                    let accepted = accepted.clone();
+
+                    tokio::spawn(async move {
+                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+                        let mut buffer = vec![0u8; 8192];
+                        let read = socket.read(&mut buffer).await.unwrap_or(0);
+                        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                        let path = request
+                            .split_whitespace()
+                            .nth(1)
+                            .unwrap_or_default()
+                            .to_string();
+
+                        accepted.lock().unwrap().push(path.clone());
+
+                        match respond(&path, addr) {
+                            Some(response) => {
+                                let _ = socket.write_all(response.as_bytes()).await;
+                            }
+                            // Accept and never answer, so the caller's own
+                            // timeout is the only thing that ends the request.
+                            None => std::future::pending::<()>().await,
+                        }
+                    });
+                }
+            });
+
+            Self { addr, paths }
+        }
+
+        fn issuer(&self) -> String {
+            format!("http://127.0.0.1:{}", self.addr.port())
+        }
+
+        fn requested_paths(&self) -> Vec<String> {
+            self.paths.lock().unwrap().clone()
+        }
+    }
+
+    fn http_json_status(status: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            status,
+            body.len(),
+            body
+        )
+    }
+
+    fn http_json(body: &str) -> String {
+        http_json_status("200 OK", body)
+    }
+
+    fn discovery_document(issuer: &str) -> String {
+        http_json(&format!(
+            "{{\"issuer\":\"{issuer}\",\"device_authorization_endpoint\":\"{issuer}/device\",\"token_endpoint\":\"{issuer}/token\"}}"
+        ))
+    }
+
+    fn hardened_client(timeout: Duration) -> reqwest::Client {
+        reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(timeout)
+            .build()
+            .expect("test client must build")
+    }
+
+    #[tokio::test]
+    async fn fetch_login_discovery_endpoints_succeeds_against_a_matching_fixture() {
+        // AC5 positive control: same-origin discovery completes.
+        let idp = IdpServer::start(|path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+            if path == "/.well-known/openid-configuration" {
+                return Some(discovery_document(&issuer));
+            }
+            Some(http_json_status("404 Not Found", "{}"))
+        })
+        .await;
+
+        let client = hardened_client(Duration::from_secs(5));
+        let (device, token) = fetch_login_discovery_endpoints(&client, &idp.issuer())
+            .await
+            .expect("matching fixture must succeed");
+
+        assert_eq!(device, format!("{}/device", idp.issuer()));
+        assert_eq!(token, format!("{}/token", idp.issuer()));
+    }
+
+    #[tokio::test]
+    async fn fetch_login_discovery_endpoints_refuses_a_cross_origin_token_endpoint() {
+        // AC5 negative control, driven through the full discovery fetch
+        // rather than only the pure validator.
+        let idp = IdpServer::start(|path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+            if path == "/.well-known/openid-configuration" {
+                return Some(http_json(&format!(
+                    "{{\"issuer\":\"{issuer}\",\"device_authorization_endpoint\":\"{issuer}/device\",\"token_endpoint\":\"https://attacker.example.com/token\"}}"
+                )));
+            }
+            Some(http_json_status("404 Not Found", "{}"))
+        })
+        .await;
+
+        let client = hardened_client(Duration::from_secs(5));
+        let error = fetch_login_discovery_endpoints(&client, &idp.issuer())
+            .await
+            .expect_err("a cross-origin token_endpoint must be refused");
+
+        assert!(
+            error.to_string().contains("token_endpoint"),
+            "unexpected error: {}",
+            error
+        );
+        assert_eq!(
+            idp.requested_paths(),
+            vec!["/.well-known/openid-configuration".to_string()],
+            "no request may reach the attacker-named endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_login_discovery_endpoints_refuses_a_redirected_discovery_response() {
+        // C-5(a): the discovery GET must not follow a redirect to another
+        // origin. A 302 with no JSON body fails `.json()` parsing once the
+        // client refuses to follow it — mirroring the SDK's own
+        // `refresh_access_token_does_not_follow_a_redirected_token_endpoint`.
+        let elsewhere = IdpServer::start(|_, _| Some(http_json("{}"))).await;
+        let elsewhere_port = elsewhere.addr.port();
+
+        let idp = IdpServer::start(move |path, _| {
+            if path == "/.well-known/openid-configuration" {
+                return Some(format!(
+                    "HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:{}/.well-known/openid-configuration\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                    elsewhere_port
+                ));
+            }
+            Some(http_json_status("404 Not Found", "{}"))
+        })
+        .await;
+
+        let client = hardened_client(Duration::from_secs(5));
+        fetch_login_discovery_endpoints(&client, &idp.issuer())
+            .await
+            .expect_err("a redirected discovery response must not be followed");
+
+        assert!(
+            elsewhere.requested_paths().is_empty(),
+            "the redirect target must never be reached"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_login_discovery_endpoints_times_out_on_a_hung_idp() {
+        // C-5(b): a discovery endpoint that accepts and never answers must
+        // not stall the command past the client's own timeout.
+        let idp = IdpServer::start(|_, _| None).await;
+
+        let client = hardened_client(Duration::from_millis(250));
+        let started = std::time::Instant::now();
+
+        fetch_login_discovery_endpoints(&client, &idp.issuer())
+            .await
+            .expect_err("a hung discovery endpoint must not hang the caller");
+
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the client timeout, not the test harness, must have ended this request"
+        );
     }
 }

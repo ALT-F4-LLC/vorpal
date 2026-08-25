@@ -844,7 +844,14 @@ impl From<RefreshFailure> for anyhow::Error {
 /// eavesdrop and local IdP fixtures live. The origin it returns is what pins
 /// the token endpoint — named by a remote discovery document — to the issuer
 /// the user actually logged in to.
-fn credential_egress_origin(raw: &str) -> Result<String> {
+///
+/// `pub` so `Command::Login` (`cli/src/command.rs`) can apply the same rule
+/// to the issuer and the discovery-named endpoints it fetches: the refresh
+/// path above is only the *second* time a credential crosses the network, and
+/// a second implementation of this rule on the login side is exactly how the
+/// two paths could disagree (see the trim mismatch this function does not
+/// itself fix, guarded instead at each caller's normalization point).
+pub fn credential_egress_origin(raw: &str) -> Result<String> {
     let url = reqwest::Url::parse(raw).with_context(|| format!("invalid OIDC URL: {}", raw))?;
 
     let host = url
@@ -901,8 +908,15 @@ async fn refresh_access_token(
 
     let issuer_origin = credential_egress_origin(issuer).map_err(RefreshFailure::NotSent)?;
 
-    // Discover token endpoint
-    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
+    // Discover token endpoint. Trimmed here, not only at write time in
+    // `Command::Login`: a credentials file already on disk with a trailing
+    // slash on its issuer key (written before this fix existed) must not
+    // double-slash the discovery path — this is the migration, not
+    // duplication of the login-side trim.
+    let discovery_url = format!(
+        "{}/.well-known/openid-configuration",
+        issuer.trim_end_matches('/')
+    );
     let doc: serde_json::Value = http_client
         .get(&discovery_url)
         .send()
@@ -3138,6 +3152,54 @@ mod tests {
                 "/.well-known/openid-configuration".to_string(),
                 "/token".to_string()
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_trims_a_trailing_slash_on_the_stored_issuer() {
+        // VPL-280 C-6, second half: a credentials file written before this
+        // fix existed has an untrimmed issuer key on disk. The refresh path
+        // must format a single-slash discovery URL from it without a
+        // re-login. Matches the discovery path *exactly*, so an untrimmed
+        // issuer (which would request `//.well-known/openid-configuration`)
+        // is observably distinguished from the fixed request instead of
+        // both being accepted by a loose `.contains(...)` match.
+        let idp = IdpServer::start(|path, addr| {
+            if path == "/.well-known/openid-configuration" {
+                return Some(discovery_document(addr));
+            }
+
+            if path == "/token" {
+                return Some(http_json(
+                    "{\"access_token\":\"fresh-access\",\"token_type\":\"bearer\"}",
+                ));
+            }
+
+            Some(http_json_status("404 Not Found", "{}"))
+        })
+        .await;
+
+        let issuer_with_trailing_slash = format!("{}/", idp.issuer());
+
+        let (access_token, ..) = refresh_access_token(
+            None,
+            "client-1",
+            &issuer_with_trailing_slash,
+            "stored-refresh",
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .map_err(anyhow::Error::from)
+        .expect("a trailing slash on the stored issuer must not break discovery");
+
+        assert_eq!(access_token, "fresh-access");
+        assert_eq!(
+            idp.requested_paths(),
+            vec![
+                "/.well-known/openid-configuration".to_string(),
+                "/token".to_string()
+            ],
+            "no double slash may reach the discovery request"
         );
     }
 
