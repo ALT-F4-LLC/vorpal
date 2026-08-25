@@ -1067,6 +1067,22 @@ fn clamp_jobs(requested: usize) -> usize {
 /// `REFRESH_HTTP_TIMEOUT`.
 const LOGIN_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The one hardened HTTP client every request `Command::Login` makes is
+/// built through (VPL-280 AC3, C-5): no redirects, and a caller-supplied
+/// timeout. A single function, rather than an inline `ClientBuilder` at the
+/// call site, is the fix for the defect this control exists to close — a
+/// hardened client and an unhardened `reqwest::get` coexisting a few lines
+/// apart, with the unhardened one used for discovery. Tests call this same
+/// function (with a short timeout) rather than building their own client, so
+/// a mutant that strips the redirect policy or the timeout fails here, not
+/// only in production.
+fn login_http_client(timeout: Duration) -> Result<reqwest::Client> {
+    Ok(reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(timeout)
+        .build()?)
+}
+
 /// Normalizes and validates the `--issuer` value before any network request
 /// touches it (VPL-280 AC1). Trimming and validation happen at this one call
 /// site so every later consumer — the discovery URL, `AuthUrl`, and both
@@ -1163,6 +1179,30 @@ async fn fetch_login_discovery_endpoints(
         .await?;
 
     login_discovery_targets(issuer, &doc)
+}
+
+/// Assembles the `VorpalCredentials` a successful login writes to disk
+/// (VPL-280 AC4, C-6). A pure function so the wiring this issue exists to
+/// get right — the registry map's value must be the *exact same string* as
+/// the issuer map's key, or every authenticated call after login fails to
+/// find credentials (`sdk/rust/src/context.rs` looks the registry value up
+/// as a key into the issuer map) — is asserted directly, rather than only
+/// reachable by driving a full device-authorization flow.
+fn build_login_credentials(
+    normalized_issuer: &str,
+    effective_registry: &str,
+    content: VorpalCredentialsContent,
+) -> VorpalCredentials {
+    let mut issuer_map = BTreeMap::new();
+    let mut registry_map = BTreeMap::new();
+
+    issuer_map.insert(normalized_issuer.to_string(), content);
+    registry_map.insert(effective_registry.to_string(), normalized_issuer.to_string());
+
+    VorpalCredentials {
+        issuer: issuer_map,
+        registry: registry_map,
+    }
 }
 
 /// Build-output flags shared between `build` and `prepare`, mirroring the
@@ -1385,18 +1425,10 @@ async fn run_login(
 ) -> Result<()> {
     let normalized_issuer = normalize_and_validate_login_issuer(issuer)?;
 
-    // One hardened client for every request this flow makes (AC3): no
-    // redirects, and a timeout so a hung or malicious IdP cannot stall the
-    // command indefinitely. Previously the discovery GET used bare
-    // `reqwest::get` — the unhardened default client — while an equivalent
-    // hardened client, built further down, was used only for the device and
-    // token requests; that split is what let the discovery fetch go
-    // unhardened.
-    let http_client = reqwest::ClientBuilder::new()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(LOGIN_HTTP_TIMEOUT)
-        .build()
-        .context("failed to build HTTP client")?;
+    // One hardened client for every request this flow makes (AC3), built by
+    // the same function the tests exercise (`login_http_client`) so a
+    // mutant that weakens it fails there too.
+    let http_client = login_http_client(LOGIN_HTTP_TIMEOUT).context("failed to build HTTP client")?;
 
     let (device_endpoint, token_endpoint) =
         fetch_login_discovery_endpoints(&http_client, &normalized_issuer).await?;
@@ -1473,16 +1505,7 @@ async fn run_login(
 
     // TODO: load existing credentials file if it exists
 
-    let mut issuer_map = BTreeMap::new();
-    let mut registry_map = BTreeMap::new();
-
-    issuer_map.insert(normalized_issuer.clone(), content);
-    registry_map.insert(registry.to_string(), normalized_issuer);
-
-    let credentials = VorpalCredentials {
-        issuer: issuer_map,
-        registry: registry_map,
-    };
+    let credentials = build_login_credentials(&normalized_issuer, registry, content);
     let credentials_json = serde_json::to_string_pretty(&credentials)?;
     let credentials_path = get_key_credentials_path();
 
@@ -1865,6 +1888,44 @@ mod login_egress_tests {
         assert_eq!(normalized, "https://tenant.example.com");
     }
 
+    // --- build_login_credentials (AC4, C-6) ---------------------------------
+
+    #[test]
+    fn build_login_credentials_stores_the_same_issuer_string_in_both_maps() {
+        // Cluster M (blocker): a mutant that has the registry map store a
+        // different issuer string than the one used as the issuer map's key
+        // — the exact C-6 trap the pinned threat model warns about, where
+        // every authenticated call after login fails to find credentials —
+        // previously left `cargo test -p vorpal-cli` green, because nothing
+        // called this wiring outside the untested `Command::Login` arm.
+        let content = VorpalCredentialsContent {
+            access_token: "access-token".to_string(),
+            audience: None,
+            client_id: "client-id".to_string(),
+            expires_in: 3600,
+            issued_at: 0,
+            refresh_token: "refresh-token".to_string(),
+            scopes: vec![],
+        };
+
+        let credentials = build_login_credentials(
+            "https://tenant.example.com",
+            "https://registry.example.com",
+            content,
+        );
+
+        let registry_issuer = credentials
+            .registry
+            .get("https://registry.example.com")
+            .expect("registry map must have an entry for effective_registry");
+
+        assert_eq!(registry_issuer, "https://tenant.example.com");
+        assert!(
+            credentials.issuer.contains_key(registry_issuer),
+            "registry map value {registry_issuer:?} must be a key in the issuer map"
+        );
+    }
+
     // --- login_discovery_targets (AC2, C-3, C-4) ---------------------------
 
     fn matching_doc(issuer: &str) -> serde_json::Value {
@@ -1938,6 +1999,26 @@ mod login_egress_tests {
             "unexpected error: {}",
             error
         );
+    }
+
+    #[test]
+    fn login_discovery_targets_trims_the_documents_issuer_claim_before_comparing() {
+        // N: the trailing-slash trim on the document's own `issuer` claim
+        // (`doc_issuer.trim_end_matches('/') != issuer`) was untested —
+        // `matching_doc` never emits a trailing slash, so a mutant deleting
+        // the trim would still pass every other case here. `issuer` is
+        // already normalized (no trailing slash, per
+        // `normalize_and_validate_login_issuer`); the document below
+        // disagrees with it only in that one respect.
+        let issuer = "https://idp.example.com";
+        let mut doc = matching_doc(issuer);
+        doc["issuer"] = serde_json::json!("https://idp.example.com/");
+
+        let (device, token) = login_discovery_targets(issuer, &doc)
+            .expect("a trailing-slash issuer claim must still match after trimming");
+
+        assert_eq!(device, format!("{issuer}/device"));
+        assert_eq!(token, format!("{issuer}/token"));
     }
 
     #[test]
@@ -2049,14 +2130,6 @@ mod login_egress_tests {
         ))
     }
 
-    fn hardened_client(timeout: Duration) -> reqwest::Client {
-        reqwest::ClientBuilder::new()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(timeout)
-            .build()
-            .expect("test client must build")
-    }
-
     #[tokio::test]
     async fn fetch_login_discovery_endpoints_succeeds_against_a_matching_fixture() {
         // AC5 positive control: same-origin discovery completes.
@@ -2069,7 +2142,7 @@ mod login_egress_tests {
         })
         .await;
 
-        let client = hardened_client(Duration::from_secs(5));
+        let client = login_http_client(Duration::from_secs(5)).expect("test client must build");
         let (device, token) = fetch_login_discovery_endpoints(&client, &idp.issuer())
             .await
             .expect("matching fixture must succeed");
@@ -2093,7 +2166,7 @@ mod login_egress_tests {
         })
         .await;
 
-        let client = hardened_client(Duration::from_secs(5));
+        let client = login_http_client(Duration::from_secs(5)).expect("test client must build");
         let error = fetch_login_discovery_endpoints(&client, &idp.issuer())
             .await
             .expect_err("a cross-origin token_endpoint must be refused");
@@ -2130,7 +2203,7 @@ mod login_egress_tests {
         })
         .await;
 
-        let client = hardened_client(Duration::from_secs(5));
+        let client = login_http_client(Duration::from_secs(5)).expect("test client must build");
         fetch_login_discovery_endpoints(&client, &idp.issuer())
             .await
             .expect_err("a redirected discovery response must not be followed");
@@ -2147,7 +2220,7 @@ mod login_egress_tests {
         // not stall the command past the client's own timeout.
         let idp = IdpServer::start(|_, _| None).await;
 
-        let client = hardened_client(Duration::from_millis(250));
+        let client = login_http_client(Duration::from_millis(250)).expect("test client must build");
         let started = std::time::Instant::now();
 
         fetch_login_discovery_endpoints(&client, &idp.issuer())
