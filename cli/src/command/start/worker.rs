@@ -269,9 +269,17 @@ async fn pull_source(
         match client_archive.pull(request).await {
             Err(status) => {
                 if status.code() != NotFound {
-                    return Err(Status::internal(format!(
-                        "failed to pull source archive: {status:?}"
-                    )));
+                    // The upstream `Status` debug rendering (transport/metadata
+                    // detail, sometimes including registry-internal paths or
+                    // host info) is logged server-side only — reconcile
+                    // R2-C5, the same sanitization `accumulate_archive_stream`
+                    // already applies to a mid-stream failure, extended to
+                    // this RPC-initiation failure too.
+                    error!("worker |> failed to pull source archive: {status:?}");
+
+                    return Err(Status::internal(
+                        "failed to pull source archive: registry request failed",
+                    ));
                 }
 
                 return Err(Status::not_found("source archive not found in registry"));
@@ -664,9 +672,14 @@ async fn pull_artifact(
         match client_archive.pull(request).await {
             Err(status) => {
                 if status.code() != NotFound {
-                    return Err(Status::internal(format!(
-                        "failed to pull artifact archive: {status:?}"
-                    )));
+                    // See the matching comment in `pull_source` (reconcile
+                    // R2-C5): the upstream `Status` detail is logged, never
+                    // returned to the build client.
+                    error!("worker |> failed to pull artifact archive: {status:?}");
+
+                    return Err(Status::internal(
+                        "failed to pull artifact archive: registry request failed",
+                    ));
                 }
 
                 return Err(Status::not_found("artifact archive not found in registry"));
@@ -1838,6 +1851,10 @@ mod tests {
         assert_eq!(err.code(), tonic::Code::Internal);
         // The upstream `Status` debug rendering is logged, not returned —
         // the client-facing message names only the sanitized disposition.
+        // Reconcile R2-C12: asserting the exact sanitized message, not just
+        // the absence of the leaked detail, so this test cannot pass
+        // vacuously against an empty or unrelated message.
+        assert_eq!(err.message(), "test archive stream failed before completion");
         assert!(
             !err.message().contains("connection reset"),
             "the upstream status detail must not reach the client: {}",
@@ -2649,113 +2666,9 @@ mod tests {
         assert_eq!(status.message(), "unknown target");
     }
 
-    // `resolve_registry` is the seam the request-shape block calls. Unit tests
-    // pin its cases directly; the `build_artifact` tests below confirm it is
-    // actually wired in ahead of the target check.
-    #[test]
-    fn resolve_registry_defaults_to_the_sole_configured_value_when_the_request_is_silent() {
-        let allowed = vec!["http://registry.example.com:9000".to_string()];
-
-        assert_eq!(
-            resolve_registry("", &allowed).unwrap(),
-            "http://registry.example.com:9000"
-        );
-    }
-
-    #[test]
-    fn resolve_registry_refuses_a_mismatch_even_with_a_sole_configured_value() {
-        let allowed = vec!["http://registry.example.com:9000".to_string()];
-
-        let err = resolve_registry("http://attacker.example.com", &allowed).unwrap_err();
-
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    }
-
-    #[test]
-    fn resolve_registry_defaults_to_the_first_entry_when_the_request_is_silent() {
-        let allowed = vec![
-            "http://registry-a.example.com".to_string(),
-            "http://registry-b.example.com".to_string(),
-        ];
-
-        assert_eq!(
-            resolve_registry("", &allowed).unwrap(),
-            "http://registry-a.example.com"
-        );
-    }
-
-    #[test]
-    fn resolve_registry_accepts_a_listed_selection() {
-        let allowed = vec![
-            "http://registry-a.example.com".to_string(),
-            "http://registry-b.example.com".to_string(),
-        ];
-
-        assert_eq!(
-            resolve_registry("http://registry-b.example.com", &allowed).unwrap(),
-            "http://registry-b.example.com"
-        );
-    }
-
-    #[test]
-    fn resolve_registry_trims_one_trailing_slash_on_both_sides() {
-        let allowed = vec!["http://registry.example.com/".to_string()];
-
-        assert_eq!(
-            resolve_registry("http://registry.example.com", &allowed).unwrap(),
-            "http://registry.example.com/"
-        );
-    }
-
-    // The prior test only trims the allow-list side; a request-supplied
-    // trailing slash must be trimmed too, or the two sides of the same
-    // normalization would be tested asymmetrically.
-    #[test]
-    fn resolve_registry_trims_one_trailing_slash_on_the_request_side_too() {
-        let allowed = vec!["http://registry.example.com".to_string()];
-
-        assert_eq!(
-            resolve_registry("http://registry.example.com/", &allowed).unwrap(),
-            "http://registry.example.com"
-        );
-    }
-
-    #[test]
-    fn resolve_registry_refuses_a_selection_outside_the_allow_list() {
-        let allowed = vec![
-            "http://registry-a.example.com".to_string(),
-            "http://registry-b.example.com".to_string(),
-        ];
-
-        let err = resolve_registry("http://attacker.example.com", &allowed).unwrap_err();
-
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("registry"), "{}", err.message());
-    }
-
-    // Prefix and substring near-misses must not be admitted by a whole-URI
-    // allow-list entry: `starts_with` would let a `.evil.test` suffix through,
-    // and `contains` would let a query-string trick through.
-    #[test]
-    fn resolve_registry_refuses_prefix_and_substring_near_misses() {
-        let allowed = vec!["https://registry.example.com".to_string()];
-
-        for hostile in [
-            "https://registry.example.com.evil.test",
-            "https://evil.test/?u=https://registry.example.com",
-        ] {
-            let err = resolve_registry(hostile, &allowed).unwrap_err();
-
-            assert_eq!(err.code(), tonic::Code::InvalidArgument, "{hostile:?}");
-        }
-    }
-
-    #[test]
-    fn resolve_registry_refuses_everything_when_nothing_is_configured() {
-        let err = resolve_registry("http://registry.example.com", &[]).unwrap_err();
-
-        assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    }
+    // `resolve_registry`'s own unit tests live in `start.rs`, where the
+    // function is defined (reconcile R2-C10) — the tests below confirm it is
+    // actually wired into `build_artifact` ahead of the target check.
 
     // A request naming a registry outside the allow-list is refused ahead of
     // the target check — the same "unknown target" positive control the other

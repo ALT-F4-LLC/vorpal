@@ -56,104 +56,235 @@ pub struct RunArgs {
     /// explicit empty set means no registry is configured (fail-closed —
     /// never "any registry"). Populated from `--registry-allowed` (or
     /// `VORPAL_REGISTRY_ALLOWED`) in `cli/src/command.rs`. `None` means the
-    /// flag was omitted: `run` below resolves it to this process's own
-    /// listening address — computed from `effective_port`/`tls`, not from
-    /// the client-facing `get_default_address()` helper, so a TCP or TLS
-    /// deployment (or one where the registry runs split from this worker's
-    /// socket default) gets a default that actually matches what it is
-    /// listening on rather than refusing every build.
+    /// flag was omitted: see `default_registry_allowed` in this file for how
+    /// it resolves — this process's own listening address when it also
+    /// co-hosts the registry service, fail-closed empty otherwise.
     pub registry_allowed: Option<Vec<String>>,
     pub services: Vec<String>,
     pub tls: bool,
 }
 
-/// The registry `resolve_registry` selected. Wrapping it distinguishes it,
-/// at the type level, from `request.registry` (a bare `String` on the
-/// unvalidated request) — `worker::pull_source`, `worker::pull_artifact` and
-/// `agent::build_source` accept only this type, so a future edit that
-/// threads the raw request field into any of them instead of the resolved
-/// value fails to compile rather than silently reopening the
-/// registry-pinning check (C1/A2 in the threat model). The tuple field has
-/// no visibility modifier, so it is private to this module: neither `worker`
-/// nor `agent` (both children of this module) can construct one with a bare
-/// tuple literal — `resolve_registry`, defined here, is structurally the
-/// only constructor.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ResolvedRegistry(String);
+/// `ResolvedRegistry` and `resolve_registry` live in their own submodule,
+/// not directly in `start`, so the type's single-constructor guarantee is
+/// something the compiler actually enforces rather than a comment asserting
+/// it. `pub(super)` on an item defined in `start` is visible to `start`'s
+/// *parent* and, transitively, to every descendant of that parent —
+/// `worker` and `agent`, both children of `start`, are such descendants, so
+/// a bare tuple literal `ResolvedRegistry(attacker_str)` written in either
+/// of them would have compiled. Nesting the type one module deeper closes
+/// that: the tuple field below has no visibility modifier, so it is private
+/// to `resolved_registry` and *its* descendants only, and `worker`/`agent`
+/// are siblings of `resolved_registry`, not descendants of it (verified
+/// 2026-08-24, reconcile C1: reverting this nesting while keeping the old
+/// comment's claim is exactly the gap it closes).
+mod resolved_registry {
+    /// The registry `resolve_registry` selected. Wrapping it distinguishes
+    /// it, at the type level, from `request.registry` (a bare `String` on
+    /// the unvalidated request) — `worker::pull_source`,
+    /// `worker::pull_artifact` and `agent::build_source` accept only this
+    /// type, so a future edit that threads the raw request field into any of
+    /// them instead of the resolved value fails to compile rather than
+    /// silently reopening the registry-pinning check (C1/A2 in the threat
+    /// model). See the module doc above for why `resolve_registry`, defined
+    /// in this same module, is the compiler-enforced only constructor.
+    #[derive(Debug, Clone)]
+    pub(super) struct ResolvedRegistry(String);
 
-impl PartialEq<&str> for ResolvedRegistry {
-    fn eq(&self, other: &&str) -> bool {
-        self.0 == *other
+    // Test-only: production code never compares two resolved registries or a
+    // registry against a literal string, and deriving this unconditionally
+    // would make it production surface (reconcile R2-C10) for a capability
+    // only assertions use.
+    #[cfg(test)]
+    impl PartialEq<&str> for ResolvedRegistry {
+        fn eq(&self, other: &&str) -> bool {
+            self.0 == *other
+        }
+    }
+
+    impl std::ops::Deref for ResolvedRegistry {
+        type Target = str;
+
+        fn deref(&self) -> &str {
+            &self.0
+        }
+    }
+
+    impl std::fmt::Display for ResolvedRegistry {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+
+    /// Resolves the registry a build may pull from and push to, from the
+    /// caller-supplied `requested` value and the operator-configured
+    /// `allowed` set. Shared by the worker's `build_artifact` and the
+    /// agent's `prepare_artifact` — both dial a caller-named registry, so
+    /// both need the identical check, living here in the module both share
+    /// rather than in either sibling.
+    ///
+    /// A request-supplied registry is at most a selector over the
+    /// operator-configured set: it never introduces a registry the operator
+    /// did not name. An empty `allowed` set is fail-closed — it means no
+    /// registry is configured for this process, never "any registry is
+    /// acceptable" (the inverse of `issuer_service_client_ids`, where empty
+    /// means "trust nobody" but every token still routes through namespace
+    /// RBAC rather than being refused outright).
+    ///
+    /// Matching is exact string equality after trimming one trailing `/`
+    /// from each side — not a URI parse of scheme/host/port, and never
+    /// prefix or substring, which would let
+    /// `https://registry.example.com.evil.test` or a query-string trick slip
+    /// past an allow-list entry of `https://registry.example.com`. Two URIs
+    /// that are equivalent as parsed components (e.g. differing only in
+    /// path, case, or a second trailing `/`) but differ as strings after one
+    /// trim are treated as different registries — stricter than semantic URI
+    /// equality, which is the safe direction for an allow-list to err in.
+    pub(super) fn resolve_registry(
+        requested: &str,
+        allowed: &[String],
+    ) -> Result<ResolvedRegistry, tonic::Status> {
+        fn normalized(value: &str) -> &str {
+            value.strip_suffix('/').unwrap_or(value)
+        }
+
+        let Some(default_registry) = allowed.first() else {
+            return Err(tonic::Status::invalid_argument(
+                "no registry is configured for this worker",
+            ));
+        };
+
+        if requested.is_empty() {
+            return Ok(ResolvedRegistry(default_registry.clone()));
+        }
+
+        allowed
+            .iter()
+            .find(|candidate| normalized(candidate) == normalized(requested))
+            .cloned()
+            .map(ResolvedRegistry)
+            .ok_or_else(|| {
+                tonic::Status::invalid_argument(format!(
+                    "registry {requested:?} is not in the configured allow-list"
+                ))
+            })
+    }
+
+    // Moved from `worker.rs` (reconcile R2-C10): `resolve_registry` lives
+    // here now, and a pure-function seam should carry its own tests rather
+    // than leaving them behind in the module that merely calls it.
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn resolve_registry_defaults_to_the_sole_configured_value_when_the_request_is_silent() {
+            let allowed = vec!["http://registry.example.com:9000".to_string()];
+
+            assert_eq!(
+                resolve_registry("", &allowed).unwrap(),
+                "http://registry.example.com:9000"
+            );
+        }
+
+        #[test]
+        fn resolve_registry_refuses_a_mismatch_even_with_a_sole_configured_value() {
+            let allowed = vec!["http://registry.example.com:9000".to_string()];
+
+            let err = resolve_registry("http://attacker.example.com", &allowed).unwrap_err();
+
+            assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        }
+
+        #[test]
+        fn resolve_registry_defaults_to_the_first_entry_when_the_request_is_silent() {
+            let allowed = vec![
+                "http://registry-a.example.com".to_string(),
+                "http://registry-b.example.com".to_string(),
+            ];
+
+            assert_eq!(
+                resolve_registry("", &allowed).unwrap(),
+                "http://registry-a.example.com"
+            );
+        }
+
+        #[test]
+        fn resolve_registry_accepts_a_listed_selection() {
+            let allowed = vec![
+                "http://registry-a.example.com".to_string(),
+                "http://registry-b.example.com".to_string(),
+            ];
+
+            assert_eq!(
+                resolve_registry("http://registry-b.example.com", &allowed).unwrap(),
+                "http://registry-b.example.com"
+            );
+        }
+
+        #[test]
+        fn resolve_registry_trims_one_trailing_slash_on_both_sides() {
+            let allowed = vec!["http://registry.example.com/".to_string()];
+
+            assert_eq!(
+                resolve_registry("http://registry.example.com", &allowed).unwrap(),
+                "http://registry.example.com/"
+            );
+        }
+
+        // The prior test only trims the allow-list side; a request-supplied
+        // trailing slash must be trimmed too, or the two sides of the same
+        // normalization would be tested asymmetrically.
+        #[test]
+        fn resolve_registry_trims_one_trailing_slash_on_the_request_side_too() {
+            let allowed = vec!["http://registry.example.com".to_string()];
+
+            assert_eq!(
+                resolve_registry("http://registry.example.com/", &allowed).unwrap(),
+                "http://registry.example.com"
+            );
+        }
+
+        #[test]
+        fn resolve_registry_refuses_a_selection_outside_the_allow_list() {
+            let allowed = vec![
+                "http://registry-a.example.com".to_string(),
+                "http://registry-b.example.com".to_string(),
+            ];
+
+            let err = resolve_registry("http://attacker.example.com", &allowed).unwrap_err();
+
+            assert_eq!(err.code(), tonic::Code::InvalidArgument);
+            assert!(err.message().contains("registry"), "{}", err.message());
+        }
+
+        // Prefix and substring near-misses must not be admitted by a
+        // whole-URI allow-list entry: `starts_with` would let a
+        // `.evil.test` suffix through, and `contains` would let a
+        // query-string trick through.
+        #[test]
+        fn resolve_registry_refuses_prefix_and_substring_near_misses() {
+            let allowed = vec!["https://registry.example.com".to_string()];
+
+            for hostile in [
+                "https://registry.example.com.evil.test",
+                "https://evil.test/?u=https://registry.example.com",
+            ] {
+                let err = resolve_registry(hostile, &allowed).unwrap_err();
+
+                assert_eq!(err.code(), tonic::Code::InvalidArgument, "{hostile:?}");
+            }
+        }
+
+        #[test]
+        fn resolve_registry_refuses_everything_when_nothing_is_configured() {
+            let err = resolve_registry("http://registry.example.com", &[]).unwrap_err();
+
+            assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        }
     }
 }
 
-impl std::ops::Deref for ResolvedRegistry {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ResolvedRegistry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-/// Resolves the registry a build may pull from and push to, from the
-/// caller-supplied `requested` value and the operator-configured `allowed`
-/// set. Shared by the worker's `build_artifact` and the agent's
-/// `prepare_artifact` — both dial a caller-named registry, so both need the
-/// identical check, living here in the module both share rather than in
-/// either sibling.
-///
-/// A request-supplied registry is at most a selector over the
-/// operator-configured set: it never introduces a registry the operator did
-/// not name. An empty `allowed` set is fail-closed — it means no registry is
-/// configured for this process, never "any registry is acceptable" (the
-/// inverse of `issuer_service_client_ids`, where empty means "trust nobody"
-/// but every token still routes through namespace RBAC rather than being
-/// refused outright).
-///
-/// Matching is exact string equality after trimming one trailing `/` from
-/// each side — not a URI parse of scheme/host/port, and never prefix or
-/// substring, which would let `https://registry.example.com.evil.test` or a
-/// query-string trick slip past an allow-list entry of
-/// `https://registry.example.com`. Two URIs that are equivalent as parsed
-/// components (e.g. differing only in path, case, or a second trailing `/`)
-/// but differ as strings after one trim are treated as different registries
-/// — stricter than semantic URI equality, which is the safe direction for an
-/// allow-list to err in.
-pub(super) fn resolve_registry(
-    requested: &str,
-    allowed: &[String],
-) -> Result<ResolvedRegistry, tonic::Status> {
-    fn normalized(value: &str) -> &str {
-        value.strip_suffix('/').unwrap_or(value)
-    }
-
-    let Some(default_registry) = allowed.first() else {
-        return Err(tonic::Status::invalid_argument(
-            "no registry is configured for this worker",
-        ));
-    };
-
-    if requested.is_empty() {
-        return Ok(ResolvedRegistry(default_registry.clone()));
-    }
-
-    allowed
-        .iter()
-        .find(|candidate| normalized(candidate) == normalized(requested))
-        .cloned()
-        .map(ResolvedRegistry)
-        .ok_or_else(|| {
-            tonic::Status::invalid_argument(format!(
-                "registry {requested:?} is not in the configured allow-list"
-            ))
-        })
-}
+use resolved_registry::{resolve_registry, ResolvedRegistry};
 
 /// `build_channel` (sdk/rust/src/context.rs) skips TLS entirely for the
 /// `http://` scheme, so an allow-list entry using it carries the worker's
@@ -167,7 +298,8 @@ fn registry_crosses_network_without_tls(entry: &str) -> bool {
 
 /// This process's own registry endpoint, in the shape `resolve_registry`
 /// compares against — used as the sole default allow-list entry when
-/// `--registry-allowed`/`VORPAL_REGISTRY_ALLOWED` is omitted.
+/// `--registry-allowed`/`VORPAL_REGISTRY_ALLOWED` is omitted and this
+/// process co-hosts the registry service (see `default_registry_allowed`).
 ///
 /// Deliberately independent of `vorpal_sdk::artifact::get_default_address()`:
 /// that helper is a *client*-facing default (env `VORPAL_SOCKET_PATH`, else
@@ -177,14 +309,64 @@ fn registry_crosses_network_without_tls(entry: &str) -> bool {
 /// `args.tls` — the same values `run` already used to decide what to
 /// bind — so the default always names the transport this process actually
 /// serves on.
+///
+/// The host is `localhost`, not the `127.0.0.1` literal an earlier version
+/// used (reconcile R2-C2/R2-C3): the main listener binds `[::]:<port>` — the
+/// IPv6 unspecified address — and on several platforms (notably BSD/macOS,
+/// where `net.inet6.ip6.v6only` defaults on) that socket does not accept an
+/// IPv4 connection to `127.0.0.1` at all, so the worker's self-dial could
+/// fail to even reach its own listener. `localhost` also matches the sole
+/// DNS SAN the generated service certificate carries
+/// (`system/keys.rs`, `let name = "localhost"`), so a `--tls` deployment's
+/// self-dial can complete its handshake instead of failing hostname
+/// verification against an IP literal. It is the same spelling already used
+/// elsewhere in this codebase for the equivalent purpose (`command/config.rs`'s
+/// `http://localhost:{command_port}`).
 fn own_registry_address(effective_port: Option<u16>, tls: bool, socket_path: &Path) -> String {
     match effective_port {
         Some(port) => {
             let scheme = if tls { "https" } else { "http" };
-            format!("{scheme}://127.0.0.1:{port}")
+            format!("{scheme}://localhost:{port}")
         }
         None => format!("unix://{}", socket_path.display()),
     }
+}
+
+/// The registry allow-list `run` uses when `--registry-allowed`/
+/// `VORPAL_REGISTRY_ALLOWED` was not passed explicitly.
+///
+/// Pulled out of `run` as its own pure function, tested directly, so a
+/// mutation to either wiring point it replaces — the `has_registry` gate
+/// below, or the default no longer being `own_registry_address`'s result —
+/// fails a test of its own instead of surviving because nothing outside
+/// `run`'s untestable body exercised it (reconcile R2-C4: mutation testing
+/// found exactly this gap on both the prior single-branch version here and
+/// the CLI's `Start` match arm).
+///
+/// Defaulting to `own_registry_address` regardless of whether this process
+/// runs its own registry was itself the reconcile R2-C2 bug: on a
+/// worker-only (or agent-only) deployment split from its registry, "this
+/// process's own address" names no registry at all, and guessing it papers
+/// over a configuration the operator must actually supply. Only when this
+/// process also runs the registry service (`has_registry`) is its own
+/// address a meaningful default; otherwise the omitted flag falls back to
+/// the same fail-closed empty list an explicit `--registry-allowed ""`
+/// produces; every worker/agent registry dial refuses until the operator
+/// configures one, and the startup log below still surfaces that fact.
+fn default_registry_allowed(
+    explicit: Option<Vec<String>>,
+    has_registry: bool,
+    effective_port: Option<u16>,
+    tls: bool,
+    socket_path: &Path,
+) -> Vec<String> {
+    explicit.unwrap_or_else(|| {
+        if has_registry {
+            vec![own_registry_address(effective_port, tls, socket_path)]
+        } else {
+            Vec::new()
+        }
+    })
 }
 
 /// Whether `run` should emit the registry allow-list startup log at all —
@@ -600,6 +782,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     let has_worker = args.services.contains(&"worker".to_string());
     let has_agent = args.services.contains(&"agent".to_string());
+    let has_registry = args.services.contains(&"registry".to_string());
 
     let effective_port = resolve_effective_port(
         args.port,
@@ -613,15 +796,19 @@ pub async fn run(args: RunArgs) -> Result<()> {
     // not from the client-facing `get_default_address()` helper, which
     // knows nothing about `--port`/`--tls` and would default a TCP or TLS
     // deployment to a Unix socket path nothing is listening on, refusing
-    // every build. An explicit (possibly empty) `--registry-allowed` is the
-    // operator's own choice and is used as given.
-    let registry_allowed = args.registry_allowed.clone().unwrap_or_else(|| {
-        vec![own_registry_address(
-            effective_port,
-            args.tls,
-            &get_socket_path(),
-        )]
-    });
+    // every build — and only when this process co-hosts the registry
+    // service itself; a split (worker- or agent-only) deployment has no
+    // meaningful "own address" default and falls back to fail-closed empty
+    // instead. An explicit (possibly empty) `--registry-allowed` is the
+    // operator's own choice and is used as given. See
+    // `default_registry_allowed`.
+    let registry_allowed = default_registry_allowed(
+        args.registry_allowed.clone(),
+        has_registry,
+        effective_port,
+        args.tls,
+        &get_socket_path(),
+    );
 
     // Emit the registry allow-list at startup for the same reason the
     // trusted-service list is emitted above: a worker or agent with an
@@ -632,19 +819,21 @@ pub async fn run(args: RunArgs) -> Result<()> {
     // about it here would be a false signal.
     if registry_allowed_log_is_active(has_worker, has_agent) {
         if registry_allowed.is_empty() {
-            // Only reachable when `--registry-allowed ""` (or
+            // Reachable either from an explicit `--registry-allowed ""` (or
             // `VORPAL_REGISTRY_ALLOWED=`, which reads identically to clap)
-            // was passed explicitly — the omitted-flag case is defaulted to
-            // `own_registry_address` above and is never empty. An operator
-            // deliberately refusing every build on this process is
-            // indistinguishable, from a bare info line, from an empty env
-            // var nobody meant to set — so this is a `warn!`, naming both
-            // possible sources, rather than the info line a healthy,
-            // fully-configured process also produces.
+            // or from the omitted-flag default when this process does not
+            // co-host the registry service (`default_registry_allowed`). An
+            // operator who deliberately refuses every build, one running a
+            // split worker-only deployment who has not yet set
+            // `--registry-allowed`, and an empty env var nobody meant to set
+            // are indistinguishable from a bare info line — so this is a
+            // `warn!`, naming every possible source, rather than the info
+            // line a healthy, fully-configured process also produces.
             warn!(
-                "registry allow-list is explicitly empty (--registry-allowed \"\" or \
-                 VORPAL_REGISTRY_ALLOWED=\"\"); every worker/agent registry dial will \
-                 be refused"
+                "registry allow-list is empty (--registry-allowed \"\", \
+                 VORPAL_REGISTRY_ALLOWED=\"\", or this process does not run its own \
+                 registry service): every worker/agent registry dial will be refused \
+                 until --registry-allowed/VORPAL_REGISTRY_ALLOWED is configured"
             );
         } else {
             info!(
@@ -701,8 +890,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
         info!("agent |> service: {}", transport_label);
     }
-
-    let has_registry = args.services.contains(&"registry".to_string());
 
     if has_registry {
         router = add_registry_services(router, &args, &transport_label).await?;
@@ -868,12 +1055,16 @@ mod own_registry_address_tests {
         );
     }
 
+    // R2-C2/R2-C3 (reconcile): `localhost`, not the `127.0.0.1` literal —
+    // the listener binds the IPv6 unspecified address, which does not accept
+    // `127.0.0.1` connections on every platform, and the generated service
+    // certificate's sole DNS SAN is `localhost`, not an IP literal.
     #[test]
     fn own_registry_address_uses_http_when_a_plaintext_port_is_bound() {
         let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
         assert_eq!(
             own_registry_address(Some(23151), false, socket_path),
-            "http://127.0.0.1:23151"
+            "http://localhost:23151"
         );
     }
 
@@ -882,7 +1073,53 @@ mod own_registry_address_tests {
         let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
         assert_eq!(
             own_registry_address(Some(23151), true, socket_path),
-            "https://127.0.0.1:23151"
+            "https://localhost:23151"
+        );
+    }
+}
+
+#[cfg(test)]
+mod default_registry_allowed_tests {
+    use super::*;
+
+    // R2-C4 (reconcile): pin the wiring `run` uses, not just the pieces it
+    // calls — reverting either the `has_registry` gate or the default back
+    // to `own_registry_address` unconditionally fails one of these.
+    #[test]
+    fn default_registry_allowed_uses_explicit_value_regardless_of_has_registry() {
+        let explicit = vec!["http://explicit.example.com".to_string()];
+        let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
+
+        assert_eq!(
+            default_registry_allowed(Some(explicit.clone()), true, Some(23151), false, socket_path),
+            explicit
+        );
+        assert_eq!(
+            default_registry_allowed(Some(explicit.clone()), false, None, false, socket_path),
+            explicit
+        );
+    }
+
+    // R2-C2: a split deployment (this process runs no registry of its own)
+    // gets no guessed default — fail-closed empty, same as an explicit
+    // `--registry-allowed ""`.
+    #[test]
+    fn default_registry_allowed_is_empty_when_this_process_has_no_registry() {
+        let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
+
+        assert_eq!(
+            default_registry_allowed(None, false, Some(23151), false, socket_path),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn default_registry_allowed_uses_own_address_when_this_process_has_a_registry() {
+        let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
+
+        assert_eq!(
+            default_registry_allowed(None, true, Some(23151), false, socket_path),
+            vec!["http://localhost:23151".to_string()]
         );
     }
 }

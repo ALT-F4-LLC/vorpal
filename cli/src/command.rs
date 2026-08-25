@@ -218,14 +218,19 @@ pub enum CommandSystemServices {
         /// from or push to. A request-supplied `registry` may only select a
         /// value from this list (or leave it unset to get the first entry,
         /// the worker's own configured value); a request naming anything
-        /// else is refused. Leave unset (default) and the worker allows only
-        /// this process's own registry endpoint — computed from `--port`/
-        /// `--tls` at start time (`unix://<socket>`, `http://127.0.0.1:<port>`
-        /// or `https://127.0.0.1:<port>`), not the client-facing
-        /// `get_default_address()` default every other command targets, which
-        /// would name a Unix socket a TCP- or TLS-configured process is not
-        /// listening on. Pass an explicit empty string to fail closed and
-        /// refuse every build instead.
+        /// else is refused. Leave unset (default): if `--services` includes
+        /// `registry`, the worker allows only this process's own registry
+        /// endpoint — computed from `--port`/`--tls` at start time
+        /// (`unix://<socket>`, `http://localhost:<port>` or
+        /// `https://localhost:<port>`; `localhost`, not an IP literal, to
+        /// match the generated certificate's DNS SAN and to reach a listener
+        /// bound to the IPv6 unspecified address), not the client-facing
+        /// `get_default_address()` default every other command targets. If
+        /// this process does not run its own registry service (a split
+        /// worker- or agent-only deployment), the omitted flag instead fails
+        /// closed — every build is refused until `--registry-allowed` names
+        /// the real registry. Pass an explicit empty string to fail closed
+        /// deliberately on a combined deployment too.
         #[arg(env = "VORPAL_REGISTRY_ALLOWED", long)]
         registry_allowed: Option<String>,
 

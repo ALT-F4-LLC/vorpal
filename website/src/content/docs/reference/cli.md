@@ -396,6 +396,7 @@ vorpal system services start [OPTIONS]
 | `--registry-backend <BACKEND>` | `local` | Registry storage backend (`local` or `s3`) |
 | `--registry-backend-s3-bucket <BUCKET>` | | S3 bucket name (required when backend is `s3`) |
 | `--registry-backend-s3-force-path-style` | `false` | Use path-style S3 URLs |
+| `--registry-allowed <LIST>` | this process's own registry endpoint (fails closed if it does not run `registry`) | Comma-separated registries the worker/agent may pull from or push to; pass `""` to refuse every build |
 | `--services <LIST>` | `agent,registry,worker` | Comma-separated list of services to start |
 | `--tls` | `false` | Enable TLS (requires keys from `vorpal system keys generate`) |
 
