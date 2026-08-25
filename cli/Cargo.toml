@@ -55,6 +55,12 @@ walkdir = { version = "2.5.0" }
 
 [dev-dependencies]
 tempfile = { version = "3.24.0" }
+# Handler-level test support for `tonic::Streaming<T>` (VPL-383): builds a
+# real gRPC-framed request body so `ArchiveService::push` is exercised
+# through its actual entry point rather than only through the backend trait.
+http-body = { version = "1.0.1" }
+prost = { version = "0.14.3" }
+tonic-prost = { version = "0.14.3" }
 
 [lints]
 workspace = true

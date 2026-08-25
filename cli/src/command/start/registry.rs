@@ -1,5 +1,7 @@
 use crate::command::{
-    start::auth::{get_user_context, require_namespace_or_service_trust, PrincipalKind},
+    start::auth::{
+        authorize_namespace_if_authenticated, get_user_context, Claims, PrincipalKind,
+    },
     store::paths::{
         parse_alias_name, parse_artifact_digest, parse_store_path_component, split_alias_name_tag,
     },
@@ -148,11 +150,14 @@ impl ArchiveServer {
             cache_ttl_seconds
         );
 
-        // Bounded on entry count: the key is "{namespace}/{digest}" from an
-        // unauthenticated endpoint (`ArchiveService::check` has no authz —
-        // see the `require_namespace_or_service_trust` call added below),
-        // so an unbounded cache lets any caller grow it without limit
-        // regardless of the TTL (VPL-383).
+        // Bounded on entry count: the key is "{namespace}/{digest}", and
+        // `ArchiveService::check`'s authz call (`authorize_namespace_if_authenticated`,
+        // below) only runs when the deployment is authenticated at all — an
+        // anonymous deployment (no `--issuer`) still has no check on who can
+        // grow this cache, and even an authenticated caller only needs
+        // *some* namespace grant to keep issuing distinct cache keys within
+        // it, so an unbounded cache still lets any caller grow it without
+        // limit regardless of the TTL (VPL-383).
         const CHECK_CACHE_MAX_ENTRIES: u64 = 100_000;
 
         let check_cache = if cache_ttl_seconds > 0 {
@@ -192,13 +197,9 @@ impl ArchiveService for ArchiveServer {
         // Authorization check — see DKT-64 note in `pull`. `check` previously
         // had no authz call at all, so any token holder (or, with auth off,
         // anyone) got an existence oracle across every namespace (VPL-383).
-        if request
-            .extensions()
-            .get::<crate::command::start::auth::Claims>()
-            .is_some()
-        {
-            require_namespace_or_service_trust(&request, &namespace, "read")?;
+        authorize_namespace_if_authenticated(&request, &namespace, "read")?;
 
+        if request.extensions().get::<Claims>().is_some() {
             info!(
                 "archive |> check by {} in namespace {}",
                 principal_label(&request),
@@ -274,18 +275,13 @@ impl ArchiveService for ArchiveServer {
         // `require_namespace_or_service_trust` so service-user tokens with an
         // `azp` in `--issuer-service-client-ids` bypass namespace RBAC while
         // human tokens still go through the unchanged permission check.
-        if request
-            .extensions()
-            .get::<crate::command::start::auth::Claims>()
-            .is_some()
-        {
-            let req_inner = request.get_ref();
-            require_namespace_or_service_trust(&request, &req_inner.namespace, "read")?;
+        authorize_namespace_if_authenticated(&request, &request.get_ref().namespace, "read")?;
 
+        if request.extensions().get::<Claims>().is_some() {
             info!(
                 "archive |> pull by {} in namespace {}",
                 principal_label(&request),
-                req_inner.namespace
+                request.get_ref().namespace
             );
         }
 
@@ -334,13 +330,9 @@ impl ArchiveService for ArchiveServer {
         // Authorization check — see DKT-64 note in `pull`. Runs after the
         // namespace is known (it arrives in the first stream chunk, not in
         // the RPC's own metadata) and before any backend I/O.
-        if request
-            .extensions()
-            .get::<crate::command::start::auth::Claims>()
-            .is_some()
-        {
-            require_namespace_or_service_trust(&request, &request_namespace, "write")?;
+        authorize_namespace_if_authenticated(&request, &request_namespace, "write")?;
 
+        if request.extensions().get::<Claims>().is_some() {
             info!(
                 "archive |> push by {} in namespace {}",
                 principal_label(&request),
@@ -418,18 +410,13 @@ impl ArtifactService for ArtifactServer {
         request: Request<ArtifactRequest>,
     ) -> Result<Response<Artifact>, Status> {
         // Authorization check — see DKT-64 note in `ArchiveService::pull`.
-        if request
-            .extensions()
-            .get::<crate::command::start::auth::Claims>()
-            .is_some()
-        {
-            let req_inner = request.get_ref();
-            require_namespace_or_service_trust(&request, &req_inner.namespace, "read")?;
+        authorize_namespace_if_authenticated(&request, &request.get_ref().namespace, "read")?;
 
+        if request.extensions().get::<Claims>().is_some() {
             info!(
                 "artifact |> get_artifact by {} in namespace {}",
                 principal_label(&request),
-                req_inner.namespace
+                request.get_ref().namespace
             );
         }
 
@@ -454,18 +441,13 @@ impl ArtifactService for ArtifactServer {
         // Authorization check — see DKT-64 note in `ArchiveService::pull`.
         // This site previously had no observability log line; DKT-64 adds one
         // so every authz decision (AC §1.3 #5) is logged uniformly.
-        if request
-            .extensions()
-            .get::<crate::command::start::auth::Claims>()
-            .is_some()
-        {
-            let req_inner = request.get_ref();
-            require_namespace_or_service_trust(&request, &req_inner.namespace, "read")?;
+        authorize_namespace_if_authenticated(&request, &request.get_ref().namespace, "read")?;
 
+        if request.extensions().get::<Claims>().is_some() {
             info!(
                 "artifact |> get_artifact_alias by {} in namespace {}",
                 principal_label(&request),
-                req_inner.namespace
+                request.get_ref().namespace
             );
         }
 
@@ -517,18 +499,17 @@ impl ArtifactService for ArtifactServer {
         request: Request<StoreArtifactRequest>,
     ) -> Result<Response<ArtifactResponse>, Status> {
         // Authorization check — see DKT-64 note in `ArchiveService::pull`.
-        if request
-            .extensions()
-            .get::<crate::command::start::auth::Claims>()
-            .is_some()
-        {
-            let req_inner = request.get_ref();
-            require_namespace_or_service_trust(&request, &req_inner.artifact_namespace, "write")?;
+        authorize_namespace_if_authenticated(
+            &request,
+            &request.get_ref().artifact_namespace,
+            "write",
+        )?;
 
+        if request.extensions().get::<Claims>().is_some() {
             info!(
                 "artifact |> store_artifact by {} in namespace {}",
                 principal_label(&request),
-                req_inner.artifact_namespace
+                request.get_ref().artifact_namespace
             );
         }
 
@@ -644,6 +625,7 @@ mod tests {
     /// Mock backend that tracks call counts, received data, and returns configurable results.
     struct MockBackend {
         check_call_count: Arc<AtomicUsize>,
+        pull_call_count: Arc<AtomicUsize>,
         push_call_count: Arc<AtomicUsize>,
         should_exist: bool,
         /// Stores one entry per push call.
@@ -656,6 +638,7 @@ mod tests {
         fn new(should_exist: bool) -> Self {
             Self {
                 check_call_count: Arc::new(AtomicUsize::new(0)),
+                pull_call_count: Arc::new(AtomicUsize::new(0)),
                 push_call_count: Arc::new(AtomicUsize::new(0)),
                 should_exist,
                 push_calls: Arc::new(Mutex::new(Vec::new())),
@@ -665,6 +648,10 @@ mod tests {
 
         fn call_count(&self) -> usize {
             self.check_call_count.load(Ordering::SeqCst)
+        }
+
+        fn pull_count(&self) -> usize {
+            self.pull_call_count.load(Ordering::SeqCst)
         }
 
         fn push_count(&self) -> usize {
@@ -690,11 +677,17 @@ mod tests {
         async fn pull(
             &self,
             _req: &ArchivePullRequest,
-            _tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
+            tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
         ) -> Result<(), Status> {
-            Err(Status::unimplemented(
-                "MockBackend::pull is not needed for cache tests",
-            ))
+            self.pull_call_count.fetch_add(1, Ordering::SeqCst);
+
+            let _ = tx
+                .send(Ok(ArchivePullResponse {
+                    data: b"archive-bytes".to_vec(),
+                }))
+                .await;
+
+            Ok(())
         }
 
         async fn push(
@@ -728,6 +721,7 @@ mod tests {
         fn box_clone(&self) -> Box<dyn ArchiveBackend> {
             Box::new(MockBackend {
                 check_call_count: Arc::clone(&self.check_call_count),
+                pull_call_count: Arc::clone(&self.pull_call_count),
                 push_call_count: Arc::clone(&self.push_call_count),
                 should_exist: self.should_exist,
                 push_calls: Arc::clone(&self.push_calls),
@@ -985,6 +979,40 @@ mod tests {
         assert_eq!(backend.call_count(), 1);
     }
 
+    #[tokio::test]
+    async fn test_check_denies_when_principal_lacks_namespace_permission() {
+        // Proves `check`'s authorization gate is load-bearing (VPL-383
+        // CLUSTER-24: "the two authorization gates this round added" — the
+        // other is `push`, tested above — "are pinned by no test; deleting
+        // check's authz call leaves the suite fully green"). A Human
+        // principal with a grant on a *different* namespace must be denied,
+        // and the backend must never run.
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let mut request = make_check_request("library", DIGEST_GENERIC);
+        request.extensions_mut().insert(PrincipalKind::Human);
+        request.extensions_mut().insert(Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("attacker".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(std::collections::HashMap::from([(
+                "other".to_string(),
+                vec!["read".to_string()],
+            )])),
+        });
+
+        let result = server.check(request).await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
+        assert_eq!(backend.call_count(), 0);
+    }
+
     // -----------------------------------------------------------------------
     // `ArtifactService::get_artifact_alias` (VPL-383 AC-1/AC-2): this handler
     // previously checked nothing. A hostile `name` or `tag` reached the
@@ -993,6 +1021,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     struct MockArtifactBackend {
+        get_artifact_calls: Arc<AtomicUsize>,
         get_artifact_alias_calls: Arc<AtomicUsize>,
         store_artifact_calls: Arc<AtomicUsize>,
     }
@@ -1000,9 +1029,14 @@ mod tests {
     impl MockArtifactBackend {
         fn new() -> Self {
             Self {
+                get_artifact_calls: Arc::new(AtomicUsize::new(0)),
                 get_artifact_alias_calls: Arc::new(AtomicUsize::new(0)),
                 store_artifact_calls: Arc::new(AtomicUsize::new(0)),
             }
+        }
+
+        fn get_artifact_call_count(&self) -> usize {
+            self.get_artifact_calls.load(Ordering::SeqCst)
         }
 
         fn alias_call_count(&self) -> usize {
@@ -1017,7 +1051,8 @@ mod tests {
     #[tonic::async_trait]
     impl ArtifactBackend for MockArtifactBackend {
         async fn get_artifact(&self, _digest: &str, _namespace: &str) -> Result<Artifact, Status> {
-            unimplemented!("not needed for validation tests")
+            self.get_artifact_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Artifact::default())
         }
 
         async fn get_artifact_alias(
@@ -1043,6 +1078,7 @@ mod tests {
 
         fn box_clone(&self) -> Box<dyn ArtifactBackend> {
             Box::new(MockArtifactBackend {
+                get_artifact_calls: Arc::clone(&self.get_artifact_calls),
                 get_artifact_alias_calls: Arc::clone(&self.get_artifact_alias_calls),
                 store_artifact_calls: Arc::clone(&self.store_artifact_calls),
             })
@@ -1090,6 +1126,21 @@ mod tests {
         assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
+    #[tokio::test]
+    async fn test_get_artifact_accepts_a_well_formed_request() {
+        // Positive control (VPL-383 CLUSTER-9B): without this, a handler
+        // that refused every request would still pass both tests above.
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let result = server
+            .get_artifact(make_get_artifact_request("library", DIGEST_GENERIC))
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(backend.get_artifact_call_count(), 1);
+    }
+
     // -----------------------------------------------------------------------
     // `ArchiveService::pull` (VPL-383/C1-C2): a traversing digest or
     // namespace must be refused before the streaming response is ever
@@ -1122,6 +1173,27 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn test_pull_accepts_a_well_formed_request() {
+        // Positive control (VPL-383 CLUSTER-9B): without this, a handler
+        // that refused every request — including a well-formed one — would
+        // still pass every test above. `pull`'s backend call happens inside
+        // a spawned task, so draining one item from the response stream is
+        // what gives that task a chance to run before the assertion.
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let response = server
+            .pull(make_check_request("library", DIGEST_GENERIC))
+            .await;
+
+        assert!(response.is_ok());
+        let mut stream = response.unwrap().into_inner();
+        let _ = stream.next().await;
+
+        assert_eq!(backend.pull_count(), 1);
     }
 
     fn make_alias_request(
@@ -1343,26 +1415,177 @@ mod tests {
     // Streaming push tests (DKT-16)
     // -----------------------------------------------------------------------
     //
-    // NOTE on handler-level tests: tonic::Streaming<T> cannot be constructed
-    // from a plain stream in unit tests (it requires HTTP body + codec internals).
-    // The handler tests below exercise the ArchiveService::push method indirectly
-    // through the handler's stream-processing pipeline. The backend-level tests
-    // exercise push streaming directly.
-    //
     // NOTE on silent stream truncation (pre-existing gap): The handler at line 253
     // calls `request_stream.next().await` which returns `None` on client disconnect.
     // If the client disconnects mid-stream after metadata extraction, the backend
     // receives a truncated stream and writes a partial archive. This is a pre-existing
     // gap in error handling (not introduced by the streaming refactor) — the server
     // has no way to distinguish "stream ended normally" from "client dropped
-    // connection after sending some data". Integrity is preserved by digest
-    // verification at a higher layer.
+    // connection after sending some data". No integrity control catches this:
+    // the store is recipe-addressed, not content-addressed (VPL-383 threat
+    // model §4 AC-2, `paths.rs:288-294`), and nothing verifies a pulled
+    // archive's bytes against its digest before a build unpacks it
+    // (`build.rs:646-686`) — a partial write from this gap is
+    // indistinguishable, downstream, from a deliberately planted one.
 
     /// Helper: create a byte stream from chunks for backend push tests.
     fn byte_stream_from_chunks(
         chunks: Vec<Result<bytes::Bytes, Status>>,
     ) -> impl Stream<Item = Result<bytes::Bytes, Status>> + Unpin + Send {
         tokio_stream::iter(chunks)
+    }
+
+    // -----------------------------------------------------------------------
+    // Handler-level `ArchiveService::push` tests (VPL-383 CLUSTER-9A).
+    //
+    // `tonic::Streaming<T>` *is* constructible outside a live connection:
+    // `Streaming::new_request` takes a decoder and any `http_body::Body`, and
+    // a body that yields already gRPC-framed bytes (compression flag + u32
+    // length + encoded message, repeated) round-trips through it exactly as
+    // a real HTTP/2 request body would. This drives `ArchiveServer::push`
+    // through its real entry point — including the authz gate and the
+    // `parse_artifact_digest`/`parse_store_path_component` calls this
+    // handler already makes — rather than only through `ArchiveBackend`.
+    // -----------------------------------------------------------------------
+
+    /// A fixed sequence of gRPC-framed byte frames, yielded one per
+    /// `poll_frame` call. `http_body::Body` is a foreign trait (`http-body`
+    /// is not a direct dependency of this crate — it is reachable only
+    /// through `tonic`'s `Streaming`), so this local type is what makes the
+    /// impl below coherent.
+    struct FixedFramesBody {
+        frames: std::collections::VecDeque<bytes::Bytes>,
+    }
+
+    impl http_body::Body for FixedFramesBody {
+        type Data = bytes::Bytes;
+        type Error = std::convert::Infallible;
+
+        fn poll_frame(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+            std::task::Poll::Ready(self.frames.pop_front().map(|b| Ok(http_body::Frame::data(b))))
+        }
+    }
+
+    /// Encode one protobuf message as a single gRPC length-prefixed frame
+    /// (uncompressed): `[0u8][len: u32 BE][message bytes]`.
+    fn grpc_frame(msg: &ArchivePushRequest) -> bytes::Bytes {
+        let mut payload = Vec::new();
+        prost::Message::encode(msg, &mut payload).expect("encoding a well-formed message");
+
+        let mut framed = Vec::with_capacity(5 + payload.len());
+        framed.push(0u8);
+        framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        framed.extend_from_slice(&payload);
+
+        bytes::Bytes::from(framed)
+    }
+
+    /// Build a real `Request<Streaming<ArchivePushRequest>>` from a sequence
+    /// of chunks, each becoming one gRPC message on the wire — the same
+    /// shape a real client's `ArchivePushRequest` stream produces.
+    fn make_push_streaming_request(
+        chunks: Vec<ArchivePushRequest>,
+    ) -> Request<Streaming<ArchivePushRequest>> {
+        let body = FixedFramesBody {
+            frames: chunks.iter().map(grpc_frame).collect(),
+        };
+
+        let decoder = tonic_prost::ProstCodec::<ArchivePushRequest, ArchivePushRequest>::raw_decoder(
+            tonic::codec::BufferSettings::default(),
+        );
+
+        let streaming = Streaming::new_request(decoder, body, None, None);
+
+        Request::new(streaming)
+    }
+
+    #[tokio::test]
+    async fn test_push_handler_rejects_a_traversing_digest_before_any_backend_call() {
+        // Given: a server whose backend would happily write anywhere
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        // When: the first chunk carries a traversing digest, over a real
+        // `Streaming<ArchivePushRequest>` built from wire-framed bytes
+        let request = make_push_streaming_request(vec![ArchivePushRequest {
+            data: b"hello".to_vec(),
+            digest: "../../../../../etc/cron.d/pwn".to_string(),
+            namespace: "library".to_string(),
+        }]);
+
+        let result = server.push(request).await;
+
+        // Then: refused before the backend ever runs
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        assert_eq!(backend.push_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_push_handler_accepts_a_well_formed_streaming_request() {
+        // Given: a server with a real Streaming<ArchivePushRequest> request
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let request = make_push_streaming_request(vec![ArchivePushRequest {
+            data: b"hello world".to_vec(),
+            digest: DIGEST_GENERIC.to_string(),
+            namespace: "library".to_string(),
+        }]);
+
+        // When: pushed
+        let result = server.push(request).await;
+
+        // Then: the backend receives the parsed digest/namespace and the data
+        assert!(result.is_ok());
+        assert_eq!(backend.push_count(), 1);
+        let push_calls = backend.push_calls();
+        let calls = push_calls.lock().await;
+        assert_eq!(calls[0].0, DIGEST_GENERIC);
+        assert_eq!(calls[0].1, "library");
+        assert_eq!(calls[0].2, b"hello world");
+    }
+
+    #[tokio::test]
+    async fn test_push_handler_denies_when_principal_lacks_write_permission() {
+        // Given: a server and a Human principal with no `write` grant on
+        // the namespace the push targets — proves `push`'s authorization
+        // gate is load-bearing, not merely present (VPL-383 CLUSTER-24: this
+        // is one of "the two authorization gates this round added" with no
+        // prior test).
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let mut request = make_push_streaming_request(vec![ArchivePushRequest {
+            data: b"hello".to_vec(),
+            digest: DIGEST_GENERIC.to_string(),
+            namespace: "library".to_string(),
+        }]);
+        request.extensions_mut().insert(PrincipalKind::Human);
+        request.extensions_mut().insert(Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("attacker".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(std::collections::HashMap::from([(
+                "other".to_string(),
+                vec!["write".to_string()],
+            )])),
+        });
+
+        // When: pushed
+        let result = server.push(request).await;
+
+        // Then: denied before the backend runs
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
+        assert_eq!(backend.push_count(), 0);
     }
 
     #[tokio::test]

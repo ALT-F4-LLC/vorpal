@@ -267,7 +267,12 @@ pub fn parse_alias_name(name: &str, field: &str) -> Result<String> {
 /// a path could drift apart if one copy changed and the others did not.
 pub fn split_alias_name_tag(alias: &str) -> (&str, &str) {
     let mut parts = alias.split(':');
-    let name = parts.next().unwrap_or(alias);
+    // `str::split` always yields at least one item, even for `""` — the
+    // `unwrap_or(alias)` this replaced could never take its fallback arm
+    // (VPL-383 CLUSTER-20); `unwrap_or_default()` names the same guaranteed
+    // case honestly instead of carrying dead code that implies a path that
+    // does not exist.
+    let name = parts.next().unwrap_or_default();
     let tag = parts.next().unwrap_or("latest");
 
     (name, tag)

@@ -520,6 +520,30 @@ pub fn require_namespace_or_service_trust<T>(
     }
 }
 
+/// Authorization gate that also owns the "is this deployment authenticated
+/// at all" decision. An anonymous deployment (no `--issuer` configured, so
+/// the interceptor never inserted `Claims`) skips the check, preserving the
+/// pre-existing default-UDS-developer-install behavior (VPL-383 residual
+/// R2); every other request delegates to
+/// [`require_namespace_or_service_trust`], which fails closed.
+///
+/// Each `registry.rs` handler previously repeated its own
+/// `Claims::is_some()` guard around that same rule — six copies of one
+/// decision, and the pattern this function replaces (VPL-383 CLUSTER-21):
+/// the absent-credential decision now lives once, here, instead of at every
+/// call site.
+pub fn authorize_namespace_if_authenticated<T>(
+    request: &Request<T>,
+    namespace: &str,
+    permission: &str,
+) -> Result<(), Status> {
+    if request.extensions().get::<Claims>().is_none() {
+        return Ok(());
+    }
+
+    require_namespace_or_service_trust(request, namespace, permission)
+}
+
 /// Extract user context for audit logging
 pub fn get_user_context<T>(request: &Request<T>) -> Option<String> {
     request
