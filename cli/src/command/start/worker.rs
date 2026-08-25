@@ -1669,6 +1669,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
     use tempfile::TempDir;
+    use tokio::sync::Barrier;
     use vorpal_sdk::api::artifact::Artifact;
 
     fn write_files(dir: &Path, names: &[&str], contents: &str) {
@@ -2204,6 +2205,112 @@ mod tests {
             dir_entry_names(&store_path),
             BTreeSet::from(["abc123".to_string()]),
             "the loser's staging directory survived under the store"
+        );
+    }
+
+    // The test above stages one writer against a pre-existing winner, not two
+    // producers racing each other. This drives an actual two-writer race --
+    // both producers line up at a barrier right before their rename, so the
+    // publish itself overlaps on a multi-threaded runtime instead of merely
+    // interleaving on one thread -- and pins that exactly one wins, the store
+    // holds only that winner's bytes, no staging directory is left behind
+    // either way, and the result matches what publishing the winner alone,
+    // sequentially, would have produced.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn two_concurrent_publishers_of_the_same_digest_race_cleanly() {
+        let (_root, store_path, output_path) = store_dir();
+        let barrier = Arc::new(Barrier::new(2));
+        let contents = ["producer-0", "producer-1"];
+
+        let mut handles = Vec::new();
+
+        for (index, content) in contents.iter().enumerate() {
+            let output_path = output_path.clone();
+            let barrier = Arc::clone(&barrier);
+            let content = content.to_string();
+
+            handles.push(tokio::spawn(async move {
+                stage_then_publish(&output_path, move |staging_path| {
+                    let barrier = Arc::clone(&barrier);
+
+                    async move {
+                        std::fs::write(staging_path.join(format!("{index}.txt")), &content)
+                            .unwrap();
+
+                        barrier.wait().await;
+
+                        Ok::<(), Status>(())
+                    }
+                })
+                .await
+            }));
+        }
+
+        let mut outcomes = Vec::new();
+
+        for handle in handles {
+            outcomes.push(handle.await.unwrap().unwrap());
+        }
+
+        let published = outcomes
+            .iter()
+            .filter(|outcome| **outcome == PublishOutcome::Published)
+            .count();
+        let superseded = outcomes
+            .iter()
+            .filter(|outcome| **outcome == PublishOutcome::Superseded)
+            .count();
+
+        assert_eq!(
+            published, 1,
+            "exactly one producer must win the race: {outcomes:?}"
+        );
+        assert_eq!(
+            superseded, 1,
+            "exactly one producer must lose the race: {outcomes:?}"
+        );
+
+        let winner = outcomes
+            .iter()
+            .position(|outcome| *outcome == PublishOutcome::Published)
+            .unwrap();
+
+        assert_eq!(
+            dir_entry_names(&output_path),
+            BTreeSet::from([format!("{winner}.txt")]),
+            "the store held a mix of, or neither, producer's files"
+        );
+        assert_eq!(
+            std::fs::read_to_string(output_path.join(format!("{winner}.txt"))).unwrap(),
+            contents[winner],
+            "the winner's published bytes did not match what it staged"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::from(["abc123".to_string()]),
+            "the loser's staging directory survived the race under the store"
+        );
+
+        // Byte-identical to a sequential run: publishing the winner's content
+        // alone, with no concurrent second writer, must produce exactly the
+        // same store contents the race produced.
+        let (_sequential_root, _sequential_store, sequential_output) = store_dir();
+
+        let sequential_outcome =
+            stage_then_publish(&sequential_output, |staging_path| async move {
+                std::fs::write(staging_path.join(format!("{winner}.txt")), contents[winner])
+                    .unwrap();
+
+                Ok::<(), Status>(())
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(sequential_outcome, PublishOutcome::Published);
+        assert_eq!(
+            std::fs::read_to_string(output_path.join(format!("{winner}.txt"))).unwrap(),
+            std::fs::read_to_string(sequential_output.join(format!("{winner}.txt"))).unwrap(),
+            "the concurrent race's output diverged from a sequential run's"
         );
     }
 
