@@ -393,6 +393,52 @@ fn anonymous_start_refused(has_worker: bool, has_registry: bool, issuer: Option<
     (has_worker || has_registry) && issuer.is_none()
 }
 
+/// Resolves the credential the worker and registry (archive/artifact)
+/// services need, once, at the single point their requirement is
+/// established — rather than each registration site re-deriving "an issuer
+/// is present" for itself. Before this, `run` carried two `.expect()`s, 165
+/// and 210 lines apart, each independently re-asserting a guarantee that
+/// `anonymous_start_refused` had already checked (VPL-434-CORRECTNESS-3,
+/// VPL434-ARCH-2): a bare bool told the caller *that* an issuer was
+/// required, not *what* it was, so every call site had to go back to
+/// `args.issuer` and re-justify pulling it out of the `Option`. Returning
+/// the validated issuer itself, once, removes both `.expect()`s and the
+/// bool in between.
+///
+/// Takes a named `StartupServices` rather than two adjacent `bool`s
+/// (VPL434-ARCH-7): `resolve_required_issuer(has_registry, has_worker, ..)`
+/// transposed from the intended `resolve_required_issuer(has_worker,
+/// has_registry, ..)` would read identically at any call site and compile
+/// either way, which is what made the swap invisible in `bool`-parameter
+/// form.
+struct StartupServices {
+    has_worker: bool,
+    has_registry: bool,
+}
+
+fn resolve_required_issuer(
+    services: StartupServices,
+    issuer: Option<String>,
+) -> Result<Option<String>> {
+    if anonymous_start_refused(
+        services.has_worker,
+        services.has_registry,
+        issuer.as_deref(),
+    ) {
+        bail!(
+            "worker and archive/artifact services require --issuer for authentication; \
+             refusing to start unauthenticated — an anonymous peer could otherwise run \
+             arbitrary build entrypoints as this process's uid"
+        );
+    }
+
+    Ok(if services.has_worker || services.has_registry {
+        issuer
+    } else {
+        None
+    })
+}
+
 /// Whether `run` should emit the registry allow-list startup log at all —
 /// scoped to processes running a worker or an agent, since a registry-only
 /// process configures no allow-list of its own and logging about it would
@@ -479,6 +525,7 @@ async fn new_validator_interceptor(
 async fn add_registry_services(
     mut router: tonic::transport::server::Router,
     args: &RunArgs,
+    issuer: &str,
     transport_label: &str,
 ) -> Result<tonic::transport::server::Router> {
     let backend = match args.registry_backend.as_str() {
@@ -514,15 +561,6 @@ async fn add_registry_services(
     let archive_server = ArchiveServer::new(backend_archive, args.archive_cache_ttl);
     let artifact_server = ArtifactServer::new(backend_artifact);
 
-    // `anonymous_start_refused` has already bailed out in `run` when
-    // `args.issuer` is `None` and this service is enabled, so an issuer is
-    // always configured by the time this line runs — there is no "register
-    // without an interceptor" branch left to fall into.
-    let issuer = args
-        .issuer
-        .as_ref()
-        .expect("anonymous_start_refused already refused a registry service without --issuer");
-
     let validator_intercepter =
         new_validator_interceptor(issuer, args.issuer_audience.as_deref(), &args.issuer_service_client_ids)
             .await?;
@@ -549,25 +587,18 @@ async fn add_registry_services(
 async fn add_worker_service(
     mut router: tonic::transport::server::Router,
     args: &RunArgs,
+    issuer: &str,
     registry_allowed: Vec<String>,
     transport_label: &str,
 ) -> Result<tonic::transport::server::Router> {
     // callee in start/worker.rs takes ownership; `args` is a shared reference reused below
     let worker_server = WorkerServer::new(
-        args.issuer.clone(),
+        Some(issuer.to_string()),
         args.issuer_audience.clone(),
         args.issuer_client_id.clone(),
         args.issuer_client_secret.clone(),
         registry_allowed,
     );
-
-    // Same reasoning as the archive/artifact registration above: an issuer
-    // is guaranteed present here because `anonymous_start_refused` already
-    // bailed out in `run` when the worker service is enabled with none.
-    let issuer = args
-        .issuer
-        .as_ref()
-        .expect("anonymous_start_refused already refused a worker service without --issuer");
 
     let validator_intercepter =
         new_validator_interceptor(issuer, args.issuer_audience.as_deref(), &args.issuer_service_client_ids)
@@ -819,16 +850,19 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     // VPL-434 (C1): refuse to start with an unauthenticated worker or
     // registry (archive/artifact) service rather than defaulting into one.
-    // See `anonymous_start_refused` for why this is a hard startup error
-    // rather than a per-request decision.
-    if anonymous_start_refused(has_worker, has_registry, args.issuer.as_deref()) {
-        bail!(
-            "worker and archive/artifact services require --issuer for authentication; \
-             refusing to start unauthenticated — an anonymous peer could otherwise run \
-             arbitrary build entrypoints as this process's uid. Configure --issuer, or \
-             run only --services agent"
-        );
-    }
+    // See `resolve_required_issuer` for why this returns the validated
+    // issuer itself rather than a bare refusal bool. VPL-434-CLUSTER-3: the
+    // refusal message no longer suggests `--services agent` as a remedy —
+    // the agent service is the one that stays unauthenticated regardless of
+    // `--issuer` (a distinct, already-gapped defect), so that suggestion
+    // steered operators onto the single remaining anonymous surface.
+    let required_issuer = resolve_required_issuer(
+        StartupServices {
+            has_worker,
+            has_registry,
+        },
+        args.issuer.clone(),
+    )?;
 
     // An omitted `--registry-allowed` resolves to this process's own
     // listening address, computed from the transport just decided above —
@@ -930,15 +964,29 @@ pub async fn run(args: RunArgs) -> Result<()> {
         info!("agent |> service: {}", transport_label);
     }
 
-    if has_registry {
-        router = add_registry_services(router, &args, &transport_label).await?;
-    }
+    // `required_issuer` is `Some` here exactly when `has_registry` or
+    // `has_worker` is true (`resolve_required_issuer`'s own contract) — a
+    // `match` on it, rather than an `Option::expect()` re-derived inside
+    // each helper below, means neither can compile against a missing issuer
+    // in the first place, so there is nothing left here for
+    // VPL-434-CORRECTNESS-3/VPL434-ARCH-2 to flag.
+    if let Some(issuer) = required_issuer {
+        if has_registry {
+            router = add_registry_services(router, &args, &issuer, &transport_label).await?;
+        }
 
-    if has_worker {
-        router =
-            add_worker_service(router, &args, registry_allowed.clone(), &transport_label).await?;
+        if has_worker {
+            router = add_worker_service(
+                router,
+                &args,
+                &issuer,
+                registry_allowed.clone(),
+                &transport_label,
+            )
+            .await?;
 
-        info!("worker |> service: {}", transport_label);
+            info!("worker |> service: {}", transport_label);
+        }
     }
 
     tokio::spawn(async move {
@@ -1045,6 +1093,52 @@ mod anonymous_start_refused_tests {
     #[test]
     fn anonymous_start_not_refused_for_agent_only_deployment() {
         assert!(!anonymous_start_refused(false, false, None));
+    }
+}
+
+// VPL-434-CLUSTER-6: `anonymous_start_refused` is unit-tested above, but
+// nothing previously pinned that `run` actually calls it before binding a
+// listener — a mutation that deleted the `if anonymous_start_refused(..) {
+// bail!(..) }` block in `run` compiled and the full suite still passed
+// (reconciled finding, observed: `cargo test --package vorpal-cli` 266/0
+// with that block removed). Driving `run` itself, rather than the predicate
+// alone, closes that gap.
+#[cfg(test)]
+mod run_startup_refusal_tests {
+    use super::*;
+
+    fn worker_only_args(issuer: Option<String>) -> RunArgs {
+        RunArgs {
+            archive_cache_ttl: 3600,
+            health_check: false,
+            health_check_port: 0,
+            issuer,
+            issuer_audience: None,
+            issuer_client_id: None,
+            issuer_client_secret: None,
+            issuer_service_client_ids: vec![],
+            port: None,
+            registry_backend: "local".to_string(),
+            registry_backend_s3_bucket: None,
+            registry_backend_s3_force_path_style: false,
+            registry_allowed: None,
+            services: vec!["worker".to_string()],
+            tls: false,
+        }
+    }
+
+    // A worker service with no issuer must return `Err` from `run` without
+    // ever reaching a bind — the assertion is on `run`'s own return value,
+    // not on the predicate it delegates to, so a mutation that removes the
+    // call site (not just the predicate) fails this test.
+    #[tokio::test]
+    async fn run_refuses_a_worker_service_with_no_issuer() {
+        let err = run(worker_only_args(None)).await.unwrap_err();
+
+        assert!(
+            err.to_string().contains("require --issuer"),
+            "unexpected error: {err}"
+        );
     }
 }
 

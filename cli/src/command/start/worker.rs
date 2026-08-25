@@ -2801,15 +2801,19 @@ mod tests {
     // is present — the previous `is_some()` guard treated absence of a
     // credential as tacit permission, letting an anonymous peer reach the
     // spawned build.
+    //
+    // Built with `issuer: None` (VPL-434-CLUSTER-13, formerly `Some(..)`):
+    // `WorkerServer`'s own `issuer` field plays no role in this gate — the
+    // real credential check runs at the interceptor `start.rs` attaches at
+    // registration, before a request ever reaches this handler; this test
+    // only pins `auth::require_namespace_or_service_trust` itself. A prior
+    // `Some("https://issuer.example.com")` precondition here was decorative:
+    // the assertion below passes identically regardless of its value, and
+    // reading it suggested the denial depended on the worker's own issuer
+    // configuration.
     #[tokio::test]
     async fn build_artifact_service_denies_a_request_with_no_claims() {
-        let server = WorkerServer::new(
-            Some("https://issuer.example.com".to_string()),
-            None,
-            None,
-            None,
-            default_registry_allowed(),
-        );
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed());
 
         let digest = valid_digest("a");
         let request = Request::new(build_request("library", &digest, &digest));
@@ -2822,19 +2826,44 @@ mod tests {
         assert_eq!(status.code(), tonic::Code::Unauthenticated);
     }
 
+    // VPL-434-CLUSTER-7: the denial above must land before any build state
+    // (the recipe-addressed lock file) is created — the gate is the first
+    // statement in the trait method, ahead of the `tokio::spawn` that would
+    // reach the standalone `build_artifact` free function where the lock is
+    // written, but nothing previously pinned that ordering. A regression
+    // that moved the gate below the spawn would still return the same
+    // `Unauthenticated` status (the spawned task also errors and the stream
+    // simply carries no successful response), so the status code alone,
+    // asserted above, does not discriminate the two orderings — checking
+    // that no lock file exists for this digest does.
+    #[tokio::test]
+    async fn build_artifact_denial_creates_no_lock_file() {
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed());
+
+        let digest = valid_digest("a");
+        let request = Request::new(build_request("library", &digest, &digest));
+
+        server
+            .build_artifact(request)
+            .await
+            .expect_err("a claim-free request must be denied");
+
+        let namespace = parse_store_path_component("library", "namespace").unwrap();
+        let lock_path = get_artifact_output_lock_path(&digest, &namespace);
+
+        assert!(
+            !lock_path.exists(),
+            "a denied request must never reach lock creation"
+        );
+    }
+
     // Positive control: a request carrying `Claims`/`PrincipalKind` with
     // namespace write permission passes the gate and reaches the streamed
     // response — proving the denial above is the gate itself, not a
     // construction error.
     #[tokio::test]
     async fn build_artifact_service_admits_a_request_with_namespace_write_claims() {
-        let server = WorkerServer::new(
-            Some("https://issuer.example.com".to_string()),
-            None,
-            None,
-            None,
-            default_registry_allowed(),
-        );
+        let server = WorkerServer::new(None, None, None, None, default_registry_allowed());
 
         let digest = valid_digest("a");
         let mut request = Request::new(build_request("library", &digest, &digest));
