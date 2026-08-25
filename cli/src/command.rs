@@ -1197,7 +1197,10 @@ fn build_login_credentials(
     let mut registry_map = BTreeMap::new();
 
     issuer_map.insert(normalized_issuer.to_string(), content);
-    registry_map.insert(effective_registry.to_string(), normalized_issuer.to_string());
+    registry_map.insert(
+        effective_registry.to_string(),
+        normalized_issuer.to_string(),
+    );
 
     VorpalCredentials {
         issuer: issuer_map,
