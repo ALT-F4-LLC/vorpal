@@ -51,8 +51,15 @@ build:
 
 test:
 	cargo test $(CARGO_FLAGS)
-	cd sdk/go && go test -race ./...
-	cd sdk/typescript && bun install --frozen-lockfile && bun test
+
+test-sdk-go:
+	cd sdk/go && go test -race -count=1 ./...
+
+test-sdk-typescript-install:
+	cd sdk/typescript && bun install --frozen-lockfile
+
+test-sdk-typescript: test-sdk-typescript-install
+	cd sdk/typescript && bun test
 
 dist:
 	mkdir -p $(DIST_DIR)
