@@ -1932,7 +1932,9 @@ mod login_egress_tests {
             .expect_err("a document declaring a different issuer must be refused");
 
         assert!(
-            error.to_string().contains("does not match requested issuer"),
+            error
+                .to_string()
+                .contains("does not match requested issuer"),
             "unexpected error: {}",
             error
         );
