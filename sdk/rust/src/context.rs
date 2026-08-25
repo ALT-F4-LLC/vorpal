@@ -3663,21 +3663,49 @@ mod tests {
         // The timeout is the only thing standing between a hung IdP and a
         // permanently stalled refresh, and it defends a failure no other test
         // injects.
+        //
+        // The outer `tokio::time::timeout` below is the test harness's own
+        // failure detector, not the control under test: asserting only that
+        // it fired would pass even if the client's own timeout were
+        // stripped, since the outer bound would still end the call. So the
+        // outer `expect` must be the one that goes red, and the inner error
+        // must be pinned to a client-side timeout, not merely "some error".
         let idp = IdpServer::start(|_, _| None).await;
 
-        let failure = refresh_access_token(
-            None,
-            "client-1",
-            &idp.issuer(),
-            "stored-refresh",
-            std::time::Duration::from_millis(250),
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            refresh_access_token(
+                None,
+                "client-1",
+                &idp.issuer(),
+                "stored-refresh",
+                std::time::Duration::from_millis(250),
+            ),
         )
         .await
-        .expect_err("a hung IdP must not hang the caller");
+        .expect("the client's own timeout, not the test harness, must end this refresh");
+
+        let failure = outcome.expect_err("a hung IdP must not hang the caller");
 
         assert!(
             matches!(failure, RefreshFailure::NotSent(_)),
             "a discovery request that never completed never carried the token"
+        );
+
+        let error = anyhow::Error::from(failure);
+        let reqwest_error = error
+            .downcast_ref::<reqwest::Error>()
+            .expect("the client timeout must surface as a reqwest::Error");
+        assert!(
+            reqwest_error.is_timeout(),
+            "unexpected error: {}",
+            reqwest_error
+        );
+
+        assert_eq!(
+            idp.requested_paths(),
+            vec!["/.well-known/openid-configuration".to_string()],
+            "the request must actually reach the fixture before timing out"
         );
     }
 
@@ -3770,15 +3798,24 @@ mod tests {
         })
         .await;
 
-        let failure = refresh_access_token(
-            None,
-            "client-1",
-            &idp.issuer(),
-            "stored-refresh",
-            std::time::Duration::from_millis(250),
+        // Same shape as the discovery-leg test above: the outer bound is the
+        // harness's detector, not the control under test, so its own
+        // `expect` must be the one that goes red if the client's timeout is
+        // ever stripped.
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            refresh_access_token(
+                None,
+                "client-1",
+                &idp.issuer(),
+                "stored-refresh",
+                std::time::Duration::from_millis(250),
+            ),
         )
         .await
-        .expect_err("a token POST that never completes must not hang the caller");
+        .expect("the client's own timeout, not the test harness, must end this refresh");
+
+        let failure = outcome.expect_err("a token POST that never completes must not hang the caller");
 
         assert!(
             matches!(failure, RefreshFailure::Sent(_)),
