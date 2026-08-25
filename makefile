@@ -49,7 +49,7 @@ lint:
 build:
 	cargo build $(CARGO_FLAGS)
 
-test:
+test: test-sdk-go test-sdk-typescript
 	cargo test $(CARGO_FLAGS)
 
 test-sdk-go:
