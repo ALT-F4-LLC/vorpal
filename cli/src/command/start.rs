@@ -369,6 +369,30 @@ fn default_registry_allowed(
     })
 }
 
+/// VPL-434 (C1): whether starting with the given service set and `--issuer`
+/// value must be refused. Worker, archive and artifact requests reach
+/// `run_step`/the store with no isolation at all (`worker.rs`), so an
+/// unauthenticated registration of any of them is not a narrower-permission
+/// mode — it is unauthenticated arbitrary code execution as this process's
+/// uid. `issuer == None` used to register those three services with no
+/// interceptor (`WorkerServiceServer::new`/`ArchiveServiceServer::new`/
+/// `ArtifactServiceServer::new`, no `with_interceptor`), so a peer that could
+/// merely reach the listener needed no credential at all. The governing rule
+/// (VPL-434 threat model §4): the absence of a credential in a request must
+/// never be what authorizes it, which means "this deployment is anonymous"
+/// cannot be inferred per request — it has to be refused at the one place
+/// that is outside the attacker's reach, process construction. Extracted as
+/// a pure predicate, mirroring `registry_allowed_log_is_active`, so this
+/// decision is unit-testable without standing up a server (TDD §11).
+///
+/// The agent service (`start.rs`, `AgentServiceServer::new`) is deliberately
+/// not covered here: it has never been wrapped by an interceptor even when
+/// `--issuer` is set, which is a distinct defect outside this file's
+/// declared scope — see the gap filed alongside this change.
+fn anonymous_start_refused(has_worker: bool, has_registry: bool, issuer: Option<&str>) -> bool {
+    (has_worker || has_registry) && issuer.is_none()
+}
+
 /// Whether `run` should emit the registry allow-list startup log at all —
 /// scoped to processes running a worker or an agent, since a registry-only
 /// process configures no allow-list of its own and logging about it would
@@ -490,28 +514,29 @@ async fn add_registry_services(
     let archive_server = ArchiveServer::new(backend_archive, args.archive_cache_ttl);
     let artifact_server = ArtifactServer::new(backend_artifact);
 
-    if let Some(issuer) = &args.issuer {
-        let validator_intercepter = new_validator_interceptor(
-            issuer,
-            args.issuer_audience.as_deref(),
-            &args.issuer_service_client_ids,
-        )
-        .await?;
+    // `anonymous_start_refused` has already bailed out in `run` when
+    // `args.issuer` is `None` and this service is enabled, so an issuer is
+    // always configured by the time this line runs — there is no "register
+    // without an interceptor" branch left to fall into.
+    let issuer = args
+        .issuer
+        .as_ref()
+        .expect("anonymous_start_refused already refused a registry service without --issuer");
 
-        router = router.add_service(ArchiveServiceServer::with_interceptor(
-            archive_server,
-            // shared with the artifact service registered just below
-            validator_intercepter.clone(),
-        ));
+    let validator_intercepter =
+        new_validator_interceptor(issuer, args.issuer_audience.as_deref(), &args.issuer_service_client_ids)
+            .await?;
 
-        router = router.add_service(ArtifactServiceServer::with_interceptor(
-            artifact_server,
-            validator_intercepter,
-        ));
-    } else {
-        router = router.add_service(ArchiveServiceServer::new(archive_server));
-        router = router.add_service(ArtifactServiceServer::new(artifact_server));
-    }
+    router = router.add_service(ArchiveServiceServer::with_interceptor(
+        archive_server,
+        // shared with the artifact service registered just below
+        validator_intercepter.clone(),
+    ));
+
+    router = router.add_service(ArtifactServiceServer::with_interceptor(
+        artifact_server,
+        validator_intercepter,
+    ));
 
     info!("archive |> service: {}", transport_label);
     info!("artifact |> service: {}", transport_label);
@@ -536,21 +561,22 @@ async fn add_worker_service(
         registry_allowed,
     );
 
-    if let Some(issuer) = &args.issuer {
-        let validator_intercepter = new_validator_interceptor(
-            issuer,
-            args.issuer_audience.as_deref(),
-            &args.issuer_service_client_ids,
-        )
-        .await?;
+    // Same reasoning as the archive/artifact registration above: an issuer
+    // is guaranteed present here because `anonymous_start_refused` already
+    // bailed out in `run` when the worker service is enabled with none.
+    let issuer = args
+        .issuer
+        .as_ref()
+        .expect("anonymous_start_refused already refused a worker service without --issuer");
 
-        router = router.add_service(WorkerServiceServer::with_interceptor(
-            worker_server,
-            validator_intercepter,
-        ));
-    } else {
-        router = router.add_service(WorkerServiceServer::new(worker_server));
-    }
+    let validator_intercepter =
+        new_validator_interceptor(issuer, args.issuer_audience.as_deref(), &args.issuer_service_client_ids)
+            .await?;
+
+    router = router.add_service(WorkerServiceServer::with_interceptor(
+        worker_server,
+        validator_intercepter,
+    ));
 
     info!("worker |> service: {}", transport_label);
 
@@ -791,6 +817,19 @@ pub async fn run(args: RunArgs) -> Result<()> {
         args.health_check_port,
     )?;
 
+    // VPL-434 (C1): refuse to start with an unauthenticated worker or
+    // registry (archive/artifact) service rather than defaulting into one.
+    // See `anonymous_start_refused` for why this is a hard startup error
+    // rather than a per-request decision.
+    if anonymous_start_refused(has_worker, has_registry, args.issuer.as_deref()) {
+        bail!(
+            "worker and archive/artifact services require --issuer for authentication; \
+             refusing to start unauthenticated — an anonymous peer could otherwise run \
+             arbitrary build entrypoints as this process's uid. Configure --issuer, or \
+             run only --services agent"
+        );
+    }
+
     // An omitted `--registry-allowed` resolves to this process's own
     // listening address, computed from the transport just decided above —
     // not from the client-facing `get_default_address()` helper, which
@@ -970,6 +1009,43 @@ pub async fn run(args: RunArgs) -> Result<()> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod anonymous_start_refused_tests {
+    use super::*;
+
+    // AC-1/AC-2 (VPL-434): a worker or registry (archive/artifact) service
+    // with no issuer must be refused, whether reachable over UDS or TCP —
+    // the predicate takes no transport argument because the decision is
+    // about credential absence, not reach.
+    #[test]
+    fn anonymous_start_refused_for_worker_with_no_issuer() {
+        assert!(anonymous_start_refused(true, false, None));
+    }
+
+    #[test]
+    fn anonymous_start_refused_for_registry_with_no_issuer() {
+        assert!(anonymous_start_refused(false, true, None));
+    }
+
+    #[test]
+    fn anonymous_start_not_refused_when_an_issuer_is_configured() {
+        assert!(!anonymous_start_refused(
+            true,
+            true,
+            Some("https://issuer.example.com")
+        ));
+    }
+
+    // An agent-only or registry-free deployment with no issuer is not this
+    // predicate's concern — the agent service is a separate, already-filed
+    // gap (see the change summary), and a process running neither worker
+    // nor registry has no anonymous-RCE surface for this predicate to gate.
+    #[test]
+    fn anonymous_start_not_refused_for_agent_only_deployment() {
+        assert!(!anonymous_start_refused(false, false, None));
+    }
 }
 
 #[cfg(test)]

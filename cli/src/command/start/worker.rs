@@ -1593,29 +1593,33 @@ impl WorkerService for WorkerServer {
         &self,
         request: Request<BuildArtifactRequest>,
     ) -> Result<Response<Self::BuildArtifactStream>, Status> {
-        // Check namespace authorization if auth is enabled. Service-user
-        // tokens whose `azp` is in the trusted allow-list bypass namespace RBAC
-        // per TDD §4.3 (m2m-authz-decoupling); human tokens still route through
+        // VPL-434 (C2): the absence of a credential must never be what
+        // authorizes a request. This gate used to run only when `Claims` was
+        // present and skip entirely otherwise, so a claim-free request
+        // reached the worker with no denial at all — the process's own
+        // service registration was the only thing standing between an
+        // unauthenticated peer and `run_step`. `require_namespace_or_service_trust`
+        // already returns `unauthenticated` when no `PrincipalKind` sits in
+        // the request extensions (`auth.rs`), so calling it unconditionally
+        // makes that failure explicit instead of implicit in what the caller
+        // omitted. Service-user tokens whose `azp` is in the trusted
+        // allow-list bypass namespace RBAC per TDD §4.3
+        // (m2m-authz-decoupling); human tokens still route through
         // `require_namespace_permission` unchanged.
-        if request.extensions().get::<auth::Claims>().is_some() {
-            let req_inner = request.get_ref();
-            auth::require_namespace_or_service_trust(
-                &request,
-                &req_inner.artifact_namespace,
-                "write",
-            )?;
+        let req_inner = request.get_ref();
+        auth::require_namespace_or_service_trust(&request, &req_inner.artifact_namespace, "write")?;
 
-            // TDD §4.5 + AC §1.3 #5: every authenticated call records the
-            // principal classification (Human with `sub`, TrustedService with
-            // `azp`) and the namespace it touched.
-            if let Some(auth::PrincipalKind::TrustedService { azp }) =
-                request.extensions().get::<auth::PrincipalKind>()
-            {
+        // TDD §4.5 + AC §1.3 #5: every authenticated call records the
+        // principal classification (Human with `sub`, TrustedService with
+        // `azp`) and the namespace it touched.
+        match request.extensions().get::<auth::PrincipalKind>() {
+            Some(auth::PrincipalKind::TrustedService { azp }) => {
                 info!(
                     "worker |> build_artifact by service={} in namespace {}",
                     azp, req_inner.artifact_namespace
                 );
-            } else {
+            }
+            _ => {
                 let user =
                     auth::get_user_context(&request).unwrap_or_else(|| "<unknown>".to_string());
                 info!(
@@ -2790,5 +2794,69 @@ mod tests {
             "{}",
             status.message()
         );
+    }
+
+    // VPL-434 C2: the trait-level handler must deny a claim-free request
+    // outright rather than skipping authorization when no `Claims` extension
+    // is present — the previous `is_some()` guard treated absence of a
+    // credential as tacit permission, letting an anonymous peer reach the
+    // spawned build.
+    #[tokio::test]
+    async fn build_artifact_service_denies_a_request_with_no_claims() {
+        let server = WorkerServer::new(
+            Some("https://issuer.example.com".to_string()),
+            None,
+            None,
+            None,
+            default_registry_allowed(),
+        );
+
+        let digest = valid_digest("a");
+        let request = Request::new(build_request("library", &digest, &digest));
+
+        let status = server
+            .build_artifact(request)
+            .await
+            .expect_err("a claim-free request must be denied, not silently skipped");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+    }
+
+    // Positive control: a request carrying `Claims`/`PrincipalKind` with
+    // namespace write permission passes the gate and reaches the streamed
+    // response — proving the denial above is the gate itself, not a
+    // construction error.
+    #[tokio::test]
+    async fn build_artifact_service_admits_a_request_with_namespace_write_claims() {
+        let server = WorkerServer::new(
+            Some("https://issuer.example.com".to_string()),
+            None,
+            None,
+            None,
+            default_registry_allowed(),
+        );
+
+        let digest = valid_digest("a");
+        let mut request = Request::new(build_request("library", &digest, &digest));
+
+        let mut namespaces = std::collections::HashMap::new();
+        namespaces.insert("library".to_string(), vec!["write".to_string()]);
+
+        request.extensions_mut().insert(auth::Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("tester".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(namespaces),
+        });
+        request.extensions_mut().insert(auth::PrincipalKind::Human);
+
+        server
+            .build_artifact(request)
+            .await
+            .expect("a claims-bearing request with namespace write permission is admitted");
     }
 }
