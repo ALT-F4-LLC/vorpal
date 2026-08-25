@@ -1,7 +1,5 @@
 use crate::command::{
-    start::auth::{
-        authorize_namespace_if_authenticated, get_user_context, Claims, PrincipalKind,
-    },
+    start::auth::{authorize_namespace_if_authenticated, get_user_context, Claims, PrincipalKind},
     store::paths::{
         parse_alias_name, parse_artifact_digest, parse_store_path_component, split_alias_name_tag,
     },
@@ -1465,7 +1463,11 @@ mod tests {
             mut self: std::pin::Pin<&mut Self>,
             _cx: &mut std::task::Context<'_>,
         ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-            std::task::Poll::Ready(self.frames.pop_front().map(|b| Ok(http_body::Frame::data(b))))
+            std::task::Poll::Ready(
+                self.frames
+                    .pop_front()
+                    .map(|b| Ok(http_body::Frame::data(b))),
+            )
         }
     }
 
@@ -1493,9 +1495,10 @@ mod tests {
             frames: chunks.iter().map(grpc_frame).collect(),
         };
 
-        let decoder = tonic_prost::ProstCodec::<ArchivePushRequest, ArchivePushRequest>::raw_decoder(
-            tonic::codec::BufferSettings::default(),
-        );
+        let decoder =
+            tonic_prost::ProstCodec::<ArchivePushRequest, ArchivePushRequest>::raw_decoder(
+                tonic::codec::BufferSettings::default(),
+            );
 
         let streaming = Streaming::new_request(decoder, body, None, None);
 

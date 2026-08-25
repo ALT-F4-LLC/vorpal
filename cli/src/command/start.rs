@@ -1091,7 +1091,13 @@ mod default_registry_allowed_tests {
         let socket_path = Path::new("/var/lib/vorpal/vorpal.sock");
 
         assert_eq!(
-            default_registry_allowed(Some(explicit.clone()), true, Some(23151), false, socket_path),
+            default_registry_allowed(
+                Some(explicit.clone()),
+                true,
+                Some(23151),
+                false,
+                socket_path
+            ),
             explicit
         );
         assert_eq!(

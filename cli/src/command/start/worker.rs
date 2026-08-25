@@ -1854,7 +1854,10 @@ mod tests {
         // Reconcile R2-C12: asserting the exact sanitized message, not just
         // the absence of the leaked detail, so this test cannot pass
         // vacuously against an empty or unrelated message.
-        assert_eq!(err.message(), "test archive stream failed before completion");
+        assert_eq!(
+            err.message(),
+            "test archive stream failed before completion"
+        );
         assert!(
             !err.message().contains("connection reset"),
             "the upstream status detail must not reach the client: {}",
