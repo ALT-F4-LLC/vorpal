@@ -516,29 +516,53 @@ validate_services() {
     done
 }
 
+# Rejects a value that carries a character an installed unit/plist file
+# could reinterpret as its own syntax (VPL-711 AC2/C5, extended by
+# CLUSTER-C/CLUSTER-O to cover $ and `, which also let systemd or a shell
+# re-expand the value). Used on $ISSUER and on the three OIDC client values
+# that cross the same plist/systemd-unit boundary (VPL-711 CLUSTER-C):
+# $ISSUER_AUDIENCE, $ISSUER_CLIENT_ID and $ISSUER_CLIENT_SECRET were
+# previously written into both files with no validation at all.
+#
+# Args: $1 = human-readable field name (for the error message), $2 = value.
+validate_no_unit_injection_chars() {
+    local field="$1"
+    local value="$2"
+
+    case "$value" in
+        *$'\n'* | *'"'* | *'<'* | *'>'* | *'&'* | *'%'* | *'\'* | *'$'* | *'`'*)
+            print_error "Invalid $field: contains a disallowed character" \
+                "$field values may not contain newlines, quotes, angle brackets, '&', '%', '\$', backticks, or backslashes." \
+                "This value is written into a systemd unit and a launchd plist; those characters could change what either file runs."
+            exit 1
+            ;;
+    esac
+}
+
 # Rejects an $ISSUER that is not a well-formed https (or http+loopback)
 # URL, or that carries a character an installed unit/plist file could
 # reinterpret as its own syntax (VPL-711 AC2/C5). Mirrors validate_services'
 # allow-list shape rather than escaping: $ISSUER crosses into two different
 # downstream grammars (systemd unit, launchd plist XML), and one allow-list
-# is cheaper to get right than two escapers.
+# is cheaper to get right than two escapers. The loopback exception matches
+# the host exactly (`localhost`, `127.0.0.1`, `[::1]`, each followed only by
+# `/`, `:` or end-of-string) rather than by prefix, so it accepts exactly
+# what the CLI's `credential_egress_origin` accepts and nothing broader —
+# `http://localhost.attacker.example` used to match the old
+# `http://localhost*` glob here while the CLI refused it, so the installer
+# would write a unit that could never start (VPL-711 CLUSTER-B).
 validate_issuer() {
     if [[ -z "$ISSUER" ]]; then
         return
     fi
 
-    case "$ISSUER" in
-        *$'\n'* | *'"'* | *'<'* | *'>'* | *'&'* | *'%'* | *'\'*)
-            print_error "Invalid issuer: contains a disallowed character" \
-                "Issuer values may not contain newlines, quotes, angle brackets, '&', '%', or backslashes." \
-                "Example: install.sh --issuer https://idp.example.com/realms/vorpal"
-            exit 1
-            ;;
-    esac
+    validate_no_unit_injection_chars "issuer" "$ISSUER"
 
     case "$ISSUER" in
         https://*) ;;
-        http://localhost* | http://127.0.0.1* | http://\[::1\]*) ;;
+        http://localhost | http://localhost/* | http://localhost:*) ;;
+        http://127.0.0.1 | http://127.0.0.1/* | http://127.0.0.1:*) ;;
+        http://\[::1\] | http://\[::1\]/* | http://\[::1\]:*) ;;
         *)
             print_error "Invalid issuer: '$ISSUER'" \
                 "The issuer must be an https URL (plaintext http is only allowed on localhost, 127.0.0.1 or [::1])." \
@@ -546,6 +570,17 @@ validate_issuer() {
             exit 1
             ;;
     esac
+}
+
+# Validates the three OIDC client values against the same character
+# allow-list as $ISSUER (VPL-711 CLUSTER-C): they cross the identical
+# plist/systemd-unit boundary and were unvalidated even after AC2 added
+# validate_issuer for the issuer value alone.
+validate_issuer_client_values() {
+    [[ -n "$ISSUER_AUDIENCE" ]] && validate_no_unit_injection_chars "issuer audience" "$ISSUER_AUDIENCE"
+    [[ -n "$ISSUER_CLIENT_ID" ]] && validate_no_unit_injection_chars "issuer client ID" "$ISSUER_CLIENT_ID"
+    [[ -n "$ISSUER_CLIENT_SECRET" ]] && validate_no_unit_injection_chars "issuer client secret" "$ISSUER_CLIENT_SECRET"
+    return 0
 }
 
 # Refuses to write a worker/registry unit that cannot start (VPL-711
@@ -1368,7 +1403,11 @@ install_service_macos() {
 
     mkdir -p "$plist_dir"
 
-    # Write the plist
+    # Write the plist. The client secret (if any) travels through
+    # EnvironmentVariables rather than ProgramArguments (VPL-711 C10): argv
+    # is readable by any local user via `ps`, an environment key is not.
+    # The file itself is still chmod 600 below, since EnvironmentVariables
+    # values sit in this same plist.
     cat > "$plist_path" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1387,9 +1426,10 @@ install_service_macos() {
 [[ -n "$ISSUER" ]] && printf '\n        <string>--issuer</string>\n        <string>%s</string>' "$ISSUER"
 [[ -n "$ISSUER_AUDIENCE" ]] && printf '\n        <string>--issuer-audience</string>\n        <string>%s</string>' "$ISSUER_AUDIENCE"
 [[ -n "$ISSUER_CLIENT_ID" ]] && printf '\n        <string>--issuer-client-id</string>\n        <string>%s</string>' "$ISSUER_CLIENT_ID"
-[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf '\n        <string>--issuer-client-secret</string>\n        <string>%s</string>' "$ISSUER_CLIENT_SECRET"
 )
-    </array>
+    </array>$(
+[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf '\n    <key>EnvironmentVariables</key>\n    <dict>\n        <key>VORPAL_ISSUER_CLIENT_SECRET</key>\n        <string>%s</string>\n    </dict>' "$ISSUER_CLIENT_SECRET"
+)
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -1401,6 +1441,8 @@ install_service_macos() {
 </dict>
 </plist>
 PLIST
+
+    chmod 600 "$plist_path"
 
     # Bootout existing service (ignore errors — may not be loaded on fresh install)
     launchctl bootout "${gui_target}/com.altf4llc.vorpal" 2>/dev/null || true
@@ -1431,9 +1473,22 @@ PLIST
 install_service_linux() {
     local unit_dir="${HOME}/.config/systemd/user"
     local unit_path="${unit_dir}/vorpal.service"
+    local env_path="${unit_dir}/vorpal.env"
     local vorpal_bin="${VORPAL_INSTALL_DIR}/bin/vorpal"
 
     mkdir -p "$unit_dir"
+
+    # The client secret (if any) travels through a mode-600 EnvironmentFile
+    # rather than ExecStart argv (VPL-711 C10): argv is readable by any
+    # local user via `ps`/`/proc/<pid>/cmdline`, a 600 file is not. Written
+    # (or removed, on a re-install with no secret) before the unit so the
+    # unit's EnvironmentFile= reference is never dangling.
+    if [[ -n "$ISSUER_CLIENT_SECRET" ]]; then
+        printf 'VORPAL_ISSUER_CLIENT_SECRET=%s\n' "$ISSUER_CLIENT_SECRET" > "$env_path"
+        chmod 600 "$env_path"
+    else
+        rm -f "$env_path"
+    fi
 
     # Write the systemd user unit
     cat > "$unit_path" <<UNIT
@@ -1443,11 +1498,11 @@ After=network.target
 
 [Service]
 Type=simple
+EnvironmentFile=-${env_path}
 ExecStart=${vorpal_bin} system services start --services ${SERVICES}$(
 [[ -n "$ISSUER" ]] && printf ' --issuer "%s"' "$ISSUER"
 [[ -n "$ISSUER_AUDIENCE" ]] && printf ' --issuer-audience "%s"' "$ISSUER_AUDIENCE"
 [[ -n "$ISSUER_CLIENT_ID" ]] && printf ' --issuer-client-id "%s"' "$ISSUER_CLIENT_ID"
-[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf ' --issuer-client-secret "%s"' "$ISSUER_CLIENT_SECRET"
 )
 Restart=on-failure
 RestartSec=5
@@ -1455,6 +1510,8 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 UNIT
+
+    chmod 600 "$unit_path"
 
     # Stop existing service if running (graceful restart on upgrade)
     systemctl --user stop vorpal.service 2>/dev/null || true
@@ -1862,6 +1919,18 @@ main() {
         exit 0
     fi
 
+    # Validate before anything is downloaded or written (VPL-711 CLUSTER-H):
+    # these checks used to run after download_binary/setup_system_dirs/
+    # generate_keys, so a malformed --issuer or a service/issuer mismatch
+    # was only discovered after the release was fetched and system
+    # directories and keys already existed.
+    if [[ "$NO_SERVICE" != 1 ]]; then
+        validate_services
+        validate_issuer
+        validate_issuer_client_values
+        require_issuer_for_authenticated_services
+    fi
+
     print_banner
     check_prerequisites
 
@@ -1879,9 +1948,6 @@ main() {
     generate_keys
 
     if [[ "$NO_SERVICE" != 1 ]]; then
-        validate_services
-        validate_issuer
-        require_issuer_for_authenticated_services
         install_service
         verify_service
     else

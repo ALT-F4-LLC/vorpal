@@ -12,9 +12,27 @@ VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
 # system services start now refuses a worker/registry with no issuer
-# (VPL-434); default to the repository's own docker-compose.yaml Keycloak
-# so vorpal-start/lima-vorpal-start keep working out of the box.
+# (VPL-434). This default points at the repository's own
+# docker-compose.yaml Keycloak, but docker-compose.yaml runs bare
+# `keycloak start-dev` with no realm import: the `vorpal` realm below is
+# not provisioned by anything in this repository, so `vorpal-start`/
+# `lima-vorpal-start` still fail (at discovery, not at the refusal) until
+# an operator creates that realm by hand or `script/test/keycloak.sh` is
+# wired into a make target — tracked as a gap (VPL-711 CLUSTER-A), not
+# fixed here: that provisioning is new script/CI surface outside this
+# fix's declared scope (cli/src/command.rs, script/install.sh, makefile).
 VORPAL_ISSUER ?= http://localhost:8080/realms/vorpal
+
+# VORPAL_ISSUER is interpolated into vorpal-start/lima-vorpal-start below
+# inside a shell double-quoted string; Make substitutes it as plain text
+# before the shell parses that line, so an override containing a quote,
+# backtick or '$' could inject shell syntax into a build host (VPL-711
+# CLUSTER-P). Checked once, in pure Make (no subshell), so the recipe
+# never runs with an unsafe value — the default above is unaffected.
+ifneq ($(strip $(findstring ",$(VORPAL_ISSUER))$(findstring `,$(VORPAL_ISSUER))$(findstring $$,$(VORPAL_ISSUER))),)
+$(error VORPAL_ISSUER may not contain '"', a backtick, or '$$')
+endif
+
 LIMA_ARCH := $(ARCH)
 LIMA_CPUS := 8
 LIMA_DISK := 100

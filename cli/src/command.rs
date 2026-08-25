@@ -196,7 +196,11 @@ pub enum CommandSystemServices {
         #[arg(long)]
         issuer_client_id: Option<String>,
 
-        #[arg(long)]
+        /// Settable via VORPAL_ISSUER_CLIENT_SECRET so an installed unit can
+        /// read the secret from a mode-600 environment file instead of
+        /// carrying it in argv, where any local user could read it from
+        /// `ps`/`/proc/<pid>/cmdline` (VPL-711 C10).
+        #[arg(env = "VORPAL_ISSUER_CLIENT_SECRET", long)]
         issuer_client_secret: Option<String>,
 
         /// Comma-separated OAuth client IDs whose tokens are classified as
@@ -1092,14 +1096,35 @@ fn login_http_client(timeout: Duration) -> Result<reqwest::Client> {
         .build()?)
 }
 
+/// Trims and validates a raw issuer string against the shared https-or-
+/// loopback rule (`credential_egress_origin`), then re-derives the returned
+/// value from the parsed `Url` rather than the trimmed input (VPL-711
+/// CLUSTER-F): `credential_egress_origin` only proves the value parses to an
+/// acceptable scheme/host, it does not prove the *returned* string is what
+/// was parsed, so returning the raw trimmed input let a control character
+/// embedded in the path (which `Url::parse` accepts and normalizes, but does
+/// not strip from an untouched copy) reach every downstream consumer intact.
+/// Reparsing and returning `Url::as_str()` closes that gap: the value that
+/// passed validation is the value every caller sees. Shared by
+/// `parse_issuer` (VPL-711 AC1) and `normalize_and_validate_login_issuer`
+/// (VPL-280 AC1) so the two issuer-accepting paths in this binary do not
+/// carry two independent implementations of the same rule (VPL-711
+/// CLUSTER-J).
+fn validate_and_normalize_issuer_url(candidate: &str) -> std::result::Result<String, String> {
+    credential_egress_origin(candidate).map_err(|err| err.to_string())?;
+    let url = reqwest::Url::parse(candidate).map_err(|err| err.to_string())?;
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
 /// clap `value_parser` for `system services start --issuer` (VPL-711 AC1,
 /// C1). Applied identically whether the value arrives via `--issuer` or the
 /// `VORPAL_ISSUER` environment variable, so an empty env value — which clap
 /// treats as present, not absent — is rejected here rather than reaching
 /// `resolve_required_issuer` as a false "issuer configured" (VPL-711 AB2).
-/// Reuses the same https-or-loopback rule already enforced for `vorpal
-/// login` (`credential_egress_origin`) so the two issuer-accepting paths in
-/// this binary agree on what a valid issuer looks like.
+/// The scheme/host error text names this command's own trust anchor rather
+/// than `credential_egress_origin`'s "refresh token" wording, because
+/// `system services start` never sends a refresh token — that phrasing
+/// belongs to `vorpal login`, the only other caller (VPL-711 CLUSTER-G).
 fn parse_issuer(raw: &str) -> std::result::Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -1109,9 +1134,13 @@ fn parse_issuer(raw: &str) -> std::result::Result<String, String> {
                 .to_string(),
         );
     }
-    let normalized = trimmed.trim_end_matches('/').to_string();
-    credential_egress_origin(&normalized).map_err(|err| err.to_string())?;
-    Ok(normalized)
+    let candidate = trimmed.trim_end_matches('/');
+    validate_and_normalize_issuer_url(candidate).map_err(|_| {
+        "issuer must be https (plaintext http is only allowed on localhost, 127.0.0.1 or \
+         [::1]); set --issuer or VORPAL_ISSUER to your OIDC issuer URL, e.g. \
+         https://idp.example.com/realms/vorpal"
+            .to_string()
+    })
 }
 
 /// Normalizes and validates the `--issuer` value before any network request
@@ -1121,9 +1150,8 @@ fn parse_issuer(raw: &str) -> std::result::Result<String, String> {
 /// an untrimmed issuer in one place and a trimmed one in another is the bug
 /// that made the refresh path mis-format its discovery URL.
 fn normalize_and_validate_login_issuer(issuer: &str) -> Result<String> {
-    let normalized = issuer.trim_end_matches('/').to_string();
-    credential_egress_origin(&normalized)?;
-    Ok(normalized)
+    let candidate = issuer.trim_end_matches('/');
+    validate_and_normalize_issuer_url(candidate).map_err(|err| anyhow!(err))
 }
 
 /// Validates a login discovery document against the requested issuer and
@@ -1925,6 +1953,60 @@ mod login_egress_tests {
     }
 
     #[test]
+    fn issuer_arg_is_wired_to_vorpal_issuer_env_and_parse_issuer() {
+        // VPL-711 CLUSTER-E: every existing parse_issuer test calls the
+        // function directly, so reverting `--issuer`'s clap definition from
+        // `#[arg(env = "VORPAL_ISSUER", long, value_parser = parse_issuer)]`
+        // back to `#[arg(long)]` left the suite green. Inspect the built
+        // clap `Command` itself — the thing the derive macro actually
+        // produces — so that revert fails here regardless of what
+        // `parse_issuer` does in isolation.
+        use clap::CommandFactory;
+
+        let cli_command = Cli::command();
+        let system_command = cli_command
+            .find_subcommand("system")
+            .expect("system subcommand must exist");
+        let services_command = system_command
+            .find_subcommand("services")
+            .expect("system services subcommand must exist");
+        let start_command = services_command
+            .find_subcommand("start")
+            .expect("system services start subcommand must exist");
+        let issuer_arg = start_command
+            .get_arguments()
+            .find(|arg| arg.get_id().as_str() == "issuer")
+            .expect("--issuer argument must exist on system services start");
+
+        assert_eq!(
+            issuer_arg.get_env(),
+            Some(std::ffi::OsStr::new("VORPAL_ISSUER")),
+            "--issuer must be settable via the VORPAL_ISSUER environment variable"
+        );
+    }
+
+    #[test]
+    fn system_services_start_issuer_flag_is_validated_by_clap() {
+        // Companion to the CommandFactory test above: parses real argv
+        // through the derived `Cli`, so a revert of `value_parser =
+        // parse_issuer` (independent of the `env` attribute) also fails
+        // here rather than only in a test that calls `parse_issuer` itself.
+        let result = Cli::try_parse_from([
+            "vorpal",
+            "system",
+            "services",
+            "start",
+            "--issuer",
+            "not-a-url",
+        ]);
+
+        assert!(
+            result.is_err(),
+            "a malformed --issuer value must be rejected during clap parsing"
+        );
+    }
+
+    #[test]
     fn parse_issuer_accepts_plaintext_loopback() {
         // Positive control (VPL-711 C1's loopback exception): the shipped
         // `makefile`/`docker-compose.yaml` Keycloak default.
@@ -1940,6 +2022,32 @@ mod login_egress_tests {
             .expect("a well-formed https issuer must validate");
 
         assert_eq!(normalized, "https://tenant.example.com");
+    }
+
+    #[test]
+    fn parse_issuer_trims_multiple_trailing_slashes() {
+        // VPL-711 CLUSTER-L: a single `trim_end_matches('/')` call removes
+        // every trailing slash, not just one — pin that so a future switch
+        // to a single-slash-only trim (e.g. `strip_suffix('/')`) is caught.
+        let normalized = parse_issuer("https://tenant.example.com///")
+            .expect("a well-formed https issuer must validate");
+
+        assert_eq!(normalized, "https://tenant.example.com");
+    }
+
+    #[test]
+    fn parse_issuer_strips_embedded_control_characters() {
+        // VPL-711 CLUSTER-F: the returned value must come from the parsed
+        // `Url`, not the raw trimmed input, so a control character embedded
+        // in the path cannot ride through validation unparsed. `Url::parse`
+        // removes ASCII tab/newline wherever they appear in the input.
+        let normalized = parse_issuer("https://tenant.example.com/rea\tlm")
+            .expect("a well-formed https issuer must validate");
+
+        assert!(
+            !normalized.contains('\t'),
+            "control character survived validation: {normalized:?}"
+        );
     }
 
     // --- normalize_and_validate_login_issuer (AC1, AC4) -------------------
