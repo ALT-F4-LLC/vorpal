@@ -3815,7 +3815,8 @@ mod tests {
         .await
         .expect("the client's own timeout, not the test harness, must end this refresh");
 
-        let failure = outcome.expect_err("a token POST that never completes must not hang the caller");
+        let failure =
+            outcome.expect_err("a token POST that never completes must not hang the caller");
 
         assert!(
             matches!(failure, RefreshFailure::Sent(_)),
