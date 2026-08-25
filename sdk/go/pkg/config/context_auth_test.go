@@ -41,8 +41,18 @@ func credentialsFixture(issuer, refreshToken string, issuedAt, expiresIn int64, 
 	}
 }
 
+// writeFixture writes creds to path and, via resetSpentTokenMemo, always
+// registers a cleanup that clears the process-global spent-refresh-token
+// memo (C-3) at the end of the calling test. This is deliberately
+// unconditional rather than left to each test to opt into: every test that
+// writes a credentials fixture is a candidate for exercising a refresh, and
+// a test that forgot the separate call was exactly the unenforced,
+// easy-to-miss convention review flagged — folding the reset into the one
+// helper every such test already calls makes it structural instead of
+// remembered.
 func writeFixture(t *testing.T, path string, creds VorpalCredentials) {
 	t.Helper()
+	resetSpentTokenMemo(t)
 	data, err := json.MarshalIndent(creds, "", "  ")
 	if err != nil {
 		t.Fatalf("failed to marshal fixture: %v", err)
@@ -204,14 +214,21 @@ func TestClientAuthHeaderAtMultipleRegistries(t *testing.T) {
 }
 
 // TestClientAuthHeaderWiresProductionPathRefresherAndClock exercises the
-// exported ClientAuthHeader wrapper itself (VPL-189-CL26: it had no test at
-// all after the path-override test seam was removed by C-12). C-12
-// deliberately leaves no way to redirect ClientAuthHeader off the real
+// exported ClientAuthHeader wrapper itself, which had no test at all after
+// the path-override test seam was removed by C-12. C-12 deliberately leaves
+// no way to redirect ClientAuthHeader off the real
 // /var/lib/vorpal/key/credentials.json, so this can only assert the one
 // branch reachable without that file existing on the test host: "no
 // credentials file" returns an empty header and no error, exactly like
 // clientAuthHeaderAt's equivalent branch, proving the production wiring
-// reaches that shared core rather than diverging from it.
+// reaches that shared core rather than diverging from it. Now a thin,
+// one-line wrapper over clientAuthHeaderLive(GetKeyCredentialsPath(), ...) —
+// the substantial "does the real refresher/clock wiring actually work"
+// coverage a real credentials file would require lives in
+// TestClientAuthHeaderLiveWithNoCredentialsFileReturnsEmptyHeader and
+// TestClientAuthHeaderLiveBoundsAHungDiscoveryEndpoint below, both of which
+// drive clientAuthHeaderLive against a scratch path and so always execute
+// regardless of what this host's real credentials file holds.
 func TestClientAuthHeaderWiresProductionPathRefresherAndClock(t *testing.T) {
 	if _, err := os.Stat(GetKeyCredentialsPath()); err == nil {
 		t.Skip("a real credentials file exists on this host; skipping to avoid depending on its contents")
@@ -544,8 +561,8 @@ func TestWriteCredentialsSecureOverwritesExistingFileMode(t *testing.T) {
 // AB-13's failure window: a fault AFTER the temp file is created but BEFORE
 // the rename commits. The dir-permission trick used elsewhere in this file
 // (chmod 0500) blocks os.CreateTemp itself, so its "no leftover .tmp"
-// assertion is vacuous — no temp file is ever created for it to leak
-// (VPL-189-CL20/F5). Making the destination a pre-existing directory lets
+// assertion is vacuous — no temp file is ever created for it to leak.
+// Making the destination a pre-existing directory lets
 // the temp file be created normally and fails only at os.Rename, isolating
 // the window the control is actually meant to close.
 func TestWriteCredentialsSecureUnlinksTempFileOnRenameFailure(t *testing.T) {
@@ -674,7 +691,7 @@ func TestClientAuthHeaderAtRefreshesDespiteFutureIssuedAt(t *testing.T) {
 	}
 }
 
-// TestClientAuthHeaderAtSamplesClockAfterLock is C-2's own test (VPL-189-CL22):
+// TestClientAuthHeaderAtSamplesClockAfterLock is C-2's own test:
 // TestClientAuthHeaderAtSerializesConcurrentRefresh above proves exactly one
 // exchange happens, but with a fast refresher and near-identical real
 // timestamps it would pass even if now() were sampled before Lock() — the
@@ -830,12 +847,37 @@ func TestCredentialEgressOriginIsHostCaseInsensitive(t *testing.T) {
 	}
 }
 
+// TestCredentialEgressOriginRefusesHostThatCasefoldsToASCII is the
+// regression test for the exploit review found in credentialEgressOrigin's
+// ASCII gate: U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE has a Unicode
+// *simple* lowercase mapping of plain ASCII
+// 'i' (the dot above is dropped, not represented as a combining mark), so
+// strings.ToLower turns a host built from it into an all-ASCII string. Before
+// the fix, this function checked ASCII-ness on that already-lowered string,
+// so this host's ASCII image passed the "must be ASCII" gate while the
+// original, un-lowered, non-ASCII byte sequence is what net/http actually
+// resolves and dials — the pinned origin and the dialed origin were
+// two different names. Checking the raw hostname before any case-folding
+// (this test's positive assertion) is what closes it.
+func TestCredentialEgressOriginRefusesHostThatCasefoldsToASCII(t *testing.T) {
+	// "İdp.example.com" lowercases, under Go's strings.ToLower, to the
+	// pure-ASCII "idp.example.com".
+	const confusableHost = "İdp.example.com"
+	if lowered := strings.ToLower(confusableHost); lowered != "idp.example.com" {
+		t.Fatalf("test assumption violated: strings.ToLower(%q) = %q, expected an all-ASCII result — this test no longer exercises the hazard it names", confusableHost, lowered)
+	}
+
+	if _, err := credentialEgressOrigin("https://" + confusableHost); err == nil {
+		t.Fatalf("expected credentialEgressOrigin to refuse a host whose only ASCII form appears after lowercasing, got no error")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // C-4 — refreshAccessToken's real Sent/NotSent classification, exercised
 // through actual HTTP round trips rather than fabricated by a mock
-// refresher (VPL-189-CL16: the replay-guard tests above prove
-// clientAuthHeaderAt honors a classification it is handed, not that
-// refreshAccessToken produces the right one).
+// refresher: the replay-guard tests above prove clientAuthHeaderAt honors a
+// classification it is handed, not that refreshAccessToken produces the
+// right one.
 // ---------------------------------------------------------------------------
 
 func TestRefreshAccessTokenClassifiesTokenEndpointStatusAsSent(t *testing.T) {
@@ -865,8 +907,8 @@ func TestRefreshAccessTokenClassifiesTokenEndpointStatusAsSent(t *testing.T) {
 // directly), not a token endpoint that responds with a bad status — the two
 // prior Sent tests above both get a real HTTP response and fail on its
 // content. Hijacking and closing the connection with no response at all
-// forces a transport-level error out of PostForm, the arm VPL-189-CL37
-// found untested (VPL-189-CL37, VPL-189-G2).
+// forces a transport-level error out of PostForm, an arm review found
+// untested.
 func TestRefreshAccessTokenClassifiesTransportFailureAsSent(t *testing.T) {
 	mux := http.NewServeMux()
 	var server *httptest.Server
@@ -874,13 +916,21 @@ func TestRefreshAccessTokenClassifiesTransportFailureAsSent(t *testing.T) {
 		fmt.Fprintf(w, `{"token_endpoint": %q}`, server.URL+"/token")
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		// t.Error/t.Errorf, never t.Fatal/t.Fatalf, from this handler: it
+		// runs on its own goroutine (httptest.Server serves each request on
+		// one), and FailNow's family calls runtime.Goexit — which only ends
+		// THIS goroutine, not the test — a shape `go vet`'s testinggoroutine
+		// analyzer flags because the test goroutine is left waiting on a
+		// handler that will never finish.
 		hj, ok := w.(http.Hijacker)
 		if !ok {
-			t.Fatal("test server's ResponseWriter does not support hijacking")
+			t.Error("test server's ResponseWriter does not support hijacking")
+			return
 		}
 		conn, _, err := hj.Hijack()
 		if err != nil {
-			t.Fatalf("failed to hijack connection: %v", err)
+			t.Errorf("failed to hijack connection: %v", err)
+			return
 		}
 		// Close with no response at all: the client sees a transport
 		// failure (EOF/connection reset) out of PostForm itself, not a
@@ -924,7 +974,7 @@ func TestRefreshAccessTokenClassifiesMalformedTokenResponseAsSent(t *testing.T) 
 
 // ---------------------------------------------------------------------------
 // C-3 — an empty access_token in a 200 response must not destroy the
-// working credential (VPL-189-CL3).
+// working credential.
 // ---------------------------------------------------------------------------
 
 func TestRefreshAccessTokenRefusesEmptyAccessToken(t *testing.T) {
@@ -955,8 +1005,8 @@ func TestRefreshAccessTokenRefusesEmptyAccessToken(t *testing.T) {
 // refresher that hands back the same failure refreshAccessToken produces for
 // an empty access_token. It does not itself decide to refuse an empty
 // access_token; TestRefreshAccessTokenRefusesEmptyAccessToken above is what
-// exercises that decision, in refreshAccessToken (VPL-189-CL41: this test
-// was previously named for the wrong function's decision).
+// exercises that decision, in refreshAccessToken (this test was previously
+// named for the wrong function's decision).
 func TestClientAuthHeaderAtPreservesOldAccessTokenOnSentFailure(t *testing.T) {
 	resetSpentTokenMemo(t)
 	tempDir := t.TempDir()
@@ -1014,8 +1064,7 @@ func TestRefreshAccessTokenRefusesRedirectFromTokenEndpoint(t *testing.T) {
 // that never responds inside the configured timeout must still return in
 // bounded time. This matters beyond the request itself — C-1's mutex is
 // held across the whole exchange, so an unbounded discovery request would
-// stall every authenticated call in the process, not just this one
-// (VPL-189-CL21).
+// stall every authenticated call in the process, not just this one.
 func TestRefreshAccessTokenBoundsAHungDiscoveryEndpoint(t *testing.T) {
 	unblock := make(chan struct{})
 
@@ -1034,21 +1083,129 @@ func TestRefreshAccessTokenBoundsAHungDiscoveryEndpoint(t *testing.T) {
 	defer close(unblock)
 
 	const timeout = 200 * time.Millisecond
-	start := time.Now()
-	_, _, _, _, err := refreshAccessToken(nil, "client", server.URL, "refresh-token", timeout)
-	elapsed := time.Since(start)
+	// This test's whole point is to catch C-9's timeout being unwired — the
+	// exact scenario in which a bare call to refreshAccessToken on the test
+	// goroutine would never return. Without its own watchdog, that failure
+	// mode does not fail this test: it hangs until `go test`'s own global
+	// timeout (10 minutes by default) fires a runtime panic that dumps every
+	// goroutine and kills the whole package's test binary, not just this
+	// test. Running the call on its own goroutine and racing
+	// it against a watchdog many times the configured timeout but far below
+	// the global one turns that into an ordinary, immediate test failure
+	// with a clear message.
+	const watchdog = 5 * time.Second
 
-	if err == nil {
-		t.Fatal("expected an error from a discovery endpoint that never responds")
+	type result struct {
+		elapsed time.Duration
+		err     error
 	}
-	var failure *refreshFailureError
-	if !errors.As(err, &failure) || failure.kind != refreshFailureNotSent {
-		t.Fatalf("expected NotSent classification for a timeout before the token was on the wire, got: %v", err)
+	done := make(chan result, 1)
+	go func() {
+		start := time.Now()
+		_, _, _, _, err := refreshAccessToken(nil, "client", server.URL, "refresh-token", timeout)
+		done <- result{elapsed: time.Since(start), err: err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err == nil {
+			t.Fatal("expected an error from a discovery endpoint that never responds")
+		}
+		var failure *refreshFailureError
+		if !errors.As(r.err, &failure) || failure.kind != refreshFailureNotSent {
+			t.Fatalf("expected NotSent classification for a timeout before the token was on the wire, got: %v", r.err)
+		}
+		// Generous upper bound (10x the configured timeout) to absorb
+		// scheduler jitter in CI without accepting a client.Timeout that
+		// silently no-ops.
+		if r.elapsed > 10*timeout {
+			t.Fatalf("expected the request to be bounded by %v, took %v", timeout, r.elapsed)
+		}
+	case <-time.After(watchdog):
+		t.Fatalf("refreshAccessToken did not return within this test's own %v watchdog: C-9's timeout appears to be unwired", watchdog)
 	}
-	// Generous upper bound (10x the configured timeout) to absorb scheduler
-	// jitter in CI without accepting a client.Timeout that silently no-ops.
-	if elapsed > 10*timeout {
-		t.Fatalf("expected the request to be bounded by %v, took %v", timeout, elapsed)
+}
+
+// TestClientAuthHeaderLiveBoundsAHungDiscoveryEndpoint is
+// TestRefreshAccessTokenBoundsAHungDiscoveryEndpoint's counterpart for the
+// actual production wiring: refreshAccessToken's own timeout parameter is
+// exhaustively tested above, but liveTokenRefresher — the only production
+// caller, reached through ClientAuthHeader/clientAuthHeaderLive — hardcodes
+// refreshHTTPTimeout and was exercised by no test at all. A parameter-level
+// test alone cannot catch a regression that drops the timeout argument at
+// this wiring layer.
+//
+// The watchdog here is deliberately well above refreshHTTPTimeout itself
+// (30s) rather than a small multiple of a short test-local timeout, because
+// this test's honest positive case is "the real 30s timeout fired" — a
+// smaller watchdog would fail correct code, not just broken code — but it
+// is still a bounded, test-owned failure far short of `go test`'s global
+// timeout, for the same reason given in
+// TestRefreshAccessTokenBoundsAHungDiscoveryEndpoint's comment above.
+func TestClientAuthHeaderLiveBoundsAHungDiscoveryEndpoint(t *testing.T) {
+	unblock := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		<-unblock
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	defer close(unblock)
+
+	tempDir := t.TempDir()
+	credPath := filepath.Join(tempDir, "credentials.json")
+	now := time.Now().Unix()
+	writeFixture(t, credPath, credentialsFixture(server.URL, "refresh-tok-live-hung-discovery", now-7200, 3600, "old-access-token"))
+
+	const watchdog = refreshHTTPTimeout + 30*time.Second
+
+	type result struct {
+		elapsed time.Duration
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		start := time.Now()
+		// credentialsFixture always maps the fixed registry key
+		// "https://registry.example.com" to the issuer — server.URL here —
+		// so that is the registry this call must use, not server.URL.
+		_, err := clientAuthHeaderLive(credPath, "https://registry.example.com")
+		done <- result{elapsed: time.Since(start), err: err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err == nil {
+			t.Fatal("expected an error from a discovery endpoint that never responds")
+		}
+		if r.elapsed < refreshHTTPTimeout {
+			t.Fatalf("expected liveTokenRefresher to honor the full %v C-9 timeout, returned after only %v", refreshHTTPTimeout, r.elapsed)
+		}
+		if r.elapsed > watchdog {
+			t.Fatalf("expected the production call to be bounded near %v, took %v", refreshHTTPTimeout, r.elapsed)
+		}
+	case <-time.After(watchdog):
+		t.Fatalf("clientAuthHeaderLive did not return within this test's own %v watchdog: liveTokenRefresher's C-9 timeout appears to be unwired", watchdog)
+	}
+}
+
+// TestClientAuthHeaderLiveWithNoCredentialsFileReturnsEmptyHeader drives the
+// identical production wiring (liveTokenRefresher, the real clock) through
+// clientAuthHeaderLive against a scratch path instead of ClientAuthHeader's
+// hardcoded GetKeyCredentialsPath(), so it always executes this branch
+// rather than skipping on any host that happens to already hold a real
+// /var/lib/vorpal/key/credentials.json, the way
+// TestClientAuthHeaderWiresProductionPathRefresherAndClock above must.
+func TestClientAuthHeaderLiveWithNoCredentialsFileReturnsEmptyHeader(t *testing.T) {
+	tempDir := t.TempDir()
+	credPath := filepath.Join(tempDir, "credentials.json")
+
+	header, err := clientAuthHeaderLive(credPath, "https://registry.example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if header != "" {
+		t.Fatalf("expected empty header when no credentials file exists, got %q", header)
 	}
 }
 

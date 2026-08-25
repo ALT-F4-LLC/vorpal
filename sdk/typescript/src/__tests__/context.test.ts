@@ -378,8 +378,8 @@ describe("clientAuthHeader: refresh-token rotation", () => {
   });
 
   // ---------------------------------------------------------------------
-  // C-4 — a malformed token-endpoint body must not escape Sent classification
-  // (VPL-189-CL1/CL2). Before this fix, a literal `null` body passed
+  // C-4 — a malformed token-endpoint body must not escape Sent classification.
+  // Before this fix, a literal `null` body passed
   // `tokenResp.json()` (it is valid JSON) and then threw an unclassified
   // TypeError reading `.refresh_token` off `null` — the token was already
   // on the wire, but the failure was never marked Sent, so a second caller
@@ -426,12 +426,45 @@ describe("clientAuthHeader: refresh-token rotation", () => {
     expect(persisted.issuer[ISSUER].access_token).toBe("old-access-token");
   });
 
+  // Regression test for the finding that Number.isFinite alone lets a
+  // finite-but-absurd expires_in through: it permanently suppresses
+  // needsRefresh for that issuer and, once persisted to the shared
+  // credentials.json, its magnitude overflows Go's int64 and Rust's u64
+  // fields, failing the whole file's decode for every OTHER issuer too. This
+  // was CL30/CL50's finding: the finiteness guard shipped with no test of
+  // its own, isFinite(1e21) is true, and the pre-fix validator accepted it.
+  test("refuses a token response whose expires_in is finite but absurdly large", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "absurd-expires-in-refresh-token" });
+    installFetchMock({ tokenResponse: { access_token: "new-access-token", expires_in: 1e21 } });
+
+    await expect(clientAuthHeader(REGISTRY, credentialsPath)).rejects.toThrow();
+
+    const persisted = JSON.parse(readFileSync(credentialsPath, "utf-8"));
+    expect(persisted.issuer[ISSUER].access_token).toBe("old-access-token");
+  });
+
+  test("refuses a token response whose expires_in is a non-integer number", async () => {
+    writeCredentialsFile(credentialsPath, { refreshToken: "fractional-expires-in-refresh-token" });
+    installFetchMock({ tokenResponse: { access_token: "new-access-token", expires_in: 3600.5 } });
+
+    await expect(clientAuthHeader(REGISTRY, credentialsPath)).rejects.toThrow();
+  });
+
   // ---------------------------------------------------------------------
   // C-3 — a commit failure after a successful exchange must spend the
   // token (AB-3), same as Go's equivalent chmod-based test.
   // ---------------------------------------------------------------------
 
-  test("never replays a token whose refresh succeeded but failed to persist", async () => {
+  // Skipped under uid 0, matching the Go test this was ported from: a
+  // permission bit of 0500 on tmpDir does not deny root a write, so root
+  // silently loses the fault this test injects and the persist below
+  // succeeds instead of failing — a false pass, not a weaker but still real
+  // assertion — review's finding: the TS port omitted the check
+  // Go's TestClientAuthHeaderAtNeverReplaysATokenWhoseRefreshFailedToPersist
+  // already has.
+  test.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(
+    "never replays a token whose refresh succeeded but failed to persist",
+    async () => {
     writeCredentialsFile(credentialsPath, { refreshToken: "persist-fail-refresh-token" });
     installFetchMock({ tokenResponse: { access_token: "new-access-token", expires_in: 3600 } });
 
@@ -649,17 +682,32 @@ describe("clientAuthHeader: atomic credential write", () => {
 
     const durationMs = 500;
     const resultPath = join(tmpDir, "reader-result.txt");
+    // The result line is "<verdict> <reads> <unexpected>": how many read
+    // attempts actually happened and how many threw something other than
+    // ENOENT (the expected, benign miss during the rename window) or
+    // SyntaxError (the torn-read signal itself) — an underpowered or inert
+    // reader (few or zero reads) would trivially never observe a torn file
+    // and must not be indistinguishable from a real pass, and an unexpected
+    // error swallowed into the same branch as ENOENT would mask a real
+    // defect as a clean "OK".
     const readerScript = [
       `const { readFileSync, writeFileSync } = require("node:fs");`,
       `const path = ${JSON.stringify(credentialsPath)};`,
       `const resultPath = ${JSON.stringify(resultPath)};`,
       `const deadline = Date.now() + ${durationMs};`,
       `let torn = false;`,
+      `let reads = 0;`,
+      `let unexpected = 0;`,
       `while (Date.now() < deadline) {`,
+      `  reads += 1;`,
       `  try { JSON.parse(readFileSync(path, "utf-8")); }`,
-      `  catch (err) { if (err instanceof SyntaxError) { torn = true; break; } }`,
+      `  catch (err) {`,
+      `    if (err instanceof SyntaxError) { torn = true; break; }`,
+      `    if (err && err.code === "ENOENT") { continue; }`,
+      `    unexpected += 1;`,
+      `  }`,
       `}`,
-      `writeFileSync(resultPath, torn ? "TORN" : "OK");`,
+      `writeFileSync(resultPath, (torn ? "TORN" : "OK") + " " + reads + " " + unexpected);`,
     ].join("\n");
 
     const reader = Bun.spawn([process.execPath, "-e", readerScript], {
@@ -684,13 +732,25 @@ describe("clientAuthHeader: atomic credential write", () => {
     const advancingClock = () => (fakeNow += 10_000);
 
     const deadline = Date.now() + durationMs;
+    let writes = 0;
     while (Date.now() < deadline) {
       await clientAuthHeader(REGISTRY, credentialsPath, countingRefresher, advancingClock);
+      writes += 1;
     }
 
     await reader.exited;
-    const result = readFileSync(resultPath, "utf-8");
-    expect(result).toBe("OK");
+    const [verdict, readsStr, unexpectedStr] = readFileSync(resultPath, "utf-8").trim().split(" ");
+    const reads = Number(readsStr);
+    const unexpected = Number(unexpectedStr);
+
+    // Floors on both sides of the race: an inert or underpowered reader (few
+    // reads) or writer (few writes) would report "OK" trivially, having
+    // never actually raced the atomic-write path this test exists to
+    // exercise.
+    expect(writes).toBeGreaterThan(5);
+    expect(reads).toBeGreaterThan(5);
+    expect(unexpected).toBe(0);
+    expect(verdict).toBe("OK");
   });
 });
 

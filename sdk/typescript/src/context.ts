@@ -215,6 +215,22 @@ export function credentialEgressOrigin(raw: string): string {
 }
 
 /**
+ * Upper bound {@link parseTokenResponse} enforces on an `expires_in` it
+ * accepts. `Number.isFinite` alone rejects `Infinity`/`NaN` but not a
+ * finite-yet-absurd value — a token endpoint returning, say, `1e21` passes a
+ * finiteness check, permanently suppresses {@link needsRefresh} for that
+ * issuer (an availability outage that never clears without manual
+ * intervention), and once persisted to the shared `credentials.json` is
+ * unreadable by Go's `int64` and Rust's `u64` fields: a JSON number whose
+ * magnitude overflows the target integer type fails that whole
+ * `json.Unmarshal`/`serde` decode call, taking every OTHER issuer's entry in
+ * the same file down with it, not just the poisoned one. Chosen well inside
+ * every peer's integer range (`i64`/`u64` max is roughly `9.2e18`) so no
+ * value this function accepts can ever overflow either.
+ */
+const MAX_EXPIRES_IN_SECONDS = Number.MAX_SAFE_INTEGER;
+
+/**
  * Validates a parsed token-endpoint response body into {@link TokenResponse}.
  * `tokenResp.json()` only guarantees valid JSON, not this shape — an
  * unchecked cast would let a malformed or hostile token response (a bare
@@ -238,25 +254,44 @@ export function parseTokenResponse(parsed: unknown): TokenResponse {
   // Number.isFinite, not just typeof: `Infinity`/`NaN` are typeof "number"
   // but neither survives round-tripping through JSON.stringify — Infinity
   // serializes as `null`, which would brick credentials.json for every
-  // future call reading this issuer back.
+  // future call reading this issuer back. Number.isInteger and the
+  // MAX_EXPIRES_IN_SECONDS bound close the gap finiteness alone leaves open
+  // — see that constant's comment for why a merely-finite value is not
+  // enough.
+  //
+  // Bound to local `const`s, not repeated `candidate.expires_in` property
+  // reads: TypeScript's control-flow narrowing tracks a local binding across
+  // statements, but `candidate` is typed via an index signature
+  // (`Record<string, unknown>`), and a fresh `candidate.expires_in` access
+  // after this guard widens straight back to `unknown` — which is exactly
+  // why the return statement below previously needed an `as` cast on two of
+  // three fields despite this comment already claiming the compiler, not an
+  // assertion, verified them. Reading through a local binding once and
+  // narrowing that is what makes the claim true.
+  const expiresIn = candidate.expires_in;
   if (
-    candidate.expires_in !== undefined &&
-    (typeof candidate.expires_in !== "number" || !Number.isFinite(candidate.expires_in))
+    expiresIn !== undefined &&
+    (typeof expiresIn !== "number" ||
+      !Number.isFinite(expiresIn) ||
+      !Number.isInteger(expiresIn) ||
+      expiresIn > MAX_EXPIRES_IN_SECONDS)
   ) {
-    throw new Error("token response's expires_in must be a finite number when present");
+    throw new Error(
+      `token response's expires_in must be a finite integer no greater than ${MAX_EXPIRES_IN_SECONDS} when present`,
+    );
   }
-  if (candidate.refresh_token !== undefined && typeof candidate.refresh_token !== "string") {
+  const refreshToken = candidate.refresh_token;
+  if (refreshToken !== undefined && typeof refreshToken !== "string") {
     throw new Error("token response's refresh_token must be a string when present");
   }
-  // Every field TokenResponse declares has just been checked above; build
-  // the return value explicitly rather than casting `candidate` (whose
-  // index signature makes every property type `unknown`) so the compiler
-  // verifies this function's own claim about its return type instead of
-  // trusting an assertion.
+  // Every field TokenResponse declares has just been checked above, through
+  // the narrowed local bindings read above rather than through `candidate`
+  // directly — the compiler verifies this function's own claim about its
+  // return type here, with no assertion anywhere in this return statement.
   return {
     access_token: candidate.access_token,
-    expires_in: candidate.expires_in as number | undefined,
-    refresh_token: candidate.refresh_token as string | undefined,
+    expires_in: expiresIn,
+    refresh_token: refreshToken,
   };
 }
 

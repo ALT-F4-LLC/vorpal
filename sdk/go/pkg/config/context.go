@@ -155,37 +155,57 @@ func sentErr(err error) error    { return &refreshFailureError{kind: refreshFail
 // credentialEgressOrigin parses an OIDC URL into its scheme://host:port
 // origin, refusing any destination a refresh token must not be sent to.
 // Plaintext HTTP is refused except on loopback, where there is no network to
-// eavesdrop and local IdP fixtures live. Mirrors Rust's
-// credential_egress_origin (context.rs:688-712).
+// eavesdrop and local IdP fixtures live. Shares Rust's credential_egress_origin
+// structure (context.rs:688-712) but does NOT mirror it exactly: this
+// function additionally refuses any non-ASCII host outright (see the ASCII
+// gate below), which Rust and TypeScript do not — an ordinary
+// internationalized-domain-name issuer that Rust/TS accept is refused here.
+// That is a deliberate, Go-only tightening in the absence of an IDNA/
+// punycode normalizer (see the gate's own comment for why), not a bug to
+// silently converge away; restoring IDN parity needs the same normalization
+// added to all three SDKs at once and is tracked separately, out of this
+// issue's scope.
 func credentialEgressOrigin(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", fmt.Errorf("invalid OIDC URL: %s: %w", raw, err)
 	}
 
-	// Lowercase before comparing: TypeScript's WHATWG URL always lowercases
-	// the host, so an issuer and a token_endpoint that differ only in host
-	// case would compare unequal here (a false pin failure) while TS treats
-	// them as the same origin — normalize to match TS rather than diverge.
-	host := strings.ToLower(u.Hostname())
-	if host == "" {
+	rawHost := u.Hostname()
+	if rawHost == "" {
 		return "", fmt.Errorf("OIDC URL has no host: %s", raw)
 	}
 
-	// Refuse any non-ASCII host outright rather than comparing a lowercased
-	// copy of it. net/url.Hostname() does not apply IDNA/punycode
-	// normalization the way TypeScript's WHATWG URL does, so the string this
-	// function compares and the string an outbound request actually
-	// resolves are the same bytes only for ASCII hosts; for anything else a
-	// Unicode-casefolded comparison here could accept an origin pin that a
-	// DNS lookup of the raw, un-normalized host would not treat as the same
-	// name. Refusing keeps the compared value and the dialed value identical
-	// by construction instead of by two independent normalizations agreeing.
-	for i := 0; i < len(host); i++ {
-		if host[i] > unicode.MaxASCII {
+	// Refuse any non-ASCII host outright, checked on the RAW hostname —
+	// before any case-folding — rather than on a lowercased copy of it.
+	// strings.ToLower performs full Unicode case folding, not a byte-wise
+	// ASCII fold: some non-ASCII codepoints (e.g. U+0130 LATIN CAPITAL
+	// LETTER I WITH DOT ABOVE) simple-lowercase to an all-ASCII string, so
+	// checking the ALREADY-LOWERED host would let such a codepoint's ASCII
+	// image pass this refusal while the original, un-lowered, non-ASCII
+	// byte sequence is what net/http actually dials — a pinned origin and a
+	// dialed origin that are provably different names (OBSERVED exploitable
+	// for U+0130). net/url.Hostname() does not apply
+	// IDNA/punycode normalization the way TypeScript's WHATWG URL does, so
+	// the string this function compares and the string an outbound request
+	// resolves are the same bytes only for ASCII hosts to begin with;
+	// refusing here keeps the compared value and the dialed value identical
+	// by construction instead of by two independent normalizations
+	// agreeing.
+	for i := 0; i < len(rawHost); i++ {
+		if rawHost[i] > unicode.MaxASCII {
 			return "", fmt.Errorf("OIDC URL host must be ASCII: %s", raw)
 		}
 	}
+
+	// Lowercase only after the ASCII gate above: TypeScript's WHATWG URL
+	// always lowercases the host, so an issuer and a token_endpoint that
+	// differ only in host case would compare unequal here (a false pin
+	// failure) while TS treats them as the same origin — normalize to match
+	// TS rather than diverge. Safe to fold now because rawHost is already
+	// known to be pure ASCII, so strings.ToLower's Unicode case-folding
+	// behaves as a plain byte-wise ASCII fold on it.
+	host := strings.ToLower(rawHost)
 
 	// Deliberate divergence from Rust: net/url.Hostname() strips the bracket
 	// syntax from an IPv6 literal ("::1", not "[::1]"), so this "::1" match
@@ -400,17 +420,14 @@ func writeCredentialsSecure(path string, data []byte) error {
 	// turn into a real accumulation bug by adding a second iteration that
 	// doesn't return.
 	for attempt := 0; attempt < tempFileMaxAttempts; attempt++ {
-		committed, err := writeCredentialsSecureAttempt(dir, base, path, data)
-		if err != nil {
-			if errors.Is(err, os.ErrExist) {
-				lastErr = err
-				continue
-			}
-			return err
-		}
-		if committed {
+		retry, err := writeCredentialsSecureAttempt(dir, base, path, data)
+		if err == nil {
 			return nil
 		}
+		if !retry {
+			return err
+		}
+		lastErr = err
 	}
 
 	return fmt.Errorf("every one of %d candidate temp-file names was already taken writing %s: %w", tempFileMaxAttempts, path, lastErr)
@@ -418,15 +435,25 @@ func writeCredentialsSecure(path string, data []byte) error {
 
 // writeCredentialsSecureAttempt performs one candidate-name attempt of
 // writeCredentialsSecure's retry loop: create the temp file exclusively,
-// write/fsync/rename it, and unlink it on any failure. Returns
-// (true, nil) on a committed write, (false, err) with err wrapping
-// os.ErrExist when the candidate name was already taken (the caller
-// retries), and (false, err) for any other failure (the caller stops).
-func writeCredentialsSecureAttempt(dir, base, path string, data []byte) (bool, error) {
+// write/fsync/rename it, and unlink it on any failure. Returns (false, nil)
+// on a committed write, (true, err) only when os.CreateTemp itself failed
+// because the candidate name was already taken (the caller retries with a
+// new name), and (false, err) for every other failure (the caller stops).
+//
+// The retry signal is this function's own explicit judgment of WHERE the
+// failure happened, never a downstream errors.Is(err, os.ErrExist) test
+// applied to whatever writeCredentialsSecureCommit returns. A rename onto an
+// existing non-empty directory can itself fail with an error some platforms
+// report as EEXIST-class, and that failure has nothing to do with the
+// candidate temp-file name being taken; treating it as retryable turned a
+// directory-shaped destination into tempFileMaxAttempts silent retries and a
+// misleading "candidate temp-file names was already taken" message instead
+// of surfacing the real, non-retryable cause immediately.
+func writeCredentialsSecureAttempt(dir, base, path string, data []byte) (retry bool, err error) {
 	f, err := os.CreateTemp(dir, base+".*.tmp")
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return false, err
+			return true, err
 		}
 		return false, fmt.Errorf("failed to create temp credentials file: %w", err)
 	}
@@ -444,7 +471,7 @@ func writeCredentialsSecureAttempt(dir, base, path string, data []byte) (bool, e
 	}
 
 	committed = true
-	return true, nil
+	return false, nil
 }
 
 // writeCredentialsSecureCommit writes data to the already-created temp file
@@ -713,7 +740,18 @@ func clientAuthHeaderAt(
 // Returns the Bearer token string if credentials exist, empty string otherwise, or error on failure.
 // This matches the Rust SDK's client_auth_header function.
 func ClientAuthHeader(registry string) (string, error) {
-	return clientAuthHeaderAt(GetKeyCredentialsPath(), registry, liveTokenRefresher, func() (int64, error) {
+	return clientAuthHeaderLive(GetKeyCredentialsPath(), registry)
+}
+
+// clientAuthHeaderLive is the production wiring of ClientAuthHeader — the
+// real IdP exchange (liveTokenRefresher) and the real clock — with only the
+// credentials path left as a parameter, so a test can drive this exact
+// wiring against a scratch file instead of trusting it by inspection or
+// depending on whatever /var/lib/vorpal/key/credentials.json happens to
+// contain on the host running the test. Mirrors Rust's client_auth_header_live
+// (sdk/rust/src/context.rs:1463-1468), which exists for the identical reason.
+func clientAuthHeaderLive(credentialsPath, registry string) (string, error) {
+	return clientAuthHeaderAt(credentialsPath, registry, liveTokenRefresher, func() (int64, error) {
 		return time.Now().Unix(), nil
 	})
 }
