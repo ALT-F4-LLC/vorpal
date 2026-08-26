@@ -11,26 +11,28 @@ VORPAL_NAMESPACE := library
 VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
-# system services start now refuses a worker/registry with no issuer
-# (VPL-434). This default points at the repository's own
-# docker-compose.yaml Keycloak, but docker-compose.yaml runs bare
-# `keycloak start-dev` with no realm import: the `vorpal` realm below is
-# not provisioned by anything in this repository, so `vorpal-start`/
-# `lima-vorpal-start` still fail (at discovery, not at the refusal) until
-# an operator creates that realm by hand or `script/test/keycloak.sh` is
-# wired into a make target — tracked as a gap (VPL-711 CLUSTER-A), not
-# fixed here: that provisioning is new script/CI surface outside this
-# fix's declared scope (cli/src/command.rs, script/install.sh, makefile).
-VORPAL_ISSUER ?= http://localhost:8080/realms/vorpal
+# system services start refuses a worker/registry with no issuer (VPL-434),
+# so vorpal-start/lima-vorpal-start must name one. This default is the realm
+# the repository's own docker-compose.yaml actually serves: `keycloak
+# start-dev` creates `master` on first boot and imports no other realm, so
+# the previous `realms/vorpal` default 404'd at discovery and no `make
+# vorpal-start` could ever start (VPL-711 CLUSTER-A). `master` is a
+# development convenience only — it is Keycloak's own administrative realm,
+# and any deployment beyond `docker compose up` overrides VORPAL_ISSUER with
+# a realm provisioned for Vorpal (script/test/keycloak.sh's clients live in
+# a `vorpal` realm an operator creates by hand today).
+VORPAL_ISSUER ?= http://localhost:8080/realms/master
 
-# VORPAL_ISSUER is interpolated into vorpal-start/lima-vorpal-start below
-# inside a shell double-quoted string; Make substitutes it as plain text
-# before the shell parses that line, so an override containing a quote,
-# backtick or '$' could inject shell syntax into a build host (VPL-711
-# CLUSTER-P). Checked once, in pure Make (no subshell), so the recipe
-# never runs with an unsafe value — the default above is unaffected.
-ifneq ($(strip $(findstring ",$(VORPAL_ISSUER))$(findstring `,$(VORPAL_ISSUER))$(findstring $$,$(VORPAL_ISSUER))),)
-$(error VORPAL_ISSUER may not contain '"', a backtick, or '$$')
+# VORPAL_ISSUER is substituted by Make as plain text into two different shell
+# contexts before either shell parses the line, so the deny-list is the union
+# of what each context can reinterpret: vorpal-start puts it in a
+# double-quoted string ('"', '`', '$', '\'), and lima-vorpal-start nests that
+# inside `bash -c '...'`, where the single quote ends the outer quoting and
+# injects into the VM (VPL-711 CLUSTER-P, CLUSTER-S). Checked once, in pure
+# Make (no subshell), so no recipe runs with an unsafe value — the default
+# above is unaffected.
+ifneq ($(strip $(findstring ",$(VORPAL_ISSUER))$(findstring ',$(VORPAL_ISSUER))$(findstring `,$(VORPAL_ISSUER))$(findstring \,$(VORPAL_ISSUER))$(findstring $$,$(VORPAL_ISSUER))),)
+$(error VORPAL_ISSUER may not contain a quote, an apostrophe, a backtick, a backslash, or '$$')
 endif
 
 LIMA_ARCH := $(ARCH)

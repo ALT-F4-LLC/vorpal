@@ -199,8 +199,17 @@ pub enum CommandSystemServices {
         /// Settable via VORPAL_ISSUER_CLIENT_SECRET so an installed unit can
         /// read the secret from a mode-600 environment file instead of
         /// carrying it in argv, where any local user could read it from
-        /// `ps`/`/proc/<pid>/cmdline` (VPL-711 C10).
-        #[arg(env = "VORPAL_ISSUER_CLIENT_SECRET", long)]
+        /// `ps`/`/proc/<pid>/cmdline` (VPL-711 C10). `hide_env_values` keeps
+        /// `--help` from printing the secret straight back out of the
+        /// environment the unit just hid it in (VPL-711 CLUSTER-AE), and
+        /// `parse_client_secret` refuses a set-but-empty value on either
+        /// channel (VPL-711 CLUSTER-X).
+        #[arg(
+            env = "VORPAL_ISSUER_CLIENT_SECRET",
+            hide_env_values = true,
+            long,
+            value_parser = parse_client_secret
+        )]
         issuer_client_secret: Option<String>,
 
         /// Comma-separated OAuth client IDs whose tokens are classified as
@@ -1110,9 +1119,38 @@ fn login_http_client(timeout: Duration) -> Result<reqwest::Client> {
 /// (VPL-280 AC1) so the two issuer-accepting paths in this binary do not
 /// carry two independent implementations of the same rule (VPL-711
 /// CLUSTER-J).
+///
+/// Returning the parsed form is a deliberate behaviour change for
+/// `vorpal login` as well as for `system services start`, and it is the
+/// login path where it is observable (VPL-711 CLUSTER-U): the value returned
+/// here becomes the credentials-file key and the string compared against the
+/// discovery document's `issuer` claim, so `Url`'s own normalization —
+/// lower-cased scheme and host, elided default port, canonical
+/// percent-encoding — now applies to both. That is the intended direction
+/// (an IdP states its `iss` in canonical form, so normalizing the operator's
+/// text toward it makes the comparison agree more often, not less), and
+/// `issuer_normalization_is_shared_by_both_issuer_entry_points` pins the
+/// exact transformation so no future caller inherits it unannounced.
 fn validate_and_normalize_issuer_url(candidate: &str) -> std::result::Result<String, String> {
-    credential_egress_origin(candidate).map_err(|err| err.to_string())?;
-    let url = reqwest::Url::parse(candidate).map_err(|err| err.to_string())?;
+    let url = reqwest::Url::parse(candidate)
+        .map_err(|err| format!("not a valid absolute URL ({err})"))?;
+
+    // The rule stays in `credential_egress_origin` (CLUSTER-J); only its
+    // wording is re-stated here. Its own message names the refresh token,
+    // which neither caller of this function is sending (CLUSTER-G), and it
+    // reports one sentence for four distinct failures (CLUSTER-T). Having
+    // already parsed the URL, the two causes that can still reach this arm
+    // are recoverable from the parse: an authority with no host, or a scheme
+    // the egress rule refuses for that host.
+    credential_egress_origin(url.as_str()).map_err(|_| match url.host_str() {
+        None => "URL has no host".to_string(),
+        Some(host) => format!(
+            "scheme {:?} is not allowed for host {host:?}: the OIDC issuer must be https \
+             (plaintext http is only allowed on localhost, 127.0.0.1 or [::1])",
+            url.scheme()
+        ),
+    })?;
+
     Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
@@ -1125,6 +1163,15 @@ fn validate_and_normalize_issuer_url(candidate: &str) -> std::result::Result<Str
 /// than `credential_egress_origin`'s "refresh token" wording, because
 /// `system services start` never sends a refresh token — that phrasing
 /// belongs to `vorpal login`, the only other caller (VPL-711 CLUSTER-G).
+///
+/// The underlying cause is carried into the message rather than discarded
+/// (VPL-711 CLUSTER-T): `validate_and_normalize_issuer_url` fails for four
+/// distinct reasons — unparseable URL, no host, a non-loopback plaintext
+/// scheme, and a URL with no port and no known default — and reporting all
+/// four as "issuer must be https" told an operator whose issuer was
+/// `https:/idp.example.com` (one slash) to fix a scheme that was already
+/// correct. AC4 asks the failure to name the migration step; it cannot do
+/// that while describing the wrong failure.
 fn parse_issuer(raw: &str) -> std::result::Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -1134,13 +1181,41 @@ fn parse_issuer(raw: &str) -> std::result::Result<String, String> {
                 .to_string(),
         );
     }
-    let candidate = trimmed.trim_end_matches('/');
-    validate_and_normalize_issuer_url(candidate).map_err(|_| {
-        "issuer must be https (plaintext http is only allowed on localhost, 127.0.0.1 or \
-         [::1]); set --issuer or VORPAL_ISSUER to your OIDC issuer URL, e.g. \
-         https://idp.example.com/realms/vorpal"
-            .to_string()
+    // No trailing-slash trim here: `validate_and_normalize_issuer_url`
+    // trims the *parsed* form, which is the only trim that can be observed
+    // (VPL-711 CLUSTER-AA — a second trim on the raw text made the test that
+    // claimed to pin this one unable to fail for its own named mutant).
+    validate_and_normalize_issuer_url(trimmed).map_err(|cause| {
+        format!(
+            "invalid issuer {trimmed:?}: {cause}. Set --issuer or VORPAL_ISSUER to your OIDC \
+             issuer URL — https, or plaintext http only on localhost, 127.0.0.1 or [::1] — e.g. \
+             https://idp.example.com/realms/vorpal"
+        )
     })
+}
+
+/// clap `value_parser` for `system services start --issuer-client-secret`
+/// (VPL-711 CLUSTER-X). clap treats a set-but-empty environment variable as a
+/// supplied value, so `VORPAL_ISSUER_CLIENT_SECRET=` — the shape an
+/// `EnvironmentFile` written for an install that has no secret yet produces —
+/// would otherwise reach `exchange_client_credentials` as `Some("")` and be
+/// POSTed to the IdP, whose refusal arrives as an opaque 401 rather than as
+/// the configuration error it is.
+///
+/// The value is returned byte-for-byte, deliberately: a client secret is
+/// opaque IdP-generated text that the operator cannot edit, so trimming it
+/// would silently alter a credential whose surrounding whitespace, however
+/// unlikely, is the IdP's to define and not ours.
+fn parse_client_secret(raw: &str) -> std::result::Result<String, String> {
+    if raw.trim().is_empty() {
+        return Err(
+            "issuer client secret must not be empty; leave --issuer-client-secret and \
+             VORPAL_ISSUER_CLIENT_SECRET unset entirely to start without client credentials"
+                .to_string(),
+        );
+    }
+
+    Ok(raw.to_string())
 }
 
 /// Normalizes and validates the `--issuer` value before any network request
@@ -2009,11 +2084,32 @@ mod login_egress_tests {
     #[test]
     fn parse_issuer_accepts_plaintext_loopback() {
         // Positive control (VPL-711 C1's loopback exception): the shipped
-        // `makefile`/`docker-compose.yaml` Keycloak default.
-        let normalized = parse_issuer("http://localhost:8080/realms/vorpal")
+        // `makefile` default, which is the realm `docker-compose.yaml`'s
+        // `keycloak start-dev` actually serves (VPL-711 CLUSTER-A).
+        let normalized = parse_issuer("http://localhost:8080/realms/master")
             .expect("a loopback issuer must validate");
 
-        assert_eq!(normalized, "http://localhost:8080/realms/vorpal");
+        assert_eq!(normalized, "http://localhost:8080/realms/master");
+    }
+
+    #[test]
+    fn parse_issuer_names_the_cause_it_actually_hit() {
+        // VPL-711 CLUSTER-T: every failure used to be reported as "issuer
+        // must be https", including the ones that had nothing to do with
+        // the scheme. AC4 asks the refusal to name the migration step; a
+        // message describing the wrong defect cannot. Assert both halves —
+        // the cause that was hit, and the absence of the one that was not.
+        let error = parse_issuer("idp.example.com/realms/vorpal")
+            .expect_err("a scheme-less issuer must be refused");
+
+        assert!(
+            error.contains("not a valid absolute URL"),
+            "unexpected message: {error}"
+        );
+        assert!(
+            !error.contains("must be https"),
+            "a URL-shape failure must not be reported as a scheme failure: {error}"
+        );
     }
 
     #[test]
@@ -2027,8 +2123,13 @@ mod login_egress_tests {
     #[test]
     fn parse_issuer_trims_multiple_trailing_slashes() {
         // VPL-711 CLUSTER-L: a single `trim_end_matches('/')` call removes
-        // every trailing slash, not just one — pin that so a future switch
-        // to a single-slash-only trim (e.g. `strip_suffix('/')`) is caught.
+        // every trailing slash, not just one. VPL-711 CLUSTER-AA: this test
+        // could not fail for the mutant its comment named, because
+        // `parse_issuer` trimmed the raw text *and*
+        // `validate_and_normalize_issuer_url` trimmed the parsed form, so
+        // weakening either one left the other to absorb it. The raw-text
+        // trim is gone, and the surviving trim is the one this pins:
+        // replacing it with `strip_suffix('/')` now fails here.
         let normalized = parse_issuer("https://tenant.example.com///")
             .expect("a well-formed https issuer must validate");
 
@@ -2041,12 +2142,185 @@ mod login_egress_tests {
         // `Url`, not the raw trimmed input, so a control character embedded
         // in the path cannot ride through validation unparsed. `Url::parse`
         // removes ASCII tab/newline wherever they appear in the input.
-        let normalized = parse_issuer("https://tenant.example.com/rea\tlm")
-            .expect("a well-formed https issuer must validate");
+        //
+        // VPL-711 CLUSTER-AB: asserting only that the tab is absent passes
+        // for any implementation that mangles the value, and skipped the
+        // newline — the character round 0's finding actually turned on,
+        // since a newline is what breaks out of a systemd unit line. Assert
+        // the whole normalized value, for both characters.
+        assert_eq!(
+            parse_issuer("https://tenant.example.com/rea\tlm")
+                .expect("a well-formed https issuer must validate"),
+            "https://tenant.example.com/realm"
+        );
+
+        assert_eq!(
+            parse_issuer("https://tenant.example.com/rea\nlm")
+                .expect("a well-formed https issuer must validate"),
+            "https://tenant.example.com/realm"
+        );
+    }
+
+    #[test]
+    fn issuer_normalization_is_shared_by_both_issuer_entry_points() {
+        // VPL-711 CLUSTER-U: de-duplicating the two issuer rules onto
+        // `validate_and_normalize_issuer_url` also handed `vorpal login`
+        // `Url`'s normalization, which is observable there — the returned
+        // string is the credentials-file key and the value compared against
+        // the discovery document's `issuer` claim. Nothing could see that
+        // change. Pin the exact transformation on both entry points, so it
+        // is a stated contract rather than a side effect, and so the two
+        // cannot drift apart again without a red test.
+        let mixed_case = "https://Tenant.Example.COM:443/realms/Vorpal";
+
+        assert_eq!(
+            parse_issuer(mixed_case).expect("a well-formed https issuer must validate"),
+            "https://tenant.example.com/realms/Vorpal",
+            "scheme and host are lower-cased and the default port elided; the path is not"
+        );
+
+        assert_eq!(
+            normalize_and_validate_login_issuer(mixed_case)
+                .expect("a well-formed https issuer must validate"),
+            parse_issuer(mixed_case).expect("a well-formed https issuer must validate"),
+            "the login path and the service path must normalize an issuer identically"
+        );
+    }
+
+    #[test]
+    fn parse_client_secret_refuses_a_set_but_empty_value() {
+        // VPL-711 CLUSTER-X: `VORPAL_ISSUER_CLIENT_SECRET=` is a *present*
+        // value to clap, so with no value parser it became `Some("")` and
+        // was POSTed to the IdP as an empty secret, coming back as an
+        // opaque 401 rather than as the configuration error it is.
+        let error = parse_client_secret("").expect_err("an empty secret must be refused");
 
         assert!(
-            !normalized.contains('\t'),
-            "control character survived validation: {normalized:?}"
+            error.contains("must not be empty"),
+            "unexpected message: {error}"
+        );
+
+        assert!(
+            parse_client_secret("   ").is_err(),
+            "a whitespace-only secret must be refused"
+        );
+    }
+
+    #[test]
+    fn parse_client_secret_returns_an_idp_generated_value_unchanged() {
+        // The companion to the refusal above: a client secret is opaque IdP
+        // text, so every byte of an accepted one survives (VPL-711
+        // CLUSTER-W is the same principle on the installer side).
+        let secret = " a&b<c>d\"e'f ";
+
+        assert_eq!(
+            parse_client_secret(secret).expect("a non-empty secret must be accepted"),
+            secret
+        );
+    }
+
+    #[test]
+    fn issuer_client_secret_arg_hides_its_env_value_and_validates_it() {
+        // VPL-711 CLUSTER-Y: the round that built the CommandFactory
+        // instrument for `--issuer` left the new
+        // `VORPAL_ISSUER_CLIENT_SECRET` contract with nothing pinning it at
+        // all. VPL-711 CLUSTER-AE: without `hide_env_values`, clap prints
+        // the live secret in `system services start --help`, undoing the
+        // point of moving it out of argv in the first place.
+        use clap::CommandFactory;
+
+        let cli_command = Cli::command();
+        let start_command = cli_command
+            .find_subcommand("system")
+            .expect("system subcommand must exist")
+            .find_subcommand("services")
+            .expect("system services subcommand must exist")
+            .find_subcommand("start")
+            .expect("system services start subcommand must exist");
+        let secret_arg = start_command
+            .get_arguments()
+            .find(|arg| arg.get_id().as_str() == "issuer_client_secret")
+            .expect("--issuer-client-secret argument must exist");
+
+        assert_eq!(
+            secret_arg.get_env(),
+            Some(std::ffi::OsStr::new("VORPAL_ISSUER_CLIENT_SECRET")),
+            "the secret must be settable from the mode-600 environment file the installer writes"
+        );
+        assert!(
+            secret_arg.is_hide_env_values_set(),
+            "--help must not print the client secret it read from the environment"
+        );
+
+        assert!(
+            Cli::try_parse_from([
+                "vorpal",
+                "system",
+                "services",
+                "start",
+                "--issuer-client-secret",
+                "",
+            ])
+            .is_err(),
+            "an empty --issuer-client-secret must be rejected during clap parsing"
+        );
+    }
+
+    #[test]
+    fn system_services_start_reads_the_issuer_from_the_environment() {
+        // VPL-711 CLUSTER-Z: the two existing instruments pin the argument
+        // *metadata* (CommandFactory) and the argv path (try_parse_from)
+        // separately, so nothing drove the composition AC1 actually ships —
+        // a value arriving through VORPAL_ISSUER, with no flag, reaching
+        // `StartArgs.issuer` already validated. This is that test.
+        //
+        // clap snapshots the environment when the `Arg` is built, which is
+        // inside `try_parse_from`, so the variable must be set across the
+        // call. Tests share a process, so the writes are serialized on one
+        // mutex and undone before it is released.
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+
+        std::env::set_var(
+            "VORPAL_ISSUER",
+            "https://Idp.Example.com:443/realms/vorpal/",
+        );
+        let accepted = Cli::try_parse_from(["vorpal", "system", "services", "start"]);
+
+        std::env::set_var("VORPAL_ISSUER", "");
+        let empty = Cli::try_parse_from(["vorpal", "system", "services", "start"]);
+
+        std::env::set_var("VORPAL_ISSUER", "http://idp.example.com/realms/vorpal");
+        let plaintext = Cli::try_parse_from(["vorpal", "system", "services", "start"]);
+
+        std::env::remove_var("VORPAL_ISSUER");
+
+        let parsed = accepted.expect("an https VORPAL_ISSUER must parse");
+
+        let issuer = match parsed.command {
+            Command::System(CommandSystem::Services(CommandSystemServices::Start {
+                issuer,
+                ..
+            })) => issuer,
+            _ => panic!("expected `system services start`"),
+        };
+
+        assert_eq!(
+            issuer.as_deref(),
+            Some("https://idp.example.com/realms/vorpal"),
+            "the env-sourced issuer must arrive already validated and normalized"
+        );
+
+        // AB2: clap treats a set-but-empty variable as a supplied value, so
+        // without the value parser this one reached `resolve_required_issuer`
+        // as a false "issuer configured".
+        assert!(
+            empty.is_err(),
+            "an empty VORPAL_ISSUER must be refused at parse time, not seen as present"
+        );
+        assert!(
+            plaintext.is_err(),
+            "a plaintext off-loopback VORPAL_ISSUER must be refused at parse time"
         );
     }
 
