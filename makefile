@@ -166,6 +166,33 @@ generate:
 generate-check:
 	cargo run -p vorpal-sdk-codegen -- --check
 
+# Docket gates
+#
+# These targets back the `docket trust` entries of the same name (the rest of
+# that list maps onto `format`, `build` and `test` above). Every target in this
+# section is a STUB: it exits 0 without performing the check its name implies,
+# so a workflow that gates on it is not actually checking anything. Each is
+# registered with `docket trust add --stub`, which makes docket mark its passes
+# hollow in run reports rather than counting them as real coverage. Replace a
+# stub with the real check before treating its gate as meaningful.
+
+STUB = echo "STUB: 'make $@' performed no check (see 'Docket gates' in makefile)"
+
+ac-commands:
+	$(STUB)
+
+doc-record:
+	$(STUB)
+
+sdet-abuse:
+	$(STUB)
+
+secret-scan:
+	$(STUB)
+
+vuln-scan:
+	$(STUB)
+
 # Development (with Vorpal)
 
 vorpal-build:
