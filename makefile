@@ -12,16 +12,16 @@ VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
 # system services start refuses a worker/registry with no issuer (VPL-434),
-# so vorpal-start/lima-vorpal-start must name one. This default is the realm
-# the repository's own docker-compose.yaml actually serves: `keycloak
-# start-dev` creates `master` on first boot and imports no other realm, so
-# the previous `realms/vorpal` default 404'd at discovery and no `make
-# vorpal-start` could ever start (VPL-711 CLUSTER-A). `master` is a
-# development convenience only — it is Keycloak's own administrative realm,
-# and any deployment beyond `docker compose up` overrides VORPAL_ISSUER with
-# a realm provisioned for Vorpal (script/test/keycloak.sh's clients live in
-# a `vorpal` realm an operator creates by hand today).
-VORPAL_ISSUER ?= http://localhost:8080/realms/master
+# so vorpal-start/lima-vorpal-start must name one. This default matches the
+# realm `vorpal login`'s own clap default names (cli/src/command.rs) and the
+# realm script/test/keycloak.sh's clients live in (KC_REALM=vorpal) —
+# `realms/master` (a prior default) is Keycloak's own administrative realm,
+# holds none of Vorpal's OIDC clients, and is provisioned with a published
+# admin/password bootstrap credential, so it satisfied AC3/AC4's "an issuer
+# is configured" in letter while a running service trusted the wrong realm
+# (VPL-711-C8). `docker compose up` alone only creates `master`; a `vorpal`
+# realm with Vorpal's OIDC clients is still provisioned by hand today.
+VORPAL_ISSUER ?= http://localhost:8080/realms/vorpal
 
 # VORPAL_ISSUER is substituted by Make as plain text into two different shell
 # contexts before either shell parses the line, so the deny-list is the union
@@ -31,7 +31,18 @@ VORPAL_ISSUER ?= http://localhost:8080/realms/master
 # injects into the VM (VPL-711 CLUSTER-P, CLUSTER-S). Checked once, in pure
 # Make (no subshell), so no recipe runs with an unsafe value — the default
 # above is unaffected.
-ifneq ($(strip $(findstring ",$(VORPAL_ISSUER))$(findstring ',$(VORPAL_ISSUER))$(findstring `,$(VORPAL_ISSUER))$(findstring \,$(VORPAL_ISSUER))$(findstring $$,$(VORPAL_ISSUER))),)
+#
+# Reads with `$(value VORPAL_ISSUER)`, not `$(VORPAL_ISSUER)` (VPL-711-C2):
+# `VORPAL_ISSUER` is a recursively-expanded variable, so a plain `$(...)`
+# reference re-expands its text on every use — including any `$(shell ...)`
+# call the operator's value itself contains — *before* `findstring` ever
+# gets to look at it. `make VORPAL_ISSUER='$(shell touch pwned)'` therefore
+# ran the shell command as a side effect of the check meant to refuse it,
+# with the deny-list never seeing a literal `$`. `$(value ...)` returns the
+# variable's raw text without expanding it, so the same call site can
+# search it for a `$` without that `$` ever being interpreted as a
+# function call.
+ifneq ($(strip $(findstring ",$(value VORPAL_ISSUER))$(findstring ',$(value VORPAL_ISSUER))$(findstring `,$(value VORPAL_ISSUER))$(findstring \,$(value VORPAL_ISSUER))$(findstring $$,$(value VORPAL_ISSUER))),)
 $(error VORPAL_ISSUER may not contain a quote, an apostrophe, a backtick, a backslash, or '$$')
 endif
 

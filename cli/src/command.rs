@@ -1257,7 +1257,22 @@ fn login_discovery_targets(issuer: &str, doc: &serde_json::Value) -> Result<(Str
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("OIDC discovery document is missing issuer"))?;
 
-    if doc_issuer.trim_end_matches('/') != issuer {
+    // VPL-711-C1 (blocker): `issuer` arrives already run through
+    // `validate_and_normalize_issuer_url` (lower-cased host, elided default
+    // port, canonical percent-encoding), but until this fix `doc_issuer` was
+    // only trailing-slash trimmed — a one-sided canonicalization. An IdP
+    // whose `iss` claim names an explicit default port (Keycloak behind a
+    // proxy setting an explicit KC_HOSTNAME) or a mixed-case host matched
+    // before `validate_and_normalize_issuer_url` existed and failed closed
+    // after, with an error naming two strings that differ only in a
+    // representation this binary itself considers equivalent. Running
+    // `doc_issuer` through the same normalizer restores the symmetry the
+    // equality check requires.
+    let normalized_doc_issuer = validate_and_normalize_issuer_url(doc_issuer).map_err(|err| {
+        anyhow!("OIDC discovery document issuer {doc_issuer:?} is invalid: {err}")
+    })?;
+
+    if normalized_doc_issuer != issuer {
         bail!(
             "OIDC discovery issuer {} does not match requested issuer {}",
             doc_issuer,
@@ -1773,6 +1788,25 @@ async fn dispatch_system(system: CommandSystem) -> Result<()> {
                 services,
                 tls,
             } => {
+                // VPL-711-C17/C-4: the installer moved the secret off argv
+                // and onto a mode-600 EnvironmentFile/plist entry (C10), but
+                // the flag itself still accepts it, so a hand-run or
+                // `make`-run service still exposes the secret to `ps`/
+                // `/proc/<pid>/cmdline`. A set env var is indistinguishable
+                // here from a set flag once both resolve to `Some`, so
+                // absence of the env var is what marks this value as having
+                // arrived on argv.
+                if issuer_client_secret.is_some()
+                    && std::env::var("VORPAL_ISSUER_CLIENT_SECRET").is_err()
+                {
+                    tracing::warn!(
+                        "--issuer-client-secret was supplied on the command line; any \
+                         local process can read it from `ps` or /proc/<pid>/cmdline. \
+                         Prefer the VORPAL_ISSUER_CLIENT_SECRET environment variable \
+                         instead."
+                    );
+                }
+
                 let issuer_service_client_ids = issuer_service_client_ids
                     .as_deref()
                     .map(parse_comma_list)
@@ -1991,6 +2025,18 @@ pub async fn run() -> Result<()> {
 mod login_egress_tests {
     use super::*;
 
+    // VPL-711-C14: `std::env::var`/`set_var`/`remove_var` are process-global,
+    // and Rust's default test harness runs tests on multiple threads, so two
+    // tests that each mutate `VORPAL_ISSUER` behind their own *private*
+    // `Mutex` do not exclude each other at all — a `Mutex` only excludes
+    // callers that take the *same* lock. This crate has exactly two tests
+    // that mutate this variable
+    // (`system_services_start_reads_the_issuer_from_the_environment`,
+    // `system_services_start_issuer_flag_takes_precedence_over_the_environment`);
+    // both take this one lock, and any future test in this module that reads
+    // or writes `VORPAL_ISSUER` must too, or it races the two above.
+    static ISSUER_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     // --- parse_issuer (VPL-711 AC1) ----------------------------------------
 
     #[test]
@@ -2081,15 +2127,93 @@ mod login_egress_tests {
         );
     }
 
+    // VPL-711-C15: this used to be a literal copied from `makefile` by
+    // hand, with only a comment claiming it matched — nothing linked the
+    // two beyond the discipline of whoever edited one to remember the
+    // other. `git log -S"realms/master"` shows both files were in fact
+    // edited together in the one commit that changed this default so far
+    // (482dbc8), but that was discipline, not a guarantee: nothing would
+    // have failed if that commit had touched only one of the two. Reading
+    // the real default at test time turns a future one-sided edit into a
+    // test failure instead of a silent drift.
+    fn makefile_default_vorpal_issuer() -> String {
+        let makefile = include_str!("../../makefile");
+        makefile
+            .lines()
+            .find_map(|line| line.strip_prefix("VORPAL_ISSUER ?= "))
+            .expect("makefile must define a default VORPAL_ISSUER")
+            .trim()
+            .to_string()
+    }
+
     #[test]
     fn parse_issuer_accepts_plaintext_loopback() {
         // Positive control (VPL-711 C1's loopback exception): the shipped
         // `makefile` default, which is the realm `docker-compose.yaml`'s
-        // `keycloak start-dev` actually serves (VPL-711 CLUSTER-A).
-        let normalized = parse_issuer("http://localhost:8080/realms/master")
-            .expect("a loopback issuer must validate");
+        // `keycloak start-dev` actually serves and the same realm
+        // `Command::Login`'s clap default and `script/test/keycloak.sh`
+        // provision (VPL-711-C8).
+        let default_issuer = makefile_default_vorpal_issuer();
+        let normalized = parse_issuer(&default_issuer).expect("a loopback issuer must validate");
 
-        assert_eq!(normalized, "http://localhost:8080/realms/master");
+        assert_eq!(normalized, default_issuer);
+    }
+
+    #[test]
+    fn required_issuer_service_set_matches_between_cli_and_installer() {
+        // VPL-711-C9/ARCH-A4: the required-issuer service set is
+        // hand-maintained twice — `cli/src/command/start.rs` (Rust) and
+        // `script/install.sh`'s `require_issuer_for_authenticated_services`
+        // (shell) — with nothing pinning the copies together. This reads
+        // both source files at test time so a service added to one list
+        // and not the other fails here. It pins the token-level agreement,
+        // not full semantic equivalence: it cannot prove the two `if`
+        // conditions are logically identical, only that both name the same
+        // service identifiers.
+        let start_rs = include_str!("command/start.rs");
+        let install_sh = include_str!("../../script/install.sh");
+
+        for service in ["worker", "registry"] {
+            assert!(
+                start_rs.contains(&format!("\"{service}\"")),
+                "cli/src/command/start.rs must still name {service:?} among \
+                 the services whose absence of --issuer is refused"
+            );
+            assert!(
+                install_sh.contains(service),
+                "script/install.sh's require_issuer_for_authenticated_services \
+                 must still name {service:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn https_or_loopback_issuer_rule_names_the_same_plaintext_hosts_in_both_copies() {
+        // VPL-711-C9/ARCH-A4: `credential_egress_origin`
+        // (`sdk/rust/src/context.rs`) and `install.sh`'s `validate_issuer`
+        // are two hand-maintained copies of "plaintext http is only
+        // allowed on localhost, 127.0.0.1 or [::1]". This pins the two
+        // unbracketed hosts; it deliberately does not assert the bracketed
+        // `[::1]` form, which VPL-711-C4 already names as mismatched
+        // between these two files (context.rs compares against the
+        // unbracketed `"::1"`, which `Url::host_str()` never produces) —
+        // asserting it here would just be a second, less informative
+        // report of the same open finding.
+        let context_rs = include_str!("../../sdk/rust/src/context.rs");
+        let install_sh = include_str!("../../script/install.sh");
+
+        for host in ["localhost", "127.0.0.1"] {
+            assert!(
+                context_rs.contains(&format!("\"{host}\"")),
+                "sdk/rust/src/context.rs's credential_egress_origin must \
+                 still treat {host:?} as loopback"
+            );
+            assert!(
+                install_sh.contains(host),
+                "script/install.sh's validate_issuer must still treat \
+                 {host:?} as loopback"
+            );
+        }
     }
 
     #[test]
@@ -2276,10 +2400,11 @@ mod login_egress_tests {
         //
         // clap snapshots the environment when the `Arg` is built, which is
         // inside `try_parse_from`, so the variable must be set across the
-        // call. Tests share a process, so the writes are serialized on one
-        // mutex and undone before it is released.
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        // call. Tests share a process, so the writes are serialized on the
+        // module's one `ISSUER_ENV_LOCK` and undone before it is released.
+        let _guard = ISSUER_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
 
         std::env::set_var(
             "VORPAL_ISSUER",
@@ -2321,6 +2446,51 @@ mod login_egress_tests {
         assert!(
             plaintext.is_err(),
             "a plaintext off-loopback VORPAL_ISSUER must be refused at parse time"
+        );
+    }
+
+    #[test]
+    fn system_services_start_issuer_flag_takes_precedence_over_the_environment() {
+        // VPL-711-C13/C-2: the installed systemd unit's trust anchor
+        // (`script/install.sh:1621`) depends on argv winning over
+        // `EnvironmentFile=`'s `VORPAL_ISSUER=...` — clap documents this as
+        // its default precedence, but nothing in this crate exercised both
+        // channels at once before this test. `:1872` pins that the env value
+        // is wired at all, `:2111` pins an env-only value is read; neither
+        // proves which one wins when both are present.
+        let _guard = ISSUER_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+
+        std::env::set_var(
+            "VORPAL_ISSUER",
+            "https://env-anchor.example.com/realms/vorpal",
+        );
+        let parsed = Cli::try_parse_from([
+            "vorpal",
+            "system",
+            "services",
+            "start",
+            "--issuer",
+            "https://argv-anchor.example.com/realms/vorpal",
+        ]);
+        std::env::remove_var("VORPAL_ISSUER");
+
+        let issuer = match parsed
+            .expect("both a valid flag and a valid env value must still parse")
+            .command
+        {
+            Command::System(CommandSystem::Services(CommandSystemServices::Start {
+                issuer,
+                ..
+            })) => issuer,
+            _ => panic!("expected `system services start`"),
+        };
+
+        assert_eq!(
+            issuer.as_deref(),
+            Some("https://argv-anchor.example.com/realms/vorpal"),
+            "--issuer on argv must win over a simultaneously-set VORPAL_ISSUER"
         );
     }
 
@@ -2489,6 +2659,26 @@ mod login_egress_tests {
 
         assert_eq!(device, format!("{issuer}/device"));
         assert_eq!(token, format!("{issuer}/token"));
+    }
+
+    #[test]
+    fn login_discovery_targets_accepts_a_documents_issuer_naming_an_explicit_default_port() {
+        // VPL-711-C1 (blocker): before this fix, `issuer` was canonicalized
+        // by `validate_and_normalize_issuer_url` (eliding the default :443
+        // port) while `doc_issuer` was only trailing-slash trimmed, so this
+        // exact case — a document's `issuer` claim spelling out the default
+        // port explicitly, which RFC 3986 and this binary's own
+        // canonicalization both treat as equivalent to omitting it — failed
+        // the equality check and refused a login that previously worked.
+        let issuer = "https://idp.example.com/realms/vorpal";
+        let doc = matching_doc("https://idp.example.com:443/realms/vorpal");
+
+        let (device, token) = login_discovery_targets(issuer, &doc).expect(
+            "a document issuer naming the scheme's default port explicitly must still match",
+        );
+
+        assert_eq!(device, "https://idp.example.com:443/realms/vorpal/device");
+        assert_eq!(token, "https://idp.example.com:443/realms/vorpal/token");
     }
 
     #[test]

@@ -531,19 +531,44 @@ validate_services() {
 # EnvironmentFile or a plist EnvironmentVariables entry, whose grammars
 # `systemd_env_escape` and `xml_escape` encode for.
 #
+# '%' is deliberately NOT on this list (VPL-711-C6): a legal RFC 3986
+# percent-encoded octet in an issuer path or query (`%20`, a non-ASCII
+# realm name IDNA/percent-encodes into) is text the CLI's own URL parser
+# accepts, so refusing it here would make that value permanently
+# uninstallable rather than merely unsafe. '%' is only meaningful to
+# systemd's unit-file specifier expansion, not to plist XML, so it is
+# escaped at the one call site that needs it (`systemd_specifier_escape`,
+# applied to $ISSUER/$ISSUER_AUDIENCE/$ISSUER_CLIENT_ID where they are
+# interpolated into `ExecStart=`) rather than refused everywhere.
+#
 # Args: $1 = human-readable field name (for the error message), $2 = value.
 validate_no_unit_injection_chars() {
     local field="$1"
     local value="$2"
 
     case "$value" in
-        *$'\n'* | *'"'* | *'<'* | *'>'* | *'&'* | *'%'* | *'\'* | *'$'* | *'`'*)
+        *$'\n'* | *'"'* | *'<'* | *'>'* | *'&'* | *'\'* | *'$'* | *'`'*)
             print_error "Invalid $field: contains a disallowed character" \
-                "$field values may not contain newlines, quotes, angle brackets, '&', '%', '\$', backticks, or backslashes." \
+                "$field values may not contain newlines, quotes, angle brackets, '&', '\$', backticks, or backslashes." \
                 "This value is written into a systemd unit and a launchd plist; those characters could change what either file runs."
             exit 1
             ;;
     esac
+}
+
+# Escapes '%' as '%%' so a value survives systemd's unit-file specifier
+# expansion literally (VPL-711-C6): unescaped, a legal percent-encoded
+# octet in an operator's issuer text (e.g. `%20`) would either be
+# misinterpreted as a specifier systemd does understand, or — before this
+# function existed — be refused outright by the denylist above, permanently,
+# with no value the operator could supply instead. Doubling every '%'
+# neutralizes both failure modes regardless of what follows it, because
+# `%%` is systemd's own escape for a literal percent sign. Applied only at
+# the `ExecStart=` interpolation site: plist `<string>` elements have no
+# specifier syntax, so `%` needs no XML-side handling.
+systemd_specifier_escape() {
+    local value="$1"
+    printf '%s' "${value//%/%%}"
 }
 
 # Escapes the five XML predefined entities so a value can sit inside a plist
@@ -649,8 +674,17 @@ validate_issuer() {
             ;;
     esac
 
+    # VPL-711-C3: a bracketed IPv6 host with no port (`[::1]`) matched
+    # neither the first arm (which requires a `:` immediately after `]`)
+    # nor a host of its own — it fell through to the generic `*:*` arm,
+    # which strips everything from the *first* colon it finds, and `[::1]`
+    # contains colons inside the brackets. `${authority%%:*}` on `[::1]`
+    # left `host='['`, silently refusing a value this function's own
+    # allow-list below names as accepted. The portless-bracket case must be
+    # matched explicitly, before the generic `*:*` arm.
     case "$authority" in
         \[*\]:*) host=${authority%%\]:*}\] ;;
+        \[*\]) host=$authority ;;
         *:*) host=${authority%%:*} ;;
         *) host=$authority ;;
     esac
@@ -1502,12 +1536,28 @@ install_service_macos() {
     mkdir -p "$plist_dir"
 
     # Write the plist. The client secret (if any) travels through
-    # EnvironmentVariables rather than ProgramArguments (VPL-711 C10): argv
-    # is readable by any local user via `ps`, an environment key is not.
+    # EnvironmentVariables rather than ProgramArguments: argv is readable
+    # by any local user via `ps`, an environment key is not. VORPAL_ISSUER
+    # travels there too, alongside the existing --issuer on argv (VPL-711
+    # C10: the CLI has read this variable since AC1, but no installed unit
+    # ever wrote it, so the channel had no consumer). argv still carries
+    # --issuer as well and still wins on precedence (pinned by
+    # `system_services_start_issuer_flag_takes_precedence_over_the_environment`
+    # in cli/src/command.rs) — this only gives the operator a second,
+    # `ps`-invisible way to see what the running service was configured
+    # with, it does not change which value takes effect.
+    #
     # The file itself is still chmod 600 below, since EnvironmentVariables
     # values sit in this same plist; the mode is applied by umask at create
     # time rather than by a chmod afterwards, so the secret is never briefly
-    # world-readable (VPL-711 CLUSTER-AD).
+    # world-readable — but umask only governs a file's mode at *creation*
+    # (open with O_CREAT on a path that does not yet exist); an upgrade
+    # overwriting an already-existing plist would otherwise write the new
+    # secret into a file still carrying whatever mode it had before,
+    # world-readable if that was ever the case (VPL-711-C5). `rm -f` first
+    # forces every write through a real creation, so umask always applies.
+    rm -f "$plist_path"
+
     local prior_umask
     prior_umask=$(umask)
     umask 077
@@ -1532,7 +1582,12 @@ install_service_macos() {
 [[ -n "$ISSUER_CLIENT_ID" ]] && printf '\n        <string>--issuer-client-id</string>\n        <string>%s</string>' "$ISSUER_CLIENT_ID"
 )
     </array>$(
-[[ -n "$ISSUER_CLIENT_SECRET" ]] && printf '\n    <key>EnvironmentVariables</key>\n    <dict>\n        <key>VORPAL_ISSUER_CLIENT_SECRET</key>\n        <string>%s</string>\n    </dict>' "$(xml_escape "$ISSUER_CLIENT_SECRET")"
+if [[ -n "$ISSUER" || -n "$ISSUER_CLIENT_SECRET" ]]; then
+    printf '\n    <key>EnvironmentVariables</key>\n    <dict>'
+    [[ -n "$ISSUER" ]] && printf '\n        <key>VORPAL_ISSUER</key>\n        <string>%s</string>' "$(xml_escape "$ISSUER")"
+    [[ -n "$ISSUER_CLIENT_SECRET" ]] && printf '\n        <key>VORPAL_ISSUER_CLIENT_SECRET</key>\n        <string>%s</string>' "$(xml_escape "$ISSUER_CLIENT_SECRET")"
+    printf '\n    </dict>'
+fi
 )
     <key>RunAtLoad</key>
     <true/>
@@ -1584,27 +1639,47 @@ install_service_linux() {
     mkdir -p "$unit_dir"
 
     # The client secret (if any) travels through a mode-600 EnvironmentFile
-    # rather than ExecStart argv (VPL-711 C10): argv is readable by any
-    # local user via `ps`/`/proc/<pid>/cmdline`, a 600 file is not. Written
-    # (or removed, on a re-install with no secret) before the unit so the
-    # unit's EnvironmentFile= reference is never dangling.
-    if [[ -n "$ISSUER_CLIENT_SECRET" ]]; then
-        # umask inside the subshell, not chmod after it: between a default-
-        # umask create and a later chmod the secret is on disk world-readable,
-        # and that window is enough for any local process that is watching
-        # (VPL-711 CLUSTER-AD).
+    # rather than ExecStart argv: argv is readable by any local user via
+    # `ps`/`/proc/<pid>/cmdline`, a 600 file is not. VORPAL_ISSUER travels
+    # there too now, alongside the existing --issuer on argv (VPL-711 C10:
+    # the CLI has read this variable since AC1, but no installed unit ever
+    # wrote it, so the channel had no consumer). argv still carries --issuer
+    # and still wins on precedence (pinned by
+    # `system_services_start_issuer_flag_takes_precedence_over_the_environment`
+    # in cli/src/command.rs); this file only gives a second, `ps`-invisible
+    # way to see what the running service was configured with. Written (or
+    # removed, when neither value is set) before the unit so the unit's
+    # EnvironmentFile= reference is never dangling.
+    if [[ -n "$ISSUER" || -n "$ISSUER_CLIENT_SECRET" ]]; then
+        # `rm -f` before the umask-governed create, not a chmod afterwards
+        # (VPL-711-C5): umask only governs a file's mode at *creation* (open
+        # with O_CREAT on a path that does not yet exist). Without the
+        # `rm -f`, an upgrade overwriting an already-existing env file would
+        # write the new secret into a file still carrying whatever mode it
+        # had before — world-readable, if that was ever the case — for the
+        # whole write, with the later `chmod 600` only closing the window
+        # after the fact.
         (
             umask 077
-            printf 'VORPAL_ISSUER_CLIENT_SECRET="%s"\n' "$(systemd_env_escape "$ISSUER_CLIENT_SECRET")" > "$env_path"
+            rm -f "$env_path"
+            {
+                [[ -n "$ISSUER" ]] && printf 'VORPAL_ISSUER="%s"\n' "$(systemd_env_escape "$ISSUER")"
+                [[ -n "$ISSUER_CLIENT_SECRET" ]] && printf 'VORPAL_ISSUER_CLIENT_SECRET="%s"\n' "$(systemd_env_escape "$ISSUER_CLIENT_SECRET")"
+            } > "$env_path"
         )
         chmod 600 "$env_path"
     else
         rm -f "$env_path"
     fi
 
-    # Write the systemd user unit. Created under a 077 umask rather than
-    # chmod'd afterwards, for the same reason as the env file above
-    # (VPL-711 CLUSTER-AD).
+    # Write the systemd user unit. `rm -f` first, then created under a 077
+    # umask rather than chmod'd afterwards, for the same reason as the env
+    # file above (VPL-711-C5) — the unit file carries no secret today, but
+    # the invariant ("umask governs creation only") is the same one, and a
+    # future edit that puts anything sensitive in ExecStart inherits the
+    # fix instead of the bug.
+    rm -f "$unit_path"
+
     local prior_umask
     prior_umask=$(umask)
     umask 077
@@ -1618,9 +1693,9 @@ After=network.target
 Type=simple
 EnvironmentFile=-${env_path}
 ExecStart=${vorpal_bin} system services start --services ${SERVICES}$(
-[[ -n "$ISSUER" ]] && printf ' --issuer "%s"' "$ISSUER"
-[[ -n "$ISSUER_AUDIENCE" ]] && printf ' --issuer-audience "%s"' "$ISSUER_AUDIENCE"
-[[ -n "$ISSUER_CLIENT_ID" ]] && printf ' --issuer-client-id "%s"' "$ISSUER_CLIENT_ID"
+[[ -n "$ISSUER" ]] && printf ' --issuer "%s"' "$(systemd_specifier_escape "$ISSUER")"
+[[ -n "$ISSUER_AUDIENCE" ]] && printf ' --issuer-audience "%s"' "$(systemd_specifier_escape "$ISSUER_AUDIENCE")"
+[[ -n "$ISSUER_CLIENT_ID" ]] && printf ' --issuer-client-id "%s"' "$(systemd_specifier_escape "$ISSUER_CLIENT_ID")"
 )
 Restart=on-failure
 RestartSec=5
