@@ -165,6 +165,18 @@ pub enum CommandSystemKeys {
     Generate {},
 }
 
+/// clap ids for the two `system services start` arguments whose *provenance*
+/// is read back at startup (`services_start_value_source`).
+///
+/// Both the definition below and the lookup name the id through these
+/// constants, so a rename is a compile error. Spelled out because
+/// `ArgMatches::value_source` takes the id as a string: given an id no
+/// argument carries it panics in a debug build and returns `None` in a
+/// release build, which would have turned a rename into a silently disabled
+/// argv-secret warning in exactly the profile that ships.
+const ISSUER_ARG_ID: &str = "issuer";
+const ISSUER_CLIENT_SECRET_ARG_ID: &str = "issuer_client_secret";
+
 #[derive(Subcommand)]
 pub enum CommandSystemServices {
     Start {
@@ -186,7 +198,12 @@ pub enum CommandSystemServices {
         /// parse time by `parse_issuer` so a value on either channel that is
         /// empty or not a well-formed issuer never reaches
         /// `resolve_required_issuer` disguised as "present".
-        #[arg(env = "VORPAL_ISSUER", long, value_parser = parse_issuer)]
+        #[arg(
+            env = "VORPAL_ISSUER",
+            id = ISSUER_ARG_ID,
+            long = "issuer",
+            value_parser = parse_issuer
+        )]
         issuer: Option<String>,
 
         #[arg(long)]
@@ -206,7 +223,8 @@ pub enum CommandSystemServices {
         #[arg(
             env = "VORPAL_ISSUER_CLIENT_SECRET",
             hide_env_values = true,
-            long,
+            id = ISSUER_CLIENT_SECRET_ARG_ID,
+            long = "issuer-client-secret",
             value_parser = parse_client_secret
         )]
         issuer_client_secret: Option<String>,
@@ -1118,9 +1136,10 @@ fn login_http_client(timeout: Duration) -> Result<reqwest::Client> {
 const DEFAULT_DEV_ISSUER: &str = "http://localhost:8080/realms/vorpal";
 
 /// An issuer URL that has been through [`NormalizedIssuer::parse`], and so
-/// is known to satisfy the shared https-or-loopback rule and to be in the
-/// `Url` crate's canonical form: lower-cased scheme and host, elided default
-/// port, canonical percent-encoding, no trailing slash.
+/// is known to satisfy the shared https-or-loopback rule, to carry no
+/// embedded credentials, and to be in the `Url` crate's canonical form:
+/// lower-cased scheme and host, elided default port, canonical
+/// percent-encoding, no trailing slash.
 ///
 /// The type exists because `login_discovery_targets` compares an issuer for
 /// string equality against the discovery document's own `iss` claim, and
@@ -1169,6 +1188,22 @@ impl NormalizedIssuer {
             ),
         })?;
 
+        // Userinfo is refused rather than stripped. An issuer that carries
+        // `user:password@` is a credential the value then drags everywhere
+        // it goes — the startup log line that states the trust anchor, the
+        // credentials file `vorpal login` writes, any error message quoting
+        // it — and no IdP states userinfo in the `iss` claim this value is
+        // compared against, so there is nothing to preserve. Refusing also
+        // keeps this rule a superset of `script/install.sh`'s, which already
+        // rejects an authority containing `@`.
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(
+                "URL carries embedded credentials (user:password@); supply the issuer URL \
+                 without them"
+                    .to_string(),
+            );
+        }
+
         Ok(Self(url.as_str().trim_end_matches('/').to_string()))
     }
 
@@ -1193,9 +1228,10 @@ impl std::fmt::Display for NormalizedIssuer {
 /// `system services start` never sends a refresh token.
 ///
 /// The underlying cause is carried into the message rather than discarded:
-/// `NormalizedIssuer::parse` fails for four distinct reasons — unparseable
-/// URL, no host, a non-loopback plaintext scheme, and a URL with no port and
-/// no known default — and reporting all four as "issuer must be https" told
+/// `NormalizedIssuer::parse` fails for five distinct reasons — unparseable
+/// URL, no host, a non-loopback plaintext scheme, a URL with no port and no
+/// known default, and embedded `user:password@` credentials — and reporting
+/// them all as "issuer must be https" told
 /// an operator whose issuer was `https:/idp.example.com` (one slash) to fix
 /// a scheme that was already correct. AC4 asks the failure to name the
 /// migration step; it cannot do that while describing the wrong failure.
@@ -1241,19 +1277,35 @@ fn services_start_value_source(matches: &ArgMatches, arg_id: &str) -> Option<Val
         .value_source(arg_id)
 }
 
+/// Whether a `--services` list starts a service that `resolve_required_issuer`
+/// (`cli/src/command/start.rs`) refuses to run without an OIDC issuer.
+///
+/// Split the same way `RunArgs` splits it, so the answer describes the list
+/// this process is actually about to start rather than a second reading of
+/// the same text.
+fn starts_an_authenticated_service(services: &str) -> bool {
+    services
+        .split(',')
+        .any(|service| service == "registry" || service == "worker")
+}
+
 /// Human-readable name for a channel, for the startup log line that states
 /// the effective OIDC trust anchor.
+///
+/// `--issuer` has no clap default, so `ValueSource::DefaultValue` has no
+/// caller and gets no arm of its own: a branch nothing can reach is a claim
+/// about behaviour that no test can pin. If a default is ever added, add the
+/// arm back with the caller that reaches it.
 fn value_source_label(source: Option<ValueSource>) -> &'static str {
     match source {
         Some(ValueSource::CommandLine) => "command line",
         Some(ValueSource::EnvVariable) => "environment",
-        Some(ValueSource::DefaultValue) => "built-in default",
         _ => "unknown source",
     }
 }
 
-/// clap `value_parser` for `system services start --issuer-client-secret`
-///. clap treats a set-but-empty environment variable as a
+/// clap `value_parser` for `system services start --issuer-client-secret`.
+/// clap treats a set-but-empty environment variable as a
 /// supplied value, so `VORPAL_ISSUER_CLIENT_SECRET=` — the shape an
 /// `EnvironmentFile` written for an install that has no secret yet produces —
 /// would otherwise reach `exchange_client_credentials` as `Some("")` and be
@@ -1856,19 +1908,26 @@ async fn dispatch_system(system: CommandSystem, matches: &ArgMatches) -> Result<
                 match &issuer {
                     Some(value) => tracing::info!(
                         "OIDC trust anchor: {value} (from {})",
-                        value_source_label(services_start_value_source(matches, "issuer"))
+                        value_source_label(services_start_value_source(matches, ISSUER_ARG_ID))
                     ),
-                    None => tracing::info!(
+                    // Only the worker and the registry refuse to start
+                    // without an anchor, so only a start that includes one
+                    // of them is told they will. `--services agent` with no
+                    // issuer is a supported configuration; a warning about
+                    // a refusal that will not happen trains an operator to
+                    // ignore the line that matters.
+                    None if starts_an_authenticated_service(&services) => tracing::info!(
                         "no OIDC trust anchor configured; worker and registry services \
                          will refuse to start"
                     ),
+                    None => tracing::info!("no OIDC trust anchor configured"),
                 }
 
                 // The installer moved the secret off argv and onto a
                 // mode-600 EnvironmentFile/plist entry, but the flag still
                 // accepts it, so a hand-run or `make`-run service still
                 // exposes it to `ps`/`/proc/<pid>/cmdline`.
-                if services_start_value_source(matches, "issuer_client_secret")
+                if services_start_value_source(matches, ISSUER_CLIENT_SECRET_ARG_ID)
                     == Some(ValueSource::CommandLine)
                 {
                     tracing::warn!(
@@ -2106,8 +2165,10 @@ mod login_egress_tests {
     // mentions the environment.
     //
     // Every test below that writes either variable, and every test below that
-    // parses `system services start`, takes this lock. A new test in either
-    // category must take it too.
+    // reads the process environment — by parsing `system services start`, or
+    // by spawning a child that inherits the whole environment — takes this
+    // lock. A new test in either category must take it too; the helpers that
+    // spawn `bash` and `make` take it on their caller's behalf.
     static ISSUER_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Takes [`ISSUER_ENV_LOCK`], recovering it if a previous test panicked
@@ -2175,7 +2236,7 @@ mod login_egress_tests {
             .expect("system services start subcommand must exist");
         let issuer_arg = start_command
             .get_arguments()
-            .find(|arg| arg.get_id().as_str() == "issuer")
+            .find(|arg| arg.get_id().as_str() == ISSUER_ARG_ID)
             .expect("--issuer argument must exist on system services start");
 
         assert_eq!(
@@ -2217,9 +2278,18 @@ mod login_egress_tests {
         let makefile = include_str!("../../makefile");
         makefile
             .lines()
-            .find_map(|line| line.strip_prefix("VORPAL_ISSUER ?= "))
+            .find_map(|line| {
+                // Match the assignment by variable name and split on the
+                // operator, rather than on the exact `VORPAL_ISSUER ?= `
+                // text: `?=`, `:=`, `+=` and a bare `=` all mean the same
+                // thing to this test, and pinning one spelling made
+                // reformatting the makefile fail here as a missing default.
+                let (name, value) = line.split_once('=')?;
+                let name = name.trim_end_matches(['?', ':', '+']);
+
+                (name.trim() == "VORPAL_ISSUER").then(|| value.trim())
+            })
             .expect("makefile must define a default VORPAL_ISSUER")
-            .trim()
             .to_string()
     }
 
@@ -2274,6 +2344,12 @@ mod login_egress_tests {
     /// it reads as defaults cleared so the result does not depend on the
     /// environment the test suite happens to run in.
     fn run_installer(args: &[&str]) -> String {
+        // A spawned child inherits the whole environment, so this is a
+        // reader of `VORPAL_ISSUER` even though the variables it cares about
+        // are cleared below: a concurrent test's `set_var` lands between the
+        // `env_remove` calls and the spawn otherwise.
+        let _guard = issuer_env_guard();
+
         let output = std::process::Command::new("bash")
             .arg(INSTALL_SH)
             .args(args)
@@ -2298,12 +2374,45 @@ mod login_egress_tests {
         )
     }
 
+    /// Runs `script/install.sh` the way the project documents installing it:
+    /// piped into `bash` on stdin (`curl … | bash`). The script has no file
+    /// of its own there, so `$0` is `bash` and `BASH_SOURCE` is empty — the
+    /// one invocation form the other helpers here cannot reach.
+    fn pipe_installer_to_bash(args: &[&str]) -> String {
+        let _guard = issuer_env_guard();
+
+        let script = std::fs::File::open(INSTALL_SH)
+            .unwrap_or_else(|err| panic!("{INSTALL_SH} must be readable: {err}"));
+
+        let output = std::process::Command::new("bash")
+            .arg("-s")
+            .arg("--")
+            .args(args)
+            .stdin(std::process::Stdio::from(script))
+            .env_remove("VORPAL_ISSUER")
+            .env_remove("VORPAL_ISSUER_AUDIENCE")
+            .env_remove("VORPAL_ISSUER_CLIENT_ID")
+            .env_remove("VORPAL_ISSUER_CLIENT_SECRET")
+            .env_remove("VORPAL_SERVICES")
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("script/install.sh must be runnable from bash's stdin");
+
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    }
+
     /// Sources `script/install.sh` and runs `body` against its functions.
     /// Sourcing is inert: the script's entry point is guarded on
     /// `BASH_SOURCE`, so only its variable defaults are set. `set -euo
     /// pipefail` comes with it, so `body` runs under the same shell options
     /// the installer itself does.
     fn source_installer(body: &str) -> String {
+        let _guard = issuer_env_guard();
+
         let script = format!("source {INSTALL_SH:?}\n{body}\n");
 
         let output = std::process::Command::new("bash")
@@ -2410,6 +2519,10 @@ mod login_egress_tests {
             ("https://", false),
             // `localhost:` here is userinfo; the host is off-box.
             ("http://localhost:pw@evil.example/realms/vorpal", false),
+            // Userinfo on an otherwise acceptable https issuer: a credential
+            // the value would then carry into the startup log line and the
+            // credentials file. Both sides refuse it.
+            ("https://user:pw@idp.example.com/realms/vorpal", false),
             // No scheme.
             ("idp.example.com/realms/vorpal", false),
         ];
@@ -2479,10 +2592,12 @@ mod login_egress_tests {
     }
 
     #[test]
-    fn installer_keeps_the_client_secret_out_of_argv() {
-        // The secret's whole reason for living in a mode-600 file is that
-        // argv is world-readable through `ps`. Pin that it is written to the
-        // file, escaped for systemd's env-file grammar.
+    fn installer_escapes_the_client_secret_for_the_systemd_env_file() {
+        // Named for what it can fail for: this drives the env-file writer
+        // and reads the file back, so it pins the *encoding*. That the
+        // secret stays out of the unit's argv is a property of the unit
+        // writer, which this never calls — see
+        // `installer_keeps_the_client_secret_out_of_the_units_argv`.
         let transcript = source_installer(
             "tmp=$(mktemp -d)\n\
              ISSUER='https://idp.example.com/realms/vorpal'\n\
@@ -2523,9 +2638,263 @@ mod login_egress_tests {
         );
     }
 
+    /// Drives `install_service_linux` against a throwaway `$HOME`, returning
+    /// the two written files' modes, the directory listing, and the unit
+    /// itself.
+    ///
+    /// `systemctl` is shadowed by a function that fails, so the real init
+    /// system is never contacted and the writers' behaviour is the same on
+    /// every platform. Everything the function writes lands under the
+    /// temporary `$HOME`.
+    fn install_linux_service_transcript() -> String {
+        source_installer(
+            "systemctl() { return 1; }\n\
+             tmp=$(mktemp -d)\n\
+             HOME=\"$tmp\"\n\
+             VORPAL_INSTALL_DIR=\"$tmp/.vorpal\"\n\
+             SERVICES='worker'\n\
+             ISSUER='https://idp.example.com/realms/vorpal'\n\
+             ISSUER_CLIENT_SECRET='s3cr3t-not-in-argv'\n\
+             unit_dir=\"$tmp/.config/systemd/user\"\n\
+             mkdir -p \"$unit_dir\"\n\
+             : > \"$unit_dir/vorpal.service\"\n\
+             chmod 644 \"$unit_dir/vorpal.service\"\n\
+             install_service_linux || true\n\
+             printf 'unit-mode %s\\n' \"$(ls -l \"$unit_dir/vorpal.service\" | cut -c1-10)\"\n\
+             printf 'env-mode %s\\n' \"$(ls -l \"$unit_dir/vorpal.env\" | cut -c1-10)\"\n\
+             ls \"$unit_dir\"\n\
+             cat \"$unit_dir/vorpal.service\"\n\
+             rm -rf \"$tmp\"",
+        )
+    }
+
+    #[test]
+    fn installer_writes_the_unit_and_the_env_file_mode_600_with_no_temporary_left_behind() {
+        // Both writers create a temporary sibling under `umask 077` and
+        // rename it into place. Pre-creating the unit at 0644 is what makes
+        // this pin the rename rather than the umask: umask governs a file's
+        // mode only at creation, so a writer that truncated the existing
+        // file in place would leave 0644 here while passing on a fresh
+        // directory.
+        let transcript = install_linux_service_transcript();
+
+        assert!(
+            transcript.contains("unit-mode -rw-------"),
+            "the unit must end up mode 600 even where a 0644 file already \
+             existed: {transcript}"
+        );
+        assert!(
+            transcript.contains("env-mode -rw-------"),
+            "the env file carries the client secret and must be mode 600: {transcript}"
+        );
+        assert!(
+            !transcript.contains("vorpal.service.tmp") && !transcript.contains("vorpal.env.tmp"),
+            "each writer must rename its temporary sibling into place rather \
+             than leave it beside the installed file: {transcript}"
+        );
+    }
+
+    #[test]
+    fn installer_keeps_the_client_secret_out_of_the_units_argv() {
+        // The secret lives in a mode-600 EnvironmentFile because argv is
+        // world-readable through `ps`, so the property is about the *unit*:
+        // it is the rendered `ExecStart` that has to be read back. A writer
+        // that appended `--issuer-client-secret` to that line would leave
+        // every other installer test green.
+        let transcript = install_linux_service_transcript();
+
+        assert!(
+            transcript.contains("--issuer \"https://idp.example.com/realms/vorpal\""),
+            "the unit's ExecStart must carry the issuer on argv: {transcript}"
+        );
+        assert!(
+            !transcript.contains("s3cr3t-not-in-argv"),
+            "the client secret must never be written into the unit: {transcript}"
+        );
+    }
+
+    #[test]
+    fn installer_encodes_the_plists_operator_supplied_values_as_xml() {
+        // The launchd half of the same two writers. `launchctl` is shadowed
+        // so nothing reaches the real service manager.
+        //
+        // The audience carries `<` — a character `validate_no_unit_injection_chars`
+        // refuses at the front door, so the encoders here are unreachable in
+        // a real install. That is the point: the plist grammar is encoded at
+        // the site that writes it, so a later relaxation of the deny-list
+        // cannot silently turn an operator's value into markup. Driving the
+        // writer directly is the only way to see the encoder at all.
+        let transcript = source_installer(
+            "launchctl() { return 1; }\n\
+             tmp=$(mktemp -d)\n\
+             HOME=\"$tmp\"\n\
+             VORPAL_INSTALL_DIR=\"$tmp/.vorpal\"\n\
+             VORPAL_SYSTEM_DIR=\"$tmp/system\"\n\
+             SERVICES='worker'\n\
+             ISSUER='https://idp.example.com/realms/vorpal'\n\
+             ISSUER_AUDIENCE='aud<ience'\n\
+             ISSUER_CLIENT_SECRET='s3cr3t-not-in-argv'\n\
+             plist_dir=\"$tmp/Library/LaunchAgents\"\n\
+             install_service_macos || true\n\
+             printf 'plist-mode %s\\n' \"$(ls -l \"$plist_dir/com.altf4llc.vorpal.plist\" | cut -c1-10)\"\n\
+             ls \"$plist_dir\"\n\
+             cat \"$plist_dir/com.altf4llc.vorpal.plist\"\n\
+             rm -rf \"$tmp\"",
+        );
+
+        assert!(
+            transcript.contains("<string>aud&lt;ience</string>"),
+            "a ProgramArguments value must be XML-encoded at the site that \
+             writes it: {transcript}"
+        );
+        assert!(
+            transcript.contains("plist-mode -rw-------"),
+            "the plist carries the client secret and must be mode 600: {transcript}"
+        );
+        assert!(
+            !transcript.contains("com.altf4llc.vorpal.plist.tmp"),
+            "the temporary sibling must be renamed into place: {transcript}"
+        );
+        assert!(
+            !transcript.contains("--issuer-client-secret"),
+            "the secret travels in EnvironmentVariables, never in \
+             ProgramArguments: {transcript}"
+        );
+    }
+
+    #[test]
+    fn installer_runs_when_piped_to_bash_on_stdin() {
+        // The documented install is `curl … | bash`, where the script has no
+        // file of its own and `BASH_SOURCE` is empty. Under the file's
+        // `set -euo pipefail` an unguarded array read aborts there before
+        // `main` runs — invisible to every other test here, because they all
+        // reach the script through a path (`bash <file>`, `source <file>`)
+        // that gives `BASH_SOURCE` a value.
+        let transcript = pipe_installer_to_bash(&["--dry-run", "--services", "worker"]);
+
+        assert!(
+            !transcript.contains("unbound variable"),
+            "the entry-point guard must not read BASH_SOURCE unguarded: {transcript}"
+        );
+        assert!(
+            transcript.contains("Missing --issuer for service 'worker'"),
+            "main must run when the installer arrives on stdin: {transcript}"
+        );
+    }
+
+    // --- makefile, driven as a program --------------------------------------
+
+    /// Expands `target` with `make -n` after `assignment`, from the
+    /// repository root. `-n` still expands recipe lines, so
+    /// `$(CHECK_VORPAL_ISSUER)`'s `$(error …)` fires without the recipe
+    /// running. Returns whether make succeeded, and its transcript.
+    fn make_dry_run(assignment: &str, target: &str) -> (bool, String) {
+        let _guard = issuer_env_guard();
+
+        let output = std::process::Command::new("make")
+            .arg("-n")
+            .arg(assignment)
+            .arg(target)
+            .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
+            .env_remove("VORPAL_ISSUER")
+            .output()
+            .expect("make must be runnable from the repository root");
+
+        (
+            output.status.success(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        )
+    }
+
+    #[test]
+    fn makefile_refuses_an_issuer_carrying_shell_syntax() {
+        // `$(VORPAL_ISSUER)` is substituted as plain text into a
+        // double-quoted host shell word, and into that same shape nested
+        // inside `bash -c '…'` for the Lima VM. The guard is the union of
+        // what either shell can reinterpret; until now it was checked by
+        // reading it.
+        let (accepted, transcript) = make_dry_run(
+            "VORPAL_ISSUER=http://localhost:8080/realms/vorpal",
+            "vorpal-start",
+        );
+
+        assert!(
+            accepted && transcript.contains("--issuer"),
+            "positive control: a well-formed issuer must expand the recipe: {transcript}"
+        );
+
+        for hostile in [
+            "VORPAL_ISSUER=http://localhost:8080/\" evil",
+            "VORPAL_ISSUER=http://localhost:8080/' evil",
+            "VORPAL_ISSUER=http://localhost:8080/`evil`",
+            "VORPAL_ISSUER=http://localhost:8080/\\evil",
+            "VORPAL_ISSUER=http://localhost:8080/$evil",
+        ] {
+            let (accepted, transcript) = make_dry_run(hostile, "vorpal-start");
+
+            assert!(
+                !accepted && transcript.contains("VORPAL_ISSUER may not contain"),
+                "{hostile:?} must be refused by the guard: {transcript}"
+            );
+        }
+    }
+
+    #[test]
+    fn makefile_issuer_guard_cannot_see_a_simply_expanded_override() {
+        // The guard's one documented hole, made executable so it cannot
+        // decay into a comment nobody re-checks. `make VORPAL_ISSUER:=…`
+        // is expanded at assignment time — before any line of the makefile
+        // runs — so a `$(shell …)` in it has already run by the time
+        // `$(value …)` reads the result. The recursively-expanded form an
+        // operator actually writes is caught, and that half is what the
+        // guard exists for.
+        //
+        // If this test starts failing because make refuses the second form
+        // too, the hole is closed: delete this test and the makefile comment
+        // that describes it together.
+        let witness = std::env::temp_dir().join(format!(
+            "vorpal-makefile-issuer-guard-{}",
+            std::process::id()
+        ));
+        let witness = witness.display().to_string();
+
+        let _ = std::fs::remove_file(&witness);
+        let (accepted, transcript) = make_dry_run(
+            &format!("VORPAL_ISSUER=$(shell touch {witness})"),
+            "vorpal-start",
+        );
+
+        assert!(
+            !accepted && transcript.contains("VORPAL_ISSUER may not contain"),
+            "a recursively-expanded override must be refused: {transcript}"
+        );
+        assert!(
+            !std::path::Path::new(&witness).exists(),
+            "`$(value …)` must hand the guard the raw text, so the shell \
+             function in a refused value never runs"
+        );
+
+        let (accepted, transcript) = make_dry_run(
+            &format!("VORPAL_ISSUER:=$(shell touch {witness})"),
+            "vorpal-start",
+        );
+        let bypassed = std::path::Path::new(&witness).exists();
+        let _ = std::fs::remove_file(&witness);
+
+        assert!(
+            accepted && bypassed,
+            "the simply-expanded form is expanded before the guard can read \
+             it; this is the documented limit: {transcript}"
+        );
+    }
+
     #[test]
     fn parse_issuer_names_the_cause_it_actually_hit() {
-        // every failure used to be reported as "issuer
+        // Every failure used to be reported as "issuer
         // must be https", including the ones that had nothing to do with
         // the scheme. AC4 asks the refusal to name the migration step; a
         // message describing the wrong defect cannot. Assert both halves —
@@ -2544,6 +2913,28 @@ mod login_egress_tests {
     }
 
     #[test]
+    fn parse_issuer_refuses_embedded_credentials() {
+        // The startup log line states the trust anchor verbatim, and the
+        // login path stores it as a credentials-file key, so a
+        // `user:password@` issuer would put a password in the journal and on
+        // disk. Nothing is lost by refusing: no IdP states userinfo in the
+        // `iss` claim this value is compared against.
+        let error = parse_issuer("https://user:pw@idp.example.com/realms/vorpal")
+            .expect_err("an issuer carrying credentials must be refused");
+
+        assert!(
+            error.contains("embedded credentials"),
+            "unexpected message: {error}"
+        );
+
+        // A password with no username is the same defect spelled differently.
+        assert!(
+            parse_issuer("https://:pw@idp.example.com/realms/vorpal").is_err(),
+            "a password-only authority must be refused too"
+        );
+    }
+
+    #[test]
     fn parse_issuer_trims_a_trailing_slash() {
         let normalized = parse_issuer("https://tenant.example.com/")
             .expect("a well-formed https issuer must validate");
@@ -2553,11 +2944,11 @@ mod login_egress_tests {
 
     #[test]
     fn parse_issuer_trims_multiple_trailing_slashes() {
-        // a single `trim_end_matches('/')` call removes
-        // every trailing slash, not just one. this test
-        // could not fail for the mutant its comment named, because
-        // `parse_issuer` trimmed the raw text *and*
-        // `validate_and_normalize_issuer_url` trimmed the parsed form, so
+        // A single `trim_end_matches('/')` call removes every trailing
+        // slash, not just one. An earlier version of this test could not
+        // fail for the mutant its comment named, because `parse_issuer`
+        // trimmed the raw text *and* `NormalizedIssuer::parse` trimmed the
+        // parsed form, so
         // weakening either one left the other to absorb it. The raw-text
         // trim is gone, and the surviving trim is the one this pins:
         // replacing it with `strip_suffix('/')` now fails here.
@@ -2569,7 +2960,7 @@ mod login_egress_tests {
 
     #[test]
     fn parse_issuer_strips_embedded_control_characters() {
-        // the returned value must come from the parsed
+        // The returned value must come from the parsed
         // `Url`, not the raw trimmed input, so a control character embedded
         // in the path cannot ride through validation unparsed. `Url::parse`
         // removes ASCII tab/newline wherever they appear in the input.
@@ -2594,8 +2985,8 @@ mod login_egress_tests {
 
     #[test]
     fn issuer_normalization_is_shared_by_both_issuer_entry_points() {
-        // de-duplicating the two issuer rules onto
-        // `validate_and_normalize_issuer_url` also handed `vorpal login`
+        // De-duplicating the two issuer rules onto
+        // `NormalizedIssuer::parse` also handed `vorpal login`
         // `Url`'s normalization, which is observable there — the returned
         // string is the credentials-file key and the value compared against
         // the discovery document's `issuer` claim. Nothing could see that
@@ -2668,7 +3059,7 @@ mod login_egress_tests {
             .expect("system services start subcommand must exist");
         let secret_arg = start_command
             .get_arguments()
-            .find(|arg| arg.get_id().as_str() == "issuer_client_secret")
+            .find(|arg| arg.get_id().as_str() == ISSUER_CLIENT_SECRET_ARG_ID)
             .expect("--issuer-client-secret argument must exist");
 
         assert_eq!(
@@ -2697,7 +3088,7 @@ mod login_egress_tests {
 
     #[test]
     fn system_services_start_reads_the_issuer_from_the_environment() {
-        // the two existing instruments pin the argument
+        // The two existing instruments pin the argument
         // *metadata* (CommandFactory) and the argv path (try_parse_from)
         // separately, so nothing drove the composition AC1 actually ships —
         // a value arriving through VORPAL_ISSUER, with no flag, reaching
@@ -2825,13 +3216,13 @@ mod login_egress_tests {
         std::env::remove_var("VORPAL_ISSUER_CLIENT_SECRET");
 
         assert_eq!(
-            services_start_value_source(&both, "issuer_client_secret"),
+            services_start_value_source(&both, ISSUER_CLIENT_SECRET_ARG_ID),
             Some(ValueSource::CommandLine),
             "a secret typed on the command line is exposed to `ps` whether or \
              not the environment also carries one"
         );
         assert_eq!(
-            services_start_value_source(&env_only, "issuer_client_secret"),
+            services_start_value_source(&env_only, ISSUER_CLIENT_SECRET_ARG_ID),
             Some(ValueSource::EnvVariable),
             "a secret that arrived only through the environment must not be \
              reported as being on argv"
@@ -2857,18 +3248,35 @@ mod login_egress_tests {
         let unset = services_start_matches(&[]);
 
         assert_eq!(
-            value_source_label(services_start_value_source(&from_env, "issuer")),
+            value_source_label(services_start_value_source(&from_env, ISSUER_ARG_ID)),
             "environment"
         );
         assert_eq!(
-            value_source_label(services_start_value_source(&from_argv, "issuer")),
+            value_source_label(services_start_value_source(&from_argv, ISSUER_ARG_ID)),
             "command line"
         );
         assert_eq!(
-            services_start_value_source(&unset, "issuer"),
+            services_start_value_source(&unset, ISSUER_ARG_ID),
             None,
             "with no issuer on either channel there is no anchor to name"
         );
+    }
+
+    #[test]
+    fn only_a_worker_or_registry_start_is_told_a_missing_anchor_refuses() {
+        // The startup log warns that worker and registry services "will
+        // refuse to start" when no anchor is configured. Said on an
+        // agent-only start, where nothing refuses, it is a warning about an
+        // event that cannot happen — which is how operators learn to skim
+        // the line that matters.
+        assert!(starts_an_authenticated_service("worker"));
+        assert!(starts_an_authenticated_service("agent,registry"));
+        assert!(!starts_an_authenticated_service("agent"));
+
+        // Split exactly as `start::run` splits it (`services.split(',')`,
+        // then equality against "worker"/"registry"), so the log line and
+        // the refusal cannot disagree about a padded list.
+        assert!(!starts_an_authenticated_service(" worker"));
     }
 
     // --- normalize_and_validate_login_issuer (AC1, AC4) -------------------
@@ -3046,8 +3454,8 @@ mod login_egress_tests {
 
     #[test]
     fn login_discovery_targets_accepts_a_documents_issuer_naming_an_explicit_default_port() {
-        // before this fix, `issuer` was canonicalized
-        // by `validate_and_normalize_issuer_url` (eliding the default :443
+        // Before this fix, `issuer` was canonicalized
+        // by `NormalizedIssuer::parse` (eliding the default :443
         // port) while `doc_issuer` was only trailing-slash trimmed, so this
         // exact case — a document's `issuer` claim spelling out the default
         // port explicitly, which RFC 3986 and this binary's own

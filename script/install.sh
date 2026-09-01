@@ -61,6 +61,13 @@ IS_UPGRADE=0
 EXISTING_VERSION=""
 SPINNER_PID=""
 
+# The temporary sibling a create-then-rename writer is part way through, or
+# "" when no write is in flight. The env file and the plist carry the OIDC
+# client secret, so an interrupt between "create" and "rename" would otherwise
+# leave that secret at a second path nothing ever removes; `cleanup` unlinks
+# whatever this names.
+PENDING_WRITE_TMP=""
+
 # -- Output utilities ---------------------------------------------------------
 
 has_color() {
@@ -765,6 +772,10 @@ cleanup() {
     fi
     if [[ -n "$TEMP_DIR" ]] && [[ -d "$TEMP_DIR" ]]; then
         rm -rf "$TEMP_DIR"
+    fi
+    if [[ -n "$PENDING_WRITE_TMP" ]]; then
+        rm -f "$PENDING_WRITE_TMP"
+        PENDING_WRITE_TMP=""
     fi
 }
 
@@ -1575,6 +1586,13 @@ write_service_env_file() {
     # the unit with no EnvironmentFile at all if the write is interrupted.
     # `mv` within one directory is atomic, so the installed path only ever
     # holds a complete, mode-600 file.
+    #
+    # The temporary sibling is announced to `cleanup` first: between the
+    # create and the rename it holds the same client secret the installed
+    # file does, so an interrupt there must not leave a live credential at a
+    # path the uninstaller never looks at.
+    PENDING_WRITE_TMP="$env_tmp"
+
     (
         umask 077
         rm -f "$env_tmp"
@@ -1589,6 +1607,7 @@ write_service_env_file() {
     )
 
     mv -f "$env_tmp" "$env_path"
+    PENDING_WRITE_TMP=""
 }
 
 install_service_macos() {
@@ -1608,6 +1627,15 @@ install_service_macos() {
     # in cli/src/command.rs), so this only gives the operator a second,
     # `ps`-invisible view of what the running service was configured with.
     #
+    # Every operator-supplied value in this document goes through
+    # `xml_escape`, in both the ProgramArguments array and the
+    # EnvironmentVariables dict. `validate_no_unit_injection_chars` already
+    # refuses the XML metacharacters, so the encoders are no-ops today; the
+    # point is that the plist grammar is encoded at the site that writes it,
+    # so relaxing the deny-list later cannot silently turn a value into
+    # markup. `$SERVICES` is exempt — `validate_services` allow-lists it
+    # element by element against a closed set of three names.
+    #
     # Written to a temporary sibling under a 077 umask and renamed into
     # place, never truncated or unlinked in situ. umask governs a file's
     # mode only at *creation*, so overwriting an existing plist would write
@@ -1616,7 +1644,14 @@ install_service_macos() {
     # the write is interrupted. Creating a fresh temporary file gets the
     # umask guarantee, and `mv` within one directory is atomic, so the
     # installed path only ever holds a complete file.
+    #
+    # The temporary sibling is announced to `cleanup` first: it carries the
+    # same client secret the installed plist does, so an interrupt between
+    # the create and the rename must not leave a live credential at a path
+    # the uninstaller never looks at.
     local plist_tmp="${plist_path}.tmp"
+
+    PENDING_WRITE_TMP="$plist_tmp"
 
     rm -f "$plist_tmp"
 
@@ -1639,9 +1674,9 @@ install_service_macos() {
         <string>start</string>
         <string>--services</string>
         <string>${SERVICES}</string>$(
-[[ -n "$ISSUER" ]] && printf '\n        <string>--issuer</string>\n        <string>%s</string>' "$ISSUER"
-[[ -n "$ISSUER_AUDIENCE" ]] && printf '\n        <string>--issuer-audience</string>\n        <string>%s</string>' "$ISSUER_AUDIENCE"
-[[ -n "$ISSUER_CLIENT_ID" ]] && printf '\n        <string>--issuer-client-id</string>\n        <string>%s</string>' "$ISSUER_CLIENT_ID"
+[[ -n "$ISSUER" ]] && printf '\n        <string>--issuer</string>\n        <string>%s</string>' "$(xml_escape "$ISSUER")"
+[[ -n "$ISSUER_AUDIENCE" ]] && printf '\n        <string>--issuer-audience</string>\n        <string>%s</string>' "$(xml_escape "$ISSUER_AUDIENCE")"
+[[ -n "$ISSUER_CLIENT_ID" ]] && printf '\n        <string>--issuer-client-id</string>\n        <string>%s</string>' "$(xml_escape "$ISSUER_CLIENT_ID")"
 )
     </array>$(
 if [[ -n "$ISSUER" || -n "$ISSUER_CLIENT_SECRET" ]]; then
@@ -1665,6 +1700,7 @@ PLIST
 
     umask "$prior_umask"
     mv -f "$plist_tmp" "$plist_path"
+    PENDING_WRITE_TMP=""
 
     # Bootout existing service (ignore errors — may not be loaded on fresh install)
     launchctl bootout "${gui_target}/com.altf4llc.vorpal" 2>/dev/null || true
@@ -1709,6 +1745,8 @@ install_service_linux() {
     # inherits them instead of having to rediscover them.
     local unit_tmp="${unit_path}.tmp"
 
+    PENDING_WRITE_TMP="$unit_tmp"
+
     rm -f "$unit_tmp"
 
     local prior_umask
@@ -1737,6 +1775,7 @@ UNIT
 
     umask "$prior_umask"
     mv -f "$unit_tmp" "$unit_path"
+    PENDING_WRITE_TMP=""
 
     # Stop existing service if running (graceful restart on upgrade)
     systemctl --user stop vorpal.service 2>/dev/null || true
@@ -2044,6 +2083,12 @@ run_uninstall() {
         local gui_target="gui/$(id -u)"
         launchctl bootout "${gui_target}/com.altf4llc.vorpal" 2>/dev/null || true
         local plist_path="${HOME}/Library/LaunchAgents/com.altf4llc.vorpal.plist"
+        # The `.tmp` sibling goes with it: the plist writer creates it, and an
+        # install interrupted between the create and the rename leaves it
+        # holding the OIDC client secret. An uninstall that reports success
+        # while a live credential survives is the posture this removal exists
+        # to prevent, whichever path the credential is sitting at.
+        rm -f "${plist_path}.tmp"
         if [[ -f "$plist_path" ]]; then
             rm -f "$plist_path"
             removed+=("LaunchAgent configuration")
@@ -2052,6 +2097,7 @@ run_uninstall() {
         systemctl --user stop vorpal.service 2>/dev/null || true
         systemctl --user disable vorpal.service 2>/dev/null || true
         local unit_path="${HOME}/.config/systemd/user/vorpal.service"
+        rm -f "${unit_path}.tmp"
         if [[ -f "$unit_path" ]]; then
             rm -f "$unit_path"
             systemctl --user daemon-reload 2>/dev/null || true
@@ -2062,8 +2108,11 @@ run_uninstall() {
         # unconditionally and named in the summary: it
         # is a separate file from the unit and can outlive it, and an
         # uninstall that reports success while leaving a live IdP credential
-        # on disk is a worse posture than the argv the secret came from.
+        # on disk is a worse posture than the argv the secret came from. The
+        # `.tmp` sibling the writer renames from is removed for the same
+        # reason: an interrupted install leaves the secret there too.
         local env_path="${HOME}/.config/systemd/user/vorpal.env"
+        rm -f "${env_path}.tmp"
         if [[ -f "$env_path" ]]; then
             rm -f "$env_path"
             removed+=("systemd credentials file (OIDC client secret)")
@@ -2204,8 +2253,16 @@ main() {
 # Run only when executed, not when sourced. The installer's validators and
 # file writers are security controls with no shell test harness to reach
 # them; sourcing this file makes them callable, which is how
-# `cli/src/command.rs`'s installer tests drive them. Running the script
-# normally is unaffected: `$0` is this file's path, so the guard is true.
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+# `cli/src/command.rs`'s installer tests drive them.
+#
+# `${BASH_SOURCE[0]:-$0}`, not `${BASH_SOURCE[0]}`: the documented install is
+# `curl … | bash`, where the script arrives on stdin and BASH_SOURCE is empty,
+# so under this file's `set -u` a bare array read aborts with "unbound
+# variable" before main ever runs. Defaulting to `$0` makes the comparison
+# true there, which is correct — a piped script is being executed, not
+# sourced. `${BASH_SOURCE[0]:-}` would be the opposite bug: it compares empty
+# against `$0` ("bash"), so `curl … | bash` would exit 0 having installed
+# nothing.
+if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
     main "$@"
 fi
