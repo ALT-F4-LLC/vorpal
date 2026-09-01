@@ -2394,7 +2394,12 @@ mod tests {
         control.write_fixture(3600, now - 3360, &control.token("old-refresh"));
 
         let control_refresher = ScriptedRefresher::new(move |_| {
-            Ok(("rotated-access".to_string(), 3600, now, Some(rotated.clone())))
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(rotated.clone()),
+            ))
         });
 
         let result =
@@ -2417,7 +2422,9 @@ mod tests {
 
         let refused = client_auth_header_at(&scratch.path, "registry-1", &retry, &|| Ok(now))
             .await
-            .expect_err("a token whose exchange future was dropped mid-flight must not be replayed");
+            .expect_err(
+                "a token whose exchange future was dropped mid-flight must not be replayed",
+            );
 
         assert!(
             refused
@@ -2486,12 +2493,19 @@ mod tests {
         control.write_fixture(3600, now - 3360, &original);
 
         let rotating_refresher = ScriptedRefresher::new(move |_| {
-            Ok(("rotated-access".to_string(), 3600, now, Some(rotated.clone())))
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(rotated.clone()),
+            ))
         });
 
-        client_auth_header_at(&control.path, "registry-1", &rotating_refresher, &|| Ok(now))
-            .await
-            .expect("rotating refresh must succeed");
+        client_auth_header_at(&control.path, "registry-1", &rotating_refresher, &|| {
+            Ok(now)
+        })
+        .await
+        .expect("rotating refresh must succeed");
 
         let state = CREDENTIALS_REFRESH.lock().await;
 
