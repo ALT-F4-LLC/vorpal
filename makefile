@@ -11,40 +11,49 @@ VORPAL_NAMESPACE := library
 VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
-# system services start refuses a worker/registry with no issuer (VPL-434),
-# so vorpal-start/lima-vorpal-start must name one. This default matches the
-# realm `vorpal login`'s own clap default names (cli/src/command.rs) and the
-# realm script/test/keycloak.sh's clients live in (KC_REALM=vorpal) —
-# `realms/master` (a prior default) is Keycloak's own administrative realm,
-# holds none of Vorpal's OIDC clients, and is provisioned with a published
-# admin/password bootstrap credential, so it satisfied AC3/AC4's "an issuer
-# is configured" in letter while a running service trusted the wrong realm
-# (VPL-711-C8). `docker compose up` alone only creates `master`; a `vorpal`
-# realm with Vorpal's OIDC clients is still provisioned by hand today.
+# `system services start` refuses a worker/registry with no issuer, so
+# vorpal-start and lima-vorpal-start must name one. This development default
+# is the realm `vorpal login`'s clap default names and the realm
+# script/test/keycloak.sh's clients live in (KC_REALM=vorpal), so all three
+# agree. Nothing in this repository *provisions* that realm: `docker compose
+# up` boots Keycloak with only its own `master` realm, and the `vorpal` realm
+# and its OIDC clients are still created by hand. `realms/master` was a prior
+# default and is worse, not simpler — it is Keycloak's administrative realm,
+# holds none of Vorpal's clients, and ships with a published admin/password
+# bootstrap credential, so it satisfies "an issuer is configured" while
+# pointing a running service at the wrong realm.
+#
+# A Rust test (`makefile_default_vorpal_issuer` in cli/src/command.rs) reads
+# the line below at compile time and fails if it drifts from the CLI's own
+# default, so edit both together.
 VORPAL_ISSUER ?= http://localhost:8080/realms/vorpal
 
-# VORPAL_ISSUER is substituted by Make as plain text into two different shell
-# contexts before either shell parses the line, so the deny-list is the union
-# of what each context can reinterpret: vorpal-start puts it in a
-# double-quoted string ('"', '`', '$', '\'), and lima-vorpal-start nests that
-# inside `bash -c '...'`, where the single quote ends the outer quoting and
-# injects into the VM (VPL-711 CLUSTER-P, CLUSTER-S). Checked once, in pure
-# Make (no subshell), so no recipe runs with an unsafe value — the default
-# above is unaffected.
+# Guard for VORPAL_ISSUER, expanded by the two recipes that interpolate it.
 #
-# Reads with `$(value VORPAL_ISSUER)`, not `$(VORPAL_ISSUER)` (VPL-711-C2):
-# `VORPAL_ISSUER` is a recursively-expanded variable, so a plain `$(...)`
-# reference re-expands its text on every use — including any `$(shell ...)`
-# call the operator's value itself contains — *before* `findstring` ever
-# gets to look at it. `make VORPAL_ISSUER='$(shell touch pwned)'` therefore
-# ran the shell command as a side effect of the check meant to refuse it,
-# with the deny-list never seeing a literal `$`. `$(value ...)` returns the
-# variable's raw text without expanding it, so the same call site can
-# search it for a `$` without that `$` ever being interpreted as a
-# function call.
-ifneq ($(strip $(findstring ",$(value VORPAL_ISSUER))$(findstring ',$(value VORPAL_ISSUER))$(findstring `,$(value VORPAL_ISSUER))$(findstring \,$(value VORPAL_ISSUER))$(findstring $$,$(value VORPAL_ISSUER))),)
-$(error VORPAL_ISSUER may not contain a quote, an apostrophe, a backtick, a backslash, or '$$')
-endif
+# Make substitutes the value as plain text into two different shell contexts
+# before either shell parses the line, so the deny-list is the union of what
+# each can reinterpret: vorpal-start puts it in a double-quoted string ('"',
+# '`', '$', '\'), and lima-vorpal-start nests that inside `bash -c '...'`,
+# where an apostrophe ends the outer quoting and injects into the VM.
+#
+# Reads with `$(value VORPAL_ISSUER)`, not `$(VORPAL_ISSUER)`: the variable is
+# recursively expanded, so a plain reference re-expands its text on every use
+# — including any `$(shell ...)` the operator's value contains — before
+# `findstring` ever sees it. `make VORPAL_ISSUER='$(shell touch pwned)'` ran
+# the shell command as a side effect of the check meant to refuse it, with
+# the deny-list never seeing a literal `$`. `$(value ...)` returns the raw
+# text unexpanded.
+#
+# Expanded inside the two recipes rather than once at file scope, so a
+# malformed value fails only the targets that would interpolate it instead of
+# aborting every target in this file, `make build` included.
+#
+# Out of reach either way: `make VORPAL_ISSUER:=...` on the command line is a
+# simply-expanded assignment, which Make expands at assignment time — before
+# any part of this file runs — so `$(value ...)` sees the result and no check
+# here can prevent it. Nothing in this file can; the guard covers the
+# recursively-expanded forms, which are the ones an operator writes.
+CHECK_VORPAL_ISSUER = $(if $(strip $(findstring ",$(value VORPAL_ISSUER))$(findstring ',$(value VORPAL_ISSUER))$(findstring `,$(value VORPAL_ISSUER))$(findstring \,$(value VORPAL_ISSUER))$(findstring $$,$(value VORPAL_ISSUER))),$(error VORPAL_ISSUER may not contain a quote, an apostrophe, a backtick, a backslash, or '$$'))
 
 LIMA_ARCH := $(ARCH)
 LIMA_CPUS := 8
@@ -215,6 +224,7 @@ vorpal-prepare:
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- prepare $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
 vorpal-start:
+	$(CHECK_VORPAL_ISSUER)
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start --issuer "$(VORPAL_ISSUER)" $(VORPAL_FLAGS)
 
 vorpal-website-start:
@@ -240,4 +250,5 @@ lima-vorpal:
 	limactl shell "vorpal-$(LIMA_ARCH)" bash -c 'cd ~/vorpal && target/debug/vorpal build $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)'
 
 lima-vorpal-start:
+	$(CHECK_VORPAL_ISSUER)
 	limactl shell "vorpal-$(LIMA_ARCH)" bash -c '~/vorpal/target/debug/vorpal system services start --issuer "$(VORPAL_ISSUER)" $(VORPAL_FLAGS)'
