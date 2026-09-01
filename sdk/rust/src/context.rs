@@ -1294,9 +1294,26 @@ impl TokenRefresher for LiveTokenRefresher {
     }
 }
 
-/// Refresh-token values this process has already put on the wire without
-/// durably committing a replacement, keyed by a SHA-256 digest of the token
-/// value — never the plaintext, and never logged.
+/// Refresh-token values this process has armed as about-to-be-spent, or has
+/// spent, keyed by a SHA-256 digest of the token value — never the
+/// plaintext, and never logged.
+///
+/// Armed *before* the refresh exchange is awaited (VPL-282 C-1), not after:
+/// the digest is recorded in the same synchronous stretch as the
+/// `is_spent` check that guards it, before the only `.await` that could be
+/// lost to a dropped future or a cancelled task. From that point no
+/// reachable exit — a local failure, an IdP failure, a commit failure, or
+/// the caller simply dropping the future while it is suspended inside the
+/// exchange — can leave the digest unrecorded. Disarmed again only when the
+/// digest turns out not to have been needed: the exchange never reached the
+/// IdP (`RefreshFailure::NotSent`), or it did and the value that ended up
+/// stored is the same value that was armed. That second case is a digest
+/// comparison, not a presence check on the response's rotated-token field:
+/// an IdP that did not rotate the value and one that rotated it to an
+/// identical (echoed) value both leave the stored token equal to the one
+/// that was armed, and both must disarm — a presence check would wrongly
+/// treat the echo as a real rotation and leave the digest spent forever
+/// (VPL-282 CL-1).
 ///
 /// A failed exchange, and a successful one whose result never reaches disk,
 /// both leave `credentials.json` byte-identical. Re-reading that file cannot
@@ -1311,6 +1328,15 @@ impl TokenRefresher for LiveTokenRefresher {
 /// rather than the issuer is what keeps that from spreading — a legitimately
 /// rotated token has a different digest and is unaffected by an older
 /// value's terminal failure.
+///
+/// Arming before the await, rather than after the exchange returns as the
+/// pre-VPL-282 version of this memo did, moves the insert from "on failure
+/// or on a rotating success" to "on every due refresh attempt", raising this
+/// set's steady-state growth rate accordingly. Accepted (VPL-282 AB-6): the
+/// set is never evicted — a timer-based eviction would reopen the exact
+/// replay window this memo exists to close — and at realistic refresh
+/// cadences the growth is tens of 64-character digests per day even for a
+/// long-lived process.
 struct RefreshState {
     spent: BTreeSet<String>,
 }
@@ -1320,6 +1346,28 @@ impl RefreshState {
         Self {
             spent: BTreeSet::new(),
         }
+    }
+
+    /// True when `digest` names a refresh-token value this process must
+    /// treat as already consumed.
+    fn is_spent(&self, digest: &str) -> bool {
+        self.spent.contains(digest)
+    }
+
+    /// Arms `digest`: from this call forward it reads as spent until a
+    /// matching `disarm`. The one seam the arm/disarm protocol (VPL-282
+    /// C-1–C-3) goes through, so the protocol lives here instead of in
+    /// comments beside raw `BTreeSet` mutations scattered through the
+    /// caller (VPL-282 CL-5).
+    fn arm(&mut self, digest: String) {
+        self.spent.insert(digest);
+    }
+
+    /// Disarms `digest`: undoes a prior `arm` once it turns out the memo
+    /// never needed to hold it (the exchange never reached the IdP, or the
+    /// value that ended up stored is the one that was armed).
+    fn disarm(&mut self, digest: &str) {
+        self.spent.remove(digest);
     }
 }
 
@@ -1619,9 +1667,16 @@ async fn client_auth_header_at(
         // so the memo is the only thing that can tell the two apart.
         let refresh_token_digest = digest(issuer_creds.refresh_token.as_str());
 
-        if state.spent.contains(&refresh_token_digest) {
+        if state.is_spent(&refresh_token_digest) {
+            // VPL-282 CL-12: this fires whenever the digest is armed, which
+            // is now true on paths that never definitively "failed" — a
+            // future dropped mid-exchange, or a `Sent` failure whose IdP
+            // outcome this process never learned. Neither claim is one this
+            // process can make honestly, so the message says only what is
+            // known: the exchange was already attempted and its outcome is
+            // not confirmed safe to retry.
             return Err(anyhow!(
-                "OAuth refresh-token exchange already failed for the stored token. Please run: vorpal login --issuer {}",
+                "OAuth refresh-token exchange for the stored token was already attempted and its outcome could not be confirmed as safe to retry. Please run: vorpal login --issuer {}",
                 registry_issuer
             ));
         }
@@ -1630,11 +1685,11 @@ async fn client_auth_header_at(
         // reachable exit from this function — including the caller dropping
         // this future while the `.await` below is suspended — can leave the
         // memo without the digest (VPL-282 C-1). `NotSent` below and a
-        // non-rotating commit further down are the only paths that remove it
-        // again; every other exit (a `Sent` failure, a commit failure, or a
-        // rotating success) leaves it in place, which is what each of those
-        // paths already needs.
-        state.spent.insert(refresh_token_digest.clone());
+        // disarm whose stored value matches the armed one further down are
+        // the only paths that remove it again; every other exit (a `Sent`
+        // failure, a commit failure, or a genuine rotation) leaves it in
+        // place, which is what each of those paths already needs.
+        state.arm(refresh_token_digest.clone());
 
         let exchange = refresher
             .refresh(
@@ -1654,7 +1709,7 @@ async fn client_auth_header_at(
             // point would wrongly spend a token the IdP never saw (VPL-282
             // C-3).
             Err(RefreshFailure::NotSent(err)) => {
-                state.spent.remove(&refresh_token_digest);
+                state.disarm(&refresh_token_digest);
 
                 return Err(err);
             }
@@ -1673,6 +1728,30 @@ async fn client_auth_header_at(
             }
         };
 
+        // Normalized here, once, for every `TokenRefresher` implementer
+        // alike (VPL-282 CL-3): the trait's contract (see its doc comment
+        // above) says nothing about whether its `rotated_refresh_token`
+        // element is already normalized. `LiveTokenRefresher` only happens
+        // to hand back a normalized value because it routes through
+        // `refresh_access_token`, which calls
+        // `normalize_rotated_refresh_token` internally — nothing in the
+        // trait boundary enforces that on every implementer. Trusting the
+        // unstated guarantee here would let a raw `Some("")` from some
+        // other implementer both overwrite a live stored token with an
+        // empty string below and be misread as "the value changed" by the
+        // disarm decision that follows.
+        let refreshed = (
+            refreshed.0,
+            refreshed.1,
+            refreshed.2,
+            normalize_rotated_refresh_token(refreshed.3),
+        );
+
+        // Named, not positional (VPL-282 CL-6): `refreshed` is the raw
+        // `RefreshedToken` tuple, and reading two of its four fields by
+        // `.0`/`.3` index reads worse than the name each one already has.
+        let (refreshed_access_token, _, _, rotated_refresh_token) = &refreshed;
+
         // The access token this call returns comes from `refreshed` itself,
         // never from a later re-read of `credentials_path`: the commit below
         // re-reads and merges the file under the cross-process lock (VPL-281),
@@ -1681,12 +1760,23 @@ async fn client_auth_header_at(
         // freshly minted value here is what keeps the header this call hands
         // back in sync with what it just committed, rather than with
         // whatever another writer's entry happens to say.
-        let refreshed_access_token = refreshed.0.clone();
+        let refreshed_access_token = refreshed_access_token.clone();
 
-        // Read before `refreshed` is moved into the commit below: whether the
-        // IdP rotated the value is what decides whether the digest armed
-        // above stays spent once the commit lands (VPL-282 C-2).
-        let rotated_refresh_token = refreshed.3.clone();
+        // The digest that must stay armed identifies a token *value*, not an
+        // `Option`'s discriminant (VPL-282 C-2, CL-1): disarm exactly when
+        // the value that ends up stored is the same value that was armed
+        // above. A presence test (`rotated_refresh_token.is_some()`) cannot
+        // tell "the IdP rotated to a new value" apart from "the IdP echoed
+        // the same value back" — both carry a `Some`, so a presence test
+        // takes the same branch for both and leaves an echoing IdP's own
+        // valid token permanently spent. Comparing digests instead treats
+        // "not rotated" and "rotated to an identical value" the same way:
+        // both leave the stored digest matching the armed one, so both
+        // disarm; only an actual change in value keeps it armed.
+        let stored_refresh_token_digest = match rotated_refresh_token.as_deref() {
+            Some(new_value) => digest(new_value),
+            None => refresh_token_digest.clone(),
+        };
 
         // No await is introduced between the exchange above and the write
         // below: the sequence stays synchronous so the window in which a
@@ -1714,12 +1804,12 @@ async fn client_auth_header_at(
             ));
         }
 
-        // The IdP did not rotate the value: the stored refresh token is
-        // unchanged and still live, so it must not stay marked spent, or the
-        // very next refresh would be refused for a token that is perfectly
-        // valid at the IdP (VPL-282 AB-4).
-        if rotated_refresh_token.is_none() {
-            state.spent.remove(&refresh_token_digest);
+        // The value that landed on disk is the same value that was armed:
+        // still live, so it must not stay marked spent, or the very next
+        // refresh would be refused for a token that is perfectly valid at
+        // the IdP (VPL-282 AB-4, CL-1).
+        if stored_refresh_token_digest == refresh_token_digest {
+            state.disarm(&refresh_token_digest);
         }
 
         let header = format!("Bearer {}", refreshed_access_token)
@@ -1957,14 +2047,24 @@ mod tests {
     /// let the *signal* — not a wall-clock guess — decide when the exchange
     /// has genuinely started. `select!` drops whichever branch loses, which
     /// is the exact caller pattern this issue reports.
+    ///
+    /// Signals via `tokio::sync::Notify` rather than a
+    /// `Mutex<Option<oneshot::Sender<_>>>` (VPL-282 CL-7): `oneshot::Sender`
+    /// consumes `self` on `send`, which is why an earlier version of this
+    /// double needed a `Mutex<Option<_>>` just to move one out of a `&self`
+    /// method once. `Notify::notify_one` takes `&self` directly — it is the
+    /// primitive this module already reaches for (`tokio::sync`) for exactly
+    /// this "signal once, from a `&self` method" shape, and it stores a
+    /// permit if `notify_one` runs before anyone is waiting, so signal and
+    /// wait can race safely in either order.
     struct HangingRefresher {
-        entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        entered: tokio::sync::Notify,
     }
 
     impl HangingRefresher {
-        fn new(entered: tokio::sync::oneshot::Sender<()>) -> Self {
+        fn new() -> Self {
             Self {
-                entered: std::sync::Mutex::new(Some(entered)),
+                entered: tokio::sync::Notify::new(),
             }
         }
     }
@@ -1978,9 +2078,7 @@ mod tests {
             _issuer: &str,
             _refresh_token: &str,
         ) -> Exchange {
-            if let Some(tx) = self.entered.lock().expect("lock poisoned").take() {
-                let _ = tx.send(());
-            }
+            self.entered.notify_one();
 
             std::future::pending::<Exchange>().await
         }
@@ -2356,38 +2454,58 @@ mod tests {
     #[tokio::test]
     async fn client_auth_header_at_spends_a_token_whose_future_is_dropped_mid_exchange() {
         // VPL-282 C-1: the digest must already be in the memo before the
-        // exchange is awaited, so a future dropped anywhere after that point
-        // — including while still suspended inside the exchange itself —
-        // cannot lose the spend-marking. `select!` here drops the losing
-        // branch exactly the way a caller wrapping this call in `select!` or
-        // `timeout` would, and a oneshot signal from the refresher double —
-        // not a wall-clock guess — is what proves the exchange had genuinely
-        // started before the drop.
+        // exchange is awaited, so a future dropped at any point after that
+        // — including here, while still suspended inside the exchange
+        // itself — cannot lose the spend-marking. `select!` here drops the
+        // losing branch exactly the way a caller wrapping this call in
+        // `select!` or `timeout` would, and a signal from the refresher
+        // double — not a wall-clock guess — is what proves the exchange had
+        // genuinely started before the drop.
+        //
+        // `HangingRefresher` never resolves (VPL-282 CL-9): this test drops
+        // the future strictly *during* the exchange, never after it
+        // completes. That is deliberate, not a gap in coverage — under C-1
+        // the insert already ran before the exchange was ever awaited, so
+        // there is no remaining window between "the exchange completes" and
+        // "the digest is recorded" left for a test to hit; that window only
+        // existed in the pre-C-1 code, where the insert ran after the await.
         let scratch = ScratchCredentials::new("dropped-future");
         let now = unix_now();
         let original = scratch.token("old-refresh");
 
         scratch.write_fixture(3600, now - 3360, &original);
 
-        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
-        let hanging = HangingRefresher::new(entered_tx);
+        let hanging = HangingRefresher::new();
         let clock = || Ok(now);
 
         tokio::select! {
             result = client_auth_header_at(&scratch.path, "registry-1", &hanging, &clock) => {
                 panic!("the exchange never resolves; got {:?}", result);
             }
-            _ = entered_rx => {
+            () = hanging.entered.notified() => {
                 // The exchange has been entered — state.spent is already
                 // armed by this point (C-1) — and `select!` now drops the
-                // still-pending branch above.
+                // still-pending branch above. `Notify` (VPL-282 CL-7)
+                // has no error variant a bare `_` pattern could mis-accept
+                // as this signal, unlike the `oneshot::Receiver<()>` this
+                // replaced, whose `Err(RecvError)` — delivered if its sender
+                // were ever dropped without sending — a `_` pattern would
+                // have matched identically to a real send (VPL-282 CL-10).
             }
         }
 
         // Positive control (V-1 / evidence-rules: pair every negative probe
-        // with one): the same setup, run to completion without a drop, must
-        // succeed — otherwise "refused" below would be indistinguishable
-        // from a fixture that never reaches the exchange at all.
+        // with one): a comparable setup, run to completion without a drop,
+        // must succeed — otherwise "refused" below would be indistinguishable
+        // from a fixture that never reaches the exchange at all. Not
+        // literally the same setup (VPL-282 CL-4): `HangingRefresher` never
+        // resolves by construction, so it cannot stand in for "completes
+        // normally", and reusing `scratch`'s own token would collide with
+        // the digest the negative probe above already armed in the
+        // process-wide `CREDENTIALS_REFRESH` memo (V-2 / evidence-rules:
+        // unique token values per test). A separate `ScratchCredentials`
+        // with its own token, driven by a `ScriptedRefresher` that actually
+        // returns, is what "run to completion without a drop" requires here.
         let control = ScratchCredentials::new("dropped-future-control");
         let rotated = control.token("rotated-refresh");
 
@@ -2408,14 +2526,22 @@ mod tests {
 
         assert!(
             result.is_ok(),
-            "the same setup without a drop must succeed: {:?}",
+            "a comparable setup without a drop must succeed: {:?}",
             result.err()
         );
 
         // Back in the dropped case: the credentials file was never rewritten
         // (the write never happened), so a later caller re-reading it must
         // be refused rather than replaying the token the dropped future
-        // already put on the wire.
+        // already put on the wire. Asserted directly (VPL-282 CL-11) rather
+        // than only inferred from the refusal below, since the refusal by
+        // itself is also consistent with a commit that ran and failed.
+        assert_eq!(
+            scratch.stored().refresh_token,
+            original,
+            "the credentials file must be untouched: the dropped future never reached the commit"
+        );
+
         let retry = ScriptedRefresher::new(|_| {
             panic!("must not be reached: the memo must refuse before a second exchange")
         });
@@ -2427,9 +2553,7 @@ mod tests {
             );
 
         assert!(
-            refused
-                .to_string()
-                .contains("already failed for the stored token"),
+            refused.to_string().contains("already attempted"),
             "got: {}",
             refused
         );
@@ -2464,8 +2588,12 @@ mod tests {
         // value it was given, so re-supplying `now` a second time would look
         // freshly issued and skip the refresh path entirely without ever
         // reaching C-2. Advance the clock past the refresh window instead,
-        // so the second call is due for refresh again on its own terms.
-        let later = now + 3300;
+        // so the second call is due for refresh again on its own terms. Past
+        // with margin, not exactly on the boundary (VPL-282 CL-8): landing
+        // `token_age + refresh_window` exactly on `expires_in` would couple
+        // this test's "due" assumption to whether `needs_refresh` compares
+        // with `>=` or `>`.
+        let later = now + 3400;
 
         client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(later))
             .await
@@ -2510,8 +2638,96 @@ mod tests {
         let state = CREDENTIALS_REFRESH.lock().await;
 
         assert!(
-            state.spent.contains(&digest(original.as_str())),
+            state.is_spent(&digest(original.as_str())),
             "a rotating commit must still leave the superseded token's digest spent"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_at_does_not_spend_a_token_an_echoing_idp_returns_unchanged() {
+        // VPL-282 CL-1 (blocker): the disarm decision must compare the
+        // digest of the value that ended up stored against the digest that
+        // was armed, not merely ask whether the response carried a
+        // `refresh_token` field at all. An IdP that "rotates" in name only —
+        // it echoes the same non-empty value back rather than omitting the
+        // field — takes the same `Some` branch a real rotation does under a
+        // presence test, so a presence test leaves the digest spent forever
+        // and permanently locks the IdP's own still-valid token out of every
+        // later refresh in this process.
+        let scratch = ScratchCredentials::new("echoing-idp");
+        let now = unix_now();
+        let stable = scratch.token("stable-refresh");
+
+        scratch.write_fixture(3600, now - 3360, &stable);
+
+        let echoed = stable.clone();
+        let refresher = ScriptedRefresher::new(move |_| {
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(echoed.clone()),
+            ))
+        });
+
+        client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(now))
+            .await
+            .expect("first refresh must succeed");
+
+        // Same reasoning as the non-rotating test above: advance past the
+        // refresh window, with margin past the boundary (VPL-282 CL-8), so
+        // the second call is genuinely due again rather than skipped as
+        // freshly issued.
+        let later = now + 3400;
+
+        client_auth_header_at(&scratch.path, "registry-1", &refresher, &|| Ok(later))
+            .await
+            .expect(
+                "an IdP that echoes the same refresh token back must not lock itself out of its own valid token",
+            );
+
+        assert_eq!(
+            refresher.calls(),
+            2,
+            "an echoing IdP's token must never be refused as spent: both refreshes must reach the exchange"
+        );
+        assert_eq!(
+            scratch.stored().refresh_token,
+            stable,
+            "the stored value is unchanged when the IdP echoes the same token back"
+        );
+
+        // Positive control (evidence-rules: pair every negative probe with
+        // one): a genuinely rotating double, run the same way, must still
+        // leave its old digest spent — otherwise this test would only prove
+        // the disarm always fires, not that it fires conditionally on the
+        // stored value actually matching the armed one.
+        let control = ScratchCredentials::new("echoing-idp-control");
+        let original = control.token("old-refresh");
+        let rotated = control.token("rotated-refresh");
+
+        control.write_fixture(3600, now - 3360, &original);
+
+        let rotating_refresher = ScriptedRefresher::new(move |_| {
+            Ok((
+                "rotated-access".to_string(),
+                3600,
+                now,
+                Some(rotated.clone()),
+            ))
+        });
+
+        client_auth_header_at(&control.path, "registry-1", &rotating_refresher, &|| {
+            Ok(now)
+        })
+        .await
+        .expect("rotating refresh must succeed");
+
+        let state = CREDENTIALS_REFRESH.lock().await;
+
+        assert!(
+            state.is_spent(&digest(original.as_str())),
+            "a genuinely rotating commit must still leave the superseded token's digest spent"
         );
     }
 
