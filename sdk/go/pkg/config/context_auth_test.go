@@ -847,6 +847,111 @@ func TestCredentialEgressOriginIsHostCaseInsensitive(t *testing.T) {
 	}
 }
 
+// TestCredentialEgressOriginLoopbackTable walks the C-8 loopback table,
+// shared row-for-row with TypeScript's suite (the "shared loopback table"
+// block in sdk/typescript/src/__tests__/context.test.ts). Every input below
+// appears there too; a row the two SDKs legitimately disagree on carries the
+// other SDK's outcome in a comment rather than being dropped to make the two
+// suites look identical.
+//
+// The two SDKs ask the same question of different strings. net/url hands this
+// function the host as written, while the WHATWG parser hands TypeScript a
+// canonicalized host, so IPv4 shorthands are accepted there and refused here,
+// and a non-canonical IPv6 literal keeps its spelling here and arrives
+// compressed there. Closing that would mean reimplementing the WHATWG host
+// parser in Go — a far larger change carrying its own risk of the compared
+// string and the dialed string drifting apart — and is not attempted.
+func TestCredentialEgressOriginLoopbackTable(t *testing.T) {
+	// want == "" means the URL must be refused.
+	for _, tc := range []struct {
+		url  string
+		want string
+	}{
+		{"http://127.0.0.1:8080", "http://127.0.0.1:8080"},
+		{"http://localhost:8080", "http://localhost:8080"},
+		{"http://LOCALHOST:8080", "http://localhost:8080"},
+		{"http://[::1]:8080", "http://::1:8080"},
+		// TS: "http://::1:8080" — WHATWG compresses the literal, Go keeps
+		// the spelling it was given.
+		{"http://[0:0:0:0:0:0:0:1]:8080", "http://0:0:0:0:0:0:0:1:8080"},
+		// All of 127.0.0.0/8 is loopback, not just 127.0.0.1.
+		{"http://127.0.0.2:8080", "http://127.0.0.2:8080"},
+		// TS: "http://::ffff:7f00:1:8080" — WHATWG serializes an
+		// IPv4-mapped address in hex and never in the dotted form.
+		{"http://[::ffff:127.0.0.1]:8080", "http://::ffff:127.0.0.1:8080"},
+		{"http://[::ffff:7f00:1]:8080", "http://::ffff:7f00:1:8080"},
+		// TS accepts the next four as "http://127.0.0.1:8080": WHATWG
+		// canonicalizes each one before any check the SDK writes can run.
+		// net.ParseIP refuses shorthand and non-decimal forms, which is the
+		// fail-closed direction.
+		{"http://127.1:8080", ""},
+		{"http://2130706433:8080", ""},
+		{"http://0x7f.0.0.1:8080", ""},
+		{"http://0177.0.0.1:8080", ""},
+		// TS accepts this one too, for the same reason. Here the ASCII gate
+		// refuses it before the loopback check is reached.
+		{"http://１２７.0.0.1:8080", ""},
+		// Zone IDs are refused by both: net.ParseIP rejects "::1%eth0" and
+		// the WHATWG parser rejects the URL outright.
+		{"http://[::1%25eth0]:8080", ""},
+		// Non-loopback lookalikes: unspecified, link-local, private, and
+		// near-miss addresses must stay refused over plaintext http.
+		{"http://0.0.0.0:8080", ""},
+		{"http://[::]:8080", ""},
+		{"http://[::2]:8080", ""},
+		{"http://128.0.0.1:8080", ""},
+		{"http://10.0.0.1:8080", ""},
+		{"http://169.254.169.254:8080", ""},
+		// The name exemption covers exactly the name "localhost".
+		{"http://localhost.evil.com:8080", ""},
+		{"http://evil.localhost:8080", ""},
+		{"http://localhost.:8080", ""},
+		{"http://xlocalhost:8080", ""},
+		{"http://127.0.0.1.evil.com:8080", ""},
+		// Refused by both, for different reasons: net/url rejects the escape,
+		// while WHATWG decodes it to the host "127.0.0.1.evil.com".
+		{"http://127.0.0.1%2eevil.com/x", ""},
+		{"https://idp.example.com", "https://idp.example.com:443"},
+	} {
+		t.Run(tc.url, func(t *testing.T) {
+			origin, err := credentialEgressOrigin(tc.url)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("expected refusal, got origin %q", origin)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if origin != tc.want {
+				t.Fatalf("got %q, want %q", origin, tc.want)
+			}
+		})
+	}
+}
+
+// TestCredentialEgressOriginPinsSpellingNotAddress records the pin semantics
+// this SDK chose: the origin key is the host as parsed, so two spellings of
+// one loopback address are two different origins and a token_endpoint must
+// match the issuer's spelling, not merely resolve to the same address.
+// TypeScript's equivalent test asserts the opposite outcome for the same two
+// URLs, because the WHATWG parser canonicalizes both spellings before its
+// check ever runs.
+func TestCredentialEgressOriginPinsSpellingNotAddress(t *testing.T) {
+	issuer, err := credentialEgressOrigin("http://[::1]:8080")
+	if err != nil {
+		t.Fatalf("unexpected error for the issuer: %v", err)
+	}
+	tokenEndpoint, err := credentialEgressOrigin("http://[0:0:0:0:0:0:0:1]:8080")
+	if err != nil {
+		t.Fatalf("unexpected error for the token endpoint: %v", err)
+	}
+	if issuer == tokenEndpoint {
+		t.Fatalf("expected two spellings of ::1 to pin as different origins, both were %q", issuer)
+	}
+}
+
 // TestCredentialEgressOriginRefusesHostThatCasefoldsToASCII is the
 // regression test for the exploit review found in credentialEgressOrigin's
 // ASCII gate: U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE has a Unicode

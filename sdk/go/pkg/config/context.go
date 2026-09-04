@@ -207,14 +207,21 @@ func credentialEgressOrigin(raw string) (string, error) {
 	// behaves as a plain byte-wise ASCII fold on it.
 	host := strings.ToLower(rawHost)
 
+	// Loopback is decided by parsing the host as an address and asking the
+	// address, never by string equality against a spelling: "::1" and
+	// "0:0:0:0:0:0:0:1" are one address, and the whole of 127.0.0.0/8 is
+	// loopback. "localhost" keeps a separate exemption because ParseIP does
+	// not resolve names — it is a name exemption, so it still trusts the
+	// resolver, and no IP test can change that.
+	//
 	// Deliberate divergence from Rust: net/url.Hostname() strips the bracket
-	// syntax from an IPv6 literal ("::1", not "[::1]"), so this "::1" match
-	// fires for a real IPv6-loopback issuer. Rust's reqwest::Url::host_str()
-	// keeps the brackets, so Rust's identical-looking match at
-	// sdk/rust/src/context.rs:695 never fires and every IPv6-loopback issuer
-	// is refused there — recorded here so a future parity pass reads Go's
-	// behavior as the considered one, not Rust's as the baseline to restore.
-	isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
+	// syntax from an IPv6 literal ("::1", not "[::1]"), so an IPv6-loopback
+	// issuer parses here. Rust's reqwest::Url::host_str() keeps the brackets,
+	// so its string match at sdk/rust/src/context.rs:704 never fires and every
+	// IPv6-loopback issuer is refused there — recorded here so a future parity
+	// pass reads Go's behavior as the considered one, not Rust's as the
+	// baseline to restore.
+	isLoopback := host == "localhost" || net.ParseIP(host).IsLoopback()
 
 	switch {
 	case u.Scheme == "https":
@@ -235,6 +242,14 @@ func credentialEgressOrigin(raw string) (string, error) {
 		}
 	}
 
+	// The key is the host as parsed, not a canonicalized address: two
+	// spellings of one loopback address are two different origins, so a
+	// token_endpoint has to match the issuer's spelling and not merely reach
+	// the same address. That keeps the string compared here byte-identical to
+	// the string net/http dials. TypeScript pins the same rule over a host its
+	// WHATWG parser already canonicalized, so it accepts a spelling change
+	// where this refuses one; the shared loopback table in each suite marks
+	// every row where the two outcomes differ.
 	return fmt.Sprintf("%s://%s:%s", u.Scheme, host, port), nil
 }
 

@@ -167,6 +167,28 @@ function sent(cause: unknown): RefreshFailure {
  * hung IdP would otherwise stall every authenticated call in the process. */
 const REFRESH_HTTP_TIMEOUT_MS = 30_000;
 
+/** Loopback spellings the WHATWG host parser can produce, matched against
+ * `url.hostname` after its brackets are stripped. Node and Bun expose no
+ * loopback test, so this stands in for Go's `net.ParseIP(host).IsLoopback()`
+ * and must accept the same addresses: all of 127.0.0.0/8, `::1`, and
+ * IPv4-mapped loopback. The patterns describe the parser's *output*, not the
+ * forms a human writes — an IPv4 host always arrives as a dotted quad and an
+ * IPv4-mapped address always in hex (`::ffff:7f00:1`, never
+ * `::ffff:127.0.0.1`), so a check written against the dotted mapped form
+ * would silently never fire. */
+const LOOPBACK_IPV4 = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+const LOOPBACK_IPV4_MAPPED_IPV6 = /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/;
+
+function isLoopbackHost(host: string): boolean {
+  return (
+    // A name exemption, so it trusts the resolver; no IP test can change that.
+    host === "localhost" ||
+    host === "::1" ||
+    LOOPBACK_IPV4.test(host) ||
+    LOOPBACK_IPV4_MAPPED_IPV6.test(host)
+  );
+}
+
 /**
  * Parses an OIDC URL into its `scheme://host:port` origin, refusing any
  * destination a refresh token must not be sent to. Plaintext HTTP is
@@ -197,7 +219,7 @@ export function credentialEgressOrigin(raw: string): string {
     throw new Error(`OIDC URL has no host: ${raw}`);
   }
 
-  const isLoopback = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  const isLoopback = isLoopbackHost(host);
 
   if (url.protocol === "https:") {
     // ok
@@ -211,6 +233,12 @@ export function credentialEgressOrigin(raw: string): string {
 
   const port = url.port || (url.protocol === "https:" ? "443" : "80");
 
+  // The key is the host the WHATWG parser produced, which is the same string
+  // `fetch` resolves, so what is compared stays what is dialed. Because that
+  // host is already canonicalized, two spellings of one address pin as one
+  // origin here while Go, which sees the host as written, treats them as two —
+  // every row where the two SDKs differ is marked in the shared loopback table
+  // in each suite.
   return `${url.protocol}//${host}:${port}`;
 }
 

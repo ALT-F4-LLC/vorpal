@@ -802,6 +802,81 @@ describe("credentialEgressOrigin", () => {
   test("allows IPv6 loopback http", () => {
     expect(credentialEgressOrigin("http://[::1]:8080")).toBe("http://::1:8080");
   });
+
+  // The shared loopback table, row-for-row the same inputs as Go's
+  // TestCredentialEgressOriginLoopbackTable in
+  // sdk/go/pkg/config/context_auth_test.go. A row the two SDKs legitimately
+  // disagree on carries Go's outcome in a comment rather than being dropped
+  // to make the two suites look identical.
+  //
+  // The two SDKs ask the same question of different strings: `url.hostname`
+  // is already canonicalized when the check runs here, while Go sees the host
+  // as written. That is a difference in what the parsers accept, not in the
+  // rule, and it cannot be closed on this side — the SDK never observes the
+  // pre-normalization string.
+  const LOOPBACK_TABLE: ReadonlyArray<readonly [string, string | null]> = [
+    // null means the URL must be refused.
+    ["http://127.0.0.1:8080", "http://127.0.0.1:8080"],
+    ["http://localhost:8080", "http://localhost:8080"],
+    ["http://LOCALHOST:8080", "http://localhost:8080"],
+    ["http://[::1]:8080", "http://::1:8080"],
+    // Go: "http://0:0:0:0:0:0:0:1:8080" — it keeps the spelling it was given.
+    ["http://[0:0:0:0:0:0:0:1]:8080", "http://::1:8080"],
+    // All of 127.0.0.0/8 is loopback, not just 127.0.0.1.
+    ["http://127.0.0.2:8080", "http://127.0.0.2:8080"],
+    // Go: "http://::ffff:127.0.0.1:8080" — WHATWG serializes an IPv4-mapped
+    // address in hex and never in the dotted form.
+    ["http://[::ffff:127.0.0.1]:8080", "http://::ffff:7f00:1:8080"],
+    ["http://[::ffff:7f00:1]:8080", "http://::ffff:7f00:1:8080"],
+    // Go refuses the next four: net.ParseIP takes neither shorthand nor
+    // non-decimal forms, while WHATWG canonicalizes each to 127.0.0.1 before
+    // any check written here can see it.
+    ["http://127.1:8080", "http://127.0.0.1:8080"],
+    ["http://2130706433:8080", "http://127.0.0.1:8080"],
+    ["http://0x7f.0.0.1:8080", "http://127.0.0.1:8080"],
+    ["http://0177.0.0.1:8080", "http://127.0.0.1:8080"],
+    // Go refuses this one at its ASCII host gate.
+    ["http://１２７.0.0.1:8080", "http://127.0.0.1:8080"],
+    // Zone IDs are refused by both: the WHATWG parser rejects the URL
+    // outright and net.ParseIP rejects "::1%eth0".
+    ["http://[::1%25eth0]:8080", null],
+    // Non-loopback lookalikes: unspecified, link-local, private, and
+    // near-miss addresses must stay refused over plaintext http.
+    ["http://0.0.0.0:8080", null],
+    ["http://[::]:8080", null],
+    ["http://[::2]:8080", null],
+    ["http://128.0.0.1:8080", null],
+    ["http://10.0.0.1:8080", null],
+    ["http://169.254.169.254:8080", null],
+    // The name exemption covers exactly the name "localhost".
+    ["http://localhost.evil.com:8080", null],
+    ["http://evil.localhost:8080", null],
+    ["http://localhost.:8080", null],
+    ["http://xlocalhost:8080", null],
+    ["http://127.0.0.1.evil.com:8080", null],
+    // Refused by both, for different reasons: WHATWG decodes the escape to
+    // the host "127.0.0.1.evil.com", while net/url rejects the URL.
+    ["http://127.0.0.1%2eevil.com/x", null],
+    ["https://idp.example.com", "https://idp.example.com:443"],
+  ];
+
+  test.each(LOOPBACK_TABLE)("shared loopback table: %s", (url, want) => {
+    if (want === null) {
+      expect(() => credentialEgressOrigin(url)).toThrow();
+      return;
+    }
+    expect(credentialEgressOrigin(url)).toBe(want);
+  });
+
+  // Records the pin semantics this SDK has: the WHATWG parser canonicalizes
+  // both spellings before the check runs, so two spellings of one loopback
+  // address pin as the same origin. Go's equivalent test asserts the opposite
+  // outcome for the same two URLs, because it compares the host as written.
+  test("pins the canonical address, so two spellings of ::1 are one origin", () => {
+    expect(credentialEgressOrigin("http://[0:0:0:0:0:0:0:1]:8080")).toBe(
+      credentialEgressOrigin("http://[::1]:8080"),
+    );
+  });
 });
 
 describe("refreshAccessToken: egress and redirect controls", () => {
