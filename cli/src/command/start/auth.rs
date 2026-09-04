@@ -1,14 +1,64 @@
-use anyhow::{anyhow, Context, Result};
+use crate::command::{login_http_client, NormalizedIssuer};
+use anyhow::{anyhow, bail, Context, Result};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
 use tonic::{
     metadata::{Ascii, MetadataValue},
     Request, Status,
 };
 use tracing::error;
+use vorpal_sdk::context::credential_egress_origin;
+
+/// Bounds every OIDC request this file makes, so a hung or hostile endpoint
+/// cannot pin a blocking worker for the life of the process: token
+/// validation runs inside `block_in_place`, so an unbounded fetch is an
+/// availability defect and not only a slow start. Same value as the login
+/// path's `LOGIN_HTTP_TIMEOUT`.
+const OIDC_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Turns a redirect into an error instead of a body to parse.
+///
+/// The client these responses come from refuses to follow redirects, which
+/// makes a redirect a returned 3xx rather than a transport error.
+/// `error_for_status` does not treat 3xx as failure, so without this the
+/// redirect would surface as "parsing discovery doc" and name the wrong
+/// cause. Redirects are refused rather than followed because a redirect
+/// moves a request *after* the origin pin below has checked the URL.
+fn reject_redirect(response: reqwest::Response, url: &str) -> Result<reqwest::Response> {
+    if response.status().is_redirection() {
+        bail!(
+            "refusing to follow redirect ({}) from {}: OIDC endpoints must answer on the \
+             issuer's own origin",
+            response.status(),
+            url
+        );
+    }
+
+    Ok(response)
+}
+
+/// Requires a discovery-named endpoint to share the issuer's
+/// `scheme://host:port` origin.
+///
+/// The discovery document is attacker-influenceable wherever the response
+/// bytes are: whoever names `jwks_uri` chooses the keys that validate every
+/// bearer token this server accepts, and whoever names `token_endpoint`
+/// receives the service-account client secret. The origin comparison is
+/// blind to path, which is why the document's own `issuer` claim is still
+/// checked separately.
+fn require_issuer_origin(endpoint: &str, issuer_origin: &str, field: &str) -> Result<()> {
+    let endpoint_origin = credential_egress_origin(endpoint)
+        .with_context(|| format!("OIDC discovery {field} {endpoint:?} is not a usable URL"))?;
+
+    if endpoint_origin != issuer_origin {
+        bail!("OIDC discovery {field} {endpoint} does not match issuer origin {issuer_origin}");
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Deserialize)]
 struct OidcDiscovery {
@@ -131,45 +181,66 @@ pub struct OidcValidator {
     pub trusted_service_client_ids: Vec<String>,
     // Cache the current JWK set; refresh if key not found
     jwks: Arc<RwLock<JwkSet>>,
+    /// The one hardened client every OIDC fetch goes through, including the
+    /// rolling-key refresh an unauthenticated peer can trigger.
+    client: reqwest::Client,
 }
 
 impl OidcValidator {
     pub async fn new(issuer: String, issuer_audiences: Vec<String>) -> Result<Self> {
-        // Normalize issuer by removing trailing slash for consistent comparison
-        let normalized_issuer = issuer.trim_end_matches('/').to_string();
+        // The issuer is validated here, at the chokepoint, and not only by
+        // the `--issuer` value parser: this constructor is `pub` and takes a
+        // bare `String`, so a caller added later would otherwise reintroduce
+        // a plaintext non-loopback trust anchor with no error. Parsing also
+        // canonicalizes, which is what makes the equality below sound.
+        let issuer = NormalizedIssuer::parse(&issuer)
+            .map_err(|cause| anyhow!("invalid OIDC issuer {issuer:?}: {cause}"))?;
+        let issuer_origin = credential_egress_origin(issuer.as_str())?;
+        let client = login_http_client(OIDC_HTTP_TIMEOUT)?;
 
         // 1) Discover the realm (/.well-known/openid-configuration)
-        let discovery_url = format!("{normalized_issuer}/.well-known/openid-configuration");
-        let disc: OidcDiscovery = reqwest::Client::new()
-            .get(&discovery_url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await
-            .context("parsing discovery doc")?;
+        let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+        let disc: OidcDiscovery =
+            reject_redirect(client.get(&discovery_url).send().await?, &discovery_url)?
+                .error_for_status()?
+                .json()
+                .await
+                .context("parsing discovery doc")?;
 
-        // Normalize discovery issuer for comparison (Auth0 always includes trailing slash)
-        let normalized_disc_issuer = disc.issuer.trim_end_matches('/').to_string();
+        // Both sides are normalized: an IdP that states its `iss` with an
+        // explicit default port or a mixed-case host means the same issuer,
+        // and comparing raw text there fails a correct deployment closed.
+        let disc_issuer = NormalizedIssuer::parse(&disc.issuer).map_err(|cause| {
+            anyhow!(
+                "OIDC discovery issuer {:?} is invalid: {cause}",
+                disc.issuer
+            )
+        })?;
 
-        if normalized_disc_issuer != normalized_issuer {
-            // Defensive: enforce exact issuer match
+        if disc_issuer != issuer {
+            // Path-blind origin pinning alone would accept a co-tenant's
+            // endpoints on a multi-tenant IdP; this is the check that does not.
             return Err(anyhow!(
                 "issuer mismatch (expected {}, discovery says {})",
-                normalized_issuer,
+                issuer,
                 disc.issuer
             ));
         }
 
+        require_issuer_origin(&disc.jwks_uri, &issuer_origin, "jwks_uri")?;
+
         // 2) Fetch JWKS
-        let jwks = fetch_jwks(&disc.jwks_uri).await?;
+        let jwks = fetch_jwks(&client, &disc.jwks_uri).await?;
 
         Ok(Self {
-            issuer: normalized_issuer,
+            issuer: issuer.as_str().to_string(),
             issuer_audiences,
             jwks: Arc::new(RwLock::new(jwks)),
+            // The pinned URL is what gets stored, so the refresh below reuses
+            // a value that was checked rather than re-deriving one.
             jwks_uri: disc.jwks_uri,
             trusted_service_client_ids: Vec::new(),
+            client,
         })
     }
 
@@ -204,7 +275,7 @@ impl OidcValidator {
         }
 
         // If not found, refresh JWKS once and retry (handles rolling keys)
-        let fresh = fetch_jwks(&self.jwks_uri)
+        let fresh = fetch_jwks(&self.client, &self.jwks_uri)
             .await
             .map_err(|e| AuthError::Jwt(format!("jwks refresh failed: {e}")))?;
         *self.jwks.write().await = fresh;
@@ -281,11 +352,8 @@ impl OidcValidator {
     // }
 }
 
-async fn fetch_jwks(uri: &str) -> Result<JwkSet> {
-    let jwks: JwkSet = reqwest::Client::new()
-        .get(uri)
-        .send()
-        .await?
+async fn fetch_jwks(client: &reqwest::Client, uri: &str) -> Result<JwkSet> {
+    let jwks: JwkSet = reject_redirect(client.get(uri).send().await?, uri)?
         .error_for_status()?
         .json()
         .await?;
@@ -406,13 +474,23 @@ pub async fn exchange_client_credentials(
     scope: &str,
 ) -> Result<(MetadataValue<Ascii>, u64)> {
     // 1) Discover the token endpoint via OIDC discovery
-    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
+    let issuer = NormalizedIssuer::parse(issuer)
+        .map_err(|cause| anyhow!("invalid OIDC issuer {issuer:?}: {cause}"))?;
+    let issuer_origin = credential_egress_origin(issuer.as_str())?;
+    let client = login_http_client(OIDC_HTTP_TIMEOUT)?;
 
-    let discovery_response = reqwest::Client::new()
-        .get(&discovery_url)
-        .send()
-        .await
-        .context("failed to fetch OIDC discovery")?;
+    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+
+    let discovery_response = reject_redirect(
+        client
+            .get(&discovery_url)
+            .send()
+            .await
+            .context("failed to fetch OIDC discovery")?,
+        &discovery_url,
+    )?
+    .error_for_status()
+    .context("OIDC discovery request failed")?;
 
     // let discovery_status = discovery_response.status();
     let discovery_text = discovery_response
@@ -428,6 +506,11 @@ pub async fn exchange_client_credentials(
         anyhow!("failed to parse OIDC discovery response: {e} - response was: {discovery_text}")
     })?;
 
+    // The POST below carries the service-account client secret, so an
+    // off-origin `token_endpoint` is credential exfiltration and not merely
+    // a misrouted request.
+    require_issuer_origin(&disc.token_endpoint, &issuer_origin, "token_endpoint")?;
+
     // 2) Exchange client credentials for access token
     let token_request = ClientCredentialsRequest {
         audience: issuer_audience.map(std::string::ToString::to_string),
@@ -437,12 +520,18 @@ pub async fn exchange_client_credentials(
         scope: compose_client_credentials_scope(scope, issuer_audience),
     };
 
-    let token_response = reqwest::Client::new()
-        .post(&disc.token_endpoint)
-        .form(&token_request)
-        .send()
-        .await
-        .context("failed to send token request to OIDC provider")?;
+    // A 307 or 308 replays the request body — the client secret — at the
+    // redirect target, which header stripping does not prevent. Refusing the
+    // redirect is the control.
+    let token_response = reject_redirect(
+        client
+            .post(&disc.token_endpoint)
+            .form(&token_request)
+            .send()
+            .await
+            .context("failed to send token request to OIDC provider")?,
+        &disc.token_endpoint,
+    )?;
 
     let token_status = token_response.status();
     let token_text = token_response
@@ -883,6 +972,315 @@ mod tests {
         assert!(
             result.is_ok(),
             "trusted azp must bypass even with no namespaces claim: {result:?}"
+        );
+    }
+
+    // ===== OIDC key provenance (VPL-699) =====
+    //
+    // The network is the only thing faked here: the code under test is the
+    // real discovery fetch, the real origin checks and the real token
+    // exchange. Every negative test below is paired with a positive control
+    // in the same module, because "the off-origin fixture logged zero
+    // requests" and "the fixture never worked" are the same observation
+    // otherwise.
+
+    /// A minimal HTTP/1.1 stand-in for an IdP, answering each request with
+    /// whatever `respond` returns for that request's path and recording the
+    /// paths it served.
+    struct IdpServer {
+        addr: std::net::SocketAddr,
+        paths: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl IdpServer {
+        async fn start(
+            respond: impl Fn(&str, std::net::SocketAddr) -> String + Send + Sync + 'static,
+        ) -> Self {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind idp fixture");
+            let addr = listener.local_addr().expect("fixture address");
+            let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let respond = Arc::new(respond);
+            let accepted = paths.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    let Ok((mut socket, _)) = listener.accept().await else {
+                        return;
+                    };
+
+                    let respond = respond.clone();
+                    let accepted = accepted.clone();
+
+                    tokio::spawn(async move {
+                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+                        let mut buffer = vec![0u8; 8192];
+                        let read = socket.read(&mut buffer).await.unwrap_or(0);
+                        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                        let path = request
+                            .split_whitespace()
+                            .nth(1)
+                            .unwrap_or_default()
+                            .to_string();
+
+                        accepted.lock().unwrap().push(path.clone());
+
+                        let response = respond(&path, addr);
+
+                        let _ = socket.write_all(response.as_bytes()).await;
+                    });
+                }
+            });
+
+            Self { addr, paths }
+        }
+
+        fn issuer(&self) -> String {
+            format!("http://127.0.0.1:{}", self.addr.port())
+        }
+
+        fn requested_paths(&self) -> Vec<String> {
+            self.paths.lock().unwrap().clone()
+        }
+    }
+
+    fn http_json(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+    }
+
+    fn http_redirect(status: &str, location: &str) -> String {
+        format!(
+            "HTTP/1.1 {}\r\nlocation: {}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            status, location
+        )
+    }
+
+    fn discovery_document(issuer: &str, jwks_uri: &str) -> String {
+        http_json(&format!(
+            "{{\"issuer\":\"{}\",\"jwks_uri\":\"{}\",\"token_endpoint\":\"{}/token\"}}",
+            issuer, jwks_uri, issuer
+        ))
+    }
+
+    const EMPTY_JWKS: &str = "{\"keys\":[]}";
+
+    #[tokio::test]
+    async fn oidc_validator_accepts_same_origin_discovery() {
+        // Positive control for both refusal tests below: without it, their
+        // "zero requests" assertions could pass against an inert fixture.
+        let idp = IdpServer::start(|path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => {
+                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                }
+                _ => http_json(EMPTY_JWKS),
+            }
+        })
+        .await;
+
+        let validator = OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .expect("same-origin discovery must succeed");
+
+        assert_eq!(validator.issuer, idp.issuer());
+        assert_eq!(validator.jwks_uri, format!("{}/jwks", idp.issuer()));
+        assert_eq!(
+            idp.requested_paths(),
+            vec![
+                "/.well-known/openid-configuration".to_string(),
+                "/jwks".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_validator_refuses_redirected_discovery() {
+        let elsewhere = IdpServer::start(|path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => {
+                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                }
+                _ => http_json(EMPTY_JWKS),
+            }
+        })
+        .await;
+
+        let target = elsewhere.issuer();
+        let idp = IdpServer::start(move |_, _| {
+            http_redirect(
+                "302 Found",
+                &format!("{}/.well-known/openid-configuration", target),
+            )
+        })
+        .await;
+
+        let err = OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .err()
+            .expect("a redirected discovery response must be refused");
+
+        assert!(
+            err.to_string().contains("refusing to follow redirect"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            elsewhere.requested_paths().is_empty(),
+            "the redirect target must never be contacted, got {:?}",
+            elsewhere.requested_paths()
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_validator_refuses_cross_origin_jwks_uri() {
+        let elsewhere = IdpServer::start(|_, _| http_json(EMPTY_JWKS)).await;
+
+        let attacker_jwks = format!("{}/jwks", elsewhere.issuer());
+        let idp = IdpServer::start(move |path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                // The document's own `issuer` claim is honest; only
+                // `jwks_uri` points elsewhere.
+                "/.well-known/openid-configuration" => discovery_document(&issuer, &attacker_jwks),
+                _ => http_json(EMPTY_JWKS),
+            }
+        })
+        .await;
+
+        let err = OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .err()
+            .expect("an off-origin jwks_uri must be refused");
+
+        assert!(
+            err.to_string().contains("jwks_uri")
+                && err.to_string().contains("does not match issuer origin"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            elsewhere.requested_paths().is_empty(),
+            "the off-origin key host must never be contacted, got {:?}",
+            elsewhere.requested_paths()
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_validator_refuses_non_loopback_plaintext_issuer() {
+        // No fixture: the issuer must be refused before any network I/O, so
+        // the error names the scheme rule rather than a failed connection.
+        let err = OidcValidator::new("http://idp.internal/realms/vorpal".to_string(), vec![])
+            .await
+            .err()
+            .expect("a plaintext non-loopback issuer must be refused");
+
+        assert!(
+            err.to_string().contains("must be https"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_credentials_exchange_succeeds_on_issuer_origin() {
+        // Positive control for the two token-endpoint refusals below.
+        let idp = IdpServer::start(|path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => {
+                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                }
+                _ => http_json(
+                    "{\"access_token\":\"header.payload.signature\",\"expires_in\":300,\
+                     \"token_type\":\"Bearer\"}",
+                ),
+            }
+        })
+        .await;
+
+        let (header, expires_in) =
+            exchange_client_credentials(&idp.issuer(), None, "vorpal-worker", "s3cr3t", "openid")
+                .await
+                .expect("same-origin token exchange must succeed");
+
+        assert_eq!(header.to_str().unwrap(), "Bearer header.payload.signature");
+        assert_eq!(expires_in, 300);
+        assert!(idp.requested_paths().contains(&"/token".to_string()));
+    }
+
+    #[tokio::test]
+    async fn client_credentials_exchange_refuses_cross_origin_token_endpoint() {
+        let elsewhere = IdpServer::start(|_, _| http_json("{}")).await;
+
+        let attacker_token_endpoint = format!("{}/token", elsewhere.issuer());
+        let idp = IdpServer::start(move |_, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            http_json(&format!(
+                "{{\"issuer\":\"{}\",\"jwks_uri\":\"{}/jwks\",\"token_endpoint\":\"{}\"}}",
+                issuer, issuer, attacker_token_endpoint
+            ))
+        })
+        .await;
+
+        let err =
+            exchange_client_credentials(&idp.issuer(), None, "vorpal-worker", "s3cr3t", "openid")
+                .await
+                .expect_err("an off-origin token_endpoint must be refused");
+
+        assert!(
+            err.to_string().contains("token_endpoint")
+                && err.to_string().contains("does not match issuer origin"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            elsewhere.requested_paths().is_empty(),
+            "the client secret must never leave the issuer origin, got {:?}",
+            elsewhere.requested_paths()
+        );
+    }
+
+    #[tokio::test]
+    async fn client_credentials_exchange_refuses_redirected_token_endpoint() {
+        // A 307 replays the request body, so following it would hand the
+        // client secret to the redirect target.
+        let elsewhere = IdpServer::start(|_, _| http_json("{}")).await;
+
+        let target = format!("{}/token", elsewhere.issuer());
+        let idp = IdpServer::start(move |path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => {
+                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                }
+                _ => http_redirect("307 Temporary Redirect", &target),
+            }
+        })
+        .await;
+
+        let err =
+            exchange_client_credentials(&idp.issuer(), None, "vorpal-worker", "s3cr3t", "openid")
+                .await
+                .expect_err("a redirected token endpoint must be refused");
+
+        assert!(
+            err.to_string().contains("refusing to follow redirect"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            elsewhere.requested_paths().is_empty(),
+            "the client secret must never be replayed at the redirect target, got {:?}",
+            elsewhere.requested_paths()
         );
     }
 }
