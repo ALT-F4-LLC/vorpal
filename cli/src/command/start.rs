@@ -385,12 +385,14 @@ fn default_registry_allowed(
 /// a pure predicate, mirroring `registry_allowed_log_is_active`, so this
 /// decision is unit-testable without standing up a server (TDD §11).
 ///
-/// The agent service (`start.rs`, `AgentServiceServer::new`) is deliberately
-/// not covered here: it has never been wrapped by an interceptor even when
-/// `--issuer` is set, which is a distinct defect outside this file's
-/// declared scope — see the gap filed alongside this change.
-fn anonymous_start_refused(has_worker: bool, has_registry: bool, issuer: Option<&str>) -> bool {
-    (has_worker || has_registry) && issuer.is_none()
+/// The agent is covered by the same rule: it reads caller-named filesystem
+/// paths and pushes what it reads into a caller-named registry namespace
+/// under the host user's own stored OAuth credentials, so an unauthenticated
+/// agent is a confused deputy for arbitrary file read and namespace forgery.
+/// Refusing here is what leaves only two states — authenticated, or refused
+/// to start — with no third in which the agent registers bare.
+fn anonymous_start_refused(services: &StartupServices, issuer: Option<&str>) -> bool {
+    (services.has_worker || services.has_registry || services.has_agent) && issuer.is_none()
 }
 
 /// Resolves the credential the worker and registry (archive/artifact)
@@ -414,29 +416,29 @@ fn anonymous_start_refused(has_worker: bool, has_registry: bool, issuer: Option<
 struct StartupServices {
     has_worker: bool,
     has_registry: bool,
+    has_agent: bool,
 }
 
 fn resolve_required_issuer(
     services: StartupServices,
     issuer: Option<String>,
 ) -> Result<Option<String>> {
-    if anonymous_start_refused(
-        services.has_worker,
-        services.has_registry,
-        issuer.as_deref(),
-    ) {
+    if anonymous_start_refused(&services, issuer.as_deref()) {
         bail!(
-            "worker and archive/artifact services require --issuer for authentication; \
+            "agent, worker and archive/artifact services require --issuer for authentication; \
              refusing to start unauthenticated — an anonymous peer could otherwise run \
-             arbitrary build entrypoints as this process's uid"
+             arbitrary build entrypoints as this process's uid, or have the agent read local \
+             files and push them to the registry under this user's credentials"
         );
     }
 
-    Ok(if services.has_worker || services.has_registry {
-        issuer
-    } else {
-        None
-    })
+    Ok(
+        if services.has_worker || services.has_registry || services.has_agent {
+            issuer
+        } else {
+            None
+        },
+    )
 }
 
 /// Whether `run` should emit the registry allow-list startup log at all —
@@ -848,18 +850,15 @@ pub async fn run(args: RunArgs) -> Result<()> {
         args.health_check_port,
     )?;
 
-    // VPL-434 (C1): refuse to start with an unauthenticated worker or
+    // VPL-434 (C1): refuse to start with an unauthenticated agent, worker or
     // registry (archive/artifact) service rather than defaulting into one.
     // See `resolve_required_issuer` for why this returns the validated
-    // issuer itself rather than a bare refusal bool. VPL-434-CLUSTER-3: the
-    // refusal message no longer suggests `--services agent` as a remedy —
-    // the agent service is the one that stays unauthenticated regardless of
-    // `--issuer` (a distinct, already-gapped defect), so that suggestion
-    // steered operators onto the single remaining anonymous surface.
+    // issuer itself rather than a bare refusal bool.
     let required_issuer = resolve_required_issuer(
         StartupServices {
             has_worker,
             has_registry,
+            has_agent,
         },
         args.issuer.clone(),
     )?;
@@ -956,21 +955,33 @@ pub async fn run(args: RunArgs) -> Result<()> {
         None => get_socket_path().display().to_string(),
     };
 
-    if has_agent {
-        let service = AgentServiceServer::new(AgentServer::new(registry_allowed.clone()));
-
-        router = router.add_service(service);
-
-        info!("agent |> service: {}", transport_label);
-    }
-
-    // `required_issuer` is `Some` here exactly when `has_registry` or
-    // `has_worker` is true (`resolve_required_issuer`'s own contract) — a
-    // `match` on it, rather than an `Option::expect()` re-derived inside
-    // each helper below, means neither can compile against a missing issuer
-    // in the first place, so there is nothing left here for
-    // VPL-434-CORRECTNESS-3/VPL434-ARCH-2 to flag.
+    // `required_issuer` is `Some` here exactly when `has_agent`,
+    // `has_registry` or `has_worker` is true (`resolve_required_issuer`'s own
+    // contract) — a `match` on it, rather than an `Option::expect()`
+    // re-derived inside each `if has_registry`/`if has_worker` block below,
+    // means neither block can compile against a missing issuer in the first
+    // place, so there is nothing left here for
+    // VPL-434-CORRECTNESS-3/VPL434-ARCH-2 to flag. Registering the agent
+    // inside this arm is what makes a bare `AgentServiceServer::new`
+    // unreachable: there is no branch left in which the agent is added
+    // without an interceptor.
     if let Some(issuer) = required_issuer {
+        if has_agent {
+            let validator_intercepter = new_validator_interceptor(
+                &issuer,
+                args.issuer_audience.as_deref(),
+                &args.issuer_service_client_ids,
+            )
+            .await?;
+
+            router = router.add_service(AgentServiceServer::with_interceptor(
+                AgentServer::new(registry_allowed.clone()),
+                validator_intercepter,
+            ));
+
+            info!("agent |> service: {}", transport_label);
+        }
+
         if has_registry {
             router = add_registry_services(router, &args, &issuer, &transport_label).await?;
         }
@@ -1063,36 +1074,54 @@ pub async fn run(args: RunArgs) -> Result<()> {
 mod anonymous_start_refused_tests {
     use super::*;
 
+    fn services(has_worker: bool, has_registry: bool, has_agent: bool) -> StartupServices {
+        StartupServices {
+            has_worker,
+            has_registry,
+            has_agent,
+        }
+    }
+
     // AC-1/AC-2 (VPL-434): a worker or registry (archive/artifact) service
     // with no issuer must be refused, whether reachable over UDS or TCP —
     // the predicate takes no transport argument because the decision is
     // about credential absence, not reach.
     #[test]
     fn anonymous_start_refused_for_worker_with_no_issuer() {
-        assert!(anonymous_start_refused(true, false, None));
+        assert!(anonymous_start_refused(&services(true, false, false), None));
     }
 
     #[test]
     fn anonymous_start_refused_for_registry_with_no_issuer() {
-        assert!(anonymous_start_refused(false, true, None));
+        assert!(anonymous_start_refused(&services(false, true, false), None));
     }
 
     #[test]
     fn anonymous_start_not_refused_when_an_issuer_is_configured() {
         assert!(!anonymous_start_refused(
-            true,
-            true,
+            &services(true, true, true),
             Some("https://issuer.example.com")
         ));
     }
 
-    // An agent-only or registry-free deployment with no issuer is not this
-    // predicate's concern — the agent service is a separate, already-filed
-    // gap (see the change summary), and a process running neither worker
-    // nor registry has no anonymous-RCE surface for this predicate to gate.
+    // An agent with no issuer used to be permitted, which registered the
+    // agent service with no interceptor at all: an anonymous peer could have
+    // it read local files and push them to the registry under this user's
+    // stored credentials. The agent now joins worker and registry in the
+    // refusal.
     #[test]
-    fn anonymous_start_not_refused_for_agent_only_deployment() {
-        assert!(!anonymous_start_refused(false, false, None));
+    fn anonymous_start_refused_for_agent_with_no_issuer() {
+        assert!(anonymous_start_refused(&services(false, false, true), None));
+    }
+
+    // A process running none of the three has no surface for this predicate
+    // to gate.
+    #[test]
+    fn anonymous_start_not_refused_for_a_process_running_none_of_them() {
+        assert!(!anonymous_start_refused(
+            &services(false, false, false),
+            None
+        ));
     }
 }
 
@@ -1107,7 +1136,7 @@ mod anonymous_start_refused_tests {
 mod run_startup_refusal_tests {
     use super::*;
 
-    fn worker_only_args(issuer: Option<String>) -> RunArgs {
+    fn single_service_args(service: &str, issuer: Option<String>) -> RunArgs {
         RunArgs {
             archive_cache_ttl: 3600,
             health_check: false,
@@ -1122,7 +1151,7 @@ mod run_startup_refusal_tests {
             registry_backend_s3_bucket: None,
             registry_backend_s3_force_path_style: false,
             registry_allowed: None,
-            services: vec!["worker".to_string()],
+            services: vec![service.to_string()],
             tls: false,
         }
     }
@@ -1133,7 +1162,21 @@ mod run_startup_refusal_tests {
     // call site (not just the predicate) fails this test.
     #[tokio::test]
     async fn run_refuses_a_worker_service_with_no_issuer() {
-        let err = run(worker_only_args(None)).await.unwrap_err();
+        let err = run(single_service_args("worker", None)).await.unwrap_err();
+
+        assert!(
+            err.to_string().contains("require --issuer"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // The default `--services agent` install is the deployment this refusal
+    // is about: without it the agent registers with no interceptor to
+    // install, so driving `run` itself — not just the predicate — is what
+    // pins that a bare agent never binds a listener.
+    #[tokio::test]
+    async fn run_refuses_an_agent_service_with_no_issuer() {
+        let err = run(single_service_args("agent", None)).await.unwrap_err();
 
         assert!(
             err.to_string().contains("require --issuer"),

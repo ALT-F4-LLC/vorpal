@@ -1,6 +1,6 @@
 use crate::command::{
     lock::{artifact_system_to_platform, load_lock, save_lock, LockSource, Lockfile},
-    start::{resolve_registry, ResolvedRegistry},
+    start::{auth, resolve_registry, ResolvedRegistry},
     store::{
         archives::{compress_zstd, unpack_zip},
         hashes::get_source_digest,
@@ -1002,6 +1002,22 @@ impl AgentService for AgentServer {
         &self,
         request: Request<PrepareArtifactRequest>,
     ) -> Result<Response<Self::PrepareArtifactStream>, Status> {
+        // The absence of a credential must never be what authorizes a
+        // request. This runs as the first statement of the handler, ahead of
+        // the spawn below, so a claim-free caller is refused as the RPC
+        // status itself and never reaches `prepare_artifact` — which reads
+        // caller-named filesystem paths and pushes what it reads into a
+        // caller-named registry namespace under the host user's own stored
+        // bearer. `require_namespace_or_service_trust` returns
+        // `unauthenticated` when no `PrincipalKind` sits in the request
+        // extensions; `authorize_namespace_if_authenticated` returns `Ok` in
+        // that case and would leave the anonymous path open.
+        auth::require_namespace_or_service_trust(
+            &request,
+            &request.get_ref().artifact_namespace,
+            "write",
+        )?;
+
         let (tx, rx) = channel(100);
         // Cloned so the spawned task can own a handle while `self` keeps its own.
         let source_cache = Arc::clone(&self.source_cache);
@@ -1193,5 +1209,86 @@ mod tests {
                 status.message()
             );
         }
+    }
+
+    fn prepare_request(namespace: &str) -> PrepareArtifactRequest {
+        PrepareArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec![],
+                name: "test".to_string(),
+                sources: vec![],
+                steps: vec![],
+                systems: vec![],
+                target: 0,
+            }),
+            artifact_context: ".".to_string(),
+            artifact_namespace: namespace.to_string(),
+            artifact_unlock: false,
+            registry: "http://registry.example.com".to_string(),
+        }
+    }
+
+    // The trait-level handler must deny a claim-free request outright: the
+    // agent had no interceptor and no namespace check at all, so an
+    // anonymous peer reached a handler that reads caller-named paths and
+    // pushes them under the host user's bearer.
+    #[tokio::test]
+    async fn prepare_artifact_service_denies_a_request_with_no_claims() {
+        let server = AgentServer::new(vec!["http://registry.example.com".to_string()]);
+
+        let status = server
+            .prepare_artifact(Request::new(prepare_request("library")))
+            .await
+            .expect_err("a claim-free request must be denied, not silently skipped");
+
+        assert_eq!(status.code(), Code::Unauthenticated);
+    }
+
+    // The denial must land before the allow-list check the spawned task
+    // performs, so an unauthenticated caller cannot tell an allow-listed
+    // registry from a rejected one by the code it gets back.
+    #[tokio::test]
+    async fn prepare_artifact_denies_a_claim_free_request_for_any_registry() {
+        let server = AgentServer::new(vec!["http://registry.example.com".to_string()]);
+
+        let mut request = prepare_request("library");
+        request.registry = "http://attacker.example.com".to_string();
+
+        let status = server
+            .prepare_artifact(Request::new(request))
+            .await
+            .expect_err("a claim-free request must be denied");
+
+        assert_eq!(status.code(), Code::Unauthenticated);
+    }
+
+    // Positive control: a request carrying `Claims`/`PrincipalKind` with
+    // namespace write permission passes the gate, proving the denials above
+    // are the gate firing rather than an inert fixture.
+    #[tokio::test]
+    async fn prepare_artifact_service_admits_a_request_with_namespace_write_claims() {
+        let server = AgentServer::new(vec!["http://registry.example.com".to_string()]);
+
+        let mut request = Request::new(prepare_request("library"));
+
+        let mut namespaces = HashMap::new();
+        namespaces.insert("library".to_string(), vec!["write".to_string()]);
+
+        request.extensions_mut().insert(auth::Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("tester".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(namespaces),
+        });
+        request.extensions_mut().insert(auth::PrincipalKind::Human);
+
+        server
+            .prepare_artifact(request)
+            .await
+            .expect("a claims-bearing request with namespace write permission is admitted");
     }
 }
