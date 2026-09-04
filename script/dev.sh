@@ -8,7 +8,8 @@ readonly SCRIPT_PATH="${PWD}/script"
 scripts=("rustup" "protoc")
 
 if [[ "${CI:-}" != "true" ]]; then
-    scripts=("xz" "amber" "${scripts[@]}" "lima" "terraform")
+    # CI provisions go and bun through setup actions, with its own caching.
+    scripts=("xz" "amber" "${scripts[@]}" "go" "bun" "lima" "terraform")
 fi
 
 if [[ "$(uname -s)" == "Linux" ]]; then
