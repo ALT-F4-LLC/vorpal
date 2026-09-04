@@ -1,6 +1,9 @@
 module github.com/ALT-F4-LLC/vorpal/sdk/go
 
-go 1.26.0
+// A minor-line floor, not an exact patch: CI reads this file via
+// actions/setup-go's go-version-file, so patch releases of 1.26 are picked up
+// without a commit. Add a toolchain directive only to require a newer minor.
+go 1.26
 
 require (
 	github.com/BurntSushi/toml v1.6.0
