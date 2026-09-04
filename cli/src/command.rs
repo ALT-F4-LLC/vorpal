@@ -1,9 +1,6 @@
-use crate::command::{
-    config::{
-        VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourcePython, VorpalConfigSourceRust,
-        VorpalConfigSourceTypeScript,
-    },
-    store::paths::get_key_credentials_path,
+use crate::command::config::{
+    VorpalConfigSource, VorpalConfigSourceGo, VorpalConfigSourcePython, VorpalConfigSourceRust,
+    VorpalConfigSourceTypeScript,
 };
 use anyhow::{anyhow, bail, Context as _, Result};
 use clap::parser::ValueSource;
@@ -15,14 +12,13 @@ use oauth2::{
 use path_clean::PathClean;
 use rustls::crypto::ring;
 use std::{
-    collections::BTreeMap,
     env::current_dir,
     path::{Path, PathBuf},
     process::exit,
     sync::Mutex,
     time::{Duration, Instant},
 };
-use tokio::{fs::OpenOptions, io::AsyncWriteExt, time::sleep};
+use tokio::time::sleep;
 use tracing::{error, subscriber, warn, Level};
 use tracing_subscriber::{
     filter::{LevelFilter, Targets},
@@ -32,7 +28,8 @@ use tracing_subscriber::{
 use vorpal_sdk::{
     artifact::{get_default_address, system::get_system_default_str},
     context::{
-        credential_egress_origin, VorpalCredentials, VorpalCredentialsContent, DEFAULT_NAMESPACE,
+        commit_login_credentials, credential_egress_origin, VorpalCredentialsContent,
+        DEFAULT_NAMESPACE,
     },
 };
 
@@ -1439,33 +1436,6 @@ async fn fetch_login_discovery_endpoints(
     login_discovery_targets(issuer, &doc)
 }
 
-/// Assembles the `VorpalCredentials` a successful login writes to disk
-/// (VPL-280 AC4, C-6). A pure function so the wiring this issue exists to
-/// get right — the registry map's value must be the *exact same string* as
-/// the issuer map's key, or every authenticated call after login fails to
-/// find credentials (`sdk/rust/src/context.rs` looks the registry value up
-/// as a key into the issuer map) — is asserted directly, rather than only
-/// reachable by driving a full device-authorization flow.
-fn build_login_credentials(
-    normalized_issuer: &str,
-    effective_registry: &str,
-    content: VorpalCredentialsContent,
-) -> VorpalCredentials {
-    let mut issuer_map = BTreeMap::new();
-    let mut registry_map = BTreeMap::new();
-
-    issuer_map.insert(normalized_issuer.to_string(), content);
-    registry_map.insert(
-        effective_registry.to_string(),
-        normalized_issuer.to_string(),
-    );
-
-    VorpalCredentials {
-        issuer: issuer_map,
-        registry: registry_map,
-    }
-}
-
 /// Build-output flags shared between `build` and `prepare`, mirroring the
 /// independent boolean CLI flags on [`Command::Build`] one-to-one.
 #[expect(
@@ -1764,43 +1734,7 @@ async fn run_login(
         scopes,
     };
 
-    // TODO: load existing credentials file if it exists
-
-    let credentials = build_login_credentials(normalized_issuer.as_str(), registry, content);
-    let credentials_json = serde_json::to_string_pretty(&credentials)?;
-    let credentials_path = get_key_credentials_path();
-
-    // Enforce mode 0o600 on file create so the credentials are not
-    // born world-readable on a default-umask (022) system. This is
-    // the file-birth point — `OpenOptions::mode()` only applies when
-    // the file is created, so getting it right here is load-bearing.
-    //
-    // KNOWN OPEN RISK, deliberately not fixed here: this write is
-    // truncate-then-write, so a concurrent reader can observe the
-    // file empty or partial and a crash mid-write leaves it
-    // zero-length, and the mode is not re-asserted on a file that
-    // already exists. `vorpal build` now reads this file from up to
-    // `--jobs` tasks at once, which multiplies how often a reader is
-    // in that window. The correct fix is to route this through the
-    // SDK's own atomic writer (`write_credentials_secure`,
-    // `sdk/rust/src/context.rs`, temp file + fsync + rename, with
-    // its own torn-read tests) rather than growing a second
-    // implementation here — that needs the SDK to export it, which
-    // is outside this change's declared scope and is filed as its
-    // own issue.
-    let mut credentials_file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&credentials_path)
-        .await?;
-    credentials_file
-        .write_all(credentials_json.as_bytes())
-        .await?;
-    credentials_file.flush().await?;
-
-    Ok(())
+    commit_login_credentials(normalized_issuer.as_str(), registry, content).await
 }
 
 /// Installs the process-global `tracing` subscriber: a stderr fmt layer
@@ -3310,44 +3244,6 @@ mod login_egress_tests {
             .expect("a well-formed https issuer must validate");
 
         assert_eq!(normalized.as_str(), "https://tenant.example.com");
-    }
-
-    // --- build_login_credentials (AC4, C-6) ---------------------------------
-
-    #[test]
-    fn build_login_credentials_stores_the_same_issuer_string_in_both_maps() {
-        // Cluster M (blocker): a mutant that has the registry map store a
-        // different issuer string than the one used as the issuer map's key
-        // — the exact C-6 trap the pinned threat model warns about, where
-        // every authenticated call after login fails to find credentials —
-        // previously left `cargo test -p vorpal-cli` green, because nothing
-        // called this wiring outside the untested `Command::Login` arm.
-        let content = VorpalCredentialsContent {
-            access_token: "access-token".to_string(),
-            audience: None,
-            client_id: "client-id".to_string(),
-            expires_in: 3600,
-            issued_at: 0,
-            refresh_token: "refresh-token".to_string(),
-            scopes: vec![],
-        };
-
-        let credentials = build_login_credentials(
-            "https://tenant.example.com",
-            "https://registry.example.com",
-            content,
-        );
-
-        let registry_issuer = credentials
-            .registry
-            .get("https://registry.example.com")
-            .expect("registry map must have an entry for effective_registry");
-
-        assert_eq!(registry_issuer, "https://tenant.example.com");
-        assert!(
-            credentials.issuer.contains_key(registry_issuer),
-            "registry map value {registry_issuer:?} must be a key in the issuer map"
-        );
     }
 
     // --- login_discovery_targets (AC2, C-3, C-4) ---------------------------

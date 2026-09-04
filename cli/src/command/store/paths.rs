@@ -13,10 +13,12 @@ use vorpal_sdk::api::artifact::ArtifactSystem;
 use walkdir::WalkDir;
 
 // Root paths
-
-pub fn get_root_dir_path() -> PathBuf {
-    Path::new("/var/lib/vorpal").to_path_buf()
-}
+//
+// Re-exported from the SDK rather than defined twice. The credentials path
+// itself is gone from here entirely: the CLI now writes and reads that file
+// through the SDK, and two definitions drifting would have login write one
+// path while every reader looks at another.
+pub use vorpal_sdk::context::{get_root_dir_path, get_root_key_dir_path};
 
 pub fn get_socket_path() -> PathBuf {
     if let Ok(path) = std::env::var("VORPAL_SOCKET_PATH") {
@@ -36,10 +38,6 @@ pub fn get_lock_path() -> PathBuf {
     socket_path.with_file_name(format!("{lock_name}.lock"))
 }
 
-pub fn get_root_key_dir_path() -> PathBuf {
-    get_root_dir_path().join("key")
-}
-
 pub fn get_root_sandbox_dir_path() -> PathBuf {
     get_root_dir_path().join("sandbox")
 }
@@ -52,12 +50,6 @@ pub fn get_root_store_dir_path() -> PathBuf {
 
 pub fn get_key_ca_key_path() -> PathBuf {
     get_root_key_dir_path().join("ca").with_extension("key.pem")
-}
-
-pub fn get_key_credentials_path() -> PathBuf {
-    get_root_key_dir_path()
-        .join("credentials")
-        .with_extension("json")
 }
 
 pub fn get_key_service_path() -> PathBuf {

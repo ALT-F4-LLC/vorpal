@@ -1396,12 +1396,12 @@ impl RefreshState {
 /// lock is what now guarantees no lost update **between Rust processes that
 /// take it**.
 ///
-/// Still unserialized by either guard: `vorpal login`
-/// (`cli/src/command.rs:1604-1614`) truncates the file to a single issuer
-/// without taking any lock (VPL-188), and the Go and TypeScript SDKs
+/// `vorpal login` now commits through `commit_login_credentials`, which takes
+/// the same file lock, so the two Rust writers serialize against each other.
+/// Still unserialized: the Go and TypeScript SDKs
 /// (`sdk/go/pkg/config/context.go:589-592`,
 /// `sdk/typescript/src/context.ts:703`) hold only a process-local mutex, no
-/// file lock. A refresh racing any of those three can still lose an update.
+/// file lock. A refresh racing either of those can still lose an update.
 static CREDENTIALS_REFRESH: Mutex<RefreshState> = Mutex::const_new(RefreshState::new());
 
 /// Decides whether the stored access token must be refreshed before use.
@@ -1574,6 +1574,103 @@ async fn commit_refreshed_credentials(
     drop(lock);
 
     result
+}
+
+/// Records a completed `vorpal login` for `issuer` into
+/// `/var/lib/vorpal/key/credentials.json`, preserving every other issuer's
+/// and registry's entry.
+///
+/// The only public way to write that file. [`write_credentials_secure`] and
+/// [`acquire_credentials_lock`] stay private on purpose: exporting both would
+/// let a caller take the atomic write without the lock, and nothing in the
+/// type system would say they belong together (VPL-188 C-2).
+pub async fn commit_login_credentials(
+    issuer: &str,
+    registry: &str,
+    content: VorpalCredentialsContent,
+) -> Result<()> {
+    commit_login_credentials_at(&get_key_credentials_path(), issuer, registry, content).await
+}
+
+/// Core of [`commit_login_credentials`], taking the credentials path as a
+/// parameter so the merge is testable without touching the real
+/// `/var/lib/vorpal/key/credentials.json`. Deliberately private and not
+/// configurable from any production entry point — same discipline as
+/// `client_auth_header_at`.
+///
+/// The cross-process [`CredentialsFileLock`] spans the read through the
+/// rename, exactly as `commit_refreshed_credentials` does: an atomic write
+/// prevents a torn read but not a lost update, so without the lock a refresh
+/// committing a rotated token between this call's read and its rename would
+/// be written back stale.
+///
+/// Merge direction: `issuer`'s entry is replaced wholesale — field-merging it
+/// would carry a prior grant's refresh token, with different scopes or
+/// audience, into a record describing the new grant — and `registry`'s entry
+/// is overwritten to name `issuer`, because a mapping left in place keeps
+/// sending the old issuer's token to a registry the user has just re-pointed.
+/// Every other key in both maps is preserved.
+async fn commit_login_credentials_at(
+    path: &Path,
+    issuer: &str,
+    registry: &str,
+    content: VorpalCredentialsContent,
+) -> Result<()> {
+    let lock = acquire_credentials_lock(path).await?;
+
+    let result = async {
+        let mut credentials = read_credentials_for_merge(path).await?;
+
+        credentials.issuer.insert(issuer.to_string(), content);
+        credentials
+            .registry
+            .insert(registry.to_string(), issuer.to_string());
+
+        let credentials_json = serde_json::to_string_pretty(&credentials)?;
+
+        write_credentials_secure(path, credentials_json.as_bytes()).await
+    }
+    .await;
+
+    drop(lock);
+
+    result
+}
+
+/// The document a login merges into: the parsed contents of `path`, or an
+/// empty document when there is no file yet, because a first login has
+/// nothing to merge and must still work.
+///
+/// A file that exists but does not parse is a named error, never a silent
+/// overwrite: overwriting would destroy other issuers' entries a human can
+/// still recover by hand, and `vorpal login` is the command people reach for
+/// when credentials are broken, so it says which file to move aside rather
+/// than failing opaquely. The message carries `serde_json`'s line/column
+/// report and never the document, which holds live refresh tokens.
+async fn read_credentials_for_merge(path: &Path) -> Result<VorpalCredentials> {
+    let data = match read(path).await {
+        Ok(data) => data,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(VorpalCredentials {
+                issuer: BTreeMap::new(),
+                registry: BTreeMap::new(),
+            })
+        }
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to read credentials file: {}", path.display()))
+        }
+    };
+
+    serde_json::from_slice(&data).map_err(|err| {
+        anyhow!(
+            "credentials file {} is not valid JSON ({}). Move it aside and log in again: mv {} {}.bak",
+            path.display(),
+            err,
+            path.display(),
+            path.display()
+        )
+    })
 }
 
 /// The error every arm that spends the stored refresh token returns: what
@@ -1883,7 +1980,7 @@ async fn client_auth_header_live(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::sync::{atomic::AtomicU32, Arc};
 
     fn unix_now() -> u64 {
@@ -2244,6 +2341,200 @@ mod tests {
 
         let contents = std::fs::read(&scratch.path).expect("read credentials");
         assert_eq!(contents, b"{\"hello\":\"world\"}");
+    }
+
+    // --- commit_login_credentials (VPL-188) --------------------------------
+
+    fn login_content(refresh_token: &str) -> VorpalCredentialsContent {
+        VorpalCredentialsContent {
+            access_token: "new-access".to_string(),
+            audience: None,
+            client_id: "client-2".to_string(),
+            expires_in: 3600,
+            issued_at: 1_700_000_000,
+            refresh_token: refresh_token.to_string(),
+            scopes: vec!["openid".to_string()],
+        }
+    }
+
+    fn stored_document(path: &Path) -> VorpalCredentials {
+        let bytes = std::fs::read(path).expect("read credentials");
+
+        serde_json::from_slice(&bytes).expect("parse credentials")
+    }
+
+    #[tokio::test]
+    async fn commit_login_credentials_at_preserves_another_issuers_refresh_token() {
+        let scratch = ScratchCredentials::new("login-preserve");
+        let issuer_a_refresh = scratch.token("issuer-a-refresh");
+
+        scratch.write_fixture(3600, 1_600_000_000, &issuer_a_refresh);
+
+        commit_login_credentials_at(
+            &scratch.path,
+            "issuer-b",
+            "registry-1",
+            login_content(&scratch.token("issuer-b-refresh")),
+        )
+        .await
+        .expect("commit login credentials");
+
+        let stored = stored_document(&scratch.path);
+
+        assert_eq!(
+            stored
+                .issuer
+                .get(&scratch.issuer())
+                .expect("issuer A must survive a login to issuer B")
+                .refresh_token,
+            issuer_a_refresh
+        );
+        assert!(stored.issuer.contains_key("issuer-b"));
+    }
+
+    #[tokio::test]
+    async fn commit_login_credentials_at_repoints_a_registry_already_mapped_to_another_issuer() {
+        let scratch = ScratchCredentials::new("login-repoint");
+
+        // The fixture maps registry-1 at issuer A. A merge written as
+        // insert-if-absent keeps that mapping, so every later call to
+        // registry-1 keeps sending issuer A's token to a registry the user
+        // has just moved to issuer B.
+        scratch.write_fixture(3600, 1_600_000_000, &scratch.token("issuer-a-refresh"));
+
+        commit_login_credentials_at(
+            &scratch.path,
+            "issuer-b",
+            "registry-1",
+            login_content(&scratch.token("issuer-b-refresh")),
+        )
+        .await
+        .expect("commit login credentials");
+
+        let stored = stored_document(&scratch.path);
+        let mapped = stored
+            .registry
+            .get("registry-1")
+            .expect("registry-1 must stay mapped");
+
+        assert_eq!(mapped, "issuer-b");
+        assert!(
+            stored.issuer.contains_key(mapped),
+            "registry map value {mapped:?} must be a key in the issuer map"
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_login_credentials_at_commits_onto_a_fresh_inode() {
+        let scratch = ScratchCredentials::new("login-inode");
+
+        scratch.write_fixture(3600, 1_600_000_000, &scratch.token("issuer-a-refresh"));
+
+        let before = std::fs::metadata(&scratch.path).expect("stat before").ino();
+
+        commit_login_credentials_at(
+            &scratch.path,
+            "issuer-b",
+            "registry-1",
+            login_content(&scratch.token("issuer-b-refresh")),
+        )
+        .await
+        .expect("commit login credentials");
+
+        let after = std::fs::metadata(&scratch.path).expect("stat after").ino();
+
+        assert_ne!(
+            before, after,
+            "login must commit by renaming a temp file onto the destination; an unchanged inode means the destination was opened and truncated in place"
+        );
+        assert!(scratch.leftover_temp_files().is_empty());
+    }
+
+    #[tokio::test]
+    async fn commit_login_credentials_at_tightens_a_pre_existing_0o644_file() {
+        let scratch = ScratchCredentials::new("login-mode");
+
+        scratch.write_fixture(3600, 1_600_000_000, &scratch.token("issuer-a-refresh"));
+        std::fs::set_permissions(&scratch.path, std::fs::Permissions::from_mode(0o644))
+            .expect("set pre-existing mode to 0o644");
+
+        commit_login_credentials_at(
+            &scratch.path,
+            "issuer-b",
+            "registry-1",
+            login_content(&scratch.token("issuer-b-refresh")),
+        )
+        .await
+        .expect("commit login credentials");
+
+        let mode = std::fs::metadata(&scratch.path)
+            .expect("stat credentials")
+            .permissions()
+            .mode();
+
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "a login must leave the credentials file at 0o600 even when it was already 0o644, got {:o}",
+            mode & 0o777
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_login_credentials_at_creates_the_file_on_a_first_login() {
+        let scratch = ScratchCredentials::new("login-first");
+
+        commit_login_credentials_at(
+            &scratch.path,
+            "issuer-b",
+            "registry-1",
+            login_content(&scratch.token("issuer-b-refresh")),
+        )
+        .await
+        .expect("first login must succeed with no credentials file present");
+
+        let stored = stored_document(&scratch.path);
+
+        assert!(stored.issuer.contains_key("issuer-b"));
+        assert_eq!(
+            stored.registry.get("registry-1").map(String::as_str),
+            Some("issuer-b")
+        );
+    }
+
+    #[tokio::test]
+    async fn commit_login_credentials_at_refuses_an_unparseable_file_and_leaves_it_intact() {
+        let scratch = ScratchCredentials::new("login-corrupt");
+        let issuer_a_refresh = scratch.token("issuer-a-refresh");
+        let corrupt =
+            format!("{{\"issuer\":{{\"issuer-a\":{{\"refresh_token\":\"{issuer_a_refresh}\"");
+
+        std::fs::write(&scratch.path, corrupt.as_bytes()).expect("write corrupt file");
+
+        let err = commit_login_credentials_at(
+            &scratch.path,
+            "issuer-b",
+            "registry-1",
+            login_content(&scratch.token("issuer-b-refresh")),
+        )
+        .await
+        .expect_err("an unparseable credentials file must not be silently overwritten");
+
+        let rendered = format!("{err:#}");
+
+        assert!(
+            rendered.contains(&scratch.path.display().to_string()),
+            "the error must name the file the user has to deal with: {rendered}"
+        );
+        assert!(
+            !rendered.contains(&issuer_a_refresh),
+            "the error must not carry credential material: {rendered}"
+        );
+        assert_eq!(
+            std::fs::read(&scratch.path).expect("read credentials"),
+            corrupt.as_bytes(),
+            "the unparseable file must be left byte-identical for hand recovery"
+        );
     }
 
     #[tokio::test]
