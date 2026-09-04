@@ -48,8 +48,9 @@ use vorpal_sdk::{
             ArchivePushRequest,
         },
         artifact::{
-            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactSource, ArtifactStep,
-            ArtifactStepSecret, ArtifactSystem, StoreArtifactRequest,
+            artifact_service_client::ArtifactServiceClient, Artifact, ArtifactRequest,
+            ArtifactSource, ArtifactStep, ArtifactStepSecret, ArtifactSystem,
+            StoreArtifactRequest,
         },
         worker::{
             worker_service_server::WorkerService, BuildArtifactRequest, BuildArtifactResponse,
@@ -1070,15 +1071,284 @@ async fn release_failed_build(workspace_path: &Path, lock_path: &Path) {
     }
 }
 
+/// The registry half of a build: the effects that make a digest this worker
+/// already holds locally visible to every other worker.
+///
+/// Behind a trait because the failure it exists to survive — a local publish
+/// that landed and a push that did not — can only be pinned by a registry that
+/// refuses one push and accepts the next.
+trait RegistryPublisher {
+    /// Whether the registry already holds the archive for this digest.
+    async fn has_archive(&mut self, digest: &str, namespace: &str) -> Result<bool, Status>;
+
+    /// Whether the registry already holds the recipe for this digest.
+    async fn has_artifact(&mut self, digest: &str, namespace: &str) -> Result<bool, Status>;
+
+    /// Packs the published output at `output_path` and pushes it as the
+    /// archive for `digest`. Packing lives behind this seam because it stages
+    /// through the sandbox directory under the store root, which no test
+    /// process can write.
+    async fn push_archive(
+        &mut self,
+        output_path: &Path,
+        digest: &str,
+        namespace: &str,
+    ) -> Result<(), Status>;
+
+    async fn store_artifact(&mut self, request: StoreArtifactRequest) -> Result<(), Status>;
+}
+
+/// `RegistryPublisher` over the real services. A channel per call, as every
+/// other registry caller in this module does.
+struct RemoteRegistry<'a> {
+    archive_auth_header: &'a Option<MetadataValue<Ascii>>,
+    artifact_auth_header: &'a Option<MetadataValue<Ascii>>,
+    registry: &'a ResolvedRegistry,
+}
+
+impl RegistryPublisher for RemoteRegistry<'_> {
+    async fn has_archive(&mut self, digest: &str, namespace: &str) -> Result<bool, Status> {
+        let channel = build_channel(self.registry)
+            .await
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
+
+        let mut client = ArchiveServiceClient::with_interceptor(
+            channel,
+            apply_auth_to_request(self.archive_auth_header.as_ref()),
+        );
+
+        let request = ArchivePullRequest {
+            digest: digest.to_string(),
+            namespace: namespace.to_string(),
+        };
+
+        match client.check(request).await {
+            Ok(_) => Ok(true),
+            Err(status) if status.code() == NotFound => Ok(false),
+            Err(status) => {
+                error!("worker |> failed to check registry archive: {status:?}");
+
+                Err(Status::internal("failed to check registry archive"))
+            }
+        }
+    }
+
+    async fn has_artifact(&mut self, digest: &str, namespace: &str) -> Result<bool, Status> {
+        let channel = build_channel(self.registry)
+            .await
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
+
+        let mut client = ArtifactServiceClient::with_interceptor(
+            channel,
+            apply_auth_to_request(self.artifact_auth_header.as_ref()),
+        );
+
+        let request = ArtifactRequest {
+            digest: digest.to_string(),
+            namespace: namespace.to_string(),
+        };
+
+        match client.get_artifact(request).await {
+            Ok(_) => Ok(true),
+            Err(status) if status.code() == NotFound => Ok(false),
+            Err(status) => {
+                error!("worker |> failed to check registry artifact: {status:?}");
+
+                Err(Status::internal("failed to check registry artifact"))
+            }
+        }
+    }
+
+    async fn push_archive(
+        &mut self,
+        output_path: &Path,
+        digest: &str,
+        namespace: &str,
+    ) -> Result<(), Status> {
+        // Packed from the published path, never from a staging directory: that
+        // is where the bytes this worker holds live, and it is what a puller of
+        // this digest will get.
+        let published_entries = staged_entries(output_path)?;
+
+        let packing_paths: Vec<PathBuf> = published_entries
+            .iter()
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
+
+        let artifact_archive = create_sandbox_file(Some("tar.zst"))
+            .await
+            .map_err(|err| Status::internal(format!("failed to create artifact archive: {err}")))?;
+
+        compress_zstd(
+            &output_path.to_path_buf(),
+            &packing_paths,
+            &artifact_archive,
+        )
+        .await
+        .map_err(|err| {
+            error!("worker |> failed to compress artifact: {:?}", err);
+            Status::internal(format!("failed to compress artifact: {err:?}"))
+        })?;
+
+        let channel = build_channel(self.registry)
+            .await
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
+
+        let mut client = ArchiveServiceClient::with_interceptor(
+            channel,
+            apply_auth_to_request(self.archive_auth_header.as_ref()),
+        );
+
+        let artifact_file = File::open(&artifact_archive)
+            .await
+            .map_err(|err| Status::internal(format!("failed to open artifact archive: {err}")))?;
+
+        let digest_for_stream = digest.to_string();
+        let namespace_for_stream = namespace.to_string();
+
+        let request_stream = async_stream::stream! {
+            let mut reader = BufReader::new(artifact_file);
+            let mut buf = vec![0u8; DEFAULT_CHUNKS_SIZE];
+            loop {
+                match reader.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        yield ArchivePushRequest {
+                            data: buf[..n].to_vec(),
+                            digest: digest_for_stream.clone(),
+                            namespace: namespace_for_stream.clone(),
+                        };
+                    }
+                    Err(err) => {
+                        error!("worker |> failed to read artifact archive chunk: {err}");
+                        break;
+                    }
+                }
+            }
+        };
+
+        let pushed = client.push(request_stream).await.map_err(|err| {
+            error!("worker |> failed to push artifact: {:?}", err);
+            Status::internal(format!("failed to push artifact: {err:?}"))
+        });
+
+        // The archive is a sandbox file this worker owns; a push that failed
+        // leaves nothing worth keeping either, so it goes before the push
+        // result is propagated.
+        if let Err(err) = remove_file(&artifact_archive).await {
+            error!("worker |> failed to remove artifact archive: {:?}", err);
+
+            if pushed.is_ok() {
+                return Err(Status::internal(format!(
+                    "failed to remove artifact archive: {err:?}"
+                )));
+            }
+        }
+
+        pushed.map(|_| ())
+    }
+
+    async fn store_artifact(&mut self, request: StoreArtifactRequest) -> Result<(), Status> {
+        let channel = build_channel(self.registry)
+            .await
+            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
+
+        let mut client = ArtifactServiceClient::with_interceptor(
+            channel,
+            apply_auth_to_request(self.artifact_auth_header.as_ref()),
+        );
+
+        client
+            .store_artifact(request)
+            .await
+            .map_err(|err| Status::internal(format!("failed to store artifact in registry: {err}")))
+            .map(|_| ())
+    }
+}
+
+/// Puts a digest this worker holds locally into the registry: the archive
+/// first, then the recipe that names it.
+///
+/// Each half is skipped when the registry already has it, which is what makes
+/// this retryable — the push and the store are two effects that fail
+/// separately, and a build reaching here for the second time completes
+/// whichever half is missing. Returns whether anything was sent, so a caller
+/// that found nothing left to do can still say so.
+async fn publish_to_registry(
+    publisher: &mut impl RegistryPublisher,
+    artifact_digest: &str,
+    artifact_namespace: &str,
+    artifact_output_path: &Path,
+    store_request: StoreArtifactRequest,
+    tx: &Sender<Result<BuildArtifactResponse, Status>>,
+) -> Result<bool, Status> {
+    let mut published = false;
+
+    if !publisher
+        .has_archive(artifact_digest, artifact_namespace)
+        .await?
+    {
+        send_message(format!("pack: {artifact_digest}"), tx).await?;
+        send_message(format!("push: {artifact_digest}"), tx).await?;
+
+        publisher
+            .push_archive(artifact_output_path, artifact_digest, artifact_namespace)
+            .await?;
+
+        published = true;
+    }
+
+    // After the push and never before it: the recipe is what every other
+    // worker resolves this digest through, so it may only name an archive the
+    // registry already carries.
+    if !publisher
+        .has_artifact(artifact_digest, artifact_namespace)
+        .await?
+    {
+        publisher.store_artifact(store_request).await?;
+
+        published = true;
+    }
+
+    Ok(published)
+}
+
+/// What `validate_and_lock_artifact` found at the artifact's digest.
+enum LockedArtifact {
+    /// Nothing at the output path and no concurrent build holding the lock;
+    /// the lock file has been created and the caller owns the build.
+    Ready {
+        artifact_digest: String,
+        artifact_output_path: PathBuf,
+        artifact_output_lock: PathBuf,
+    },
+    /// Already at the output path from a prior build. No lock is held or
+    /// needed — there is nothing left to build — but the registry copy may
+    /// still be incomplete; see `validate_and_lock_artifact`.
+    AlreadyBuilt {
+        artifact_digest: String,
+        artifact_output_path: PathBuf,
+    },
+}
+
 /// Validates `artifact` against `worker_target`, computes its digest, checks it is
-/// neither already built nor locked by a concurrent build, and creates the lock file.
-/// Returns the artifact's digest, output path, and lock path for the caller to use and
-/// eventually remove.
+/// neither locked by a concurrent build nor already at its output path, and creates
+/// the lock file. Returns the artifact's digest, output path, and lock path for the
+/// caller to use and eventually remove.
+///
+/// An artifact already at its output path is reported as
+/// [`LockedArtifact::AlreadyBuilt`] rather than refused outright here: the local
+/// publish and the registry copy are separate effects that fail separately, so a
+/// prior build whose publish landed and whose push did not left exactly this state,
+/// and refusing unconditionally made it permanent — no later build of the digest
+/// could ever finish the registry half. Only `build_artifact`, which holds the
+/// registry auth headers this function does not, can decide whether that registry
+/// half still needs finishing.
 async fn validate_and_lock_artifact(
     artifact: &Artifact,
     artifact_namespace: &str,
     artifact_json: &str,
-) -> Result<(String, std::path::PathBuf, std::path::PathBuf), Status> {
+) -> Result<LockedArtifact, Status> {
     if artifact.name.is_empty() {
         return Err(Status::invalid_argument("artifact 'name' is missing"));
     }
@@ -1129,9 +1399,18 @@ async fn validate_and_lock_artifact(
 
     let artifact_output_path = get_artifact_output_path(&artifact_digest, artifact_namespace);
 
+    // A digest already at its output path was built here before, but the local
+    // publish and the registry copy are separate effects that fail separately:
+    // a build whose publish landed and whose push did not leaves exactly this
+    // state, and refusing here made it permanent — no later build of the digest
+    // could ever make the registry copy. `build_artifact` decides whether the
+    // registry half still needs finishing; this function has no auth headers
+    // or registry to do that itself.
     if artifact_output_path.exists() {
-        error!("worker |> artifact already exists: {}", artifact_digest);
-        return Err(Status::already_exists("artifact exists"));
+        return Ok(LockedArtifact::AlreadyBuilt {
+            artifact_digest,
+            artifact_output_path,
+        });
     }
 
     // Check if artifact is locked
@@ -1160,7 +1439,11 @@ async fn validate_and_lock_artifact(
         )));
     }
 
-    Ok((artifact_digest, artifact_output_path, artifact_output_lock))
+    Ok(LockedArtifact::Ready {
+        artifact_digest,
+        artifact_output_path,
+        artifact_output_lock,
+    })
 }
 
 /// Obtains the pair of service-to-service `OAuth2` tokens `build_artifact` needs: one
@@ -1229,9 +1512,7 @@ async fn build_artifact(
     let artifact_json = serde_json::to_string(&artifact)
         .map_err(|err| Status::internal(format!("artifact failed to serialize: {err}")))?;
 
-    let (artifact_digest, artifact_output_path, artifact_output_lock) =
-        validate_and_lock_artifact(&artifact, artifact_namespace, &artifact_json).await?;
-    let artifact_digest = &artifact_digest;
+    let locked = validate_and_lock_artifact(&artifact, artifact_namespace, &artifact_json).await?;
 
     // Obtain service-to-service OAuth2 tokens for archive and artifact services
     let (archive_auth_header, artifact_auth_header) = obtain_build_credentials(
@@ -1241,6 +1522,54 @@ async fn build_artifact(
         issuer_client_secret,
     )
     .await;
+
+    let (artifact_digest, artifact_output_path, artifact_output_lock) = match locked {
+        LockedArtifact::Ready {
+            artifact_digest,
+            artifact_output_path,
+            artifact_output_lock,
+        } => (artifact_digest, artifact_output_path, artifact_output_lock),
+
+        LockedArtifact::AlreadyBuilt {
+            artifact_digest,
+            artifact_output_path,
+        } => {
+            let store_request = StoreArtifactRequest {
+                artifact: Some(artifact),
+                artifact_aliases: request.artifact_aliases,
+                artifact_namespace: artifact_namespace.clone(),
+            };
+
+            let mut publisher = RemoteRegistry {
+                archive_auth_header: &archive_auth_header,
+                artifact_auth_header: &artifact_auth_header,
+                registry: &registry,
+            };
+
+            let published = publish_to_registry(
+                &mut publisher,
+                &artifact_digest,
+                artifact_namespace,
+                &artifact_output_path,
+                store_request,
+                tx,
+            )
+            .await?;
+
+            if !published {
+                error!("worker |> artifact already exists: {}", artifact_digest);
+                return Err(Status::already_exists("artifact exists"));
+            }
+
+            info!(
+                "worker |> published existing artifact to registry: {}",
+                artifact_digest
+            );
+
+            return Ok(());
+        }
+    };
+    let artifact_digest = &artifact_digest;
 
     // Create workspace
     //
@@ -1413,10 +1742,11 @@ async fn build_artifact(
         .await?;
 
         // Losing the publish race is not a failure: the winner's bytes stand at
-        // the digest and this build's staged copy is gone. Nothing this build
-        // produced is in the store, so there is nothing for it to advertise —
-        // pushing its archive now would point every other worker at bytes this
-        // worker does not hold — and the registry is left to the winner.
+        // the digest and this build's staged copy is gone. The registry copy is
+        // still owed, and the winner may be the build that failed to make it, so
+        // this build carries on to the publication below. What it advertises is
+        // read from the output path, so it is the winner's bytes — the ones this
+        // worker now holds — never this build's own staged copy.
         if published == PublishOutcome::Superseded {
             info!(
                 "worker |> published concurrently by another builder: {}",
@@ -1424,104 +1754,15 @@ async fn build_artifact(
             );
 
             send_message(format!("superseded: {artifact_digest}"), tx).await?;
-
-            return Ok(());
         }
 
         // Publish to the registry, after the local publish and never before it.
         //
         // A push and a `store_artifact` are effects nothing local can take back:
         // once they land, every other worker resolves this digest to these bytes.
-        // The local publish is the last step that can still refuse this build or
-        // lose it to another builder, so it goes first and the registry only ever
-        // learns about a digest this worker really holds. The archive is packed
-        // from the published path for the same reason — that is where the staged
-        // content now lives, and it is what a puller of this digest will get.
-
-        let published_entries = staged_entries(&artifact_output_path)?;
-
-        let packing_paths: Vec<PathBuf> = published_entries
-            .iter()
-            .map(|entry| entry.path().to_path_buf())
-            .collect();
-
-        send_message(format!("pack: {artifact_digest}"), tx).await?;
-
-        // Create archive
-
-        let artifact_archive = create_sandbox_file(Some("tar.zst"))
-            .await
-            .map_err(|err| Status::internal(format!("failed to create artifact archive: {err}")))?;
-
-        compress_zstd(&artifact_output_path, &packing_paths, &artifact_archive)
-            .await
-            .map_err(|err| {
-                error!("worker |> failed to compress artifact: {:?}", err);
-                Status::internal(format!("failed to compress artifact: {err:?}"))
-            })?;
-
-        // TODO: check if archive is already uploaded
-
-        // Upload archive
-
-        // Create authenticated archive client for pushing
-        let client_archive_channel = build_channel(&registry)
-            .await
-            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
-
-        // Create client with authorization interceptor for pushing if token is available
-        let mut client_archive = ArchiveServiceClient::with_interceptor(
-            client_archive_channel,
-            apply_auth_to_request(archive_auth_header.as_ref()),
-        );
-
-        send_message(format!("push: {artifact_digest}"), tx).await?;
-
-        let artifact_file = File::open(&artifact_archive)
-            .await
-            .map_err(|err| Status::internal(format!("failed to open artifact archive: {err}")))?;
-
-        let digest_for_stream = artifact_digest.to_string();
-        let namespace_for_stream = artifact_namespace.to_string();
-
-        let request_stream = async_stream::stream! {
-            let mut reader = BufReader::new(artifact_file);
-            let mut buf = vec![0u8; DEFAULT_CHUNKS_SIZE];
-            loop {
-                match reader.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        yield ArchivePushRequest {
-                            data: buf[..n].to_vec(),
-                            digest: digest_for_stream.clone(),
-                            namespace: namespace_for_stream.clone(),
-                        };
-                    }
-                    Err(err) => {
-                        error!("worker |> failed to read artifact archive chunk: {err}");
-                        break;
-                    }
-                }
-            }
-        };
-
-        client_archive.push(request_stream).await.map_err(|err| {
-            error!("worker |> failed to push artifact: {:?}", err);
-            Status::internal(format!("failed to push artifact: {err:?}"))
-        })?;
-
-        // Store artifact in registry
-
-        // Create authenticated artifact client
-        let client_artifact_channel = build_channel(&registry)
-            .await
-            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
-
-        // Create client with authorization interceptor if token is available
-        let mut client_artifact = ArtifactServiceClient::with_interceptor(
-            client_artifact_channel,
-            apply_auth_to_request(artifact_auth_header.as_ref()),
-        );
+        // The local publish is the last step that can still refuse this build, so
+        // it goes first and the registry only ever learns about a digest this
+        // worker really holds.
 
         let store_request = StoreArtifactRequest {
             artifact: Some(artifact),
@@ -1529,19 +1770,21 @@ async fn build_artifact(
             artifact_namespace: store_namespace,
         };
 
-        client_artifact
-            .store_artifact(store_request)
-            .await
-            .map_err(|err| {
-                Status::internal(format!("failed to store artifact in registry: {err}"))
-            })?;
+        let mut publisher = RemoteRegistry {
+            archive_auth_header: &archive_auth_header,
+            artifact_auth_header: &artifact_auth_header,
+            registry: &registry,
+        };
 
-        // Remove artifact archive
-
-        remove_file(&artifact_archive).await.map_err(|err| {
-            error!("worker |> failed to remove artifact archive: {:?}", err);
-            Status::internal(format!("failed to remove artifact archive: {err:?}"))
-        })?;
+        publish_to_registry(
+            &mut publisher,
+            artifact_digest,
+            artifact_namespace,
+            &artifact_output_path,
+            store_request,
+            tx,
+        )
+        .await?;
 
         Ok(())
     }
@@ -2994,5 +3237,202 @@ mod tests {
             .build_artifact(request)
             .await
             .expect("a claims-bearing request with namespace write permission is admitted");
+    }
+
+    /// A registry double for the publication seam: it holds the two halves a
+    /// build sends — the archive and the recipe — and can be told to refuse a
+    /// number of pushes first. One digest per instance, which is all any test
+    /// here needs, so the recipe it holds is a name rather than a map.
+    #[derive(Default)]
+    struct FakeRegistry {
+        archived_digest: Option<String>,
+        archived_entries: Vec<String>,
+        pushes: usize,
+        pushes_to_refuse: usize,
+        recipe_name: Option<String>,
+    }
+
+    impl RegistryPublisher for FakeRegistry {
+        async fn has_archive(&mut self, digest: &str, _namespace: &str) -> Result<bool, Status> {
+            Ok(self.archived_digest.as_deref() == Some(digest))
+        }
+
+        async fn has_artifact(&mut self, _digest: &str, _namespace: &str) -> Result<bool, Status> {
+            Ok(self.recipe_name.is_some())
+        }
+
+        async fn push_archive(
+            &mut self,
+            output_path: &Path,
+            digest: &str,
+            _namespace: &str,
+        ) -> Result<(), Status> {
+            self.pushes += 1;
+
+            if self.pushes_to_refuse > 0 {
+                self.pushes_to_refuse -= 1;
+
+                return Err(Status::internal("failed to push artifact"));
+            }
+
+            self.archived_digest = Some(digest.to_string());
+            self.archived_entries = relative_entry_names(output_path);
+
+            Ok(())
+        }
+
+        async fn store_artifact(&mut self, request: StoreArtifactRequest) -> Result<(), Status> {
+            self.recipe_name = request.artifact.map(|artifact| artifact.name);
+
+            Ok(())
+        }
+    }
+
+    /// The state a build leaves behind when its local publish landed: a real
+    /// store entry with real content at the output path.
+    fn published_output() -> (TempDir, PathBuf) {
+        let root = TempDir::new().unwrap();
+        let output_path = root.path().join("abc123");
+
+        std::fs::create_dir_all(&output_path).unwrap();
+        write_files(&output_path, &["built.txt"], "built");
+
+        (root, output_path)
+    }
+
+    fn store_request() -> StoreArtifactRequest {
+        StoreArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec![],
+                name: "example".to_string(),
+                sources: vec![],
+                steps: vec![],
+                systems: vec![],
+                target: ArtifactSystem::UnknownSystem as i32,
+            }),
+            artifact_aliases: vec![],
+            artifact_namespace: "library".to_string(),
+        }
+    }
+
+    /// Progress messages are not what these tests pin, but the sender has to
+    /// stay open or the first `send_message` fails on a closed channel.
+    fn drained_sender() -> Sender<Result<BuildArtifactResponse, Status>> {
+        let (tx, mut rx) = mpsc::channel(100);
+
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+
+        tx
+    }
+
+    // AC2: a build whose local publish landed and whose push did not is
+    // completed by running it again, with no hand-deletion of the store entry
+    // in between. The first attempt must also leave the recipe unstored — a
+    // registry naming a digest whose archive never arrived is the failure the
+    // publish ordering exists to prevent.
+    #[tokio::test]
+    async fn a_failed_push_is_completed_by_publishing_the_same_output_again() {
+        let (_root, output_path) = published_output();
+        let tx = drained_sender();
+
+        let mut registry = FakeRegistry {
+            pushes_to_refuse: 1,
+            ..FakeRegistry::default()
+        };
+
+        let first = publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            store_request(),
+            &tx,
+        )
+        .await;
+
+        assert!(first.is_err(), "a refused push was reported as a success");
+        assert_eq!(registry.archived_digest, None);
+        assert_eq!(
+            registry.recipe_name, None,
+            "the recipe was stored for a digest whose archive never arrived"
+        );
+
+        let published = publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            store_request(),
+            &tx,
+        )
+        .await
+        .expect("the retry was refused");
+
+        assert!(published);
+        assert_eq!(registry.archived_digest.as_deref(), Some("abc123"));
+        assert_eq!(
+            registry.archived_entries,
+            vec!["built.txt".to_string()],
+            "the retry pushed something other than the published output"
+        );
+        assert_eq!(registry.recipe_name.as_deref(), Some("example"));
+    }
+
+    // The other half of AC2's gate: a digest the registry already carries whole
+    // is left alone, so a repeat build of a complete artifact is still the
+    // refusal it was before the retry path existed.
+    #[tokio::test]
+    async fn a_registry_that_already_has_the_digest_is_sent_nothing() {
+        let (_root, output_path) = published_output();
+        let tx = drained_sender();
+
+        let mut registry = FakeRegistry {
+            archived_digest: Some("abc123".to_string()),
+            recipe_name: Some("example".to_string()),
+            ..FakeRegistry::default()
+        };
+
+        let published = publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            store_request(),
+            &tx,
+        )
+        .await
+        .unwrap();
+
+        assert!(!published);
+        assert_eq!(registry.pushes, 0, "a digest already held was pushed again");
+    }
+
+    // The push and the store fail separately, so each is retried separately: a
+    // registry holding the archive and not the recipe is given the recipe and
+    // is not pushed to a second time.
+    #[tokio::test]
+    async fn a_registry_missing_only_the_recipe_is_given_only_the_recipe() {
+        let (_root, output_path) = published_output();
+        let tx = drained_sender();
+
+        let mut registry = FakeRegistry {
+            archived_digest: Some("abc123".to_string()),
+            ..FakeRegistry::default()
+        };
+
+        let published = publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            store_request(),
+            &tx,
+        )
+        .await
+        .unwrap();
+
+        assert!(published);
+        assert_eq!(registry.pushes, 0);
+        assert_eq!(registry.recipe_name.as_deref(), Some("example"));
     }
 }
