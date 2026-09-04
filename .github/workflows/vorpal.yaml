@@ -148,6 +148,21 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - uses: actions/cache/restore@v5
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sdk/typescript/bun.lock') }}-bun
+          path: ~/.bun/install/cache
+
+      # Fills the Go module and Bun install caches, the way `make vendor` fills
+      # cargo's. This is the only step in the job allowed to reach the network
+      # for SDK dependencies; the TARGET=release test run below is offline.
+      - run: ./script/dev.sh make test-sdk-warm
+
+      - uses: actions/cache/save@v5
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sdk/typescript/bun.lock') }}-bun
+          path: ~/.bun/install/cache
+
       - run: ./script/dev.sh make TARGET=release test
       - run: ./script/dev.sh make TARGET=release dist
 

@@ -11,6 +11,13 @@ VORPAL_NAMESPACE := library
 VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
 CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
+# The SDK test legs share CARGO_FLAGS' hermeticity guarantee: under
+# TARGET=release they resolve every dependency from an already-warm cache and
+# fail loudly instead of reaching the network. `make test-sdk-warm` is the one
+# deliberate networked seam that fills those caches, the way `make vendor`
+# fills cargo's; on a warm cache it too touches no network.
+GO_TEST_ENV := $(if $(filter $(TARGET),release),GOFLAGS=-mod=readonly GOPROXY=off,)
+BUN_INSTALL_FLAGS := --frozen-lockfile$(if $(filter $(TARGET),release), --offline,)
 # `system services start` refuses a worker/registry with no issuer, so
 # vorpal-start and lima-vorpal-start must name one. This development default
 # is the realm `vorpal login`'s clap default names and the realm
@@ -96,11 +103,15 @@ build:
 test: test-sdk-go test-sdk-typescript
 	cargo test $(CARGO_FLAGS)
 
+test-sdk-warm:
+	cd sdk/go && go mod download
+	cd sdk/typescript && bun install --frozen-lockfile
+
 test-sdk-go:
-	cd sdk/go && go test -race -count=1 ./...
+	cd sdk/go && $(GO_TEST_ENV) go test -race -count=1 ./...
 
 test-sdk-typescript-install:
-	cd sdk/typescript && bun install --frozen-lockfile
+	cd sdk/typescript && bun install $(BUN_INSTALL_FLAGS)
 
 test-sdk-typescript: test-sdk-typescript-install
 	cd sdk/typescript && bun test
