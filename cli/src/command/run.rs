@@ -990,6 +990,10 @@ mod tests {
             "/Users/u/.ssh",
             "ABC123",
             "abc123",
+            // Right length, wrong alphabet: the only fixtures that reach the
+            // character-class half of the check rather than failing on length.
+            &"g".repeat(64),
+            &"A".repeat(64),
         ] {
             let alias_path = root.path().join("alias");
 

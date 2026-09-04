@@ -2356,6 +2356,10 @@ mod tests {
             "ABC123",
             &"a".repeat(63),
             &"a".repeat(65),
+            // Right length, wrong alphabet: the only fixtures that reach the
+            // character-class half of the check rather than failing on length.
+            &"g".repeat(64),
+            &"A".repeat(64),
         ] {
             let err = parse_artifact_digest(hostile, "test").unwrap_err();
 
