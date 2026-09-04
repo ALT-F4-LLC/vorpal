@@ -1078,21 +1078,23 @@ async fn release_failed_build(workspace_path: &Path, lock_path: &Path) {
 /// that landed and a push that did not — can only be pinned by a registry that
 /// refuses one push and accepts the next.
 trait RegistryPublisher {
-    /// Whether the registry already holds the archive for this digest.
-    async fn has_archive(&mut self, digest: &str, namespace: &str) -> Result<bool, Status>;
-
     /// Whether the registry already holds the recipe for this digest.
-    async fn has_artifact(&mut self, digest: &str, namespace: &str) -> Result<bool, Status>;
+    ///
+    /// `&self` because asking changes nothing: only the two methods below are
+    /// effects, and they keep `&mut self`.
+    async fn has_recipe(&self, digest: &str, namespace: &str) -> Result<bool, Status>;
 
-    /// Packs the published output at `output_path` and pushes it as the
-    /// archive for `digest`. Packing lives behind this seam because it stages
-    /// through the sandbox directory under the store root, which no test
-    /// process can write.
-    async fn push_archive(
+    /// Packs the published output at `output_path`, pushes it as the archive
+    /// for `digest`, and reports both transitions on `tx`. Packing lives behind
+    /// this seam because it stages through the sandbox directory under the
+    /// store root, which no test process can write; the name says so rather
+    /// than leaving a reader to find it.
+    async fn pack_and_push_archive(
         &mut self,
         output_path: &Path,
         digest: &str,
         namespace: &str,
+        tx: &Sender<Result<BuildArtifactResponse, Status>>,
     ) -> Result<(), Status>;
 
     async fn store_artifact(&mut self, request: StoreArtifactRequest) -> Result<(), Status>;
@@ -1107,33 +1109,7 @@ struct RemoteRegistry<'a> {
 }
 
 impl RegistryPublisher for RemoteRegistry<'_> {
-    async fn has_archive(&mut self, digest: &str, namespace: &str) -> Result<bool, Status> {
-        let channel = build_channel(self.registry)
-            .await
-            .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
-
-        let mut client = ArchiveServiceClient::with_interceptor(
-            channel,
-            apply_auth_to_request(self.archive_auth_header.as_ref()),
-        );
-
-        let request = ArchivePullRequest {
-            digest: digest.to_string(),
-            namespace: namespace.to_string(),
-        };
-
-        match client.check(request).await {
-            Ok(_) => Ok(true),
-            Err(status) if status.code() == NotFound => Ok(false),
-            Err(status) => {
-                error!("worker |> failed to check registry archive: {status:?}");
-
-                Err(Status::internal("failed to check registry archive"))
-            }
-        }
-    }
-
-    async fn has_artifact(&mut self, digest: &str, namespace: &str) -> Result<bool, Status> {
+    async fn has_recipe(&self, digest: &str, namespace: &str) -> Result<bool, Status> {
         let channel = build_channel(self.registry)
             .await
             .map_err(|err| Status::internal(format!("failed to connect to registry: {err}")))?;
@@ -1159,12 +1135,15 @@ impl RegistryPublisher for RemoteRegistry<'_> {
         }
     }
 
-    async fn push_archive(
+    async fn pack_and_push_archive(
         &mut self,
         output_path: &Path,
         digest: &str,
         namespace: &str,
+        tx: &Sender<Result<BuildArtifactResponse, Status>>,
     ) -> Result<(), Status> {
+        send_message(format!("pack: {digest}"), tx).await?;
+
         // Packed from the published path, never from a staging directory: that
         // is where the bytes this worker holds live, and it is what a puller of
         // this digest will get.
@@ -1189,6 +1168,8 @@ impl RegistryPublisher for RemoteRegistry<'_> {
             error!("worker |> failed to compress artifact: {:?}", err);
             Status::internal(format!("failed to compress artifact: {err:?}"))
         })?;
+
+        send_message(format!("push: {digest}"), tx).await?;
 
         let channel = build_channel(self.registry)
             .await
@@ -1269,11 +1250,24 @@ impl RegistryPublisher for RemoteRegistry<'_> {
 /// Puts a digest this worker holds locally into the registry: the archive
 /// first, then the recipe that names it.
 ///
-/// Each half is skipped when the registry already has it, which is what makes
-/// this retryable — the push and the store are two effects that fail
-/// separately, and a build reaching here for the second time completes
-/// whichever half is missing. Returns whether anything was sent, so a caller
-/// that found nothing left to do can still say so.
+/// This is what makes the registry copy retryable — the push and the store are
+/// two effects that fail separately, and a build reaching here for the second
+/// time completes whichever half is missing.
+///
+/// The push is unconditional. Both archive backends already dedupe it
+/// (`start/registry/archive/local.rs` and `.../s3.rs` each return early when
+/// the archive is there), and the only way to ask instead — `Archive/Check` — is served
+/// from a TTL cache that neither a push nor a delete invalidates
+/// (`start/registry.rs`), so a stale "yes" would skip the push and still store
+/// a recipe naming an archive the registry does not hold. An existence check
+/// may buy back cost; it may not decide an invariant.
+///
+/// The recipe is stored unless the registry already answers for it. That check
+/// is answered from the stored recipe rather than a cache, and it is not an
+/// invariant either way: it only avoids a store that would fail on an alias it
+/// wrote itself. A check that errors is not an answer, so the store is
+/// attempted — refusing here would abandon a build whose local publish has
+/// already landed, which is the failure this whole path exists to end.
 async fn publish_to_registry(
     publisher: &mut impl RegistryPublisher,
     artifact_digest: &str,
@@ -1281,36 +1275,33 @@ async fn publish_to_registry(
     artifact_output_path: &Path,
     store_request: StoreArtifactRequest,
     tx: &Sender<Result<BuildArtifactResponse, Status>>,
-) -> Result<bool, Status> {
-    let mut published = false;
-
-    if !publisher
-        .has_archive(artifact_digest, artifact_namespace)
-        .await?
-    {
-        send_message(format!("pack: {artifact_digest}"), tx).await?;
-        send_message(format!("push: {artifact_digest}"), tx).await?;
-
-        publisher
-            .push_archive(artifact_output_path, artifact_digest, artifact_namespace)
-            .await?;
-
-        published = true;
-    }
+) -> Result<(), Status> {
+    publisher
+        .pack_and_push_archive(
+            artifact_output_path,
+            artifact_digest,
+            artifact_namespace,
+            tx,
+        )
+        .await?;
 
     // After the push and never before it: the recipe is what every other
     // worker resolves this digest through, so it may only name an archive the
     // registry already carries.
-    if !publisher
-        .has_artifact(artifact_digest, artifact_namespace)
-        .await?
-    {
-        publisher.store_artifact(store_request).await?;
+    let has_recipe = publisher
+        .has_recipe(artifact_digest, artifact_namespace)
+        .await
+        .unwrap_or_else(|status| {
+            error!("worker |> registry recipe check failed, storing anyway: {status:?}");
 
-        published = true;
+            false
+        });
+
+    if !has_recipe {
+        publisher.store_artifact(store_request).await?;
     }
 
-    Ok(published)
+    Ok(())
 }
 
 /// What `validate_and_lock_artifact` found at the artifact's digest.
@@ -1546,7 +1537,7 @@ async fn build_artifact(
                 registry: &registry,
             };
 
-            let published = publish_to_registry(
+            publish_to_registry(
                 &mut publisher,
                 &artifact_digest,
                 artifact_namespace,
@@ -1555,11 +1546,6 @@ async fn build_artifact(
                 tx,
             )
             .await?;
-
-            if !published {
-                error!("worker |> artifact already exists: {}", artifact_digest);
-                return Err(Status::already_exists("artifact exists"));
-            }
 
             info!(
                 "worker |> published existing artifact to registry: {}",
@@ -3241,31 +3227,42 @@ mod tests {
 
     /// A registry double for the publication seam: it holds the two halves a
     /// build sends — the archive and the recipe — and can be told to refuse a
-    /// number of pushes first. One digest per instance, which is all any test
-    /// here needs, so the recipe it holds is a name rather than a map.
+    /// number of pushes or stores first, or to fail the recipe check. One
+    /// digest per instance, which is all any test here needs, so the recipe it
+    /// holds is a name rather than a map.
+    ///
+    /// It fakes the registry, not the packing: `archived_entries` is what this
+    /// double read from the `output_path` it was handed, so a test asserting on
+    /// it pins which path the publication packed from, never what the real
+    /// packer produced. `RemoteRegistry` does that, and reaching it needs a
+    /// live registry, so no test here covers it.
     #[derive(Default)]
     struct FakeRegistry {
         archived_digest: Option<String>,
         archived_entries: Vec<String>,
         pushes: usize,
         pushes_to_refuse: usize,
+        recipe_check_fails: bool,
         recipe_name: Option<String>,
+        stores: usize,
+        stores_to_refuse: usize,
     }
 
     impl RegistryPublisher for FakeRegistry {
-        async fn has_archive(&mut self, digest: &str, _namespace: &str) -> Result<bool, Status> {
-            Ok(self.archived_digest.as_deref() == Some(digest))
-        }
+        async fn has_recipe(&self, _digest: &str, _namespace: &str) -> Result<bool, Status> {
+            if self.recipe_check_fails {
+                return Err(Status::internal("failed to check registry artifact"));
+            }
 
-        async fn has_artifact(&mut self, _digest: &str, _namespace: &str) -> Result<bool, Status> {
             Ok(self.recipe_name.is_some())
         }
 
-        async fn push_archive(
+        async fn pack_and_push_archive(
             &mut self,
             output_path: &Path,
             digest: &str,
             _namespace: &str,
+            _tx: &Sender<Result<BuildArtifactResponse, Status>>,
         ) -> Result<(), Status> {
             self.pushes += 1;
 
@@ -3275,6 +3272,8 @@ mod tests {
                 return Err(Status::internal("failed to push artifact"));
             }
 
+            // The real backends dedupe a repeated push; so does this one, by
+            // landing on the same digest and entries.
             self.archived_digest = Some(digest.to_string());
             self.archived_entries = relative_entry_names(output_path);
 
@@ -3282,6 +3281,14 @@ mod tests {
         }
 
         async fn store_artifact(&mut self, request: StoreArtifactRequest) -> Result<(), Status> {
+            self.stores += 1;
+
+            if self.stores_to_refuse > 0 {
+                self.stores_to_refuse -= 1;
+
+                return Err(Status::internal("failed to store artifact in registry"));
+            }
+
             self.recipe_name = request.artifact.map(|artifact| artifact.name);
 
             Ok(())
@@ -3353,11 +3360,11 @@ mod tests {
         assert!(first.is_err(), "a refused push was reported as a success");
         assert_eq!(registry.archived_digest, None);
         assert_eq!(
-            registry.recipe_name, None,
+            registry.stores, 0,
             "the recipe was stored for a digest whose archive never arrived"
         );
 
-        let published = publish_to_registry(
+        publish_to_registry(
             &mut registry,
             "abc123",
             "library",
@@ -3368,21 +3375,66 @@ mod tests {
         .await
         .expect("the retry was refused");
 
-        assert!(published);
         assert_eq!(registry.archived_digest.as_deref(), Some("abc123"));
         assert_eq!(
             registry.archived_entries,
             vec!["built.txt".to_string()],
-            "the retry pushed something other than the published output"
+            "the retry packed from somewhere other than the published output path"
         );
         assert_eq!(registry.recipe_name.as_deref(), Some("example"));
     }
 
-    // The other half of AC2's gate: a digest the registry already carries whole
-    // is left alone, so a repeat build of a complete artifact is still the
-    // refusal it was before the retry path existed.
+    // AC2's other half: the store fails on its own too, and the archive it
+    // names must survive that failure so the retry has something to name. The
+    // retry then stores the recipe rather than reporting the digest done.
     #[tokio::test]
-    async fn a_registry_that_already_has_the_digest_is_sent_nothing() {
+    async fn a_failed_recipe_store_is_completed_by_publishing_the_same_output_again() {
+        let (_root, output_path) = published_output();
+        let tx = drained_sender();
+
+        let mut registry = FakeRegistry {
+            stores_to_refuse: 1,
+            ..FakeRegistry::default()
+        };
+
+        let first = publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            store_request(),
+            &tx,
+        )
+        .await;
+
+        assert!(first.is_err(), "a refused store was reported as a success");
+        assert_eq!(
+            registry.archived_digest.as_deref(),
+            Some("abc123"),
+            "the archive was dropped along with the recipe that failed to store"
+        );
+        assert_eq!(registry.recipe_name, None);
+
+        publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            store_request(),
+            &tx,
+        )
+        .await
+        .expect("the retry was refused");
+
+        assert_eq!(registry.recipe_name.as_deref(), Some("example"));
+    }
+
+    // A recipe the registry already answers for is not stored again: the store
+    // is the half that fails on an alias it wrote itself, so a digest whose
+    // recipe landed is left alone. The archive is pushed regardless — the
+    // backends dedupe it, and no existence answer is trusted to decide it.
+    #[tokio::test]
+    async fn a_registry_that_already_has_the_recipe_is_not_sent_it_again() {
         let (_root, output_path) = published_output();
         let tx = drained_sender();
 
@@ -3392,7 +3444,7 @@ mod tests {
             ..FakeRegistry::default()
         };
 
-        let published = publish_to_registry(
+        publish_to_registry(
             &mut registry,
             "abc123",
             "library",
@@ -3403,24 +3455,27 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(!published);
-        assert_eq!(registry.pushes, 0, "a digest already held was pushed again");
+        assert_eq!(registry.stores, 0, "a recipe already held was stored again");
+        assert_eq!(
+            registry.pushes, 1,
+            "the archive was skipped on an existence answer"
+        );
     }
 
-    // The push and the store fail separately, so each is retried separately: a
-    // registry holding the archive and not the recipe is given the recipe and
-    // is not pushed to a second time.
+    // The recipe check gates cost, not correctness: a registry that cannot
+    // answer it must not cost a build its registry copy, which is the state
+    // this whole path exists to repair.
     #[tokio::test]
-    async fn a_registry_missing_only_the_recipe_is_given_only_the_recipe() {
+    async fn a_recipe_check_that_errors_still_publishes_both_halves() {
         let (_root, output_path) = published_output();
         let tx = drained_sender();
 
         let mut registry = FakeRegistry {
-            archived_digest: Some("abc123".to_string()),
+            recipe_check_fails: true,
             ..FakeRegistry::default()
         };
 
-        let published = publish_to_registry(
+        publish_to_registry(
             &mut registry,
             "abc123",
             "library",
@@ -3429,10 +3484,9 @@ mod tests {
             &tx,
         )
         .await
-        .unwrap();
+        .expect("a check the registry could not answer failed the publication");
 
-        assert!(published);
-        assert_eq!(registry.pushes, 0);
+        assert_eq!(registry.archived_digest.as_deref(), Some("abc123"));
         assert_eq!(registry.recipe_name.as_deref(), Some("example"));
     }
 }
