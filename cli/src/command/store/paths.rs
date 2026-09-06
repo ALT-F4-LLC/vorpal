@@ -1121,6 +1121,43 @@ mod tests {
     // through the registry handlers that call them.
     // -------------------------------------------------------------------
 
+    // The fixtures that matter are the right-length ones: anything shorter or
+    // longer fails on the length guard and never reaches the character-class
+    // scan. `"a".repeat(63) + "/"` puts the offending byte last, so a scan
+    // that stops early accepts a path-shaped value.
+    #[test]
+    fn parse_artifact_digest_refuses_a_digest_that_is_not_a_bare_hex_string() {
+        let path_shaped = "a".repeat(63) + "/";
+
+        for hostile in [
+            "../../../../../../etc/passwd",
+            "/etc/passwd",
+            "",
+            &"a".repeat(63),
+            &"a".repeat(65),
+            &"g".repeat(64),
+            &"A".repeat(64),
+            &path_shaped,
+        ] {
+            let err = parse_artifact_digest(hostile, "test").unwrap_err();
+
+            assert!(
+                err.to_string().contains("invalid artifact digest"),
+                "accepted a digest that does not name a store path: {hostile:?}"
+            );
+        }
+    }
+
+    // Producer-shaped: a real sha256 digest carries digits, so an accept
+    // fixture of only letters would leave the digit half of the alphabet
+    // unpinned.
+    #[test]
+    fn parse_artifact_digest_accepts_a_producer_shaped_sha256_digest() {
+        let digest = "a1".repeat(32);
+
+        assert_eq!(parse_artifact_digest(&digest, "test").unwrap(), digest);
+    }
+
     #[test]
     fn parse_store_path_component_rejects_a_nul_byte() {
         let result = parse_store_path_component("a\0b", "tag");
