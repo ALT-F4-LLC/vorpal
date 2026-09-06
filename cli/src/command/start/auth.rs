@@ -609,30 +609,6 @@ pub fn require_namespace_or_service_trust<T>(
     }
 }
 
-/// Authorization gate that also owns the "is this deployment authenticated
-/// at all" decision. An anonymous deployment (no `--issuer` configured, so
-/// the interceptor never inserted `Claims`) skips the check, preserving the
-/// pre-existing default-UDS-developer-install behavior (VPL-383 residual
-/// R2); every other request delegates to
-/// [`require_namespace_or_service_trust`], which fails closed.
-///
-/// Each `registry.rs` handler previously repeated its own
-/// `Claims::is_some()` guard around that same rule — six copies of one
-/// decision, and the pattern this function replaces (VPL-383 CLUSTER-21):
-/// the absent-credential decision now lives once, here, instead of at every
-/// call site.
-pub fn authorize_namespace_if_authenticated<T>(
-    request: &Request<T>,
-    namespace: &str,
-    permission: &str,
-) -> Result<(), Status> {
-    if request.extensions().get::<Claims>().is_none() {
-        return Ok(());
-    }
-
-    require_namespace_or_service_trust(request, namespace, permission)
-}
-
 /// Extract user context for audit logging
 pub fn get_user_context<T>(request: &Request<T>) -> Option<String> {
     request
@@ -1281,6 +1257,73 @@ mod tests {
             elsewhere.requested_paths().is_empty(),
             "the client secret must never be replayed at the redirect target, got {:?}",
             elsewhere.requested_paths()
+        );
+    }
+
+    /// Build a validator against a loopback IdP serving an empty JWKS: enough
+    /// for the interceptor to be constructed, and enough that any presented
+    /// token fails verification rather than being accepted.
+    async fn interceptor_over_empty_jwks_idp(
+    ) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
+        let idp = IdpServer::start(|path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => {
+                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                }
+                _ => http_json(EMPTY_JWKS),
+            }
+        })
+        .await;
+
+        let validator = OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .expect("loopback discovery must succeed");
+
+        new_interceptor(Arc::new(validator))
+    }
+
+    // VPL-714 AC 1: the interceptor `start.rs` attaches to the archive and
+    // artifact services is the first of the two links that keep a claim-free
+    // request away from a registry handler, and nothing pinned it. It must
+    // reject a request carrying no `authorization` metadata outright, so
+    // `InterceptedService` never calls the inner service.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn interceptor_denies_a_request_with_no_authorization_metadata() {
+        let interceptor = interceptor_over_empty_jwks_idp().await;
+
+        let status = interceptor(Request::new(()))
+            .err()
+            .expect("a request with no authorization metadata must be refused");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        assert_eq!(status.message(), "missing authorization");
+    }
+
+    // Known-positive control for the test above: it distinguishes "the
+    // metadata gate fired" from "the fixture is inert". A request that does
+    // carry an `authorization` header reaches token validation and fails
+    // there instead, with a different message.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn interceptor_rejects_a_presented_token_at_validation_not_at_the_metadata_gate() {
+        let interceptor = interceptor_over_empty_jwks_idp().await;
+
+        let mut request = Request::new(());
+        request.metadata_mut().insert(
+            "authorization",
+            "Bearer not-a-real-token".parse().expect("header value"),
+        );
+
+        let status = interceptor(request)
+            .err()
+            .expect("a token that does not verify must be refused");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        assert!(
+            status.message().starts_with("token invalid"),
+            "the request must reach validation, got: {}",
+            status.message()
         );
     }
 }

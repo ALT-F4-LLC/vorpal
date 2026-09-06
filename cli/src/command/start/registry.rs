@@ -1,5 +1,5 @@
 use crate::command::{
-    start::auth::{authorize_namespace_if_authenticated, get_user_context, Claims, PrincipalKind},
+    start::auth::{get_user_context, require_namespace_or_service_trust, Claims, PrincipalKind},
     store::paths::{
         parse_alias_name, parse_artifact_digest, parse_store_path_component, split_alias_name_tag,
     },
@@ -173,13 +173,13 @@ impl ArchiveServer {
     /// CLUSTER-12R).
     fn with_check_cache_ttl(backend: Box<dyn ArchiveBackend>, ttl: Duration) -> Self {
         // Bounded on entry count: the key is "{namespace}/{digest}", and
-        // `ArchiveService::check`'s authz call (`authorize_namespace_if_authenticated`,
-        // below) only runs when the deployment is authenticated at all — an
-        // anonymous deployment (no `--issuer`) still has no check on who can
-        // grow this cache, and even an authenticated caller only needs
-        // *some* namespace grant to keep issuing distinct cache keys within
-        // it, so an unbounded cache still lets any caller grow it without
-        // limit regardless of the TTL (VPL-383). Each key/value pair is also
+        // `ArchiveService::check`'s authz call
+        // (`require_namespace_or_service_trust`, below) now refuses every
+        // claim-free request, so only a credentialed caller can grow this
+        // cache at all — but such a caller needs only *some* namespace grant
+        // to keep issuing distinct cache keys within it, so an unbounded
+        // cache would still let it grow without limit regardless of the TTL
+        // (VPL-383). Each key/value pair is also
         // now bounded in size: `parse_store_path_component` caps namespace
         // and tag length (CLUSTER-17), and `parse_artifact_digest` fixes the
         // digest length.
@@ -213,7 +213,7 @@ impl ArchiveService for ArchiveServer {
         // Authorization check — see DKT-64 note in `pull`. `check` previously
         // had no authz call at all, so any token holder (or, with auth off,
         // anyone) got an existence oracle across every namespace (VPL-383).
-        authorize_namespace_if_authenticated(&request, &namespace, "read")?;
+        require_namespace_or_service_trust(&request, &namespace, "read")?;
 
         if request.extensions().get::<Claims>().is_some() {
             info!(
@@ -293,7 +293,7 @@ impl ArchiveService for ArchiveServer {
         // `require_namespace_or_service_trust` so service-user tokens with an
         // `azp` in `--issuer-service-client-ids` bypass namespace RBAC while
         // human tokens still go through the unchanged permission check.
-        authorize_namespace_if_authenticated(&request, &namespace, "read")?;
+        require_namespace_or_service_trust(&request, &namespace, "read")?;
 
         if request.extensions().get::<Claims>().is_some() {
             info!(
@@ -346,7 +346,7 @@ impl ArchiveService for ArchiveServer {
         // Authorization check — see DKT-64 note in `pull`. Runs after the
         // namespace is known (it arrives in the first stream chunk, not in
         // the RPC's own metadata) and before any backend I/O.
-        authorize_namespace_if_authenticated(&request, &request_namespace, "write")?;
+        require_namespace_or_service_trust(&request, &request_namespace, "write")?;
 
         if request.extensions().get::<Claims>().is_some() {
             info!(
@@ -426,7 +426,7 @@ impl ArtifactService for ArtifactServer {
         request: Request<ArtifactRequest>,
     ) -> Result<Response<Artifact>, Status> {
         // Authorization check — see DKT-64 note in `ArchiveService::pull`.
-        authorize_namespace_if_authenticated(&request, &request.get_ref().namespace, "read")?;
+        require_namespace_or_service_trust(&request, &request.get_ref().namespace, "read")?;
 
         if request.extensions().get::<Claims>().is_some() {
             info!(
@@ -457,7 +457,7 @@ impl ArtifactService for ArtifactServer {
         // Authorization check — see DKT-64 note in `ArchiveService::pull`.
         // This site previously had no observability log line; DKT-64 adds one
         // so every authz decision (AC §1.3 #5) is logged uniformly.
-        authorize_namespace_if_authenticated(&request, &request.get_ref().namespace, "read")?;
+        require_namespace_or_service_trust(&request, &request.get_ref().namespace, "read")?;
 
         if request.extensions().get::<Claims>().is_some() {
             info!(
@@ -515,7 +515,7 @@ impl ArtifactService for ArtifactServer {
         request: Request<StoreArtifactRequest>,
     ) -> Result<Response<ArtifactResponse>, Status> {
         // Authorization check — see DKT-64 note in `ArchiveService::pull`.
-        authorize_namespace_if_authenticated(
+        require_namespace_or_service_trust(
             &request,
             &request.get_ref().artifact_namespace,
             "write",
@@ -777,11 +777,48 @@ mod tests {
     const DIGEST_GENERIC: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     const DIGEST_MISSING: &str = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 
-    fn make_check_request(namespace: &str, digest: &str) -> Request<ArchivePullRequest> {
+    /// Attach the extensions the auth interceptor inserts for a human
+    /// principal holding read and write on `namespace`.
+    ///
+    /// The registry gates now fail closed on a claim-free request, so a
+    /// request that is meant to exercise anything *past* authorization has to
+    /// carry a credential — the same shape a real request reaching a handler
+    /// always has. `Extensions::insert` replaces by type, so a test that needs
+    /// a different principal or grant simply inserts its own afterwards.
+    fn authenticate<T>(mut request: Request<T>, namespace: &str) -> Request<T> {
+        request.extensions_mut().insert(PrincipalKind::Human);
+        request.extensions_mut().insert(Claims {
+            aud: None,
+            exp: None,
+            iss: None,
+            sub: Some("tester".to_string()),
+            scope: None,
+            azp: None,
+            gty: None,
+            namespaces: Some(std::collections::HashMap::from([(
+                namespace.to_string(),
+                vec!["read".to_string(), "write".to_string()],
+            )])),
+        });
+
+        request
+    }
+
+    fn make_unauthenticated_check_request(
+        namespace: &str,
+        digest: &str,
+    ) -> Request<ArchivePullRequest> {
         Request::new(ArchivePullRequest {
             namespace: namespace.to_string(),
             digest: digest.to_string(),
         })
+    }
+
+    fn make_check_request(namespace: &str, digest: &str) -> Request<ArchivePullRequest> {
+        authenticate(
+            make_unauthenticated_check_request(namespace, digest),
+            namespace,
+        )
     }
 
     #[tokio::test]
@@ -1123,11 +1160,21 @@ mod tests {
     // namespace must be refused before the backend's path join runs.
     // -----------------------------------------------------------------------
 
-    fn make_get_artifact_request(namespace: &str, digest: &str) -> Request<ArtifactRequest> {
+    fn make_unauthenticated_get_artifact_request(
+        namespace: &str,
+        digest: &str,
+    ) -> Request<ArtifactRequest> {
         Request::new(ArtifactRequest {
             namespace: namespace.to_string(),
             digest: digest.to_string(),
         })
+    }
+
+    fn make_get_artifact_request(namespace: &str, digest: &str) -> Request<ArtifactRequest> {
+        authenticate(
+            make_unauthenticated_get_artifact_request(namespace, digest),
+            namespace,
+        )
     }
 
     #[tokio::test]
@@ -1291,7 +1338,7 @@ mod tests {
         assert_eq!(backend.pull_count(), 0);
     }
 
-    fn make_alias_request(
+    fn make_unauthenticated_alias_request(
         name: &str,
         namespace: &str,
         tag: &str,
@@ -1302,6 +1349,17 @@ mod tests {
             namespace: namespace.to_string(),
             tag: tag.to_string(),
         })
+    }
+
+    fn make_alias_request(
+        name: &str,
+        namespace: &str,
+        tag: &str,
+    ) -> Request<GetArtifactAliasRequest> {
+        authenticate(
+            make_unauthenticated_alias_request(name, namespace, tag),
+            namespace,
+        )
     }
 
     #[tokio::test]
@@ -1416,7 +1474,7 @@ mod tests {
     // writes anything.
     // -----------------------------------------------------------------------
 
-    fn make_store_request(
+    fn make_unauthenticated_store_request(
         namespace: &str,
         artifact_aliases: Vec<&str>,
     ) -> Request<StoreArtifactRequest> {
@@ -1425,6 +1483,16 @@ mod tests {
             artifact_aliases: artifact_aliases.into_iter().map(String::from).collect(),
             artifact_namespace: namespace.to_string(),
         })
+    }
+
+    fn make_store_request(
+        namespace: &str,
+        artifact_aliases: Vec<&str>,
+    ) -> Request<StoreArtifactRequest> {
+        authenticate(
+            make_unauthenticated_store_request(namespace, artifact_aliases),
+            namespace,
+        )
     }
 
     #[tokio::test]
@@ -1484,14 +1552,17 @@ mod tests {
         let backend = MockArtifactBackend::new();
         let server = ArtifactServer::new(backend.box_clone());
 
-        let request = Request::new(StoreArtifactRequest {
-            artifact: Some(Artifact {
-                aliases: vec!["../../../../../x:latest".to_string()],
-                ..Artifact::default()
+        let request = authenticate(
+            Request::new(StoreArtifactRequest {
+                artifact: Some(Artifact {
+                    aliases: vec!["../../../../../x:latest".to_string()],
+                    ..Artifact::default()
+                }),
+                artifact_aliases: vec![],
+                artifact_namespace: "library".to_string(),
             }),
-            artifact_aliases: vec![],
-            artifact_namespace: "library".to_string(),
-        });
+            "library",
+        );
 
         let result = server.store_artifact(request).await;
 
@@ -1506,14 +1577,17 @@ mod tests {
         let backend = MockArtifactBackend::new();
         let server = ArtifactServer::new(backend.box_clone());
 
-        let request = Request::new(StoreArtifactRequest {
-            artifact: Some(Artifact {
-                aliases: vec!["rust:latest".to_string()],
-                ..Artifact::default()
+        let request = authenticate(
+            Request::new(StoreArtifactRequest {
+                artifact: Some(Artifact {
+                    aliases: vec!["rust:latest".to_string()],
+                    ..Artifact::default()
+                }),
+                artifact_aliases: vec![],
+                artifact_namespace: "library".to_string(),
             }),
-            artifact_aliases: vec![],
-            artifact_namespace: "library".to_string(),
-        });
+            "library",
+        );
 
         let result = server.store_artifact(request).await;
 
@@ -1648,7 +1722,7 @@ mod tests {
     /// Build a real `Request<Streaming<ArchivePushRequest>>` from a sequence
     /// of chunks, each becoming one gRPC message on the wire — the same
     /// shape a real client's `ArchivePushRequest` stream produces.
-    fn make_push_streaming_request(
+    fn make_unauthenticated_push_request(
         chunks: Vec<ArchivePushRequest>,
     ) -> Request<Streaming<ArchivePushRequest>> {
         let body = FixedFramesBody {
@@ -1663,6 +1737,20 @@ mod tests {
         let streaming = Streaming::new_request(decoder, body, None, None);
 
         Request::new(streaming)
+    }
+
+    /// `push` authorizes against the namespace carried by the first stream
+    /// chunk rather than by the RPC's own fields, so the grant is derived
+    /// from that chunk.
+    fn make_push_streaming_request(
+        chunks: Vec<ArchivePushRequest>,
+    ) -> Request<Streaming<ArchivePushRequest>> {
+        let namespace = chunks
+            .first()
+            .map(|chunk| chunk.namespace.clone())
+            .unwrap_or_default();
+
+        authenticate(make_unauthenticated_push_request(chunks), &namespace)
     }
 
     #[tokio::test]
@@ -2000,4 +2088,129 @@ mod tests {
     // 2. Code review: PutObject path used when total data < 5MB (s3.rs:160-176)
     // 3. Code review: multipart upload lifecycle (create, upload parts, complete)
     // Integration tests with a mock S3 server are recommended for CI.
+
+    // -----------------------------------------------------------------------
+    // Claim-free denial across every archive/artifact handler (VPL-714 AC 1),
+    // mirroring the worker's
+    // `build_artifact_service_denies_a_request_with_no_claims`.
+    //
+    // The six registry gates previously called
+    // `authorize_namespace_if_authenticated`, which returned `Ok(())` whenever
+    // the `Claims` extension was absent — an uncredentialed request reaching a
+    // handler by any route was authorized by the absence of a credential. The
+    // only thing preventing that was the registration shape in `start.rs`
+    // (`with_interceptor`, never `::new`), which no test pinned, so a refactor
+    // adding a second registration site or moving auth behind routing would
+    // have restored the exposure with the suite fully green.
+    //
+    // Each case asserts both the `Unauthenticated` status and that the backend
+    // was never reached: the status code alone does not discriminate a gate
+    // that ran from a handler that failed later for an unrelated reason.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn check_denies_a_request_with_no_claims() {
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let status = server
+            .check(make_unauthenticated_check_request(
+                "library",
+                DIGEST_GENERIC,
+            ))
+            .await
+            .expect_err("a claim-free request must be denied, not silently skipped");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        assert_eq!(backend.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn pull_denies_a_request_with_no_claims() {
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let status = server
+            .pull(make_unauthenticated_check_request(
+                "library",
+                DIGEST_GENERIC,
+            ))
+            .await
+            .expect_err("a claim-free request must be denied, not silently skipped");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        assert_eq!(backend.pull_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn push_denies_a_request_with_no_claims() {
+        // `push` reads its first stream chunk before the gate runs, because
+        // the namespace it authorizes against arrives in that chunk rather
+        // than in the RPC's metadata. That ordering is the current intended
+        // shape; what must hold is that no backend write happens, which
+        // `push_count() == 0` pins independently of the status code.
+        let backend = MockBackend::new(true);
+        let server = ArchiveServer::new(backend.box_clone(), 300);
+
+        let request = make_unauthenticated_push_request(vec![ArchivePushRequest {
+            data: b"payload".to_vec(),
+            digest: DIGEST_GENERIC.to_string(),
+            namespace: "library".to_string(),
+        }]);
+
+        let status = server
+            .push(request)
+            .await
+            .expect_err("a claim-free request must be denied, not silently skipped");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        assert_eq!(backend.push_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn get_artifact_denies_a_request_with_no_claims() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let status = server
+            .get_artifact(make_unauthenticated_get_artifact_request(
+                "library",
+                DIGEST_GENERIC,
+            ))
+            .await
+            .expect_err("a claim-free request must be denied, not silently skipped");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        assert_eq!(backend.get_artifact_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn get_artifact_alias_denies_a_request_with_no_claims() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let status = server
+            .get_artifact_alias(make_unauthenticated_alias_request(
+                "vorpal", "library", "latest",
+            ))
+            .await
+            .expect_err("a claim-free request must be denied, not silently skipped");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        assert_eq!(backend.alias_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn store_artifact_denies_a_request_with_no_claims() {
+        let backend = MockArtifactBackend::new();
+        let server = ArtifactServer::new(backend.box_clone());
+
+        let status = server
+            .store_artifact(make_unauthenticated_store_request("library", vec![]))
+            .await
+            .expect_err("a claim-free request must be denied, not silently skipped");
+
+        assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        assert_eq!(backend.store_call_count(), 0);
+    }
 }
