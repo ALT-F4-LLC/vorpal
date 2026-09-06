@@ -27,9 +27,9 @@ use std::{
 use tokio::{
     fs::{
         create_dir_all, read_dir, read_link, remove_dir_all, remove_file, set_permissions,
-        symlink_metadata, write, File,
+        symlink_metadata, write, File, OpenOptions,
     },
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::Command,
     sync::{mpsc, mpsc::Sender},
 };
@@ -1304,6 +1304,53 @@ async fn send_message(
     send_build_response(tx, Ok(BuildArtifactResponse { output })).await
 }
 
+/// Takes the build lock for a digest, refusing a digest another build already
+/// holds.
+///
+/// Exclusive creation is the whole mechanism: a separate existence probe
+/// followed by a write leaves a window — the parent directory creation between
+/// them is an await point, so the task can yield there — in which two builds of
+/// one digest both observe no lock and both proceed, and the plain write
+/// truncates the holder's lock rather than refusing it. `create_new` makes the
+/// test and the set one operation the OS serializes.
+async fn acquire_output_lock(lock_path: &Path, artifact_json: &str) -> Result<(), Status> {
+    let lock_parent = lock_path
+        .parent()
+        .ok_or_else(|| Status::internal("failed to get lock file parent"))?;
+
+    create_dir_all(lock_parent)
+        .await
+        .map_err(|err| Status::internal(format!("failed to create lock file parent: {err}")))?;
+
+    let mut lock = match OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(lock_path)
+        .await
+    {
+        Ok(file) => file,
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+            return Err(Status::already_exists("artifact is locked"));
+        }
+        Err(err) => {
+            return Err(Status::internal(format!(
+                "failed to create lock file: {err:?}"
+            )));
+        }
+    };
+
+    // The flush is load-bearing: `tokio::fs::File` buffers, and a buffered
+    // write that a dropped handle never flushes leaves the lock on disk with
+    // no recipe in it.
+    let written = async {
+        lock.write_all(artifact_json.as_bytes()).await?;
+        lock.flush().await
+    }
+    .await;
+
+    written.map_err(|err| Status::internal(format!("failed to write lock file: {err:?}")))
+}
+
 /// Releases what a *failed* build holds for its digest: the workspace it ran in
 /// and the lock every later build of the same digest trips over.
 ///
@@ -1656,30 +1703,18 @@ async fn validate_and_lock_artifact(
         });
     }
 
-    // Check if artifact is locked
+    // Take the lock for this digest
 
     let artifact_output_lock = get_artifact_output_lock_path(&artifact_digest, artifact_namespace);
 
-    if artifact_output_lock.exists() {
-        error!("worker |> artifact is locked: {}", artifact_digest);
-        return Err(Status::already_exists("artifact is locked"));
-    }
+    if let Err(status) = acquire_output_lock(&artifact_output_lock, &artifact_json).await {
+        error!(
+            "worker |> could not take the lock for {}: {}",
+            artifact_digest,
+            status.message()
+        );
 
-    // Create lock file
-
-    let artifact_output_lock_parent = artifact_output_lock
-        .parent()
-        .ok_or_else(|| Status::internal("failed to get lock file parent"))?;
-
-    create_dir_all(artifact_output_lock_parent)
-        .await
-        .map_err(|err| Status::internal(format!("failed to create lock file parent: {err}")))?;
-
-    if let Err(err) = write(&artifact_output_lock, artifact_json).await {
-        error!("worker |> failed to create lock file: {:?}", err);
-        return Err(Status::internal(format!(
-            "failed to create lock file: {err:?}"
-        )));
+        return Err(status);
     }
 
     Ok(LockedArtifact::Ready {
@@ -3102,6 +3137,50 @@ mod tests {
         let root = TempDir::new().unwrap();
 
         release_failed_build(&root.path().join("gone"), &root.path().join("gone.lock")).await;
+    }
+
+    // Acquisition has to be a single atomic test-and-set. A separate
+    // `exists()` probe followed by a `write` leaves a window — the parent
+    // directory creation between them is an await point — where two builds of
+    // one digest both see no lock and both proceed, and the plain `write`
+    // truncates the loser's lock rather than refusing. Asserting the existing
+    // lock's bytes are untouched is what distinguishes exclusive creation from
+    // a status returned after an overwrite.
+    #[tokio::test]
+    async fn acquire_output_lock_refuses_a_digest_another_build_already_holds() {
+        let root = TempDir::new().unwrap();
+        let lock_path = root.path().join("output").join("abc123.lock.json");
+
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        std::fs::write(&lock_path, b"held-by-the-first-build").unwrap();
+
+        let status = acquire_output_lock(&lock_path, "held-by-the-second-build")
+            .await
+            .expect_err("a locked digest must be refused");
+
+        assert_eq!(status.code(), tonic::Code::AlreadyExists);
+        assert_eq!(
+            std::fs::read(&lock_path).unwrap(),
+            b"held-by-the-first-build",
+            "a refused acquisition overwrote the holder's lock"
+        );
+    }
+
+    // Positive control: with nothing holding the digest, acquisition creates
+    // the lock (and the store directory it lives in) and records the recipe.
+    #[tokio::test]
+    async fn acquire_output_lock_creates_the_lock_for_an_unheld_digest() {
+        let root = TempDir::new().unwrap();
+        let lock_path = root.path().join("output").join("abc123.lock.json");
+
+        acquire_output_lock(&lock_path, "{\"name\":\"abc\"}")
+            .await
+            .expect("an unheld digest must be acquirable");
+
+        assert_eq!(
+            std::fs::read_to_string(&lock_path).unwrap(),
+            "{\"name\":\"abc\"}"
+        );
     }
 
     /// Writes a zstd-compressed tar whose entries come from raw ustar headers,

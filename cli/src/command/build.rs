@@ -700,6 +700,34 @@ async fn retire_atomically(real_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Refuses a `--rebuild` of a digest a worker is currently building.
+///
+/// The lock is the worker's whole mutual-exclusion control — it refuses a build
+/// while the file exists (`start/worker.rs`) and removes it on completion — so
+/// retiring one out from under a live build admits a second concurrent build of
+/// the same digest and then fails the first build's own removal, reporting a
+/// build that completed as an internal error. `retire_atomically` makes that
+/// removal atomic; atomic removal of a live lock is still removal of a live
+/// lock, which is why the rebuild refuses rather than retiring it.
+///
+/// A digest nobody is building has no lock to retire, so the ordinary rebuild
+/// passes straight through.
+///
+/// This is racy against a lock taken immediately afterwards, and it cannot tell
+/// a live lock from one a killed worker left behind: the file carries no owner
+/// and no liveness marker, and nothing reads its body. Clearing a stale lock is
+/// a manual deletion, which is what the message points at.
+fn refuse_rebuild_of_a_locked_digest(lock_path: &Path) -> Result<()> {
+    if lock_path.exists() {
+        bail!(
+            "refusing to rebuild while a worker holds {}: wait for that build to finish, or delete the lock if no build is running",
+            lock_path.display()
+        );
+    }
+
+    Ok(())
+}
+
 /// Builds one artifact: pull, unpack, or build-then-pull. This is the body
 /// `run_scheduler` spawns, so it — and everything it calls — must report
 /// failure by returning `Err` and never by `process::exit` or a panic
@@ -1535,15 +1563,22 @@ async fn remove_outputs_for_rebuild(
     selected_artifact_digest: &str,
     namespace: &str,
 ) -> Result<()> {
-    retire_atomically(&get_artifact_output_lock_path(config_digest, namespace)).await?;
+    // Both digests are checked before either output is retired, so a rebuild
+    // refused on the second one has not already retired the first.
+    refuse_rebuild_of_a_locked_digest(&get_artifact_output_lock_path(config_digest, namespace))?;
 
-    retire_atomically(&get_artifact_output_path(config_digest, namespace)).await?;
-
-    retire_atomically(&get_artifact_output_lock_path(
+    refuse_rebuild_of_a_locked_digest(&get_artifact_output_lock_path(
         selected_artifact_digest,
         namespace,
-    ))
-    .await?;
+    ))?;
+
+    // The output paths are retired unconditionally: no worker writes one in
+    // place — `stage_then_publish` builds into a private staging directory
+    // and the real path comes into existence in a single publishing rename —
+    // so retiring one removes a completed entry, which is what `--rebuild`
+    // is for.
+
+    retire_atomically(&get_artifact_output_path(config_digest, namespace)).await?;
 
     retire_atomically(&get_artifact_output_path(
         selected_artifact_digest,
@@ -2383,6 +2418,56 @@ mod tests {
         let missing_path = root.path().join("does-not-exist");
 
         retire_atomically(&missing_path).await.unwrap();
+    }
+
+    // The lock file is the worker's only mutual exclusion control: it refuses
+    // a build while the file exists and removes it on completion. `--rebuild`
+    // renaming it away mid-build admits a second concurrent build of the same
+    // digest and then fails the first build's own removal, reporting a
+    // completed build as an internal error. So a live lock must survive
+    // `--rebuild`, and the refusal must name it.
+    #[test]
+    fn a_rebuild_of_a_locked_digest_is_refused_and_leaves_the_lock_intact() {
+        let root = TempDir::new().unwrap();
+        let store_path = root.path().join("output");
+
+        std::fs::create_dir_all(&store_path).unwrap();
+
+        let lock_path = store_path.join("abc123.lock.json");
+
+        std::fs::write(&lock_path, b"held-by-a-live-build").unwrap();
+
+        let err = refuse_rebuild_of_a_locked_digest(&lock_path).unwrap_err();
+        let message = err.to_string();
+
+        assert!(
+            message.contains(&lock_path.display().to_string()),
+            "the refusal did not name the live lock: {message}"
+        );
+        assert!(
+            message.contains("delete the lock"),
+            "the refusal did not say how to clear a stale lock: {message}"
+        );
+        assert_eq!(
+            std::fs::read(&lock_path).unwrap(),
+            b"held-by-a-live-build",
+            "a refused rebuild retired the live lock anyway"
+        );
+        assert_eq!(
+            dir_entry_names(&store_path),
+            BTreeSet::from(["abc123.lock.json".to_string()]),
+            "a refused rebuild left a staging entry under the store"
+        );
+    }
+
+    // The ordinary rebuild — nothing is building this digest — must still
+    // proceed, so the refusal above cannot be implemented as a blanket one.
+    #[test]
+    fn a_rebuild_of_an_unheld_digest_is_not_refused() {
+        let root = TempDir::new().unwrap();
+        let missing_lock = root.path().join("output").join("abc123.lock.json");
+
+        refuse_rebuild_of_a_locked_digest(&missing_lock).unwrap();
     }
 
     #[test]
