@@ -17,7 +17,7 @@ use anyhow::{anyhow, bail, Result};
 use async_compression::tokio::bufread::{BzDecoder, GzipDecoder};
 use sha256::digest;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::{
     fs::{remove_dir_all, remove_file, write, File},
@@ -83,6 +83,48 @@ fn requires_unlock_to_pin(
     );
 
     is_remote && !has_inline_digest && !has_lock_entry
+}
+
+/// Resolves the caller-supplied `artifact_context` against the
+/// operator-configured `workspace_root`, refusing anything that lands outside
+/// it. The handler reads `<context>/Vorpal.lock`, walks and copies the whole
+/// tree under `context` for a `Local` source, and writes `<context>/Vorpal.lock`
+/// back — all as the agent's own uid, on behalf of a principal whose only
+/// established authority is `write` on a registry namespace. The namespace gate
+/// says nothing about the path, so without this the caller names any directory
+/// the agent can read and any directory it can write.
+///
+/// `workspace_root` is canonicalized once at startup (`resolve_workspace_root`
+/// in `cli/src/command/start.rs`) and the context is canonicalized here, so
+/// both sides are compared in the same resolved form — `/var` vs `/private/var`
+/// on macOS would otherwise refuse every request, or admit an escape if the
+/// comparison ran the other way. Containment is `Path::starts_with`, which
+/// matches whole components: `<root>-evil` is not inside `<root>`, the way a
+/// string prefix would have it.
+///
+/// Fails closed: a context that cannot be resolved at all — nonexistent,
+/// unreadable, a broken component — is refused rather than passed through
+/// unchecked, so a path the caller names but has not created is no way around
+/// the check.
+fn resolve_artifact_context(
+    artifact_context: &str,
+    workspace_root: &Path,
+) -> Result<PathBuf, Status> {
+    let denied = || {
+        Status::permission_denied(format!(
+            "'artifact_context' {artifact_context:?} is outside the configured workspace root"
+        ))
+    };
+
+    let resolved = Path::new(artifact_context)
+        .canonicalize()
+        .map_err(|_| denied())?;
+
+    if !resolved.starts_with(workspace_root) {
+        return Err(denied());
+    }
+
+    Ok(resolved)
 }
 
 const DEFAULT_CHUNKS_SIZE: usize = 8192; // streaming chunk size
@@ -931,6 +973,7 @@ async fn prepare_artifact(
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
     source_cache: SourceCache,
     registry_allowed: &[String],
+    workspace_root: &Path,
     source_builder: &dyn SourceBuilder,
 ) -> Result<(), Status> {
     let request = request.into_inner();
@@ -946,6 +989,16 @@ async fn prepare_artifact(
     // request naming a registry outside the allow-list is refused before
     // any network I/O rather than per-source.
     let registry = resolve_registry(&request.registry, registry_allowed)?;
+
+    // The caller names a filesystem path the agent then reads, walks and
+    // writes as its own uid; the namespace gate above authorizes a registry
+    // namespace and says nothing about that path. Resolve it against the
+    // operator's workspace root here, ahead of the lockfile read below and of
+    // every `source_builder.build` call, so one check covers all three
+    // operations and the raw request field is never used as a path again.
+    // This runs for every principal, including `TrustedService`, which
+    // bypasses namespace RBAC entirely.
+    let artifact_context = resolve_artifact_context(&request.artifact_context, workspace_root)?;
 
     // TODO: Check if artifact already exists in the registry
 
@@ -978,7 +1031,7 @@ async fn prepare_artifact(
     }
 
     // Load lockfile to hydrate source digests before processing
-    let lock_path = Path::new(&request.artifact_context).join("Vorpal.lock");
+    let lock_path = artifact_context.join("Vorpal.lock");
     let lock_file = load_lock(&lock_path).await.unwrap_or(None);
 
     let mut artifact_sources = vec![];
@@ -988,7 +1041,7 @@ async fn prepare_artifact(
     for artifact_source in artifact.sources {
         resolve_and_upsert_source(
             artifact_source,
-            &request.artifact_context,
+            &artifact_context.display().to_string(),
             &request.artifact_namespace,
             request.artifact_unlock,
             &registry,
@@ -1049,13 +1102,19 @@ pub struct AgentServer {
     /// dials a caller-supplied registry too, so it needs the identical
     /// check.
     registry_allowed: Vec<String>,
+    /// The operator-configured directory a caller's `artifact_context` must
+    /// resolve inside, already canonicalized by `resolve_workspace_root` in
+    /// `cli/src/command/start.rs`. See `resolve_artifact_context` for what it
+    /// confines and why the canonical form is the one stored here.
+    workspace_root: PathBuf,
     source_cache: SourceCache,
 }
 
 impl AgentServer {
-    pub fn new(registry_allowed: Vec<String>) -> Self {
+    pub fn new(registry_allowed: Vec<String>, workspace_root: PathBuf) -> Self {
         Self {
             registry_allowed,
+            workspace_root,
             source_cache: Arc::new(Mutex::new(SourceCacheState::default())),
         }
     }
@@ -1089,6 +1148,7 @@ impl AgentService for AgentServer {
         // Cloned so the spawned task can own a handle while `self` keeps its own.
         let source_cache = Arc::clone(&self.source_cache);
         let registry_allowed = self.registry_allowed.clone();
+        let workspace_root = self.workspace_root.clone();
 
         tokio::spawn(async move {
             if let Err(err) = prepare_artifact(
@@ -1096,6 +1156,7 @@ impl AgentService for AgentServer {
                 &tx,
                 source_cache,
                 &registry_allowed,
+                &workspace_root,
                 &RegistrySourceBuilder,
             )
             .await
@@ -1114,16 +1175,20 @@ mod tests {
     use tempfile::TempDir;
 
     /// Records the namespace each prepare actually reached the push-bearing
-    /// builder under. A cache hit skips this call entirely, so the recorded
-    /// namespaces are exactly the set of namespaces this agent pushed into.
+    /// builder under, alongside the context it was handed. A cache hit skips
+    /// this call entirely, so the recorded namespaces are exactly the set of
+    /// namespaces this agent pushed into, and the recorded contexts are
+    /// exactly the roots it walked.
     struct RecordingSourceBuilder {
         calls: Arc<Mutex<Vec<(String, String)>>>,
+        contexts: Arc<Mutex<Vec<String>>>,
     }
 
     impl RecordingSourceBuilder {
         fn new() -> Self {
             Self {
                 calls: Arc::new(Mutex::new(Vec::new())),
+                contexts: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -1135,19 +1200,25 @@ mod tests {
                 .map(|(namespace, _)| namespace.clone())
                 .collect()
         }
+
+        async fn contexts(&self) -> Vec<String> {
+            self.contexts.lock().await.clone()
+        }
     }
 
     #[tonic::async_trait]
     impl SourceBuilder for RecordingSourceBuilder {
         async fn build(
             &self,
-            _artifact_context: String,
+            artifact_context: String,
             artifact_namespace: String,
             artifact_source: &ArtifactSource,
             _artifact_unlock: bool,
             _registry: &ResolvedRegistry,
             _tx: &Sender<Result<PrepareArtifactResponse, Status>>,
         ) -> Result<String> {
+            self.contexts.lock().await.push(artifact_context);
+
             self.calls
                 .lock()
                 .await
@@ -1187,6 +1258,23 @@ mod tests {
         }
     }
 
+    /// A workspace root a test can pass to the handler. `TempDir` hands back
+    /// `/var/folders/...` on macOS, which the handler's own canonicalization
+    /// resolves to `/private/var/...`; a root left uncanonicalized would make
+    /// every in-root context look like an escape.
+    fn workspace_root(dir: &TempDir) -> PathBuf {
+        dir.path().canonicalize().expect("canonical root")
+    }
+
+    /// The root the operator gets by default: the agent process's own cwd.
+    /// The `artifact_context: "."` fixtures below sit inside it.
+    fn cwd_root() -> PathBuf {
+        std::env::current_dir()
+            .expect("cwd")
+            .canonicalize()
+            .expect("canonical cwd")
+    }
+
     async fn prepare_http_source(
         namespace: &str,
         source_cache: SourceCache,
@@ -1194,12 +1282,14 @@ mod tests {
     ) {
         let (tx, _rx) = channel(100);
         let context = TempDir::new().expect("context dir");
+        let root = workspace_root(&context);
 
         prepare_artifact(
             Request::new(http_source_request(namespace, &context)),
             &tx,
             source_cache,
             &["http://registry.example.com".to_string()],
+            &root,
             builder,
         )
         .await
@@ -1362,6 +1452,7 @@ mod tests {
             &tx,
             source_cache,
             &["http://registry.example.com".to_string()],
+            &cwd_root(),
             &RecordingSourceBuilder::new(),
         )
         .await
@@ -1402,6 +1493,7 @@ mod tests {
             &tx,
             source_cache,
             &["http://registry.example.com".to_string()],
+            &cwd_root(),
             &RecordingSourceBuilder::new(),
         )
         .await;
@@ -1441,7 +1533,7 @@ mod tests {
     // pushes them under the host user's bearer.
     #[tokio::test]
     async fn prepare_artifact_service_denies_a_request_with_no_claims() {
-        let server = AgentServer::new(vec!["http://registry.example.com".to_string()]);
+        let server = AgentServer::new(vec!["http://registry.example.com".to_string()], cwd_root());
 
         let status = server
             .prepare_artifact(Request::new(prepare_request("library")))
@@ -1456,7 +1548,7 @@ mod tests {
     // registry from a rejected one by the code it gets back.
     #[tokio::test]
     async fn prepare_artifact_denies_a_claim_free_request_for_any_registry() {
-        let server = AgentServer::new(vec!["http://registry.example.com".to_string()]);
+        let server = AgentServer::new(vec!["http://registry.example.com".to_string()], cwd_root());
 
         let mut request = prepare_request("library");
         request.registry = "http://attacker.example.com".to_string();
@@ -1474,7 +1566,7 @@ mod tests {
     // are the gate firing rather than an inert fixture.
     #[tokio::test]
     async fn prepare_artifact_service_admits_a_request_with_namespace_write_claims() {
-        let server = AgentServer::new(vec!["http://registry.example.com".to_string()]);
+        let server = AgentServer::new(vec!["http://registry.example.com".to_string()], cwd_root());
 
         let mut request = Request::new(prepare_request("library"));
 
@@ -1497,5 +1589,263 @@ mod tests {
             .prepare_artifact(request)
             .await
             .expect("a claims-bearing request with namespace write permission is admitted");
+    }
+
+    /// A local-source request naming `context` as its read root. The source
+    /// path is `"."`, which always exists and therefore classifies `Local` —
+    /// the branch that walks and copies `artifact_context` itself.
+    fn local_source_request(context: &Path) -> PrepareArtifactRequest {
+        PrepareArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec![],
+                name: "test".to_string(),
+                sources: vec![ArtifactSource {
+                    digest: None,
+                    excludes: vec![],
+                    includes: vec![],
+                    name: "source".to_string(),
+                    path: ".".to_string(),
+                }],
+                steps: vec![],
+                systems: vec![],
+                target: 0,
+            }),
+            artifact_context: context.display().to_string(),
+            artifact_namespace: "library".to_string(),
+            artifact_unlock: false,
+            registry: "http://registry.example.com".to_string(),
+        }
+    }
+
+    async fn prepare_with_root(
+        request: PrepareArtifactRequest,
+        root: &Path,
+        builder: &RecordingSourceBuilder,
+    ) -> Result<(), Status> {
+        let (tx, _rx) = channel(100);
+        let source_cache: SourceCache = Arc::new(Mutex::new(SourceCacheState::default()));
+
+        prepare_artifact(
+            Request::new(request),
+            &tx,
+            source_cache,
+            &["http://registry.example.com".to_string()],
+            root,
+            builder,
+        )
+        .await
+    }
+
+    /// A workspace root with a sibling `escape` directory outside it, holding
+    /// a `Vorpal.lock` that pins `source` to a digest the request does not
+    /// carry. Reading that lockfile would make the handler refuse with
+    /// `failed_precondition` ("changed - use '--unlock'"), so a
+    /// `permission_denied` is positive evidence the read never happened —
+    /// not merely that the status differs.
+    fn root_and_escape() -> (TempDir, PathBuf, PathBuf) {
+        let parent = TempDir::new().expect("parent dir");
+        let parent_path = parent.path().canonicalize().expect("canonical parent");
+
+        let root = parent_path.join("root");
+        let escape = parent_path.join("escape");
+
+        std::fs::create_dir(&root).expect("root dir");
+        std::fs::create_dir(&escape).expect("escape dir");
+
+        std::fs::write(
+            escape.join("Vorpal.lock"),
+            "lockfile = 1\n\n[[sources]]\ndigest = \"deadbeef\"\nexcludes = []\nincludes = []\nname = \"source\"\npath = \"https://elsewhere.example.com/other.tar.gz\"\nplatform = \"unknown\"\n",
+        )
+        .expect("escape lockfile");
+
+        (parent, root, escape)
+    }
+
+    // AC2: a `..`-escaping context is refused before anything reads or walks
+    // it. `<root>/../escape` canonicalizes outside the configured root, so
+    // the handler must refuse rather than treat the traversal as ordinary
+    // path text.
+    #[tokio::test]
+    async fn prepare_artifact_refuses_a_dot_dot_escaping_context() {
+        let (_parent, root, escape) = root_and_escape();
+        let builder = RecordingSourceBuilder::new();
+
+        let context = root.join("..").join("escape");
+
+        let status = prepare_with_root(local_source_request(&context), &root, &builder)
+            .await
+            .expect_err("a context outside the workspace root is refused");
+
+        assert_eq!(status.code(), Code::PermissionDenied);
+        assert!(
+            builder.contexts().await.is_empty(),
+            "a refused context must never reach the source builder"
+        );
+        assert!(
+            !escape.join("Vorpal.lock.written").exists(),
+            "nothing may be written outside the root"
+        );
+    }
+
+    // AC2, second shape: an absolute path outside the root, with no traversal
+    // syntax to notice. A check that only looked for ".." would pass the test
+    // above and fail this one.
+    #[tokio::test]
+    async fn prepare_artifact_refuses_an_absolute_context_outside_the_root() {
+        let (_parent, root, escape) = root_and_escape();
+        let builder = RecordingSourceBuilder::new();
+
+        let status = prepare_with_root(local_source_request(&escape), &root, &builder)
+            .await
+            .expect_err("an absolute context outside the workspace root is refused");
+
+        assert_eq!(status.code(), Code::PermissionDenied);
+        assert!(
+            builder.contexts().await.is_empty(),
+            "a refused context must never reach the source builder"
+        );
+    }
+
+    // The positive control the denials above need: a context inside the root
+    // still prepares, and the builder is handed the resolved path. Without
+    // this, a handler that refused every request would pass both denials.
+    #[tokio::test]
+    async fn prepare_artifact_accepts_a_context_inside_the_root() {
+        let (_parent, root, _escape) = root_and_escape();
+        let builder = RecordingSourceBuilder::new();
+
+        let inside = root.join("workspace");
+
+        std::fs::create_dir(&inside).expect("workspace dir");
+
+        prepare_with_root(local_source_request(&inside), &root, &builder)
+            .await
+            .expect("a context inside the workspace root prepares");
+
+        assert_eq!(
+            builder.contexts().await,
+            vec![inside.display().to_string()],
+            "the builder must receive the resolved in-root context"
+        );
+    }
+
+    // The root itself is inside the root: a prefix check that demanded a
+    // strict descendant would refuse the ordinary single-workspace install.
+    #[tokio::test]
+    async fn prepare_artifact_accepts_the_root_itself_as_the_context() {
+        let (_parent, root, _escape) = root_and_escape();
+        let builder = RecordingSourceBuilder::new();
+
+        prepare_with_root(local_source_request(&root), &root, &builder)
+            .await
+            .expect("the workspace root itself is an acceptable context");
+
+        assert_eq!(builder.contexts().await, vec![root.display().to_string()]);
+    }
+
+    // A sibling whose name merely starts with the root's is not inside it:
+    // `<root>-evil` shares a string prefix with `<root>` but no path
+    // component boundary, so a `String::starts_with` check would admit it.
+    #[tokio::test]
+    async fn prepare_artifact_refuses_a_sibling_sharing_the_roots_name_prefix() {
+        let parent = TempDir::new().expect("parent dir");
+        let parent_path = parent.path().canonicalize().expect("canonical parent");
+
+        let root = parent_path.join("root");
+        let near_miss = parent_path.join("root-evil");
+
+        std::fs::create_dir(&root).expect("root dir");
+        std::fs::create_dir(&near_miss).expect("near-miss dir");
+
+        let builder = RecordingSourceBuilder::new();
+
+        let status = prepare_with_root(local_source_request(&near_miss), &root, &builder)
+            .await
+            .expect_err("a name-prefix sibling is not inside the root");
+
+        assert_eq!(status.code(), Code::PermissionDenied);
+        assert!(builder.contexts().await.is_empty());
+    }
+
+    // Fail closed on a context that cannot be resolved at all: a nonexistent
+    // path has no canonical form to compare, and treating that as "unchecked"
+    // would reopen the hole for any path the attacker names but has not
+    // created.
+    #[tokio::test]
+    async fn prepare_artifact_refuses_a_context_that_cannot_be_resolved() {
+        let (_parent, root, _escape) = root_and_escape();
+        let builder = RecordingSourceBuilder::new();
+
+        let missing = root.join("does-not-exist");
+
+        let status = prepare_with_root(local_source_request(&missing), &root, &builder)
+            .await
+            .expect_err("an unresolvable context is refused");
+
+        assert_eq!(status.code(), Code::PermissionDenied);
+        assert!(builder.contexts().await.is_empty());
+    }
+
+    // AC3: the lockfile write is covered by the same check. `save_lock`
+    // failure is only `warn!`-logged, never returned, so the assertion that
+    // matters is on the filesystem — no `Vorpal.lock` may appear outside the
+    // root, whatever status the caller sees.
+    #[tokio::test]
+    async fn prepare_artifact_writes_no_lockfile_outside_the_root() {
+        let parent = TempDir::new().expect("parent dir");
+        let parent_path = parent.path().canonicalize().expect("canonical parent");
+
+        let root = parent_path.join("root");
+        let escape = parent_path.join("escape");
+
+        std::fs::create_dir(&root).expect("root dir");
+        std::fs::create_dir(&escape).expect("escape dir");
+
+        let builder = RecordingSourceBuilder::new();
+
+        let mut request = PrepareArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec![],
+                name: "test".to_string(),
+                sources: vec![ArtifactSource {
+                    digest: Some(SOURCE_DIGEST.to_string()),
+                    excludes: vec![],
+                    includes: vec![],
+                    name: "source".to_string(),
+                    path: SOURCE_URL.to_string(),
+                }],
+                steps: vec![],
+                systems: vec![],
+                target: 0,
+            }),
+            artifact_context: escape.display().to_string(),
+            artifact_namespace: "library".to_string(),
+            artifact_unlock: true,
+            registry: "http://registry.example.com".to_string(),
+        };
+
+        let status = prepare_with_root(request.clone(), &root, &builder)
+            .await
+            .expect_err("an escaping context is refused before the lockfile upsert");
+
+        assert_eq!(status.code(), Code::PermissionDenied);
+        assert!(
+            !escape.join("Vorpal.lock").exists(),
+            "no lockfile may be written outside the workspace root"
+        );
+
+        // Positive control: the identical upsert inside the root does write
+        // one, so the absence above is the check firing rather than an upsert
+        // that never happens.
+        request.artifact_context = root.display().to_string();
+
+        prepare_with_root(request, &root, &builder)
+            .await
+            .expect("an in-root upsert prepares");
+
+        assert!(
+            root.join("Vorpal.lock").exists(),
+            "an in-root upsert must still write its lockfile"
+        );
     }
 }

@@ -10,10 +10,10 @@ use crate::command::{
         get_key_service_key_path, get_key_service_path, get_lock_path, get_socket_path,
     },
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use fs4::fs_std::FileExt;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::read_to_string;
 use tokio::net::{TcpListener, UnixListener};
@@ -62,6 +62,40 @@ pub struct RunArgs {
     pub registry_allowed: Option<Vec<String>>,
     pub services: Vec<String>,
     pub tls: bool,
+    /// The directory a caller-supplied `artifact_context` must resolve inside
+    /// before the agent reads, walks or writes it. Populated from
+    /// `--workspace-root` (or `VORPAL_WORKSPACE_ROOT`) in
+    /// `cli/src/command.rs`. `None` means the flag was omitted and the root
+    /// defaults to this process's own working directory — see
+    /// `resolve_workspace_root`.
+    pub workspace_root: Option<PathBuf>,
+}
+
+/// Resolves the agent's workspace root once at startup, in the canonical form
+/// `agent::resolve_artifact_context` compares against — an uncanonicalized
+/// root would refuse every request on any host where the configured path
+/// traverses a symlink (`/var` -> `/private/var` on macOS).
+///
+/// An omitted flag defaults to this process's working directory, which is only
+/// as confining as wherever the operator started the agent: under a service
+/// manager that is often `/`, and a root of `/` admits every path. The caller
+/// logs the effective root and whether it came from the flag so that
+/// configuration is visible at boot rather than inferred from what a build
+/// managed to read.
+///
+/// A configured root that does not resolve is a startup error, not a silent
+/// fallback: an agent that cannot establish its confinement boundary must not
+/// come up serving requests without one.
+fn resolve_workspace_root(configured: Option<PathBuf>) -> Result<PathBuf> {
+    let root = match configured {
+        Some(root) => root,
+        None => std::env::current_dir().map_err(|e| {
+            anyhow!("failed to read the current directory for the workspace root: {e}")
+        })?,
+    };
+
+    root.canonicalize()
+        .map_err(|e| anyhow!("workspace root {:?} could not be resolved: {e}", root))
 }
 
 /// `ResolvedRegistry` and `resolve_registry` live in their own submodule,
@@ -1106,6 +1140,29 @@ pub async fn run(args: RunArgs) -> Result<()> {
         &get_socket_path(),
     );
 
+    // The agent's filesystem confinement boundary. Resolved before any
+    // listener is bound so an unresolvable configured root refuses the start
+    // rather than surfacing as a refused build later.
+    let workspace_root_configured = args.workspace_root.is_some();
+    let workspace_root = resolve_workspace_root(args.workspace_root.clone())?;
+
+    // Same reason the registry allow-list is emitted above: what this process
+    // will and will not read is a boot-time fact an operator should be able to
+    // confirm. The cwd fallback in particular is only as confining as wherever
+    // the process was started, so it is named as a fallback rather than
+    // reported as configuration.
+    if has_agent {
+        if workspace_root_configured {
+            info!("agent |> workspace root: {}", workspace_root.display());
+        } else {
+            warn!(
+                "agent |> workspace root defaults to this process's working directory ({}); \
+                 set --workspace-root/VORPAL_WORKSPACE_ROOT to confine it deliberately",
+                workspace_root.display()
+            );
+        }
+    }
+
     // Emit the registry allow-list at startup for the same reason the
     // trusted-service list is emitted above: a worker or agent with an
     // empty list refuses every registry dial (fail-closed), which should be
@@ -1212,7 +1269,10 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
         if has_agent {
             registrar = registrar.intercepted(
-                AgentServiceServer::new(AgentServer::new(registry_allowed.clone())),
+                AgentServiceServer::new(AgentServer::new(
+                    registry_allowed.clone(),
+                    workspace_root.clone(),
+                )),
                 validator_intercepter.clone(),
             );
 
@@ -1415,6 +1475,7 @@ mod run_startup_refusal_tests {
             registry_backend_s3_bucket: None,
             registry_backend_s3_force_path_style: false,
             registry_allowed: None,
+            workspace_root: None,
             services: vec![service.to_string()],
             tls: false,
         }
@@ -1500,6 +1561,44 @@ mod registry_scheme_tests {
         ];
 
         assert!(registries_needing_tls_warning(&allowed).is_empty());
+    }
+
+    // The default the operator gets by omitting the flag, in the canonical
+    // form the agent compares against — not the raw cwd string, which on a
+    // symlinked path would refuse every request inside it.
+    #[test]
+    fn resolve_workspace_root_defaults_to_the_canonical_working_directory() {
+        let expected = std::env::current_dir().unwrap().canonicalize().unwrap();
+
+        assert_eq!(resolve_workspace_root(None).unwrap(), expected);
+    }
+
+    #[test]
+    fn resolve_workspace_root_canonicalizes_a_configured_value() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let expected = dir.path().canonicalize().unwrap();
+
+        let configured = dir.path().join("..").join(
+            dir.path()
+                .file_name()
+                .expect("the temp dir has a final component"),
+        );
+
+        assert_eq!(resolve_workspace_root(Some(configured)).unwrap(), expected);
+    }
+
+    // Fail closed at startup: an agent that cannot resolve its confinement
+    // boundary must not come up serving requests without one.
+    #[test]
+    fn resolve_workspace_root_refuses_a_configured_root_that_does_not_exist() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let err = resolve_workspace_root(Some(dir.path().join("missing"))).unwrap_err();
+
+        assert!(
+            err.to_string().contains("could not be resolved"),
+            "unexpected error: {err}"
+        );
     }
 
     // C11 (reconcile): pin the startup-log gate itself, not just the
@@ -1722,7 +1821,10 @@ mod registration_enumeration_tests {
         let registrar = ServiceRegistrar::new(Server::builder());
 
         let err = registrar
-            .exempt(AgentServiceServer::new(AgentServer::new(vec![])))
+            .exempt(AgentServiceServer::new(AgentServer::new(
+                vec![],
+                PathBuf::from("/"),
+            )))
             .err()
             .expect("registering the agent with no interceptor must be refused");
 
@@ -1768,6 +1870,7 @@ mod registration_enumeration_tests {
             registry_backend_s3_bucket: None,
             registry_backend_s3_force_path_style: false,
             registry_allowed: None,
+            workspace_root: None,
             services: vec![
                 "agent".to_string(),
                 "registry".to_string(),
@@ -1809,6 +1912,7 @@ mod registration_enumeration_tests {
             registry_backend_s3_bucket: None,
             registry_backend_s3_force_path_style: false,
             registry_allowed: None,
+            workspace_root: None,
             services: vec!["workers".to_string()],
             tls: false,
         };

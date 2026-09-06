@@ -151,6 +151,7 @@ mod registry_allowed_tests {
             registry_allowed,
             services: vec!["worker".to_string()],
             tls: false,
+            workspace_root: None,
         };
 
         assert_eq!(run_args.registry_allowed, None);
@@ -273,6 +274,18 @@ pub enum CommandSystemServices {
         /// Enable TLS for the main gRPC listener (requires keys in /var/lib/vorpal/key/)
         #[arg(default_value_t = false, long)]
         tls: bool,
+
+        /// Directory the agent confines every request's `artifact_context`
+        /// to. The agent reads `<context>/Vorpal.lock`, walks and copies the
+        /// whole tree under `<context>` for a local source, and writes
+        /// `<context>/Vorpal.lock` back, all as its own uid — a request whose
+        /// context resolves outside this root is refused. Leave unset
+        /// (default): this process's own working directory, which confines
+        /// nothing if the agent was started from `/` or a home directory, so
+        /// name the workspace deliberately on any host the agent's owner does
+        /// not have to themselves.
+        #[arg(env = "VORPAL_WORKSPACE_ROOT", long)]
+        workspace_root: Option<PathBuf>,
     },
 }
 
@@ -1936,6 +1949,7 @@ async fn dispatch_system(system: CommandSystem, matches: &ArgMatches) -> Result<
                 registry_allowed,
                 services,
                 tls,
+                workspace_root,
             } => {
                 // State the trust anchor and the channel it arrived on.
                 // Whoever controls the issuer controls which tokens this
@@ -2004,6 +2018,7 @@ async fn dispatch_system(system: CommandSystem, matches: &ArgMatches) -> Result<
                         .map(std::string::ToString::to_string)
                         .collect(),
                     tls,
+                    workspace_root,
                 };
 
                 start::run(run_args).await
