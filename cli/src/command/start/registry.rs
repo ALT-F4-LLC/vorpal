@@ -1,14 +1,15 @@
 use crate::command::{
     start::auth::{get_user_context, require_namespace_or_service_trust, Claims, PrincipalKind},
     store::paths::{
-        parse_alias_name, parse_artifact_digest, parse_store_path_component, split_alias_name_tag,
+        get_root_artifact_archive_dir_path, parse_alias_name, parse_artifact_digest,
+        parse_store_path_component, split_alias_name_tag,
     },
 };
 use anyhow::{bail, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use moka::future::Cache;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -45,7 +46,9 @@ pub enum ServerBackend {
 }
 
 #[derive(Clone, Debug)]
-pub struct LocalBackend;
+pub struct LocalBackend {
+    archive_dir: PathBuf,
+}
 
 const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
@@ -81,8 +84,18 @@ pub struct S3Backend {
 }
 
 impl LocalBackend {
-    pub fn new() -> Self {
-        Self
+    pub fn new(archive_dir: PathBuf) -> Self {
+        Self { archive_dir }
+    }
+
+    /// Mirrors the trailing `<namespace>/<digest>.tar.zst` of
+    /// `get_artifact_archive_path`, rooted at this backend's own archive
+    /// directory rather than the process-wide store.
+    pub(super) fn archive_path(&self, digest: &str, namespace: &str) -> PathBuf {
+        self.archive_dir
+            .join(namespace)
+            .join(digest)
+            .with_extension("tar.zst")
     }
 }
 
@@ -603,7 +616,7 @@ pub async fn backend_archive(
     };
 
     let backend_archive: Box<dyn ArchiveBackend> = match backend {
-        ServerBackend::Local => Box::new(LocalBackend::new()),
+        ServerBackend::Local => Box::new(LocalBackend::new(get_root_artifact_archive_dir_path())),
         ServerBackend::S3 => Box::new(
             S3Backend::new(
                 registry_backend_s3_bucket,
@@ -629,7 +642,7 @@ pub async fn backend_artifact(
     };
 
     let backend_artifact: Box<dyn ArtifactBackend> = match backend {
-        ServerBackend::Local => Box::new(LocalBackend::new()),
+        ServerBackend::Local => Box::new(LocalBackend::new(get_root_artifact_archive_dir_path())),
         ServerBackend::S3 => Box::new(
             S3Backend::new(
                 registry_backend_s3_bucket,
@@ -2047,14 +2060,6 @@ mod tests {
 
         Ok(())
     }
-
-    // LocalBackend's own temp-file cleanup on a stream error
-    // (`registry/archive/local.rs`) has no test here. It writes under
-    // `get_artifact_archive_path`, which is hardcoded to /var/lib/vorpal, so
-    // reaching it needs either write access to that path or a configurable
-    // base path. The test that used to sit here asserted a constant and
-    // exercised nothing; it was removed rather than left reporting a pass for
-    // behavior it never ran.
 
     #[tokio::test]
     async fn test_push_large_multi_chunk_stream() -> Result<(), Box<dyn std::error::Error>> {
