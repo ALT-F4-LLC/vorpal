@@ -938,6 +938,16 @@ async fn refresh_access_token(
         .await
         .map_err(|e| RefreshFailure::NotSent(e.into()))?;
 
+    // Deliberately weaker than the login path, not an oversight:
+    // `login_discovery_targets` in `cli/src/command.rs` additionally compares
+    // the document's `issuer` claim against the requested issuer, pins
+    // `device_authorization_endpoint`'s origin, and calls `error_for_status()`
+    // on the discovery fetch. VPL-280's threat model (control C-4 and the
+    // E-4/E-6 inheritance table, "DO NOT INHERIT SILENTLY") rules the gap
+    // unexploitable here: refresh never opens a browser, and a missing or
+    // off-origin `token_endpoint` already fails closed as
+    // `RefreshFailure::NotSent` below. Neither side may be relaxed toward the
+    // other on an assumption of symmetry; revisit both against that table.
     let token_endpoint = doc
         .get("token_endpoint")
         .and_then(|v| v.as_str())
