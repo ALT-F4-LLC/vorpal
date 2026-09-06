@@ -202,26 +202,145 @@ generate-check:
 # Docket gates
 #
 # These targets back the `docket trust` entries of the same name (the rest of
-# that list maps onto `format`, `build` and `test` above). Every target in this
-# section is a STUB: it exits 0 without performing the check its name implies,
-# so a workflow that gates on it is not actually checking anything. Each is
-# registered with `docket trust add --stub`, which makes docket mark its passes
-# hollow in run reports rather than counting them as real coverage. Replace a
-# stub with the real check before treating its gate as meaningful.
+# that list maps onto `format`, `build` and `test` above).
+#
+# `secret-scan`, `ac-commands` and `doc-record` below are real. The remaining
+# two, `sdet-abuse` and `vuln-scan`, are still STUBS: each exits 0 without
+# performing the check its name implies, so a workflow gating on either is not
+# checking anything. Their trust entries carry `stub(no-real-check: ...)`,
+# which makes docket mark their passes hollow in run reports rather than
+# counting them as real coverage.
+#
+# Making a target real here is only half the change: the trust entry's stub
+# annotation is operator state, cleared by re-running `docket trust add` for
+# that gate. Until that happens the three real targets still report as hollow
+# passes.
 
 STUB = echo "STUB: 'make $@' performed no check (see 'Docket gates' in makefile)"
 
+# ac-commands — run this repo's own checks and report each result.
+#
+# Wired as a pre-gate on `verify`, where the output lands in the step's context
+# bundle. `verify-ac` judges acceptance criteria against the diff, and an AC of
+# the form "the tests pass" is one it cannot settle by reading code: without
+# recorded command results it must answer `unverifiable`, which parks the step.
+#
+# The exit status is the WORST any check recorded, never the sum: summed exits
+# wrap at 256 back to 0, reporting a failure as success. A failing pre-gate
+# does not refuse the claim; the engine carries the failure into the bundle as
+# data, so the verifier sees an honest verdict and the step still runs.
+#
+# KNOWN LIMIT: this cannot run the fenced AC commands harvested per issue. A
+# gate process receives an allowlisted environment with no run, issue or step
+# identity, so it cannot locate the issue whose fences it would execute.
+# Closing that needs the engine to pass step identity into the gate.
 ac-commands:
-	$(STUB)
+	echo "=== ac-commands: recorded results for the verifier ==="
+	echo "commit: $$(git rev-parse --short HEAD)"
+	echo "tree:   $$(git status --porcelain | wc -l | tr -d ' ') uncommitted path(s)"
+	worst=0; \
+	log=$$(mktemp) || exit 1; \
+	trap 'rm -f "$$log"' EXIT; \
+	for target in build test; do \
+		echo "--- $$target: make $$target ---"; \
+		status=0; \
+		$(MAKE) $$target >"$$log" 2>&1 || status=$$?; \
+		tail -20 "$$log"; \
+		echo "[$$target] exit $$status"; \
+		if [ "$$status" -gt "$$worst" ]; then worst=$$status; fi; \
+		echo; \
+	done; \
+	echo "=== end ac-commands ==="; \
+	exit $$worst
 
+# doc-record — the trusted action behind the spec-doc workflow's record step.
+#
+# Not a check: it reads a JSON context bundle on stdin and writes exactly one
+# JSON document back on stdout, so a single stray byte there fails the step.
+# Silenced with `@` for that reason, and shipped by the docket corpus rather
+# than by this repository.
 doc-record:
-	$(STUB)
+	@"$$HOME/.docket/bin/doc-record"
 
 sdet-abuse:
 	$(STUB)
 
+# secret-scan — refuse a change that adds a credential to the tree.
+#
+# Scope is what THIS step added. A secret already in an older commit is not
+# this step's doing, and failing on it would make the gate unclearable for
+# every later step that touches the file.
+#
+# FOUR sources, because a change hides in any of them:
+#
+#   staged     this gate also runs before a commit, and a staged file is
+#              absent from both a bare working-tree diff and the untracked
+#              enumeration — it would fall straight through the gap.
+#   unstaged   the ordinary in-progress edit.
+#   untracked  a brand-new file is exactly where a credential lands, and
+#              `git diff` cannot see one.
+#   HEAD       LOAD-BEARING, and the reason a three-source scan would be
+#              decorative here. The engine re-runs gates after the step's
+#              hand-back commit, against a clean tree: all three sources above
+#              are empty by then, so the gate would report "nothing to scan"
+#              on every invocation it actually performs. HEAD's own patch is
+#              the change under review at that point.
+#
+# KNOWN LIMIT of the HEAD source: it is one commit. A step that hands back
+# several commits has only its last one scanned this way (the earlier ones
+# were covered while they were still staged or unstaged, on an earlier run of
+# this gate, which is weaker evidence than scanning the range).
+#
+# FAILS CLOSED on a git that refuses. Every line scanned comes from git, so a
+# git that errors leaves the input empty — and an empty scan reads as "clean",
+# a security gate passing precisely when it inspected nothing. Each git
+# invocation's own exit status is therefore checked. This is not `pipefail`
+# territory: make runs recipes under /bin/sh, where a pipeline's status is its
+# LAST command's, so a `git ... | grep` would report grep's success and hide
+# the failure. Hence the redirect-then-grep shape below.
+#
+# The matching line is never printed: it would land in the gate's recorded
+# verdict, the event log and every transcript quoting them, making the gate
+# itself the leak. The count is enough to go looking.
+#
+# Untracked names reach `sh` as ARGUMENTS, never spliced into its command
+# string. A file named `x"; rm -rf ~; "` would otherwise execute as code in
+# the gate's own context — a scanner that runs what it is meant to inspect.
+#
+# Patterns are high-signal shapes only. One that fires on ordinary code trains
+# people to route around the gate, so the bar is that a true positive is far
+# likelier than a false one. `github_pat_` is listed separately from
+# `gh[pousr]_` because fine-grained tokens use a different prefix entirely.
+SECRET_PATTERNS := AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,}|xox[abprs]-[0-9A-Za-z-]{10,}|sk-ant-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----
+
+SECRET_SCAN_COLLECT_FAILED = echo "secret-scan FAILED: could not collect the change set; nothing was scanned." >&2; exit 1
+
 secret-scan:
-	$(STUB)
+	if ! git rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "secret-scan FAILED: not a git repository, so nothing can be scanned." >&2; \
+		exit 1; \
+	fi
+	raw=$$(mktemp) || exit 1; \
+	scanned=$$(mktemp) || exit 1; \
+	list=$$(mktemp) || exit 1; \
+	trap 'rm -f "$$raw" "$$scanned" "$$list"' EXIT; \
+	git diff --cached --unified=0 -- . >"$$raw" || { $(SECRET_SCAN_COLLECT_FAILED); }; \
+	git diff --unified=0 -- . >>"$$raw" || { $(SECRET_SCAN_COLLECT_FAILED); }; \
+	git show --unified=0 --format= --diff-merges=first-parent HEAD -- . >>"$$raw" || { $(SECRET_SCAN_COLLECT_FAILED); }; \
+	/usr/bin/grep '^+' "$$raw" | /usr/bin/grep -v '^+++' >"$$scanned" || true; \
+	git ls-files --others --exclude-standard -z >"$$list" || { $(SECRET_SCAN_COLLECT_FAILED); }; \
+	xargs -0 sh -c 'for f; do if test -f "./$$f"; then cat "./$$f" || exit 1; fi; done' _ <"$$list" >>"$$scanned" || { $(SECRET_SCAN_COLLECT_FAILED); }; \
+	if [ ! -s "$$scanned" ]; then \
+		echo "secret-scan: no added lines to scan"; \
+		exit 0; \
+	fi; \
+	hits=$$(/usr/bin/grep -cE '$(SECRET_PATTERNS)' "$$scanned" || true); \
+	if [ "$$hits" -gt 0 ]; then \
+		echo "secret-scan FAILED: $$hits added line(s) match a credential pattern." >&2; \
+		echo "Remove it and re-run. If it is a fixture, make it unmistakably fake." >&2; \
+		exit 1; \
+	fi; \
+	echo "secret-scan: clean"
 
 vuln-scan:
 	$(STUB)
