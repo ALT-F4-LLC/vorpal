@@ -987,6 +987,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
         }
 
         if has_worker {
+            worker::sweep_store_staging().await;
+
             router = add_worker_service(
                 router,
                 &args,

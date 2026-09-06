@@ -6,8 +6,8 @@ use crate::command::{
         paths::{
             discard_staging, get_artifact_archive_path, get_artifact_output_lock_path,
             get_artifact_output_path, get_file_paths, get_key_service_key_path,
-            parse_artifact_digest, parse_store_path_component, publish_atomically, set_timestamps,
-            staging_path_for, PublishOutcome,
+            get_root_artifact_output_dir_path, parse_artifact_digest, parse_store_path_component,
+            publish_atomically, set_timestamps, staging_path_for, PublishOutcome, STAGING_PREFIX,
         },
         temps::{create_sandbox_dir, create_sandbox_file},
     },
@@ -18,14 +18,16 @@ use std::{
     collections::HashSet,
     fs::Permissions,
     future::Future,
+    io::ErrorKind,
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
     path::{Path, PathBuf},
     process::Stdio,
+    time::{Duration, SystemTime},
 };
 use tokio::{
     fs::{
-        create_dir_all, read_link, remove_dir_all, remove_file, set_permissions, symlink_metadata,
-        write, File,
+        create_dir_all, read_dir, read_link, remove_dir_all, remove_file, set_permissions,
+        symlink_metadata, write, File,
     },
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
@@ -40,7 +42,7 @@ use tonic::{
     Code::NotFound,
     Request, Response, Status, Streaming,
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use vorpal_sdk::{
     api::{
         archive::{
@@ -545,6 +547,171 @@ where
     }
 
     staged
+}
+
+/// How old an abandoned staging directory must be before the startup sweep
+/// reclaims it. Overridable through `VORPAL_STAGING_SWEEP_AGE` (seconds).
+///
+/// The sweep runs against a live store, so this is not a tidiness setting: it
+/// is the whole separation between a killed producer's debris and a running
+/// producer's working directory. A day is far longer than any build here and
+/// leaves an operator room to lower it once they know their own longest build.
+const DEFAULT_STAGING_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+const STAGING_SWEEP_AGE_ENV: &str = "VORPAL_STAGING_SWEEP_AGE";
+
+/// An unset or unparseable override keeps the default rather than failing
+/// startup: this threshold decides only how long debris lingers, and refusing
+/// to serve builds over a typo in it would be the worse outcome.
+fn staging_max_age_from(value: Option<&str>) -> Duration {
+    let Some(value) = value else {
+        return DEFAULT_STAGING_MAX_AGE;
+    };
+
+    match value.trim().parse::<u64>() {
+        Ok(seconds) => Duration::from_secs(seconds),
+        Err(err) => {
+            warn!("worker |> ignoring invalid {STAGING_SWEEP_AGE_ENV}={value:?}: {err}");
+
+            DEFAULT_STAGING_MAX_AGE
+        }
+    }
+}
+
+/// Reclaims staging directories no producer will ever publish, and reports how
+/// many went.
+///
+/// `stage_then_publish` discards its staging path on every error return, but a
+/// producer that is killed — a worker crash, a SIGKILL mid-build — never
+/// reaches that discard, and the directory it left is invisible to readers: it
+/// is not a digest, so no `exists()` check ever names it, and nothing else
+/// under the output namespaces deletes anything. Left alone it is permanent
+/// disk consumption, one full staged toolchain at a time.
+///
+/// Two conditions must both hold before an entry is removed. It must carry the
+/// reserved `STAGING_PREFIX`, which `parse_store_path_component` forbids any
+/// namespace, digest, or alias from wearing, so nothing published can match;
+/// and its mtime must be older than `max_age`, because this runs beside live
+/// builds in a shared store and a fresh staging directory belongs to a
+/// producer still filling it.
+///
+/// Failures are logged, never propagated: a store root that is unreadable, or
+/// one debris directory that will not delete, must not stop a worker from
+/// serving builds.
+async fn sweep_abandoned_staging(output_root: &Path, max_age: Duration) -> u64 {
+    let mut namespaces = match read_dir(output_root).await {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == ErrorKind::NotFound => return 0,
+        Err(err) => {
+            warn!(
+                "worker |> failed to read store root {}: {err}",
+                output_root.display()
+            );
+
+            return 0;
+        }
+    };
+
+    let cutoff = SystemTime::now() - max_age;
+    let mut removed = 0;
+
+    loop {
+        let namespace = match namespaces.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(err) => {
+                warn!(
+                    "worker |> failed to read store root {}: {err}",
+                    output_root.display()
+                );
+
+                break;
+            }
+        };
+
+        removed += sweep_namespace(&namespace.path(), cutoff).await;
+    }
+
+    removed
+}
+
+async fn sweep_namespace(namespace_path: &Path, cutoff: SystemTime) -> u64 {
+    let mut entries = match read_dir(namespace_path).await {
+        Ok(entries) => entries,
+        Err(err) => {
+            // A plain file beside the namespace directories is not an error
+            // worth reporting; anything else is.
+            if err.kind() != ErrorKind::NotADirectory {
+                warn!(
+                    "worker |> failed to read namespace {}: {err}",
+                    namespace_path.display()
+                );
+            }
+
+            return 0;
+        }
+    };
+
+    let mut removed = 0;
+
+    loop {
+        let entry = match entries.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(err) => {
+                warn!(
+                    "worker |> failed to read namespace {}: {err}",
+                    namespace_path.display()
+                );
+
+                break;
+            }
+        };
+
+        if !entry
+            .file_name()
+            .as_bytes()
+            .starts_with(STAGING_PREFIX.as_bytes())
+        {
+            continue;
+        }
+
+        // The link itself, not its target: a build step owns its staging
+        // directory and can replace it with a symlink out of the store, and a
+        // stat through that link would age — and then delete — whatever it
+        // points at.
+        let Ok(metadata) = symlink_metadata(entry.path()).await else {
+            continue;
+        };
+
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+
+        if modified >= cutoff {
+            continue;
+        }
+
+        discard_staging(&entry.path()).await;
+
+        removed += 1;
+    }
+
+    removed
+}
+
+/// Reclaims abandoned staging debris across every artifact output namespace,
+/// logging what it freed. Called once as the worker service comes up, which is
+/// the moment a crashed predecessor's debris is certainly abandoned.
+pub async fn sweep_store_staging() {
+    let output_root = get_root_artifact_output_dir_path();
+    let max_age = staging_max_age_from(std::env::var(STAGING_SWEEP_AGE_ENV).ok().as_deref());
+    let removed = sweep_abandoned_staging(&output_root, max_age).await;
+
+    info!(
+        "worker |> reclaimed {removed} abandoned staging directories older than {}s",
+        max_age.as_secs()
+    );
 }
 
 /// Size of one scan read. Deliberately its own constant: this is a local file
@@ -1892,6 +2059,7 @@ impl WorkerService for WorkerServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use filetime::{set_file_mtime, FileTime};
     use std::{
         collections::BTreeSet,
         os::unix::fs::MetadataExt,
@@ -3488,5 +3656,111 @@ mod tests {
 
         assert_eq!(registry.archived_digest.as_deref(), Some("abc123"));
         assert_eq!(registry.recipe_name.as_deref(), Some("example"));
+    }
+
+    /// Backdates `path`'s modification time by `age`, standing in for a
+    /// staging directory a killed producer left behind some time ago. The
+    /// sweep reads mtime, so this is the whole of what "aged" means to it.
+    fn backdate(path: &Path, age: Duration) {
+        let stale = FileTime::from_system_time(SystemTime::now() - age);
+
+        set_file_mtime(path, stale).unwrap();
+    }
+
+    // AC2: only the aged staging directory goes. The fresh one belongs to a
+    // producer that may still be running — this sweep races every live build
+    // in the store, and the age threshold is the only thing separating debris
+    // from work in progress.
+    #[tokio::test]
+    async fn sweep_removes_aged_staging_directories_and_spares_fresh_ones() {
+        let root = TempDir::new().unwrap();
+        let namespace = root.path().join("library");
+        let aged = namespace.join(".tmp-0199b0f0-0000-7000-8000-000000000000");
+        let fresh = namespace.join(".tmp-0199b0f0-0000-7000-8000-000000000001");
+
+        std::fs::create_dir_all(aged.join("bin")).unwrap();
+        std::fs::create_dir_all(&fresh).unwrap();
+        write_files(&aged.join("bin"), &["tool"], "aged output");
+
+        backdate(&aged, Duration::from_secs(7200));
+
+        let removed = sweep_abandoned_staging(root.path(), Duration::from_secs(3600)).await;
+
+        assert_eq!(removed, 1);
+        assert!(!aged.exists(), "the aged staging directory survived");
+        assert!(
+            fresh.exists(),
+            "a staging directory younger than the threshold was swept out from under its producer"
+        );
+    }
+
+    // AC3: everything that is not a `.tmp-` sibling survives, whatever its
+    // age. A digest directory backdated past the threshold is the case that
+    // matters — an age-only sweep would delete the entire store.
+    #[tokio::test]
+    async fn sweep_spares_store_entries_of_any_age() {
+        let root = TempDir::new().unwrap();
+        let namespace = root.path().join("library");
+        let digest = namespace.join(valid_digest("a"));
+        let lock = namespace.join(format!("{}.lock.json", valid_digest("b")));
+
+        std::fs::create_dir_all(digest.join("bin")).unwrap();
+        write_files(&digest.join("bin"), &["tool"], "published output");
+        std::fs::write(&lock, "{}").unwrap();
+
+        backdate(&digest, Duration::from_secs(7200));
+        backdate(&lock, Duration::from_secs(7200));
+
+        let removed = sweep_abandoned_staging(root.path(), Duration::from_secs(3600)).await;
+
+        assert_eq!(removed, 0);
+        assert!(
+            digest.join("bin/tool").exists(),
+            "a published store entry was swept"
+        );
+        assert!(lock.exists(), "a lock file was swept");
+    }
+
+    // The sweep reaches every namespace, not only the first: namespaces are
+    // created per caller, so a worker that only ever sweeps one leaves the
+    // rest growing.
+    #[tokio::test]
+    async fn sweep_covers_every_namespace_and_tolerates_a_missing_root() {
+        let root = TempDir::new().unwrap();
+
+        for namespace in ["library", "testing"] {
+            let staging = root
+                .path()
+                .join(namespace)
+                .join(".tmp-0199b0f0-0000-7000-8000-000000000000");
+
+            std::fs::create_dir_all(&staging).unwrap();
+            backdate(&staging, Duration::from_secs(7200));
+        }
+
+        let removed = sweep_abandoned_staging(root.path(), Duration::from_secs(3600)).await;
+
+        assert_eq!(removed, 2);
+
+        let absent = root.path().join("no-such-store");
+
+        assert_eq!(
+            sweep_abandoned_staging(&absent, Duration::from_secs(3600)).await,
+            0,
+            "a store root that does not exist yet is not a failure"
+        );
+    }
+
+    // AC1's "configurable threshold": an operator's seconds value is what the
+    // sweep uses, and a value that does not parse falls back to the default
+    // rather than to zero, which would sweep every live build's staging
+    // directory the moment the worker came up.
+    #[test]
+    fn staging_max_age_reads_an_override_and_keeps_the_default_otherwise() {
+        assert_eq!(staging_max_age_from(Some(" 60 ")), Duration::from_secs(60));
+        assert_eq!(staging_max_age_from(None), DEFAULT_STAGING_MAX_AGE);
+        assert_eq!(staging_max_age_from(Some("")), DEFAULT_STAGING_MAX_AGE);
+        assert_eq!(staging_max_age_from(Some("soon")), DEFAULT_STAGING_MAX_AGE);
+        assert_eq!(staging_max_age_from(Some("-1")), DEFAULT_STAGING_MAX_AGE);
     }
 }

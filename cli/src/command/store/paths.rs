@@ -291,7 +291,7 @@ pub fn split_alias_name_tag(alias: &str) -> (&str, &str) {
 
 /// The name every staging path starts with, reserved so no store entry can
 /// wear it (`parse_store_path_component`).
-const STAGING_PREFIX: &str = ".tmp-";
+pub const STAGING_PREFIX: &str = ".tmp-";
 
 /// Builds the staging path for a store entry: a unique sibling of `real_path`,
 /// so the publishing rename stays on one filesystem and `real_path` itself is
