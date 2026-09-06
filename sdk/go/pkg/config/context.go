@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -532,13 +533,80 @@ func validateIssuerCredentials(c VorpalCredentialsContent) error {
 	return nil
 }
 
-// commitRefreshedCredentials applies a completed exchange to credentials and
-// writes the result to path. Returns an error without committing anything
-// when the IdP's response is unusable (C-10): an absent expires_in defaults
-// to 3600, but an explicit value <= 0 can never satisfy needsRefresh's
+// credentialsLockPath is the sidecar this process locks instead of path
+// itself.
+//
+// writeCredentialsSecureCommit replaces path's inode on every write (os.Rename,
+// :508), and flock(2) binds to the open file description's inode, not the path
+// — so a process that locked path directly would hold a lock on an inode a
+// concurrent committer has already replaced, and the next opener would acquire
+// an uncontested lock on the new inode while believing it excludes the first.
+// Locking a name the code never renames, unlinks, or truncates is what keeps
+// the lock meaningful across a commit. Mirrors Rust's credentials_lock_path
+// (sdk/rust/src/context.rs:1303).
+func credentialsLockPath(path string) string {
+	return path + ".lock"
+}
+
+// acquireCredentialsLock takes the exclusive, cross-process lock guarding
+// path's credentials file, blocking until held, and returns the function that
+// releases it.
+//
+// The lock is released by the kernel when the returned closure closes the
+// descriptor, and also on ordinary process exit and on SIGKILL alike — never
+// by unlinking the lock file or depending on a deferred call running. An
+// existence-sentinel lock (create-then-unlink) would instead brick every later
+// acquirer after any exit that skips cleanup.
+//
+// Acquisition blocks without a timeout, matching Rust's
+// acquire_credentials_lock (sdk/rust/src/context.rs:1336). The hold is bounded
+// by what runs under it — a re-read, an in-memory merge and an atomic write,
+// with no network I/O — because the IdP exchange completes before
+// commitRefreshedCredentials is called.
+//
+// The lock file is opened with O_NOFOLLOW so a symlink planted at the lock
+// path is refused rather than followed, and created at mode 0600 on first use.
+// That refusal, and the lock's integrity generally, still assume no other
+// local principal can create entries in the credentials file's directory: a
+// group- or world-writable /var/lib/vorpal/key lets another user pre-create
+// the sidecar at a wider mode and hold the lock indefinitely, and nothing in
+// this code enforces that directory's mode.
+func acquireCredentialsLock(path string) (func(), error) {
+	lockPath := credentialsLockPath(path)
+
+	file, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open credentials lock file %s: %w", lockPath, err)
+	}
+
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to lock credentials file %s: %w", lockPath, err)
+	}
+
+	return func() { file.Close() }, nil
+}
+
+// commitRefreshedCredentials applies a completed exchange to path's on-disk
+// credentials and commits the result. Returns an error without committing
+// anything when the IdP's response is unusable (C-10): an absent expires_in
+// defaults to 3600, but an explicit value <= 0 can never satisfy needsRefresh's
 // window, which would make every later call rotate again — refused instead.
+//
+// The cross-process lock spans the whole critical section — re-read, merge,
+// serialize, write and rename — so a concurrent process refreshing a different
+// issuer cannot lose this call's update or have this call lose its own. The
+// merge re-reads path under the lock and mutates only issuer's entry in that
+// fresh copy: the in-memory document the caller read before the exchange
+// started is never the thing serialized, so an issuer another writer added,
+// removed, or rotated concurrently is neither clobbered nor resurrected. An
+// issuer missing from the re-read is an error, never an insert — a credential
+// another writer deleted must not be resurrected here.
+//
+// credentialsRefreshState.mu alone does not provide this: it is one
+// process-global mutex and does not serialize against another process, so two
+// processes each holding their own mu can still race the file.
 func commitRefreshedCredentials(
-	credentials *VorpalCredentials,
 	issuer string,
 	path string,
 	accessToken string,
@@ -557,6 +625,22 @@ func commitRefreshedCredentials(
 		)
 	default:
 		expires = *expiresIn
+	}
+
+	release, err := acquireCredentialsLock(path)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	credentialsData, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read credentials file: %w", err)
+	}
+
+	var credentials VorpalCredentials
+	if err := json.Unmarshal(credentialsData, &credentials); err != nil {
+		return fmt.Errorf("failed to parse credentials: %w", err)
 	}
 
 	issuerCreds, ok := credentials.Issuer[issuer]
@@ -591,7 +675,7 @@ func commitRefreshedCredentials(
 // makes that a structural fact of the state's shape rather than an
 // unstated obligation a future edit could violate by adding a second,
 // independently locked package-level map. Mirrors Rust's
-// Mutex<RefreshState> (context.rs:1140-1166), which the compiler enforces;
+// Mutex<RefreshState> (context.rs:1193-1258), which the compiler enforces;
 // Go's sync.Mutex does not embed its data, so the struct shape is the
 // closest available discipline. mu is held for the whole critical
 // section — read, refresh decision, exchange, write — not just the write,
@@ -602,10 +686,30 @@ func commitRefreshedCredentials(
 // Go's compiler does not stop a future edit from reading or writing spent
 // outside the lock the way Rust's Mutex<RefreshState> does.
 //
-// Scope is this process only: it does not serialize against a separately
-// spawned config process, a running vorpal start agent, or the Rust/
-// TypeScript SDKs writing the same credentials.json — an accepted residual
-// risk shared with Rust (context.rs:1160-1166).
+// Scope for the decision-making (the refresh-due check, the exchange, the
+// spent memo) is this process only: two processes each holding their own mu
+// do not serialize against each other, and the memo is neither durable nor
+// visible across processes.
+//
+// The commit itself is additionally guarded — commitRefreshedCredentials
+// re-reads and merges credentials.json under the cross-process lock on the
+// credentials.json.lock sidecar, spanning the read through the rename. That
+// is what prevents a lost update, which the atomic rename alone does not: an
+// atomic write stops a reader from ever observing a torn file, but two
+// processes that each read the whole document before either commits will each
+// write the whole document back, and whichever commits second silently
+// discards the first's change.
+//
+// What the lock guarantees, and what it does not. No lost update between the
+// Rust SDK (sdk/rust/src/context.rs:1336), vorpal login (which commits
+// through the same Rust lock) and this SDK — the three take the same lock on
+// the same sidecar. Still unserialized: the TypeScript SDK
+// (sdk/typescript/src/context.ts) and the Python SDK
+// (sdk/python/src/vorpal_sdk/context.py), both of which read-modify-write the
+// same file holding no file lock, so a refresh racing either can still lose
+// an update. flock(2) is advisory in any case: it constrains only processes
+// that call it, and it excludes nothing at all on a filesystem without
+// cross-process flock semantics, such as NFS or some container overlays.
 var credentialsRefreshState = struct {
 	mu    sync.Mutex
 	spent map[string]struct{}
@@ -724,7 +828,6 @@ func clientAuthHeaderAt(
 		// which a killed process loses the rotated token to disk (accepted
 		// residual risk) does not widen.
 		if err := commitRefreshedCredentials(
-			&credentials,
 			registryIssuer,
 			credentialsPath,
 			newToken,
@@ -745,7 +848,11 @@ func clientAuthHeaderAt(
 			)
 		}
 
-		issuerCredentials = credentials.Issuer[registryIssuer]
+		// The freshly minted token, not a re-read of the file: the merged
+		// document lives inside commitRefreshedCredentials' locked span and
+		// is deliberately not handed back, so nothing here can act on a
+		// snapshot another writer has already superseded.
+		issuerCredentials.AccessToken = newToken
 	}
 
 	return fmt.Sprintf("Bearer %s", issuerCredentials.AccessToken), nil

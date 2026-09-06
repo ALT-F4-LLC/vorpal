@@ -1343,12 +1343,12 @@ func TestClientAuthHeaderAtStopsRotatingAZeroLifetimeToken(t *testing.T) {
 func TestCommitRefreshedCredentialsDefaultsAbsentExpiresInTo3600(t *testing.T) {
 	tempDir := t.TempDir()
 	path := filepath.Join(tempDir, "credentials.json")
-	creds := credentialsFixture("https://issuer.example", "old-refresh", 0, 3600, "old-access-token")
+	writeFixture(t, path, credentialsFixture("https://issuer.example", "old-refresh", 0, 3600, "old-access-token"))
 
-	if err := commitRefreshedCredentials(&creds, "https://issuer.example", path, "new-access-token", nil, time.Now().Unix(), ""); err != nil {
+	if err := commitRefreshedCredentials("https://issuer.example", path, "new-access-token", nil, time.Now().Unix(), ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := creds.Issuer["https://issuer.example"].ExpiresIn; got != 3600 {
+	if got := readPersisted(t, path).Issuer["https://issuer.example"].ExpiresIn; got != 3600 {
 		t.Fatalf("expected default expires_in 3600 for an absent field, got %d", got)
 	}
 }

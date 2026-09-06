@@ -716,7 +716,7 @@ function commitRefreshedCredentials(
  * bundling makes that a structural fact of the state's shape
  * rather than an unstated obligation a future edit could violate by adding
  * a new top-level `let`. Mirrors Rust's `Mutex<RefreshState>`
- * (`context.rs:1140-1166`), which the language enforces at compile time;
+ * (`context.rs:1193-1258`), which the language enforces at compile time;
  * TypeScript has no equivalent guarantee, so the single-object shape is the
  * closest available discipline.
  *
@@ -727,9 +727,24 @@ function commitRefreshedCredentials(
  * `await fetch(...)` twice.
  *
  * Scope is this process only: it does not serialize against a separately
- * spawned config process, a running `vorpal start agent`, or the Rust/Go
- * SDKs writing the same `credentials.json` — an accepted residual risk
- * shared with Rust (context.rs:1160-1166) and Go.
+ * spawned config process, a running `vorpal start agent`, or any other SDK
+ * writing the same `credentials.json`. That limitation is **no longer shared
+ * with Rust or Go**: both now re-read and merge the file under a
+ * cross-process `flock(2)` on a `credentials.json.lock` sidecar spanning the
+ * read through the rename (`sdk/rust/src/context.rs:1336`,
+ * `sdk/go/pkg/config/context.go`'s `acquireCredentialsLock`). This SDK, and
+ * the Python SDK (`sdk/python/src/vorpal_sdk/context.py`), still
+ * read-modify-write the whole document holding no file lock, so a refresh
+ * here racing a Rust, Go or Python writer can silently discard that writer's
+ * rotated entry for a different issuer — the atomic `renameSync` prevents a
+ * torn read, never a lost update.
+ *
+ * This SDK does not take that lock because `flock(2)` is not reachable from
+ * `node:fs`, and every way to reach it (a native addon, `bun:ffi`, a new
+ * dependency) changes what this package ships and which runtimes can load
+ * it. That is an unmade design decision, not an oversight; a sentinel-file
+ * lock is not a substitute, because it would not exclude the `flock` holders
+ * on the same sidecar.
  */
 const credentialsRefreshState: { chain: Promise<void>; spent: Set<string> } = {
   chain: Promise.resolve(),
