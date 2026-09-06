@@ -2109,10 +2109,25 @@ mod tests {
         }
 
         fn write_fixture(&self, expires_in: u64, issued_at: u64, refresh_token: &str) {
+            self.write_fixture_for_issuer(&self.issuer(), expires_in, issued_at, refresh_token);
+        }
+
+        /// `write_fixture` with the issuer supplied, for the tests whose
+        /// issuer must be a reachable URL rather than this fixture's bare
+        /// `issuer-{label}` name: `credential_egress_origin` rejects the bare
+        /// name before any request is made, so a test that means to drive the
+        /// real exchange would never reach it.
+        fn write_fixture_for_issuer(
+            &self,
+            issuer_name: &str,
+            expires_in: u64,
+            issued_at: u64,
+            refresh_token: &str,
+        ) {
             let mut issuer = BTreeMap::new();
 
             issuer.insert(
-                self.issuer(),
+                issuer_name.to_string(),
                 VorpalCredentialsContent {
                     access_token: "old-access".to_string(),
                     audience: None,
@@ -2126,7 +2141,7 @@ mod tests {
 
             let mut registry = BTreeMap::new();
 
-            registry.insert("registry-1".to_string(), self.issuer());
+            registry.insert("registry-1".to_string(), issuer_name.to_string());
 
             let credentials = VorpalCredentials { issuer, registry };
 
@@ -4705,6 +4720,77 @@ mod tests {
         assert_eq!(
             rotated, None,
             "an IdP that does not rotate must leave the stored token alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_auth_header_live_bounds_a_hung_discovery_endpoint() {
+        // `refresh_access_token_gives_up_on_a_hung_idp` below pins the
+        // `timeout` *parameter*. Nothing pinned the wiring layer that supplies
+        // it: `LiveTokenRefresher::refresh` hardcodes `REFRESH_HTTP_TIMEOUT`,
+        // and the only test that drove it answered both legs normally, so
+        // dropping or inflating that argument left the suite green. The
+        // refresh runs while the process-global `CREDENTIALS_REFRESH` lock is
+        // held, so an unwired timeout stalls every authenticated RPC in the
+        // process permanently.
+        //
+        // Both bounds are load-bearing and catch different mutants:
+        //   - the lower bound catches a *shortened* timeout, which the
+        //     watchdog alone would happily accept;
+        //   - the watchdog catches a *removed or inflated* one, and gives it a
+        //     bounded, named failure instead of a hang until cargo's own
+        //     global timeout.
+        // The honest positive case is therefore "the real 30s bound fired",
+        // which is what this test costs. That cost is the reason the watchdog
+        // sits well above `REFRESH_HTTP_TIMEOUT` rather than at a small
+        // multiple of a short test-local value.
+        let idp = IdpServer::start(|_, _| None).await;
+
+        let scratch = ScratchCredentials::new("live-hung-discovery");
+
+        // The issuer must be the fixture's own URL: `ScratchCredentials`'
+        // default bare `issuer-{label}` is rejected by
+        // `credential_egress_origin` before any request, which would return in
+        // microseconds and fail the lower bound for the wrong reason. Stamped
+        // stale so `needs_refresh` is true and the call reaches the refresher
+        // rather than short-circuiting on a still-valid token.
+        scratch.write_fixture_for_issuer(
+            &idp.issuer(),
+            3600,
+            unix_now() - 7200,
+            &scratch.token("stored-refresh"),
+        );
+
+        let watchdog = REFRESH_HTTP_TIMEOUT + std::time::Duration::from_secs(30);
+        let started = std::time::Instant::now();
+
+        let outcome = tokio::time::timeout(
+            watchdog,
+            client_auth_header_live(&scratch.path, "registry-1"),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "client_auth_header_live did not return within this test's own {:?} watchdog: LiveTokenRefresher's REFRESH_HTTP_TIMEOUT appears to be unwired",
+                watchdog
+            )
+        });
+
+        let elapsed = started.elapsed();
+
+        outcome.expect_err("a discovery endpoint that never responds must not yield a header");
+
+        assert!(
+            elapsed >= REFRESH_HTTP_TIMEOUT,
+            "LiveTokenRefresher must honor the full {:?} REFRESH_HTTP_TIMEOUT, returned after only {:?}",
+            REFRESH_HTTP_TIMEOUT,
+            elapsed
+        );
+
+        assert_eq!(
+            idp.requested_paths(),
+            vec!["/.well-known/openid-configuration".to_string()],
+            "the production wiring must actually reach the fixture before timing out"
         );
     }
 
