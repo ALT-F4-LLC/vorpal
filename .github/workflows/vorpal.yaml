@@ -52,6 +52,54 @@ jobs:
           key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-vendor
           path: vendor
 
+  dev-installers:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - macos-latest
+          - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # No setup-go/setup-bun here: this job exists to exercise the go.sh and
+      # bun.sh installers that every other job bypasses under CI=true.
+      - name: Provision a developer environment from an empty ENV_PATH
+        run: |
+          env_path="$RUNNER_TEMP/dev-env-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          rm -rf "$env_path" .env
+          mkdir -p "$env_path"
+          ln -s "$env_path" .env
+          CI= ./script/dev.sh true
+
+      - name: Assert installed Go and Bun match the pinned versions
+        run: |
+          GO_DIRECTIVE=$(grep -oE '^go [0-9]+\.[0-9]+(\.[0-9]+)?' sdk/go/go.mod | sed -E 's/^go //')
+          GO_PINNED=$(sed -n 's/^GO_PINNED_VERSION="\([^"]*\)"$/\1/p' script/dev/go.sh)
+          if [[ "$GO_PINNED" != "$GO_DIRECTIVE" && "$GO_PINNED" != "$GO_DIRECTIVE."* ]]; then
+            echo "ERROR: script/dev/go.sh pins '$GO_PINNED', which is not the go directive '$GO_DIRECTIVE' in sdk/go/go.mod"
+            exit 1
+          fi
+          GO_INSTALLED=$(.env/bin/go env GOVERSION)
+          if [[ "$GO_INSTALLED" != "go$GO_PINNED" ]]; then
+            echo "ERROR: script/dev/go.sh installed '$GO_INSTALLED', expected 'go$GO_PINNED'"
+            exit 1
+          fi
+          BUN_PINNED=$(sed -n 's/.*DEFAULT_BUN_VERSION: &str = "\([^"]*\)".*/\1/p' sdk/rust/src/artifact/bun.rs)
+          BUN_INSTALLED=$(.env/bin/bun --version)
+          if [[ "$BUN_INSTALLED" != "$BUN_PINNED" ]]; then
+            echo "ERROR: script/dev/bun.sh installed '$BUN_INSTALLED', expected '$BUN_PINNED' from sdk/rust/src/artifact/bun.rs"
+            exit 1
+          fi
+          echo "go $GO_INSTALLED, bun $BUN_INSTALLED"
+
+      - name: Remove the provisioned environment
+        if: always()
+        run: |
+          rm -f .env
+          rm -rf "$RUNNER_TEMP/dev-env-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
   code-quality:
     needs:
       - vendor
