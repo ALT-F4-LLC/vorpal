@@ -141,6 +141,9 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
+          # Without this, a tool-cache hit short-circuits manifest resolution
+          # and CI runs the runner image's cached patch of the go.mod minor.
+          check-latest: true
           go-version-file: sdk/go/go.mod
           cache-dependency-path: sdk/go/go.sum
 
