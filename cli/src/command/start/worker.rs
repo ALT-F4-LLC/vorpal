@@ -311,30 +311,115 @@ async fn pull_source(
 
     let source_workspace_path = artifact_source_dir_path.join(&artifact_source.name);
 
-    if let Err(err) = create_dir_all(&source_workspace_path).await {
+    unpack_source_workspace(&source_workspace_path, &source_archive).await
+}
+
+/// Unpacks `source_archive` into `source_workspace_path`, leaving nothing at
+/// that path if anything goes wrong.
+///
+/// Unlike the store paths `stage_then_publish` guards, this one is private to a
+/// single build (`create_sandbox_dir`'s UUID directory), so there is no reader
+/// to protect from a half-built entry and no rename to buy. What is worth
+/// buying is locality: `unpack_zstd` refuses a hostile archive part-way through
+/// its entry stream, with everything ahead of the refusal already written, and
+/// the function that created the directory is the one holding the path it has
+/// to take back. The build's own `release_failed_build` removes the whole
+/// workspace afterwards, but only two frames up and only for a failure that
+/// reaches it.
+async fn unpack_source_workspace(
+    source_workspace_path: &Path,
+    source_archive: &Path,
+) -> Result<(), Status> {
+    if let Err(err) = create_dir_all(source_workspace_path).await {
         return Err(Status::internal(format!(
             "failed to create source path: {err:?}"
         )));
     }
 
-    if let Err(err) = unpack_zstd(&source_workspace_path, &source_archive).await {
-        return Err(Status::internal(format!(
-            "failed to unpack source archive: {err:?}"
-        )));
+    let unpacked = async {
+        unpack_zstd(source_workspace_path, source_archive)
+            .await
+            .map_err(|err| Status::internal(format!("failed to unpack source archive: {err:?}")))?;
+
+        let source_workspace_files =
+            get_file_paths(&source_workspace_path.to_path_buf(), vec![], vec![])
+                .map_err(|err| Status::internal(format!("failed to get source files: {err}")))?;
+
+        for path in source_workspace_files.iter() {
+            set_timestamps(path).await.map_err(|err| {
+                Status::internal(format!("failed to sanitize output files: {err:?}"))
+            })?;
+        }
+
+        Ok(())
+    }
+    .await;
+
+    if unpacked.is_err() {
+        discard_source_workspace(source_workspace_path).await;
     }
 
-    let source_workspace_files = get_file_paths(&source_workspace_path, vec![], vec![])
-        .map_err(|err| Status::internal(format!("failed to get source files: {err}")))?;
+    unpacked
+}
 
-    for path in &source_workspace_files {
-        if let Err(err) = set_timestamps(path).await {
-            return Err(Status::internal(format!(
-                "failed to sanitize output files: {err:?}"
-            )));
+/// Removes an abandoned source workspace, restoring owner access on every
+/// directory in it first.
+///
+/// The chmod pass is what makes this removal work at all against the archives
+/// it exists for. tokio-tar applies a directory entry's mode to a directory
+/// that already exists, so an archive whose directory entry is ordered after
+/// its own children leaves that directory carrying whatever mode the archive
+/// chose. Unlinking what is inside a directory needs write *and* search on it,
+/// and reading its names needs read, so `0o700` is restored rather than the
+/// write bit alone: a `0o444` entry defeats a removal that only added write.
+///
+/// The walk is top-down and chmods each directory *before* reading it, which is
+/// why it is written out rather than handed to `WalkDir`. `WalkDir` opens a
+/// directory to enumerate it before yielding that directory's own entry, so a
+/// `0o000` entry surfaces as a walk error instead of a path to repair, and the
+/// chmod that would have fixed it never runs.
+///
+/// Failures are logged rather than propagated: the caller is already returning
+/// the unpack failure that abandoned this tree, and that error names what went
+/// wrong, while a removal error would only name where.
+async fn discard_source_workspace(source_workspace_path: &Path) {
+    let mut pending = vec![source_workspace_path.to_path_buf()];
+
+    while let Some(dir) = pending.pop() {
+        // Resolved without following links, so a symlink an archive entry
+        // planted is left alone rather than chmodded through to its target.
+        match symlink_metadata(&dir).await {
+            Ok(meta) if meta.is_dir() => {
+                let mode = meta.permissions().mode();
+
+                if mode & 0o700 != 0o700 {
+                    let _ = set_permissions(&dir, Permissions::from_mode(mode | 0o700)).await;
+                }
+            }
+            _ => continue,
+        }
+
+        let Ok(mut entries) = read_dir(&dir).await else {
+            continue;
+        };
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if let Ok(file_type) = entry.file_type().await {
+                if file_type.is_dir() {
+                    pending.push(entry.path());
+                }
+            }
         }
     }
 
-    Ok(())
+    if let Err(err) = remove_dir_all(source_workspace_path).await {
+        if err.kind() != ErrorKind::NotFound {
+            warn!(
+                "worker |> failed to discard source workspace {}: {err}",
+                source_workspace_path.display()
+            );
+        }
+    }
 }
 
 /// Writes `data` to the shared `archive_path` (recipe-addressed, not
@@ -3017,6 +3102,125 @@ mod tests {
         let root = TempDir::new().unwrap();
 
         release_failed_build(&root.path().join("gone"), &root.path().join("gone.lock")).await;
+    }
+
+    /// Writes a zstd-compressed tar whose entries come from raw ustar headers,
+    /// so a fixture can carry a name or a mode `tokio_tar::Builder`'s own path
+    /// handling would refuse. `contents` of `None` writes a directory entry.
+    async fn write_raw_zstd_archive(archive_path: &Path, entries: &[(&str, Option<&str>, u32)]) {
+        use async_compression::tokio::write::ZstdEncoder;
+        use tokio::io::AsyncWriteExt;
+        use tokio_tar::{Builder, EntryType, Header};
+
+        let file = File::create(archive_path).await.unwrap();
+        let mut builder = Builder::new(ZstdEncoder::new(file));
+
+        for (name, contents, mode) in entries {
+            let mut header = Header::new_gnu();
+            let body = contents.unwrap_or_default().as_bytes();
+
+            header.set_entry_type(match contents {
+                Some(_) => EntryType::Regular,
+                None => EntryType::Directory,
+            });
+            header.set_size(body.len() as u64);
+            header.set_mode(*mode);
+
+            let name_bytes = name.as_bytes();
+
+            assert!(name_bytes.len() < 100, "test fixture name too long");
+
+            header.as_mut_bytes()[0..name_bytes.len()].copy_from_slice(name_bytes);
+            header.set_cksum();
+
+            builder.append(&header, body).await.unwrap();
+        }
+
+        builder.finish().await.unwrap();
+
+        let mut encoder = builder.into_inner().await.unwrap();
+
+        encoder.shutdown().await.unwrap();
+    }
+
+    // AC2. The unpack writes entries straight into the workspace, so a hostile
+    // archive refused partway through has already put the entries ahead of the
+    // refusal on disk. The function that created the workspace is the one that
+    // has to take it back: leaving the tree standing hands the caller an error
+    // and an attacker-chosen directory under the name the pull refused to fill.
+    //
+    // The inaccessible directory ordered after its own child is the fixture
+    // that matters. tokio-tar applies a directory entry's mode to a directory
+    // that already exists, so this leaves a populated 0000 directory: a bare
+    // recursive removal fails EACCES against it, a repair pass that adds only
+    // the write bit still cannot list it, and a bottom-up walk never reaches
+    // it at all because enumerating it is what fails. Those are the three ways
+    // this cleanup can be written and be useless against exactly the archives
+    // it exists for.
+    #[tokio::test]
+    async fn unpack_source_workspace_removes_the_workspace_when_the_archive_is_refused() {
+        let root = TempDir::new().unwrap();
+        let archive_path = root.path().join("source.tar.zst");
+        let workspace_path = root.path().join("source").join("hostile");
+
+        write_raw_zstd_archive(
+            &archive_path,
+            &[
+                ("locked/planted.txt", Some("planted"), 0o644),
+                ("locked/", None, 0o000),
+                ("escape/../../victim.txt", Some("owned"), 0o644),
+            ],
+        )
+        .await;
+
+        let err = unpack_source_workspace(&workspace_path, &archive_path)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.message().contains("failed to unpack source archive"),
+            "the unpack failure must be what the caller is told: {err:?}"
+        );
+        assert!(
+            !workspace_path.exists(),
+            "a refused unpack left its partial tree at the workspace path"
+        );
+        assert!(
+            !root.path().join("victim.txt").exists(),
+            "the traversing entry escaped the workspace"
+        );
+    }
+
+    // AC3, the positive control: the cleanup fires on failure only. A good
+    // archive still leaves its whole tree at the workspace path, carrying the
+    // sanitized timestamps `set_timestamps` applies.
+    #[tokio::test]
+    async fn unpack_source_workspace_leaves_a_good_archive_unpacked() {
+        let root = TempDir::new().unwrap();
+        let archive_path = root.path().join("source.tar.zst");
+        let workspace_path = root.path().join("source").join("good");
+
+        write_zstd_archive(
+            &archive_path,
+            &[("nested", None), ("nested/file.txt", Some("contents"))],
+        )
+        .await;
+
+        unpack_source_workspace(&workspace_path, &archive_path)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(workspace_path.join("nested/file.txt")).unwrap(),
+            "contents"
+        );
+        assert_eq!(
+            FileTime::from_last_modification_time(
+                &std::fs::metadata(workspace_path.join("nested/file.txt")).unwrap()
+            ),
+            FileTime::zero(),
+            "an unpacked source file kept an unsanitized timestamp"
+        );
     }
 
     // `step.environments` is a free-form list of request strings, so an entry
