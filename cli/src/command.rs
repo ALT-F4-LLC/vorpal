@@ -1451,6 +1451,73 @@ fn login_discovery_targets(
     Ok((device_endpoint.to_string(), token_endpoint.to_string()))
 }
 
+/// The verification links `vorpal login` prints, after both have been pinned
+/// to the issuer origin. Owned canonical strings rather than the response's
+/// own types: the oauth2 newtypes render the raw response text, and printing
+/// that would let a passing origin check vouch for bytes the check never saw.
+#[derive(Debug)]
+struct LoginVerificationPrompt {
+    verification_uri: String,
+    verification_uri_complete: Option<String>,
+}
+
+/// Pins the device-authorization response's human-facing links to the issuer
+/// origin before anything reaches the terminal (VPL-738).
+///
+/// `login_discovery_targets` pins where the CLI *sends* the device-code
+/// request; nothing pinned what came back. The response names the URL the
+/// user opens and authenticates at, so an off-origin value there is IdP
+/// credential phishing even though vorpal's own tokens stay safe. The
+/// guarantee is narrow on purpose: it protects a user whose issuer is honest
+/// but whose device-endpoint response path is not. An issuer that is itself
+/// hostile already holds the credentials.
+///
+/// `verification_uri_complete` is a plain string in the oauth2 crate — never
+/// parsed as a URL — so it is parsed here and a parse failure refuses rather
+/// than skipping the check.
+///
+/// A pure function so each case is testable without driving a live device
+/// flow, mirroring `login_discovery_targets`.
+fn login_verification_prompt(
+    issuer: &NormalizedIssuer,
+    details: &StandardDeviceAuthorizationResponse,
+) -> Result<LoginVerificationPrompt> {
+    let issuer_origin = credential_egress_origin(issuer.as_str())?;
+
+    let pinned = |field: &str, raw: &str| -> Result<String> {
+        let url = reqwest::Url::parse(raw)
+            .map_err(|err| anyhow!("device-authorization {field} is not a URL: {err}"))?;
+
+        let origin = credential_egress_origin(url.as_str())?;
+
+        if origin != issuer_origin {
+            bail!(
+                "device-authorization {} origin {} does not match issuer origin {}",
+                field,
+                origin,
+                issuer_origin
+            );
+        }
+
+        Ok(url.to_string())
+    };
+
+    let verification_uri = pinned(
+        "verification_uri",
+        details.verification_uri().url().as_str(),
+    )?;
+
+    let verification_uri_complete = details
+        .verification_uri_complete()
+        .map(|complete| pinned("verification_uri_complete", complete.secret()))
+        .transpose()?;
+
+    Ok(LoginVerificationPrompt {
+        verification_uri,
+        verification_uri_complete,
+    })
+}
+
 /// Fetches and validates the login discovery document with an
 /// already-hardened client (VPL-280 AC2, AC3): the caller controls the
 /// redirect policy and timeout, so this function's own behavior under a
@@ -1718,16 +1785,15 @@ async fn run_login(
     let details: StandardDeviceAuthorizationResponse =
         device_request.request_async(&http_client).await?;
 
-    if let Some(complete_uri) = details.verification_uri_complete() {
-        crate::output::line(format!(
-            "Open this URL in your browser:\n{}",
-            complete_uri.secret()
-        ));
+    let prompt = login_verification_prompt(&normalized_issuer, &details)?;
+
+    if let Some(complete_uri) = &prompt.verification_uri_complete {
+        crate::output::line(format!("Open this URL in your browser:\n{complete_uri}"));
     }
 
     crate::output::line(format!(
         "Or open {} and enter code: {}",
-        details.verification_uri(),
+        prompt.verification_uri,
         details.user_code().secret()
     ));
 
@@ -3483,6 +3549,192 @@ mod login_egress_tests {
             error.to_string().contains("missing issuer"),
             "unexpected error: {}",
             error
+        );
+    }
+
+    // --- login_verification_prompt (VPL-738 AC1, AC2, AC3) -----------------
+
+    fn device_response(
+        verification_uri: &str,
+        verification_uri_complete: Option<&str>,
+    ) -> StandardDeviceAuthorizationResponse {
+        let mut doc = serde_json::json!({
+            "device_code": "device",
+            "user_code": "ABCD-EFGH",
+            "verification_uri": verification_uri,
+            "expires_in": 600,
+            "interval": 5,
+        });
+
+        if let Some(complete) = verification_uri_complete {
+            doc["verification_uri_complete"] = serde_json::json!(complete);
+        }
+
+        serde_json::from_value(doc).expect("a well-formed device-authorization response")
+    }
+
+    #[test]
+    fn login_verification_prompt_accepts_an_on_origin_response() {
+        let issuer = "https://idp.example.com/realms/vorpal";
+        let details = device_response(
+            "https://idp.example.com/realms/vorpal/device",
+            Some("https://idp.example.com/realms/vorpal/device?user_code=ABCD-EFGH"),
+        );
+
+        let prompt = login_verification_prompt(&normalized(issuer), &details)
+            .expect("an on-origin verification URI must be accepted");
+
+        assert_eq!(
+            prompt.verification_uri,
+            "https://idp.example.com/realms/vorpal/device"
+        );
+        assert_eq!(
+            prompt.verification_uri_complete.as_deref(),
+            Some("https://idp.example.com/realms/vorpal/device?user_code=ABCD-EFGH")
+        );
+    }
+
+    #[test]
+    fn login_verification_prompt_accepts_the_loopback_dev_issuer() {
+        // Positive control for the flagless `vorpal login` default: the
+        // loopback allowance in `credential_egress_origin` must reach the
+        // verification URI too, or the documented dev flow breaks.
+        let details = device_response(
+            "http://localhost:8080/realms/vorpal/device",
+            Some("http://localhost:8080/realms/vorpal/device?user_code=ABCD-EFGH"),
+        );
+
+        let prompt = login_verification_prompt(&normalized(DEFAULT_DEV_ISSUER), &details)
+            .expect("the loopback dev issuer must keep working");
+
+        assert_eq!(
+            prompt.verification_uri,
+            "http://localhost:8080/realms/vorpal/device"
+        );
+    }
+
+    #[test]
+    fn login_verification_prompt_omits_an_absent_complete_uri() {
+        let issuer = "https://idp.example.com";
+        let details = device_response("https://idp.example.com/device", None);
+
+        let prompt = login_verification_prompt(&normalized(issuer), &details)
+            .expect("verification_uri_complete is optional per RFC 8628");
+
+        assert_eq!(prompt.verification_uri_complete, None);
+    }
+
+    #[test]
+    fn login_verification_prompt_refuses_an_off_origin_verification_uri() {
+        let issuer = "https://idp.example.com";
+        let details = device_response("https://idp-example.com.attacker.test/device", None);
+
+        let error = login_verification_prompt(&normalized(issuer), &details)
+            .expect_err("an off-origin verification_uri must be refused before printing");
+
+        assert!(
+            error.to_string().contains("verification_uri"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn login_verification_prompt_refuses_an_off_origin_complete_uri() {
+        // The complete URI is printed first and is the link the user
+        // actually follows, so a check covering only `verification_uri`
+        // leaves the primary human-facing link unprotected.
+        let issuer = "https://idp.example.com";
+        let details = device_response(
+            "https://idp.example.com/device",
+            Some("https://attacker.example.com/device?user_code=ABCD-EFGH"),
+        );
+
+        let error = login_verification_prompt(&normalized(issuer), &details)
+            .expect_err("an off-origin verification_uri_complete must be refused");
+
+        assert!(
+            error.to_string().contains("verification_uri_complete"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn login_verification_prompt_refuses_an_unparseable_complete_uri() {
+        // `verification_uri_complete` is a plain string in the oauth2 crate,
+        // never parsed as a URL, so a value that is not a URL at all reaches
+        // this function intact. A parse failure is a refusal, not a skip.
+        let issuer = "https://idp.example.com";
+        let details = device_response("https://idp.example.com/device", Some("not a url"));
+
+        let error = login_verification_prompt(&normalized(issuer), &details)
+            .expect_err("an unparseable verification_uri_complete must be refused");
+
+        assert!(
+            error.to_string().contains("verification_uri_complete"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn login_verification_prompt_refuses_a_plaintext_verification_uri() {
+        let issuer = "https://idp.example.com";
+        let details = device_response("http://idp.example.com/device", None);
+
+        let error = login_verification_prompt(&normalized(issuer), &details)
+            .expect_err("a scheme downgrade on the human-facing link must be refused");
+
+        assert!(
+            error.to_string().contains("must be https"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn login_verification_prompt_prints_the_parsed_form_not_the_raw_response_text() {
+        // WHATWG parsing strips ASCII tab/LF/CR from a URL, so a raw
+        // response string can parse on-origin while its own bytes carry a
+        // second rendered line. Printing the raw text would let a passing
+        // origin check vouch for a URL the user never sees checked.
+        let issuer = "https://idp.example.com";
+        let smuggled = "https://idp.example.com/dev\nice";
+        let details = device_response(smuggled, None);
+
+        assert!(
+            details.verification_uri().to_string().contains('\n'),
+            "the fixture must actually retain the raw newline, or this test is vacuous"
+        );
+
+        let prompt = login_verification_prompt(&normalized(issuer), &details)
+            .expect("the parsed URL is on-origin");
+
+        assert_eq!(prompt.verification_uri, "https://idp.example.com/device");
+    }
+
+    #[test]
+    fn login_verification_prompt_refusal_does_not_echo_the_rejected_uri() {
+        // The refusal ends the attack; it must not carry the attacker's
+        // bytes into the terminal that renders it.
+        let issuer = "https://idp.example.com";
+        let details = device_response("https://attacker.example.com/\u{1b}[2Kdevice", None);
+
+        let error = login_verification_prompt(&normalized(issuer), &details)
+            .expect_err("an off-origin verification_uri must be refused");
+
+        let rendered = error.to_string();
+
+        assert!(
+            !rendered.contains('\u{1b}'),
+            "the refusal rendered an escape byte: {:?}",
+            rendered
+        );
+        assert!(
+            rendered.contains("https://attacker.example.com"),
+            "the refusal must still name the offending origin: {}",
+            rendered
         );
     }
 
