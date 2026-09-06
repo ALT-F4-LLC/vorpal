@@ -158,13 +158,26 @@ jobs:
       # for SDK dependencies; the TARGET=release test run below is offline.
       - run: ./script/dev.sh make test-sdk-warm
 
-      - uses: actions/cache/save@v5
-        with:
-          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sdk/typescript/bun.lock') }}-bun
-          path: ~/.bun/install/cache
+      - name: Verify SDK test legs stay offline under TARGET=release
+        run: |
+          expansion=$(make -n TARGET=release test-sdk-go test-sdk-typescript-install)
+          for guard in 'GOPROXY=off' '-mod=readonly"' 'BUN_CONFIG_REGISTRY=http://127.0.0.1:1'; do
+            if ! printf '%s\n' "$expansion" | grep -qF -- "$guard"; then
+              echo "ERROR: TARGET=release SDK test legs no longer carry $guard:"
+              printf '%s\n' "$expansion"
+              exit 1
+            fi
+          done
 
       - run: ./script/dev.sh make TARGET=release test
       - run: ./script/dev.sh make TARGET=release dist
+
+      # Saved after the release legs so anything they pull is cached too.
+      - uses: actions/cache/save@v5
+        if: always()
+        with:
+          key: ${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('sdk/typescript/bun.lock') }}-bun
+          path: ~/.bun/install/cache
 
       - run: |
           echo "ARCH=$(uname -m | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/')" >> $GITHUB_ENV

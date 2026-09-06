@@ -10,14 +10,26 @@ VORPAL_DIR := /var/lib/vorpal
 VORPAL_NAMESPACE := library
 VORPAL_SOCKET := /tmp/vorpal-$(notdir $(WORK_DIR)).sock
 TARGET ?= debug
-CARGO_FLAGS := $(if $(filter $(TARGET),release),--offline --release,)
-# The SDK test legs share CARGO_FLAGS' hermeticity guarantee: under
-# TARGET=release they resolve every dependency from an already-warm cache and
-# fail loudly instead of reaching the network. `make test-sdk-warm` is the one
-# deliberate networked seam that fills those caches, the way `make vendor`
-# fills cargo's; on a warm cache it too touches no network.
-GO_TEST_ENV := $(if $(filter $(TARGET),release),GOFLAGS=-mod=readonly GOPROXY=off,)
-BUN_INSTALL_FLAGS := --frozen-lockfile$(if $(filter $(TARGET),release), --offline,)
+# One predicate for the whole file's hermeticity guarantee: under
+# TARGET=release every toolchain resolves dependencies from an already-warm
+# cache and fails loudly instead of reaching the network. `make test-sdk-warm`
+# is the one deliberate networked seam that fills those caches, the way
+# `make vendor` fills cargo's; on a warm cache it too touches no network. A new
+# SDK test leg derives its flags from OFFLINE to join the guarantee.
+OFFLINE := $(filter $(TARGET),release)
+CARGO_FLAGS := $(if $(OFFLINE),--offline --release,)
+# Appends to a caller's GOFLAGS rather than replacing it, and appends *last*:
+# cmd/go resolves repeated flags last-wins, so a caller's `-mod=mod` would
+# override this guard if it came after. The shell expands $GOFLAGS from the
+# environment, so a value with spaces stays one word.
+GO_TEST_ENV := $(if $(OFFLINE),GOFLAGS="$$GOFLAGS -mod=readonly" GOPROXY=off,)
+# bun has no --offline flag (1.3.10 ignores unknown flags rather than
+# rejecting them), so the enforcement is an unreachable registry: a package
+# bun cannot satisfy locally fails with a connection error, the analogue of
+# GOPROXY=off. It does not prove a cold cache would suffice — node_modules and
+# the restored bun cache are both warm in CI — it proves the leg took no
+# network.
+BUN_INSTALL_ENV := $(if $(OFFLINE),BUN_CONFIG_REGISTRY=http://127.0.0.1:1,)
 # `system services start` refuses a worker/registry with no issuer, so
 # vorpal-start and lima-vorpal-start must name one. This development default
 # is the realm `vorpal login`'s clap default names and the realm
@@ -108,10 +120,12 @@ test-sdk-warm:
 	cd sdk/typescript && bun install --frozen-lockfile
 
 test-sdk-go:
-	cd sdk/go && $(GO_TEST_ENV) go test -race -count=1 ./...
+	cd sdk/go && $(GO_TEST_ENV) go test -race -count=1 ./...$(if $(OFFLINE), \
+		|| { status=$$?; echo "hint: offline leg; run 'make test-sdk-warm' to fill the Go module cache" >&2; exit $$status; })
 
 test-sdk-typescript-install:
-	cd sdk/typescript && bun install $(BUN_INSTALL_FLAGS)
+	cd sdk/typescript && $(BUN_INSTALL_ENV) bun install --frozen-lockfile$(if $(OFFLINE), \
+		|| { status=$$?; echo "hint: offline leg; run 'make test-sdk-warm' to fill the bun install cache" >&2; exit $$status; })
 
 test-sdk-typescript: test-sdk-typescript-install
 	cd sdk/typescript && bun test
