@@ -59,7 +59,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::fs::{
-    copy, create_dir_all, metadata, remove_dir_all, remove_file, rename, symlink, symlink_metadata,
+    copy, create_dir_all, hard_link, metadata, remove_dir_all, remove_file, rename, symlink,
+    symlink_metadata,
 };
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -459,6 +460,46 @@ pub async fn publish_atomically(staging_path: &Path, target_path: &Path) -> Resu
     ))
 }
 
+/// Publishes fully-written `staging_path` to shared `target_path` with a
+/// single `hard_link`, consuming `staging_path` either way.
+///
+/// This is the write-once counterpart to `publish_atomically`, for a path
+/// whose name carries meaning the bytes do not: an alias maps a name to a
+/// digest, so replacing an existing entry would silently re-point the name.
+/// `rename` replaces an existing *file* and cannot express that refusal;
+/// `hard_link` fails `AlreadyExists` when the name is taken — including when
+/// it is a dangling symlink — and never writes through it.
+///
+/// A taken name yields `Superseded` with the existing entry left untouched.
+/// Nothing here compares bytes, so a caller that needs the published mapping
+/// must read the target back rather than assume its own content stands.
+pub async fn publish_exclusively(
+    staging_path: &Path,
+    target_path: &Path,
+) -> Result<PublishOutcome> {
+    let link = hard_link(staging_path, target_path).await;
+
+    discard_staging(staging_path).await;
+
+    match link {
+        Ok(()) => Ok(PublishOutcome::Published),
+
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+            info!(
+                "store |> discarded staged copy of {}: published concurrently",
+                target_path.display()
+            );
+
+            Ok(PublishOutcome::Superseded)
+        }
+
+        Err(err) => Err(anyhow!(
+            "failed to publish {}: {err}",
+            target_path.display()
+        )),
+    }
+}
+
 // Temp paths
 
 pub fn get_sandbox_path() -> PathBuf {
@@ -746,6 +787,86 @@ mod tests {
             published_inode,
             "the winner's published directory was replaced instead of left alone"
         );
+    }
+
+    // The write-once counterpart: an alias maps a name to a digest, so a
+    // taken name must be refused rather than re-pointed. A rename would
+    // replace the existing file; the exclusive create must leave the winner's
+    // bytes standing and still consume the loser's staged copy.
+    #[tokio::test]
+    async fn publish_exclusively_refuses_a_taken_name_and_leaves_its_content_alone() {
+        let root = TempDir::new().unwrap();
+        let target_path = root.path().join("latest");
+        let winner_temp = root.path().join("winner");
+        let loser_temp = root.path().join("loser");
+
+        std::fs::write(&winner_temp, "winner-digest").unwrap();
+
+        assert_eq!(
+            publish_exclusively(&winner_temp, &target_path)
+                .await
+                .unwrap(),
+            PublishOutcome::Published
+        );
+
+        std::fs::write(&loser_temp, "loser-digest").unwrap();
+
+        assert_eq!(
+            publish_exclusively(&loser_temp, &target_path)
+                .await
+                .unwrap(),
+            PublishOutcome::Superseded,
+            "the loser was told it published its own bytes"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&target_path).unwrap(),
+            "winner-digest",
+            "an existing alias was re-pointed at the loser's digest"
+        );
+        assert!(
+            !loser_temp.exists(),
+            "staged copy left behind after a superseded publish"
+        );
+    }
+
+    // A dangling symlink is a taken name too. `hard_link` refuses it without
+    // following it, so a build step that left one behind cannot redirect an
+    // alias publish at a path outside the store.
+    #[tokio::test]
+    async fn publish_exclusively_refuses_a_dangling_symlink_without_writing_through_it() {
+        let root = TempDir::new().unwrap();
+        let target_path = root.path().join("latest");
+        let outside_path = root.path().join("outside");
+        let staging_path = root.path().join("staged");
+
+        std::os::unix::fs::symlink(&outside_path, &target_path).unwrap();
+        std::fs::write(&staging_path, "digest").unwrap();
+
+        assert_eq!(
+            publish_exclusively(&staging_path, &target_path)
+                .await
+                .unwrap(),
+            PublishOutcome::Superseded
+        );
+
+        assert!(
+            !outside_path.exists(),
+            "the publish wrote through a symlink to a path outside the store"
+        );
+        assert!(!staging_path.exists());
+    }
+
+    // A failed link is not a lost race. Publishing from a staging path that
+    // does not exist must surface as an error rather than as a publish.
+    #[tokio::test]
+    async fn publish_exclusively_reports_a_link_failure_that_is_not_a_taken_name() {
+        let root = TempDir::new().unwrap();
+        let err = publish_exclusively(&root.path().join("absent"), &root.path().join("latest"))
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("failed to publish"), "{err:?}");
     }
 
     // A rename can fail for reasons that have nothing to do with a racing

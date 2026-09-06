@@ -2,12 +2,14 @@ use crate::command::store::{
     archives::unpack_zstd,
     paths::{
         discard_staging, get_artifact_alias_path, get_artifact_archive_path,
-        get_artifact_output_path, publish_atomically, set_timestamps, staging_path_for,
+        get_artifact_output_path, publish_atomically, publish_exclusively, set_timestamps,
+        staging_path_for, PublishOutcome,
     },
 };
 use anyhow::{anyhow, bail, Context, Result};
 use std::fmt::Write as _;
 use std::{
+    io::ErrorKind,
     os::unix::{ffi::OsStrExt, fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
     process::Command,
@@ -102,11 +104,15 @@ async fn get_alias_from_registry(
 }
 
 async fn read_alias_digest(alias_path: &Path, artifact_name: &str) -> Result<String> {
-    let artifact_digest = read_to_string(alias_path)
+    let contents = read_to_string(alias_path)
         .await
         .with_context(|| format!("failed to read alias file: {}", alias_path.display()))?;
 
-    let artifact_digest = artifact_digest.trim().to_string();
+    parse_alias_digest(&contents, alias_path, artifact_name)
+}
+
+fn parse_alias_digest(contents: &str, alias_path: &Path, artifact_name: &str) -> Result<String> {
+    let artifact_digest = contents.trim().to_string();
 
     if artifact_digest.is_empty() {
         bail!(
@@ -121,6 +127,69 @@ async fn read_alias_digest(alias_path: &Path, artifact_name: &str) -> Result<Str
     }
 
     parse_artifact_digest(&artifact_digest, "alias file")
+}
+
+/// Reads the cached alias, reporting an alias this store has never held as
+/// `None`.
+///
+/// Absence is decided by the read that needs it rather than by a preceding
+/// `exists()`: the stat and the read see different states when another `run`
+/// publishes in between, and only the read's own `NotFound` means this caller
+/// must go to the registry.
+async fn read_cached_alias_digest(
+    alias_path: &Path,
+    artifact_name: &str,
+) -> Result<Option<String>> {
+    match read_to_string(alias_path).await {
+        Ok(contents) => parse_alias_digest(&contents, alias_path, artifact_name).map(Some),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to read alias file: {}", alias_path.display()))
+        }
+    }
+}
+
+/// Caches `artifact_digest` at `alias_path` through an exclusive create, and
+/// reports which digest the alias names afterwards.
+///
+/// The registry publishes an alias write-once
+/// (`cli/src/command/start/registry/artifact/local.rs`), so this local cache
+/// of the same mapping must not re-point a name either. Publishing by rename
+/// would: a rename onto an existing file replaces it, so a second `run`
+/// resolving the same alias concurrently would overwrite the first one's
+/// entry. `publish_exclusively` refuses a taken name instead, and this
+/// function then reads that entry back — losing the race is not a failure,
+/// because the winner published the same registry's answer.
+async fn cache_alias_digest(
+    alias_path: &Path,
+    artifact_name: &str,
+    artifact_digest: &str,
+) -> Result<String> {
+    if let Some(parent) = alias_path.parent() {
+        create_dir_all(parent)
+            .await
+            .with_context(|| format!("failed to create alias directory: {}", parent.display()))?;
+    }
+
+    let staging_path = staging_path_for(alias_path);
+
+    let published: Result<PublishOutcome> = async {
+        write(&staging_path, artifact_digest.as_bytes())
+            .await
+            .with_context(|| format!("failed to write alias file: {}", staging_path.display()))?;
+
+        publish_exclusively(&staging_path, alias_path).await
+    }
+    .await;
+
+    if published.is_err() {
+        discard_staging(&staging_path).await;
+    }
+
+    match published? {
+        PublishOutcome::Published => Ok(artifact_digest.to_string()),
+        PublishOutcome::Superseded => read_alias_digest(alias_path, artifact_name).await,
+    }
 }
 
 /// `parse_artifact_alias`'s own component check (`sdk/rust/src/context.rs`,
@@ -646,78 +715,50 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
     let alias_path =
         get_artifact_alias_path(&artifact_name, &artifact_namespace, system, &artifact_tag)?;
 
-    if !alias_path.exists() {
-        info!("alias not found locally, checking registry: {registry}");
+    let artifact_digest = match read_cached_alias_digest(&alias_path, &artifact_name).await? {
+        Some(digest) => digest,
 
-        match get_alias_from_registry(
-            registry,
-            &artifact_name,
-            &artifact_namespace,
-            system,
-            &artifact_tag,
-        )
-        .await
-        {
-            Ok(digest) => {
-                info!("alias resolved from registry: digest={digest}");
+        None => {
+            info!("alias not found locally, checking registry: {registry}");
 
-                if let Some(parent) = alias_path.parent() {
-                    create_dir_all(parent).await.with_context(|| {
-                        format!("failed to create alias directory: {}", parent.display())
-                    })?;
+            match get_alias_from_registry(
+                registry,
+                &artifact_name,
+                &artifact_namespace,
+                system,
+                &artifact_tag,
+            )
+            .await
+            {
+                Ok(digest) => {
+                    info!("alias resolved from registry: digest={digest}");
+
+                    cache_alias_digest(&alias_path, &artifact_name, &digest).await?
                 }
 
-                // This writer publishes the alias by rename, so it never
-                // leaves a truncated digest behind.
-                let alias_staging_path = staging_path_for(&alias_path);
+                Err(err) => {
+                    debug!("registry alias lookup failed: {err}");
 
-                let staged: Result<()> = async {
-                    write(&alias_staging_path, digest.as_bytes())
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "failed to write alias file: {}",
-                                alias_staging_path.display()
-                            )
-                        })?;
-
-                    publish_atomically(&alias_staging_path, &alias_path)
-                        .await
-                        .map(|_| ())
+                    bail!(
+                        "artifact alias not found: {}\n\
+                         \n\
+                         The alias file does not exist at: {}\n\
+                         \n\
+                         The alias could not be resolved from the registry:\n\
+                         \n\
+                         \t{err}\n\
+                         \n\
+                         Have you built this artifact? Try:\n\
+                         \n\
+                         \tvorpal build {}",
+                        alias,
+                        alias_path.display(),
+                        artifact_name,
+                    );
                 }
-                .await;
-
-                if staged.is_err() {
-                    discard_staging(&alias_staging_path).await;
-                }
-
-                staged?;
-            }
-
-            Err(err) => {
-                debug!("registry alias lookup failed: {err}");
-
-                bail!(
-                    "artifact alias not found: {}\n\
-                     \n\
-                     The alias file does not exist at: {}\n\
-                     \n\
-                     The alias could not be resolved from the registry:\n\
-                     \n\
-                     \t{err}\n\
-                     \n\
-                     Have you built this artifact? Try:\n\
-                     \n\
-                     \tvorpal build {}",
-                    alias,
-                    alias_path.display(),
-                    artifact_name,
-                );
             }
         }
-    }
-
-    let artifact_digest = read_alias_digest(&alias_path, &artifact_name).await?;
+    };
 
     debug!("run: resolved digest={artifact_digest}");
 
@@ -1015,6 +1056,88 @@ mod tests {
         assert_eq!(
             read_alias_digest(&alias_path, "example").await.unwrap(),
             digest
+        );
+    }
+
+    // The registry publishes an alias write-once, so this local cache of the
+    // same mapping must not re-point a name either. Publishing by rename did:
+    // a rename onto an existing file replaces it, so a second `run` resolving
+    // the same alias would overwrite the entry the first one published.
+    #[tokio::test]
+    async fn cache_alias_digest_leaves_an_already_cached_alias_pointing_where_it_did() {
+        let root = TempDir::new().unwrap();
+        let alias_dir = root.path().join("alias");
+        let alias_path = alias_dir.join("latest");
+        let published = "a".repeat(64);
+        let losing = "b".repeat(64);
+
+        std::fs::create_dir_all(&alias_dir).unwrap();
+        std::fs::write(&alias_path, &published).unwrap();
+
+        assert_eq!(
+            cache_alias_digest(&alias_path, "example", &losing)
+                .await
+                .unwrap(),
+            published,
+            "the loser reported its own digest rather than the cached mapping"
+        );
+        assert_eq!(std::fs::read_to_string(&alias_path).unwrap(), published);
+        assert_eq!(
+            dir_entry_names(&alias_dir),
+            BTreeSet::from(["latest".to_string()]),
+            "a losing publish left its staging file under the store"
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_alias_digest_publishes_into_a_store_that_has_no_alias_yet() {
+        let root = TempDir::new().unwrap();
+        let alias_dir = root.path().join("alias");
+        let alias_path = alias_dir.join("latest");
+        let digest = "c".repeat(64);
+
+        assert_eq!(
+            cache_alias_digest(&alias_path, "example", &digest)
+                .await
+                .unwrap(),
+            digest
+        );
+        assert_eq!(std::fs::read_to_string(&alias_path).unwrap(), digest);
+        assert_eq!(
+            dir_entry_names(&alias_dir),
+            BTreeSet::from(["latest".to_string()])
+        );
+    }
+
+    // Absence is what sends `run` to the registry, and only the read that
+    // needs the digest can decide it: a preceding `exists()` answers about a
+    // moment that has already passed.
+    #[tokio::test]
+    async fn read_cached_alias_digest_reports_a_missing_alias_as_absent() {
+        let root = TempDir::new().unwrap();
+
+        assert_eq!(
+            read_cached_alias_digest(&root.path().join("absent"), "example")
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn read_cached_alias_digest_rejects_a_cached_digest_that_is_not_hex() {
+        let root = TempDir::new().unwrap();
+        let alias_path = root.path().join("latest");
+
+        std::fs::write(&alias_path, "../../etc").unwrap();
+
+        let err = read_cached_alias_digest(&alias_path, "example")
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("invalid artifact digest"),
+            "a cached alias bypassed the digest check: {err}"
         );
     }
 
