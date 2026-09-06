@@ -668,11 +668,7 @@ pub async fn run(alias: &str, args: &[String], bin: Option<&str>, registry: &str
                 }
 
                 // This writer publishes the alias by rename, so it never
-                // leaves a truncated digest behind. That is a property of
-                // this producer only: the local registry backend
-                // (`start/registry/artifact/local.rs`) still writes the same
-                // alias path in place, so a reader can still observe a
-                // partial digest written by that one.
+                // leaves a truncated digest behind.
                 let alias_staging_path = staging_path_for(&alias_path);
 
                 let staged: Result<()> = async {
