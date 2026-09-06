@@ -34,26 +34,27 @@ BUN_INSTALL_ENV := $(if $(OFFLINE),BUN_CONFIG_REGISTRY=http://127.0.0.1:1,)
 # vorpal-start and lima-vorpal-start must name one. This development default
 # is the realm `vorpal login`'s clap default names and the realm
 # script/test/keycloak.sh's clients live in (KC_REALM=vorpal), so all three
-# agree. Nothing in this repository *provisions* that realm: `docker compose
-# up` boots Keycloak with only its own `master` realm, and the `vorpal` realm
-# and its OIDC clients are still created by hand. `realms/master` was a prior
-# default and is worse, not simpler — it is Keycloak's administrative realm,
-# holds none of Vorpal's clients, and ships with a published admin/password
-# bootstrap credential, so it satisfies "an issuer is configured" while
-# pointing a running service at the wrong realm.
+# agree. `docker-compose.yaml` provisions that realm and its OIDC clients from
+# an inline realm import, and `keycloak-start` — which `vorpal-start` depends
+# on — brings it up and waits for its discovery document. `realms/master` was a
+# prior default and is worse, not simpler — it is Keycloak's administrative
+# realm, holds none of Vorpal's clients, and ships with a published
+# admin/password bootstrap credential, so it satisfies "an issuer is
+# configured" while pointing a running service at the wrong realm.
 #
 # A Rust test (`makefile_default_vorpal_issuer` in cli/src/command.rs) reads
 # the line below at compile time and fails if it drifts from the CLI's own
 # default, so edit both together.
 VORPAL_ISSUER ?= http://localhost:8080/realms/vorpal
 
-# Guard for VORPAL_ISSUER, expanded by the two recipes that interpolate it.
+# Guard for VORPAL_ISSUER, expanded by the three recipes that interpolate it.
 #
 # Make substitutes the value as plain text into two different shell contexts
 # before either shell parses the line, so the deny-list is the union of what
-# each can reinterpret: vorpal-start puts it in a double-quoted string ('"',
-# '`', '$', '\'), and lima-vorpal-start nests that inside `bash -c '...'`,
-# where an apostrophe ends the outer quoting and injects into the VM.
+# each can reinterpret: vorpal-start and keycloak-start put it in a
+# double-quoted string ('"', '`', '$', '\'), and lima-vorpal-start nests that
+# inside `bash -c '...'`, where an apostrophe ends the outer quoting and
+# injects into the VM.
 #
 # Reads with `$(value VORPAL_ISSUER)`, not `$(VORPAL_ISSUER)`: the variable is
 # recursively expanded, so a plain reference re-expands its text on every use
@@ -367,7 +368,36 @@ vorpal-build:
 vorpal-prepare:
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- prepare $(VORPAL_FLAGS) $(VORPAL_ARTIFACT)
 
-vorpal-start:
+# Brings up the development Keycloak and blocks until the realm named by
+# VORPAL_ISSUER answers OIDC discovery. Without the wait, `vorpal-start` races
+# Keycloak's boot and its startup discovery fails against a port that is bound
+# but not yet serving the realm.
+#
+# The readiness probe polls the issuer's own discovery document rather than a
+# container health endpoint: that is the exact URL `system services start`
+# fetches, so a probe that passes and a start that fails cannot disagree about
+# what "ready" means. VORPAL_ISSUER is interpolated into a double-quoted shell
+# string, so CHECK_VORPAL_ISSUER guards this recipe too.
+#
+# Import is idempotent by Keycloak's own rule: `--import-realm` skips a realm
+# that already exists, so re-running this target against a live container
+# neither recreates the realm nor discards state.
+KEYCLOAK_READY_TIMEOUT ?= 120
+
+keycloak-start:
+	$(CHECK_VORPAL_ISSUER)
+	docker compose up --detach
+	deadline=$$(($$(date +%s) + $(KEYCLOAK_READY_TIMEOUT))); \
+	until curl --fail --silent --show-error --output /dev/null "$(VORPAL_ISSUER)/.well-known/openid-configuration"; do \
+		if [ "$$(date +%s)" -ge "$$deadline" ]; then \
+			echo "keycloak-start: $(VORPAL_ISSUER) did not answer OIDC discovery within $(KEYCLOAK_READY_TIMEOUT)s" >&2; \
+			exit 1; \
+		fi; \
+		sleep 2; \
+	done
+	echo "keycloak-start: $(VORPAL_ISSUER) is serving OIDC discovery"
+
+vorpal-start: keycloak-start
 	$(CHECK_VORPAL_ISSUER)
 	VORPAL_SOCKET_PATH=$(VORPAL_SOCKET) cargo $(CARGO_FLAGS) run --bin "vorpal" -- system services start --issuer "$(VORPAL_ISSUER)" $(VORPAL_FLAGS)
 

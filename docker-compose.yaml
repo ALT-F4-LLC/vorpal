@@ -1,6 +1,147 @@
+configs:
+  vorpal-realm:
+    content: |
+      {
+        "realm": "vorpal",
+        "enabled": true,
+        "clientScopes": [
+          {
+            "name": "archive",
+            "description": "Audience for the archive service.",
+            "protocol": "openid-connect",
+            "attributes": {
+              "include.in.token.scope": "true",
+              "display.on.consent.screen": "false"
+            },
+            "protocolMappers": [
+              {
+                "name": "archive-audience",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper",
+                "config": {
+                  "included.client.audience": "archive",
+                  "access.token.claim": "true",
+                  "id.token.claim": "false"
+                }
+              }
+            ]
+          },
+          {
+            "name": "artifact",
+            "description": "Audience for the artifact service.",
+            "protocol": "openid-connect",
+            "attributes": {
+              "include.in.token.scope": "true",
+              "display.on.consent.screen": "false"
+            },
+            "protocolMappers": [
+              {
+                "name": "artifact-audience",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper",
+                "config": {
+                  "included.client.audience": "artifact",
+                  "access.token.claim": "true",
+                  "id.token.claim": "false"
+                }
+              }
+            ]
+          },
+          {
+            "name": "worker",
+            "description": "Audience for the worker service.",
+            "protocol": "openid-connect",
+            "attributes": {
+              "include.in.token.scope": "true",
+              "display.on.consent.screen": "false"
+            },
+            "protocolMappers": [
+              {
+                "name": "worker-audience",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper",
+                "config": {
+                  "included.client.audience": "worker",
+                  "access.token.claim": "true",
+                  "id.token.claim": "false"
+                }
+              }
+            ]
+          }
+        ],
+        "clients": [
+          {
+            "clientId": "cli",
+            "name": "Vorpal CLI",
+            "enabled": true,
+            "publicClient": true,
+            "standardFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "attributes": {
+              "oauth2.device.authorization.grant.enabled": "true"
+            },
+            "defaultClientScopes": ["openid", "profile", "email"],
+            "optionalClientScopes": ["archive", "artifact", "worker"]
+          },
+          {
+            "clientId": "worker",
+            "name": "Vorpal worker",
+            "enabled": true,
+            "publicClient": false,
+            "serviceAccountsEnabled": true,
+            "standardFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "secret": "not-a-secret-worker",
+            "attributes": {
+              "standard.token.exchange.enabled": "true"
+            },
+            "defaultClientScopes": ["openid", "profile", "email"],
+            "optionalClientScopes": ["archive", "artifact", "worker"]
+          },
+          {
+            "clientId": "archive",
+            "name": "Vorpal archive",
+            "enabled": true,
+            "publicClient": false,
+            "standardFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "secret": "not-a-secret-archive"
+          },
+          {
+            "clientId": "artifact",
+            "name": "Vorpal artifact",
+            "enabled": true,
+            "publicClient": false,
+            "standardFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "secret": "not-a-secret-artifact"
+          }
+        ],
+        "users": [
+          {
+            "username": "vorpal",
+            "enabled": true,
+            "emailVerified": true,
+            "email": "vorpal@localhost",
+            "firstName": "Vorpal",
+            "lastName": "Developer",
+            "credentials": [
+              {
+                "type": "password",
+                "value": "not-a-secret-vorpal",
+                "temporary": false
+              }
+            ]
+          }
+        ]
+      }
+
 services:
   keycloak:
-    command: start-dev
+    command: start-dev --import-realm
+    configs:
+      - source: vorpal-realm
+        target: /opt/keycloak/data/import/vorpal-realm.json
     environment:
       KC_BOOTSTRAP_ADMIN_PASSWORD: password
       KC_BOOTSTRAP_ADMIN_USERNAME: admin

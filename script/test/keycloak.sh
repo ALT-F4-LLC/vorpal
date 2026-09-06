@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-if [ -z "${ARCHIVE_CLIENT_SECRET}" ]; then
-    echo "missing ARCHIVE_CLIENT_SECRET env var"
-    exit 1
-fi
-
-if [ -z "${ARTIFACT_CLIENT_SECRET}" ]; then
-    echo "missing ARTIFACT_CLIENT_SECRET env var"
-    exit 1
-fi
-
-if [ -z "${WORKER_CLIENT_SECRET}" ]; then
-    echo "missing WORKER_CLIENT_SECRET env var"
-    exit 1
-fi
+# These three secrets used to be required env vars with no stated source, so
+# running this script meant first creating the clients by hand and inventing
+# values for them. They now default to the ones docker-compose.yaml's inline
+# realm import assigns to the same clients, which is what `make keycloak-start`
+# brings up. They are development placeholders on a Keycloak bound to
+# 127.0.0.1, in the same class as that file's published admin/password
+# bootstrap credential — not secrets, and never reused anywhere real. Point
+# KC_BASE/KC_REALM at another Keycloak and you must supply its own values
+# through the environment.
+: "${ARCHIVE_CLIENT_SECRET:=not-a-secret-archive}"
+: "${ARTIFACT_CLIENT_SECRET:=not-a-secret-artifact}"
+: "${WORKER_CLIENT_SECRET:=not-a-secret-worker}"
 
 # =========================
 # Config (edit these)
