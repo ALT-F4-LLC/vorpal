@@ -580,9 +580,13 @@ pub async fn build_source(
     Ok(source_digest)
 }
 
-/// All fields of an artifact source except `digest`, used as a cache key.
+/// The namespace a prepare was authorized for, plus every field of an artifact
+/// source except `digest`. The namespace is the string the handler's write gate
+/// checked, so a cached digest can only be served back to the namespace whose
+/// authorization produced it.
 #[derive(Debug, Eq, Hash, PartialEq)]
 struct SourceCacheKey {
+    artifact_namespace: String,
     excludes: Vec<String>,
     includes: Vec<String>,
     name: String,
@@ -593,13 +597,56 @@ struct SourceCacheKey {
 /// Combined cache of source digests resolved during this session.
 #[derive(Debug, Default)]
 struct SourceCacheState {
-    /// Key: all source fields (except digest) + platform -> computed source digest
+    /// Key: namespace + all source fields (except digest) + platform -> computed source digest
     by_key: HashMap<SourceCacheKey, String>,
-    /// Key: (`source_url`, excludes, includes, platform) -> computed source digest (HTTP sources only)
-    by_url: HashMap<(String, Vec<String>, Vec<String>, String), String>,
+    /// Key: (namespace, `source_url`, excludes, includes, platform) -> computed source digest (HTTP sources only)
+    by_url: HashMap<(String, String, Vec<String>, Vec<String>, String), String>,
 }
 
 type SourceCache = Arc<Mutex<SourceCacheState>>;
+
+/// The push-bearing step of a prepare, behind a trait so a test can observe
+/// which namespaces a request actually pushes under. `build_source` reaches a
+/// real registry and a writable store root, neither of which a unit test can
+/// stand up here; the cache decision this seam sits behind is what the tests
+/// need to pin.
+#[tonic::async_trait]
+trait SourceBuilder: Send + Sync {
+    async fn build(
+        &self,
+        artifact_context: String,
+        artifact_namespace: String,
+        artifact_source: &ArtifactSource,
+        artifact_unlock: bool,
+        registry: &ResolvedRegistry,
+        tx: &Sender<Result<PrepareArtifactResponse, Status>>,
+    ) -> Result<String>;
+}
+
+struct RegistrySourceBuilder;
+
+#[tonic::async_trait]
+impl SourceBuilder for RegistrySourceBuilder {
+    async fn build(
+        &self,
+        artifact_context: String,
+        artifact_namespace: String,
+        artifact_source: &ArtifactSource,
+        artifact_unlock: bool,
+        registry: &ResolvedRegistry,
+        tx: &Sender<Result<PrepareArtifactResponse, Status>>,
+    ) -> Result<String> {
+        build_source(
+            artifact_context,
+            artifact_namespace,
+            artifact_source,
+            artifact_unlock,
+            registry,
+            tx,
+        )
+        .await
+    }
+}
 
 /// Upserts `artifact_sources`'s last (just-resolved) entry into the on-disk lockfile at
 /// `lock_path`, keyed by (name, platform), creating the lockfile if it does not exist.
@@ -761,6 +808,7 @@ async fn resolve_and_upsert_source(
     source_cache: &SourceCache,
     artifact_sources: &mut Vec<ArtifactSource>,
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
+    source_builder: &dyn SourceBuilder,
 ) -> Result<(), Status> {
     hydrate_and_gate_source(
         &mut artifact_source,
@@ -773,6 +821,7 @@ async fn resolve_and_upsert_source(
     // (and moved) at L786/804 while artifact_source is still needed afterward, and
     // url_cache_key is moved separately into by_url at L806.
     let cache_key = SourceCacheKey {
+        artifact_namespace: request_artifact_namespace.to_string(),
         excludes: artifact_source.excludes.clone(),
         includes: artifact_source.includes.clone(),
         name: artifact_source.name.clone(),
@@ -784,6 +833,7 @@ async fn resolve_and_upsert_source(
         artifact_source.path.starts_with("http://") || artifact_source.path.starts_with("https://");
     let url_cache_key = if is_http_source {
         Some((
+            request_artifact_namespace.to_string(),
             artifact_source.path.clone(),
             artifact_source.excludes.clone(),
             artifact_source.includes.clone(),
@@ -820,16 +870,17 @@ async fn resolve_and_upsert_source(
             .or_insert(digest.clone());
         digest
     } else {
-        let digest = build_source(
-            request_artifact_context.to_string(),
-            request_artifact_namespace.to_string(),
-            &artifact_source,
-            request_artifact_unlock,
-            request_registry,
-            tx,
-        )
-        .await
-        .map_err(|err| Status::internal(format!("{err}")))?;
+        let digest = source_builder
+            .build(
+                request_artifact_context.to_string(),
+                request_artifact_namespace.to_string(),
+                &artifact_source,
+                request_artifact_unlock,
+                request_registry,
+                tx,
+            )
+            .await
+            .map_err(|err| Status::internal(format!("{err}")))?;
 
         // Only populate cache for HTTP sources. `digest` is inserted into up to
         // two caches and is still this branch's return value, so each insert
@@ -880,6 +931,7 @@ async fn prepare_artifact(
     tx: &Sender<Result<PrepareArtifactResponse, Status>>,
     source_cache: SourceCache,
     registry_allowed: &[String],
+    source_builder: &dyn SourceBuilder,
 ) -> Result<(), Status> {
     let request = request.into_inner();
 
@@ -946,6 +998,7 @@ async fn prepare_artifact(
             &source_cache,
             &mut artifact_sources,
             tx,
+            source_builder,
         )
         .await?;
     }
@@ -1038,7 +1091,14 @@ impl AgentService for AgentServer {
         let registry_allowed = self.registry_allowed.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = prepare_artifact(request, &tx, source_cache, &registry_allowed).await
+            if let Err(err) = prepare_artifact(
+                request,
+                &tx,
+                source_cache,
+                &registry_allowed,
+                &RegistrySourceBuilder,
+            )
+            .await
             {
                 let _ = tx.send(Err(err)).await;
             }
@@ -1051,6 +1111,137 @@ impl AgentService for AgentServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    /// Records the namespace each prepare actually reached the push-bearing
+    /// builder under. A cache hit skips this call entirely, so the recorded
+    /// namespaces are exactly the set of namespaces this agent pushed into.
+    struct RecordingSourceBuilder {
+        calls: Arc<Mutex<Vec<(String, String)>>>,
+    }
+
+    impl RecordingSourceBuilder {
+        fn new() -> Self {
+            Self {
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        async fn namespaces(&self) -> Vec<String> {
+            self.calls
+                .lock()
+                .await
+                .iter()
+                .map(|(namespace, _)| namespace.clone())
+                .collect()
+        }
+    }
+
+    #[tonic::async_trait]
+    impl SourceBuilder for RecordingSourceBuilder {
+        async fn build(
+            &self,
+            _artifact_context: String,
+            artifact_namespace: String,
+            artifact_source: &ArtifactSource,
+            _artifact_unlock: bool,
+            _registry: &ResolvedRegistry,
+            _tx: &Sender<Result<PrepareArtifactResponse, Status>>,
+        ) -> Result<String> {
+            self.calls
+                .lock()
+                .await
+                .push((artifact_namespace, artifact_source.path.clone()));
+
+            Ok(SOURCE_DIGEST.to_string())
+        }
+    }
+
+    const SOURCE_URL: &str = "https://example.com/source.tar.gz";
+    const SOURCE_DIGEST: &str = "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1";
+
+    /// A request for one pinned http source, prepared under `namespace` with a
+    /// context of its own. Every prepare needs a fresh context: the handler
+    /// upserts `Vorpal.lock` there, and a shared context would hydrate the
+    /// digest and change what the next prepare is deciding.
+    fn http_source_request(namespace: &str, context: &TempDir) -> PrepareArtifactRequest {
+        PrepareArtifactRequest {
+            artifact: Some(Artifact {
+                aliases: vec![],
+                name: "test".to_string(),
+                sources: vec![ArtifactSource {
+                    digest: Some(SOURCE_DIGEST.to_string()),
+                    excludes: vec![],
+                    includes: vec![],
+                    name: "source".to_string(),
+                    path: SOURCE_URL.to_string(),
+                }],
+                steps: vec![],
+                systems: vec![],
+                target: 0,
+            }),
+            artifact_context: context.path().display().to_string(),
+            artifact_namespace: namespace.to_string(),
+            artifact_unlock: false,
+            registry: "http://registry.example.com".to_string(),
+        }
+    }
+
+    async fn prepare_http_source(
+        namespace: &str,
+        source_cache: SourceCache,
+        builder: &RecordingSourceBuilder,
+    ) {
+        let (tx, _rx) = channel(100);
+        let context = TempDir::new().expect("context dir");
+
+        prepare_artifact(
+            Request::new(http_source_request(namespace, &context)),
+            &tx,
+            source_cache,
+            &["http://registry.example.com".to_string()],
+            builder,
+        )
+        .await
+        .expect("a pinned http source prepares");
+    }
+
+    // The write gate authorizes a namespace; the cache decides whether the
+    // push that lands in it ever runs. A digest resolved under `x` must not
+    // stand in for a prepare under `y`, or `y`'s artifact names an archive
+    // only `x` holds.
+    #[tokio::test]
+    async fn prepare_artifact_pushes_the_same_source_once_per_namespace() {
+        let source_cache: SourceCache = Arc::new(Mutex::new(SourceCacheState::default()));
+        let builder = RecordingSourceBuilder::new();
+
+        prepare_http_source("x", source_cache.clone(), &builder).await;
+        prepare_http_source("y", source_cache.clone(), &builder).await;
+
+        assert_eq!(
+            builder.namespaces().await,
+            vec!["x".to_string(), "y".to_string()],
+            "each namespace must get its own push, not a hit on the other's entry"
+        );
+    }
+
+    // The benign case the fix must not break: within one namespace the cache
+    // still answers, so a second prepare of the same source does not push
+    // again. Without this, deleting the cache would satisfy the test above.
+    #[tokio::test]
+    async fn prepare_artifact_reuses_a_cached_source_within_one_namespace() {
+        let source_cache: SourceCache = Arc::new(Mutex::new(SourceCacheState::default()));
+        let builder = RecordingSourceBuilder::new();
+
+        prepare_http_source("x", source_cache.clone(), &builder).await;
+        prepare_http_source("x", source_cache.clone(), &builder).await;
+
+        assert_eq!(
+            builder.namespaces().await,
+            vec!["x".to_string()],
+            "a repeat prepare in the same namespace must hit the cache"
+        );
+    }
 
     #[test]
     fn classify_local_when_path_exists() {
@@ -1171,6 +1362,7 @@ mod tests {
             &tx,
             source_cache,
             &["http://registry.example.com".to_string()],
+            &RecordingSourceBuilder::new(),
         )
         .await
         .expect_err("a registry outside the allow-list is refused");
@@ -1210,6 +1402,7 @@ mod tests {
             &tx,
             source_cache,
             &["http://registry.example.com".to_string()],
+            &RecordingSourceBuilder::new(),
         )
         .await;
 
