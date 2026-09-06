@@ -3,8 +3,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::RwLock;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::sync::{Mutex, RwLock};
 use tonic::{
     metadata::{Ascii, MetadataValue},
     Request, Status,
@@ -18,6 +22,18 @@ use vorpal_sdk::context::credential_egress_origin;
 /// availability defect and not only a slow start. Same value as the login
 /// path's `LOGIN_HTTP_TIMEOUT`.
 const OIDC_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Floor on the time between JWKS refreshes triggered by a token whose `kid`
+/// misses the cache.
+///
+/// The interceptor reaches that refresh before any authentication decision, so
+/// without a floor an unauthenticated peer aims one outbound request at the
+/// operator's IdP per token by varying `kid`. The bound is a minimum interval
+/// rather than a per-`kid` negative cache so a genuine rolling-key rotation is
+/// still picked up: it is delayed by at most one interval and never blocked.
+/// Five seconds collapses a sustained flood by orders of magnitude while
+/// keeping the worst-case rotation delay well inside a token's lifetime.
+const MIN_JWKS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Turns a redirect into an error instead of a body to parse.
 ///
@@ -204,6 +220,18 @@ pub struct OidcValidator {
     /// The one hardened client every OIDC fetch goes through, including the
     /// rolling-key refresh an unauthenticated peer can trigger.
     client: reqwest::Client,
+    /// Instant of the last *attempted* cache-miss refresh, `None` until the
+    /// first one. Attempted rather than successful: keying on success would
+    /// hand the unbounded rate back whenever the IdP is failing, which is
+    /// exactly when the extra load is least affordable.
+    ///
+    /// A `Mutex` rather than an `RwLock` because the test-and-claim and the
+    /// fetch it authorizes must be one atomic transition: the guard is held
+    /// across the `await` so C concurrent misses issue one fetch, not C. It is
+    /// a `tokio` mutex for that reason — a `std` one held across an await
+    /// would block the executor thread outright.
+    last_refresh_attempt: Mutex<Option<Instant>>,
+    min_refresh_interval: Duration,
 }
 
 impl OidcValidator {
@@ -261,6 +289,8 @@ impl OidcValidator {
             jwks_uri: disc.jwks_uri,
             trusted_service_client_ids: Vec::new(),
             client,
+            last_refresh_attempt: Mutex::new(None),
+            min_refresh_interval: MIN_JWKS_REFRESH_INTERVAL,
         })
     }
 
@@ -271,6 +301,14 @@ impl OidcValidator {
     /// `--issuer-service-client-ids` CLI flag through to the interceptor.
     pub fn with_trusted_service_client_ids(mut self, ids: Vec<String>) -> Self {
         self.trusted_service_client_ids = ids;
+        self
+    }
+
+    /// Overrides the cache-miss refresh floor so a test can exercise both
+    /// sides of the bound without waiting out the production default.
+    #[cfg(test)]
+    fn with_min_refresh_interval(mut self, interval: Duration) -> Self {
+        self.min_refresh_interval = interval;
         self
     }
 
@@ -294,11 +332,8 @@ impl OidcValidator {
             return Ok(claims);
         }
 
-        // If not found, refresh JWKS once and retry (handles rolling keys)
-        let fresh = fetch_jwks(&self.client, &self.jwks_uri)
-            .await
-            .map_err(|e| AuthError::Jwt(format!("jwks refresh failed: {e}")))?;
-        *self.jwks.write().await = fresh;
+        // If not found, refresh JWKS once and retry (handles rolling keys).
+        self.refresh_jwks_if_interval_elapsed().await?;
 
         if let Some(claims) = self.try_decode_with_kid(&aud, &kid, token).await? {
             // self.validate_claims(&claims)?;
@@ -306,6 +341,33 @@ impl OidcValidator {
         }
 
         Err(AuthError::KeyNotFound)
+    }
+
+    /// Fetches the JWK set and replaces the cache, unless a refresh was already
+    /// attempted less than [`Self::min_refresh_interval`] ago.
+    ///
+    /// A suppressed refresh is not an error: the caller falls through to the
+    /// same `KeyNotFound` it would have returned had the fetch happened and
+    /// still not produced the `kid`. Only a refresh that ran and failed is
+    /// reported, which keeps a broken IdP diagnosable.
+    async fn refresh_jwks_if_interval_elapsed(&self) -> Result<(), AuthError> {
+        let mut last_attempt = self.last_refresh_attempt.lock().await;
+
+        if let Some(attempted_at) = *last_attempt {
+            if attempted_at.elapsed() < self.min_refresh_interval {
+                return Ok(());
+            }
+        }
+
+        *last_attempt = Some(Instant::now());
+
+        let fresh = fetch_jwks(&self.client, &self.jwks_uri)
+            .await
+            .map_err(|e| AuthError::Jwt(format!("jwks refresh failed: {e}")))?;
+
+        *self.jwks.write().await = fresh;
+
+        Ok(())
     }
 
     async fn try_decode_with_kid(
@@ -1536,6 +1598,231 @@ mod tests {
             status.message().starts_with("token invalid"),
             "the request must reach validation, got: {}",
             status.message()
+        );
+    }
+
+    // ===== Cache-miss JWKS refresh floor (VPL-1403) =====
+    //
+    // The observable throughout is the fixture's recorded `/jwks` request
+    // count, never the returned error: every miss below returns the same
+    // `KeyNotFound` with and without the bound, so an assertion on the error
+    // would prove nothing.
+
+    /// A syntactically valid JWT whose header names `kid` and whose signature
+    /// is garbage — everything an unauthenticated peer can produce for free,
+    /// and all it takes to reach the refresh path.
+    fn unsigned_token_with_kid(kid: &str) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let header = URL_SAFE_NO_PAD.encode(format!(
+            "{{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"{kid}\"}}"
+        ));
+        let payload = URL_SAFE_NO_PAD.encode("{\"sub\":\"nobody\"}");
+
+        format!("Bearer {header}.{payload}.{}", URL_SAFE_NO_PAD.encode("x"))
+    }
+
+    /// A JWKS containing one RSA key under `kid`, with a well-formed but
+    /// meaningless modulus: enough for `try_decode_with_kid` to select it and
+    /// fail at the signature rather than at key lookup.
+    fn jwks_with_kid(kid: &str) -> String {
+        format!(
+            "{{\"keys\":[{{\"kid\":\"{kid}\",\"kty\":\"RSA\",\"n\":\"{}\",\"e\":\"AQAB\"}}]}}",
+            "sQ".repeat(128)
+        )
+    }
+
+    /// An IdP whose `/jwks` body is swappable, so a key rotation can be staged
+    /// mid-test, and whose served paths are counted by `IdpServer`.
+    async fn rotatable_idp(initial_jwks: String) -> (IdpServer, Arc<std::sync::Mutex<String>>) {
+        let served = Arc::new(std::sync::Mutex::new(initial_jwks));
+        let jwks = served.clone();
+
+        let idp = IdpServer::start(move |path, addr| {
+            let issuer = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => {
+                    discovery_document(&issuer, &format!("{}/jwks", issuer))
+                }
+                _ => http_json(&jwks.lock().unwrap().clone()),
+            }
+        })
+        .await;
+
+        (idp, served)
+    }
+
+    fn jwks_requests(idp: &IdpServer) -> usize {
+        idp.requested_paths()
+            .iter()
+            .filter(|path| *path == "/jwks")
+            .count()
+    }
+
+    // VPL-1403 AC 1 & 2: an unauthenticated peer varying `kid` must not buy one
+    // outbound fetch per token. Mutant check: drop the elapsed-interval test in
+    // `refresh_jwks_if_interval_elapsed` and this observes 8 misses, not 1.
+    #[tokio::test]
+    async fn cache_miss_refreshes_are_bounded_by_the_minimum_interval() {
+        let (idp, _served) = rotatable_idp(EMPTY_JWKS.to_string()).await;
+
+        let validator = OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .expect("loopback discovery must succeed")
+            .with_min_refresh_interval(Duration::from_secs(3600));
+
+        let fetches_after_construction = jwks_requests(&idp);
+
+        for attempt in 0..8 {
+            let error = validator
+                .validate(&unsigned_token_with_kid(&format!("unknown-{attempt}")))
+                .await
+                .err()
+                .expect("an unknown kid must never validate");
+
+            assert!(
+                matches!(error, AuthError::KeyNotFound),
+                "attempt {attempt} must miss, got: {error}"
+            );
+        }
+
+        assert_eq!(
+            jwks_requests(&idp) - fetches_after_construction,
+            1,
+            "8 distinct unknown kids inside one interval must buy one refresh, \
+             served: {:?}",
+            idp.requested_paths()
+        );
+    }
+
+    // Benign control for the test above: suppression must not cost the fast
+    // path. A `kid` that is already cached validates far enough to fail on its
+    // signature, with no outbound request at all.
+    #[tokio::test]
+    async fn a_cached_kid_is_served_without_any_outbound_request() {
+        let (idp, _served) = rotatable_idp(jwks_with_kid("cached")).await;
+
+        let validator = OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .expect("loopback discovery must succeed")
+            .with_min_refresh_interval(Duration::from_secs(3600));
+
+        let fetches_after_construction = jwks_requests(&idp);
+
+        let error = validator
+            .validate(&unsigned_token_with_kid("cached"))
+            .await
+            .err()
+            .expect("a garbage signature must not validate");
+
+        assert!(
+            matches!(error, AuthError::Jwt(_)),
+            "a cached kid must reach signature verification, got: {error}"
+        );
+        assert_eq!(
+            jwks_requests(&idp),
+            fetches_after_construction,
+            "a cache hit must issue no refresh, served: {:?}",
+            idp.requested_paths()
+        );
+    }
+
+    // VPL-1403 AC 2 positive control: the bound delays key discovery by at most
+    // one interval and never prevents it, so a genuine rotation is still picked
+    // up. "Picked up" is observed as the rotated `kid` ceasing to be
+    // `KeyNotFound` — it now selects a key and fails at the signature instead.
+    #[tokio::test]
+    async fn a_genuine_rotation_is_picked_up_once_the_interval_elapses() {
+        let interval = Duration::from_millis(200);
+        let (idp, served) = rotatable_idp(jwks_with_kid("before-rotation")).await;
+
+        let validator = OidcValidator::new(idp.issuer(), vec![])
+            .await
+            .expect("loopback discovery must succeed")
+            .with_min_refresh_interval(interval);
+
+        // Spend the budget, so the rotation below lands inside the interval.
+        let _ = validator.validate(&unsigned_token_with_kid("warmup")).await;
+
+        *served.lock().unwrap() = jwks_with_kid("after-rotation");
+
+        let suppressed = jwks_requests(&idp);
+        let during_interval = validator
+            .validate(&unsigned_token_with_kid("after-rotation"))
+            .await
+            .err()
+            .expect("the rotated key is not cached yet");
+
+        assert!(
+            matches!(during_interval, AuthError::KeyNotFound),
+            "inside the interval the rotated kid must still miss, got: {during_interval}"
+        );
+        assert_eq!(
+            jwks_requests(&idp),
+            suppressed,
+            "inside the interval no fetch may be issued, served: {:?}",
+            idp.requested_paths()
+        );
+
+        tokio::time::sleep(interval + Duration::from_millis(50)).await;
+
+        let after_interval = validator
+            .validate(&unsigned_token_with_kid("after-rotation"))
+            .await
+            .err()
+            .expect("a garbage signature must not validate");
+
+        assert!(
+            matches!(after_interval, AuthError::Jwt(_)),
+            "once the interval elapses the rotated key must be found, got: {after_interval}"
+        );
+        assert_eq!(
+            jwks_requests(&idp),
+            suppressed + 1,
+            "the rotation must cost exactly one refresh, served: {:?}",
+            idp.requested_paths()
+        );
+    }
+
+    // VPL-1403: the interval test and the fetch it authorizes are one atomic
+    // transition, so a concurrent flood cannot multiply the single refresh the
+    // bound allows. Mutant check: release the lock before fetching and this
+    // observes 8.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_cache_misses_issue_a_single_refresh() {
+        let (idp, _served) = rotatable_idp(EMPTY_JWKS.to_string()).await;
+
+        let validator = Arc::new(
+            OidcValidator::new(idp.issuer(), vec![])
+                .await
+                .expect("loopback discovery must succeed")
+                .with_min_refresh_interval(Duration::from_secs(3600)),
+        );
+
+        let fetches_after_construction = jwks_requests(&idp);
+
+        let mut misses = tokio::task::JoinSet::new();
+
+        for attempt in 0..8 {
+            let validator = validator.clone();
+
+            misses.spawn(async move {
+                validator
+                    .validate(&unsigned_token_with_kid(&format!("concurrent-{attempt}")))
+                    .await
+                    .err()
+                    .expect("an unknown kid must never validate");
+            });
+        }
+
+        misses.join_all().await;
+
+        assert_eq!(
+            jwks_requests(&idp) - fetches_after_construction,
+            1,
+            "8 concurrent misses must coalesce into one refresh, served: {:?}",
+            idp.requested_paths()
         );
     }
 }
