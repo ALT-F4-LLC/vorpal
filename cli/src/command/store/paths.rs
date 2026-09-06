@@ -1,3 +1,57 @@
+//! Store path naming and atomic publication.
+//!
+//! # Archive integrity rests on the registry channel, not on the store path
+//!
+//! A store path is named by an artifact's *recipe* digest —
+//! `digest(artifact_json)`, see `cli/src/command/start/worker.rs` — so the
+//! path says which recipe produced the entry, never which bytes it holds.
+//! Nothing in this module, and nothing on any pull path that writes through
+//! it (`cli/src/command/build.rs`, `cli/src/command/run.rs`,
+//! `cli/src/command/start/worker.rs`), hashes a pulled archive against an
+//! expected content hash. `publish_atomically` gives an all-or-nothing
+//! rename and nothing more; `PublishOutcome::Superseded` does not mean
+//! "verified identical."
+//!
+//! The position this module records is: **the client trusts the registry
+//! channel for archive integrity.** Verifying instead was considered and not
+//! chosen here, because no content hash for an artifact's *output* exists to
+//! verify against — `ArchivePullResponse` carries only
+//! `bytes data` and the `Artifact` message carries no output hash
+//! (`sdk/rust/api/archive/archive.proto`,
+//! `sdk/rust/api/artifact/artifact.proto`) — and a hash added to either,
+//! being supplied by the same party as the bytes, would prove only that a
+//! hostile registry can hash. Closing that gap needs a trust anchor
+//! independent of the registry (a signature over the recipe-to-output
+//! mapping, or a client-side lockfile), which is a protocol change beyond
+//! this module.
+//!
+//! # Residual this position accepts
+//!
+//! Whoever answers a pull chooses what lands at the store path and is
+//! subsequently unpacked and executed. Concretely:
+//!
+//! - A compromised registry, or a namespace writer pushing bytes under a
+//!   digest whose recipe it never ran, obtains code execution on every
+//!   client that pulls that digest before the legitimate producer publishes
+//!   it. Registry pushes are first-writer-wins, so an already-populated
+//!   digest is not exposed this way.
+//! - The trust is only as good as the transport, and the transport is the
+//!   caller's choice: `--registry http://...` is accepted with no TLS and
+//!   no warning (`get_client_tls_config`, `sdk/rust/src/context.rs`), which
+//!   extends the trusted set to any on-path attacker. Under `unix://` (the
+//!   default) or `https://` the trusted party is the registry alone.
+//! - Poisoning persists. Every pull site skips the pull when the archive
+//!   path already exists, so a store path is never re-fetched or re-examined
+//!   once written.
+//!
+//! Deployments that cannot accept this must reach the registry over
+//! `unix://` or `https://` and treat write access to a shared namespace as
+//! equivalent to code execution on its readers.
+//!
+//! Do not narrow or remove a check here on the argument that store paths are
+//! content-addressed. They are not, and that premise is what this note
+//! exists to keep from reappearing.
+
 use anyhow::{anyhow, bail, Error, Result};
 use filetime::{set_file_times, set_symlink_file_times, FileTime};
 use std::{
