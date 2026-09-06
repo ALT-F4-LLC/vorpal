@@ -476,6 +476,56 @@ mod tests {
         }
     }
 
+    // A store root that has stopped accepting writes must surface as an
+    // `Internal` failure with nothing of this publish left in the directory:
+    // the staging sibling is the only thing `publish_alias` creates before the
+    // link, and an abandoned one would be indistinguishable from a live
+    // publisher's to every later reader of that directory.
+    //
+    // Only the staging-write arm is driven from a real injected failure. The
+    // `set_timestamps` and non-`AlreadyExists` link arms remain a conscious
+    // gap: reaching them needs a fault the filesystem cannot be talked into
+    // from a test process — the staged file exists and is owned by this uid by
+    // the time either runs — and would take a seam that does not exist here.
+    #[tokio::test]
+    async fn a_publish_that_cannot_write_its_staging_file_leaves_none_behind() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TempDir::new().unwrap();
+        let alias_dir = root.path().join("aliases");
+        let alias_path = alias_dir.join("latest");
+
+        std::fs::create_dir(&alias_dir).unwrap();
+
+        let writable = std::fs::metadata(&alias_dir).unwrap().permissions();
+
+        std::fs::set_permissions(&alias_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let enforced = std::fs::write(alias_dir.join("write-probe"), b"").is_err();
+
+        let mut published = None;
+
+        if enforced {
+            published = Some(publish_alias(&alias_path, "rust:latest", &digest("artifact")).await);
+        }
+
+        let entries = dir_entry_names(&alias_dir);
+
+        std::fs::set_permissions(&alias_dir, writable).unwrap();
+
+        let Some(published) = published else {
+            // Running with the privilege to write through a read-only mode
+            // (root, or `CAP_DAC_OVERRIDE`), so no failure can be injected.
+            return;
+        };
+
+        assert_eq!(published.unwrap_err().code(), Code::Internal);
+        assert!(
+            entries.is_empty(),
+            "the failed publish must leave no staging file behind, found {entries:?}"
+        );
+    }
+
     // A build step runs as the daemon's own uid and can drop a symlink at an
     // alias path before the alias is published. Publishing must fail on the
     // entry that is already there rather than writing through it into whatever
