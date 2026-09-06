@@ -413,10 +413,29 @@ fn anonymous_start_refused(services: &StartupServices, issuer: Option<&str>) -> 
 /// has_registry, ..)` would read identically at any call site and compile
 /// either way, which is what made the swap invisible in `bool`-parameter
 /// form.
+#[derive(Clone, Copy)]
 struct StartupServices {
     has_worker: bool,
     has_registry: bool,
     has_agent: bool,
+}
+
+impl StartupServices {
+    /// The projection from the operator's `--services` list to the three
+    /// flags every downstream decision reads. It lives here, taking
+    /// `RunArgs`, rather than as three `contains` calls inline in `run`, so
+    /// the enumeration test in `registration_enumeration_tests` can start
+    /// from a real `RunArgs` — the thing VPL-713's AC-2 names — instead of
+    /// from flags a test set by hand, and so a typo in one of the three
+    /// service-name literals is a test failure rather than a service that
+    /// silently never registers.
+    fn from_run_args(args: &RunArgs) -> Self {
+        Self {
+            has_worker: args.services.iter().any(|service| service == "worker"),
+            has_registry: args.services.iter().any(|service| service == "registry"),
+            has_agent: args.services.iter().any(|service| service == "agent"),
+        }
+    }
 }
 
 fn resolve_required_issuer(
@@ -439,6 +458,219 @@ fn resolve_required_issuer(
             None
         },
     )
+}
+
+/// VPL-713 (C3): the registration invariant — every gRPC service this
+/// process puts on the main router is either wrapped in the OIDC
+/// interceptor or named in `EXEMPT_SERVICES` with a written reason.
+///
+/// The type is nested in its own module for the same compiler-enforcement
+/// reason `resolved_registry` is: the `Router` field below has no visibility
+/// modifier, so it is private to `service_registrar` and its descendants.
+/// `run`, a sibling, cannot reach past the registrar to call
+/// `Router::add_service` directly even though that method is public on
+/// tonic's own type — a would-be bare registration in `run` fails to compile
+/// rather than shipping unwrapped. That is the compiler-enforced form the
+/// threat model's C3-d asks for; a grep gate over this file would have been
+/// defeated by a rename or a new file.
+///
+/// The ledger `ledger()` returns is not a second list that has to be kept in
+/// step with the router: `intercepted` and `exempt` each record and register
+/// in the same call, so there is no state in which the router holds a route
+/// the ledger does not describe.
+mod service_registrar {
+    use tonic::{
+        codegen::{http, Service},
+        server::NamedService,
+        service::{interceptor::InterceptedService, Interceptor, Routes},
+        transport::server::{Router, Server},
+    };
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum Disposition {
+        Intercepted,
+        Exempt,
+    }
+
+    /// Services allowed on the main router with no interceptor. Each entry
+    /// carries the authority it does *not* hold, because that — not the
+    /// service's convenience — is what makes an exemption defensible.
+    ///
+    /// Adding an entry here is a security change: it is the one way to make
+    /// `every_registration_is_intercepted_or_exempt` pass for a service
+    /// nobody authenticates. Review it as a change to the authentication
+    /// boundary, not as a test fix.
+    pub(super) const EXEMPT_SERVICES: &[(&str, &str)] = &[(
+        "grpc.health.v1.Health",
+        "reports SERVING/NOT_SERVING per registered service name and nothing \
+         else: no request reaches an artifact store, a build entrypoint or a \
+         registry namespace through it. gRPC health checking is specified for \
+         unauthenticated probers (load balancers, kubelet), and the same \
+         service is already served unauthenticated on its own plaintext port \
+         when --health-check is set, so wrapping this copy would protect \
+         nothing. Residual exposure: an unauthenticated peer learns which of \
+         agent/registry/worker this process runs.",
+    )];
+
+    fn exemption_reason(name: &str) -> Option<&'static str> {
+        EXEMPT_SERVICES
+            .iter()
+            .find(|(exempt, _)| *exempt == name)
+            .map(|(_, reason)| *reason)
+    }
+
+    /// The single way a service reaches the main router.
+    pub(super) struct ServiceRegistrar {
+        router: Router,
+        registered: Vec<(&'static str, Disposition)>,
+    }
+
+    impl ServiceRegistrar {
+        /// Takes the configured `Server` builder rather than an already-built
+        /// `Router`, so that no service — including the health service, which
+        /// used to be the argument that turned the builder into a router —
+        /// can reach the routes without passing `intercepted` or `exempt`.
+        pub(super) fn new(mut server: Server) -> Self {
+            Self {
+                router: server.add_routes(Routes::default()),
+                registered: Vec::new(),
+            }
+        }
+
+        /// Registers `service` wrapped in `interceptor`. The wrapping happens
+        /// here rather than at the call site, so a caller cannot hand this
+        /// method a bare service and have it recorded as intercepted.
+        pub(super) fn intercepted<S, I>(mut self, service: S, interceptor: I) -> Self
+        where
+            S: NamedService
+                + Service<
+                    http::Request<tonic::body::Body>,
+                    Response = http::Response<tonic::body::Body>,
+                    Error = std::convert::Infallible,
+                > + Clone
+                + Send
+                + Sync
+                + 'static,
+            S::Future: Send + 'static,
+            I: Interceptor + Clone + Send + Sync + 'static,
+        {
+            self.registered.push((S::NAME, Disposition::Intercepted));
+            self.router = self
+                .router
+                .add_service(InterceptedService::new(service, interceptor));
+            self
+        }
+
+        /// Registers `service` with no interceptor. Refuses unless the
+        /// service's gRPC name appears in `EXEMPT_SERVICES`, so the exemption
+        /// list is the enforcement point rather than a description of one.
+        pub(super) fn exempt<S>(mut self, service: S) -> anyhow::Result<Self>
+        where
+            S: NamedService
+                + Service<
+                    http::Request<tonic::body::Body>,
+                    Response = http::Response<tonic::body::Body>,
+                    Error = std::convert::Infallible,
+                > + Clone
+                + Send
+                + Sync
+                + 'static,
+            S::Future: Send + 'static,
+        {
+            if exemption_reason(S::NAME).is_none() {
+                anyhow::bail!(
+                    "refusing to register {} without an authentication interceptor: it is not \
+                     named in the exemption list in cli/src/command/start.rs",
+                    S::NAME
+                );
+            }
+
+            self.registered.push((S::NAME, Disposition::Exempt));
+            self.router = self.router.add_service(service);
+            Ok(self)
+        }
+
+        /// What this process actually registered, in registration order.
+        pub(super) fn ledger(&self) -> &[(&'static str, Disposition)] {
+            &self.registered
+        }
+
+        pub(super) fn into_router(self) -> Router {
+            self.router
+        }
+    }
+}
+
+use service_registrar::{Disposition, ServiceRegistrar};
+
+#[cfg(test)]
+use service_registrar::EXEMPT_SERVICES;
+
+/// What `run` registers on the main router for a given service set, as
+/// service name and disposition, in registration order (VPL-713/C3-c).
+///
+/// This exists because the router itself cannot be asked: tonic 0.14's
+/// `Routes` wraps a private `axum::Router` and exposes no accessor that
+/// lists the service names it holds, and `NamedService::NAME` is a per-type
+/// constant rather than something enumerable from a built router. So the
+/// enumeration is a declaration. `run` compares it against
+/// `ServiceRegistrar::ledger` before it binds a listener and bails when they
+/// disagree, so a plan that drifts from what was registered stops the
+/// process rather than becoming a comment that quietly goes stale.
+///
+/// Taking `StartupServices` rather than `RunArgs` keeps this free of the
+/// network I/O `OidcValidator::new` performs, so the enumeration test can
+/// cover every service subset without an issuer to reach.
+fn planned_registrations(services: &StartupServices) -> Vec<(&'static str, Disposition)> {
+    use tonic::server::NamedService;
+
+    let mut planned = vec![(
+        <HealthServer<HealthService> as NamedService>::NAME,
+        Disposition::Exempt,
+    )];
+
+    if services.has_agent {
+        planned.push((
+            <AgentServiceServer<AgentServer> as NamedService>::NAME,
+            Disposition::Intercepted,
+        ));
+    }
+
+    if services.has_registry {
+        planned.push((
+            <ArchiveServiceServer<ArchiveServer> as NamedService>::NAME,
+            Disposition::Intercepted,
+        ));
+        planned.push((
+            <ArtifactServiceServer<ArtifactServer> as NamedService>::NAME,
+            Disposition::Intercepted,
+        ));
+    }
+
+    if services.has_worker {
+        planned.push((
+            <WorkerServiceServer<WorkerServer> as NamedService>::NAME,
+            Disposition::Intercepted,
+        ));
+    }
+
+    planned
+}
+
+/// Whether every planned registration is either intercepted or named in
+/// `EXEMPT_SERVICES`.
+///
+/// Production enforcement of this rule is `ServiceRegistrar::exempt`, which
+/// refuses an unlisted service at the registration statement itself. This is
+/// the same rule restated over a plan, so the enumeration test can assert it
+/// across every service set without standing up the backends and validator
+/// those registrations would need.
+#[cfg(test)]
+fn registrations_are_intercepted_or_exempt(planned: &[(&'static str, Disposition)]) -> bool {
+    planned.iter().all(|(name, disposition)| match disposition {
+        Disposition::Intercepted => true,
+        Disposition::Exempt => EXEMPT_SERVICES.iter().any(|(exempt, _)| exempt == name),
+    })
 }
 
 /// Whether `run` should emit the registry allow-list startup log at all —
@@ -521,15 +753,18 @@ async fn new_validator_interceptor(
     Ok(auth::new_interceptor(validator))
 }
 
-/// Adds the archive/artifact (registry) services to `router` when
-/// `args.services` requests them, wiring in an OIDC interceptor whenever
-/// `args.issuer` is set.
-async fn add_registry_services(
-    mut router: tonic::transport::server::Router,
+/// Adds the archive/artifact (registry) services to `registrar` when
+/// `args.services` requests them, wrapped in the shared `interceptor`
+/// (VPL-713/C3-f: one interceptor per `run`, not one per service block).
+async fn add_registry_services<I>(
+    mut registrar: ServiceRegistrar,
     args: &RunArgs,
-    issuer: &str,
+    interceptor: I,
     transport_label: &str,
-) -> Result<tonic::transport::server::Router> {
+) -> Result<ServiceRegistrar>
+where
+    I: tonic::service::Interceptor + Clone + Send + Sync + 'static,
+{
     let backend = match args.registry_backend.as_str() {
         "local" => ServerBackend::Local,
         "s3" => ServerBackend::S3,
@@ -563,36 +798,33 @@ async fn add_registry_services(
     let archive_server = ArchiveServer::new(backend_archive, args.archive_cache_ttl);
     let artifact_server = ArtifactServer::new(backend_artifact);
 
-    let validator_intercepter =
-        new_validator_interceptor(issuer, args.issuer_audience.as_deref(), &args.issuer_service_client_ids)
-            .await?;
-
-    router = router.add_service(ArchiveServiceServer::with_interceptor(
-        archive_server,
+    registrar = registrar.intercepted(
+        ArchiveServiceServer::new(archive_server),
         // shared with the artifact service registered just below
-        validator_intercepter.clone(),
-    ));
+        interceptor.clone(),
+    );
 
-    router = router.add_service(ArtifactServiceServer::with_interceptor(
-        artifact_server,
-        validator_intercepter,
-    ));
+    registrar = registrar.intercepted(ArtifactServiceServer::new(artifact_server), interceptor);
 
     info!("archive |> service: {}", transport_label);
     info!("artifact |> service: {}", transport_label);
 
-    Ok(router)
+    Ok(registrar)
 }
 
-/// Adds the worker service to `router` when `args.services` requests it,
-/// wiring in an OIDC interceptor whenever `args.issuer` is set.
-async fn add_worker_service(
-    mut router: tonic::transport::server::Router,
+/// Adds the worker service to `registrar` when `args.services` requests it,
+/// wrapped in the shared `interceptor` (VPL-713/C3-f: one interceptor per
+/// `run`, not one per service block).
+async fn add_worker_service<I>(
+    mut registrar: ServiceRegistrar,
     args: &RunArgs,
     issuer: &str,
+    interceptor: I,
     registry_allowed: Vec<String>,
-    transport_label: &str,
-) -> Result<tonic::transport::server::Router> {
+) -> Result<ServiceRegistrar>
+where
+    I: tonic::service::Interceptor + Clone + Send + Sync + 'static,
+{
     // callee in start/worker.rs takes ownership; `args` is a shared reference reused below
     let worker_server = WorkerServer::new(
         Some(issuer.to_string()),
@@ -602,18 +834,9 @@ async fn add_worker_service(
         registry_allowed,
     );
 
-    let validator_intercepter =
-        new_validator_interceptor(issuer, args.issuer_audience.as_deref(), &args.issuer_service_client_ids)
-            .await?;
+    registrar = registrar.intercepted(WorkerServiceServer::new(worker_server), interceptor);
 
-    router = router.add_service(WorkerServiceServer::with_interceptor(
-        worker_server,
-        validator_intercepter,
-    ));
-
-    info!("worker |> service: {}", transport_label);
-
-    Ok(router)
+    Ok(registrar)
 }
 
 /// If `socket_path` exists, checks whether it is still backed by a live
@@ -769,7 +992,14 @@ async fn prepare_health_check(
         anyhow::anyhow!("failed to bind health server on {health_address}: {err}")
     })?;
 
-    let health_router = Server::builder().add_service(health_service_plaintext);
+    // The dedicated health port serves exactly one service, and it goes
+    // through the registrar for the same reason the main router's copy
+    // does: `add_service` is not something `run` reaches directly, so a
+    // future service added to this second listener has to declare itself
+    // intercepted or exempt too.
+    let health_router = ServiceRegistrar::new(Server::builder())
+        .exempt(health_service_plaintext)?
+        .into_router();
 
     Ok(Some((health_router, health_listener, health_address)))
 }
@@ -839,9 +1069,10 @@ async fn serve_with_shutdown(
 pub async fn run(args: RunArgs) -> Result<()> {
     log_trusted_service_clients(&args.issuer_service_client_ids);
 
-    let has_worker = args.services.contains(&"worker".to_string());
-    let has_agent = args.services.contains(&"agent".to_string());
-    let has_registry = args.services.contains(&"registry".to_string());
+    let startup_services = StartupServices::from_run_args(&args);
+    let has_worker = startup_services.has_worker;
+    let has_agent = startup_services.has_agent;
+    let has_registry = startup_services.has_registry;
 
     let effective_port = resolve_effective_port(
         args.port,
@@ -854,14 +1085,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     // registry (archive/artifact) service rather than defaulting into one.
     // See `resolve_required_issuer` for why this returns the validated
     // issuer itself rather than a bare refusal bool.
-    let required_issuer = resolve_required_issuer(
-        StartupServices {
-            has_worker,
-            has_registry,
-            has_agent,
-        },
-        args.issuer.clone(),
-    )?;
+    let required_issuer = resolve_required_issuer(startup_services, args.issuer.clone())?;
 
     // An omitted `--registry-allowed` resolves to this process's own
     // listening address, computed from the transport just decided above —
@@ -932,12 +1156,15 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
-    let mut router = if args.tls {
+    // Every service below reaches the router through `ServiceRegistrar`,
+    // which either wraps it in the OIDC interceptor or refuses unless its
+    // gRPC name is in `EXEMPT_SERVICES` (VPL-713/C3). The health service is
+    // the sole exemption today and takes the same `exempt` path any other
+    // unwrapped registration would have to take.
+    let builder = if args.tls {
         info!("TLS enabled for main listener");
         let tls_config = new_tls_config().await?;
-        Server::builder()
-            .tls_config(tls_config)?
-            .add_service(health_service)
+        Server::builder().tls_config(tls_config)?
     } else {
         let transport = if effective_port.is_some() {
             "plaintext TCP"
@@ -945,8 +1172,10 @@ pub async fn run(args: RunArgs) -> Result<()> {
             "Unix domain socket"
         };
         info!("TLS disabled, using {} for main listener", transport);
-        Server::builder().add_service(health_service)
+        Server::builder()
     };
+
+    let mut registrar = ServiceRegistrar::new(builder).exempt(health_service)?;
 
     let health_prepared = prepare_health_check(&args, &health_reporter).await?;
 
@@ -962,45 +1191,78 @@ pub async fn run(args: RunArgs) -> Result<()> {
     // means neither block can compile against a missing issuer in the first
     // place, so there is nothing left here for
     // VPL-434-CORRECTNESS-3/VPL434-ARCH-2 to flag. Registering the agent
-    // inside this arm is what makes a bare `AgentServiceServer::new`
-    // unreachable: there is no branch left in which the agent is added
-    // without an interceptor.
+    // inside this arm is what leaves no branch in which the agent reaches the
+    // router without an interceptor; `ServiceRegistrar::intercepted` is what
+    // makes that true of the registration itself rather than of this `if`.
     if let Some(issuer) = required_issuer {
-        if has_agent {
-            let validator_intercepter = new_validator_interceptor(
-                &issuer,
-                args.issuer_audience.as_deref(),
-                &args.issuer_service_client_ids,
-            )
-            .await?;
+        // One interceptor for every wrapped service, constructed once
+        // (VPL-713/C3-f). Three separate `new_validator_interceptor` calls
+        // stood up three independent `OidcValidator`s — three startup
+        // discovery and JWKS fetches, three caches refreshing on their own
+        // schedules, and three argument lists a maintainer could edit apart
+        // from each other so that one client ID classified as
+        // `TrustedService` on the worker and `Human` on the registry.
+        // Sharing one value makes that divergence unrepresentable.
+        let validator_intercepter = new_validator_interceptor(
+            &issuer,
+            args.issuer_audience.as_deref(),
+            &args.issuer_service_client_ids,
+        )
+        .await?;
 
-            router = router.add_service(AgentServiceServer::with_interceptor(
-                AgentServer::new(registry_allowed.clone()),
-                validator_intercepter,
-            ));
+        if has_agent {
+            registrar = registrar.intercepted(
+                AgentServiceServer::new(AgentServer::new(registry_allowed.clone())),
+                validator_intercepter.clone(),
+            );
 
             info!("agent |> service: {}", transport_label);
         }
 
         if has_registry {
-            router = add_registry_services(router, &args, &issuer, &transport_label).await?;
+            registrar = add_registry_services(
+                registrar,
+                &args,
+                validator_intercepter.clone(),
+                &transport_label,
+            )
+            .await?;
         }
 
         if has_worker {
             worker::sweep_store_staging().await;
 
-            router = add_worker_service(
-                router,
+            registrar = add_worker_service(
+                registrar,
                 &args,
                 &issuer,
+                validator_intercepter.clone(),
                 registry_allowed.clone(),
-                &transport_label,
             )
             .await?;
 
             info!("worker |> service: {}", transport_label);
         }
     }
+
+    // The ledger is what actually reached the router; the plan is what
+    // `planned_registrations` declares for this service set and what the
+    // enumeration test asserts over. Comparing them here is what keeps the
+    // declaration honest: a registration added to `run` but not to the plan
+    // (or removed from `run` and left in it) refuses to start rather than
+    // shipping a mechanism whose own green test describes a router that no
+    // longer exists.
+    let planned = planned_registrations(&startup_services);
+
+    if registrar.ledger() != planned.as_slice() {
+        bail!(
+            "registration plan does not describe what was registered: planned {:?}, registered {:?}",
+            planned,
+            registrar.ledger()
+        );
+    }
+
+    let router = registrar.into_router();
 
     tokio::spawn(async move {
         tokio::task::yield_now().await;
@@ -1342,5 +1604,217 @@ mod default_registry_allowed_tests {
             default_registry_allowed(None, true, Some(23151), false, socket_path),
             vec!["http://localhost:23151".to_string()]
         );
+    }
+}
+
+// VPL-713 (C3, AC-2): the enumeration itself. `planned_registrations` names
+// every service a given `RunArgs` service set puts on the main router, and
+// `run` refuses to start when that plan disagrees with what
+// `ServiceRegistrar` actually recorded, so these assertions are about the
+// real router rather than a parallel description of one.
+#[cfg(test)]
+mod registration_enumeration_tests {
+    use super::*;
+
+    fn services(has_worker: bool, has_registry: bool, has_agent: bool) -> StartupServices {
+        StartupServices {
+            has_worker,
+            has_registry,
+            has_agent,
+        }
+    }
+
+    fn names(planned: &[(&'static str, Disposition)]) -> Vec<&'static str> {
+        planned.iter().map(|(name, _)| *name).collect()
+    }
+
+    // AC-2: every subset of the three configurable services. No entry may be
+    // unwrapped unless the exemption list names it.
+    #[test]
+    fn every_registration_is_intercepted_or_exempt() {
+        for has_worker in [false, true] {
+            for has_registry in [false, true] {
+                for has_agent in [false, true] {
+                    let planned =
+                        planned_registrations(&services(has_worker, has_registry, has_agent));
+
+                    assert!(
+                        registrations_are_intercepted_or_exempt(&planned),
+                        "unwrapped registration outside the exemption list for \
+                         worker={has_worker} registry={has_registry} agent={has_agent}: \
+                         {planned:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    // The default `--services agent,registry,worker` install: four services
+    // wrapped, health exempt. Pinning the names, not just the count, is what
+    // catches a registration silently swapped for a different service.
+    #[test]
+    fn a_full_service_set_registers_four_intercepted_services_and_the_exempt_health_service() {
+        let planned = planned_registrations(&services(true, true, true));
+
+        assert_eq!(
+            planned,
+            vec![
+                ("grpc.health.v1.Health", Disposition::Exempt),
+                ("vorpal.agent.AgentService", Disposition::Intercepted),
+                ("vorpal.archive.ArchiveService", Disposition::Intercepted),
+                ("vorpal.artifact.ArtifactService", Disposition::Intercepted),
+                ("vorpal.worker.WorkerService", Disposition::Intercepted),
+            ]
+        );
+    }
+
+    // A process running none of the three still serves health, and health is
+    // still the only thing it serves unwrapped.
+    #[test]
+    fn a_process_with_no_configured_services_registers_only_the_exempt_health_service() {
+        let planned = planned_registrations(&services(false, false, false));
+
+        assert_eq!(names(&planned), vec!["grpc.health.v1.Health"]);
+        assert!(registrations_are_intercepted_or_exempt(&planned));
+    }
+
+    // V-1 (the control-breaking check): the invariant predicate must actually
+    // reject an unwrapped service the exemption list does not name. If this
+    // passes, the enumeration above asserts nothing.
+    #[test]
+    fn an_unlisted_unwrapped_registration_is_rejected() {
+        let smuggled = vec![
+            ("grpc.health.v1.Health", Disposition::Exempt),
+            ("vorpal.worker.WorkerService", Disposition::Exempt),
+        ];
+
+        assert!(!registrations_are_intercepted_or_exempt(&smuggled));
+    }
+
+    // AC-1/V-3: the exemption list's contents, asserted exactly. Widening it
+    // is then a deliberate edit to this assertion — reviewable as the
+    // security change it is — rather than a silently passing test.
+    #[test]
+    fn the_exemption_list_names_only_the_health_service() {
+        let exempt: Vec<&str> = EXEMPT_SERVICES.iter().map(|(name, _)| *name).collect();
+
+        assert_eq!(exempt, vec!["grpc.health.v1.Health"]);
+    }
+
+    // An exemption with no written reason is the laundering channel the list
+    // exists to make visible, so an empty reason fails here.
+    #[test]
+    fn every_exemption_carries_a_written_reason() {
+        for (name, reason) in EXEMPT_SERVICES {
+            assert!(
+                !reason.trim().is_empty(),
+                "exemption {name} carries no reason"
+            );
+        }
+    }
+
+    // AC-1's refusal branch, at the production enforcement point rather than
+    // over a plan: `exempt` must reject a service the list does not name, and
+    // the error must say which service, so a maintainer reads what they are
+    // being asked to justify.
+    #[test]
+    fn the_registrar_refuses_an_unwrapped_service_the_exemption_list_does_not_name() {
+        let registrar = ServiceRegistrar::new(Server::builder());
+
+        let err = registrar
+            .exempt(AgentServiceServer::new(AgentServer::new(vec![])))
+            .err()
+            .expect("registering the agent with no interceptor must be refused");
+
+        assert!(
+            err.to_string().contains("vorpal.agent.AgentService"),
+            "refusal does not name the service: {err}"
+        );
+    }
+
+    // The same method must accept the one service the list does name,
+    // otherwise the refusal above would pass for a registrar that refuses
+    // everything.
+    #[test]
+    fn the_registrar_accepts_the_exempt_health_service() {
+        let (_reporter, health_service) = tonic_health::server::health_reporter();
+
+        let registrar = ServiceRegistrar::new(Server::builder())
+            .exempt(health_service)
+            .expect("the health service is named in the exemption list");
+
+        assert_eq!(
+            registrar.ledger(),
+            [("grpc.health.v1.Health", Disposition::Exempt)]
+        );
+    }
+
+    // AC-2 names `RunArgs`, so at least one case starts there: this pins the
+    // `--services` string parsing in `StartupServices::from_run_args` as part
+    // of the enumeration rather than assuming the flags.
+    #[test]
+    fn the_default_run_args_service_list_enumerates_every_service_as_intercepted_or_exempt() {
+        let args = RunArgs {
+            archive_cache_ttl: 3600,
+            health_check: false,
+            health_check_port: 0,
+            issuer: Some("https://issuer.example.com".to_string()),
+            issuer_audience: None,
+            issuer_client_id: None,
+            issuer_client_secret: None,
+            issuer_service_client_ids: vec![],
+            port: None,
+            registry_backend: "local".to_string(),
+            registry_backend_s3_bucket: None,
+            registry_backend_s3_force_path_style: false,
+            registry_allowed: None,
+            services: vec![
+                "agent".to_string(),
+                "registry".to_string(),
+                "worker".to_string(),
+            ],
+            tls: false,
+        };
+
+        let planned = planned_registrations(&StartupServices::from_run_args(&args));
+
+        assert_eq!(
+            names(&planned),
+            vec![
+                "grpc.health.v1.Health",
+                "vorpal.agent.AgentService",
+                "vorpal.archive.ArchiveService",
+                "vorpal.artifact.ArtifactService",
+                "vorpal.worker.WorkerService",
+            ]
+        );
+        assert!(registrations_are_intercepted_or_exempt(&planned));
+    }
+
+    // A `--services` value nothing recognises must register nothing beyond
+    // health — never fall through to registering everything.
+    #[test]
+    fn an_unrecognised_service_name_registers_only_the_exempt_health_service() {
+        let args = RunArgs {
+            archive_cache_ttl: 3600,
+            health_check: false,
+            health_check_port: 0,
+            issuer: None,
+            issuer_audience: None,
+            issuer_client_id: None,
+            issuer_client_secret: None,
+            issuer_service_client_ids: vec![],
+            port: None,
+            registry_backend: "local".to_string(),
+            registry_backend_s3_bucket: None,
+            registry_backend_s3_force_path_style: false,
+            registry_allowed: None,
+            services: vec!["workers".to_string()],
+            tls: false,
+        };
+
+        let planned = planned_registrations(&StartupServices::from_run_args(&args));
+
+        assert_eq!(names(&planned), vec!["grpc.health.v1.Health"]);
     }
 }
