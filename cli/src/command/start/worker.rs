@@ -3408,6 +3408,7 @@ mod tests {
     struct FakeRegistry {
         archived_digest: Option<String>,
         archived_entries: Vec<String>,
+        bound_aliases: Vec<String>,
         pushes: usize,
         pushes_to_refuse: usize,
         recipe_check_fails: bool,
@@ -3457,7 +3458,34 @@ mod tests {
                 return Err(Status::internal("failed to store artifact in registry"));
             }
 
-            self.recipe_name = request.artifact.map(|artifact| artifact.name);
+            // The real backend binds `artifact.aliases` and `artifact_aliases`
+            // together (`registry/artifact/local.rs`), so both reach this
+            // double. Binding is create-only there: an alias already on disk
+            // fails the whole call with `already_exists`, so a repeat of a
+            // binding this fake already holds is refused the same way rather
+            // than recorded twice.
+            let artifact = request.artifact;
+
+            let aliases = [
+                artifact
+                    .as_ref()
+                    .map(|artifact| artifact.aliases.clone())
+                    .unwrap_or_default(),
+                request.artifact_aliases,
+            ]
+            .concat();
+
+            for alias in aliases {
+                if self.bound_aliases.contains(&alias) {
+                    return Err(Status::already_exists(format!(
+                        "alias '{alias}' already exists"
+                    )));
+                }
+
+                self.bound_aliases.push(alias);
+            }
+
+            self.recipe_name = artifact.map(|artifact| artifact.name);
 
             Ok(())
         }
@@ -3627,6 +3655,94 @@ mod tests {
         assert_eq!(
             registry.pushes, 1,
             "the archive was skipped on an existence answer"
+        );
+    }
+
+    // The recipe skip also skips the alias writes, which live inside
+    // `store_artifact` rather than beside it: a request naming an alias that
+    // is not yet bound has it dropped, and the build still reports success.
+    // Pinned as the current behavior, not as the intended contract — binding
+    // it needs an alias write the worker can repeat safely, which the
+    // create-only registry surface does not offer today.
+    #[tokio::test]
+    async fn an_alias_is_dropped_when_the_registry_already_holds_the_recipe() {
+        let (_root, output_path) = published_output();
+        let tx = drained_sender();
+
+        let mut registry = FakeRegistry {
+            archived_digest: Some("abc123".to_string()),
+            recipe_name: Some("example".to_string()),
+            ..FakeRegistry::default()
+        };
+
+        let mut store_request = store_request();
+
+        store_request.artifact_aliases = vec!["example:latest".to_string()];
+
+        publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            store_request,
+            &tx,
+        )
+        .await
+        .expect("a publication carrying a new alias was refused");
+
+        assert_eq!(
+            registry.bound_aliases,
+            Vec::<String>::new(),
+            "the alias reached the registry, so the recipe skip no longer drops it"
+        );
+    }
+
+    // The other half of the same skip: an alias the registry already binds
+    // must not be sent again. The real backend maps a repeat binding to
+    // `already_exists`, so re-sending it would fail the retry that AC2 exists
+    // to make possible.
+    #[tokio::test]
+    async fn an_alias_the_registry_already_binds_does_not_fail_a_repeat_publication() {
+        let (_root, output_path) = published_output();
+        let tx = drained_sender();
+
+        let mut registry = FakeRegistry::default();
+
+        let mut first_request = store_request();
+
+        first_request.artifact_aliases = vec!["example:latest".to_string()];
+
+        publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            first_request,
+            &tx,
+        )
+        .await
+        .expect("the first publication was refused");
+
+        assert_eq!(registry.bound_aliases, vec!["example:latest".to_string()]);
+
+        let mut repeat_request = store_request();
+
+        repeat_request.artifact_aliases = vec!["example:latest".to_string()];
+
+        publish_to_registry(
+            &mut registry,
+            "abc123",
+            "library",
+            &output_path,
+            repeat_request,
+            &tx,
+        )
+        .await
+        .expect("a repeat publication was failed by an alias it had already bound");
+
+        assert_eq!(
+            registry.stores, 1,
+            "the recipe skip stopped protecting the repeat from the alias write"
         );
     }
 
