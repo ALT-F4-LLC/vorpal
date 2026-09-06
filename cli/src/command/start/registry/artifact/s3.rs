@@ -141,11 +141,35 @@ impl ArtifactBackend for S3Backend {
             let alias_key =
                 get_artifact_alias_key(alias_name, &artifact_namespace, artifact_system, alias_tag);
 
-            // Parity with `LocalBackend`, which refuses to overwrite an
-            // existing alias (`local.rs`, `alias_path.exists()`): without
-            // this check the S3 backend silently overwrote an alias that
-            // pointed at a different digest, which `LocalBackend` treats as
-            // a conflict rather than a no-op or a silent republish.
+            // ADVISORY ONLY, not the exclusive create `LocalBackend` gets.
+            // The head and the put below are separate requests with no state
+            // carried between them, so two publishers of an absent alias can
+            // both pass this check and both put: last writer wins and both
+            // callers are told `Ok`. What it does buy is a *sequential*
+            // republish under a different digest being refused rather than
+            // silently overwriting, which is the case it was added for.
+            //
+            // `LocalBackend` no longer has the `alias_path.exists()` this
+            // once claimed parity with: `publish_alias` in `local.rs`
+            // publishes by `hard_link`, so its refusal comes from the create
+            // itself and holds under concurrency.
+            //
+            // The S3 equivalent is a conditional `put_object` carrying
+            // `If-None-Match: *`, which is atomic at the storage service.
+            // It is not used here because it is only safe once the endpoints
+            // this registry is deployed against are known to honour it, and
+            // they are not: the client is built from ambient configuration
+            // (`aws_config::defaults` in `registry.rs`), no supported
+            // endpoint set is declared anywhere in this repository, and
+            // `--registry-backend-s3-force-path-style` exists precisely so
+            // non-AWS S3-compatible servers can be targeted. AWS S3 honours
+            // the header; MinIO's wildcard support is contested across
+            // versions (minio/minio#20346, closed "working as intended"
+            // stating `*` is unsupported, against a current source that
+            // special-cases it); Ceph/RGW, R2 and the GCS interoperability
+            // layer are unchecked. An endpoint that accepted the header and
+            // ignored it would lose even the sequential refusal above, so
+            // this check stays until that set is declared.
             //
             // `head_object`'s error case must be inspected, not treated as
             // "absent": S3's own throttling, a transient network failure, or
