@@ -374,12 +374,27 @@ where
 
     let request = Request::new(ReceiverStream::new(stream_rx));
 
-    client_archive
+    // Every prepared source now reaches this call, so a registry that
+    // refuses the push must surface as an error rather than panicking the
+    // task that serves the request.
+    let pushed = client_archive
         .push(request)
         .await
-        .map_err(|e| anyhow!("failed to push: {e}"))?;
+        .map_err(|e| anyhow!("failed to push: {e}"));
 
-    remove_file(&source_sandbox_archive).await?;
+    // The archive is a sandbox file this agent owns, and a failed push
+    // leaves nothing worth keeping, so it is removed either way. A cleanup
+    // failure must not displace the push failure that explains it, so the
+    // push result is the one reported when both fail.
+    if let Err(e) = remove_file(&source_sandbox_archive).await {
+        warn!("agent |> failed to remove source archive: {}", e);
+
+        pushed?;
+
+        bail!("failed to remove source archive: {:?}", e);
+    }
+
+    pushed?;
 
     Ok(())
 }
@@ -536,28 +551,27 @@ pub async fn build_source(
     }
 
     // 5. Push source
+    //
+    // The push is unconditional, matching the worker's publication
+    // (`start/worker.rs`, `publish_to_registry`). The only way to ask whether
+    // the registry already holds this archive — `Archive/Check` — is served
+    // from a TTL cache that neither a push nor a delete invalidates
+    // (`start/registry.rs`), so a stale "yes" would skip the push and leave a
+    // prepared artifact naming a source the registry cannot serve. Both
+    // archive backends already return early for an archive they hold
+    // (`start/registry/archive/local.rs` and `.../s3.rs`), so the repeated
+    // push costs an upload, not a correctness hazard. An existence check may
+    // buy back cost; it may not decide an invariant.
 
-    // source_digest and artifact_namespace are both used again below (push and return)
-    let registry_request = ArchivePullRequest {
-        digest: source_digest.clone(),
-        namespace: artifact_namespace.clone(),
-    };
-
-    if let Err(status) = client_archive.check(registry_request).await {
-        if status.code() != Code::NotFound {
-            bail!("registry check error: {status:?}");
-        }
-
-        pack_and_push_source(
-            &mut client_archive,
-            &source_sandbox,
-            &source_sandbox_files,
-            &source_digest,
-            &artifact_namespace,
-            tx,
-        )
-        .await?;
-    }
+    pack_and_push_source(
+        &mut client_archive,
+        &source_sandbox,
+        &source_sandbox_files,
+        &source_digest,
+        &artifact_namespace,
+        tx,
+    )
+    .await?;
 
     remove_dir_all(&source_sandbox)
         .await
