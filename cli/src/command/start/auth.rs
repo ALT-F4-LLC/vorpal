@@ -60,6 +60,26 @@ fn require_issuer_origin(endpoint: &str, issuer_origin: &str, field: &str) -> Re
     Ok(())
 }
 
+const RESPONSE_EXCERPT_LIMIT: usize = 512;
+const RESPONSE_EXCERPT_TRUNCATION_MARKER: &str = "… (truncated)";
+
+/// Renders an untrusted HTTP response body for a log line or an error.
+///
+/// Bodies from these endpoints reach `tracing::error!` and, through the
+/// returned error, the caller's own `error!` at `worker.rs`. Control
+/// characters there forge log records and inject terminal escapes, and an
+/// unbounded body copies megabytes into two more strings.
+fn response_excerpt(body: &str) -> String {
+    let mut printable = body.chars().filter(|character| !character.is_control());
+    let mut excerpt: String = printable.by_ref().take(RESPONSE_EXCERPT_LIMIT).collect();
+
+    if printable.next().is_some() {
+        excerpt.push_str(RESPONSE_EXCERPT_TRUNCATION_MARKER);
+    }
+
+    excerpt
+}
+
 #[derive(Debug, Deserialize)]
 struct OidcDiscovery {
     jwks_uri: String,
@@ -418,6 +438,9 @@ pub fn new_interceptor(
 
 #[derive(Debug, Deserialize)]
 struct TokenEndpointDiscovery {
+    /// Required rather than `Option`, so a document that omits the claim
+    /// fails the parse instead of skipping the compare below.
+    issuer: String,
     token_endpoint: String,
 }
 
@@ -499,12 +522,36 @@ pub async fn exchange_client_credentials(
         .unwrap_or_else(|_| "<unable to read response body>".to_string());
 
     let disc: TokenEndpointDiscovery = serde_json::from_str(&discovery_text).map_err(|e| {
+        let excerpt = response_excerpt(&discovery_text);
+
         error!(
             "auth |> failed to parse OIDC discovery response: {} - full response: {}",
-            e, discovery_text
+            e, excerpt
         );
-        anyhow!("failed to parse OIDC discovery response: {e} - response was: {discovery_text}")
+        anyhow!("failed to parse OIDC discovery response: {e} - response was: {excerpt}")
     })?;
+
+    // Both sides are normalized, mirroring `OidcValidator::new`: an IdP that
+    // states its `iss` with an explicit default port or a trailing slash
+    // means the same issuer, and comparing raw text fails a correct
+    // deployment closed.
+    let disc_issuer = NormalizedIssuer::parse(&disc.issuer).map_err(|cause| {
+        anyhow!(
+            "OIDC discovery issuer {:?} is invalid: {cause}",
+            disc.issuer
+        )
+    })?;
+
+    if disc_issuer != issuer {
+        // The origin pin below is blind to path, so a co-tenant realm
+        // answering on the issuer's own origin would otherwise receive the
+        // service-account client secret.
+        return Err(anyhow!(
+            "issuer mismatch (expected {}, discovery says {})",
+            issuer,
+            disc.issuer
+        ));
+    }
 
     // The POST below carries the service-account client secret, so an
     // off-origin `token_endpoint` is credential exfiltration and not merely
@@ -540,21 +587,23 @@ pub async fn exchange_client_credentials(
         .unwrap_or_else(|_| "<unable to read response body>".to_string());
 
     if !token_status.is_success() {
+        let excerpt = response_excerpt(&token_text);
+
         error!(
             "auth |> token exchange failed with status {}: {}",
-            token_status, token_text
+            token_status, excerpt
         );
-        return Err(anyhow!(
-            "token endpoint returned {token_status}: {token_text}"
-        ));
+        return Err(anyhow!("token endpoint returned {token_status}: {excerpt}"));
     }
 
     let response: ClientCredentialsResponse = serde_json::from_str(&token_text).map_err(|e| {
+        let excerpt = response_excerpt(&token_text);
+
         error!(
             "auth |> failed to parse token response: {} - full response: {}",
-            e, token_text
+            e, excerpt
         );
-        anyhow!("failed to parse token response: {e} - response was: {token_text}")
+        anyhow!("failed to parse token response: {e} - response was: {excerpt}")
     })?;
 
     // 3) Create Bearer token header
@@ -1226,6 +1275,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn client_credentials_exchange_refuses_same_origin_wrong_issuer_document() {
+        // A co-tenant realm answering on the issuer's own origin passes the
+        // path-blind origin pin, so only the issuer claim stops the secret
+        // from reaching the wrong realm's token endpoint.
+        let idp = IdpServer::start(|_, addr| {
+            let origin = format!("http://127.0.0.1:{}", addr.port());
+
+            http_json(&format!(
+                "{{\"issuer\":\"{}/realms/other\",\"jwks_uri\":\"{}/jwks\",\
+                 \"token_endpoint\":\"{}/realms/other/token\"}}",
+                origin, origin, origin
+            ))
+        })
+        .await;
+
+        let err =
+            exchange_client_credentials(&idp.issuer(), None, "vorpal-worker", "s3cr3t", "openid")
+                .await
+                .expect_err("a discovery document naming a different issuer must be refused");
+
+        assert!(
+            err.to_string().contains("issuer mismatch"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            !idp.requested_paths()
+                .iter()
+                .any(|path| path.contains("token")),
+            "the client secret must not be sent to a wrong-issuer endpoint, got {:?}",
+            idp.requested_paths()
+        );
+    }
+
+    #[tokio::test]
+    async fn client_credentials_exchange_refuses_discovery_without_an_issuer_claim() {
+        // Fails closed: an absent claim must not silently skip the compare.
+        let idp = IdpServer::start(|_, addr| {
+            let origin = format!("http://127.0.0.1:{}", addr.port());
+
+            http_json(&format!("{{\"token_endpoint\":\"{}/token\"}}", origin))
+        })
+        .await;
+
+        let err =
+            exchange_client_credentials(&idp.issuer(), None, "vorpal-worker", "s3cr3t", "openid")
+                .await
+                .expect_err("a discovery document with no issuer claim must be refused");
+
+        assert!(
+            err.to_string().contains("failed to parse OIDC discovery"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            !idp.requested_paths()
+                .iter()
+                .any(|path| path.contains("token")),
+            "the client secret must not be sent without an issuer claim, got {:?}",
+            idp.requested_paths()
+        );
+    }
+
+    #[tokio::test]
+    async fn client_credentials_exchange_accepts_a_trailing_slash_issuer_claim() {
+        // Discriminates the normalized compare from a raw `==`: a correct IdP
+        // may state its `iss` with a trailing slash the configured value lacks.
+        let idp = IdpServer::start(|path, addr| {
+            let origin = format!("http://127.0.0.1:{}", addr.port());
+
+            match path {
+                "/.well-known/openid-configuration" => http_json(&format!(
+                    "{{\"issuer\":\"{}/\",\"jwks_uri\":\"{}/jwks\",\
+                     \"token_endpoint\":\"{}/token\"}}",
+                    origin, origin, origin
+                )),
+                _ => http_json(
+                    "{\"access_token\":\"header.payload.signature\",\"expires_in\":300,\
+                     \"token_type\":\"Bearer\"}",
+                ),
+            }
+        })
+        .await;
+
+        let (header, _) =
+            exchange_client_credentials(&idp.issuer(), None, "vorpal-worker", "s3cr3t", "openid")
+                .await
+                .expect("a trailing-slash issuer claim names the same issuer");
+
+        assert_eq!(header.to_str().unwrap(), "Bearer header.payload.signature");
+        assert!(idp.requested_paths().contains(&"/token".to_string()));
+    }
+
+    #[tokio::test]
     async fn client_credentials_exchange_refuses_redirected_token_endpoint() {
         // A 307 replays the request body, so following it would hand the
         // client secret to the redirect target.
@@ -1258,6 +1399,77 @@ mod tests {
             "the client secret must never be replayed at the redirect target, got {:?}",
             elsewhere.requested_paths()
         );
+    }
+
+    #[tokio::test]
+    async fn client_credentials_exchange_does_not_relay_a_hostile_discovery_body_into_its_error() {
+        let forged = format!(
+            "not json\r\n\u{1b}[31mERROR worker |> forged record\u{1b}[0m\n{}",
+            "A".repeat(RESPONSE_EXCERPT_LIMIT)
+        );
+
+        let idp = IdpServer::start(move |_, _| http_json(&forged)).await;
+
+        let err =
+            exchange_client_credentials(&idp.issuer(), None, "vorpal-worker", "s3cr3t", "openid")
+                .await
+                .expect_err("an unparseable discovery document must be refused");
+
+        let rendered = err.to_string();
+
+        assert!(
+            !rendered.contains('\n') && !rendered.contains('\r') && !rendered.contains('\u{1b}'),
+            "control characters reached the error text: {rendered:?}"
+        );
+        assert!(
+            rendered.contains(RESPONSE_EXCERPT_TRUNCATION_MARKER),
+            "an over-long body must be visibly truncated: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains(&"A".repeat(RESPONSE_EXCERPT_LIMIT)),
+            "the full body must not reach the error text: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn response_excerpt_strips_control_characters_and_truncates() {
+        let excerpt = response_excerpt(&format!(
+            "line one\r\n\u{1b}[31mforged\u{1b}[0m{}",
+            "z".repeat(RESPONSE_EXCERPT_LIMIT)
+        ));
+
+        assert!(!excerpt.contains('\n'));
+        assert!(!excerpt.contains('\r'));
+        assert!(!excerpt.contains('\u{1b}'));
+        assert!(excerpt.ends_with(RESPONSE_EXCERPT_TRUNCATION_MARKER));
+        assert_eq!(
+            excerpt.chars().count(),
+            RESPONSE_EXCERPT_LIMIT + RESPONSE_EXCERPT_TRUNCATION_MARKER.chars().count()
+        );
+    }
+
+    #[test]
+    fn response_excerpt_truncates_on_character_boundaries() {
+        // A byte-index slice through a multi-byte character panics; this body
+        // puts one exactly at the cap.
+        let excerpt = response_excerpt(&"é".repeat(RESPONSE_EXCERPT_LIMIT + 5));
+
+        assert_eq!(
+            excerpt,
+            format!(
+                "{}{}",
+                "é".repeat(RESPONSE_EXCERPT_LIMIT),
+                RESPONSE_EXCERPT_TRUNCATION_MARKER
+            )
+        );
+    }
+
+    #[test]
+    fn response_excerpt_passes_a_short_plain_body_through_unchanged() {
+        // An operator debugging a real IdP error must still see the message.
+        let body = "{\"error\":\"invalid_client\"}";
+
+        assert_eq!(response_excerpt(body), body);
     }
 
     /// Build a validator against a loopback IdP serving an empty JWKS: enough
