@@ -211,6 +211,12 @@ generate:
 		python sdk/python/script/fix_proto_imports.py sdk/python/src/vorpal_sdk/api
 	cargo run -p vorpal-sdk-codegen
 
+# Checks only the `linux_vorpal` SDK files that `vorpal-sdk-codegen` writes.
+#
+# The protoc-generated `sdk/*/api` bindings are NOT drift-gated: this target
+# never runs the protoc half of `generate` above, and `--check` compares nothing
+# outside the codegen binary's own outputs. A `sdk/rust/api/*.proto` edit that is
+# not followed by `make generate` therefore still merges undetected.
 generate-check:
 	cargo run -p vorpal-sdk-codegen -- --check
 
