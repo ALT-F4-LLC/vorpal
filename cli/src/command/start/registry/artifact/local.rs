@@ -1,8 +1,8 @@
 use crate::command::{
     start::registry::{ArtifactBackend, LocalBackend},
     store::paths::{
-        discard_staging, get_artifact_alias_path, get_artifact_config_path, set_timestamps,
-        split_alias_name_tag, staging_path_for,
+        discard_staging, get_artifact_alias_path, get_artifact_config_path, publish_atomically,
+        set_timestamps, split_alias_name_tag, staging_path_for, PublishOutcome,
     },
 };
 use sha256::digest;
@@ -71,6 +71,47 @@ async fn publish_alias(
     }
 }
 
+/// Creates the config file from a fully-written staged sibling, so a concurrent
+/// `get_artifact` observes either no config or a whole parseable one.
+///
+/// Unlike an alias, a config path is recipe-addressed — it is
+/// `digest(artifact_json)` — so every publisher of that path carries bytes the
+/// caller asked for and `rename`'s replace-on-conflict semantics are what this
+/// path wants. `Superseded` is therefore a real success: the winner's config
+/// deserializes to the same artifact.
+///
+/// Republishing unconditionally is what makes a config truncated by a crash, a
+/// full disk, or a killed writer self-healing: the next `store_artifact` for
+/// that digest replaces it instead of skipping on its mere existence and
+/// leaving `get_artifact` failing its parse forever.
+async fn publish_artifact_config(
+    artifact_config_path: &Path,
+    artifact_json: Vec<u8>,
+) -> Result<(), Status> {
+    let staging_path = staging_path_for(artifact_config_path);
+
+    if let Err(err) = write(&staging_path, artifact_json).await {
+        discard_staging(&staging_path).await;
+
+        return Err(Status::internal(format!(
+            "failed to write store config: {err}"
+        )));
+    }
+
+    if let Err(err) = set_timestamps(&staging_path).await {
+        discard_staging(&staging_path).await;
+
+        return Err(Status::internal(format!("failed to sanitize path: {err}")));
+    }
+
+    match publish_atomically(&staging_path, artifact_config_path).await {
+        Ok(PublishOutcome::Published | PublishOutcome::Superseded) => Ok(()),
+        Err(err) => Err(Status::internal(format!(
+            "failed to publish store config: {err}"
+        ))),
+    }
+}
+
 #[async_trait]
 impl ArtifactBackend for LocalBackend {
     async fn get_artifact(&self, digest: &str, namespace: &str) -> Result<Artifact, Status> {
@@ -125,25 +166,17 @@ impl ArtifactBackend for LocalBackend {
         let artifact_digest = digest(&artifact_json);
         let artifact_config_path = get_artifact_config_path(&artifact_digest, &artifact_namespace);
 
-        if !artifact_config_path.exists() {
-            if let Some(parent) = artifact_config_path.parent() {
-                if !parent.exists() {
-                    create_dir_all(parent).await.map_err(|err| {
-                        Status::internal(format!("failed to create config dir: {err}"))
-                    })?;
-                }
+        if let Some(parent) = artifact_config_path.parent() {
+            if !parent.exists() {
+                create_dir_all(parent).await.map_err(|err| {
+                    Status::internal(format!("failed to create config dir: {err}"))
+                })?;
             }
-
-            write(&artifact_config_path, artifact_json)
-                .await
-                .map_err(|err| Status::internal(format!("failed to write store config: {err}")))?;
-
-            set_timestamps(&artifact_config_path)
-                .await
-                .map_err(|err| Status::internal(format!("failed to sanitize path: {err}")))?;
         }
 
         let artifact_system = artifact.target();
+
+        publish_artifact_config(&artifact_config_path, artifact_json).await?;
 
         let aliases = [artifact.aliases, artifact_aliases]
             .concat()
@@ -357,6 +390,90 @@ mod tests {
             published_digest,
             "the refused publish must not replace the mapping"
         );
+    }
+
+    // A config truncated by a crash or a killed writer must be repaired by the
+    // next publish of that digest, not skipped on its mere existence: the skip
+    // this replaced left `get_artifact` failing its parse until an operator
+    // deleted the file by hand.
+    #[tokio::test]
+    async fn republishing_a_truncated_config_restores_a_parseable_one() {
+        let root = TempDir::new().unwrap();
+        let config_path = root.path().join("config.json");
+        let artifact_json = br#"{"name":"rust"}"#.to_vec();
+
+        publish_artifact_config(&config_path, artifact_json.clone())
+            .await
+            .unwrap();
+
+        std::fs::write(&config_path, b"").unwrap();
+
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&config_path).unwrap())
+                .is_err(),
+            "the truncated config must be unparseable before the repair"
+        );
+
+        publish_artifact_config(&config_path, artifact_json.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&config_path).unwrap(), artifact_json);
+        assert_eq!(
+            dir_entry_names(root.path()),
+            BTreeSet::from(["config.json".to_string()]),
+            "the repair must leave no staging file behind"
+        );
+    }
+
+    // A reader polling a config path while it is republished must never see a
+    // partial JSON body: the path is only ever created by a rename of a file
+    // that is already complete.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_concurrent_reader_never_observes_a_partial_config() {
+        const ROUNDS: usize = 250;
+
+        let root = TempDir::new().unwrap();
+        let config_dir = root.path().to_path_buf();
+        let artifact_json = br#"{"name":"rust","aliases":["rust:latest"]}"#.to_vec();
+
+        let reader_dir = config_dir.clone();
+
+        let reader = tokio::task::spawn_blocking(move || {
+            let mut observed = Vec::new();
+
+            for round in 0..ROUNDS {
+                let config_path = reader_dir.join(format!("config-{round}.json"));
+
+                for _ in 0..10_000 {
+                    if let Ok(value) = std::fs::read(&config_path) {
+                        observed.push(value);
+                        break;
+                    }
+                }
+            }
+
+            observed
+        });
+
+        for round in 0..ROUNDS {
+            let config_path = config_dir.join(format!("config-{round}.json"));
+
+            publish_artifact_config(&config_path, artifact_json.clone())
+                .await
+                .unwrap();
+        }
+
+        let observed = reader.await.unwrap();
+
+        assert!(
+            !observed.is_empty(),
+            "the reader never caught a published config"
+        );
+
+        for value in observed {
+            assert_eq!(value, artifact_json);
+        }
     }
 
     // A build step runs as the daemon's own uid and can drop a symlink at an
