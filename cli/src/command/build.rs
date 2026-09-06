@@ -717,43 +717,129 @@ async fn build(
     client_worker: &mut WorkerServiceClient<Channel>,
     registry: &str,
 ) -> Result<()> {
-    // 1. Check artifact
-
-    let artifact_path = get_artifact_output_path(artifact_digest, artifact_namespace);
-
-    if artifact_path.exists() {
-        return Ok(());
-    }
-
-    // 2. Pull
-
-    let archive_path = get_artifact_archive_path(artifact_digest, artifact_namespace);
-
-    pull_archive(
-        client_archive,
-        &archive_path,
+    build_at_paths(
+        artifact,
+        artifact_aliases,
         artifact_digest,
         artifact_namespace,
+        &get_artifact_output_path(artifact_digest, artifact_namespace),
+        &get_artifact_archive_path(artifact_digest, artifact_namespace),
+        client_archive,
+        client_worker,
         registry,
-        "registry pull error",
-        || {},
     )
-    .await?;
+    .await
+}
 
-    if archive_path.exists() {
-        let has_files = unpack_archive_if_present(
-            &artifact.name,
+/// Asks the registry whether it holds the archive for `digest`. `NotFound` is
+/// the answer "absent", not a failure; every other status is a failure, so a
+/// registry that is unreachable or refusing never reads as "absent" and
+/// silently triggers a rebuild.
+async fn registry_has_archive(
+    client_archive: &mut ArchiveServiceClient<Channel>,
+    artifact_digest: &str,
+    artifact_namespace: &str,
+    registry: &str,
+) -> Result<bool> {
+    let request = ArchivePullRequest {
+        digest: artifact_digest.to_string(),
+        namespace: artifact_namespace.to_string(),
+    };
+
+    let mut request = Request::new(request);
+    let request_auth_header = client_auth_header(registry)
+        .await
+        .map_err(|e| anyhow!("failed to get client auth header: {}", e))?;
+
+    if let Some(header) = request_auth_header {
+        request.metadata_mut().insert("authorization", header);
+    }
+
+    match client_archive.check(request).await {
+        Ok(_) => Ok(true),
+
+        Err(status) => {
+            if status.code() == Code::NotFound {
+                Ok(false)
+            } else {
+                bail!("registry check error: {:?}", status);
+            }
+        }
+    }
+}
+
+/// `build` with the two store paths it works on supplied rather than derived,
+/// so the decision can be exercised against a temporary store.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the build body threading artifact/paths/clients/registry through one pass; \
+              grouping would only relocate the count, not reduce it"
+)]
+async fn build_at_paths(
+    artifact: &Artifact,
+    artifact_aliases: Vec<String>,
+    artifact_digest: &str,
+    artifact_namespace: &str,
+    artifact_path: &Path,
+    archive_path: &Path,
+    client_archive: &mut ArchiveServiceClient<Channel>,
+    client_worker: &mut WorkerServiceClient<Channel>,
+    registry: &str,
+) -> Result<()> {
+    // 1. Check artifact
+    //
+    // A local output is only half the answer. The client and the worker share
+    // one store root on the default single-host topology, so a build whose
+    // local publish landed and whose registry push failed leaves the output
+    // here and nothing in the registry; returning on the local path alone made
+    // that permanent. Ask the registry, and when it does not hold the digest,
+    // dispatch so the worker completes the registry copy (it pushes rather
+    // than rebuilds when the output is already at its path).
+    //
+    // The local pull-and-unpack path below is skipped in that case on purpose:
+    // on one host the local archive is present too, and falling into it would
+    // short-circuit again and dispatch nothing.
+    if artifact_path.exists() {
+        let registry_has_it = registry_has_archive(
+            client_archive,
             artifact_digest,
-            &artifact_path,
-            &archive_path,
+            artifact_namespace,
+            registry,
         )
         .await?;
 
-        if !has_files {
-            bail!("Artifact files not found: {}", artifact_path.display());
+        if registry_has_it {
+            return Ok(());
         }
+    } else {
+        // 2. Pull
 
-        return Ok(());
+        pull_archive(
+            client_archive,
+            &archive_path.to_path_buf(),
+            artifact_digest,
+            artifact_namespace,
+            registry,
+            "registry pull error",
+            || {},
+        )
+        .await?;
+
+        if archive_path.exists() {
+            let has_files = unpack_archive_if_present(
+                &artifact.name,
+                artifact_digest,
+                artifact_path,
+                archive_path,
+            )
+            .await?;
+
+            if !has_files {
+                bail!("Artifact files not found: {}", artifact_path.display());
+            }
+
+            return Ok(());
+        }
     }
 
     // Build
@@ -810,11 +896,9 @@ async fn build(
     // Pull built artifact back from registry to CLI host
 
     if !artifact_path.exists() {
-        let archive_path = get_artifact_archive_path(artifact_digest, artifact_namespace);
-
         pull_archive(
             client_archive,
-            &archive_path,
+            &archive_path.to_path_buf(),
             artifact_digest,
             artifact_namespace,
             registry,
@@ -831,8 +915,8 @@ async fn build(
         unpack_archive_if_present(
             &artifact.name,
             artifact_digest,
-            &artifact_path,
-            &archive_path,
+            artifact_path,
+            archive_path,
         )
         .await?;
     }
@@ -1753,6 +1837,24 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
     use tempfile::TempDir;
+    use tokio::{net::UnixListener, sync::mpsc::channel};
+    use tokio_stream::wrappers::{ReceiverStream, UnixListenerStream};
+    use tonic::{transport::Server, Response};
+    use vorpal_sdk::api::{
+        archive::{
+            archive_service_server::{
+                ArchiveService as ArchiveServiceStub,
+                ArchiveServiceServer as ArchiveServiceStubServer,
+            },
+            ArchivePushRequest, ArchiveResponse,
+        },
+        worker::{
+            worker_service_server::{
+                WorkerService as WorkerServiceStub, WorkerServiceServer as WorkerServiceStubServer,
+            },
+            BuildArtifactResponse,
+        },
+    };
 
     fn write_files(dir: &Path, names: &[&str], contents: &str) {
         for name in names {
@@ -3302,6 +3404,184 @@ mod tests {
             *dispatched.lock().await,
             order,
             "a dependency named twice was not counted once"
+        );
+    }
+
+    // The two halves of the store the short-circuit consults, plus a worker
+    // that records every `BuildArtifactRequest` it is handed.
+    #[derive(Clone)]
+    struct StubRegistry {
+        has_archive: bool,
+    }
+
+    #[tonic::async_trait]
+    impl ArchiveServiceStub for StubRegistry {
+        type PullStream = ReceiverStream<Result<ArchivePullResponse, Status>>;
+
+        async fn check(
+            &self,
+            _: Request<ArchivePullRequest>,
+        ) -> Result<Response<ArchiveResponse>, Status> {
+            if self.has_archive {
+                Ok(Response::new(ArchiveResponse {}))
+            } else {
+                Err(Status::not_found("archive not found"))
+            }
+        }
+
+        async fn pull(
+            &self,
+            _: Request<ArchivePullRequest>,
+        ) -> Result<Response<Self::PullStream>, Status> {
+            Err(Status::unimplemented("pull is not part of this scenario"))
+        }
+
+        async fn push(
+            &self,
+            _: Request<Streaming<ArchivePushRequest>>,
+        ) -> Result<Response<ArchiveResponse>, Status> {
+            Err(Status::unimplemented("push is not part of this scenario"))
+        }
+    }
+
+    #[derive(Clone)]
+    struct StubWorker {
+        dispatched: Arc<AsyncMutex<Vec<BuildArtifactRequest>>>,
+    }
+
+    #[tonic::async_trait]
+    impl WorkerServiceStub for StubWorker {
+        type BuildArtifactStream = ReceiverStream<Result<BuildArtifactResponse, Status>>;
+
+        async fn build_artifact(
+            &self,
+            request: Request<BuildArtifactRequest>,
+        ) -> Result<Response<Self::BuildArtifactStream>, Status> {
+            self.dispatched.lock().await.push(request.into_inner());
+
+            let (_tx, rx) = channel(1);
+
+            Ok(Response::new(ReceiverStream::new(rx)))
+        }
+    }
+
+    // Serves both stubs on one Unix socket under `dir` and returns clients
+    // connected to it, so `build_at_paths` runs against real gRPC transports
+    // rather than substituted internals. The server task is detached: it ends
+    // when the socket's directory is removed with the `TempDir`.
+    async fn serve_stubs(
+        dir: &Path,
+        has_archive: bool,
+    ) -> (
+        ArchiveServiceClient<Channel>,
+        WorkerServiceClient<Channel>,
+        Arc<AsyncMutex<Vec<BuildArtifactRequest>>>,
+    ) {
+        let socket_path = dir.join("stub.sock");
+        let dispatched = Arc::new(AsyncMutex::new(Vec::new()));
+
+        let listener = UnixListener::bind(&socket_path).unwrap();
+
+        let archive = ArchiveServiceStubServer::new(StubRegistry { has_archive });
+        let worker = WorkerServiceStubServer::new(StubWorker {
+            dispatched: dispatched.clone(),
+        });
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(archive)
+                .add_service(worker)
+                .serve_with_incoming(UnixListenerStream::new(listener))
+                .await
+        });
+
+        let uri = format!("unix://{}", socket_path.display());
+        let channel = build_channel(&uri).await.unwrap();
+
+        (
+            ArchiveServiceClient::new(channel.clone()),
+            WorkerServiceClient::new(channel),
+            dispatched,
+        )
+    }
+
+    fn stub_artifact() -> Artifact {
+        Artifact {
+            name: "stub".to_string(),
+            ..Default::default()
+        }
+    }
+
+    // AC2, absent half: a local output whose registry copy is missing is the
+    // exact state a landed publish and a failed push leave behind. The local
+    // archive is present too, because on the default single-host topology it
+    // is — and a decision that falls back into the unpack path would
+    // short-circuit on it and dispatch nothing.
+    #[tokio::test]
+    async fn build_dispatches_when_the_registry_does_not_hold_the_local_digest() {
+        let root = TempDir::new().unwrap();
+        let artifact_path = root.path().join("output");
+        let archive_path = root.path().join("archive.tar.zst");
+
+        std::fs::create_dir_all(&artifact_path).unwrap();
+        std::fs::write(&archive_path, b"local-archive").unwrap();
+
+        let (mut client_archive, mut client_worker, dispatched) =
+            serve_stubs(root.path(), false).await;
+
+        build_at_paths(
+            &stub_artifact(),
+            vec![],
+            "0".repeat(ARTIFACT_DIGEST_LENGTH).as_str(),
+            "library",
+            &artifact_path,
+            &archive_path,
+            &mut client_archive,
+            &mut client_worker,
+            "http://registry.invalid",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            dispatched.lock().await.len(),
+            1,
+            "a digest the registry does not hold was never dispatched, so the missing \
+             registry copy stays missing"
+        );
+    }
+
+    // AC2, present half: the round trip is what decides, and a registry that
+    // holds the digest still costs no build.
+    #[tokio::test]
+    async fn build_dispatches_nothing_when_the_registry_holds_the_local_digest() {
+        let root = TempDir::new().unwrap();
+        let artifact_path = root.path().join("output");
+        let archive_path = root.path().join("archive.tar.zst");
+
+        std::fs::create_dir_all(&artifact_path).unwrap();
+        std::fs::write(&archive_path, b"local-archive").unwrap();
+
+        let (mut client_archive, mut client_worker, dispatched) =
+            serve_stubs(root.path(), true).await;
+
+        build_at_paths(
+            &stub_artifact(),
+            vec![],
+            "0".repeat(ARTIFACT_DIGEST_LENGTH).as_str(),
+            "library",
+            &artifact_path,
+            &archive_path,
+            &mut client_archive,
+            &mut client_worker,
+            "http://registry.invalid",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            dispatched.lock().await.is_empty(),
+            "a digest the registry already holds was rebuilt anyway"
         );
     }
 }
