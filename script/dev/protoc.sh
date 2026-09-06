@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/verify.sh"
+
 ARCH="$(uname -m | tr '[:upper:]' '[:lower:]')"
 OS="$(uname | tr '[:upper:]' '[:lower:]')"
+PROTOC_SHA256=""
 PROTOC_SYSTEM=""
 PROTOC_VERSION="34.0"
 
@@ -34,10 +37,30 @@ if [[ "$PROTOC_SYSTEM" == "" ]]; then
     exit 1
 fi
 
-curl -L \
+case "${PROTOC_VERSION}-${PROTOC_SYSTEM}" in
+  "34.0-osx-aarch_64")
+    PROTOC_SHA256="3ef35187a3c8aed81ee57e792227e483e558fa56c93fce525e569bff55794c1a"
+    ;;
+  "34.0-osx-x86_64")
+    PROTOC_SHA256="d58fcd413a9ed458283d54023e409fd5cf767da4ed225d1ffaffd83cf2764f53"
+    ;;
+  "34.0-linux-aarch_64")
+    PROTOC_SHA256="f0b8aad28be5ea6150c082f96ac57e028154afb9ee29f4ce092b5a39df8ae6c8"
+    ;;
+  "34.0-linux-x86_64")
+    PROTOC_SHA256="e9a91b6fcfe4177ec2cd35fc8f15c1e811fa0ecdef9372755cd6d3513d5faaab"
+    ;;
+esac
+
+PROTOC_TMPDIR="$(mktemp -d)"
+PROTOC_ARCHIVE="${PROTOC_TMPDIR}/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"
+
+trap 'rm -rf "${PROTOC_TMPDIR}"' EXIT
+
+curl -fL \
     "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" \
-    -o "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"
+    -o "${PROTOC_ARCHIVE}"
 
-unzip "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip" -d "${1}"
+verify_sha256 "${PROTOC_ARCHIVE}" "${PROTOC_SHA256}"
 
-rm -f "/tmp/protoc-${PROTOC_VERSION}-${PROTOC_SYSTEM}.zip"
+unzip "${PROTOC_ARCHIVE}" -d "${1}"
