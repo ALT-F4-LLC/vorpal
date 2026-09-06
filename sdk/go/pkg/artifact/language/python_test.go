@@ -15,9 +15,15 @@ func TestStepBuildCommandAppMode(t *testing.T) {
 	entrypoint := "src/example.py"
 	script := stepBuildCommand("example", &entrypoint, "$VORPAL_ARTIFACT_PY/bin")
 
-	// Launcher lands at the expected output path.
-	if !strings.Contains(script, `"$VORPAL_OUTPUT/bin/example"`) {
-		t.Error("expected launcher output path in script")
+	// The heredoc writes the launcher to $VORPAL_OUTPUT/bin, the directory mkdir -p
+	// creates; asserting the whole redirection keeps the chmod line below from
+	// standing in for a wrong write target.
+	if !strings.Contains(script, `cat > "$VORPAL_OUTPUT/bin/example" << EOF`) {
+		t.Error("expected launcher heredoc to write to $VORPAL_OUTPUT/bin/example")
+	}
+
+	if !strings.Contains(script, `chmod +x "$VORPAL_OUTPUT/bin/example"`) {
+		t.Error("expected chmod +x on the launcher at $VORPAL_OUTPUT/bin/example")
 	}
 
 	// Interpreter store path is baked (unescaped); runtime vars stay escaped so the
