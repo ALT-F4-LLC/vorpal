@@ -28,7 +28,7 @@ use tracing_subscriber::{
 use vorpal_sdk::{
     artifact::{get_default_address, system::get_system_default_str},
     context::{
-        commit_login_credentials, credential_egress_origin, VorpalCredentialsContent,
+        commit_login_credentials, credential_egress_origin, LoginRecord, VorpalCredentialsContent,
         DEFAULT_NAMESPACE,
     },
 };
@@ -1215,6 +1215,42 @@ impl std::fmt::Display for NormalizedIssuer {
     }
 }
 
+/// What the device-code exchange yielded, before it is bound to the issuer
+/// that granted it and the registry the operator pointed at that issuer.
+struct LoginGrant {
+    access_token: String,
+    audience: Option<String>,
+    client_id: String,
+    expires_in: u64,
+    issued_at: u64,
+    refresh_token: String,
+    scopes: Vec<String>,
+}
+
+/// Binds a completed exchange to its issuer and registry.
+///
+/// Split out of the `Command::Login` arm so the binding is reachable from a
+/// test without driving the whole device flow: the arm's remaining work is
+/// network I/O, and the part worth pinning is which URL becomes the issuer
+/// key and which becomes the registry key. `issuer` is a [`NormalizedIssuer`]
+/// rather than a `&str` so the arm cannot reach the SDK with an issuer that
+/// skipped `normalize_and_validate_login_issuer` (VPL-188 AB-4).
+fn login_record(issuer: &NormalizedIssuer, registry: &str, grant: LoginGrant) -> LoginRecord {
+    LoginRecord {
+        issuer: issuer.as_str().to_string(),
+        registry: registry.to_string(),
+        content: VorpalCredentialsContent {
+            access_token: grant.access_token,
+            audience: grant.audience,
+            client_id: grant.client_id,
+            expires_in: grant.expires_in,
+            issued_at: grant.issued_at,
+            refresh_token: grant.refresh_token,
+            scopes: grant.scopes,
+        },
+    }
+}
+
 /// clap `value_parser` for `system services start --issuer`. Applied
 /// identically whether the value arrives via `--issuer` or the
 /// `VORPAL_ISSUER` environment variable, so an empty env value — which clap
@@ -1719,22 +1755,26 @@ async fn run_login(
         .map(|s| s.iter().map(|scope| scope.to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
 
-    // Prepare to store token
+    let issued_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before the unix epoch")?
+        .as_secs();
 
-    let content = VorpalCredentialsContent {
-        access_token,
-        audience: issuer_audience.map(str::to_string),
-        client_id: issuer_client_id.to_string(),
-        expires_in,
-        issued_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .context("system clock is before the unix epoch")?
-            .as_secs(),
-        refresh_token,
-        scopes,
-    };
+    let record = login_record(
+        &normalized_issuer,
+        registry,
+        LoginGrant {
+            access_token,
+            audience: issuer_audience.map(str::to_string),
+            client_id: issuer_client_id.to_string(),
+            expires_in,
+            issued_at,
+            refresh_token,
+            scopes,
+        },
+    );
 
-    commit_login_credentials(normalized_issuer.as_str(), registry, content).await
+    commit_login_credentials(record).await
 }
 
 /// Installs the process-global `tracing` subscriber: a stderr fmt layer
@@ -3261,6 +3301,66 @@ mod login_egress_tests {
     /// precondition their signatures now require.
     fn normalized(issuer: &str) -> NormalizedIssuer {
         NormalizedIssuer::parse(issuer).expect("a test issuer must be well formed")
+    }
+
+    #[test]
+    fn login_record_keys_the_issuer_and_the_registry_to_their_own_maps() {
+        // The `Command::Login` arm's only untested step used to be this
+        // binding, where two URL-shaped strings are handed to the SDK. A
+        // transposition writes the registry URL as an issuer key and sends
+        // that issuer's token wherever the issuer URL names a registry
+        // (VPL-188 AB-4).
+        let issuer = "https://idp.example.com";
+        let registry = "https://registry.example.com";
+
+        let record = login_record(
+            &normalized(issuer),
+            registry,
+            LoginGrant {
+                access_token: "access".to_string(),
+                audience: Some("audience".to_string()),
+                client_id: "client".to_string(),
+                expires_in: 3600,
+                issued_at: 1_700_000_000,
+                refresh_token: "refresh".to_string(),
+                scopes: vec!["openid".to_string()],
+            },
+        );
+
+        assert_eq!(record.issuer, issuer, "the issuer URL must key the grant");
+        assert_eq!(
+            record.registry, registry,
+            "the registry URL must key the mapping, not the grant"
+        );
+        assert_eq!(record.content.access_token, "access");
+        assert_eq!(record.content.refresh_token, "refresh");
+        assert_eq!(record.content.expires_in, 3600);
+        assert_eq!(record.content.issued_at, 1_700_000_000);
+        assert_eq!(record.content.client_id, "client");
+        assert_eq!(record.content.audience.as_deref(), Some("audience"));
+        assert_eq!(record.content.scopes, vec!["openid".to_string()]);
+    }
+
+    #[test]
+    fn login_record_carries_the_normalized_issuer_not_the_raw_text() {
+        // `NormalizedIssuer::parse` elides the default port and trims the
+        // trailing slash. The credentials-file key must be that canonical
+        // form, because it is the string every later lookup compares.
+        let record = login_record(
+            &normalized("https://idp.example.com:443/"),
+            "https://registry.example.com",
+            LoginGrant {
+                access_token: "access".to_string(),
+                audience: None,
+                client_id: "client".to_string(),
+                expires_in: 3600,
+                issued_at: 1_700_000_000,
+                refresh_token: "refresh".to_string(),
+                scopes: vec![],
+            },
+        );
+
+        assert_eq!(record.issuer, "https://idp.example.com");
     }
 
     #[test]
