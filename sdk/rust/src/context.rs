@@ -4804,6 +4804,17 @@ mod tests {
         );
     }
 
+    // The bound the two never-answer tests below pass to
+    // `refresh_access_token`, and the value their elapsed assertions are
+    // scaled from, so a change here moves both together.
+    const NEVER_ANSWER_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
+    // 10x the configured bound, matching the Go SDK's
+    // `elapsed > 10*timeout`: generous enough to absorb CI scheduler jitter,
+    // tight enough that an inflation the outer harness bound would still
+    // tolerate goes red here instead of merely running slow.
+    const NEVER_ANSWER_ELAPSED_ALLOWANCE: u32 = 10;
+
     #[tokio::test]
     async fn refresh_access_token_gives_up_on_a_hung_idp() {
         // The timeout is the only thing standing between a hung IdP and a
@@ -4816,7 +4827,13 @@ mod tests {
         // stripped, since the outer bound would still end the call. So the
         // outer `expect` must be the one that goes red, and the inner error
         // must be pinned to a client-side timeout, not merely "some error".
+        //
+        // The outer bound also leaves a wide band — anything under it fails
+        // in exactly the expected shape, just slower — so an inflation of the
+        // client's own bound passes unnoticed without the elapsed assertion.
         let idp = IdpServer::start(|_, _| None).await;
+
+        let started = std::time::Instant::now();
 
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -4825,11 +4842,13 @@ mod tests {
                 "client-1",
                 &idp.issuer(),
                 "stored-refresh",
-                std::time::Duration::from_millis(250),
+                NEVER_ANSWER_TIMEOUT,
             ),
         )
         .await
         .expect("the client's own timeout, not the test harness, must end this refresh");
+
+        let elapsed = started.elapsed();
 
         let failure = outcome.expect_err("a hung IdP must not hang the caller");
 
@@ -4846,6 +4865,15 @@ mod tests {
             reqwest_error.is_timeout(),
             "unexpected error: {}",
             reqwest_error
+        );
+
+        let allowance = NEVER_ANSWER_TIMEOUT * NEVER_ANSWER_ELAPSED_ALLOWANCE;
+        assert!(
+            elapsed <= allowance,
+            "the discovery leg must be bounded by the configured {:?}, took {:?} which exceeds the {:?} allowance",
+            NEVER_ANSWER_TIMEOUT,
+            elapsed,
+            allowance
         );
 
         assert_eq!(
@@ -4947,7 +4975,10 @@ mod tests {
         // Same shape as the discovery-leg test above: the outer bound is the
         // harness's detector, not the control under test, so its own
         // `expect` must be the one that goes red if the client's timeout is
-        // ever stripped.
+        // ever stripped, and the elapsed assertion covers the band the outer
+        // bound tolerates.
+        let started = std::time::Instant::now();
+
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             refresh_access_token(
@@ -4955,11 +4986,13 @@ mod tests {
                 "client-1",
                 &idp.issuer(),
                 "stored-refresh",
-                std::time::Duration::from_millis(250),
+                NEVER_ANSWER_TIMEOUT,
             ),
         )
         .await
         .expect("the client's own timeout, not the test harness, must end this refresh");
+
+        let elapsed = started.elapsed();
 
         let failure =
             outcome.expect_err("a token POST that never completes must not hang the caller");
@@ -4967,6 +5000,15 @@ mod tests {
         assert!(
             matches!(failure, RefreshFailure::Sent(_)),
             "a token POST that timed out must be classified Sent: the IdP has the token whether or not it answered"
+        );
+
+        let allowance = NEVER_ANSWER_TIMEOUT * NEVER_ANSWER_ELAPSED_ALLOWANCE;
+        assert!(
+            elapsed <= allowance,
+            "the token POST must be bounded by the configured {:?}, took {:?} which exceeds the {:?} allowance",
+            NEVER_ANSWER_TIMEOUT,
+            elapsed,
+            allowance
         );
 
         assert!(
