@@ -23,6 +23,13 @@ use vorpal_sdk::api::artifact::{Artifact, ArtifactSystem};
 /// `AlreadyExists` when the name is taken, including when the name is a
 /// dangling symlink an untrusted build step left behind, and never writes
 /// through it.
+///
+/// A taken name that already holds this exact digest is the state the caller
+/// asked for, so it is accepted: a publication that failed part way through is
+/// completed by re-sending the same request. The refusal stays for a
+/// name mapped to a different digest, and for an entry whose contents cannot be
+/// read back as this digest — a symlink to an unreadable or foreign target
+/// included.
 async fn publish_alias(
     alias_path: &Path,
     alias: &str,
@@ -48,10 +55,18 @@ async fn publish_alias(
 
     match link {
         Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => Err(Status::already_exists(format!(
-            "alias '{}' already exists",
-            alias
-        ))),
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+            let published_digest = read(alias_path).await.ok();
+
+            if published_digest.as_deref() == Some(artifact_digest.as_bytes()) {
+                return Ok(());
+            }
+
+            Err(Status::already_exists(format!(
+                "alias '{}' already exists",
+                alias
+            )))
+        }
         Err(err) => Err(Status::internal(format!("failed to publish alias: {err}"))),
     }
 }
@@ -289,6 +304,59 @@ mod tests {
         for value in observed {
             assert_eq!(value, artifact_digest);
         }
+    }
+
+    // A publication that failed part way through is completed by re-sending the
+    // same request. Re-publishing an alias that already holds this exact digest
+    // is the state the caller asked for, so it must succeed rather than refuse.
+    #[tokio::test]
+    async fn republishing_an_alias_with_the_same_digest_succeeds() {
+        let root = TempDir::new().unwrap();
+        let alias_path = root.path().join("latest");
+        let artifact_digest = digest("artifact");
+
+        publish_alias(&alias_path, "rust:latest", &artifact_digest)
+            .await
+            .unwrap();
+
+        publish_alias(&alias_path, "rust:latest", &artifact_digest)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&alias_path).unwrap(),
+            artifact_digest
+        );
+        assert_eq!(
+            dir_entry_names(root.path()),
+            BTreeSet::from(["latest".to_string()]),
+            "the republish must leave no staging file behind"
+        );
+    }
+
+    // An alias name already mapped to another digest is a real conflict: the
+    // immutability the backend promises is what makes the same-digest case safe
+    // to accept.
+    #[tokio::test]
+    async fn publishing_an_alias_holding_a_different_digest_is_refused() {
+        let root = TempDir::new().unwrap();
+        let alias_path = root.path().join("latest");
+        let published_digest = digest("first-artifact");
+
+        publish_alias(&alias_path, "rust:latest", &published_digest)
+            .await
+            .unwrap();
+
+        let status = publish_alias(&alias_path, "rust:latest", &digest("second-artifact"))
+            .await
+            .unwrap_err();
+
+        assert_eq!(status.code(), Code::AlreadyExists);
+        assert_eq!(
+            std::fs::read_to_string(&alias_path).unwrap(),
+            published_digest,
+            "the refused publish must not replace the mapping"
+        );
     }
 
     // A build step runs as the daemon's own uid and can drop a symlink at an

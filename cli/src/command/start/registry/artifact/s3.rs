@@ -155,6 +155,15 @@ impl ArtifactBackend for S3Backend {
             // this check exists to protect (VPL-383 CLUSTER-18). Only a
             // modeled "not found" is treated as absence; every other error
             // propagates as a failure instead of silently proceeding.
+            //
+            // An alias already holding this exact digest is the state the
+            // caller asked for, so it is left alone rather than refused: a
+            // publication that failed part way through is completed by
+            // re-sending the same request. This matches
+            // `publish_alias` in `local.rs`. The existing digest is read here
+            // rather than through `get_artifact_alias` so a get that fails
+            // after a successful head propagates as a failure instead of the
+            // `not_found` that method reports for any get error.
             match client
                 .head_object()
                 .bucket(bucket)
@@ -163,6 +172,31 @@ impl ArtifactBackend for S3Backend {
                 .await
             {
                 Ok(_) => {
+                    let mut published_stream = client
+                        .get_object()
+                        .bucket(bucket)
+                        .key(&alias_key)
+                        .send()
+                        .await
+                        .map_err(|err| {
+                            Status::internal(format!("failed to read existing alias: {err}"))
+                        })?
+                        .body;
+
+                    let mut published_digest = String::new();
+
+                    while let Some(chunk) = published_stream.next().await {
+                        let published_chunk = chunk.map_err(|err| {
+                            Status::internal(format!("failed to read existing alias: {err}"))
+                        })?;
+
+                        published_digest.push_str(&String::from_utf8_lossy(&published_chunk));
+                    }
+
+                    if published_digest == artifact_digest {
+                        continue;
+                    }
+
                     return Err(Status::already_exists(format!(
                         "alias '{}' already exists",
                         alias
