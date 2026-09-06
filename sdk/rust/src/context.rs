@@ -700,9 +700,21 @@ fn emit(line: impl std::fmt::Display) {
     println!("{line}");
 }
 
-/// Returns the root directory Vorpal stores its runtime state under.
+/// The store root every other path in the CLI and SDK is built from.
+///
+/// `VORPAL_ROOT_PATH` relocates the whole tree — store, keys, sandbox and the
+/// default socket — so a second instance can be verified against a scratch
+/// directory without touching the operator's real store. An unset or empty
+/// value keeps the historical default, matching how `get_socket_path` treats
+/// `VORPAL_SOCKET_PATH`.
 #[must_use]
 pub fn get_root_dir_path() -> PathBuf {
+    if let Ok(path) = std::env::var("VORPAL_ROOT_PATH") {
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+
     Path::new("/var/lib/vorpal").to_path_buf()
 }
 

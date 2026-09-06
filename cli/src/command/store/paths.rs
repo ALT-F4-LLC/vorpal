@@ -1070,3 +1070,185 @@ mod tests {
         assert_eq!(split_alias_name_tag("rust:1.85:extra"), ("rust", "1.85"));
     }
 }
+
+/// Store-root override tests.
+///
+/// `VORPAL_ROOT_PATH` is process-global state that every path builder above
+/// reads, so these tests serialize on [`ROOT_PATH_ENV_LOCK`]. Any future test
+/// that sets the variable, or that asserts on a value derived from
+/// `get_root_dir_path`, must take the same lock.
+#[cfg(test)]
+mod root_path_override_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    static ROOT_PATH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Sets `VORPAL_ROOT_PATH` to a fresh temporary directory for the caller's
+    /// lifetime and restores the previous value on drop, so the variable never
+    /// leaks into another test or into the rest of the process.
+    struct ScratchRoot {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        previous: Option<String>,
+        dir: TempDir,
+    }
+
+    impl ScratchRoot {
+        fn new() -> Self {
+            let guard = ROOT_PATH_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+
+            let previous = std::env::var("VORPAL_ROOT_PATH").ok();
+            let dir = TempDir::new().unwrap();
+
+            std::env::set_var("VORPAL_ROOT_PATH", dir.path());
+
+            Self {
+                _guard: guard,
+                previous,
+                dir,
+            }
+        }
+
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
+    }
+
+    impl Drop for ScratchRoot {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var("VORPAL_ROOT_PATH", value),
+                None => std::env::remove_var("VORPAL_ROOT_PATH"),
+            }
+        }
+    }
+
+    /// Holds `VORPAL_ROOT_PATH` at a chosen raw value, including an empty one,
+    /// which `ScratchRoot` cannot express.
+    struct RawRoot {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        previous: Option<String>,
+    }
+
+    impl RawRoot {
+        fn new(value: &str) -> Self {
+            let guard = ROOT_PATH_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+
+            let previous = std::env::var("VORPAL_ROOT_PATH").ok();
+
+            std::env::set_var("VORPAL_ROOT_PATH", value);
+
+            Self {
+                _guard: guard,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for RawRoot {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var("VORPAL_ROOT_PATH", value),
+                None => std::env::remove_var("VORPAL_ROOT_PATH"),
+            }
+        }
+    }
+
+    // The whole point of the override: every path a registry serves must land
+    // under the scratch root, so a verification instance can run without
+    // touching the operator's real `/var/lib/vorpal`.
+    #[test]
+    fn every_store_path_is_rooted_at_the_override() {
+        let root = ScratchRoot::new();
+
+        let paths = [
+            get_root_dir_path(),
+            get_root_key_dir_path(),
+            get_root_store_dir_path(),
+            get_root_sandbox_dir_path(),
+            get_artifact_dir_path(),
+            get_root_artifact_alias_dir_path(),
+            get_root_artifact_archive_dir_path(),
+            get_root_artifact_config_dir_path(),
+            get_root_artifact_output_dir_path(),
+            get_artifact_archive_path(&"a".repeat(64), "library"),
+            get_artifact_config_path(&"a".repeat(64), "library"),
+            get_artifact_output_path(&"a".repeat(64), "library"),
+            get_artifact_alias_path("rust", "library", ArtifactSystem::Aarch64Linux, "latest")
+                .unwrap(),
+            get_key_ca_key_path(),
+            get_key_service_path(),
+        ];
+
+        for path in paths {
+            assert!(
+                path.starts_with(root.path()),
+                "{} escaped the scratch root {}",
+                path.display(),
+                root.path().display()
+            );
+        }
+
+        assert!(
+            !get_root_dir_path().starts_with("/var/lib/vorpal"),
+            "the override was ignored in favor of the built-in default"
+        );
+    }
+
+    // An unset variable must leave the operator's real store exactly where it
+    // has always been; the override is opt-in, not a relocation.
+    #[test]
+    fn an_unset_override_keeps_the_default_root() {
+        let _guard = ROOT_PATH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+
+        let previous = std::env::var("VORPAL_ROOT_PATH").ok();
+
+        std::env::remove_var("VORPAL_ROOT_PATH");
+
+        let observed = get_root_dir_path();
+
+        match previous {
+            Some(value) => std::env::set_var("VORPAL_ROOT_PATH", value),
+            None => {}
+        }
+
+        assert_eq!(observed, Path::new("/var/lib/vorpal"));
+    }
+
+    // `VORPAL_ROOT_PATH=` is what a shell leaves behind when an operator
+    // clears the variable rather than unsetting it. Treating that empty string
+    // as a root would put the whole store at `/store`, `/key` and `/sandbox`,
+    // so it must fall back to the default exactly as `get_socket_path` does.
+    #[test]
+    fn an_empty_override_falls_back_to_the_default_root() {
+        let _root = RawRoot::new("");
+
+        assert_eq!(get_root_dir_path(), Path::new("/var/lib/vorpal"));
+    }
+
+    // The socket lives under the root too, so pointing the root at a scratch
+    // directory moves the socket with it — otherwise a verification instance
+    // would still try to bind inside the operator's real store.
+    #[test]
+    fn the_socket_path_follows_the_override_when_its_own_variable_is_unset() {
+        let root = ScratchRoot::new();
+
+        let previous_socket = std::env::var("VORPAL_SOCKET_PATH").ok();
+
+        std::env::remove_var("VORPAL_SOCKET_PATH");
+
+        let observed = get_socket_path();
+
+        if let Some(value) = previous_socket {
+            std::env::set_var("VORPAL_SOCKET_PATH", value);
+        }
+
+        assert_eq!(observed, root.path().join("vorpal.sock"));
+    }
+}
