@@ -147,6 +147,21 @@ jobs:
           go-version-file: sdk/go/go.mod
           cache-dependency-path: sdk/go/go.sum
 
+      - name: Verify resolved Go toolchain
+        run: |
+          GO_DIRECTIVE=$(grep -oE '^go [0-9]+\.[0-9]+(\.[0-9]+)?' sdk/go/go.mod | sed -E 's/^go //')
+          if [[ ! "$GO_DIRECTIVE" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: go directive in sdk/go/go.mod must be a minor line without a patch component: '$GO_DIRECTIVE'"
+            exit 1
+          fi
+          GO_VERSION=$(go version)
+          echo "$GO_VERSION"
+          GO_TOOLCHAIN=$(printf '%s\n' "$GO_VERSION" | awk '{print $3}')
+          if [[ ! "$GO_TOOLCHAIN" =~ ^go"$GO_DIRECTIVE"\.[0-9]+$ ]]; then
+            echo "ERROR: resolved Go toolchain '$GO_TOOLCHAIN' is not a patch release of the go directive '$GO_DIRECTIVE' in sdk/go/go.mod"
+            exit 1
+          fi
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
