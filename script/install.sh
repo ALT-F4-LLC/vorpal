@@ -597,10 +597,14 @@ xml_escape() {
 }
 
 # Encodes a value for a double-quoted assignment in a systemd
-# EnvironmentFile. systemd's env-file parser takes
-# `\<char>` inside double quotes as that character literally, so escaping is
-# lossless for every character a single line can carry; a newline is the one
-# thing the line format cannot hold, and
+# EnvironmentFile. Inside double quotes systemd drops the
+# backslash only before `"`, `\`, '$' and the backtick, and keeps BOTH
+# characters for any other `\<char>` pair. So this list must stay exactly
+# those four: escaping one more character emits it as a literal backslash
+# plus the character and corrupts the value. Every other character is
+# already carried verbatim between the quotes -- including the single
+# quote, '#', and interior whitespace -- so none of them needs escaping.
+# A newline is the one thing the line format cannot hold, and
 # `require_representable_client_secret` refuses that separately.
 #
 # '$' and the backtick are escaped too, though systemd expands neither: an
