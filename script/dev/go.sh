@@ -62,8 +62,9 @@ esac
 
 mkdir -p "${1}/bin"
 
-if [[ -x "${1}/go/bin/go" ]] && [[ "$("${1}/go/bin/go" env GOVERSION)" == "go${GO_VERSION}" ]]; then
-  "${1}/go/bin/go" version
+if [[ -x "${1}/bin/go" ]] && [[ -x "${1}/bin/gofmt" ]] &&
+   [[ "$("${1}/bin/go" env GOVERSION)" == "go${GO_VERSION}" ]]; then
+  "${1}/bin/go" version
   exit 0
 fi
 
