@@ -46,17 +46,15 @@ pub fn handle_set(key: &str, value: &str, user_level: bool, config_path: &Path) 
         let mut config = load_user_config(&path)?;
         config
             .set_by_name(key, value.to_string())
-            .map_err(|e| anyhow!("{}", e))?;
+            .map_err(|e| anyhow!("{e}"))?;
         save_user_config(&path, &config)?;
-        println!("Set {} = {} (user: {})", key, value, path.display());
+        crate::output::line(format!("Set {key} = {value} (user: {})", path.display()));
     } else {
         save_project_config(config_path, key, value)?;
-        println!(
-            "Set {} = {} (project: {})",
-            key,
-            value,
+        crate::output::line(format!(
+            "Set {key} = {value} (project: {})",
             config_path.display()
-        );
+        ));
     }
     Ok(())
 }
@@ -77,7 +75,7 @@ pub fn handle_get(key: &str, _user_level: bool, config_path: &Path) -> Result<()
     let (resolved, _) = resolve_config(config_path)?;
     match resolved.get_by_name(key) {
         Some(rv) => {
-            println!("{} = {} ({})", key, rv.value, rv.source);
+            crate::output::line(format!("{key} = {} ({})", rv.value, rv.source));
             Ok(())
         }
         None => Err(anyhow!(
@@ -96,10 +94,10 @@ pub fn handle_show(config_path: &Path) -> Result<()> {
     let names = VorpalConfig::field_names();
 
     // Collect rows to compute column widths
-    let mut rows: Vec<(&str, String, String)> = Vec::with_capacity(names.len());
+    let mut rows: Vec<(&str, &str, String)> = Vec::with_capacity(names.len());
     for &name in names {
         if let Some(rv) = resolved.get_by_name(name) {
-            rows.push((name, rv.value.clone(), rv.source.to_string()));
+            rows.push((name, rv.value.as_str(), rv.source.to_string()));
         }
     }
 
@@ -128,23 +126,21 @@ pub fn handle_show(config_path: &Path) -> Result<()> {
         .max(header_source.len());
 
     // Print header
-    println!(
-        "{:<key_width$}  {:<value_width$}  {:<source_width$}",
-        header_key, header_value, header_source,
-    );
-    println!(
+    crate::output::line(format!(
+        "{header_key:<key_width$}  {header_value:<value_width$}  {header_source:<source_width$}",
+    ));
+    crate::output::line(format!(
         "{:<key_width$}  {:<value_width$}  {:<source_width$}",
         "-".repeat(key_width),
         "-".repeat(value_width),
         "-".repeat(source_width),
-    );
+    ));
 
     // Print rows
     for (key, value, source) in &rows {
-        println!(
-            "{:<key_width$}  {:<value_width$}  {:<source_width$}",
-            key, value, source,
-        );
+        crate::output::line(format!(
+            "{key:<key_width$}  {value:<value_width$}  {source:<source_width$}",
+        ));
     }
 
     Ok(())

@@ -33,7 +33,7 @@ pub enum BackendError {
     MissingS3Bucket,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub enum ServerBackend {
     #[default]
     Unknown,
@@ -49,7 +49,7 @@ const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 /// Authz + observability label for a request's classified principal.
 ///
 /// Produces a consistent, grep-able tag at every enforcement site so operators
-/// can see *who* passed the authz gate — Human users by `sub`, TrustedService
+/// can see *who* passed the authz gate — Human users by `sub`, `TrustedService`
 /// workers by `azp`. The format is shared verbatim with `worker.rs` (DKT-65)
 /// so a single `service=` / `user=` query surfaces every authz decision
 /// across registry and worker:
@@ -62,12 +62,12 @@ const DEFAULT_GRPC_CHUNK_SIZE: usize = 2 * 1024 * 1024; // 2MB
 /// Required by TDD §4.5 (observability) and AC §1.3 #5 (every authz decision
 /// records principal classification + identifier).
 fn principal_label<T>(request: &Request<T>) -> String {
-    match request.extensions().get::<PrincipalKind>() {
-        Some(PrincipalKind::TrustedService { azp }) => format!("service={azp}"),
-        _ => {
-            let user = get_user_context(request).unwrap_or_else(|| "<unknown>".to_string());
-            format!("user={user}")
-        }
+    if let Some(PrincipalKind::TrustedService { azp }) = request.extensions().get::<PrincipalKind>()
+    {
+        format!("service={azp}")
+    } else {
+        let user = get_user_context(request).unwrap_or_else(|| "<unknown>".to_string());
+        format!("user={user}")
     }
 }
 
@@ -78,8 +78,8 @@ pub struct S3Backend {
 }
 
 impl LocalBackend {
-    pub fn new() -> Result<Self, BackendError> {
-        Ok(Self)
+    pub fn new() -> Self {
+        Self
     }
 }
 
@@ -112,7 +112,7 @@ pub trait ArchiveBackend: Send + Sync + 'static {
     async fn pull(
         &self,
         req: &ArchivePullRequest,
-        tx: mpsc::Sender<Result<ArchivePullResponse, Status>>,
+        tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
     ) -> Result<(), Status>;
 
     async fn push(
@@ -188,9 +188,8 @@ impl ArchiveService for ArchiveServer {
             if exists {
                 info!("registry |> archive check (cached): {}", req.digest);
                 return Ok(Response::new(ArchiveResponse {}));
-            } else {
-                return Err(Status::not_found("archive not found"));
             }
+            return Err(Status::not_found("archive not found"));
         }
 
         info!(
@@ -245,6 +244,7 @@ impl ArchiveService for ArchiveServer {
 
         let (tx, rx) = mpsc::channel(100);
 
+        // The spawned future must own the backend; `self` does not outlive it.
         let backend = self.backend.clone();
 
         tokio::spawn(async move {
@@ -261,7 +261,7 @@ impl ArchiveService for ArchiveServer {
                 return;
             }
 
-            if let Err(err) = backend.pull(&request, tx.clone()).await {
+            if let Err(err) = backend.pull(&request, &tx).await {
                 if let Err(err) = tx.send(Err(err)).await {
                     error!("failed to send store error: {:?}", err);
                 }
@@ -321,14 +321,14 @@ impl ArchiveService for ArchiveServer {
 
 #[tonic::async_trait]
 pub trait ArtifactBackend: Send + Sync + 'static {
-    async fn get_artifact(&self, digest: String, namespace: String) -> Result<Artifact, Status>;
+    async fn get_artifact(&self, digest: &str, namespace: &str) -> Result<Artifact, Status>;
 
     async fn get_artifact_alias(
         &self,
-        name: String,
-        namespace: String,
+        name: &str,
+        namespace: &str,
         system: ArtifactSystem,
-        version: String,
+        version: &str,
     ) -> Result<String, Status>;
 
     async fn store_artifact(
@@ -388,7 +388,7 @@ impl ArtifactService for ArtifactServer {
 
         let artifact = self
             .backend
-            .get_artifact(request.digest.clone(), request.namespace.clone())
+            .get_artifact(&request.digest, &request.namespace)
             .await?;
 
         info!("artifact |> get: {}", request.digest);
@@ -425,10 +425,10 @@ impl ArtifactService for ArtifactServer {
         let digest = self
             .backend
             .get_artifact_alias(
-                request.name.clone(),
-                request.namespace,
+                &request.name,
+                &request.namespace,
                 request_system.unwrap_or(ArtifactSystem::UnknownSystem),
-                request.tag.clone(),
+                &request.tag,
             )
             .await?;
 
@@ -506,15 +506,15 @@ pub async fn backend_archive(
     };
 
     let backend_archive: Box<dyn ArchiveBackend> = match backend {
-        ServerBackend::Local => Box::new(LocalBackend::new()?),
+        ServerBackend::Local => Box::new(LocalBackend::new()),
         ServerBackend::S3 => Box::new(
             S3Backend::new(
-                registry_backend_s3_bucket.clone(),
+                registry_backend_s3_bucket,
                 registry_backend_s3_force_path_style,
             )
             .await?,
         ),
-        ServerBackend::Unknown => bail!("unknown archive backend: {}", registry_backend),
+        ServerBackend::Unknown => bail!("unknown archive backend: {registry_backend}"),
     };
 
     Ok(backend_archive)
@@ -532,15 +532,15 @@ pub async fn backend_artifact(
     };
 
     let backend_artifact: Box<dyn ArtifactBackend> = match backend {
-        ServerBackend::Local => Box::new(LocalBackend::new()?),
+        ServerBackend::Local => Box::new(LocalBackend::new()),
         ServerBackend::S3 => Box::new(
             S3Backend::new(
-                registry_backend_s3_bucket.clone(),
+                registry_backend_s3_bucket,
                 registry_backend_s3_force_path_style,
             )
             .await?,
         ),
-        ServerBackend::Unknown => bail!("unknown artifact backend: {}", registry_backend),
+        ServerBackend::Unknown => bail!("unknown artifact backend: {registry_backend}"),
     };
 
     Ok(backend_artifact)
@@ -554,13 +554,16 @@ mod tests {
     use tokio::sync::Mutex;
     use vorpal_sdk::api::archive::archive_service_server::ArchiveService;
 
+    /// Recorded (digest, namespace, `collected_data`) for one push call.
+    type PushCall = (String, String, Vec<u8>);
+
     /// Mock backend that tracks call counts, received data, and returns configurable results.
     struct MockBackend {
         check_call_count: Arc<AtomicUsize>,
         push_call_count: Arc<AtomicUsize>,
         should_exist: bool,
-        /// Stores (digest, namespace, collected_data) for each push call.
-        push_calls: Arc<Mutex<Vec<(String, String, Vec<u8>)>>>,
+        /// Stores one entry per push call.
+        push_calls: Arc<Mutex<Vec<PushCall>>>,
         /// If set, the push method returns this error.
         push_error: Option<Status>,
     }
@@ -584,7 +587,7 @@ mod tests {
             self.push_call_count.load(Ordering::SeqCst)
         }
 
-        fn push_calls(&self) -> Arc<Mutex<Vec<(String, String, Vec<u8>)>>> {
+        fn push_calls(&self) -> Arc<Mutex<Vec<PushCall>>> {
             Arc::clone(&self.push_calls)
         }
     }
@@ -603,9 +606,11 @@ mod tests {
         async fn pull(
             &self,
             _req: &ArchivePullRequest,
-            _tx: mpsc::Sender<Result<ArchivePullResponse, Status>>,
+            _tx: &mpsc::Sender<Result<ArchivePullResponse, Status>>,
         ) -> Result<(), Status> {
-            unimplemented!("not needed for cache tests")
+            Err(Status::unimplemented(
+                "MockBackend::pull is not needed for cache tests",
+            ))
         }
 
         async fn push(
@@ -658,67 +663,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cache_hit_skips_backend() {
+    async fn test_cache_hit_skips_backend() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a server with caching enabled (TTL = 300s)
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
         // When: we check the same archive twice
-        let _ = server
-            .check(make_check_request("ns", "digest1"))
-            .await
-            .unwrap();
-        let _ = server
-            .check(make_check_request("ns", "digest1"))
-            .await
-            .unwrap();
+        server.check(make_check_request("ns", "digest1")).await?;
+        server.check(make_check_request("ns", "digest1")).await?;
 
         // Then: backend should only be called once (second call hits cache)
         assert_eq!(backend.call_count(), 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_cache_miss_for_different_keys() {
+    async fn test_cache_miss_for_different_keys() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a server with caching enabled
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
         // When: we check different digests
-        let _ = server
-            .check(make_check_request("ns", "digest-a"))
-            .await
-            .unwrap();
-        let _ = server
-            .check(make_check_request("ns", "digest-b"))
-            .await
-            .unwrap();
+        server.check(make_check_request("ns", "digest-a")).await?;
+        server.check(make_check_request("ns", "digest-b")).await?;
 
         // Then: backend should be called twice (each is a cache miss)
         assert_eq!(backend.call_count(), 2);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_cache_miss_for_different_namespaces() {
+    async fn test_cache_miss_for_different_namespaces() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a server with caching enabled
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
 
         // When: we check the same digest in different namespaces
-        let _ = server
-            .check(make_check_request("ns1", "digest"))
-            .await
-            .unwrap();
-        let _ = server
-            .check(make_check_request("ns2", "digest"))
-            .await
-            .unwrap();
+        server.check(make_check_request("ns1", "digest")).await?;
+        server.check(make_check_request("ns2", "digest")).await?;
 
         // Then: backend should be called twice (different cache keys)
         assert_eq!(backend.call_count(), 2);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_negative_caching_not_found() {
+    async fn test_negative_caching_not_found() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a server with a backend that returns "not found"
         let backend = MockBackend::new(false);
         let server = ArchiveServer::new(backend.box_clone(), 300);
@@ -728,66 +718,58 @@ mod tests {
         let result2 = server.check(make_check_request("ns", "missing")).await;
 
         // Then: both should return not_found
-        assert!(result1.is_err());
-        assert_eq!(result1.unwrap_err().code(), tonic::Code::NotFound);
-        assert!(result2.is_err());
-        assert_eq!(result2.unwrap_err().code(), tonic::Code::NotFound);
+        let Err(err1) = result1 else {
+            return Err("expected first check to fail".into());
+        };
+        assert_eq!(err1.code(), tonic::Code::NotFound);
+        let Err(err2) = result2 else {
+            return Err("expected second check to fail".into());
+        };
+        assert_eq!(err2.code(), tonic::Code::NotFound);
 
         // And: backend should only be called once (negative result is cached)
         assert_eq!(backend.call_count(), 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_ttl_zero_disables_caching() {
+    async fn test_ttl_zero_disables_caching() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a server with TTL = 0 (caching disabled)
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 0);
 
         // When: we check the same archive multiple times
-        let _ = server
-            .check(make_check_request("ns", "digest"))
-            .await
-            .unwrap();
-        let _ = server
-            .check(make_check_request("ns", "digest"))
-            .await
-            .unwrap();
-        let _ = server
-            .check(make_check_request("ns", "digest"))
-            .await
-            .unwrap();
+        server.check(make_check_request("ns", "digest")).await?;
+        server.check(make_check_request("ns", "digest")).await?;
+        server.check(make_check_request("ns", "digest")).await?;
 
         // Then: backend should be called every time (no caching)
         assert_eq!(backend.call_count(), 3);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_ttl_expiration() {
+    async fn test_ttl_expiration() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a server with a very short TTL (1 second)
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 1);
 
         // When: we check, wait for TTL to expire, then check again
-        let _ = server
-            .check(make_check_request("ns", "digest"))
-            .await
-            .unwrap();
+        server.check(make_check_request("ns", "digest")).await?;
         assert_eq!(backend.call_count(), 1);
 
         // Wait for cache to expire
         tokio::time::sleep(Duration::from_millis(1100)).await;
 
-        let _ = server
-            .check(make_check_request("ns", "digest"))
-            .await
-            .unwrap();
+        server.check(make_check_request("ns", "digest")).await?;
 
         // Then: backend should be called twice (second call after expiration)
         assert_eq!(backend.call_count(), 2);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_check_returns_error_for_empty_digest() {
+    async fn test_check_returns_error_for_empty_digest() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a server
         let backend = MockBackend::new(true);
         let server = ArchiveServer::new(backend.box_clone(), 300);
@@ -796,11 +778,14 @@ mod tests {
         let result = server.check(make_check_request("ns", "")).await;
 
         // Then: should return InvalidArgument error
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
+        let Err(err) = result else {
+            return Err("expected check to fail on empty digest".into());
+        };
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
 
         // And: backend should not be called
         assert_eq!(backend.call_count(), 0);
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -830,7 +815,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mock_backend_push_drains_stream_and_records_args() {
+    async fn test_mock_backend_push_drains_stream_and_records_args(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Given: a mock backend
         let backend = MockBackend::new(true);
 
@@ -841,10 +827,7 @@ mod tests {
         ];
         let mut stream = byte_stream_from_chunks(chunks);
 
-        backend
-            .push("sha256:abc", "default", &mut stream)
-            .await
-            .unwrap();
+        backend.push("sha256:abc", "default", &mut stream).await?;
 
         // Then: backend received correct args and drained all data
         assert_eq!(backend.push_count(), 1);
@@ -854,10 +837,12 @@ mod tests {
         assert_eq!(calls[0].0, "sha256:abc");
         assert_eq!(calls[0].1, "default");
         assert_eq!(calls[0].2, b"hello world");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_mock_backend_push_handles_empty_data_stream() {
+    async fn test_mock_backend_push_handles_empty_data_stream(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Given: a mock backend
         let backend = MockBackend::new(true);
 
@@ -865,20 +850,19 @@ mod tests {
         let chunks: Vec<Result<bytes::Bytes, Status>> = vec![];
         let mut stream = byte_stream_from_chunks(chunks);
 
-        backend
-            .push("sha256:abc", "default", &mut stream)
-            .await
-            .unwrap();
+        backend.push("sha256:abc", "default", &mut stream).await?;
 
         // Then: backend received the call with empty data
         let push_calls = backend.push_calls();
         let calls = push_calls.lock().await;
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].2, b"" as &[u8]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_mock_backend_push_propagates_stream_error() {
+    async fn test_mock_backend_push_propagates_stream_error(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Given: a mock backend
         let backend = MockBackend::new(true);
 
@@ -892,8 +876,11 @@ mod tests {
         let result = backend.push("sha256:abc", "default", &mut stream).await;
 
         // Then: the push fails with the stream error
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().code(), tonic::Code::Internal);
+        let Err(err) = result else {
+            return Err("expected push to fail".into());
+        };
+        assert_eq!(err.code(), tonic::Code::Internal);
+        Ok(())
     }
 
     #[tokio::test]
@@ -916,7 +903,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_concurrent_pushes_are_independent() {
+    async fn test_concurrent_pushes_are_independent() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a shared mock backend
         let backend = MockBackend::new(true);
 
@@ -944,9 +931,9 @@ mod tests {
         );
 
         // Then: all succeed independently
-        r1.unwrap();
-        r2.unwrap();
-        r3.unwrap();
+        r1?;
+        r2?;
+        r3?;
 
         assert_eq!(backend.push_count(), 3);
         let push_calls = backend.push_calls();
@@ -964,20 +951,23 @@ mod tests {
                 "sha256:aaa" => assert_eq!(call.2, b"archive-1"),
                 "sha256:bbb" => assert_eq!(call.2, b"archive-2"),
                 "sha256:ccc" => assert_eq!(call.2, b"archive-3"),
-                _ => panic!("unexpected digest: {}", call.0),
+                other => return Err(format!("unexpected digest: {other}").into()),
             }
         }
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_local_backend_temp_file_cleanup_on_stream_error() {
+    async fn test_local_backend_temp_file_cleanup_on_stream_error(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Test that LocalBackend cleans up temp files when a stream error occurs.
         // We use a real temp directory to exercise the actual filesystem code path.
         use std::env;
 
         let test_dir = env::temp_dir().join(format!("vorpal-test-{}", uuid::Uuid::now_v7()));
         let ns_dir = test_dir.join("default");
-        tokio::fs::create_dir_all(&ns_dir).await.unwrap();
+        tokio::fs::create_dir_all(&ns_dir).await?;
 
         // We cannot easily redirect LocalBackend's path (it uses get_artifact_archive_path
         // which is hardcoded to /var/lib/vorpal). This test documents the expected behavior
@@ -989,45 +979,39 @@ mod tests {
         // 2. Making the base path configurable (would require production code change)
         //
         // For now, we verify the pattern works via the MockBackend stream error test above,
-        // and the code review confirms the cleanup path exists in local.rs:124-127.
+        // and the code review confirms the cleanup path exists in local.rs:124-127:
+        //   if result.is_err() {
+        //       let _ = remove_file(&temp_path).await;
+        //   }
 
         // Cleanup test dir
         let _ = tokio::fs::remove_dir_all(&test_dir).await;
 
-        // Verification: the cleanup pattern is present in the implementation.
-        // See cli/src/command/start/registry/archive/local.rs:124-127:
-        //   if result.is_err() {
-        //       let _ = remove_file(&temp_path).await;
-        //   }
-        assert!(
-            true,
-            "LocalBackend temp file cleanup verified by code review (local.rs:124-127)"
-        );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_push_large_multi_chunk_stream() {
+    async fn test_push_large_multi_chunk_stream() -> Result<(), Box<dyn std::error::Error>> {
         // Given: a mock backend
         let backend = MockBackend::new(true);
 
         // When: we push a stream with many small chunks (simulating a large archive)
         let chunk_count = 100;
-        let chunk_data = vec![0xABu8; 1024]; // 1KB per chunk
-        let chunks: Vec<Result<bytes::Bytes, Status>> = (0..chunk_count)
-            .map(|_| Ok(bytes::Bytes::from(chunk_data.clone())))
-            .collect();
+        let chunk_data = bytes::Bytes::from(vec![0xABu8; 1024]); // 1KB per chunk
+                                                                 // Bytes::clone is a refcount bump (not a byte copy); the map closure
+                                                                 // runs once per chunk and each needs its own owned Bytes handle.
+        let chunks: Vec<Result<bytes::Bytes, Status>> =
+            (0..chunk_count).map(|_| Ok(chunk_data.clone())).collect();
         let mut stream = byte_stream_from_chunks(chunks);
 
-        backend
-            .push("sha256:large", "default", &mut stream)
-            .await
-            .unwrap();
+        backend.push("sha256:large", "default", &mut stream).await?;
 
         // Then: all data was received (100KB total)
         let push_calls = backend.push_calls();
         let calls = push_calls.lock().await;
         assert_eq!(calls[0].2.len(), chunk_count * 1024);
         assert!(calls[0].2.iter().all(|&b| b == 0xAB));
+        Ok(())
     }
 
     // NOTE on S3Backend tests (DKT-16 scenarios 6, 8):

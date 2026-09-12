@@ -3,14 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::fs::{read, write};
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Lockfile {
     pub lockfile: u32,
     #[serde(default)]
     pub sources: Vec<LockSource>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LockSource {
     pub name: String,
     #[serde(default)]

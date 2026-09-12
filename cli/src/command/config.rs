@@ -193,10 +193,11 @@ impl ResolvedSettings {
     ///
     /// Precedence (highest to lowest): `project` > `user` > `defaults`.
     pub fn resolve(defaults: &VorpalConfig, user: &VorpalConfig, project: &VorpalConfig) -> Self {
+        // `resolve()` only borrows defaults/user/project, so `pick` can't move their fields out.
         fn pick(
-            default: &Option<String>,
-            user: &Option<String>,
-            project: &Option<String>,
+            default: Option<&String>,
+            user: Option<&String>,
+            project: Option<&String>,
         ) -> ResolvedValue {
             if let Some(v) = project {
                 ResolvedValue {
@@ -222,12 +223,36 @@ impl ResolvedSettings {
         }
 
         Self {
-            registry: pick(&defaults.registry, &user.registry, &project.registry),
-            namespace: pick(&defaults.namespace, &user.namespace, &project.namespace),
-            language: pick(&defaults.language, &user.language, &project.language),
-            name: pick(&defaults.name, &user.name, &project.name),
-            system: pick(&defaults.system, &user.system, &project.system),
-            worker: pick(&defaults.worker, &user.worker, &project.worker),
+            registry: pick(
+                defaults.registry.as_ref(),
+                user.registry.as_ref(),
+                project.registry.as_ref(),
+            ),
+            namespace: pick(
+                defaults.namespace.as_ref(),
+                user.namespace.as_ref(),
+                project.namespace.as_ref(),
+            ),
+            language: pick(
+                defaults.language.as_ref(),
+                user.language.as_ref(),
+                project.language.as_ref(),
+            ),
+            name: pick(
+                defaults.name.as_ref(),
+                user.name.as_ref(),
+                project.name.as_ref(),
+            ),
+            system: pick(
+                defaults.system.as_ref(),
+                user.system.as_ref(),
+                project.system.as_ref(),
+            ),
+            worker: pick(
+                defaults.worker.as_ref(),
+                user.worker.as_ref(),
+                project.worker.as_ref(),
+            ),
         }
     }
 
@@ -349,20 +374,22 @@ pub async fn get_artifacts(
     config_store: &HashMap<String, Artifact>,
 ) -> Result<()> {
     if !build_store.contains_key(artifact_digest) {
+        // `artifact` is `&Artifact` and read again below (its `steps`)
         build_store.insert(artifact_digest.to_string(), artifact.clone());
     }
 
-    for step in artifact.steps.iter() {
-        for artifact_digest in step.artifacts.iter() {
+    for step in &artifact.steps {
+        for artifact_digest in &step.artifacts {
             if build_store.contains_key(artifact_digest) {
                 continue;
             }
 
             let artifact = config_store
                 .get(artifact_digest)
-                .ok_or_else(|| anyhow!("artifact 'config' not found: {}", artifact_digest))?;
+                .ok_or_else(|| anyhow!("artifact 'config' not found: {artifact_digest}"))?;
 
-            build_store.insert(artifact_digest.to_string(), artifact.clone());
+            // both `artifact_digest` and `artifact` are reused in the recursive call below
+            build_store.insert(artifact_digest.clone(), artifact.clone());
 
             Box::pin(get_artifacts(
                 artifact,
@@ -370,7 +397,7 @@ pub async fn get_artifacts(
                 build_store,
                 config_store,
             ))
-            .await?
+            .await?;
         }
     }
 
@@ -378,20 +405,20 @@ pub async fn get_artifacts(
 }
 
 pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Vec<String>> {
-    let mut artifact_graph = DiGraphMap::<&String, Artifact>::new();
+    let mut artifact_graph = DiGraphMap::<&String, ()>::new();
 
-    for (artifact_hash, artifact) in config_artifact.iter() {
+    for (artifact_hash, artifact) in config_artifact {
         artifact_graph.add_node(artifact_hash);
 
-        for step in artifact.steps.iter() {
-            for step_artifact_hash in step.artifacts.iter() {
-                artifact_graph.add_edge(step_artifact_hash, artifact_hash, artifact.clone());
+        for step in &artifact.steps {
+            for step_artifact_hash in &step.artifacts {
+                artifact_graph.add_edge(step_artifact_hash, artifact_hash, ());
             }
         }
     }
 
     let build_order = match toposort(&artifact_graph, None) {
-        Err(err) => bail!("{:?}", err),
+        Err(err) => bail!("{err:?}"),
         Ok(order) => order,
     };
 
@@ -400,40 +427,43 @@ pub async fn get_order(config_artifact: &HashMap<String, Artifact>) -> Result<Ve
     Ok(build_order)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per config-binary CLI flag it forwards; grouping them would just relabel the same values"
+)]
 pub async fn start(
-    agent: String,
-    artifact_context: PathBuf,
-    artifact_name: String,
-    artifact_namespace: String,
-    artifact_system: String,
+    agent: &str,
+    artifact_context: &Path,
+    artifact_name: &str,
+    artifact_namespace: &str,
+    artifact_system: &str,
     artifact_unlock: bool,
-    artifact_variable: Vec<String>,
-    config_file: String,
-    registry: String,
+    artifact_variable: &[String],
+    config_file: &Path,
+    registry: &str,
 ) -> Result<(Child, ContextServiceClient<Channel>)> {
     let command_artifact_context = artifact_context.display().to_string();
     let command_port = random_free_port().ok_or_else(|| anyhow!("failed to find free port"))?;
     let command_port = command_port.to_string();
 
-    let mut command = process::Command::new(config_file.clone());
+    let mut command = process::Command::new(config_file);
 
     let command_arguments = vec![
         "start",
         "--agent",
-        &agent,
+        agent,
         "--artifact",
-        &artifact_name,
+        artifact_name,
         "--artifact-context",
         &command_artifact_context,
         "--artifact-namespace",
-        &artifact_namespace,
+        artifact_namespace,
         "--artifact-system",
-        &artifact_system,
+        artifact_system,
         "--port",
         &command_port,
         "--registry",
-        &registry,
+        registry,
     ];
 
     command.args(command_arguments);
@@ -442,7 +472,7 @@ pub async fn start(
         command.arg("--artifact-unlock");
     }
 
-    for var in artifact_variable.iter() {
+    for var in artifact_variable {
         command.arg("--artifact-variable").arg(var);
     }
 
@@ -452,8 +482,12 @@ pub async fn start(
         .spawn()
         .map_err(|_| anyhow!("failed to start config server"))?;
 
-    let stdout = config_process.stdout.take().unwrap();
-    let stderr = config_process.stderr.take().unwrap();
+    let Some(stdout) = config_process.stdout.take() else {
+        bail!("config server process has no stdout pipe");
+    };
+    let Some(stderr) = config_process.stderr.take() else {
+        bail!("config server process has no stderr pipe");
+    };
 
     let stdout = LinesStream::new(BufReader::new(stdout).lines());
     let stderr = LinesStream::new(BufReader::new(stderr).lines());
@@ -485,7 +519,7 @@ pub async fn start(
                     .await
                     .map_err(|_| anyhow!("failed to kill config server"));
 
-                bail!("failed to read line: {:?}", err);
+                bail!("failed to read line: {err:?}");
             }
 
             None => break,
@@ -501,6 +535,7 @@ pub async fn start(
     let config_client = loop {
         attempts += 1;
 
+        // retried up to max_attempts times; connect() takes the dst by value
         match ContextServiceClient::connect(config_host.clone()).await {
             Ok(srv) => break srv,
             Err(e) => {
@@ -510,7 +545,7 @@ pub async fn start(
                         .await
                         .map_err(|_| anyhow!("failed to kill config server"));
 
-                    bail!("failed to connect after {} attempts: {}", max_attempts, e);
+                    bail!("failed to connect after {max_attempts} attempts: {e}");
                 }
 
                 warn!(
