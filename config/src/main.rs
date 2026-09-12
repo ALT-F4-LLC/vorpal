@@ -1,3 +1,6 @@
+//! Vorpal build config for the Vorpal repository itself: selects the
+//! requested artifact by name and hands it to the SDK context.
+
 use crate::artifact::{
     vorpal::Vorpal, vorpal_container_image::VorpalContainerImage, vorpal_job::VorpalJob,
     vorpal_process::VorpalProcess, vorpal_release::VorpalRelease, vorpal_shell::VorpalShell,
@@ -21,7 +24,7 @@ async fn main() -> Result<()> {
         "vorpal-shell" => VorpalShell::new().build(context).await?,
         "vorpal-user" => VorpalUser::new().build(context).await?,
         "vorpal-website" => VorpalWebsite::new().build(context).await?,
-        _ => "".to_string(),
+        _ => String::new(),
     };
 
     context.run().await

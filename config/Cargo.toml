@@ -13,3 +13,6 @@ anyhow = { version = "1.0.100" }
 indoc = { version = "2.0.7" }
 tokio = { version = "1.49.0", features = ["rt-multi-thread"] }
 vorpal-sdk = { path = "../sdk/rust" }
+
+[lints]
+workspace = true

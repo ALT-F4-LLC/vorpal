@@ -30,17 +30,17 @@ impl VorpalWebsite {
             ])
             .build();
 
-        let step_script = formatdoc! {r#"
+        let step_script = formatdoc! {r"
             pushd ./source/vorpal-website/website
             {bun_bin}/bun install
             {bun_bin}/bun run build
             cp -r dist/* $VORPAL_OUTPUT/
-        "#};
+        "};
 
         let steps = vec![
             step::shell(
                 context,
-                vec![bun.clone()],
+                vec![bun],
                 vec![
                     "ASTRO_TELEMETRY_DISABLED=1".to_string(),
                     format!("PATH={bun_bin}"),
