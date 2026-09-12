@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-09-12
+
+### Fixed
+
+- **CLI sockets**: honor `VORPAL_SOCKET_PATH` and explicit socket flags by
+  detecting explicitly passed flags instead of comparing against the clap
+  default, and derive registry and worker defaults from the default address.
+
+- **Linux bootstrap**: pin the gcc pass 1 host C++ dialect to `gnu++17` so
+  libcody's `u8` literals compile when the host compiler defaults to C++20.
+
+### Changed
+
+- **Release metadata**: bump SDK packages, CLI/config crates, templates,
+  install script, and documentation to `0.4.1`.
+
 ## [0.4.0] - 2026-07-08
 
 ### Changed
